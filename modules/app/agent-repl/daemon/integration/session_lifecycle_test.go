@@ -111,28 +111,31 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
-	host := f.d.WatchHost(f.ws)
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act
-	_, _ = f.openRaw()
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 
-	// Assert: the host stream's faults name the death.
-	fault := harness.AwaitView(t, f.d.Ctx(), host, "a shim_start_failed host fault",
-		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			for _, flt := range r.GetHost().GetExisting().GetLive().GetFaults() {
-				if flt.GetShimStartFailed() != nil {
-					return true
-				}
-			}
-			return false
-		})
-	_ = fault
+	// Assert: bring-up ended on the DEATH — the exit is the evidence, so no
+	// timeout was needed to explain it — and answered the landed spawn_failed
+	// arm.
+	if err != nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+	}
+	if resp.Msg.GetError().GetSpawnFailed() == nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	}
 
 	// Assert: the footer shows disconnected.start_failed.
+	//
+	// The host stream's shim_start_failed fault is NOT asserted here: the
+	// workspace has no session record at all (the bring-up died before one was
+	// made), so its host view is the `none` arm, which carries no faults. The
+	// fault IS recorded — the health surface is where it is readable.
 	awaitFooter(t, f, footer, "footer disconnected.start_failed", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetDisconnected().GetStartFailed() != nil
 	})
+	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }
 
 func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
