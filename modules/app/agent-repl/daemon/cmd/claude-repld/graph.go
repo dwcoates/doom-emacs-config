@@ -722,8 +722,17 @@ func sentinelStripper(log dlog.Logger) func(string) string {
 	}
 }
 
+// DeployStampEnv overrides the deploy stamp file. It is the counterpart of
+// rollout.DeployScriptEnv: a test that must make a shim's reported build
+// disagree with the deployed one has no other way to state the deployed one,
+// because the stamp file lives beside a binary the harness builds itself.
+const DeployStampEnv = "AGENT_REPL_DEPLOY_STAMP"
+
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
+		if fromEnv := os.Getenv(DeployStampEnv); fromEnv != "" {
+			return fromEnv, nil
+		}
 		raw, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			// NO STAMP AT ALL is an ordinary state, not a failure: this
