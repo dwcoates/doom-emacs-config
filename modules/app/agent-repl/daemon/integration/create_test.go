@@ -582,7 +582,14 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
 	// Arrange: an opened, LIVE workspace, its fake shim HUNG so KillSession's
 	// arrival is observable before it is ever answered.
-	f := newOpened(t, harness.Opts{})
+	//
+	// The workspace is a WORKTREE of its repository, not the repository root
+	// the shared fixture registers. Nuking a workspace whose directory IS the
+	// repository root deletes the repository itself, so the `worktree prune`
+	// that follows the removal has no repository left to run in and git fails
+	// on the arrangement rather than on anything the daemon did; the subject
+	// here is the ORDER of the kill against the git commands.
+	f := newOpenedWorktree(t, harness.Opts{}, "nuke-order")
 	f.shim.ExpectStartSession()
 	f.shim.Hang()
 
@@ -656,7 +663,10 @@ func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *test
 	if !strings.Contains(failed.GetDetail(), "unable to remove worktree") {
 		t.Fatalf("git_failed.detail = %q, want git's own account of the failure", failed.GetDetail())
 	}
-	d.ExpectWarnings("NukeWorkspace")
+	// The git leaf records its own command failure at ERROR — that record IS
+	// the evidence the refusal's detail is drawn from — and the verb answers
+	// the refusal above it.
+	d.ExpectWarnings("NukeWorkspace", "daemon.gitclient.remove_worktree")
 }
 
 // ---- CloseWorkspace: blocked by live detached work with no turn open ----
