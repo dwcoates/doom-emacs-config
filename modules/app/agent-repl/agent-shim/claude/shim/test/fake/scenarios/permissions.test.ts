@@ -205,3 +205,40 @@ describe("undecidable", () => {
     expect(asked).toBe(0);
   });
 });
+
+describe("a standing that carries a mode change", () => {
+  it("runs the command and reports the echoed standing, mode change included", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!perm-allow-standing-mode"], { canUseTool: allowStanding });
+
+    // Assert
+    expect(theResult(driven).result).toBe("Ran the command with 2 standing rule(s).");
+  });
+
+  it("reports zero standing rules when the gate allows only once", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!perm-allow-standing-mode"], { canUseTool: allowOnce });
+
+    // Assert
+    expect(theResult(driven).result).toBe("Ran the command with 0 standing rule(s).");
+  });
+});
+
+describe("an ask that offers no standing at all", () => {
+  it("runs the command once-allowed, the only shape it can ever produce", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!perm-no-standing"], { canUseTool: allowOnce });
+
+    // Assert
+    expect((toolUseResults(driven.transcript())[0] as { stdout: string }).stdout).toBe("one commit\n");
+    expect(theResult(driven).result).toBe("Ran the command.");
+  });
+
+  it("denies the command when the gate declines, offering nothing to echo", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!perm-no-standing"], { canUseTool: deny });
+
+    // Assert
+    expect(theResult(driven).result).toBe("The user declined the command.");
+  });
+});
