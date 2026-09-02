@@ -133,6 +133,14 @@ describe("drawFeedShell clocks", () => {
     expect(el.querySelector(".shell-clock")?.textContent).toBe("3s");
   });
 
+  it("reads the live clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the start does not share the shared ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedShell(shell({ startedAtMs: 0n }), ctxFor().rc);
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(el.querySelector(".shell-clock")?.textContent).toBe("5s");
+  });
+
   it("stops the clock at the settled instant", () => {
     vi.setSystemTime(999_999);
     const el = drawFeedShell(
