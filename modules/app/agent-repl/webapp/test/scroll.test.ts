@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   EDGE_PX,
   PIN_PX,
-  SECTION_CLASSES,
   captureFeedAnchor,
   feedTopChanged,
   restoreFeedAnchor,
@@ -22,8 +21,6 @@ import {
   type RevealTarget,
   revealNode,
 } from "../src/scroll.js";
-import { renderItem } from "../src/render.js";
-import { PermissionItem, TextItem, ToolItem, UserTurnItem } from "../src/store.js";
 
 /** Fake ancestor-chain node: the shape innerScrollerAt walks. */
 interface FakeNode {
@@ -290,67 +287,6 @@ describe("sectionFor", () => {
     const output = node("bare-output", { parentElement: feed });
     // Act + Assert
     expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
-  });
-});
-
-describe("SECTION_CLASSES", () => {
-  it("names the class the renderer puts on a tool card, which holds the tool scroll boxes", () => {
-    // Arrange
-    const item: ToolItem = {
-      kind: "tool",
-    ts: "2026-05-24T10:00:00.000Z",
-      toolUseId: "t1",
-      toolName: "Bash",
-      messageId: "m1",
-      inputJson: "",
-      input: { command: "ls" },
-      inputDone: true,
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[0]} `);
-  });
-
-  it("names the class the renderer puts on a permission card, which holds a preview scroll box", () => {
-    // Arrange
-    const item: PermissionItem = {
-      kind: "permission",
-      requestId: "p1",
-      toolUseId: "t1",
-      toolName: "Write",
-      input: {},
-      preview: { kind: "generic", summary: "a long preview" },
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[1]} `);
-  });
-
-  it("names the class the renderer puts on a response bubble, which holds its capped body", () => {
-    // Arrange — the response body caps at 25 lines and scrolls past that, so
-    // the bubble is a section: the lit gutters must ride the bubble's own
-    // edges rather than sit inset at its body's.
-    const item: TextItem = {
-      kind: "text",
-      blockId: "b1",
-      messageId: "m1",
-      text: "an answer",
-      done: true,
-      ts: "2026-05-24T10:00:00.000Z",
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[2]} `);
-  });
-
-  it("names the class the renderer puts on a prompt bubble, which holds its capped body", () => {
-    // Arrange — the prompt body caps at the same 25 lines and scrolls past
-    // that, so the prompt bubble is a section on the same terms the response
-    // bubble is.
-    const item: UserTurnItem = {
-      kind: "user-turn",
-      content: [{ type: "text", text: "a prompt" }],
-      ts: "2026-05-24T10:00:00.000Z",
-    };
-    // Act + Assert
-    expect(renderItem(item)).toContain(`class="${SECTION_CLASSES[2]} `);
   });
 });
 
@@ -872,7 +808,10 @@ describe("feed anchoring across a rebuild", () => {
  * and that is what this catches — at the import, before it can be believed.
  */
 describe("the tail-follow decision has exactly one owner", () => {
-  const sources = import.meta.glob("../src/*.ts", {
+  // `**` rather than `*`: the rebuilt webapp puts each component in its own
+  // `src/<component>/` directory, and a flat glob would stop scanning exactly
+  // the modules most likely to re-open the question.
+  const sources = import.meta.glob("../src/**/*.ts", {
     query: "?raw",
     import: "default",
     eager: true,
@@ -883,7 +822,11 @@ describe("the tail-follow decision has exactly one owner", () => {
 
   it("scans a real set of sibling modules, so an empty glob cannot pass it", () => {
     // Arrange + Act + Assert — the guard is worthless if it inspects nothing.
-    expect(others.length).toBeGreaterThan(50);
+    // The floor is well under the module count on purpose: it exists to catch a
+    // glob that resolved to nothing, and the strip to the chassis legitimately
+    // took src from ninety-odd modules to a handful, so a floor tracking the
+    // real count would have to be retuned by every agent that adds a component.
+    expect(others.length).toBeGreaterThan(5);
   });
 
   it("lets no other module reach for the raw pin test", () => {

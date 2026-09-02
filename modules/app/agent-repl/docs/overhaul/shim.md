@@ -60,9 +60,14 @@ orchestration chain.
 
 ### Process-level obligations (rulings 2026-08-29)
 
-- KERNEL LOCKS — THE SHIM HOLDS BOTH: at startup, before anything else, the
-  shim takes two exclusive kernel flocks for its lifetime — one keyed by
-  session id, one keyed by workspace dir. They exist because on a fresh
+- KERNEL LOCKS — THE SHIM HOLDS BOTH, TAKEN INSIDE StartSession (ruled
+  2026-09-02, daemon relaunch flow): the shim takes two exclusive kernel
+  flocks for its lifetime — one keyed by session id, one keyed by workspace
+  dir — both inside StartSession, before the SDK is touched. An INERT shim
+  (spawned, serving, no session) holds NEITHER lock, so the rollout's
+  prelaunched shim is never blocked behind the live one; a workspace-lock
+  conflict answers StartSession `conversation_owned`. The daemon's probe
+  semantics are unchanged (a held lock = a live shim owns the conversation). They exist because on a fresh
   daemon boot a surviving shim may not have dialed in yet, so only a kernel
   lock answers "is this conversation already owned" (connection tracking
   says NO when the truth is NOT YET); the workspace key catches two session
@@ -182,6 +187,14 @@ purpose).
     vendor's get_context_usage (never derived from usage frames). NOTE: the
     rpc comment in `service.proto` ("the shim's own health is pulled")
     predates that fold; the SessionUpdate arm comments are current.
+    OPENING FRAME (binding, daemon shim client, 2026-08-29): on EVERY
+    WatchSession open the shim pushes a `diagnostics` frame IMMEDIATELY
+    (the current health verdict), then at its cadence and on change —
+    connect-go surfaces a server-stream refusal only at the first Receive,
+    so the daemon consumes every watch's opening frame as the open's answer
+    and a silent WatchSession would block bring-up (readiness = the first
+    healthy diagnostics push). WatchAgent/WatchBash likewise open with their
+    page/start frame, as already contracted.
     A `compacting` arm is owed (contract increment, ruled 2026-08-29):
     vendor-initiated auto-compaction still happens, and its start signal
     (the system status:compacting message — the ContextCut record is the
@@ -313,6 +326,17 @@ purpose).
   permission mode, restated authoritatively on WatchSession.
 - An allowed tool then runs as an ordinary unit under the SAME identity; a
   denied tool never starts and has no activity frames.
+  RULING (project lead, 2026-09-01, final): a denied tool has NO result;
+  its unit settles `failure` with content UNSET (the producer observed no
+  error content — the documented meaning) and settled_at stamped, and is
+  drawn denied via its permission unit: AgentPermission's id IS the gated
+  unit's AgentActivityId, and the permission unit already settles denied, so
+  a consumer joins the tool unit's failure terminal to the permission unit by
+  that shared id. Tool starts are NOT deferred (the tool_use block is on the
+  stream before canUseTool fires; moving every start to the gate answer is
+  rejected). No `denied` cause on AgentToolFailure — a landing-7 candidate
+  only if the daemon lead reports the join awkward. The gate test asserts
+  start → permission denied → failure(no content), no success/output.
 - Answer validation is free: the shim already holds the pending callback
   while the agent blocks, so echoes are checked against the ask in hand.
 
@@ -458,7 +482,9 @@ purpose).
   SetSessionModel, SetSessionPermissionMode, Hibernate, KillSession,
   StartTurn, UpdateAgent, KillTurn, StopBash, DetachForeground, ReadHistory,
   plus SessionFault.kind; AgentUpdate gains `context_cut` and `api_error`
-  page-line arms (the shim may produce both). Workflow verbs answer Connect
+  page-line arms (corrected 2026-09-02 from the goldens: the shim produces
+  `context_cut`; `api_error`'s only observed producer is the transcript's
+  system:api_error record, so that page line is the SIDECAR's). Workflow verbs answer Connect
   Code.Unimplemented. A refused WatchBash/WatchAgent open closes at the
   transport.
 - UPSERT KEYS (cross-plane, adopted with the store lead): `activity:<
@@ -505,6 +531,262 @@ purpose).
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## The mocked vendor (`--fake`) — file layout and cross-plane rulings (shim lead)
+
+The mock writes vendor-shaped files exactly where the real binary would, so the
+REAL sidecar ingests them. IMPLEMENTED (mock agent, 2026-08-29): the layout
+below is what `src/fake/vendor-files.ts` writes, and every field named here is
+observed in `testdata/corpus` unless marked otherwise.
+
+- `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>.jsonl` — the
+  session transcript. Two KINDS of line, and the distinction is load-bearing:
+  - CHAINED records (`user`, `assistant`, `system`, `attachment`) carry
+    `parentUuid`, `isSidechain`, `uuid`, `timestamp`, `userType: "external"`,
+    `entrypoint: "sdk-cli"`, `cwd`, `sessionId`, `version`, `gitBranch`. A user
+    prompt adds `promptId`, `permissionMode`, `promptSource: "sdk"`; a tool
+    result adds `toolUseResult` and `sourceToolAssistantUUID` (and
+    `toolDenialKind` when a rule refused it); an assistant line adds `requestId`
+    and `effort`.
+  - UNCHAINED metadata records (`queue-operation`, `mode`, `permission-mode`,
+    `ai-title`, `last-prompt`, `pr-link`, `frame-link`, the file-history pair)
+    carry NO `uuid` and NO `parentUuid` and never advance the chain. Writing one
+    through the chained path would both invent fields and orphan the next
+    record.
+- `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<vendor-session-id>/subagents/agent-<agent-id>.jsonl`
+  plus `agent-<agent-id>.meta.json` beside it. The meta sidecar carries EXACTLY
+  four camelCase fields — `agentType`, `description`, `toolUseId`, `spawnDepth`
+  (corpus: `sidechain/agent-aef975b7bc3422d4b.meta.json`). There is NO `model`
+  field: the earlier spelling in this document (`agent_type, description,
+  tool_use_id, spawn_depth, model`) was snake_case and named a fifth field the
+  corpus does not have. Sidechain records add `agentId` and set
+  `isSidechain: true`, and keep their OWN parentUuid chain, independent of the
+  session transcript's.
+- `<spool-root>/<cwd-slug>/<vendor-session-id>/tasks/<task-id>.output` —
+  `b<hex>` shell spools written INCREMENTALLY (one append per chunk, so the
+  sidecar's tail observes growth events) and terminated by an `EXIT=<code>`
+  line; `a<hex>` AGENT spools, which are the agent's own JSONL transcript and
+  carry NO terminator. A shell run that never ends leaves no `EXIT=` line at
+  all — the corpus's `spools/bash-midoutput.output` shape. A `stopTask` writes
+  `EXIT=143`.
+  Task-id shapes are the vendor's: 9-character base36 for a shell
+  (`b86pl7ir1`), 17-character hex for an agent (`a0cbd94e5da2d662d`). A detached
+  agent's task id IS its agent id, which is what makes the spool, the transcript
+  file and the task stream address the same thing.
+- `<cwd-slug>` = the absolute cwd with EVERY byte that is not `[A-Za-z0-9]`
+  replaced by `-` — underscore included, case preserved, existing dashes
+  untouched (verified against the live `~/.claude/projects` tree). Observed:
+  `/Users/x/.config/y` → `-Users-x--config-y`;
+  `/private/var/folders/_m/x` → `-private-var-folders--m-x`. The same rule names
+  the subagent directory beside the transcript.
+- ROTATION (`/clear`). The retired identity's file is CLOSED, never truncated or
+  moved — a resume of the old id must still load — and gets one closing system
+  record before the identity moves. THE CORPUS HAS NO `/clear` RECORD: it
+  carries `compact_boundary` for compaction and nothing for a clear, so the mock
+  writes a `compact_boundary`-shaped record with `content: "Conversation
+  cleared"` and emits the DECLARED `conversation_reset` message plus a fresh
+  `system:init` on the stream. Flagged as declared-not-observed.
+- RESUME. The writer reads the existing transcript's last CHAINED record and
+  adopts its uuid as the chain head, so a resumed session's first record names a
+  parent a reader can resolve. Unchained metadata lines are skipped when looking
+  for that head, as is a half-written trailing line (what a killed CLI leaves).
+- Shapes come from `testdata/corpus` and the pinned `sdk.d.ts`, and are rebuilt
+  from the real captures once the capture run lands.
+
+Cross-plane rulings (shim lead, 2026-08-29, relayed to the store/sidecar lead):
+
+- BLOCK INDEX IS PER MESSAGE. `<message.id>:<block_index>` counts blocks
+  0-based in the ORDER OF THE ASSISTANT MESSAGE, across every transcript line
+  that shares the message id when the vendor splits one message into several
+  lines each holding one block. Text and tool_use blocks of one message thus
+  get distinct ids on both planes, and the usage carrier is the message's
+  FIRST block (index 0) whichever line it lands on. The mock writes split
+  lines the way the real binary does (one block per assistant line, same
+  `message.id`) — AND splits the SDK side identically, emitting one `assistant`
+  message per block sharing the id, each with its own uuid and the SAME usage
+  object. That symmetry is what lets the fold pick block 0 on either plane.
+- `deferred_tools_delta` and `agent_listing_delta` attachment records are
+  VENDOR_SPECIFIC RESIDUE — `StoreUnservedItem.vendor_specific{kind:
+  "attachment/<type>"}` (e.g. `attachment/deferred_tools_delta`), the exact
+  kind spelling the sidecar uses so both planes' residue agrees — never
+  `context_injected`: that unit carries instructions the model reads (memory
+  files, skill documents), while a tool-availability delta and an agent-type
+  listing are vendor bookkeeping about what the model MAY call. Both planes
+  drop them from every page.
+### R9, SETTLED (engine agent, evidence below)
+
+The main agent's `AgentId` is the conversation's ORIGINAL vendor session id.
+The final rule, one case at a time:
+
+1. FRESH START. The shim pre-mints a uuid, passes it as `Options.sessionId`,
+   and adopts it as the AgentId. It is persisted at
+   `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/agent-id.json` (atomic replace,
+   `{original_vendor_session_id, workspace_key, minted_at_ms}`) BEFORE the
+   query is created, so a crash between mint and first record still leaves the
+   identity recoverable.
+
+2. RESUME. The resume id IS the original id, and a FILE-ONLY READER CAN DERIVE
+   IT. Therefore, when `agent-id.json` is absent on a resume, the shim ADOPTS
+   the resume id as the original and persists it; that is a derivation, not a
+   guess, and it is logged as one.
+
+3. ROTATION AND FORK. FILES ALONE DO NOT SUFFICE, so the shim writes the link
+   they lack: one pointer file per rotated id at
+   `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/vendor-id/<vendor-session-id>.json`
+   holding `{vendor_session_id, original_vendor_session_id, linked_at_ms}`.
+   `engine/identity.ts:resolveOriginal(stateDir, workspaceKey, vendorSessionId)`
+   is the file-plane reader: a rotated id answers from its link file, an
+   unrotated one answers itself, and neither costs more than one stat. The
+   AgentId never moves; `SessionIdentityRotated{previous, new}` is pushed and
+   `reason` stays unset (no declared producer).
+
+EVIDENCE, ranked:
+
+- STRONGEST — the real file tree (1,107 transcripts under
+  `~/.claude/projects/*/*.jsonl`, scanned whole): every file's `sessionId`
+  equals its filename (0 mismatches), and exactly one file carries more than
+  one session id (a synthetic fixture with a placeholder uuid). A resume
+  therefore appends to the SAME file under the SAME id. The union of all 92
+  distinct keys appearing anywhere in those files contains NO lineage field —
+  no `forkedFrom`, `parentSessionId`, `resumedFrom`, `originSessionId` or
+  equivalent. (`origin` is `{kind: "human"|"task-notification"}`; `source` is
+  an api-error retry reason; neither names a session.)
+- STRONG — compaction is IN PLACE: a `system`/`compact_boundary` line carries
+  the UNCHANGED `sessionId` and links to its predecessor record with
+  `logicalParentUuid`. Compaction therefore never rotates an id.
+- STRONG — `sdk.d.ts`: `ForkSessionResult` is `{ sessionId }` alone, and
+  `SDKSessionInfo` (what `getSessionInfo` returns) has no parent or ancestor
+  field. Nothing the SDK can tell a file-only reader names a predecessor.
+- THE RUNTIME EXCEPTION — `SDKConversationResetMessage` carries BOTH
+  `session_id` and `new_conversation_id`, so the link exists exactly once, in
+  the stream, at the moment of rotation. That is why the shim must capture it
+  then and write it down: nobody can recover it afterwards.
+
+ROTATION, OBSERVED (real capture identity-rotation-clear, 2026-09-01): at
+/clear the stream carries ONE `conversation_reset` whose `session_id` is the
+OLD id and whose `new_conversation_id` is an id NOTHING later uses; the id
+the session rotates TO is the `session_id` of the SECOND `system:init` that
+follows (a third uuid), repeated by every later turn's init. On disk a new
+transcript file appears under that init id; the old file simply stops (no
+closing record — the mock's "closing system record" was declared-not-observed
+and is dropped). Rule: `SessionIdentityRotated.new` = the post-clear init's
+session_id; the link file is written for that id; `new_conversation_id` is
+never adopted as an identity.
+
+CONCLUSION FOR THE FILE PLANE: files alone suffice for resume and compaction;
+they do NOT suffice for rotation or fork, and the shim-written pointer file
+above is the smallest link that closes the gap. No store verb is involved.
+
+### Where the sixteen failure arms actually live (mock agent evidence)
+
+`sdk.d.ts` declares FOUR `result` error subtypes — `error_during_execution`,
+`error_max_turns`, `error_max_budget_usd`,
+`error_max_structured_output_retries`. Every finer stop is a `TerminalReason` on
+the result: `blocking_limit`, `rapid_refill_breaker`, `prompt_too_long`,
+`image_error`, `model_error`, `api_error`, `malformed_tool_use_exhausted`,
+`aborted_streaming`, `aborted_tools`, `stop_hook_prevented`, `hook_stopped`,
+`tool_deferred`, `max_turns`, `background_requested`, `completed`,
+`budget_exhausted`, `structured_output_retry_exhausted`,
+`tool_deferred_unavailable`, `turn_setup_failed`. A converter keyed on `subtype`
+alone can reach four of the sixteen conversation.v1 arms; the pairing is the
+contract.
+
+`AgentContinuationPrevented` has NO `TerminalReason` of its own. The two
+declared prevent-continuation signals are
+`SDKInformationalMessage.prevent_continuation` and the transcript's
+`system:stop_hook_summary.preventedContinuation`; the mock emits both beside a
+`stop_hook_prevented` terminal. UNSETTLED — a real capture may show otherwise.
+
+### Session facts with no message behind them (mock agent evidence)
+
+`sdk.d.ts` declares NO system message for `model_changed`,
+`permission_mode_changed`, `fast_mode`, `mcp_server`, `account_usage` or
+`context_budget_warning`. Those `SessionUpdate` arms are produced by the shim
+from CONTROL ANSWERS and from fields riding other messages:
+
+- model change → the next assistant message's `message.model` (the mock also
+  emits the declared `session_state_changed` beat, which carries no model).
+- permission mode → `SDKStatusMessage.permissionMode`.
+- fast mode → `result.fast_mode_state` / `fast_mode_disabled_reason`, and
+  `init.fast_mode_state`.
+- mcp servers → `query.mcpServerStatus()`.
+- account usage → `query.usage_EXPERIMENTAL…()`, whose four unavailable shapes
+  are distinct on the wire: `rate_limits: null` (service), a null WINDOW, a null
+  `utilization` inside a present window, and `behaviors: null` (the local scan).
+- context budget → UNSETTLED, and ON THE CAPTURE RUN'S CHECKLIST (ruling,
+  landing 5). It was read as the vendor's `context_tip` ATTACHMENT record, but
+  the one real `context_tip` capture is a GENERIC `/goal` tip — so the shim
+  records `context_tip` as itself (residue `attachment/context_tip`) and only a
+  record whose own type says `context_budget_warning` becomes the warning. Which
+  record the vendor really uses is a capture-run question.
+  CAPTURE RUN RESULT (2026-09-01, read from the 67 goldens): NO capture
+  carries a `context_tip` or any budget-warning attachment (the scenario ran
+  to success without one); the only token-budget carrier observed is a
+  `total_tokens_reminder` attachment (`text: "<total_tokens>N tokens
+  left</total_tokens>"`, once). The spelling is an OPEN EVIDENCE GAP — the
+  `context_budget_warning` producer (sidecar plane) stays marked ungrounded,
+  never guessed. Also recorded as negatives from the same run: no failed
+  subagent, no compaction summary line, no /clear rotation record (the last
+  two because the harness closed the query before the later turns — fixed,
+  re-capture owed).
+
+### The e2e mock additions, and what they found (mock agent evidence)
+
+Five families joined the mocked vendor for the e2e suite. Each is a registered
+`!name` in the published table; what they found while being written:
+
+- `!context-usage-drift` — `getContextUsage()` answers a GROWING occupancy from
+  the turn it runs on: the total, the percentage, the message category and the
+  whole `messageBreakdown` move together, and the answer stays a full
+  `SDKControlGetContextUsageResponse`. The FIXED costs (system prompt, memory
+  files, MCP tool list) deliberately do not move. CADENCE IS THE ENGINE'S:
+  `context_usage` is pushed at session start and at every turn end regardless of
+  scenario, so a scenario can only change WHAT is sampled, never WHEN.
+- `!fault-converter` / `!fault-recover` — the shape the fold demonstrably
+  refuses is a `system:hook_started` whose `hook_id` is PRESENT AND EMPTY:
+  `hook_id` IS the firing's activity identity, `convert/ids.ts` refuses an
+  identity stated as nothing, and the fold's catch turns that into
+  `StoreUnparsed{source: "system/hook_started", parse_error: "converter
+  defect: …"}` and NO frame. Asserted against the real fold in
+  `test/fake/scenarios/failures.test.ts`.
+  - GAP FOR THE ENGINE, not the mock: nothing turns a fold defect into a
+    `SessionFault.converter_defect` or opens a degraded window. The only
+    producer of `converter_defect` today is `store/writer.ts`'s constructor,
+    which is never called with that arm, and `store_unreachable` is the only
+    fault the writer actually emits. Until the engine subscribes to the fold's
+    defects, `!fault-converter` produces the defect and diagnostics stay
+    HEALTHY.
+- `!model-fallback` — an UNSOLICITED, PERSISTENT swap: the declared
+  `model_refusal_fallback` message (`direction: "retry"`, both models, an empty
+  `retracted_message_uuids` because nothing had been delivered), the
+  `session_state_changed` beat, and then the answer whose `message.model` is the
+  fallback. It sticks, so a following turn answers on the fallback too, and no
+  `SetSessionModel` was called.
+  - GAP FOR THE ENGINE: `model_changed` is an engine-owned arm produced from
+    `init.model` and from `SetSessionModel`'s own `applyModel`. Nothing watches
+    the next assistant message's `message.model`, so an unsolicited fallback
+    currently produces no `model_changed` push.
+- `!fast-on` / `!fast-off` / `!fast-cooldown` — the state now STICKS on the
+  session, so it is reported in BOTH declared places: every later `result` and
+  the `init` a rotation emits. A reason is cleared when fast mode is on, which is
+  what `sdk.d.ts` documents (the field is absent when nothing blocks it).
+  - GAP FOR THE ENGINE: `fastMode` is in the engine's OWNED_ARMS, so the
+    fold-produced `fast_mode` update from `init` is DROPPED, and nothing in the
+    engine pushes one. WatchSession's `fast_mode` arm has no producer yet.
+- `!usage-full` — the same `available` shape as `!usage-available` under the name
+  the e2e roster spells: every window populated (`five_hour`, `seven_day`,
+  `seven_day_oauth_apps`, `seven_day_opus`, `seven_day_sonnet`, `model_scoped`,
+  `extra_usage`), each with a `utilization` and a `resets_at`, beside
+  `subscription_type`. The older name was kept rather than renamed so no caller
+  that already spells it breaks.
+- `!usage-window-unavailable` nulls the FIVE-HOUR window, and nothing else
+  (shim lead ruling): `SessionUsageWindowUnavailable` means "the service
+  answered without a five-hour window", so a null `seven_day_opus` is merely an
+  ABSENT OPTIONAL window and still produces the AVAILABLE arm. That absent-opus
+  shape is worth having and keeps its own row as `!usage-opus-absent`;
+  `!usage-utilization-unavailable` nulls `five_hour`'s utilization while the
+  window itself is present, so the null WINDOW and the null FIGURE stay
+  distinguishable.
 
 ## Landing 3 relay (2026-08-29, project lead)
 

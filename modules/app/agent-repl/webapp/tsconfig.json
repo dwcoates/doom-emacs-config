@@ -7,6 +7,8 @@
     "paths": {
       "@bufbuild/protobuf": ["node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
       "@bufbuild/protobuf/codegenv2": ["node_modules/@bufbuild/protobuf/dist/esm/codegenv2/index.d.ts"],
+      "@bufbuild/protobuf/reflect": ["node_modules/@bufbuild/protobuf/dist/esm/reflect/index.d.ts"],
+      "@bufbuild/protobuf/wire": ["node_modules/@bufbuild/protobuf/dist/esm/wire/index.d.ts"],
       "@bufbuild/protobuf/wkt": ["node_modules/@bufbuild/protobuf/dist/esm/wkt/index.d.ts"]
     },
     "resolveJsonModule": true,
@@ -17,5 +19,10 @@
     "forceConsistentCasingInFileNames": true,
     "useDefineForClassFields": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  // The integration suite compiles WITH everything else: its harness mounts
+  // every component through that component's own published signature, so a
+  // renamed mount, a changed deps object or a dropped DOM hook fails the
+  // typecheck rather than waiting for a slow suite to notice at runtime.
+  "exclude": ["node_modules", "dist"]
 }

@@ -1,7 +1,7 @@
 <!-- used by: daemon internal/workspace/merge/testfailureresolver.go (TestFailureResolution.Prompt); placeholders: {{source_branch}}, {{target_dir}}, {{failure_tail}}, {{escalation_file}}, {{escalation_marker}} -->
-Every commit of branch {{source_branch}} was just rebased onto the merge target in the worktree at {{target_dir}}, and the repository's test suite FAILS on the resulting head. The suite runs once per merge, on that head, so the failure is a fact about the whole rebased line rather than about any one commit of it.
+Branch {{source_branch}} was just merged into the merge target with `git merge --no-ff` in the worktree at {{target_dir}}, producing a single merge commit, and the repository's test suite FAILS on that commit. The suite runs once on the merge commit, so the failure is a fact about the merged result as a whole rather than about any one commit of the source branch.
 
-That worktree is a TEMPORARY REBASE WORKTREE, not the merge target and not your own workspace. The merge target has not been modified at all and will not be until the whole rebase passes, so the failing state exists only in that worktree.
+That worktree IS the merge target, not a temporary scratch tree and not your own workspace. Changes you make here are real changes to the target — the merge commit already exists there, and you are fixing the failure on top of it.
 
 Failing output (tail):
 ---
@@ -18,4 +18,4 @@ The one way this ends without a passing suite is YOUR OWN JUDGEMENT. If you conc
 
 {{escalation_marker}}
 
-and whose remaining lines explain, in your own words, what the architectural problem is and why no local fix is correct. The daemon reads that file, fails the merge with your explanation as the reason a human will read, discards the rebase worktree, and leaves the merge target exactly as it was — it was never modified. Your branch keeps all of its work either way. Do not write that file for a failure you simply have not finished working on.
+and whose remaining lines explain, in your own words, what the architectural problem is and why no local fix is correct. The daemon reads that file, fails the merge with your explanation as the reason a human will read, and resets the merge target back to where it was before the merge — there is no rebase worktree to discard. The source branch keeps all of its work either way. Do not write that file for a failure you simply have not finished working on.

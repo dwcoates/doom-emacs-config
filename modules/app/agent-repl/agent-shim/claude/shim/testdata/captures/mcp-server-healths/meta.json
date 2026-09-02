@@ -1,0 +1,37 @@
+{
+  "scenario": "mcp-server-healths",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Report the status of every MCP server configured in this session.",
+  "prompts": [
+    {
+      "text": "Report the status of every MCP server configured in this session.",
+      "resume": false
+    }
+  ],
+  "world": "mcp-server-healths",
+  "cwd_init": null,
+  "vendor_session_id": "8ef75474-5884-416b-875c-a8fcd6679f64",
+  "manual": "The connected and failed healths are produced by this scenario as written. The NEEDS-AUTH health additionally requires a remote MCP server demanding OAuth; capture it against one of the claude.ai connectors if the lead's account has one configured.",
+  "expect": [
+    "system:init with mcp_servers",
+    "McpServerStatus[] with at least one connected and one failed",
+    "system:mcp_status"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-mcp-server-healths-XvnH1p-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:56.564Z",
+  "controls": [
+    {
+      "verb": "mcpServerStatus",
+      "ok": true
+    },
+    {
+      "verb": "mcpServerStatus",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

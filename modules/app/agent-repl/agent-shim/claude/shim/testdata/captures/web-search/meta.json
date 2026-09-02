@@ -1,0 +1,27 @@
+{
+  "scenario": "web-search",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Search the web for the current stable release version of SQLite and cite where you found it.",
+  "prompts": [
+    {
+      "text": "Search the web for the current stable release version of SQLite and cite where you found it.",
+      "resume": false
+    }
+  ],
+  "world": "web-search",
+  "cwd_init": null,
+  "vendor_session_id": "8ad0ad87-cebe-4b7a-884f-1ba0d673289d",
+  "manual": null,
+  "expect": [
+    "tool:WebSearch",
+    "tool_result:web_search"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-web-search-8O4YdY-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:57.254Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

@@ -61,6 +61,8 @@
 ;; Workspace.el loads before status.el; these calls fire only at runtime so
 ;; the cross-file reference is safe, but byte-compile-time would otherwise
 ;; warn about a free variable / unknown function.
+(declare-function agent-repl-roster-tab-order "roster" ())
+(declare-function agent-repl-status-tab-state "status" (ws))
 (declare-function agent-repl--priority-rank "agent-repl-status" (priority))
 (declare-function agent-repl--state-save "agent-repl-history" (ws))
 (declare-function agent-repl--ws-frontend "frontends" (ws))
@@ -87,7 +89,6 @@
 (defvar persp-set-frame-buffer-predicate)
 (defvar persp-autokill-buffer-on-remove)
 (defvar +workspaces-switch-project-function)
-(defvar agent-repl--restored-workspaces)
 
 (cl-defstruct agent-repl-instantiation
   "Per-environment session state for a Agent REPL workspace.
@@ -369,9 +370,9 @@ REFUSED — see the body."
       ;; `none' -> ".../slack-cee-ceac-integration-shj/" — the trailing-slash
       ;; shape of a captured `default-directory'.  A pseudo holding a
       ;; directory is LOG-ROUTABLE, so it shadowed the real workspace at that
-      ;; path: 60 of 60 `recovery-slo:' records in each of those two
-      ;; workspaces' durable logs named the perspective, and neither
-      ;; workspace had ever produced a record of its own.
+      ;; path: every durable record written for either of those two
+      ;; workspaces named the perspective, and neither workspace had ever
+      ;; produced a record of its own.
       ;;
       ;; Refused at the WRITE rather than screened at every read, so the
       ;; shadowing entry never exists to be screened.  Loud rather than
@@ -420,7 +421,7 @@ REFUSED — see the body."
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name
     :frontend-buffer
-    :incoming-session-id :pushed-render-state :pushed-render-state-meta
+    :incoming-session-id
     :daemon-workspace-metadata)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
@@ -507,21 +508,6 @@ collide with the real workspace in `agent-repl--ws-for-dir'."
                 (and p (string= canonical (agent-repl--path-canonical p))))))
        (agent-repl--live-ws-names)))))
 
-(defun agent-repl--ws-registered-dir-owner (dir &optional except)
-  "Return any registered workspace other than EXCEPT owning canonical DIR.
-Unlike `agent-repl--ws-dir-owner', this includes tombstones whose preserved
-`:project-dir' remains the identity of a closed workspace.  Inbound daemon
-state uses this query to recognize a closed workspace without creating a
-path-keyed stub."
-  (when dir
-    (let ((canonical (agent-repl--path-canonical dir)))
-      (cl-find-if
-       (lambda (ws)
-         (and (not (equal ws except))
-              (let ((p (agent-repl--ws-get ws :project-dir)))
-                (and p (string= canonical (agent-repl--path-canonical p))))))
-       (agent-repl--ws-registered-names)))))
-
 (defvar agent-repl-ws-del-hook nil
   "Abnormal hook run with WS just before `agent-repl--ws-del' tombstones it.
 Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
@@ -554,7 +540,6 @@ log line preserves the pre-existing diagnostic shape."
                  (agent-repl--ws-put peer :source-ws-name nil)))
              agent-repl--workspaces)
     (when had-entry
-      (agent-repl--ws-forget-emacs-log-target ws "workspace deletion")
       ;; Pre-tombstone hook: runs while the runtime keys are still
       ;; readable, so a handler can act on them before the clear below.
       (run-hook-with-args 'agent-repl-ws-del-hook ws)
@@ -565,7 +550,18 @@ log line preserves the pre-existing diagnostic shape."
     ;; Keep this as the operation's final normal log.  Consumers use it as
     ;; the canonical completed-tombstone record after setter advice settles.
     (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
-                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))))
+                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))
+    ;; FORGETTING IS THE LAST ACT OF THE TEARDOWN, after every record this
+    ;; teardown writes.  Forgetting first left the hook's records, the
+    ;; runtime-key clears and the closing `ws-del' line above with no owned
+    ;; target, so the very next one minted a FRESH target and re-pointed the
+    ;; canonical `<ws>/.claude/emacs/emacs.log' symlink at it -- detaching
+    ;; this workspace's entire pre-teardown history from the path a reader
+    ;; follows.  Done here, the link still resolves to the target that holds
+    ;; the history, and only a record logged for the name AFTER the teardown
+    ;; mints a new one.
+    (when had-entry
+      (agent-repl--ws-forget-emacs-log-target ws "workspace deletion"))))
 
 (defun agent-repl--ws-forget (ws)
   "Hard-remove tombstoned WS from `agent-repl--workspaces'.
@@ -619,6 +615,39 @@ no-silent-fallback rule).  Returns nil on success."
                      ws context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
+(defun agent-repl--ws-revive (ws)
+  "Clear WS's tombstone so the name is LIVE again, returning non-nil when it moved.
+The counterpart of `agent-repl--ws-del' and the only sanctioned way to
+un-tombstone a name.  `--ws-del' does not `remhash' -- it stamps
+`:killed-at' -- so a name that is closed and later REOPENED under the
+same daemon identity would otherwise stay tombstoned forever: every
+filtered iterator, `--ws-live-p', `--live-ws-names' and
+`--ws-by-ref-id' skip it, which means the reopened workspace has no tab
+and nothing to answer with.  fanout §8 makes a `closed = false' row an
+ensure-a-tab, so the reopen path must be able to bring the name back.
+
+Only `:killed-at' is cleared.  `:last-killed-at' SURVIVES on purpose: it
+is the historical record of the previous close and the picker sorts on
+it; a revive is not a claim the close never happened.  The runtime keys
+`--ws-del' cleared stay cleared, because the reopened workspace's
+buffers, timers and session state are genuinely gone and the reopen
+re-establishes them.
+
+Nothing to revive is not a failure: an unknown name and a live name both
+answer nil, so a caller may call this unconditionally before it opens."
+  (cond
+   ((not (agent-repl--ws-known-p ws))
+    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=unknown" ws)
+    nil)
+   ((null (agent-repl--ws-get ws :killed-at))
+    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=already-live" ws)
+    nil)
+   (t
+    (agent-repl--ws-put ws :killed-at nil)
+    (agent-repl--info ws "ws-revive: REVIVED ws=%s last-killed-at-kept=%s"
+                      ws (if (agent-repl--ws-get ws :last-killed-at) "t" "nil"))
+    t)))
+
 (defun agent-repl--ws-tombstoned-p (ws)
   "Return non-nil iff WS is known AND has `:killed-at' set.
 Complementary to `--ws-live-p' over `--ws-known-p': a known ws is
@@ -627,73 +656,11 @@ either live or tombstoned, never both.  Unknown ws returns nil.
 A tombstone may additionally carry a REASON marker explaining why
 the entry was killed, layered on top of the `:killed-at' stamp:
 
-  - `:hidden-project-dir t' — the entry was killed by
-    `agent-repl-hide-project-dirs-mode' and is eligible for restore
-    when the mode toggles off.  Use `--ws-hide-tombstoned-p' to test
-    for this reason specifically.
-
-The base `--ws-tombstoned-p' predicate intentionally collapses all
-reasons because every renderer treats them identically
-\(`--ws-render-status' returns nil for every reason); callers that
-need to distinguish reasons use the reason-specific helper."
+There is exactly ONE reason left: the user's own close.  Client-authored
+tab hiding died with the roster becoming the tab bar's source, so a
+tombstone no longer carries a reason marker anybody branches on."
   (and (agent-repl--ws-known-p ws)
        (not (null (agent-repl--ws-get ws :killed-at)))))
-
-(defun agent-repl--ws-hide-tombstoned-p (ws)
-  "Return non-nil iff WS is tombstoned for the hide-project-dirs reason.
-True when WS is `--ws-tombstoned-p' AND carries `:hidden-project-dir t'
-on its plist (the marker stamped by
-`agent-repl--hide-project-dirs--hide' before the kill).  Used by the
-restore path to enumerate the tombstones it owns without sweeping in
-kill-by-hand tombstones it does not.
-
-Unknown ws returns nil.  Live ws (no `:killed-at') returns nil even
-if `:hidden-project-dir' happens to be t — the predicate is a
-conjunction of tombstone state and reason marker."
-  (and (agent-repl--ws-tombstoned-p ws)
-       (not (null (agent-repl--ws-get ws :hidden-project-dir)))))
-
-(defun agent-repl--ws-hide-tombstoned-names ()
-  "Return the names of every workspace tombstoned for the hide reason.
-Wrapper around the `(hash-table-keys agent-repl--workspaces)' walk
-filtered by `--ws-hide-tombstoned-p'.  Used by
-`agent-repl-hide-project-dirs-mode's restore path so it does not
-poke `agent-repl--workspaces' directly (per the
-\"Workspace state encapsulation\" rule in AGENTS.md).
-
-Sorted by name so restore order is deterministic and matches what
-the previous direct-hash-walk produced."
-  (sort (cl-remove-if-not #'agent-repl--ws-hide-tombstoned-p
-                          (hash-table-keys agent-repl--workspaces))
-        #'string<))
-
-(defun agent-repl--ws-tombstoned-names ()
-  "Return the names of every tombstoned workspace, regardless of reason.
-All entries in `agent-repl--workspaces' for which `--ws-tombstoned-p'
-returns non-nil.  Sorted by name for determinism, paralleling
-`--ws-hide-tombstoned-names' (which applies the additional
-hide-reason filter).  Used by the snapshot collector to gather the
-identity records that must survive Emacs restart without pulling
-all-tombstones through a direct `hash-table-keys' walk at the call
-site."
-  (sort (cl-remove-if-not #'agent-repl--ws-tombstoned-p
-                          (hash-table-keys agent-repl--workspaces))
-        #'string<))
-
-(defun agent-repl--ws-names-cache-usable-p ()
-  "Return non-nil when `persp-names-cache' is bound and non-nil.
-`Usable' means the cache is available as a reliable tab-bar membership
-signal — the persp-mode cache has been populated with at least one
-entry.  Returns nil when:
-  - `persp-names-cache' is unbound (persp-mode not loaded), or
-  - `persp-names-cache' is bound but nil (startup init phase or test
-    stubs where persp-mode is not active and no persps exist yet).
-Callers (principally `--collect-snapshot-entries') use this to decide
-whether to consult the cache as the authoritative tab-bar source or fall
-back to a plain hash-traversal that includes all live entries.  Part of
-the persp-mode integration boundary owned by `workspace.el' (see file
-Commentary and AGENTS.md)."
-  (and (boundp 'persp-names-cache) persp-names-cache))
 
 (defun agent-repl--ws-open-p (ws)
   "Return non-nil iff WS is currently visible in the tab-bar.
@@ -826,34 +793,6 @@ the workspace.  Callers that need a total function should use
 `agent-repl--repo-key-unknown' sentinel."
   (or (agent-repl--ws-repo-key ws) agent-repl--repo-key-unknown))
 
-(defun agent-repl--repo-label (key)
-  "Derive a human-readable repo label from KEY (a canonical .git path).
-Returns the basename of KEY's parent directory — i.e. the project
-name, since git's common-dir is conventionally `<project>/.git'.
-Returns nil for a nil KEY, and KEY itself for the
-`agent-repl--repo-key-unknown' sentinel (which is already a label)."
-  (cond
-   ((null key) nil)
-   ((equal key agent-repl--repo-key-unknown) key)
-   (t (when-let ((parent (file-name-directory key)))
-        (file-name-nondirectory (directory-file-name parent))))))
-
-(defun agent-repl--main-worktree-dir (dir)
-  "Return the main worktree root of the git repository containing DIR.
-Derives from DIR's repo key (`agent-repl--repo-key-for-dir', the
-canonical git common-dir): the common-dir is conventionally
-`<main-worktree>/.git', so its parent IS the main checkout, no matter
-which linked worktree DIR itself is.
-
-Returns nil when DIR resolves to no repo, and nil when the parent is
-not an existing directory — the latter is the bare-repository case,
-where every worktree is linked and there is no main checkout to switch
-to.  Both are expected lookup outcomes rather than invariant
-violations, so callers own the \"no such workspace\" message."
-  (when-let* ((key (agent-repl--repo-key-for-dir dir))
-              (parent (file-name-directory (directory-file-name key))))
-    (and (file-directory-p parent) (directory-file-name parent))))
-
 (defvar agent-repl--folded-repos (make-hash-table :test 'equal)
   "Set of repo keys (see `agent-repl--ws-repo-group') currently folded.
 Keys are repo keys, values are `t' — presence is the signal.  Global
@@ -865,12 +804,6 @@ switchers alike.")
   "Return non-nil when repo GROUP (a repo key) is folded."
   (and group (gethash group agent-repl--folded-repos) t))
 
-(defun agent-repl--folded-repo-keys ()
-  "Return the folded repo keys, sorted, for cheap change-detection.
-Lets a renderer that caches its output detect that a fold/unfold
-happened by comparing successive snapshots of this list."
-  (sort (hash-table-keys agent-repl--folded-repos) #'string<))
-
 (defun agent-repl--toggle-repo-fold (group)
   "Toggle the fold state of repo GROUP (a repo key).
 Returns non-nil when GROUP is folded after the toggle."
@@ -881,144 +814,91 @@ Returns non-nil when GROUP is folded after the toggle."
     (puthash group t agent-repl--folded-repos)
     t))
 
-(defun agent-repl--ws-repo-folded-p (ws)
-  "Return non-nil when WS belongs to a folded repo."
-  (agent-repl--repo-folded-p (agent-repl--ws-repo-group ws)))
-
-(defun agent-repl--filter-folded-names (names current-name)
-  "Drop from NAMES every workspace whose repo is folded.
-CURRENT-NAME is always retained, so the active workspace never loses
-its tab.
-
-Short-circuits to NAMES untouched when no repo is folded, so the
-common case costs no repo-key resolution (and therefore no git)."
-  (if (zerop (hash-table-count agent-repl--folded-repos))
-      names
-    (cl-remove-if
-     (lambda (name)
-       (and (not (equal name current-name))
-            (agent-repl--ws-repo-folded-p name)))
-     names)))
-
 (defun agent-repl--ws-tabline-names ()
-  "Return the workspace names the tab-bar shows.
-`agent-repl--ws-list-names' minus the workspaces of folded repos (the
-current workspace excepted).  This — not `--ws-list-names' — is the
-list the tab-bar renders and the list the indexed switchers
-\(`SPC 1'..`SPC 9') index into, so the visible tab numbers stay
-contiguous as repos fold and unfold."
-  (agent-repl--filter-folded-names
-   (agent-repl--filter-merged-names (agent-repl--ws-list-names))
-   (agent-repl--ws-current-name)))
+  "Return the workspace names the tab-bar shows, in ROSTER ORDER.
+The roster is the tab bar's one source: `roster.el' walks the pushed
+view (repository sections in order, rows depth-first, then recently
+merged) and records that order, and this function follows it strictly.
 
-(defun agent-repl--merged-ws-p (name)
-  "Return non-nil when workspace NAME has merged into its source.
-Reads the SSM-pushed render state, which is the single authority on
-what a workspace is — the same value every renderer keys on.
+CLIENT-AUTHORED ORDERING AND HIDING ARE DEAD.  The resolver orders the
+roster — priority included — so a local re-sort would be a second answer
+to a question the daemon already answered, and a local filter (the old
+merged-tab hiding, the old repo-fold filter) would hide a workspace the
+daemon says is open.  Repo folding survives in the webapp's sidebar,
+where it belongs, and affects nothing here.
 
-UI-boundary tolerance: the name list this filters can briefly contain
-names the workspace hash does not know (a mid-creation persp, the
-`none' sentinel).  `--ws-render-status' signals `user-error' for those,
-so unknown names are answered NOT-merged here — the filter's job is to
-remove merged workspaces, and a workspace we know nothing about is not
-one of them.  This mirrors the same documented exception
-`--ws-display-state' makes at the renderer boundary."
-  (and (agent-repl--ws-known-p name)
-       (eq (agent-repl--ws-render-status name) :merged)))
+Names the roster lists but the perspective layer has not caught up with
+are dropped: the tab bar can only render tabs that exist.  Before the
+first push the order is empty, and the workspaces Emacs knows about are
+rendered in their registration order so a pre-roster boot still draws."
+  (let ((order (and (fboundp 'agent-repl-roster-tab-order)
+                    (agent-repl-roster-tab-order)))
+        (known (agent-repl--ws-list-names)))
+    (if (null order)
+        (progn
+          (agent-repl--log-verbose
+           nil "ws-tabline-names: no roster order yet count=%d" (length known))
+          known)
+      (let ((names (cl-remove-if-not (lambda (name) (member name known)) order)))
+        (agent-repl--log-verbose
+         nil "ws-tabline-names: roster-order=%d rendered=%d"
+         (length order) (length names))
+        names))))
 
-(defun agent-repl--filter-merged-names (names)
-  "Drop every merged workspace from NAMES.
-A merged workspace leaves the tab-bar the MOMENT the merge lands, not
-when the teardown that follows it finishes.
+(defun agent-repl--ws-by-ref-id (id)
+  "Return the live workspace whose `WorkspaceRef' id is ID, or nil.
+THE REF ID IS THE TAB IDENTITY: it is daemon-minted, opaque and compared
+byte-wise, so a workspace is found by it and never by its display name
+\(names collide across repos) or its directory (paths have many
+spellings).  Tombstoned entries are excluded — a tombstone has no tab,
+so answering with one would resurrect a closed workspace."
+  (let ((found nil))
+    (maphash (lambda (name plist)
+               (when (and (null found)
+                          (null (plist-get plist :killed-at))
+                          (equal (plist-get (plist-get plist :ref) :id) id))
+                 (setq found name)))
+             agent-repl--workspaces)
+    (agent-repl--log-verbose nil "ws-by-ref-id: id=%s ws=%S" id found)
+    found))
 
-The teardown is asynchronous and multi-step — a socket-close round-trip
-to the agent, then the workspace close, then a magit refresh — and the
-session dies partway through it.  The old design kept the tab and
-painted a 🔀 badge on it purely so the tab would not read `:dead'
-during that window.  That made the badge a workaround for a visible tab
-with no reason to be visible: the work has landed, the user is done
-with the workspace, and nothing they can do to the tab is useful.
-
-Filtering here makes the misread structurally impossible rather than
-merely covered up — there is no tab at all — and the teardown proceeds
-detached.  A teardown that stalls or dies cannot resurrect the tab
-either: the filter reads the merge state, which never un-sets, not the
-teardown's progress.
-
-Unlike `agent-repl--filter-folded-names', the current workspace gets NO
-exemption.  Folding is a view preference the user can reverse, so
-hiding the workspace they are standing in would strand them; a merge is
-terminal, and the merge flow moves them off it."
-  (cl-remove-if #'agent-repl--merged-ws-p names))
-
-;;;; ---- Render-state: daemon-pushed lookup ------------------------------
+;;;; ---- Render state: the roster row's status arm ---------------------
 ;;
-;; `agent-repl--ws-render-status' is the single source of truth for
-;; what visual state every renderer (tab-bar composed-state, project
-;; picker emoji) should display for a workspace.  Per the agent-shim
-;; cutover (design-agent-shim-architecture.md §10) Emacs is a DUMB
-;; RENDERER: it no longer derives status from `:agent-state' /
-;; `:repl-state' / `:merging' / `:merge-completed'.  The daemon's SSM
-;; resolves THE render-state and pushes it as a `frontend.v1'
-;; WorkspaceState frame; `frontend-state.el' maps the pushed RenderState
-;; enum to a keyword and stores it under the `:pushed-render-state'
-;; workspace key.  This function is now a pure lookup of that key.  The
-;; old local precedence `cond' ladder — and its `:async-live' helper —
-;; are deleted: there is exactly one status mechanism now (no redundancy,
-;; per AGENTS.md).
+;; THE ROSTER IS THE ONE SOURCE.  `WatchWorkspaceRoster' carries a status
+;; arm per row, the daemon resolves it (its own lifecycle coarsened onto
+;; that vocabulary), and the ARM IS THE STATE a renderer paints.  Emacs
+;; derives nothing: the old local precedence ladder, the `:agent-state' /
+;; `:repl-state' axes and the `:pushed-render-state' key that briefly
+;; replaced them are all gone, and there is exactly one status mechanism.
 
 (defun agent-repl--ws-render-status (ws)
-  "Return the closed-set render-state keyword for workspace WS.
-This is the SINGLE SOURCE OF TRUTH for what renderers (tab-bar,
-project picker, mode-line) should display for a workspace's status.
-Every renderer reads this; none re-derives status on its own.
+  "Return the roster status arm keyword for workspace WS.
+The SINGLE SOURCE OF TRUTH for what renderers (tab bar, picker) draw for
+a workspace.  Every renderer reads this; none re-derives status.
 
-The value is the daemon-pushed render-state (design §10): the SSM
-resolves it and pushes a WorkspaceState frame that `frontend-state.el'
-stores under the `:pushed-render-state' key (already mapped to the
-closed keyword vocabulary of `agent-repl-ws-state-icons').  This
-function only looks it up.
-
-Precondition: WS must be `--ws-known-p'.  Unknown WS signals
-`user-error' via `--ws-require-known' — there is no silent fallback
-per AGENTS.md.
+Precondition: WS must be `--ws-known-p'.  Unknown WS signals `user-error'
+via `--ws-require-known' — there is no silent fallback.
 
 Returns:
 
-  nil    — tombstoned workspace (`--ws-tombstoned-p' t, regardless of
-           REASON marker such as `:hidden-project-dir').  A tombstone
-           is a workspace closed LOCALLY in Emacs; even if the daemon
-           pushed a state before the close, rendering it would
-           resurrect a closed workspace's badge.  The `--live-ws-names'
-           filter already excludes tombstones before most renderers
-           reach this function; this guard keeps the contract explicit
-           for any caller that does not pre-filter.  This is the one
-           purely-Emacs-side state decision that survives the cutover
-           — it is about local UI membership, not agent status.
+  nil  — a TOMBSTONED workspace, or one the roster has not spoken about
+         yet.  Both are honestly \"no state to draw\": a tombstone is a
+         workspace closed locally, and a workspace with no row is one the
+         daemon has not reported on.  Renderers draw an uncoloured tab
+         for either rather than inventing an arm.
 
-  :init  — a KNOWN, LIVE workspace for which no state has been pushed
-           yet.  WHY: a just-created workspace legitimately predates
-           its first daemon push (the UDS connect + StateSnapshot
-           resync, or the first WorkspaceState delta, has not landed).
-           `:init' is the honest \"registered but not yet reported on\"
-           badge (⏳); returning nil here would make a fresh workspace
-           indistinguishable from a tombstoned one, and hard-erroring
-           would break the tab-bar on every brand-new workspace.
-
-  otherwise — the pushed keyword verbatim (one of the
-           `agent-repl-ws-state-icons' keys)."
+  otherwise — the arm keyword verbatim, one of
+         `agent-repl-wire-roster-row-status-keywords'."
   (agent-repl--ws-require-known ws "ws-render-status")
-  (cond
-   ((agent-repl--ws-tombstoned-p ws) nil)
-   (t
-    (or (agent-repl--ws-get ws :pushed-render-state)
-        :init))))
+  (if (agent-repl--ws-tombstoned-p ws)
+      nil
+    (and (fboundp 'agent-repl-status-tab-state)
+         (agent-repl-status-tab-state ws))))
 
 (defcustom agent-repl-ws-state-icons
   '((:init           . "⏳")
     ;; 💤 belongs to HIBERNATED: it is the glyph for asleep-on-purpose, and it
     ;; was always the wrong glyph for the broken half of the old `:dormant'.
-    (:hibernated     . "💤")
     ;; SEVERED gets the unplugged cord.  The substrate between us and the shim
     ;; is gone, which is a different thing from a nap, and the glyph is the only
     ;; distinction the tab-bar carries once the color says "something is wrong".
@@ -1084,7 +964,7 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 
 (defconst agent-repl--unfinished-merge-states
   '(:merging :merge-queued :merge-conflict)
-  "Pushed render states that mean WS's merge has NOT reached a verdict.
+  "Roster status arms that mean WS's merge has NOT reached a verdict.
 
 `:merged' and `:merge-failed' are absent deliberately: both are terminal,
 and a workspace sitting on either is finished with the daemon and free to
@@ -1093,13 +973,14 @@ running it, holding it behind a sibling in its repository's queue, or
 resolving its conflict under the merge lease.")
 
 (defun agent-repl--ws-merge-unfinished-p (ws)
-  "Return non-nil when WS's DAEMON-PUSHED state is an unfinished merge.
-Reads the `:pushed-render-state' key directly, so the answer is the
-daemon's verdict rather than anything Emacs derived: merging is
-daemon-owned and Emacs holds no merge state of its own to consult.  The
-raw key (rather than `agent-repl--ws-render-status') keeps the predicate
-answerable for a workspace the registry no longer calls known."
-  (memq (agent-repl--ws-get ws :pushed-render-state)
+  "Return non-nil when WS's ROSTER STATUS ARM is an unfinished merge.
+The answer is the daemon's verdict rather than anything Emacs derived:
+merging is daemon-owned and Emacs holds no merge state of its own to
+consult.  Read through `agent-repl-status-tab-state' rather than
+`agent-repl--ws-render-status' so the predicate stays answerable for a
+workspace the registry no longer calls known."
+  (memq (and (fboundp 'agent-repl-status-tab-state)
+             (agent-repl-status-tab-state ws))
         agent-repl--unfinished-merge-states))
 
 (defun agent-repl--assert-mergeable-teardown (ws)
@@ -1115,7 +996,7 @@ no-opping: a caller that asked to kill a merging workspace asked for
 something the system cannot honour, and a silent skip would read to the
 user as a completed teardown."
   (when (agent-repl--ws-merge-unfinished-p ws)
-    (let ((state (agent-repl--ws-get ws :pushed-render-state)))
+    (let ((state (agent-repl-status-tab-state ws)))
       (agent-repl--log ws
                         "kill-one-workspace: REFUSED ws=%s state=%s — merge not finished"
                         ws state)
@@ -1202,14 +1083,12 @@ finish-workspace path."
       (condition-case err
           (agent-repl--ws-del ws)
         (error (agent-repl--warn ws "kill-one-workspace: ws-del error: %S" err))))
-    ;; WHY: keep `agent-repl--restored-workspaces' consistent with the
-    ;; live hash — a ws that's been killed is no longer a restore-batch
-    ;; member, so a follow-up `kill-restored-workspaces' won't try to
-    ;; re-tear-down a stale name.  The defvar lives in commands.el; we
-    ;; treat it as the snapshot-restore module's state and mutate
-    ;; through the var directly (forward defvar at the top of this file).
-    (setq agent-repl--restored-workspaces
-          (delete ws agent-repl--restored-workspaces))
+    ;; NO RESTORE-BATCH BOOKKEEPING.  This used to drop WS from
+    ;; `agent-repl--restored-workspaces' so a follow-up
+    ;; `kill-restored-workspaces' would not re-tear-down a stale name.
+    ;; Both the batch and that command died with the snapshot restore:
+    ;; THE DAEMON is the source of which workspaces exist, and Emacs opens
+    ;; tabs from the roster stream rather than replaying a saved batch.
     ;; Kill every remaining buffer (and attached process) that belongs to
     ;; the persp before tearing down the persp itself.  The frontend kill
     ;; dispatch only handles the webview/input panels it tracks in the
@@ -1268,76 +1147,6 @@ finish-workspace path."
     (agent-repl--ws-repaint-sidebar ws "kill-one-workspace")
     (agent-repl--log ws "kill-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
 
-(defun agent-repl--reorder-workspace-by-priority (ws)
-  "Reorder workspace WS in `persp-names-cache' by its `:priority'.
-Order: p05 < p1 < p2 < p3 < unprioritized.  WS is placed after every
-existing workspace of equal-or-higher priority and before every
-lower-priority one, so a new entry never displaces an existing peer or
-higher-priority sibling.  No-op when WS has no `:priority', when the
-cache does not contain WS, or when persp-mode is not loaded — those
-fall back to the persp-mode default of appending at the end.
-
-Each entry, every bail-out, and the post-mutation cache state are
-logged so the silent no-op paths are observable when reproducing
-ordering bugs.
-
-This function is part of the persp-mode integration boundary owned
-by `workspace.el' (see file Commentary and AGENTS.md).  Callers must
-route through it; they may not mutate `persp-names-cache' directly."
-  (let ((priority (agent-repl--ws-get ws :priority))
-        (cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
-    (agent-repl--log ws "reorder-workspace-by-priority: ENTRY ws=%s priority=%s cache=%S"
-                      ws priority cache-snapshot)
-    (cond
-     ((null priority)
-      (agent-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=no-priority" ws))
-     ((not (boundp 'persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=cache-unbound" ws))
-     ((not (member ws persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-by-priority: BAIL ws=%s reason=not-in-cache cache=%S"
-                        ws persp-names-cache))
-     (t
-      ;; Use the canonical string already in persp-names-cache as the
-      ;; identity we splice in.  persp-mode's `persp-remove-from-menu' calls
-      ;; `(cl-delete name cache :count 1)' with the default `:test #'eql' —
-      ;; for strings, eql is identity comparison.  If we substitute a fresh
-      ;; string here (e.g. one returned by `completing-read' in
-      ;; `agent-repl-set-priority'), the cache ends up holding a different
-      ;; object than the persp's stored name, and `persp-kill' silently
-      ;; fails to remove the workspace from the cache later.  The result
-      ;; is a tab-bar entry that survives kill and re-duplicates on
-      ;; subsequent recreations.  Recovering the canonical string via
-      ;; `(car (member ws cache))' (which uses `equal') keeps identity
-      ;; aligned with the persp internal name.
-      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
-             (rank (agent-repl--priority-rank priority))
-             (canonical-ws (car (member ws persp-names-cache)))
-             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
-             (visible (if nil-name
-                          (cl-remove nil-name without-ws :test #'equal :count 1)
-                        without-ws))
-             (insert-at (cl-position-if
-                         (lambda (n)
-                           (> (agent-repl--priority-rank
-                               (agent-repl--ws-get n :priority))
-                              rank))
-                         visible))
-             (new-visible (if insert-at
-                              (append (cl-subseq visible 0 insert-at)
-                                      (list canonical-ws)
-                                      (cl-subseq visible insert-at))
-                            (append visible (list canonical-ws))))
-             (new-cache (if (and nil-name (member nil-name persp-names-cache))
-                            (cons nil-name new-visible)
-                          new-visible)))
-        (agent-repl--log ws "reorder-workspace-by-priority: APPLY ws=%s canonical-eq-input=%s priority=%s rank=%s position=%s new-cache=%S"
-                          ws (if (eq canonical-ws ws) "t" "nil")
-                          priority rank (or insert-at "end") new-cache)
-        (if (fboundp 'persp-update-names-cache)
-            (persp-update-names-cache new-cache)
-          (agent-repl--log ws "reorder-workspace-by-priority: SKIP-APPLY ws=%s reason=persp-update-names-cache-unbound"
-                            ws)))))))
-
 (defun agent-repl--reorder-workspace-to-front (ws)
   "Move workspace WS to the front of `persp-names-cache' (visible portion).
 The visible portion is everything after `persp-nil-name' when that
@@ -1381,71 +1190,6 @@ passing for an already-merged workspace."
                           new-visible)))
         (agent-repl--log ws "reorder-workspace-to-front: APPLY ws=%s canonical-eq-input=%s new-cache=%S"
                           ws (if (eq canonical-ws ws) "t" "nil") new-cache)
-        (agent-repl--ws-update-names-cache new-cache))))))
-
-(defun agent-repl--reorder-workspace-next-to (ws anchor)
-  "Move workspace WS to sit immediately after ANCHOR in `persp-names-cache'.
-Places WS's tab-bar entry directly to the right of ANCHOR's entry so a
-child workspace surfaces next to the parent workspace it was generated
-from.
-
-Mirrors `agent-repl--reorder-workspace-by-priority' in structure:
-preserves cache string identity via the `(car (member ws cache))'
-canonicalization (`persp-remove-from-menu' relies on `eql' identity
-for string removal), and the `persp-nil-name' slot at the cache head.
-When ANCHOR is the `persp-nil-name' sentinel — the only case where a
-cache-present ANCHOR is absent from the visible portion — WS lands at
-the front of the visible portion, i.e. immediately after the sentinel.
-
-No-op when the cache does not contain WS, when ANCHOR is nil, absent
-from the cache, or `equal' to WS, when persp-mode is not loaded, or
-when `persp-update-names-cache' is unavailable.  Those bail-outs fall
-back to the caller's alternative placement (typically
-`agent-repl--reorder-workspace-by-priority').  Each entry, every
-bail-out, and the post-mutation cache state are logged so the silent
-no-op paths are observable when reproducing ordering bugs.
-
-This function is part of the persp-mode integration boundary owned
-by `workspace.el' (see file Commentary and AGENTS.md).  Callers must
-route through it; they may not mutate `persp-names-cache' directly."
-  (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
-    (agent-repl--log ws "reorder-workspace-next-to: ENTRY ws=%s anchor=%s cache=%S"
-                      ws anchor cache-snapshot)
-    (cond
-     ((not (boundp 'persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=cache-unbound" ws))
-     ((not (member ws persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=not-in-cache cache=%S"
-                        ws persp-names-cache))
-     ((null anchor)
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=no-anchor" ws))
-     ((not (member anchor persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-not-in-cache anchor=%s cache=%S"
-                        ws anchor persp-names-cache))
-     ((equal ws anchor)
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-is-self" ws))
-     (t
-      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
-             (canonical-ws (car (member ws persp-names-cache)))
-             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
-             (visible (if nil-name
-                          (cl-remove nil-name without-ws :test #'equal :count 1)
-                        without-ws))
-             (anchor-pos (cl-position anchor visible :test #'equal))
-             (new-visible (if anchor-pos
-                              (append (cl-subseq visible 0 (1+ anchor-pos))
-                                      (list canonical-ws)
-                                      (cl-subseq visible (1+ anchor-pos)))
-                            ;; ANCHOR was the `persp-nil-name' sentinel (dropped
-                            ;; from `visible' above); put WS at the front so it
-                            ;; still lands immediately after the sentinel.
-                            (cons canonical-ws visible)))
-             (new-cache (if (and nil-name (member nil-name persp-names-cache))
-                            (cons nil-name new-visible)
-                          new-visible)))
-        (agent-repl--log ws "reorder-workspace-next-to: APPLY ws=%s canonical-eq-input=%s anchor=%s position=%s new-cache=%S"
-                          ws (if (eq canonical-ws ws) "t" "nil")
-                          anchor (or anchor-pos "front") new-cache)
         (agent-repl--ws-update-names-cache new-cache))))))
 
 ;;;; ---- persp-mode identity / navigation boundary -----------------------
@@ -1561,17 +1305,6 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-switch)
     (apply '+workspace-switch ws args)))
 
-(defun agent-repl--ws-exists-p (ws)
-  "Return non-nil when workspace WS exists in the tab-bar.
-Delegates to `+workspace-exists-p'.  Returns nil when that function is
-unbound (persp-mode not loaded).
-
-This is the persp-mode existence boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-exists-p'
-directly or wrapping it themselves with `fboundp'."
-  (and (fboundp '+workspace-exists-p)
-       (+workspace-exists-p ws)))
-
 (defun agent-repl--ws-repaint-sidebar (ws reason)
   "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
 Killing a perspective REMOVES that workspace's sidebar row
@@ -1619,16 +1352,6 @@ This is the persp-mode main-workspace boundary owned by `workspace.el'.
 Callers must use this function instead of reading `+workspaces-main'
 directly or guarding it themselves with `boundp'."
   (and (boundp '+workspaces-main) +workspaces-main))
-
-(defun agent-repl--ws-frame-switch (ws)
-  "Activate workspace WS on the current frame via `persp-frame-switch'.
-No-op when `persp-frame-switch' is unbound (persp-mode not loaded).
-
-This is the persp-mode frame-activation boundary owned by `workspace.el'.
-Callers must use this function instead of calling `persp-frame-switch'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp 'persp-frame-switch)
-    (persp-frame-switch ws)))
 
 (defun agent-repl--ws-frame-save-state ()
   "Save the current frame's persp window-configuration state.
@@ -1694,182 +1417,6 @@ workspaces return nil."
   (and (agent-repl--ws-live-p ws)
        (equal (agent-repl--ws-get ws :daemon-workspace-metadata)
               metadata)))
-
-(defun agent-repl--ws-persist-materialized-roster (ws)
-  "Record freshly materialized WS in the durable workspace roster snapshot.
-Delegates to `agent-repl--snapshot-persist-materialized-workspace' in
-`commands.el', which owns the roster file.
-
-Materialization creates a perspective and a hash entry without starting a
-session, so it never reaches `agent-repl--state-save' — the piggyback
-through which every normally-opened workspace lands in the roster.  Left
-unpersisted, the workspace survives only as long as this Emacs process:
-its worktree and daemon session keep running while the perspective
-silently disappears at the next restart.
-
-Guarded with `fboundp' because `workspace.el' loads before `commands.el';
-the guard's else-branch logs the skip rather than passing over it, since a
-missing roster write is exactly the failure this function exists to
-prevent."
-  (if (fboundp 'agent-repl--snapshot-persist-materialized-workspace)
-      (agent-repl--snapshot-persist-materialized-workspace ws)
-    (agent-repl--warn
-     ws
-     "ws-materialize-daemon: roster persist SKIPPED ws=%s reason=persist-fn-unavailable"
-     ws)))
-
-(defun agent-repl--ws-materialize-daemon-workspace (ws metadata)
-  "Materialize daemon-owned workspace WS from authoritative METADATA.
-Creates only the perspective and the `agent-repl--workspaces' bookkeeping
-entry.  It never invokes git, session creation, shim startup, prompt
-delivery, projectile registration, or frontend mounting.
-
-A successful materialization does write the workspace roster snapshot
-via `agent-repl--ws-persist-materialized-roster'.  That is not session
-state: without it the workspace has no durable record anywhere and
-disappears at the next Emacs restart while its worktree and daemon
-session keep running.
-
-Returns `created' for a new materialization and `existing' for an exact
-replay.  A same-name conflict, duplicate path owner, tombstone, or missing
-persp-mode primitive fails before mutation.  If perspective setup fails
-after creation, the perspective and fresh hash entry are rolled back before
-the original error is re-signaled."
-  (let ((path (plist-get metadata :project-dir))
-        (job-id (plist-get metadata :daemon-workspace-job-id)))
-    (agent-repl--log
-     ws
-     "ws-materialize-daemon: ENTRY ws=%s job-id=%s path=%s known=%S live=%S"
-     ws job-id path (agent-repl--ws-known-p ws)
-     (agent-repl--ws-live-p ws))
-    (cond
-     ((agent-repl--ws-daemon-materialization-matches-p ws metadata)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: IDEMPOTENT replay ws=%s job-id=%s path=%s"
-       ws job-id path)
-      'existing)
-     ((agent-repl--ws-known-p ws)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: CONFLICT known workspace ws=%s job-id=%s existing-job=%s existing-path=%s"
-       ws job-id (agent-repl--ws-get ws :daemon-workspace-job-id)
-       (agent-repl--ws-get ws :project-dir))
-      (error "agent-repl: daemon workspace %s conflicts with registered workspace" ws))
-     ((agent-repl--ws-dir-owner path)
-      (let ((owner (agent-repl--ws-dir-owner path)))
-        (agent-repl--log
-         ws
-         "ws-materialize-daemon: CONFLICT path=%s already owned by ws=%s job-id=%s"
-         path owner job-id)
-        (error "agent-repl: daemon workspace path %s is already owned by %s"
-               path owner)))
-     ((agent-repl--ws-resolve-persp ws)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: CONFLICT perspective exists without bookkeeping ws=%s job-id=%s"
-       ws job-id)
-      (error "agent-repl: perspective %s exists without daemon bookkeeping" ws))
-     (t
-      ;; Check every rollback dependency before creating anything.
-      (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
-        (unless (fboundp fn)
-          (agent-repl--log
-           ws
-           "ws-materialize-daemon: MISSING required perspective primitive=%s ws=%s job-id=%s — aborting before mutation"
-           fn ws job-id)
-          (error "agent-repl: cannot materialize %s; %s is unavailable" ws fn)))
-      (let ((persp-created nil)
-            (hash-created nil))
-        ;; `prog1', so the roster write runs only after the guarded body
-        ;; returned normally.  Inside the `condition-case' a failing write
-        ;; would trip the rollback and destroy a workspace that was
-        ;; materialized correctly.
-        (prog1
-            (condition-case err
-		(let ((persp (persp-add-new ws)))
-		  (unless (and persp (not (keywordp persp)))
-                    (agent-repl--log
-                     ws
-                     "ws-materialize-daemon: CREATE-FAILED ws=%s job-id=%s reason=invalid-persp result=%S"
-                     ws job-id persp)
-                    (error "persp-add-new did not create perspective %s" ws))
-		  (setq persp-created t)
-		  (set-persp-parameter '+workspace-project path persp)
-		  ;; One write is the bookkeeping commit point.  Keeping all
-		  ;; metadata in one plist prevents observers from seeing a
-		  ;; project-dir-only or session-id-only partial workspace.
-		  (puthash
-		   ws
-		   (append
-                    (list :created-at (current-time)
-			  :worktree-p t
-			  ;; Preserve the immutable creation envelope separately
-			  ;; from mutable top-level fields such as :priority.
-			  ;; Reconnect replay compares this exact original value,
-			  ;; so a later user priority edit cannot turn the same
-			  ;; daemon job into a false conflict.  The copy is what
-			  ;; makes that true: `append' below SHARES METADATA's
-			  ;; cons cells as the plist tail, so without it a
-			  ;; `plist-put' on any metadata-supplied key would
-			  ;; rewrite the envelope in place.
-			  :daemon-workspace-metadata (copy-sequence metadata)
-			  ;; Derive the id through the SAME canonicalizer every
-			  ;; other ws-id producer uses (`agent-repl--workspace-id',
-			  ;; `--path-canonical'), or a symlinked worktree would get
-			  ;; two different ids for one directory.
-			  :ws-id (substring
-				  (md5 (agent-repl--path-canonical path))
-				  0 agent-repl-workspace-id-length))
-                    metadata)
-		   agent-repl--workspaces)
-		  (setq hash-created t)
-		  (agent-repl--log
-		   ws
-		   "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
-		   ws job-id path (plist-get metadata :branch-name)
-		   (plist-get metadata :initial-prompt-queued))
-		  'created)
-              (error
-               (when hash-created
-		 (remhash ws agent-repl--workspaces))
-               (when persp-created
-		 (condition-case rollback-err
-                     (persp-kill ws)
-		   (error
-                    (agent-repl--warn
-                     ws
-                     "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
-                     ws job-id rollback-err))))
-               (agent-repl--log
-		ws
-		"ws-materialize-daemon: FAILED and rolled back ws=%s job-id=%s hash-created=%S persp-created=%S err=%S"
-		ws job-id hash-created persp-created err)
-               (signal (car err) (cdr err))))
-          (agent-repl--ws-persist-materialized-roster ws)))))))
-
-(defun agent-repl--ws-protected-p (ws)
-  "Return non-nil when workspace WS is protected from deletion/cycling.
-Delegates to `+workspace--protected-p'.  Returns nil when that function
-is unbound (persp-mode not loaded).
-
-This is the persp-mode protection boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace--protected-p'
-directly or wrapping it themselves with `fboundp'."
-  (and (fboundp '+workspace--protected-p)
-       (+workspace--protected-p ws)))
-
-(defun agent-repl--ws-error (message &optional noerror)
-  "Report a workspace error via `+workspace-error' with MESSAGE.
-With NOERROR non-nil, `+workspace-error' displays the message instead of
-signaling.  No-op when `+workspace-error' is unbound (persp-mode not
-loaded).  When it does signal, the error propagates to the caller.
-
-This is the persp-mode error boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-error'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp '+workspace-error)
-    (+workspace-error message noerror)))
 
 (defun agent-repl--ws-add-buffer (buffer persp &optional switch)
   "Attach BUFFER to perspective PERSP via `persp-add-buffer'.
@@ -1981,18 +1528,6 @@ Callers must use this function instead of referring to
 `+workspace-tab-selected-face' directly."
   '+workspace-tab-selected-face)
 
-(defun agent-repl--workspace-for-buffer (buf)
-  "Return the workspace name whose perspective contains BUF, or nil.
-Scans `persp-persps' for the perspective that owns BUF.  Returns nil
-when the workspace system is unavailable.
-
-This is persp-mode buffer-ownership resolution; it lives in
-`workspace.el' because it touches the raw persp set directly."
-  (when (agent-repl--ws-system-available-p)
-    (cl-loop for persp in (persp-persps)
-             when (persp-contain-buffer-p buf persp)
-             return (safe-persp-name persp))))
-
 (defun agent-repl--ws-all-persps ()
   "Return the raw list of all perspective objects via `persp-persps'.
 Returns nil when `persp-persps' is unbound (persp-mode not loaded).  The
@@ -2027,16 +1562,6 @@ its aggregate record, so this boundary does not emit a duplicate record."
     (error "agent-repl--ws-persp-identity: perspective must be non-nil"))
   (format "persp@%x" (sxhash-eq persp)))
 
-(defun agent-repl--ws-nil-name ()
-  "Return persp-mode's sentinel \"no perspective\" name, or nil.
-Reads `persp-nil-name'.  Returns nil when that variable is unbound
-(persp-mode not loaded).
-
-This is the persp-mode sentinel-name boundary owned by `workspace.el'.
-Callers must use this function instead of reading `persp-nil-name'
-directly or guarding it themselves with `boundp'."
-  (and (boundp 'persp-nil-name) persp-nil-name))
-
 (defun agent-repl--ws-names-cache ()
   "Return the raw `persp-names-cache' list, or nil when unbound.
 Used mainly for diagnostic logging of cache state.  Returns nil both
@@ -2047,22 +1572,6 @@ This is the persp-mode names-cache read boundary owned by `workspace.el'.
 Callers must use this function instead of reading `persp-names-cache'
 directly or guarding it themselves with `boundp'."
   (and (boundp 'persp-names-cache) persp-names-cache))
-
-(defun agent-repl--ws-new (&optional name)
-  "Create a new workspace, named NAME when given.
-With NAME, delegates to `+workspace-new'.  Without NAME, delegates to
-the interactive `+workspace/new', which auto-generates a name (the
-caller then reads it back via `--ws-current-name').  No-op when the
-corresponding function is unbound (persp-mode not loaded).
-
-This is the persp-mode creation boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-new' or
-`+workspace/new' directly or wrapping them with `fboundp'."
-  (if name
-      (when (fboundp '+workspace-new)
-        (+workspace-new name))
-    (when (fboundp '+workspace/new)
-      (+workspace/new))))
 
 (defun agent-repl--land-after-teardown (ws)
   "Leave the frame in a well-defined perspective now that WS is gone.
@@ -2178,15 +1687,6 @@ Projectile boundary owned by `workspace.el'."
   (when (fboundp 'projectile-add-known-project)
     (projectile-add-known-project dir)))
 
-(defun agent-repl--ws-unregister-project (dir)
-  "Drop DIR from projectile's known projects via `projectile-remove-known-project'.
-No-op when `projectile-remove-known-project' is unbound (projectile not
-loaded).
-
-Projectile boundary owned by `workspace.el'."
-  (when (fboundp 'projectile-remove-known-project)
-    (projectile-remove-known-project dir)))
-
 (defun agent-repl--ws-switch-project (project)
   "Switch to PROJECT via `projectile-switch-project-by-name'.
 No-op when `projectile-switch-project-by-name' is unbound (projectile
@@ -2195,15 +1695,6 @@ not loaded).
 Projectile boundary owned by `workspace.el'."
   (when (fboundp 'projectile-switch-project-by-name)
     (projectile-switch-project-by-name project)))
-
-(defun agent-repl--ws-known-projects ()
-  "Return the list of projectile-relevant known project roots.
-Delegates to `projectile-relevant-known-projects'.  Returns nil when
-that function is unbound (projectile not loaded).
-
-Projectile boundary owned by `workspace.el'."
-  (when (fboundp 'projectile-relevant-known-projects)
-    (projectile-relevant-known-projects)))
 
 ;;;; ---- persp-mode load-ordering / hook-registration boundary -----------
 ;;
@@ -2241,27 +1732,6 @@ callers do not name the feature directly.
 Boundary owned by `workspace.el'."
   (with-eval-after-load 'persp-mode
     (funcall thunk)))
-
-(defun agent-repl--ws-run-switch-project-function (dir)
-  "Invoke `+workspaces-switch-project-function' on DIR when it is set.
-No-op when that variable is unbound or nil.
-
-This is the Doom switch-project-function boundary owned by `workspace.el'.
-Callers must use this function instead of reading or funcalling
-`+workspaces-switch-project-function' directly."
-  (when (and (boundp '+workspaces-switch-project-function)
-             +workspaces-switch-project-function)
-    (funcall +workspaces-switch-project-function dir)))
-
-(defun agent-repl--ws-advise-kill-before (fn)
-  "Install FN as `:before' advice on `+workspace/kill'.
-Lets a caller run teardown while the workspace is still current.  This
-is load-time wiring registered once at module load.
-
-This is the persp-mode kill-advice boundary owned by `workspace.el'.
-Callers must use this function instead of calling `advice-add' on
-`+workspace/kill' directly."
-  (advice-add '+workspace/kill :before fn))
 
 ;;;; ---- persp-mode policy configuration ---------------------------------
 ;;

@@ -1,0 +1,28 @@
+{
+  "scenario": "hook-failed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `echo hook-failure-probe`.",
+  "prompts": [
+    {
+      "text": "Run `echo hook-failure-probe`.",
+      "resume": false
+    }
+  ],
+  "world": "hook-failed",
+  "cwd_init": null,
+  "vendor_session_id": "3a8183cf-165a-4bb9-a84a-de04b5c379fe",
+  "manual": null,
+  "expect": [
+    "hook_started",
+    "hook_response(error)",
+    "attachment:hook_non_blocking_error"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-hook-failed-VbL0VL-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:26:38.810Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
