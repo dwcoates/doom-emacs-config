@@ -1,0 +1,550 @@
+// Adoption on restart (SPEC.md section C, "Adoption on restart", #47-50).
+//
+// Every test here drives a REAL daemon, a REAL shim-store, a REAL sidecar,
+// and the REAL shim (its `--fake` scripted vendor), per world_test.go and
+// main_test.go. Git is the harness's scripted fake-git world
+// (claude-repld/integration/harness.NewRepo) — never a real git process —
+// exactly like every other daemon/integration test; only the daemon, store,
+// sidecar, and shim are real. No test seeds the store with hand-written
+// rows: #47 and #48 use driveScenarioToCompletion (world_test.go) to drive a
+// named, real fake-SDK scenario ("prose-streamed" — grounded, no manifest
+// caveat) through a real session to completion before simulating a daemon
+// bounce, per the binding ruling in
+// docs/overhaul/reports/E2E-EVENT-INVENTORY.md's "PROJECT-LEAD RULINGS" #3.
+//
+//   - #47 ColdBootReadsReplayFromStore — docs/overhaul/store.md cursor/replay
+//     semantics: a cold-started daemon (SIGKILL, then a fresh StartDaemon
+//     against the same state root, kernel-lock dir, and store socket)
+//     replays a workspace's history correctly from the store's durable rows,
+//     written by a prior REAL session, never a live one it never started.
+//   - #48 SessionStartedReAnnouncedOnEveryNewWatch —
+//     docs/overhaul/PROTO-CHANGES.md "Landing 7": shim.v1 WatchSessionResponse
+//     is `oneof frame { update = 1; session_started = 2 }`, "the original
+//     SessionStarted re-announced ONCE per watch, right after the opening
+//     diagnostics, on EVERY new watch, so an adopting daemon (crash boot,
+//     handover) attaches purely." daemon/internal/sessionwatcher/watcher.go's
+//     reannouncedLocked takes the facts up (logging "took the session facts
+//     from the shim's re-announcement" at INFO) on a watcher's FIRST
+//     application and logs "ignored a re-announced SessionStarted..." at
+//     DEBUG on every later one within the SAME watcher's lifetime. A crash
+//     boot's own sessionwatcher is fresh, so its first application is a
+//     SECOND, freshly-counted "took the session facts" record against the
+//     SAME still-running real shim — proving the cardinality is exactly one
+//     PER WATCH, not per session.
+//   - #49 HandoverTransfersAtFreeness — docs/overhaul/daemon.md "Rollout /
+//     handover": "Blue-green self-rollout: old daemon spawns the rebuilt one
+//     (joining mode), transfers workspaces one by one at FREENESS (no
+//     in-flight turn, no live detached work)." A HEADLESS workspace (never
+//     opened, so it has zero rendezvous participants) transfers the instant
+//     the handover recognizes it as free, per the same section: "headless
+//     workspaces transfer with zero rendezvous."
+//   - #50 RefusalOrderingDuringHandover — same section: "Ordering by
+//     REFUSAL: the new daemon refuses unowned workspaces (not_yet_adopted);
+//     the old refuses with transferring_away{address}; lagging clients
+//     self-heal." Exercised on an OPEN workspace whose host+web streams are
+//     both live at the moment of announcement, so it is an EXPECTED
+//     rendezvous participant on both sides and does not transfer until the
+//     test itself, playing the lagging client, calls
+//     AdoptHostWorkspace/AdoptWebWorkspace.
+//
+// #49 and #50 fire a REAL self-merge rollout (daemon.md's own blue-green
+// mechanism: the incumbent re-execs itself with --joining) by registering the
+// daemon's own fake-git checkout as its SelfRepo, landing a real (scripted,
+// fake-git) commit through a real CreateWorkspace + MergeWorkspace round
+// trip, and setting AGENT_REPL_TEST_ALL_SCRIPT so the merge gate passes —
+// exactly the mechanism daemon/integration/drain_rollout_test.go's own
+// TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous and
+// TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall use, reimplemented here
+// against a REAL shim's initial-turn completion (driven by a real
+// "!prose-streamed" prompt, awaited on the feed) instead of that suite's
+// fake-shim scripting, since e2e never fakes the shim.
+package e2e
+
+import (
+	"context"
+	"crypto/tls"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+
+	"claude-repld/integration/harness"
+)
+
+// ===========================================================================
+// #47 — ColdBootReadsReplayFromStore
+// ===========================================================================
+
+func TestColdBootReadsReplayFromStore(t *testing.T) {
+	// Arrange: drive a real "!prose-streamed" turn to completion so the
+	// store durably holds REAL rows (driveScenarioToCompletion blocks on the
+	// sidecar's own cursor advance) before any bounce is simulated — the
+	// binding alternative to a hand-seeded storedAssistantEvent fixture
+	// (E2E-EVENT-INVENTORY.md ruling 3).
+	w := NewWorld(t, WorldOpts{})
+	w.ExpectWarnings("daemon.rollout.reconcile")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w.WatchWorkspaceLogs(repo.Dir)
+
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+
+	// Act: crash the daemon (SIGKILL) — the real shim, spawned into its own
+	// process group by the daemon's own shim-spawn plumbing, survives — and
+	// cold-boot a successor against the SAME state root, kernel-lock dir,
+	// and store socket.
+	successor := adColdBoot(t, w)
+	successor.WatchWorkspaceLogs(repo.Dir)
+
+	// Assert: the cold-started successor's OpenFeed page replays the prior
+	// REAL session's turn purely from the store's durable rows (store.md
+	// cursor/replay semantics) — this daemon never started that session
+	// itself.
+	opened, err := successor.Client().OpenFeed(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = error %v, want a success", err)
+	}
+	page := opened.Msg.GetSuccess().GetPage().GetSuccess()
+	if page == nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a served page", opened.Msg)
+	}
+	found := false
+	for _, row := range page.GetRows() {
+		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("cold boot's replayed feed page = %v, want the prior REAL session's turn %s replayed from the store", page, turn.GetValue())
+	}
+}
+
+// ===========================================================================
+// #48 — SessionStartedReAnnouncedOnEveryNewWatch
+// ===========================================================================
+
+// adWatchSessionOp is the operation both the "took the session facts" and
+// "ignored a re-announced SessionStarted" records use
+// (daemon/internal/sessionwatcher/watcher.go's runSession/reannouncedLocked)
+// — the two are told apart by MESSAGE, not by operation.
+const adWatchSessionOp = "daemon.sessionwatcher.watch_session"
+
+// adTookSessionFactsMessage is reannouncedLocked's INFO message on a
+// watcher's FIRST application of the shim's re-announced SessionStarted.
+const adTookSessionFactsMessage = "took the session facts from the shim's re-announcement"
+
+// adIgnoredReannouncementMessage is reannouncedLocked's DEBUG message when a
+// watcher that ALREADY holds the facts sees a later re-announcement on the
+// SAME watch (an ordinary re-open after a link break, not a new watcher).
+const adIgnoredReannouncementMessage = "ignored a re-announced SessionStarted; the facts are already held"
+
+// adCountLogMessage counts a workspace's own daemon-log records matching an
+// exact operation and a message substring. The per-workspace log sink
+// (harness.WorkspaceLogPath) lives under the workspace directory itself,
+// never under a daemon's own restart-scoped state root, so it accumulates
+// across a crash + cold boot in ONE file — this reads the cumulative record.
+func adCountLogMessage(t *testing.T, workspaceDir, op, substr string) int {
+	t.Helper()
+	n := 0
+	for _, r := range harness.ReadLog(t, harness.WorkspaceLogPath(workspaceDir, "daemon")) {
+		if r.Operation == op && strings.Contains(r.Message, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	w.ExpectWarnings("daemon.rollout.reconcile")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	w.WatchWorkspaceLogs(repo.Dir)
+
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+
+	// The ORIGINAL daemon's own first (and only) watch on this session took
+	// the shim's re-announced facts up exactly once, and never logged an
+	// "ignored" record (its watcher never reconnected).
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
+		t.Fatalf("the original daemon's watch_session log holds %d %q records, want exactly 1", got, adTookSessionFactsMessage)
+	}
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
+		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want 0", got)
+	}
+	baseline := w.WorkspaceLogOperationCount(repo.Dir, adWatchSessionOp)
+
+	// Act: crash-adopt onto the SAME still-running real shim — PROTO-CHANGES.md
+	// Landing 7: the shim re-announces SessionStarted once per watch "so an
+	// adopting daemon (crash boot, handover) attaches purely."
+	successor := adColdBoot(t, w)
+	successor.WatchWorkspaceLogs(repo.Dir)
+	successor.AwaitWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
+
+	// Assert: the exact ONE-per-watch cardinality (SPEC.md #48), not merely
+	// presence. The successor's fresh watcher took the re-announced facts up
+	// exactly once more (a SECOND "took" record across the two daemons'
+	// combined, cumulative log), and NOTHING was ever logged as an ignored
+	// re-announcement — which would mean the same WATCHER, not just the
+	// process, survived the crash, the wrong shape for a cold boot.
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 2 {
+		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 2 (one per fresh watch)", got, adTookSessionFactsMessage)
+	}
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
+		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want 0 (each daemon's own watcher saw the re-announcement exactly once, as its first watch)", got)
+	}
+}
+
+// adColdBoot SIGKILLs w's daemon and boots a fresh one against the SAME
+// state root, kernel-lock dir, and store socket — a crash-restart cold boot
+// re-adopting whatever real shim survived, never a second spawn.
+func adColdBoot(t *testing.T, w *World) *harness.Daemon {
+	t.Helper()
+	w.Kill()
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir:    w.StateDir,
+		ShimNode:    requireNode(t),
+		ShimMain:    requireShimBundle(t),
+		StoreSocket: w.Store.Socket,
+		ExtraEnv:    []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir, "SHIM_BUILD_SHA=" + shimBuildSHA},
+		// A cold boot's own re-adoption of a still-running real shim chains a
+		// SECOND real process's full boot onto this one test, exactly the
+		// shape AdoptionChainTimeout documents (world_test.go) — reused
+		// verbatim rather than the tighter single-boot DefaultTimeout.
+		Timeout: AdoptionChainTimeout,
+	})
+	successor.ExpectWarnings("daemon.rollout.reconcile")
+	return successor
+}
+
+// ===========================================================================
+// #49 — HandoverTransfersAtFreeness, #50 — RefusalOrderingDuringHandover
+// ===========================================================================
+
+// adSelfRepoWorld starts a World whose daemon's own checkout (SelfRepo) is a
+// fresh fake-git repository with a passing merge gate, so a landed commit on
+// it fires a real self-merge rollout (daemon.md "Rollout / handover"). The
+// whole handover — the incumbent's own re-exec, the successor's boot, and
+// its adoption of every workspace — runs on this ONE World's context, so it
+// gets HandoverChainTimeout rather than the tighter single-boot default.
+func adSelfRepoWorld(t *testing.T) (*harness.Repo, *World) {
+	t.Helper()
+	selfRepo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("e2e: passed in 1s\n")
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		SelfRepo: selfRepo.Dir,
+		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		Timeout:  HandoverChainTimeout,
+	}})
+	return selfRepo, w
+}
+
+// adFindRepoKey finds a repository's roster section by its worktree — keyed
+// by the COMMON DIR, `<worktree>/.git` for an ordinary checkout, so either
+// spelling is checked (mirrors daemon/integration/merge_test.go's
+// mergeFindRepoKey).
+func adFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
+	for _, s := range r.GetRepository().GetSections() {
+		switch s.GetKey().GetRepository().GetDir() {
+		case dir, filepath.Join(dir, ".git"):
+			return s.GetKey().GetRepository()
+		}
+	}
+	return nil
+}
+
+// adRepositoryRef registers a fake-git repository and answers its roster
+// RepositoryRef, once the roster carries it.
+func adRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
+	t.Helper()
+	harness.Register(t, w.Daemon, repo.Dir)
+	roster := w.WatchRoster()
+	defer roster.Close()
+	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section", func(r *frontendv1.WorkspaceRoster) bool {
+		return adFindRepoKey(r, repo.Dir) != nil
+	})
+	ref := adFindRepoKey(got, repo.Dir)
+	if ref == nil {
+		t.Fatalf("no roster repository section for %s", repo.Dir)
+	}
+	return ref
+}
+
+// adSaidText builds the plain UserSaid shape SubmitPrompt sends, for the
+// CreateWorkspace/SubmitPrompt calls this file makes directly against a raw
+// client rather than through world_test.go's own SubmitPrompt helper.
+func adSaidText(text string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}},
+	}}}
+}
+
+func adStrPtr(s string) *string { return &s }
+
+// adAwaitAnyTurnEnded waits for a workspace's feed to carry a FeedTurnEnded
+// row, for a freshly CREATED workspace whose own initial-prompt turn id this
+// caller does not track (CreateWorkspaceSuccess mints no TurnId of its own).
+func adAwaitAnyTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed(%s) = error %v, want a success", ws.GetId(), err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed(%s) = %v, want success", ws.GetId(), opened.Msg)
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if row.GetTurnEnded() != nil {
+			return
+		}
+	}
+	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
+	defer stream.Close()
+	harness.AwaitView(t, w.Ctx(), stream, "the created workspace's initial turn to end", func(row *frontendv1.FeedRow) bool {
+		return row.GetTurnEnded() != nil
+	})
+}
+
+// adCreateAndFinishChild creates a top-level child workspace via
+// CreateWorkspace, driving its initial prompt through the REAL shim (never
+// the fake-shim scripting daemon/integration's own mergeCreateChild uses),
+// and waits for that turn to conclude so the workspace starts idle — the
+// state MergeWorkspace requires.
+func adCreateAndFinishChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
+	t.Helper()
+	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repoRef,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: adSaidText("!prose-streamed"),
+			Name:          adStrPtr(name),
+		}},
+	}))
+	if err != nil {
+		t.Fatalf("CreateWorkspace(%s) = error %v, want a success", name, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	if ws.GetId() == "" {
+		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
+	}
+	adAwaitAnyTurnEnded(t, w, ws)
+	return ws
+}
+
+// adTriggerSelfMergeRollout lands one fake-git-scripted commit touching
+// `path` on selfRepo through a real created child workspace and a real
+// MergeWorkspace call, firing the rollout classified by that path's
+// subsystem prefix (mirrors daemon/integration/drain_rollout_test.go's
+// drainTriggerRollout).
+func adTriggerSelfMergeRollout(t *testing.T, w *World, selfRepo *harness.Repo, path string) {
+	t.Helper()
+	repoRef := adRepositoryRef(t, w, selfRepo)
+	trigger := adCreateAndFinishChild(t, w, repoRef, "trigger")
+	sha := selfRepo.CommitIn(trigger.GetDir(), path, "trigger\n")
+	selfRepo.SetPaths(sha, path)
+	if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: trigger})); err != nil {
+		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
+	}
+}
+
+// adOpenWorkspace opens a registered workspace (spawns its real shim) so its
+// host/web streams reflect a genuinely live session at handover time.
+func adOpenWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace(%s) = error %v, want a success", ws.GetId(), err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace(%s) = %v, want a success", ws.GetId(), resp.Msg)
+	}
+}
+
+// adDial builds a raw Connect client against an arbitrary address, for
+// reaching a handover's successor before it is discoverable any other way
+// (its address rides the shutdown_announced push, never a harness field).
+// Mirrors daemon/integration/drain_rollout_test.go's drainDial.
+func adDial(addr string) agentreplv1connect.AgentReplClient {
+	client := &http.Client{
+		Transport: &http2.Transport{
+			AllowHTTP: true,
+			DialTLSContext: func(ctx context.Context, network, a string, _ *tls.Config) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(ctx, network, a)
+			},
+		},
+	}
+	return agentreplv1connect.NewAgentReplClient(client, "http://"+addr)
+}
+
+// adAwaitAddrFileChange polls daemon.addr until it holds exactly `want`,
+// bounded by the daemon's own context — never a fixed sleep. Mirrors
+// daemon/integration/drain_rollout_test.go's drainAwaitAddrFileChange.
+func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
+	t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if body, err := os.ReadFile(d.AddrFile()); err == nil && strings.TrimSuffix(string(body), "\n") == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.Ctx().Done():
+			t.Fatalf("daemon.addr never became %q after the handover: %v", want, d.Ctx().Err())
+		}
+	}
+}
+
+// adSelfMergeTriggerPath is the daemon-subsystem-prefixed path
+// daemon/integration/drain_rollout_test.go's own handover tests commit to
+// classify the landed range as a self-merge rollout worth handing over for.
+const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
+
+func TestHandoverTransfersAtFreeness(t *testing.T) {
+	// Arrange: a HEADLESS workspace — registered, never opened, so it has
+	// ZERO rendezvous participants and, per daemon.md ("headless workspaces
+	// transfer with zero rendezvous"), transfers the instant the handover
+	// recognizes it as free (no in-flight turn, no live detached work).
+	selfRepo, w := adSelfRepoWorld(t)
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	roster := w.WatchRoster()
+	defer roster.Close()
+	harness.AwaitNext(t, w.Ctx(), roster, "the roster with the headless row")
+	daemonStream := w.WatchDaemonStream()
+	defer daemonStream.Close()
+
+	// Act: land a real, fake-git-scripted commit on the daemon's own
+	// checkout, driven through a real created child workspace and a real
+	// MergeWorkspace call.
+	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+
+	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	if announced.GetCause().GetSelfMergeRollout() == nil {
+		t.Fatalf("shutdown_announced.cause = %v, want self_merge_rollout", announced.GetCause())
+	}
+	if announced.GetExpectedOutageMs() <= 0 {
+		t.Fatalf("shutdown_announced.expected_outage_ms = %d, want a stated positive bounded outage", announced.GetExpectedOutageMs())
+	}
+	addr := announced.GetAddress()
+	if addr == "" {
+		t.Fatal("shutdown_announced.address is unset, want the successor's address for a handover")
+	}
+
+	// Assert: the incumbent exits once the headless (free, zero-participant)
+	// workspace has transferred, having needed no AdoptHostWorkspace/
+	// AdoptWebWorkspace rendezvous call for it at all.
+	if code := w.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the handover", code)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, addr)
+
+	// Assert: the workspace is immediately usable on the successor.
+	successor := adDial(addr)
+	if _, err := successor.SelectWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("SelectWorkspace on the successor for the transferred headless workspace = error %v, want a success", err)
+	}
+}
+
+func TestRefusalOrderingDuringHandover(t *testing.T) {
+	// Arrange: an ordinary, idle (free) workspace whose host+web streams are
+	// BOTH open at the moment of announcement, so it is an EXPECTED
+	// rendezvous participant and does not transfer until AdoptHostWorkspace/
+	// AdoptWebWorkspace are explicitly called.
+	selfRepo, w := adSelfRepoWorld(t)
+	// The sweep covers every test; the declared record is evidence of the
+	// refusal this test deliberately provokes (mirrors
+	// TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous).
+	w.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
+
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	adOpenWorkspace(t, w, ws)
+	host := w.WatchHost(ws)
+	defer host.Close()
+	web := w.WatchWeb(ws)
+	defer web.Close()
+	harness.AwaitNext(t, w.Ctx(), host, "the fresh host push")
+	daemonStream := w.WatchDaemonStream()
+	defer daemonStream.Close()
+
+	// Act
+	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	addr := announced.GetAddress()
+	if addr == "" {
+		t.Fatal("shutdown_announced.address is unset, want the successor's address for a handover")
+	}
+	successor := adDial(addr)
+
+	// Assert: the OLD daemon refuses further intake for the departing
+	// workspace, naming the successor.
+	oldResp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
+	}))
+	if err != nil {
+		t.Fatalf("SubmitPrompt on the old daemon after the announcement = error %v, want a typed transferring_away answer", err)
+	}
+	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
+		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
+	}
+
+	// Assert: the NEW daemon refuses the same workspace before adoption.
+	newResp, err := successor.SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
+	}))
+	if err != nil {
+		t.Fatalf("SubmitPrompt on the new daemon before adoption = error %v, want a typed not_yet_adopted answer", err)
+	}
+	if newResp.Msg.GetError().GetNotYetAdopted() == nil {
+		t.Fatalf("SubmitPrompt on the new daemon before adoption = %v, want error.not_yet_adopted", newResp.Msg)
+	}
+
+	// Act: the lagging client self-heals by completing the rendezvous.
+	if _, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("AdoptHostWorkspace = error %v, want a success", err)
+	}
+	if _, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("AdoptWebWorkspace = error %v, want a success", err)
+	}
+
+	// Assert: both watchers see the transfer, naming the successor.
+	harness.AwaitView(t, w.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	})
+	webTransfer := harness.AwaitView(t, w.Ctx(), web, "transferred", func(r *agentreplv1.WatchWebWorkspaceResponse) bool {
+		return r.GetTransferred() != nil
+	}).GetTransferred()
+	if webTransfer.GetAddress() != addr {
+		t.Fatalf("WatchWebWorkspace transferred.address = %q, want the announced %q", webTransfer.GetAddress(), addr)
+	}
+
+	// Assert: the self-heal is complete — the workspace now answers
+	// ordinarily on the successor.
+	healed, err := successor.SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
+	}))
+	if err != nil || healed.Msg.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt on the successor after self-heal = (%v, %v), want a success", healed.Msg, err)
+	}
+}
