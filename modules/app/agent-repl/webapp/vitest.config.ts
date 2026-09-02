@@ -13,6 +13,19 @@ export default defineConfig({
   test: {
     css: true,
     setupFiles: ["./test/setup.ts"],
+    // The integration suite has its own config (vitest.integration.config.ts):
+    // it boots the app against a real loopback Connect server, so it must not
+    // ride along in the fast unit run.
+    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**"],
+    // TIGHT ON PURPOSE. Everything here is mocked/fake-timered — no real I/O,
+    // no daemon — so a healthy run's slowest test is under 100ms (measured:
+    // 88.9ms). Vitest's own defaults (5000ms/10000ms) would let a genuinely
+    // hung test burn 50-100x that before failing. ~3x the observed max, so
+    // real variance has headroom without masking a hang. If a test needs more,
+    // it gets its own `{ timeout: ... }` with a one-line reason, not a raised
+    // global.
+    testTimeout: 300,
+    hookTimeout: 300,
     coverage: {
       provider: "v8",
       all: true,

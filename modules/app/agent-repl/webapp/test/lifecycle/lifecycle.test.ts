@@ -1,0 +1,856 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import {
+  AdoptWebWorkspaceErrorSchema,
+  AdoptWebWorkspaceResponseSchema,
+  type AdoptWebWorkspaceResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
+import {
+  DaemonShutdownAnnouncedSchema,
+  WatchDaemonResponseSchema,
+  type DaemonDrainScheduled,
+  type DaemonShutdownAnnounced,
+  type WatchDaemonResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import { DaemonDrainScheduledSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import { WatchWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
+import type { Ticker } from "../../src/clock.js";
+import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
+import { createAgentReplClient } from "../../src/rpc/client.js";
+import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { MalformedView } from "../../src/rpc/malformed.js";
+import {
+  AdoptionFailed,
+  adoptAtBoot,
+  classifyAdoptionRefusal,
+  drainReasonText,
+  drawDrainNotice,
+  drawMovedNotice,
+  drawRestartingNotice,
+  mountBanner,
+  quietWindowMs,
+  shutdownCauseText,
+  startLifecycle,
+  workspaceMoved,
+} from "../../src/lifecycle/lifecycle.js";
+
+const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
+const NOW = 1_700_000_000_000;
+
+/** Records every report/retract/suppress, so a test can assert the arms. */
+class RecordingSink implements FailureSink {
+  readonly reported: FailureKind[] = [];
+  readonly retracted: ClientFailureArm[] = [];
+  readonly suppressed: Array<[ClientFailureArm, number]> = [];
+  report(kind: FailureKind): void {
+    this.reported.push(kind);
+  }
+  retract(arm: ClientFailureArm): void {
+    this.retracted.push(arm);
+  }
+  suppress(arm: ClientFailureArm, untilMs: number): void {
+    this.suppressed.push([arm, untilMs]);
+  }
+}
+
+/** A ticker whose instant a test moves by hand. */
+function fakeTicker(): Ticker & { set(nowMs: number): void } {
+  let now = NOW;
+  const listeners = new Set<(nowMs: number) => void>();
+  return {
+    now: () => now,
+    subscribe(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    set(nowMs: number) {
+      now = nowMs;
+      for (const fn of [...listeners]) fn(nowMs);
+    },
+  };
+}
+
+const reason = (kind: "deploy" | "maintenance" | "operator", note = "the operator asked") => {
+  if (kind === "deploy") return { kind: { case: "deploy" as const, value: {} } } as never;
+  if (kind === "maintenance") return { kind: { case: "maintenance" as const, value: {} } } as never;
+  return { kind: { case: "operator" as const, value: { note } } } as never;
+};
+
+const drain = (atMs: number, reasonInit: unknown): DaemonDrainScheduled =>
+  create(DaemonDrainScheduledSchema, {
+    atMs: BigInt(atMs),
+    reason: reasonInit as never,
+  });
+
+const announced = (init: {
+  address?: string;
+  cause: unknown;
+  outageMs: number;
+  mintedAtMs: number;
+}): DaemonShutdownAnnounced =>
+  create(DaemonShutdownAnnouncedSchema, {
+    address: init.address,
+    cause: init.cause as never,
+    expectedOutageMs: BigInt(init.outageMs),
+    mintedAtMs: BigInt(init.mintedAtMs),
+  });
+
+// ---------------------------------------------------------------------------
+
+describe("drainReasonText", () => {
+  const table: ReadonlyArray<readonly [string, unknown, string]> = [
+    ["deploy", { kind: { case: "deploy", value: {} } }, "deploy"],
+    ["maintenance", { kind: { case: "maintenance", value: {} } }, "maintenance"],
+    ["operator", { kind: { case: "operator", value: { note: "swapping disks" } } }, "swapping disks"],
+  ];
+  for (const [name, init, expected] of table) {
+    it(`words the ${name} arm`, () => {
+      expect(drainReasonText(init as never, "DrainReason")).toBe(expected);
+    });
+  }
+
+  it("refuses a reason that names no arm", () => {
+    expect(() => drainReasonText({ kind: {} } as never, "DrainReason")).toThrow(MalformedView);
+  });
+});
+
+describe("shutdownCauseText", () => {
+  it("words the rollout arm", () => {
+    expect(shutdownCauseText({ kind: { case: "selfMergeRollout", value: {} } } as never)).toBe(
+      "rollout",
+    );
+  });
+
+  it("words a scheduled drain as its own reason", () => {
+    expect(
+      shutdownCauseText({
+        kind: {
+          case: "scheduledDrain",
+          value: { reason: { kind: { case: "deploy", value: {} } } },
+        },
+      } as never),
+    ).toBe("deploy");
+  });
+
+  it("words an immediate shutdown as its own reason", () => {
+    expect(
+      shutdownCauseText({
+        kind: {
+          case: "immediate",
+          value: { reason: { kind: { case: "operator", value: { note: "now" } } } },
+        },
+      } as never),
+    ).toBe("now");
+  });
+
+  it("refuses a cause that names no arm", () => {
+    expect(() => shutdownCauseText({ kind: {} } as never)).toThrow(MalformedView);
+  });
+});
+
+describe("quietWindowMs", () => {
+  it("is the whole outage for a receiver that read it as it was minted", () => {
+    const a = announced({
+      cause: { kind: { case: "selfMergeRollout", value: {} } },
+      outageMs: 8000,
+      mintedAtMs: NOW,
+    });
+    expect(quietWindowMs(a, NOW)).toBe(8000);
+  });
+
+  it("shortens for a late receiver rather than restarting the window", () => {
+    const a = announced({
+      cause: { kind: { case: "selfMergeRollout", value: {} } },
+      outageMs: 8000,
+      mintedAtMs: NOW,
+    });
+    expect(quietWindowMs(a, NOW + 3000)).toBe(5000);
+  });
+
+  it("clamps a window that has already elapsed to zero", () => {
+    const a = announced({
+      cause: { kind: { case: "selfMergeRollout", value: {} } },
+      outageMs: 8000,
+      mintedAtMs: NOW,
+    });
+    expect(quietWindowMs(a, NOW + 20_000)).toBe(0);
+  });
+});
+
+describe("drawMovedNotice", () => {
+  it("names the successor's address, the one fact the reader may need", () => {
+    expect(drawMovedNotice("127.0.0.1:8123").textContent).toBe(
+      "workspace moved to 127.0.0.1:8123",
+    );
+  });
+
+  it("carries the address as a hook", () => {
+    expect(drawMovedNotice("127.0.0.1:8123").getAttribute("data-moved")).toBe("127.0.0.1:8123");
+  });
+
+  it("wears the standing-restart marker", () => {
+    expect(drawMovedNotice("a:1").hasAttribute("data-restarting")).toBe(true);
+  });
+});
+
+describe("drawDrainNotice", () => {
+  it("counts down to the drain instant", () => {
+    const { element, tick } = drawDrainNotice(drain(NOW + 252_000, reason("deploy")));
+    tick(NOW);
+    expect(element.textContent).toBe("daemon restart scheduled · deploy · in 4m 12s");
+  });
+
+  it("reads 'any moment now' once the instant has passed", () => {
+    const { element, tick } = drawDrainNotice(drain(NOW, reason("deploy")));
+    tick(NOW + 1000);
+    expect(element.textContent).toBe("daemon restart scheduled · deploy · any moment now");
+  });
+
+  it("draws the reason the push carried", () => {
+    const { element, tick } = drawDrainNotice(drain(NOW + 1000, reason("maintenance")));
+    tick(NOW);
+    expect(element.textContent).toContain("maintenance");
+  });
+
+  it("carries the reason's own arm beside the words it composed", () => {
+    const { element } = drawDrainNotice(drain(NOW + 1000, reason("maintenance")));
+    expect(element.querySelector("[data-arm]")?.getAttribute("data-arm")).toBe("maintenance");
+  });
+
+  it("carries the operator arm even though its words are the note", () => {
+    const { element } = drawDrainNotice(drain(NOW + 1000, reason("operator")));
+    expect(element.querySelector("[data-arm]")?.getAttribute("data-arm")).toBe("operator");
+  });
+});
+
+describe("drawRestartingNotice", () => {
+  it("counts down to the end of the announced outage", () => {
+    const { element, tick } = drawRestartingNotice(
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    tick(NOW);
+    expect(element.textContent).toBe("daemon restarting · rollout · expected back in 8s");
+  });
+
+  it("reads 'any moment now' past the window rather than counting up", () => {
+    const { element, tick } = drawRestartingNotice(
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    tick(NOW + 9000);
+    expect(element.textContent).toBe("daemon restarting · rollout · any moment now");
+  });
+
+  it("carries the cause arm as a hook", () => {
+    const { element } = drawRestartingNotice(
+      announced({
+        cause: { kind: { case: "immediate", value: { reason: reason("deploy") } } },
+        outageMs: 1,
+        mintedAtMs: NOW,
+      }),
+      NOW,
+    );
+    expect(element.getAttribute("data-shutdown-cause")).toBe("immediate");
+  });
+
+  it("refuses an announcement carrying no cause", () => {
+    expect(() =>
+      drawRestartingNotice(
+        create(DaemonShutdownAnnouncedSchema, { expectedOutageMs: 1n, mintedAtMs: 1n }),
+        NOW,
+      ),
+    ).toThrow(MalformedView);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+function bannerContext(ticker: Ticker, failures: FailureSink = new RecordingSink()): AppContext {
+  return createAppContext({
+    client: createAgentReplClient(createRouterTransport(({ service }) => service(AgentRepl, {}))),
+    workspace: WORKSPACE,
+    ticker,
+    failures,
+    composerEnabled: false,
+  });
+}
+
+describe("mountBanner", () => {
+  let host: HTMLElement;
+  beforeEach(() => {
+    host = document.createElement("div");
+  });
+
+  it("ships empty, so a healthy page costs nothing", () => {
+    mountBanner(host, bannerContext(fakeTicker()));
+    expect(host.children.length).toBe(0);
+  });
+
+  it("draws the drain notice on a schedule", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    expect(host.textContent).toContain("daemon restart scheduled");
+  });
+
+  it("ticks the drain countdown from the shared ticker", () => {
+    const ticker = fakeTicker();
+    const banner = mountBanner(host, bannerContext(ticker));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    ticker.set(NOW + 30_000);
+    expect(host.textContent).toContain("in 30s");
+  });
+
+  it("takes the banner down when the schedule is cancelled", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.clearDrain();
+    expect(host.children.length).toBe(0);
+  });
+
+  it("lets an announced restart win over a schedule that has not fired", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showRestarting(
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    expect(host.textContent).toContain("daemon restarting");
+  });
+
+  it("falls back to the standing schedule when the restart notice clears", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.showRestarting(
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+      NOW + 8000,
+    );
+    banner.clearRestarting();
+    expect(host.textContent).toContain("daemon restart scheduled");
+  });
+
+  it("lets the moved notice win over everything, since nothing follows it", () => {
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showMoved("127.0.0.1:9");
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    expect(host.textContent).toBe("workspace moved to 127.0.0.1:9");
+  });
+
+  it("unsubscribes the previous notice's clock on dispose", () => {
+    const ticker = fakeTicker();
+    const banner = mountBanner(host, bannerContext(ticker));
+    banner.showDrain(drain(NOW + 60_000, reason("deploy")));
+    banner.dispose();
+    ticker.set(NOW + 30_000);
+    expect(host.children.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+/** A daemon whose two lifecycle streams yield what the test scripts. */
+function lifecycleClient(script: {
+  web?: () => AsyncIterable<WatchWebWorkspaceResponseInit>;
+  daemon?: () => AsyncIterable<WatchDaemonResponse>;
+  adopt?: () => AdoptWebWorkspaceResponse;
+}) {
+  const state = { adoptCalls: 0 };
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      watchWebWorkspace: async function* () {
+        for await (const push of script.web?.() ?? []) {
+          yield create(WatchWebWorkspaceResponseSchema, push as never);
+        }
+        await new Promise<never>(() => undefined);
+      },
+      watchDaemon: async function* () {
+        for await (const push of script.daemon?.() ?? []) yield push;
+        await new Promise<never>(() => undefined);
+      },
+      adoptWebWorkspace: () => {
+        state.adoptCalls += 1;
+        return (
+          script.adopt?.() ??
+          create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: {} } })
+        );
+      },
+    });
+  });
+  return { client: createAgentReplClient(transport), state };
+}
+
+type WatchWebWorkspaceResponseInit = { push: { case: "transferred"; value: { address: string } } };
+
+function lifecycleContext(
+  client: ReturnType<typeof lifecycleClient>["client"],
+  failures: FailureSink,
+  ticker: Ticker,
+): AppContext {
+  return createAppContext({ client, workspace: WORKSPACE, ticker, failures, composerEnabled: false });
+}
+
+/** Let the transport's zero-delay frames land without moving the clock. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+}
+
+describe("startLifecycle: the handover", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const transferred = async function* (): AsyncIterable<WatchWebWorkspaceResponseInit> {
+    yield { push: { case: "transferred", value: { address: "127.0.0.1:8123" } } };
+  };
+
+  it("draws the moved notice naming the successor", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ASSERT (before dispose: disposing takes the banner down by design)
+    expect(host.textContent).toBe("workspace moved to 127.0.0.1:8123");
+    handle.dispose();
+  });
+
+  it("quiesces the page, so nothing more is sent on this client", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(ctx.isQuiesced()).toBe(true);
+  });
+
+  it("does not dial the successor, which is a different origin", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({ web: transferred });
+    const first = client;
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT: the client the page holds is untouched — no transport was built.
+    expect(ctx.client).toBe(first);
+  });
+
+  it("files no unreachable card for the streams the handover stopped", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const { client } = lifecycleClient({ web: transferred });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    await vi.advanceTimersByTimeAsync(10_000);
+    handle.dispose();
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).not.toContain("daemonUnreachable");
+  });
+
+  it("refuses a web-link push naming no arm", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const { client } = lifecycleClient({
+      web: async function* () {
+        yield {} as WatchWebWorkspaceResponseInit;
+      },
+    });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT: the core files the unreadable frame rather than tearing down.
+    expect(sink.reported.map((k) => k.kind.case)).toContain("frameUndecodable");
+  });
+});
+
+describe("startLifecycle: the daemon stream", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("draws the standing drain banner", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: { case: "drainScheduled", value: drain(NOW + 60_000, reason("deploy")) },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ASSERT (before dispose: disposing takes the banner down by design)
+    expect(host.textContent).toContain("daemon restart scheduled · deploy");
+    handle.dispose();
+  });
+
+  it("suppresses the unreachable card for exactly the announced window", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: announced({
+              cause: { kind: { case: "selfMergeRollout", value: {} } },
+              outageMs: 8000,
+              mintedAtMs: NOW,
+            }),
+          },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
+  });
+
+  it("takes the restarting notice down when any stream reads a frame again", async () => {
+    // ARRANGE: the daemon answering is what ends an outage, not the countdown,
+    // and a bounce takes every stream down together — so the FIRST frame any
+    // of them reads is the daemon being back.
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: announced({
+              cause: { kind: { case: "selfMergeRollout", value: {} } },
+              outageMs: 8000,
+              mintedAtMs: NOW,
+            }),
+          },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ACT
+    ctx.notePush();
+    // ASSERT
+    expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+
+  it("stops listening for frames once disposed", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ACT / ASSERT: the banner is gone with the mount, and a late frame
+    // reaches nothing that would draw into a host this page no longer owns.
+    expect(() => ctx.notePush()).not.toThrow();
+  });
+
+  it("draws the restarting notice from the announcement", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: announced({
+              address: "127.0.0.1:9",
+              cause: { kind: { case: "selfMergeRollout", value: {} } },
+              outageMs: 8000,
+              mintedAtMs: NOW,
+            }),
+          },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ASSERT (before dispose: disposing takes the banner down by design)
+    expect(host.textContent).toContain("daemon restarting · rollout");
+    handle.dispose();
+  });
+
+  it("takes the drain banner down on a cancellation", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: { case: "drainScheduled", value: drain(NOW + 60_000, reason("deploy")) },
+        });
+        yield create(WatchDaemonResponseSchema, {
+          push: { case: "drainCancelled", value: {} },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(host.children.length).toBe(0);
+  });
+
+  it("refuses a daemon push naming no arm", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {});
+      },
+    });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toContain("frameUndecodable");
+  });
+});
+
+describe("workspaceMoved", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("raises the same notice a transferred push does, for a refusal arm", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ACT
+    const handled = workspaceMoved("127.0.0.1:7");
+    // ASSERT (before dispose: disposing takes the banner down by design)
+    expect([handled, host.textContent]).toEqual([true, "workspace moved to 127.0.0.1:7"]);
+    handle.dispose();
+  });
+
+  it("answers false when no lifecycle is mounted, rather than pretending it drew", () => {
+    expect(workspaceMoved("127.0.0.1:7")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("classifyAdoptionRefusal", () => {
+  const table: ReadonlyArray<readonly [string, unknown, string]> = [
+    ["noTransferAnnounced", { case: "noTransferAnnounced", value: {} }, "no-transfer"],
+    ["notYetAdopted", { case: "notYetAdopted", value: {} }, "retry"],
+    ["unknownWorkspace", { case: "unknownWorkspace", value: {} }, "terminal"],
+    [
+      "workspaceRefMismatch",
+      { case: "workspaceRefMismatch", value: { registryDir: "/x" } },
+      "terminal",
+    ],
+    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }, "terminal"],
+    ["participantNotExpected", { case: "participantNotExpected", value: {} }, "terminal"],
+  ];
+  for (const [name, cause, kind] of table) {
+    it(`treats ${name} as ${kind}`, () => {
+      expect(classifyAdoptionRefusal({ cause } as never).kind).toBe(kind);
+    });
+  }
+
+  it("carries the registry's dir on a mismatch, so the reader can reconcile", () => {
+    const outcome = classifyAdoptionRefusal({
+      cause: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
+    } as never);
+    expect(outcome.kind === "terminal" && outcome.detail).toContain("/elsewhere");
+  });
+
+  it("refuses an error naming no cause", () => {
+    expect(() =>
+      classifyAdoptionRefusal(create(AdoptWebWorkspaceErrorSchema, {})),
+    ).toThrow(MalformedView);
+  });
+});
+
+describe("adoptAtBoot", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const refusal = (cause: unknown): AdoptWebWorkspaceResponse =>
+    create(AdoptWebWorkspaceResponseSchema, {
+      result: { case: "error", value: { cause: cause as never } },
+    });
+
+  it("resolves adopted on success", async () => {
+    const { client } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await expect(adoptAtBoot(ctx)).resolves.toBe("adopted");
+  });
+
+  it("resolves no-transfer on the ordinary non-handover boot", async () => {
+    const { client } = lifecycleClient({
+      adopt: () => refusal({ case: "noTransferAnnounced", value: {} }),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await expect(adoptAtBoot(ctx)).resolves.toBe("no-transfer");
+  });
+
+  it("calls the verb exactly once when it is answered at once", async () => {
+    const { client, state } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await adoptAtBoot(ctx);
+    expect(state.adoptCalls).toBe(1);
+  });
+
+  it("retries not_yet_adopted with backoff until the rendezvous completes", async () => {
+    // ARRANGE
+    let calls = 0;
+    const { client } = lifecycleClient({
+      adopt: () => {
+        calls += 1;
+        return calls < 3
+          ? refusal({ case: "notYetAdopted", value: {} })
+          : create(AdoptWebWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const ticker = fakeTicker();
+    const ctx = lifecycleContext(client, new RecordingSink(), ticker);
+    // ACT
+    const promise = adoptAtBoot(ctx, { initialMs: 250, maxMs: 5000, budgetMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
+    // ASSERT
+    await expect(promise).resolves.toBe("adopted");
+    expect(calls).toBe(3);
+  });
+
+  it("gives up once the budget is spent, so a boot cannot hang forever", async () => {
+    // ARRANGE
+    const { client } = lifecycleClient({
+      adopt: () => refusal({ case: "notYetAdopted", value: {} }),
+    });
+    const ticker = fakeTicker();
+    const ctx = lifecycleContext(client, new RecordingSink(), ticker);
+    // ACT
+    const promise = adoptAtBoot(ctx, { initialMs: 250, maxMs: 250, budgetMs: 500 });
+    const settled = promise.catch((err: unknown) => err);
+    for (let i = 0; i < 10; i += 1) {
+      ticker.set(ticker.now() + 250);
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    // ASSERT
+    await expect(settled).resolves.toBeInstanceOf(AdoptionFailed);
+  });
+
+  const terminal: ReadonlyArray<readonly [string, unknown]> = [
+    ["unknownWorkspace", { case: "unknownWorkspace", value: {} }],
+    ["workspaceRefMismatch", { case: "workspaceRefMismatch", value: { registryDir: "/x" } }],
+    ["transferringAway", { case: "transferringAway", value: { address: "a:1" } }],
+    ["participantNotExpected", { case: "participantNotExpected", value: {} }],
+  ];
+  for (const [name, cause] of terminal) {
+    it(`fails the boot on ${name}, naming the arm`, async () => {
+      const { client } = lifecycleClient({ adopt: () => refusal(cause) });
+      const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+      const err = await adoptAtBoot(ctx).catch((e: unknown) => e);
+      expect((err as AdoptionFailed).arm).toBe(name);
+    });
+  }
+
+  it("reports the refusal through the failure sink exactly once", async () => {
+    const sink = new RecordingSink();
+    const { client } = lifecycleClient({
+      adopt: () => refusal({ case: "unknownWorkspace", value: {} }),
+    });
+    const ctx = lifecycleContext(client, sink, fakeTicker());
+    await adoptAtBoot(ctx).catch(() => undefined);
+    expect(sink.reported.map((k) => k.kind.case)).toEqual(["controlPlaneFailed"]);
+  });
+
+  it("fails the boot on a transport failure rather than waiting on nothing", async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        adoptWebWorkspace: () => {
+          throw new ConnectError("no route", Code.Unavailable);
+        },
+      });
+    });
+    const ctx = createAppContext({
+      client: createAgentReplClient(transport),
+      workspace: WORKSPACE,
+      ticker: fakeTicker(),
+      failures: new RecordingSink(),
+      composerEnabled: false,
+    });
+    const err = await adoptAtBoot(ctx).catch((e: unknown) => e);
+    expect((err as AdoptionFailed).arm).toBe("transport");
+  });
+
+  it("refuses a response whose result oneof is unset", async () => {
+    const { client } = lifecycleClient({
+      adopt: () => create(AdoptWebWorkspaceResponseSchema, {}),
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    await expect(adoptAtBoot(ctx)).rejects.toThrow(MalformedView);
+  });
+});
