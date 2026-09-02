@@ -67,9 +67,7 @@ func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 
 	if w.turn != nil {
-		turn := *w.turn
-		w.turn = nil
-		w.sinks.Lifecycle.OnTurnEnded(w.ws, turn, wsm.CloseFailed)
+		w.turnEndedLocked(*w.turn, wsm.CloseFailed)
 	}
 	if changed := w.dropAllLiveWorkLocked(); changed {
 		w.publishLiveWorkLocked()
@@ -321,11 +319,10 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 	switch {
 	case isMain && turn != nil:
 		how := turnCloseOf(success, failure)
-		w.turn = nil
 		w.log.Debug("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
 			"turn_id": string(*turn), "close": int(how),
 		})
-		w.sinks.Lifecycle.OnTurnEnded(w.ws, *turn, how)
+		w.turnEndedLocked(*turn, how)
 	case a.id == nil && w.mainAgent == nil:
 		// THE MAIN AGENT HAS NOT BEEN NAMED, so this terminal cannot be
 		// attributed to the turn. The views still get it; only the lifecycle
