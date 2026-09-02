@@ -30,6 +30,16 @@ type fakeClient struct {
 	pid      int
 	kills    []shimclient.KillAttribution
 	killErr  error
+	// reaped makes the supervised process ALREADY GONE, which is how a test
+	// reaches the split between a session row and a live shim.
+	reaped bool
+}
+
+func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
+	if !c.reaped {
+		return shimclient.ExitInfo{}, false
+	}
+	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL"}, true
 }
 
 func (c *fakeClient) StartSession(_ context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
@@ -1029,5 +1039,45 @@ func TestStartPortsNothingWhenTheRoutingIsUnchanged(t *testing.T) {
 	// Assert.
 	if len(f.accounts.moved) != 0 {
 		t.Fatalf("moved transcripts = %+v, want none when the routing is unchanged", f.accounts.moved)
+	}
+}
+
+// TestShimAnswersFalseForASessionWhoseProcessIsGone covers the liveness split:
+// the map entry outlives a shim killed out from under the daemon, and reading
+// presence alone would drive a verb over a dead connection.
+func TestShimAnswersFalseForASessionWhoseProcessIsGone(t *testing.T) {
+	// Arrange: a live session whose process has since been reaped.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.supervisor.client.reaped = true
+
+	// Act.
+	_, ok := f.fleet.Shim(ws.ID)
+
+	// Assert.
+	if ok {
+		t.Fatal("Shim() answered a surface for a session whose process is gone")
+	}
+}
+
+// TestShimAnswersTheSurfaceForALiveSession is the other side of the same split,
+// so a liveness read that refused everything would be caught here.
+func TestShimAnswersTheSurfaceForALiveSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	_, ok := f.fleet.Shim(ws.ID)
+
+	// Assert.
+	if !ok {
+		t.Fatal("Shim() refused a live session")
 	}
 }

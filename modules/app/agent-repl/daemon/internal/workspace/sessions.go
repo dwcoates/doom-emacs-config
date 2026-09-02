@@ -816,6 +816,14 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	if !ok {
 		return nil, false
 	}
+	// A REAPED CLIENT IS NO SESSION. The map entry outlives the process — a
+	// shim killed out from under the daemon leaves its row behind until
+	// something tears it down — and reading liveness from map presence alone
+	// would send the verb over a dead connection, which answers a raw transport
+	// error where the contract spells no_session.
+	if _, reaped := session.client.Reaped(); reaped {
+		return nil, false
+	}
 	return &shimAdapter{client: session.client}, true
 }
 
