@@ -181,12 +181,27 @@ if opts.ShimMain != "" {
 Nothing else changes: `--fake` still gets passed by default (`opts.NoFake`
 false, unchanged), `AGENT_REPL_CLAUDE_BIN` still points at the fake `claude`
 (the e2e suite never exercises the login pty or the classifier — those stay
-out of scope, see B), fake `git` stays on `PATH` (git is not a vendor
-concern; no doc calls it out as in-scope for this suite), and
+out of scope, see B), the fake `git` is SKIPPED for e2e via `SkipFakeGit` (ruling 4: this
+suite uses REAL git), and
 `AGENT_REPL_FORBID_VENDOR_CALLS=1` is already set unconditionally. `--fake`
 on the REAL shim selects its `src/fake` mocked vendor by prompt-text
 scenario name (`fake/registry.ts`) — this is the intended, documented way to
 drive the real shim without touching the vendor, not a harness invention.
+
+**Seam 3 (RULING 4) — a fourth `Opts` field, `SkipFakeGit bool`, same file.**
+
+The e2e suite uses REAL git (see B, "Real git"), so it must NOT get the
+scripted fake `git` on `PATH`. `StartDaemon`/`World` call `installFakeGit`
+unconditionally today; gate that call on `!opts.SkipFakeGit`. The zero value
+is `false`, i.e. install the fake exactly as today, so every existing
+`daemon/integration` call site is unaffected.
+
+```go
+	// SkipFakeGit omits the scripted fake `git` from PATH (default: false,
+	// install it, as today). The e2e suite sets this: it exercises the real
+	// git facts the daemon's AGENTS.md hands to "the project lead's suite".
+	SkipFakeGit bool
+```
 
 This is the ONLY daemon-tree change this spec asks for. It is additive,
 covered by the "does not change `daemon/integration`'s own behavior" rule
@@ -202,7 +217,7 @@ value.
 | Binary | Built by | Source | Skip condition |
 |---|---|---|---|
 | `claude-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/claude-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
-| fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
+| real `git` | operator's `git` on `PATH` | n/a (fake git SKIPPED, ruling 4) | n/a |
 | real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `t.Skip`, never an implicit `npm ci`** |
 | `shim-store` | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShimStore` and on `shim-sidecar/integration/helpers_test.go`'s `storeBinary` | `agent-shim/shim-store` (`go build -o <bin> .`) | `go` on PATH (already required) |
 | `shim-sidecar` | same pattern | `agent-shim/claude/shim-sidecar` (`go build -o <bin> .`) | same |
@@ -384,6 +399,44 @@ never an ad hoc duration at the call site. This suite needs at minimum:
   ARE about the hold set their own window" — the degraded-state test IS
   about the hold/outage, so it gets its own explicit bound derived the same
   way, not the 5s default.
+
+### Real git (PROJECT-LEAD RULING 4)
+
+This suite uses REAL git. The daemon's "no real git in tests" directive is
+scoped to the daemon's OWN unit and integration suites; the daemon's
+`AGENTS.md` explicitly hands the git facts to "the project lead's suite",
+which is THIS one. The facts this suite owns end to end:
+
+- a two-parent `--no-ff` merge commit,
+- the landed range,
+- a conflicted index and `MERGE_HEAD`,
+- revert,
+- worktree prune,
+- porcelain markers,
+- `GIT_DIR` precedence,
+- git version compatibility.
+
+Mechanics:
+
+- The scripted fake `git` is NOT installed (`Opts.SkipFakeGit = true`, seam
+  3). The real `git` on `PATH` is used.
+- Repositories are created fresh per test under the test's temp root by the
+  real `git`. Nothing reuses a repository across tests.
+- **Tests must not depend on the operator's global git config.** The harness
+  sets, for every git child process:
+  - `GIT_CONFIG_GLOBAL` to a temp file the harness writes (identity, and any
+    default the tests rely on such as `init.defaultBranch`),
+  - `GIT_CONFIG_SYSTEM` to `/dev/null` where supported,
+  - `HOME` to a temp dir, so nothing reads `~/.gitconfig`,
+  - `GIT_AUTHOR_*` / `GIT_COMMITTER_*` name, email, and a fixed date.
+- A loud skip if `git` is absent from `PATH`, same discipline as node. The
+  harness NEVER installs git.
+- Guard against the known `core.bare` hazard: the harness must not leak a
+  `GIT_DIR` from its own environment into git children. Unset `GIT_DIR`,
+  `GIT_WORK_TREE`, and `GIT_INDEX_FILE` explicitly before spawning.
+
+The merge-queue area (§C) asserts the git facts above against these real
+repositories, not against a scripted fixture world.
 
 ### Grep gate
 
@@ -728,7 +781,17 @@ docs. File-per-area grouping is given in section E.
 70. **WriteCreatedAndUpdated** — `write-created-and-updated`.
 71. **IdeDiagnosticsAfterEdit** — `ide-diagnostics-after-edit`.
 
-### Everything else (`misc_e2e_test.go`, one test per remaining golden)
+### Everything else — SPLIT INTO FOUR FILES (project-lead ruling 5)
+
+The original single `misc_e2e_test.go` was 28 tests spanning unrelated
+families; it is split four ways for four writers:
+
+- `hooks_e2e_test.go` — #77-80
+- `questions_e2e_test.go` — #88-92
+- `mcpmonitors_e2e_test.go` — #81-84
+- `remainder_e2e_test.go` — #72-76, #85-87, #93-99
+
+One test per remaining golden, as below.
 
 72. **ArtifactPublishAndList** — `artifact-publish-and-list`.
 73. **ContextInjectedMemory** — `context-injected-memory`.
@@ -903,17 +966,57 @@ Area files, each independent (zero overlap once `harness_e2e.go` exists):
 14. `slashcommands_e2e_test.go` — §C #60-63
 15. `skills_e2e_test.go` — §C #64-65
 16. `filetools_e2e_test.go` — §C #66-71
-17. `misc_e2e_test.go` — §C #72-99
+17. `hooks_e2e_test.go` — §C #77-80
+18. `questions_e2e_test.go` — §C #88-92
+19. `mcpmonitors_e2e_test.go` — §C #81-84
+20. `remainder_e2e_test.go` — §C #72-76, #85-87, #93-99
 
-17 independent writer groups plus the one harness writer who goes first
-(18 total dispatches, one dependency edge: everyone else waits on the
+20 independent writer groups plus the one harness writer who goes first
+(21 total dispatches, one dependency edge: everyone else waits on the
 harness file's exported surface being named, not built — the harness
 writer can hand out the intended function signatures before finishing the
 implementation, same as any other fanout in this project).
 
 ---
 
-## F. Open questions for the project lead
+## F. Open questions — ALL RULED (project lead, 2026-09-02)
+
+SPEC APPROVED. Dispositions, binding on every writer:
+
+1. **Fan-wide-cancel `EXIT=` terminator — CLOSED, not a defect.** Already
+   fixed; the regression test pinning it is
+   `agent-shim/claude/shim/test/fake/scenarios/subagents.test.ts:299`
+   ("writes NO EXIT line into a stopped AGENT's spool"). Test #43 is a
+   normal green test.
+
+2. **Hook scenario shapes — no ruling needed.** A writer finding the landed
+   shape differs from what #77-80 need reports it; it is not a spec defect
+   and is never fixed by changing production.
+
+3. **`vendor_start_failed` — NOT DROPPED.** Failure arms rank high in
+   coverage and a hole there is not worth a clean "0 new scenarios" line.
+   ONE narrow fake-SDK scenario that fails session START (not a turn) is
+   added on branch `overhaul/shim-e2e-startfail`, marked ungrounded with
+   its reason in the shim manifest, with a shim unit test. Test #54 drives
+   that scenario.
+
+4. **Compaction-failure terminal shape — deferred to the area writer**, who
+   reads `session.ts`'s `COMPACT_FAILED` scenario body rather than guessing.
+   Not a contract ambiguity.
+
+5. **Real git — RULED: this suite uses REAL git.** See B, "Real git". The
+   daemon's no-real-git directive is scoped to the daemon's own unit and
+   integration suites; its `AGENTS.md` hands the git facts to this suite.
+   Fake git is skipped via the additive `SkipFakeGit` seam, so
+   `daemon/integration` is unaffected.
+
+6. **`context-budget-warning` grounding — future housekeeping**, unchanged.
+
+The original text of these questions is retained below for provenance.
+
+---
+
+## F (original). Open questions as first drafted
 
 1. **`fan-wide-cancel`'s agent-spool `EXIT=` terminator.** The shim
    coverage report (`E2E-SCENARIO-COVERAGE.md`, ranked gap #6) flags this as
