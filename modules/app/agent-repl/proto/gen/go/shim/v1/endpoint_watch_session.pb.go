@@ -62,12 +62,15 @@ func (*WatchSessionRequest) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{0}
 }
 
-// One frame: the session update, whole. STANDING — no terminal arm; the
-// stream ends only with the session, and a stream ending otherwise is a
-// transport failure.
+// One frame. STANDING — no terminal arm; the stream ends only with the
+// session, and a stream ending otherwise is a transport failure.
 type WatchSessionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Update        *v1.SessionUpdate      `protobuf:"bytes,1,opt,name=update,proto3" json:"update,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Frame:
+	//
+	//	*WatchSessionResponse_Update
+	//	*WatchSessionResponse_SessionStarted
+	Frame         isWatchSessionResponse_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -102,21 +105,65 @@ func (*WatchSessionResponse) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_watch_session_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *WatchSessionResponse) GetUpdate() *v1.SessionUpdate {
+func (x *WatchSessionResponse) GetFrame() isWatchSessionResponse_Frame {
 	if x != nil {
-		return x.Update
+		return x.Frame
 	}
 	return nil
 }
+
+func (x *WatchSessionResponse) GetUpdate() *v1.SessionUpdate {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchSessionResponse_Update); ok {
+			return x.Update
+		}
+	}
+	return nil
+}
+
+func (x *WatchSessionResponse) GetSessionStarted() *v1.SessionStarted {
+	if x != nil {
+		if x, ok := x.Frame.(*WatchSessionResponse_SessionStarted); ok {
+			return x.SessionStarted
+		}
+	}
+	return nil
+}
+
+type isWatchSessionResponse_Frame interface {
+	isWatchSessionResponse_Frame()
+}
+
+type WatchSessionResponse_Update struct {
+	// A session-level fact as it manifests upstream.
+	Update *v1.SessionUpdate `protobuf:"bytes,1,opt,name=update,proto3,oneof"`
+}
+
+type WatchSessionResponse_SessionStarted struct {
+	// RE-ANNOUNCEMENT: the session's original SessionStarted, recovered from
+	// the shim's own state, sent ONCE per watch right after the opening
+	// diagnostics — on EVERY new watch, not only the first. A daemon that
+	// adopts an already-started shim (crash boot, handover) attaches purely
+	// and still learns the identity, runtime, model, catalog and the live
+	// membership from the shim rather than from a durable record. (Landing
+	// 7, 2026-09-02.)
+	SessionStarted *v1.SessionStarted `protobuf:"bytes,2,opt,name=session_started,json=sessionStarted,proto3,oneof"`
+}
+
+func (*WatchSessionResponse_Update) isWatchSessionResponse_Frame() {}
+
+func (*WatchSessionResponse_SessionStarted) isWatchSessionResponse_Frame() {}
 
 var File_shim_v1_endpoint_watch_session_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_watch_session_proto_rawDesc = "" +
 	"\n" +
 	"$shim/v1/endpoint_watch_session.proto\x12\ashim.v1\x1a\x1dconversation/v1/session.proto\"\x15\n" +
-	"\x13WatchSessionRequest\"N\n" +
-	"\x14WatchSessionResponse\x126\n" +
-	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateR\x06updateB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x13WatchSessionRequest\"\xa5\x01\n" +
+	"\x14WatchSessionResponse\x128\n" +
+	"\x06update\x18\x01 \x01(\v2\x1e.conversation.v1.SessionUpdateH\x00R\x06update\x12J\n" +
+	"\x0fsession_started\x18\x02 \x01(\v2\x1f.conversation.v1.SessionStartedH\x00R\x0esessionStartedB\a\n" +
+	"\x05frameB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_watch_session_proto_rawDescOnce sync.Once
@@ -135,20 +182,26 @@ var file_shim_v1_endpoint_watch_session_proto_goTypes = []any{
 	(*WatchSessionRequest)(nil),  // 0: shim.v1.WatchSessionRequest
 	(*WatchSessionResponse)(nil), // 1: shim.v1.WatchSessionResponse
 	(*v1.SessionUpdate)(nil),     // 2: conversation.v1.SessionUpdate
+	(*v1.SessionStarted)(nil),    // 3: conversation.v1.SessionStarted
 }
 var file_shim_v1_endpoint_watch_session_proto_depIdxs = []int32{
 	2, // 0: shim.v1.WatchSessionResponse.update:type_name -> conversation.v1.SessionUpdate
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	3, // 1: shim.v1.WatchSessionResponse.session_started:type_name -> conversation.v1.SessionStarted
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_watch_session_proto_init() }
 func file_shim_v1_endpoint_watch_session_proto_init() {
 	if File_shim_v1_endpoint_watch_session_proto != nil {
 		return
+	}
+	file_shim_v1_endpoint_watch_session_proto_msgTypes[1].OneofWrappers = []any{
+		(*WatchSessionResponse_Update)(nil),
+		(*WatchSessionResponse_SessionStarted)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
