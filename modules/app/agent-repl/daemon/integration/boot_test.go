@@ -51,6 +51,8 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 
 	// Act
 	second := harness.StartDaemon(t, harness.Opts{StateDir: incumbent.StateDir, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the second daemon the test boots.
+	second.ExpectWarnings("daemon.cmd.claim")
 	code := second.AwaitExit()
 
 	// Assert
@@ -178,6 +180,8 @@ func TestPprofServesOnAnExplicitLoopbackAddress(t *testing.T) {
 func TestPprofRefusesARoutableBind(t *testing.T) {
 	// Arrange / Act
 	d := harness.StartDaemon(t, harness.Opts{Pprof: "0.0.0.0:6060", ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the routable pprof bind the test refuses.
+	d.ExpectWarnings("daemon.cmd.pprof", "daemon.pprof.refused")
 	code := d.AwaitExit()
 
 	// Assert
@@ -224,7 +228,6 @@ func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 	// A fresh boot with pprof disabled and no workspace ever touched produces
 	// no WARN/ERROR record at all: pprof.disabled is logged at DEBUG
 	// (internal/pprofsurface/surface.go), and nothing else runs.
-	d.ExpectWarnings()
 }
 
 // TestJSONCodecServesRegisterAndAPerWorkspaceVerb proves the daemon serves
@@ -368,7 +371,6 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 			t.Fatalf("daemon.run.log after restart carries a record from the prior boot's pid %d: %v", firstPID, r)
 		}
 	}
-	d2.ExpectWarnings()
 }
 
 // ---- audit-3 critique 9: layout-version and corrupt-row boot refusals ----
@@ -391,6 +393,8 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 
 	// Act: restart on the same state root.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
+	nd.ExpectWarnings("daemon.cmd.state", "daemon.wsm.open")
 	code := nd.AwaitExit()
 
 	// Assert
@@ -430,6 +434,8 @@ func TestBootRefusesACorruptTaskRow(t *testing.T) {
 
 	// Act: restart on the same state root.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of a state read the test corrupts, the state row the test corrupts.
+	nd.ExpectWarnings("daemon.cmd.serve", "daemon.workspace.register", "daemon.wsm.tasks")
 	code := nd.AwaitExit()
 
 	// Assert
@@ -465,12 +471,16 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 	// shim holding its kernel lock, which is what selects the ADOPT path on
 	// restart rather than a fresh spawn.
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
+	f.d.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session")
 	f.d.Kill()
 	f.d.CorruptRow("sessions", "shim_pid", "workspace_id", f.ws.GetId(), -1)
 
 	// Act: restart on the same state root, with the same redirected lock
 	// directory so the probe finds the surviving shim's lock still held.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the state row the test corrupts.
+	nd.ExpectWarnings("daemon.boot.adopt", "daemon.wsm.session")
 	code := nd.AwaitExit()
 
 	// Assert
@@ -530,6 +540,8 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 
 	// Act: restart on the same state root.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the state row the test corrupts, the unfinished merge a restart leaves.
+	nd.ExpectWarnings("daemon.boot.recover_merges", "daemon.merge.recover", "daemon.wsm.creation_job")
 	code := nd.AwaitExit()
 
 	// Assert: an undecodable row refuses the boot, non-zero and loud.

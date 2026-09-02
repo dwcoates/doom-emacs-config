@@ -65,6 +65,8 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.prompthandler.submit")
 
 	// Act
 	first := f.submit("do the thing", "dup-key", origin)
@@ -106,7 +108,6 @@ func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 		t.Fatalf("SubmitPrompt refusal = %v, want it to name the unset field \"origin\"", err)
 	}
 	// Validation refuses before any component ever logs.
-	f.d.ExpectWarnings()
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +382,8 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt to drop", "k-drop", origin)
@@ -407,6 +410,8 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 
 	// Act: restart the daemon on the same state root.
 	nd := promptRestartDaemon(t, f)
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
 
 	// Assert: still gone.
 	newHolds := nd.WatchHolds(f.ws)
@@ -453,6 +458,8 @@ func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
 func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt that must survive", "k-survive", origin)
@@ -460,6 +467,8 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 
 	// Act
 	nd := promptRestartDaemon(t, f)
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)
@@ -490,6 +499,9 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *testing.T) {
 	// Arrange: two held prompts on one workspace.
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
+	f.d.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
+		"daemon.wsm.all_held_prompts")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("first held prompt", "k-corrupt-1", origin)
@@ -508,6 +520,9 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	// UserSaid, and restart on the same state root.
 	f.d.CorruptRow("held_prompts", "said", "turn_id", turn2.GetValue(), []byte("not a protobuf blob"))
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
+	nd.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
+		"daemon.wsm.all_held_prompts")
 	code := nd.AwaitExit()
 
 	// Assert: the boot refuses loudly.
@@ -830,6 +845,9 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	// Arrange: a second workspace queued behind the first's blocked merge,
 	// then an interrupt raises the dequeue offer.
 	_, behind, _, d := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+		"daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -1461,7 +1479,6 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	// this scenario produces no WARN or ERROR record at all, matching the
 	// sibling TestInterruptAllAgentsStopsEveryLiveDetachedAgent's own
 	// zero-argument ExpectWarnings for the same detached-stop shape.
-	f.d.ExpectWarnings()
 }
 
 func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
@@ -1496,7 +1513,6 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 	// not_detached_work is answered directly at the server layer
 	// (internal/server/answers.go's askIDFrom caller), a LANDED arm logged
 	// at DEBUG.
-	f.d.ExpectWarnings()
 
 	// Act
 	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -1538,7 +1554,6 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 		return r.GetDetachedSubagent() != nil
 	})
 	awaitLiveWork(t, f, 1)
-	f.d.ExpectWarnings()
 
 	// Act
 	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -1780,7 +1795,6 @@ func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
 	// Act: an undecodable FeedId takes the server's own askIDFrom path
 	// (internal/server/answers.go), never reaching workspace.refuse -- no
 	// component here logs a WARN.
-	f.d.ExpectWarnings()
 	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
 		Workspace: f.ws,
 		Question:  &frontendv1.FeedId{Value: "not-a-real-feed-id"},

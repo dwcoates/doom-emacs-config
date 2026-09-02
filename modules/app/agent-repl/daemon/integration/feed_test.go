@@ -96,12 +96,13 @@ func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed and cause unknown_token", rec.Context)
 	}
 	// No ExpectWarnings operation: the refusal must produce no WARN at all.
-	f.d.ExpectWarnings()
 }
 
 func TestGetFeedPageNextWithNoWalkStandingIsRefused(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.feed.next_without_walk")
 
 	// Act
 	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -423,6 +424,8 @@ func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
 	// Arrange: enough rows for at least one older page, and a walk
 	// established on connection A.
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.feed.next_without_walk")
 	f.submit("go", "k-perconn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
@@ -459,6 +462,8 @@ func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
 func TestGetFeedPageWalkIsNotPersistedAcrossAReconnect(t *testing.T) {
 	// Arrange: establish a walk on one connection, then abandon it.
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.feed.next_without_walk")
 	f.submit("go", "k-noreplay", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
@@ -1942,6 +1947,8 @@ func TestFindingsDrawRowsInServedOrder(t *testing.T) {
 func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the unmodeled activity the test feeds.
+	f.d.ExpectWarnings("daemon.sessionwatcher.unmodeled_activity")
 	f.submit("go", "k-unmodeled", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1968,6 +1975,8 @@ func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
 func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the unmodeled activity the test feeds.
+	f.d.ExpectWarnings("daemon.sessionwatcher.unmodeled_activity")
 	f.submit("go", "k-unmodeleddup", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	topbar := f.d.WatchTopbar(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
@@ -2112,6 +2121,8 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 	// Arrange: a daemon retaining exactly one published row per feed, and a
 	// token minted against a page opened before anything else lands.
 	f := newOpened(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_FEED_TAIL_RETENTION=1"}})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.feed.tail_token_expired")
 	f.submit("go", "k-expire", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[0])
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[1])

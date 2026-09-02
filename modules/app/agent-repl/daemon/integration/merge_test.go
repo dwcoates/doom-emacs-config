@@ -41,6 +41,8 @@ func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 	// Arrange: a workspace registered directly, never created, so it carries
 	// no creation job.
 	f := newRegistered(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	f.d.ExpectWarnings("daemon.merge.enqueue")
 
 	// Act
 	resp, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws}))
@@ -96,6 +98,8 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterAndRoster(t *testing.T) {
 	// Arrange / Act
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 
 	// Assert: roster arm.
 	roster := behind.d.WatchRoster()
@@ -135,6 +139,9 @@ func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterA
 func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *testing.T) {
 	// Arrange
 	_, _, repo, d := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause",
+		"daemon.merge.unpause")
 	repoRef := mergeRepositoryRef(t, d, repo)
 
 	// Act: pause.
@@ -181,6 +188,9 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+		"daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
@@ -222,6 +232,8 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
@@ -254,6 +266,9 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff",
+		"daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -288,6 +303,9 @@ func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
+		"daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -351,6 +369,9 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+		"daemon.merge.merge_tab")
 	root := behind.watchRootFeed()
 	footer := behind.d.WatchFooter(behind.ws)
 
@@ -402,6 +423,9 @@ func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 	// operator's evict, though the proto cannot tell the two apart (see the
 	// section comment above).
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
+	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff",
+		"daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
@@ -475,6 +499,9 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
+		"daemon.merge.merge_tab")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -533,6 +560,9 @@ func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *test
 	// Arrange: park a merge on a scripted conflict.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
+		"daemon.merge.merge_tab")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -614,6 +644,8 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *testing.T) {
 	// Arrange
 	f, d, repo, script := mergeCleanRepo(t)
+	// The sweep covers every test; the declared records are evidence of the failing test gate the test stages, the fixes escalation the test stages.
+	d.ExpectWarnings("daemon.merge.fixes", "daemon.merge.tests", "daemon.scriptrunner.run")
 	script.SetExitCode(1)
 	script.SetStdout("daemon failed after 1s with exit code 1\nsome failing output\n")
 
@@ -656,6 +688,8 @@ func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *tes
 func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
+	// The sweep covers every test; the declared records are evidence of the failing test gate the test stages.
+	d.ExpectWarnings("daemon.merge.tests", "daemon.scriptrunner.run")
 	script.SetExitCode(1)
 	script.SetStdout("daemon failed after 1s with exit code 1\nboom\n")
 
@@ -949,6 +983,8 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	// Arrange: park a merge on a scripted conflict, then crash the daemon.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the unfinished merge a restart leaves.
+	d.ExpectWarnings("daemon.merge.recover")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -967,6 +1003,8 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 
 	// Act: a fresh daemon on the same state root.
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the unfinished merge a restart leaves.
+	d2.ExpectWarnings("daemon.merge.recover")
 	d2.AwaitRunLogOperation("daemon.merge.recover")
 
 	// Assert: the workspace's merge status is a resolved merge arm, never an
@@ -1186,6 +1224,9 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 	// spliced-brief test does.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
+		"daemon.merge.merge_tab")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "onceconflict", "do the feature", nil)
 	// THE CREATION ALREADY SENT ONE StartTurn — its initial prompt — so the
@@ -1215,6 +1256,9 @@ func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(
 	// Arrange: park a merge on a scripted conflict.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
+	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.conflicts",
+		"daemon.merge.merge_tab")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "guidancetab", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -1280,6 +1324,8 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 	// Arrange: two independent repositories, each with a blocked queue, on
 	// ONE daemon.
 	d := harness.StartDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	d.ExpectWarnings("daemon.merge.pause")
 	_, _, _, repoRefA := mergeBlockedRepoOn(t, d, "repoa")
 	_, _, _, repoRefB := mergeBlockedRepoOn(t, d, "repob")
 
@@ -1309,6 +1355,8 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 	// Arrange: a daemon that has never heard of this repository ref at all.
 	d := harness.StartDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	d.ExpectWarnings("daemon.merge.pause")
 	bogus := &workspacev1.RepositoryRef{Dir: "/nowhere/this/repo/does/not/exist"}
 
 	// Act
@@ -1454,6 +1502,10 @@ func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
 func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
+	// The sweep covers every test; the declared records are evidence of a state read the test corrupts, the state read the test corrupts, the state row the test corrupts.
+	d.ExpectWarnings("daemon.merge.finish", "daemon.merge.teardown", "daemon.promptqueue.submit",
+		"daemon.workspace.register", "daemon.wsm.list_workspaces", "daemon.wsm.release_lease",
+		"daemon.wsm.remove_merge_queue_entry", "daemon.wsm.workspace")
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 

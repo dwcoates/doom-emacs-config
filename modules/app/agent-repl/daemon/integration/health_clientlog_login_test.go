@@ -171,6 +171,8 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	// the faults table (wsm.db) persists across the restart.
 	d.Stop()
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: stateDir})
+	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
+	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
 
 	// Assert
 	resp, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest())
@@ -332,6 +334,10 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.reopen",
+		"daemon.sessionwatcher.watch_session", "daemon.shimclient.redial")
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: sever the session stream without killing the shim process.
@@ -361,7 +367,6 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// (endpoint_session_health.proto): server.resolveRefLogging fills its Arm
 	// and answers it in band, so it is logged at DEBUG, never WARN
 	// (internal/server/refuse.go refuse()).
-	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{
@@ -642,7 +647,6 @@ func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
 	f := newRegistered(t, harness.Opts{})
 	// no_login_open is answered through s.refuse (internal/server/login.go),
 	// which logs a landed arm at DEBUG, never WARN.
-	f.d.ExpectWarnings()
 
 	// Act
 	resp, err := f.d.Client().SendLoginInput(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendLoginInputRequest{
@@ -951,7 +955,6 @@ func TestOpenInEditorOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is a landed OpenInEditorError arm, answered in band at
 	// DEBUG by the same resolveRefLogging path SessionHealth uses.
-	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().OpenInEditor(d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{

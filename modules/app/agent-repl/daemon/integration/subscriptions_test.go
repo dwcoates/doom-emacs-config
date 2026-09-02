@@ -534,7 +534,6 @@ func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause s
 	if rec.Context["rpc"] != rpcName || rec.Context["cause"] != wantCause {
 		t.Fatalf("the transport-closed record's context = %v, want rpc %q and cause %q", rec.Context, rpcName, wantCause)
 	}
-	d.ExpectWarnings()
 }
 
 // TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed covers an
