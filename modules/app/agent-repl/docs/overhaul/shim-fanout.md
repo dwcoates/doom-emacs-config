@@ -667,3 +667,18 @@ every UX or contract gap you surfaced instead of improvising.
 - LEDGER: integration run #4 on 1768697c7: 180 passed / 16 failed / 1 todo
   in 184 s (detached 8, turn 4, session 3, gate 1); relayed to the rebuild
   agent as its baseline.
+- LEDGER: rebuild merged at 3dc64a89b (worktree/branch retired): smoke runs
+  the fake store + a no-store exit-1 step; golden-conformance suite (59
+  mapped rows, 27 shape-exact, 32 pinned with reason; AGENTS.md marks
+  capture-grounded vs declared-only); denied tool → failure(no content);
+  /clear = observed shape (invented closing record removed); detached causes
+  remembered; SourceCoordinates unified; subagent start frame restored;
+  StartTurn reads its page BEFORE the submit (R15). Unit 3916, integration
+  187 / 9 / 1. RULINGS (lead): WatchAgent serves ONE book — "immediate
+  children" = the agent's own units, subagent frames on their own
+  WatchAgent; fan-wide cancel is KillTurn/KillSession{force} issued by the
+  caller; INTERIM unknown-target refusal at the shim (Code.NotFound when the
+  id is unknown to the shim AND the store page is empty) pending a landing-7
+  `unknown_agent` arm on OpenAgentSessionFailure (proposed). Dispatched:
+  remediation #3 (opus-low, shim-agents/engine3) for the nine engine
+  failures; fable auditor #2 (read-only, fresh) over 3dc64a89b.
