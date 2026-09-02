@@ -54,3 +54,12 @@ Implementer-chosen UX (sidebar):
 - (sidebar, open) Does the legacy ten-row cap on the recently-merged band still apply now that the daemon resolves the section?
 
 Rulings on cards-B/asks concerns (project lead): relative ages stay; the permission card's waiting clock ticks from first draw (no arrival instant on the wire; may gain one after playtests); findings folds keyed by row position (possible landing-6 identity field, daemon side); the compact submenu pre-selects the first served model/scope (serving order is the default by design).
+
+Implementer-chosen UX (merge bubble; all currently at option a):
+- Which tab a settled merge auto-selects: (a) the terminal (last) tab; (b) the last failed tab when any failed; (c) the tests tab when one exists.
+- Where a settled-failed tab's summary sits: (a) a line under the strip, above the tab body; (b) inline at the top of the tab body.
+- Whether the composer slot appears on live agentic tabs: (a) parked only, per the spec's parked wording; (b) any agentic tab, disabled unless parked.
+- The "you are here" marker on the current queue entry: currently a muted suffix on the entry's line; wording and placement open.
+- Tab selection release rule: the reader's pick stands across pushes and is released only when a never-drawn tab id appears.
+
+Implementer-chosen UX (topbar; ruled by the project lead 2026-09-01): context breakdown opens on click (hover vs click stays with the user); `data-reveal="mode"` blessed as the sixth reveal name.
