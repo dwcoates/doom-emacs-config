@@ -1312,7 +1312,11 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	// and everything waiting on that turn's end waits forever.
 	d.AwaitWorkspaceLogOperationCount(ws.GetDir(), harness.OpTurnOpened, 1)
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID(name+"-initial")))
-	return &fixture{d: d, ws: ws, shim: shim, t: t}
+	// A created workspace is an OPENED one, so all three connectivity hops are
+	// up (daemon.md invariant 11): without the two client streams its footer
+	// reads disconnected, which outranks every merge substatus.
+	return &fixture{d: d, ws: ws, shim: shim, t: t,
+		host: d.WatchHost(ws), web: d.WatchWeb(ws)}
 }
 
 // mergeBranchOf is the branch a mergeCreateChild workspace checked out —
