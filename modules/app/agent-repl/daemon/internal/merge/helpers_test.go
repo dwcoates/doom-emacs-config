@@ -43,14 +43,17 @@ type fakeDB struct {
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	jobs       map[ids.WorkspaceID]wsm.CreationJob
-	sessions   map[ids.WorkspaceID]wsm.Session
-	leases     map[ids.WorkspaceID]wsm.Lease
-	turns      map[ids.WorkspaceID][]wsm.Turn
-	ledger     map[ids.WorkspaceID][]wsm.MergeLedgerEntry
-	queues     map[wsm.RepoKey][]wsm.MergeQueueEntry
-	paused     map[wsm.RepoKey]bool
-	repos      []wsm.Repository
-	seq        int
+	// jobDecodeErrs makes one workspace's creation_jobs row undecodable, which
+	// is the corruption the boot must refuse rather than absorb.
+	jobDecodeErrs map[ids.WorkspaceID]error
+	sessions      map[ids.WorkspaceID]wsm.Session
+	leases        map[ids.WorkspaceID]wsm.Lease
+	turns         map[ids.WorkspaceID][]wsm.Turn
+	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
+	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
+	paused        map[wsm.RepoKey]bool
+	repos         []wsm.Repository
+	seq           int
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
@@ -65,17 +68,18 @@ type fakeDB struct {
 
 func newFakeDB() *fakeDB {
 	return &fakeDB{
-		workspaces: map[ids.WorkspaceID]wsm.Workspace{},
-		jobs:       map[ids.WorkspaceID]wsm.CreationJob{},
-		sessions:   map[ids.WorkspaceID]wsm.Session{},
-		leases:     map[ids.WorkspaceID]wsm.Lease{},
-		turns:      map[ids.WorkspaceID][]wsm.Turn{},
-		ledger:     map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
-		queues:     map[wsm.RepoKey][]wsm.MergeQueueEntry{},
-		paused:     map[wsm.RepoKey]bool{},
-		mergedAt:   map[ids.WorkspaceID]time.Time{},
-		closed:     map[ids.WorkspaceID]bool{},
-		policies:   map[wsm.LeaseID]wsm.LeasePolicy{},
+		workspaces:    map[ids.WorkspaceID]wsm.Workspace{},
+		jobs:          map[ids.WorkspaceID]wsm.CreationJob{},
+		jobDecodeErrs: map[ids.WorkspaceID]error{},
+		sessions:      map[ids.WorkspaceID]wsm.Session{},
+		leases:        map[ids.WorkspaceID]wsm.Lease{},
+		turns:         map[ids.WorkspaceID][]wsm.Turn{},
+		ledger:        map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
+		queues:        map[wsm.RepoKey][]wsm.MergeQueueEntry{},
+		paused:        map[wsm.RepoKey]bool{},
+		mergedAt:      map[ids.WorkspaceID]time.Time{},
+		closed:        map[ids.WorkspaceID]bool{},
+		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 	}
 }
 
@@ -92,6 +96,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, corrupt := f.jobDecodeErrs[id]; corrupt {
+		return wsm.CreationJob{}, false, err
+	}
 	job, ok := f.jobs[id]
 	return job, ok, nil
 }
