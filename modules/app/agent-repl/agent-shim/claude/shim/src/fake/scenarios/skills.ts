@@ -19,23 +19,41 @@
  */
 import { conclude, scenario } from "./support.js";
 
+/** Split `!skill <skill-name> [args...]` into its two fields. */
+function skillInvocationOf(args: string): { skill: string; skillArgs: string } {
+  if (args === "") return { skill: "fake-skill", skillArgs: "--target one" };
+  const [skill, ...rest] = args.split(/\s+/).filter((s) => s !== "");
+  return { skill: skill ?? "fake-skill", skillArgs: rest.join(" ") };
+}
+
+/** The DOCUMENT body a skill's directory injection carries, named by the skill. */
+function skillDocument(skill: string): string {
+  return (
+    `Base directory for this skill: /w/s/.claude/skills/${skill}\n\n` +
+    `# ${skill}\n\nThe offline skill's instructions, as the vendor injects them.`
+  );
+}
+
 const SKILL = scenario({
   name: "skill",
-  prompt: "!skill",
+  prompt: "!skill [skill-name] [args]",
   emits:
     "a `Skill` tool_use, its `{success, commandName, allowedTools}` acknowledgement, then the skill DOCUMENT " +
-    "as an `isMeta` user record joined by `sourceToolUseID`",
+    "as an `isMeta` user record joined by `sourceToolUseID`. The skill name and args are parameterized by the " +
+    "prompt (first token = name, rest = args), and the document body is derived from the name — a caller can " +
+    "name e.g. `create-or-update-workspace` with args `merge`",
   writes: "the tool_use line, the acknowledgement line, the isMeta document line, the closing text line",
   arms: "AgentSkillUse.start + AgentSkillUseSuccess settled on the document, with the allowances",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "skill" }, "fake skill-invocation turn");
-    const call = ctx.toolUse("Skill", { skill: "fake-skill", args: "--target one" });
-    ctx.toolResult(call, "Launching skill: fake-skill", {
+    const { skill, skillArgs } = skillInvocationOf(ctx.args);
+    ctx.log({ turn: ctx.turn, branch: "skill", skill, skill_args: skillArgs }, "fake skill-invocation turn");
+    const call = ctx.toolUse("Skill", { skill, args: skillArgs });
+    ctx.toolResult(call, `Launching skill: ${skill}`, {
       success: true,
-      commandName: "fake-skill",
+      commandName: skill,
       // The ALLOWANCES the skill carries: tool patterns pre-approved for its
       // duration. They ride the acknowledgement and nothing else.
-      allowedTools: ["Bash(.claude/skills/fake-skill/run.sh:*)", "Read(/tmp/fake-skill-result.json)"],
+      allowedTools: [`Bash(.claude/skills/${skill}/run.sh:*)`, `Read(/tmp/${skill}-result.json)`],
     });
     // THE DOCUMENT. `isMeta: true` marks it as instructions the model reads
     // rather than a user's words, and `sourceToolUseID` is the only join back
@@ -46,19 +64,12 @@ const SKILL = scenario({
       sourceToolUseID: call.toolUseId,
       message: {
         role: "user",
-        content: [
-          {
-            type: "text",
-            text:
-              "Base directory for this skill: /w/s/.claude/skills/fake-skill\n\n" +
-              "# Fake skill\n\nThe offline skill's instructions, as the vendor injects them.",
-          },
-        ],
+        content: [{ type: "text", text: skillDocument(skill) }],
       },
       uuid: ctx.newUuid(),
       timestamp: ctx.nowIso(),
     });
-    conclude(ctx, "Invoked the skill and read its document.");
+    conclude(ctx, `Invoked the ${skill} skill and read its document.`);
   },
 });
 
