@@ -93,8 +93,6 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "merging", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoSession):
 		return s.fill(refusal{Arm: "no_session", Reason: err.Error()}), true
-	case errors.Is(err, promptqueue.ErrTurnAlreadyOpen):
-		return s.fill(refusal{Arm: "turn_already_open", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoSuchHold):
 		return s.fill(refusal{Arm: "no_such_hold", Reason: err.Error(), NotFound: true}), true
 	case errors.Is(err, promptqueue.ErrAlreadyDelivered):
@@ -338,14 +336,4 @@ func (s *server) answerRefusal(
 		refused.Arm = to
 	}
 	return s.refuse(log, rpc, resp, refused)
-}
-
-// refusalIsNotFound reports whether err is a refusal of an UNKNOWN ID, which is
-// how the two conditions a verb spells with one arm name are told apart.
-func refusalIsNotFound(err error) bool {
-	var wsRefusal *workspace.Refusal
-	if errors.As(err, &wsRefusal) {
-		return wsRefusal.NotFound
-	}
-	return false
 }
