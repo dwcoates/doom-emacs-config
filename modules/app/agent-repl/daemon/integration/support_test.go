@@ -146,6 +146,23 @@ func (f *fixture) openFeedOnceCarrying(what string, pred func(*frontendv1.FeedPa
 	}
 }
 
+// awaitRowInFeed answers a row of a feed that satisfies the predicate, looking
+// FIRST at the page the open serves and only then at the tail.
+//
+// A sub-feed's rows are usually already history by the time a test opens it --
+// a merge's tabs are all pushed before its terminal row exists to open a feed
+// on -- and a tail delivers only what arrives after the open.
+func (f *fixture) awaitRowInFeed(feed *frontendv1.FeedId, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	f.t.Helper()
+	page, token := f.openFeed(feed)
+	for _, row := range page.GetSuccess().GetRows() {
+		if pred(row) {
+			return row
+		}
+	}
+	return awaitRow(f.t, f, f.d.WatchFeed(token), what, pred)
+}
+
 // watchRootFeed opens the root feed and tails it.
 func (f *fixture) watchRootFeed() *harness.Stream[*frontendv1.FeedRow] {
 	f.t.Helper()
