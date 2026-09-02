@@ -494,3 +494,30 @@ func TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer(t *testi
 		t.Fatalf("merge interrupts = %v, want the dequeue offer raised once", f.merge.interrupted)
 	}
 }
+
+// TestInterruptTurnWithOnlyALiveShellRaisesNoChallenge pins what
+// `live_agent_count` counts: AGENTS. A detached shell dies with the query like
+// everything else, and the confirmed interrupt still stops it, but it is not
+// an agent and the user is not challenged over one.
+func TestInterruptTurnWithOnlyALiveShellRaisesNoChallenge(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.running.LiveWork.Shells = []*conversationv1.DetachedWorkId{{Value: "work-1"}}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	var challenge *ConfirmRequired
+	if errors.As(err, &challenge) {
+		t.Fatalf("error = %v, want no challenge over a detached shell", err)
+	}
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.Turn {
+		t.Fatalf("outcome = %+v, want the interrupted-turn arm", outcome)
+	}
+}

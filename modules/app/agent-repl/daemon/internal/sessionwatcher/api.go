@@ -232,6 +232,12 @@ type LifecycleSink interface {
 	// link on their own sinks; this arm exists because the HOST view's
 	// `shim_attached` is composed by the server, which cannot see the edge.
 	OnLinkChanged(ws ids.WorkspaceID, attached bool)
+	// OnSessionDiagnostics is the shim's own health verdict, handed at the
+	// daemon's machinery as well as at the topbar: the health reporter's
+	// per-session faults are what SessionHealth answers with, and a verdict
+	// that only reached a view would never reach that answer. The push is the
+	// WHOLE current verdict, so a healthy one retracts the standing faults.
+	OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *conversationv1.SessionDiagnostics)
 }
 
 // Sinks is the set a watcher routes into.

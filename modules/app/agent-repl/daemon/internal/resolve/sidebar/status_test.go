@@ -668,3 +668,28 @@ func TestRowIsThinkingOnceTheShimTakesTheTurn(t *testing.T) {
 		t.Fatalf("status = %q, want thinking", got)
 	}
 }
+
+// TestAParkedSessionKeepsAnIdleArm covers the hibernation's presentation: the
+// idle sweep stood the shim down deliberately, so the row must not report the
+// route it took down as a fault. The frontend cannot be allowed to tell a
+// parked workspace from an idle one.
+func TestAParkedSessionKeepsAnIdleArm(t *testing.T) {
+	// Arrange: a proven, idle session whose shim the sweep then stood down.
+	r := live(t, arrange(t))
+	r.OnLink(theWS, shimclient.LinkRedialing)
+
+	// Act: the park lands on the durable record.
+	r.SetRegistry(sidebar.Registry{
+		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+		Repositories: []wsm.Repository{repo},
+		Sessions: []wsm.Session{{
+			Workspace: theWS,
+			Terminal:  &wsm.SessionTerminal{Kind: "hibernated"},
+		}},
+	})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "ready" {
+		t.Fatalf("the parked row's status = %q, want an idle arm", got)
+	}
+}

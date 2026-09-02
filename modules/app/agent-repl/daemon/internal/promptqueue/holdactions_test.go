@@ -237,3 +237,33 @@ func TestAcceptSurfacesAFailedWrite(t *testing.T) {
 		t.Fatal("a failed acceptance write must be surfaced")
 	}
 }
+
+// TestReleasingAHibernationsHoldRevivesTheParkedSessionToDeliverIt covers the
+// other end of the hibernation revival: the prompt that arrived DURING the
+// hibernation window is held against the sweep's lease, and the release is its
+// one delivery point. Refusing it there as "no session" drops the prompt that
+// should have woken the workspace.
+func TestReleasingAHibernationsHoldRevivesTheParkedSessionToDeliverIt(t *testing.T) {
+	// Arrange: the prompt is held by the hibernation lease, then the sweep
+	// releases it with the session still parked.
+	h := newHarness(t)
+	h.lease(wsm.HolderHibernate, wsm.PolicyHold)
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+	h.clearLease()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	if h.revivals != 1 {
+		t.Fatalf("revivals = %d, want exactly one", h.revivals)
+	}
+	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
+		t.Fatalf("started = %v, want the held prompt delivered after the revival", started)
+	}
+}

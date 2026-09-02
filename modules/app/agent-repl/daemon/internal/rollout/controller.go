@@ -88,6 +88,12 @@ type controller struct {
 	// with `transferring_away{address}` instead of serving a workspace this
 	// daemon no longer owns.
 	transferred map[ids.WorkspaceID]string
+	// pendingDispositions are the bounce dispositions reconciled while the
+	// state handle was still READ-ONLY. A joining successor reconciles the
+	// outgoing daemon's manifest before it owns anything, and the accounting
+	// is a WRITE: it is held here and written the moment the handle is
+	// promoted, so the record is deferred rather than lost.
+	pendingDispositions []pendingDisposition
 	// successor is the address of the daemon taking over, empty while no
 	// handover is in flight.
 	successor string

@@ -289,6 +289,9 @@ type fakeSender struct {
 	promptErr   error
 	setModelErr error
 	mainAgent   string
+	// startHook runs inside StartTurn, so a test can observe what the queue
+	// holds while a delivery is in flight.
+	startHook func()
 }
 
 func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
@@ -296,6 +299,9 @@ func newFakeSender() *fakeSender { return &fakeSender{mainAgent: "main-agent"} }
 func (s *fakeSender) StartTurn(_ context.Context, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (*shimv1.StartTurnSuccess, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.startHook != nil {
+		s.startHook()
+	}
 	if s.startErr != nil {
 		return nil, s.startErr
 	}

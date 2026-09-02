@@ -664,3 +664,31 @@ func TestAnUnwiredFactsSourceAnswersNoSession(t *testing.T) {
 		t.Fatal("the unwired facts source claimed a session")
 	}
 }
+
+// TestAHibernatedSessionStaysLiveWithTheShimUnattached pins the one session
+// mark that is NOT a death: the idle sweep's park. A prompt brings the session
+// straight back, so the host keeps the live arm and only the shim's attachment
+// changes — the frontend must not be able to tell a parked workspace from an
+// idle one.
+func TestAHibernatedSessionStaysLiveWithTheShimUnattached(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.sessions = map[ids.WorkspaceID]wsm.Session{testWorkspaceID: {
+		Workspace:       testWorkspaceID,
+		HostSessionID:   "host-1",
+		VendorSessionID: "vendor-1",
+		Terminal:        &wsm.SessionTerminal{Kind: "hibernated"},
+	}}
+
+	// Act.
+	view := composeHost(t, h)
+
+	// Assert.
+	live := view.GetExisting().GetLive()
+	if live == nil {
+		t.Fatalf("standing = %v, want the live arm for a parked session", view.GetExisting().GetStanding())
+	}
+	if live.GetShimAttached() {
+		t.Fatalf("shim_attached = true, want false while the session is parked")
+	}
+}
