@@ -24,6 +24,8 @@ func TestTheReconciliationMatrixNamesEachDisposition(t *testing.T) {
 		{"a session meant to end whose lock is held", IntentStandDown, sessionlock.StateHeld, DispositionUnknown},
 		{"a probe that could not tell about a preserved session", IntentPreserve, sessionlock.StateUnknown, DispositionUnknown},
 		{"a probe that could not tell about a stood-down session", IntentStandDown, sessionlock.StateUnknown, DispositionUnknown},
+		{"a workspace with no shim whose lock is free", IntentNoSession, sessionlock.StateFree, DispositionPreserved},
+		{"a workspace with no shim whose probe could not tell", IntentNoSession, sessionlock.StateUnknown, DispositionPreserved},
 	}
 
 	for _, tc := range cases {
@@ -43,6 +45,13 @@ func TestTheReconciliationMatrixNamesEachDisposition(t *testing.T) {
 // state, then reconciles it.
 func reconcileOne(t *testing.T, h *harness, intent Intent, lock sessionlock.State) (ids.WorkspaceID, []Disposition) {
 	t.Helper()
+	return reconcileOnePID(t, h, intent, lock, 4242)
+}
+
+// reconcileOnePID is reconcileOne with the manifest entry's shim pid chosen,
+// because a pid of zero is what "no process" means on the wire.
+func reconcileOnePID(t *testing.T, h *harness, intent Intent, lock sessionlock.State, pid int) (ids.WorkspaceID, []Disposition) {
+	t.Helper()
 	ws, dir := h.workspace(t)
 	h.mu.Lock()
 	h.lockStates[dir] = lock
@@ -50,7 +59,7 @@ func reconcileOne(t *testing.T, h *harness, intent Intent, lock sessionlock.Stat
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
 		Sessions: []ManifestSession{{
-			Workspace: ws, Dir: dir, ShimPID: 4242, VendorSessionID: "vendor-1", Intent: intent,
+			Workspace: ws, Dir: dir, ShimPID: pid, VendorSessionID: "vendor-1", Intent: intent,
 		}},
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
@@ -289,5 +298,48 @@ func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	}
 	if len(open) != 1 {
 		t.Fatalf("open faults = %d, want the deferred disposition written at the promotion", len(open))
+	}
+}
+
+// TestAHeadlessWorkspaceReconcilesSilently covers the ordinary handover of a
+// workspace that was registered and never opened: it has no shim, so its free
+// lock is not a session that silently died and it raises no fault.
+func TestAHeadlessWorkspaceReconcilesSilently(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	ws, got := reconcileOnePID(t, h, IntentNoSession, sessionlock.StateFree, 0)
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(got) != 1 || got[0].Kind != DispositionPreserved {
+		t.Fatalf("dispositions = %+v, want one PRESERVED record for a workspace with no shim", got)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open faults = %d, want none: a workspace that never had a shim needs no human", len(open))
+	}
+}
+
+// TestAManifestEntryWithNoPidIsNeverAnUnknownDisposition covers the manifests
+// an OLDER daemon wrote, which spelled every entry `preserve`. The pid is what
+// names a process, so an entry without one reconciles as no-session whatever
+// the intent field says.
+func TestAManifestEntryWithNoPidIsNeverAnUnknownDisposition(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, got := reconcileOnePID(t, h, IntentPreserve, sessionlock.StateUnknown, 0)
+
+	// Assert
+	if len(got) != 1 || got[0].Kind != DispositionPreserved {
+		t.Fatalf("dispositions = %+v, want PRESERVED for a pidless entry, never UNKNOWN", got)
+	}
+	if got[0].Intent != IntentNoSession {
+		t.Fatalf("intent = %s, want the pidless entry normalized to no_session", got[0].Intent)
 	}
 }
