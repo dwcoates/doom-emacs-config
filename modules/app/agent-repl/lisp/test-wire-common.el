@@ -170,6 +170,31 @@ does not write to the durable sink."
   (let ((object (agent-repl-test-wire-common--parse "{\"atMs\":\"-5\"}")))
     (should (equal (agent-repl-wire--decode-int64 "M" 'atMs object) -5))))
 
+(ert-deftest agent-repl-test-wire-common-uint32-absent-is-zero ()
+  "An absent non-optional uint32 is the proto3 default protojson omits."
+  (should (equal (agent-repl-wire--decode-uint32 "M" 'liveWork nil) 0)))
+
+(ert-deftest agent-repl-test-wire-common-uint32-present-is-a-number ()
+  "protojson carries uint32 as a number, which decodes verbatim."
+  (let ((object (agent-repl-test-wire-common--parse "{\"liveWork\":3}")))
+    (should (equal (agent-repl-wire--decode-uint32 "M" 'liveWork object) 3))))
+
+(ert-deftest agent-repl-test-wire-common-uint32-refuses-a-negative ()
+  "A negative value cannot be a uint32 and is refused."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-uint32
+                     "M" 'liveWork (agent-repl-test-wire-common--parse "{\"liveWork\":-1}"))))
+                 '("M" liveWork "expected a non-negative integer"))))
+
+(ert-deftest agent-repl-test-wire-common-uint32-refuses-a-non-integer ()
+  "A non-integer in a uint32 field is a contract breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire--decode-uint32
+                     "M" 'liveWork (agent-repl-test-wire-common--parse "{\"liveWork\":\"lots\"}"))))
+                 '("M" liveWork "expected an integer"))))
+
 (ert-deftest agent-repl-test-wire-common-optional-uint32-absent-is-nil ()
   "An absent optional uint32 is nil — presence, never a sentinel."
   (should (equal (agent-repl-wire--decode-optional-uint32 "M" 'line nil) nil)))
