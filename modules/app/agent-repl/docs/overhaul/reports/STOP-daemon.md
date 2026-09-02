@@ -18,7 +18,8 @@ landing 7 relay).
   AGENT_REPL_FORBID_VENDOR_CALLS=1 go test ./... -count=1` — 42 packages, 3741
   tests, ~9 s, vet clean, `gofmt -l` clean.
 - Integration: `TMPDIR=/tmp AGENT_REPL_FORBID_VENDOR_CALLS=1 go test -tags
-  integration ./integration/... -count=1 -timeout 180s` — 539 tests, ~105 s.
+  integration ./integration/... -count=1 -timeout 180s` — 539 pass, 4 skip,
+  ZERO reds and zero undeclared warnings, 105-133 s.
   `TMPDIR=/tmp` is REQUIRED on macOS: `t.TempDir()` otherwise roots the state
   under `/var/folders/...` and `<state>/sock/<workspace-id>.sock` exceeds the
   103-byte unix socket path limit, so the daemon refuses the state root at boot
@@ -321,6 +322,85 @@ compared in milliseconds, the wire's own precision. That closed
 `TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause`, which
 runs 5/5 green.
 
+## Intermittents closed (2026-09-02)
+
+Three failures that were measured at the SAME rate before and after the
+landing-7 work, so all three were pre-existing, not regressions:
+
+1. `TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease`
+   (3/20) was a DAEMON correctness bug, not a timing artifact. A hibernation's
+   lease is dropped as the hibernation completes, while the workspace it parked
+   still has no shim. `promptqueue.OnLeaseChanged` read "no lease stands" as
+   "nothing holds this prompt": it un-stamped the surviving `session_starting`
+   holds and delivered them in line, reviving inside `deliverHeld`. A release
+   landing between the un-stamp and the revival found no hold stamp and no
+   session watcher, and answered the UNTYPED `UpdateHeldPromptError.no_session`
+   about a workspace that was in fact still coming up — an unlanded generic arm
+   where the landed typed `release_refused` describes the state exactly.
+   `OnLeaseChanged` no longer un-stamps a hold on a session-less workspace: the
+   hold stays `session_starting` and the bring-up is handed to the same
+   background revival a fresh submission takes, and `Release` additionally
+   consults the bring-up itself, so the window between a hold's release and its
+   delivery still answers `release_refused`. 0/20 after.
+2. `TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement`
+   failed only under full-suite load: it subscribed to the daemon stream AFTER
+   triggering the handover. The daemon-level push topic replays only its own
+   process's latest value to a new subscriber, and the incumbent tears that
+   process down as the handover completes, so under load the subscription
+   opened too late to ever see `shutdown_announced`. Fixed in the test's
+   driving — subscribe first, then trigger.
+3. `TestALandedMergesLedgerRecordsEachTabsInterval` (3/40 under GOMAXPROCS=1)
+   was NOT the millisecond-truncation shape it resembled. A landing tears the
+   merged workspace's worktree down, and `OpenFeed`/`WatchFeed` resolve the
+   workspace's log sink by stat-ing that directory; the test watched the root
+   feed after `MergeWorkspace`, racing the teardown. Same fix: subscribe before
+   enqueueing. 0/40 after.
+
+Nothing was fixed with a sleep, a retry, or a widened timeout.
+
+FOLLOW-UP OWED: the subscribe-after-trigger shape appears at roughly ten more
+sites in `integration/merge_test.go` (`root := f.watchRootFeed()` after
+`MergeWorkspace`). Only the one named test was fixed; the rest are latent
+instances of the same defect and deserve a sweep.
+
+## The four integration skips at this tip
+
+1. `TestAnAbandonedQueuedMergeHasNoReachableCause` — BEHAVIOR NOT IMPLEMENTED,
+   not a prerequisite. `internal/merge/queue.go` documents THREE distinct ends
+   (evict, dequeue, abandon), but `dropQueued` has only TWO callers: Evict (the
+   operator's) and the dequeue release (the user's). No call site anywhere
+   raises a queued merge's OWN give-up. Landing 7's `FeedMergeAbandoned.summary`
+   did NOT un-skip it, and neither would the distinct `FeedMergeError`
+   per-cause arms: a PRODUCER has to exist first. To un-skip: implement the
+   self-abandon end (the "workspace closed" and "daemon shutdown" causes the
+   landing-7 relay names have no production call site in `internal/merge`),
+   then the per-cause arms. This is a behavior question for the project lead,
+   not a proto ask.
+2. `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` — the
+   BEHAVIOR IS IMPLEMENTED; the skip is a missing TEST HOOK. The merge captures
+   the displaced turn durably, ends it (KillTurn), and resubmits exactly once
+   at lease release. What cannot be constructed is a deterministic crash inside
+   the narrow window between `CaptureDisplaced` and either the merge's own next
+   `Queue.Submit` or a clean run's near-instant finish: there is no knob to
+   freeze a merge run mid-method, and the only park point the harness offers is
+   a scripted conflict, which requires the conflict brief's own `Queue.Submit`
+   to go through — exactly the call this scenario would need held. To un-skip:
+   a test-only pause point in the merge run between capture and resubmit.
+3. `TestSubscriptionInvariantAcrossWatchKinds/WatchHostWorkspace` — DELIBERATE,
+   and it should stay skipped. The invariant under test is what a LATE
+   subscriber is replayed, which is a property of retained VIEWS. The only
+   lightweight two-step driver this suite has for that kind is `OpenInEditor`,
+   a one-shot host RELAY — sent once to whoever is listening, replayed to
+   nobody by design. Driving it here would assert the opposite of the contract.
+4. `TestSubscriptionInvariantAcrossWatchKinds/WatchWebWorkspace` — DELIBERATE,
+   and structurally unreachable. Its only push arm is `transferred`, fired once
+   per handover, and by the time it fires the workspace's standing on THIS
+   daemon is already `transferring_away`, so `resolveStreamRef` refuses every
+   further per-workspace open before it reaches the topic. There is no window
+   in which "subscribe late on the daemon holding the published transferred
+   view" exists at all, so the late-subscribe half cannot be demonstrated
+   without contradicting the refusal contract.
+
 ## Tests over 1 s (re-profiled at 971145abf)
 
 Unit: none over 1 s.
@@ -336,16 +416,6 @@ Unit: none over 1 s.
 Run 8's eight 5 s rows are gone: each was over 1 s only because it was RED and
 rode out `DefaultTimeout`. Nothing here justifies a looser bound; the AGENTS.md
 wait-bound table stands unchanged.
-
-## Skips that stay (each names its hook)
-
-- `TestAnAbandonedQueuedMergeHasNoReachableCause` — `FeedMergeError` needs
-  distinct evict/dequeue/abandon causes (only failed|abandoned exist).
-- `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` — no
-  crash-window hook.
-- The Watch* kinds with no two-step driver inside
-  `TestSubscriptionInvariantAcrossWatchKinds` (`WatchHostWorkspace`
-  deliberately).
 
 ## Standing rules for whoever resumes
 
