@@ -20,10 +20,16 @@ import (
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_Diagnostics:
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the health reporter", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar, the roster and the health reporter", dlog.Context{
 			"arm": sessionArm(update),
 		})
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		// THE ROSTER READS THE SAME PUSH. An open degraded window is what the
+		// row's `degraded` arm is made of, and without this route that arm has
+		// no producer at all: the dot would read `ready` for a session the
+		// topbar is drawing as degraded, and the two surfaces would disagree
+		// about one fact.
+		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
 
 	case *conversationv1.SessionUpdate_ContextUsage,
