@@ -33,7 +33,7 @@
  * this is the single documented place where that is admitted.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, watch } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 
 import { bindLog } from "../log.js";
@@ -115,6 +115,15 @@ export { FAIL_TURN_MARKER } from "./registry.js";
  *
  * The wait is LEVEL-then-EDGE: the file is checked first and the watch is only
  * a wakeup, so a gate released before the turn started is not a missed edge.
+ *
+ * The edge alone is NOT ENOUGH, though. On macOS `fs.watch` rides FSEvents,
+ * which coalesces and can drop a notification outright; when it does, the wait
+ * does not fail, it HANGS, and the park shows up as an unrelated test timeout
+ * (the same flake bucket `test/integration-support/redrain.ts` exists for). So
+ * a coarse, unref'd re-check runs alongside the watcher and re-tests the same
+ * LEVEL condition. The watcher stays the fast path and settles in microseconds;
+ * the re-check is only there so a lost event costs milliseconds instead of the
+ * caller's whole budget.
  */
 export const TURN_GATE_PATH_ENV = "AGENT_REPL_FAKE_TURN_GATE";
 export const TURN_GATE_TEXT_ENV = "AGENT_REPL_FAKE_TURN_GATE_TEXT";
@@ -170,6 +179,9 @@ function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string>
   return new Set(named);
 }
 
+/** How often a parked turn re-checks its gate when no edge has arrived. */
+const GATE_REDRAIN_INTERVAL_MS = 20;
+
 function awaitTurnGate(text: string): Promise<void> {
   const path = process.env[TURN_GATE_PATH_ENV] ?? "";
   const gateText = process.env[TURN_GATE_TEXT_ENV] ?? "";
@@ -177,18 +189,25 @@ function awaitTurnGate(text: string): Promise<void> {
   if (existsSync(path)) return Promise.resolve();
   LOGGER.log({ gate_path: path }, "fake turn PARKED on its gate");
   return new Promise<void>((resolve) => {
-    const watcher = watch(dirname(path), () => {
-      if (!existsSync(path)) return;
-      watcher.close();
+    let settled = false;
+    let watcher: FSWatcher | null = null;
+    let redrain: NodeJS.Timeout | null = null;
+    const release = (): void => {
+      if (settled || !existsSync(path)) return;
+      settled = true;
+      watcher?.close();
+      if (redrain !== null) clearInterval(redrain);
       LOGGER.log({ gate_path: path }, "fake turn RELEASED by its gate");
       resolve();
-    });
-    // The gate can be released between the check above and the watch's
+    };
+    watcher = watch(dirname(path), release);
+    // The backstop for an FSEvents notification that never arrives. Unref'd, so
+    // it can never by itself hold the process open.
+    redrain = setInterval(release, GATE_REDRAIN_INTERVAL_MS);
+    redrain.unref();
+    // The gate can also be released between the check above and the watch's
     // installation, which no edge would then report.
-    if (existsSync(path)) {
-      watcher.close();
-      resolve();
-    }
+    release();
   });
 }
 
