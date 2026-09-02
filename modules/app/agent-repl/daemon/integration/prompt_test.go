@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -426,8 +427,12 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 	})
 
 	// Assert
-	if !namesIntendedArm(err, "SubmitPromptError.turn_already_open") {
-		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want turn_already_open", err)
+	// Project-lead ruling: the shim's turn_already_open on a bubble-addressed
+	// submit has no SubmitPromptError home, and answers under the landing-7
+	// candidate arm bubble_refused with kind agent_busy in the reason.
+	if !namesIntendedArm(err, "SubmitPromptError.bubble_refused") ||
+		!strings.Contains(err.Error(), "kind agent_busy") {
+		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want bubble_refused{kind agent_busy}", err)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
