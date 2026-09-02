@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -129,12 +130,24 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	state.uninterruptible = command
 	q.mu.Unlock()
 
+	// THE FOOTER IS TOLD WHAT THE TURN CARRIES, BEFORE THE TURN EXISTS. Nothing
+	// on the shim's streams states it — the first frame of a turn is an
+	// activity, by which time the status is already past `submitting` — so a
+	// /clear or a compaction draws as thinking·submitting rather than as
+	// clearing or compacting unless the daemon says which it is.
+	started := &footer.TurnStarted{At: q.deps.Now(), Act: footerAct(command)}
+	q.deps.Footer.SetTurn(ws, started)
+	q.deps.Sidebar.SetTurn(ws, started)
+
 	success, err := sender.StartTurn(ctx, turn, said, origin)
 	if err != nil {
+		q.deps.Footer.SetTurn(ws, nil)
+		q.deps.Sidebar.SetTurn(ws, nil)
 		q.clearUninterruptible(ws)
 		log.Error(opAct, "the shim refused the context cut", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("deliver the context cut on %q: %w", ws, err)
 	}
+	q.deps.Sidebar.AckTurn(ws)
 	// The cut IS a turn, so the watcher is handed it like any other. It earns
 	// NO mirrored user-prompt row: a recognized command earns no user message,
 	// and the cut's visible outcome is the separation row the feed resolver
@@ -148,6 +161,19 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	log.Debug(opAct, "the context cut is running and the turn is uninterruptible",
 		dlog.Context{"turn": string(turn), "command": command.String()})
 	return nil
+}
+
+// footerAct names the footer's spelling of a context cut, so the strip draws
+// `clearing` or `compacting` rather than the ordinary submit.
+func footerAct(command conversationv1.SessionCommand) footer.SessionAct {
+	switch command {
+	case conversationv1.SessionCommand_SESSION_COMMAND_CLEAR:
+		return footer.ActClear
+	case conversationv1.SessionCommand_SESSION_COMMAND_COMPACT:
+		return footer.ActCompact
+	default:
+		return footer.ActPrompt
+	}
 }
 
 // clearUninterruptible releases the uninterruptible mark a context cut set.

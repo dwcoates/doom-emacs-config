@@ -18,6 +18,8 @@ import (
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
+	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -39,6 +41,9 @@ type fakeDB struct {
 	wsm.DB
 
 	mu sync.Mutex
+
+	// engagements counts the delivery-time engagement stamps.
+	engagements int
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
@@ -67,6 +72,14 @@ func newFakeDB() *fakeDB {
 		turns:       map[ids.TurnID]*wsm.Turn{},
 		closedTurns: map[ids.TurnID]wsm.TurnClose{},
 	}
+}
+
+// TouchEngagement records the engagement stamp every delivery writes.
+func (d *fakeDB) TouchEngagement(_ context.Context, _ ids.WorkspaceID, _ time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.engagements++
+	return nil
 }
 
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
@@ -420,10 +433,54 @@ func (f *fakeFeed) mirrored() []*frontendv1.FeedRow {
 }
 
 // fakeFooter records the waiting-interrupting status.
+// fakeSidebar records the roster's own turn facts.
+type fakeSidebar struct {
+	sidebar.Resolver
+	mu    sync.Mutex
+	turns []*footer.TurnStarted
+	ends  []sessionwatcher.TurnClose
+}
+
+func (f *fakeSidebar) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.turns = append(f.turns, turn)
+}
+
+func (f *fakeSidebar) AckTurn(_ ids.WorkspaceID) {}
+
+func (f *fakeSidebar) SetTurnEnded(_ ids.WorkspaceID, how sessionwatcher.TurnClose) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ends = append(f.ends, how)
+}
+
+// rosterTurns answers the recorded roster turn facts.
+func (f *fakeSidebar) rosterTurns() []*footer.TurnStarted {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*footer.TurnStarted(nil), f.turns...)
+}
+
 type fakeFooter struct {
 	footer.Resolver
 	mu           sync.Mutex
 	interrupting []bool
+	turns        []*footer.TurnStarted
+}
+
+// SetTurn records what the queue told the footer a turn carries.
+func (f *fakeFooter) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.turns = append(f.turns, turn)
+}
+
+// startedTurns answers the recorded turn facts.
+func (f *fakeFooter) startedTurns() []*footer.TurnStarted {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*footer.TurnStarted(nil), f.turns...)
 }
 
 func (f *fakeFooter) SetInterrupting(_ ids.WorkspaceID, on bool) {
@@ -517,6 +574,7 @@ type harness struct {
 	watcher *fakeWatcher
 	feed    *fakeFeed
 	footer  *fakeFooter
+	sidebar *fakeSidebar
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
@@ -531,7 +589,10 @@ type harness struct {
 	parkedErr error
 
 	// noSession, when set, makes the client resolver report no session.
-	noSession bool
+	revivals   int
+	reviveErr  error
+	reviveHook func()
+	noSession  bool
 }
 
 func newHarness(t *testing.T) *harness {
@@ -542,6 +603,7 @@ func newHarness(t *testing.T) *harness {
 		watcher: &fakeWatcher{},
 		feed:    &fakeFeed{},
 		footer:  &fakeFooter{},
+		sidebar: &fakeSidebar{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
@@ -551,8 +613,19 @@ func newHarness(t *testing.T) *harness {
 		Judge:   h.judge,
 		Feed:    h.feed,
 		Footer:  h.footer,
+		Sidebar: h.sidebar,
 		Holds:   h.holds,
 		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		Revive: func(context.Context, ids.WorkspaceID) error {
+			h.revivals++
+			if h.reviveErr != nil {
+				return h.reviveErr
+			}
+			if h.reviveHook != nil {
+				h.reviveHook()
+			}
+			return nil
+		},
 		Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.parked = append(h.parked, said)

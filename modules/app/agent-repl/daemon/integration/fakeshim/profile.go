@@ -25,8 +25,11 @@ const EnvBuildSHA = "FAKESHIM_BUILD_SHA"
 type Profile struct {
 	// BuildSHA overrides the reported runtime shim_build_sha.
 	BuildSHA string `json:"build_sha,omitempty"`
-	// DelayDiagnostics withholds the automatic healthy diagnostics push, so
-	// readiness only arrives when the test pushes it.
+	// DelayDiagnostics withholds the automatic healthy diagnostics push on the
+	// FIRST session stream, so readiness only arrives when the test pushes it.
+	// Later streams open normally: the flag exists to gate the daemon's
+	// bring-up, and withholding on every stream would hang the session watcher
+	// the daemon opens once bring-up has already succeeded.
 	DelayDiagnostics bool `json:"delay_diagnostics,omitempty"`
 	// ExitOn kills the process at a named moment: "startup", "start_session"
 	// or "watch_session".

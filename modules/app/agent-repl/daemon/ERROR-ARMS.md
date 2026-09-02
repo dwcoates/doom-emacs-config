@@ -111,6 +111,19 @@ until it lands both shapes answer through `server.UnlandedArm` naming
 | --- | --- | --- | --- |
 | SubmitPrompt (the bubble path) | `bubble_refused` | ONE arm, two kinds. `kind: not_deliverable` — the shim's `UpdateAgentFailure.not_deliverable` for an `UpdateAgent{prompt}` the SDK cannot route to the addressed subagent. `kind: agent_busy` — the shim's `StartTurnFailure.turn_already_open` for a subagent whose own turn is already running. `SubmitPromptError` carries neither shape today | workspace / server |
 
+SHIM-SIDE GAP (remediation pass 3b, unresolved): the `agent_busy` kind has NO
+PRODUCER. A bubble-addressed submit reaches the shim as `UpdateAgent{prompt}`,
+never as `StartTurn`, and `UpdateAgentFailure`'s kind oneof has no busy arm —
+`unknown_agent`, `no_open_ask`, `answer_mismatch`, `nothing_running`,
+`no_session`, `not_deliverable`. So a second bubble submit while the addressed
+agent's own turn runs cannot be refused honestly by any landed shape, and the
+daemon delivers it. PROPOSAL: `UpdateAgentFailure.agent_busy = 8`
+(`UpdateAgentAgentBusy {}`) — "the addressed agent's own turn is already
+open" — which `server.bubbleRefused` then maps to `kind: agent_busy` with no
+other change. The integration test
+`TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`
+stays RED until it lands.
+
 `SubmitPromptError.turn_already_open` is RETIRED (landing 6, tag 8 reserved):
 it never had a producer — the session watcher answers the MAIN turn's flight and
 nothing in the daemon tracks a subagent's own — so the sentinel, the mapping and

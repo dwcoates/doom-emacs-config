@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,8 +52,8 @@ type Opts struct {
 	Joining string
 	// IdleCutoff sets the hibernation idle cutoff via --idle-cutoff.
 	IdleCutoff time.Duration
-	// IdleCutoffMS compresses the same cutoff via
-	// AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS, the spelling the hibernation tests
+	// IdleCutoffMS compresses the same cutoff in milliseconds, for the
+	// hibernation tests
 	// use so the cutoff can be a handful of milliseconds.
 	IdleCutoffMS int
 	// Pprof sets the profiling listener address; empty leaves it off.
@@ -100,17 +101,23 @@ type Daemon struct {
 	// DefaultConfigDir and MultiRepoConfigDir are the two account roots.
 	DefaultConfigDir   string
 	MultiRepoConfigDir string
+	// MultiRepoRoot is the tree the daemon was given as $MULTI_REPO_ROOT: a
+	// workspace UNDER it routes to MultiRepoConfigDir, anything else to
+	// DefaultConfigDir. A test that cares about the routing puts its repository
+	// here with NewRepoAt.
+	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
-	t      *testing.T
-	ctx    context.Context
-	cmd    *exec.Cmd
-	stderr *syncBuffer
-	client agentreplv1connect.AgentReplClient
-	http   *http.Client
+	t          *testing.T
+	ctx        context.Context
+	cmd        *exec.Cmd
+	stderr     *syncBuffer
+	stderrPath string
+	client     agentreplv1connect.AgentReplClient
+	http       *http.Client
 
 	mu            sync.Mutex
 	workspaceDirs []string
@@ -239,6 +246,8 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		}
 	}
 
+	d.MultiRepoRoot = multiRoot
+
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	t.Cleanup(cancel)
 	d.ctx = ctx
@@ -257,8 +266,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if opts.Joining != "" {
 		args = append(args, "--joining", opts.Joining)
 	}
-	if opts.IdleCutoff > 0 {
+	// THE CUTOFF HAS ONE KNOB. The daemon reads `--idle-cutoff` and nothing
+	// else, so the millisecond spelling is the same flag with a smaller value.
+	switch {
+	case opts.IdleCutoff > 0:
 		args = append(args, "--idle-cutoff", opts.IdleCutoff.String())
+	case opts.IdleCutoffMS > 0:
+		args = append(args, "--idle-cutoff", (time.Duration(opts.IdleCutoffMS) * time.Millisecond).String())
 	}
 	if opts.Pprof != "" {
 		args = append(args, "--pprof", opts.Pprof)
@@ -297,22 +311,50 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		selfRepo = NewRepoAt(t, filepath.Join(root, "self-repo")).Dir
 	}
 	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
-	if opts.IdleCutoffMS > 0 {
-		env = append(env, "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS="+strconv.Itoa(opts.IdleCutoffMS))
-	}
 	env = append(env, opts.ExtraEnv...)
+
+	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
+	// root whose previous daemon was SIGKILLed, so the file it never removed is
+	// still there with the dead daemon's port: read as this daemon's address it
+	// dials a closed socket. The daemon is about to rewrite it, so removing it
+	// first makes AwaitAddrFile unambiguous. A JOINING successor shares the root
+	// with a live incumbent that owns the file, so it is left alone — and so is
+	// a start the test expects to be REFUSED, which is a second daemon against
+	// a live incumbent whose file must survive its refusal untouched.
+	if opts.Joining == "" && !opts.ExpectEarlyExit {
+		if err := os.Remove(filepath.Join(d.StateDir, "daemon.addr")); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("harness: remove the stale daemon.addr: %v", err)
+		}
+	}
 
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = root
 	cmd.Env = cleanGitEnv(env)
-	cmd.Stderr = d.stderr
-	cmd.Stdout = d.stderr
+	// THE PROCESS WRITES TO A FILE, NEVER TO A PIPE. exec gives an io.Writer a
+	// pipe and makes Wait block until every writer of it closes — and a
+	// HANDOVER's successor inherits this daemon's stderr, so a piped harness
+	// waits for the successor to die before it will admit the incumbent
+	// exited. A file has no such reader to drain.
+	stderrPath := filepath.Join(root, "daemon.stderr.log")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("harness: create the daemon's stderr file: %v", err)
+	}
+	t.Cleanup(func() { _ = stderrFile.Close() })
+	d.stderrPath = stderrPath
+	cmd.Stderr = stderrFile
+	cmd.Stdout = stderrFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("harness: start daemon: %v", err)
 	}
 	d.cmd = cmd
-	t.Cleanup(d.Kill)
+	t.Cleanup(func() {
+		d.Kill()
+		// The daemon's group is gone; its shims are in groups of their own and
+		// would otherwise outlive the test.
+		d.ReapStrays()
+	})
 
 	if opts.ExpectEarlyExit {
 		return d
@@ -574,7 +616,16 @@ func (d *Daemon) AwaitExit() int {
 }
 
 // Stderr is everything the daemon wrote to its terminal mirror.
-func (d *Daemon) Stderr() string { return d.stderr.String() }
+func (d *Daemon) Stderr() string {
+	if d.stderrPath == "" {
+		return d.stderr.String()
+	}
+	raw, err := os.ReadFile(d.stderrPath)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
 
 // Register registers a repository's worktree and answers the minted ref.
 func Register(t *testing.T, d *Daemon, dir string) *workspacev1.WorkspaceRef {
@@ -631,5 +682,77 @@ func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
 			d.t.Fatalf("%s = %q, want it unchanged at %q", path, body, want)
 		}
 		<-ticker.C
+	}
+}
+
+// ReapStrays kills every process whose command line names this run's state
+// directory, whatever process group it is in.
+//
+// IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
+// its own process group and Kill ends that group, but every shim the daemon
+// spawns is put in a group of ITS own (the spawn's process-group discipline),
+// so a daemon that dies without standing its shims down leaves them running —
+// and a leaked daemon keeps prelaunching more. The state directory is unique to
+// this run and appears in both the daemon's argv and every shim's `--listen`
+// path, so it is an exact key for "processes this test started".
+func (d *Daemon) ReapStrays() {
+	for _, pid := range d.strayPIDs() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// StrayPIDs answers the live processes naming this run's state directory,
+// excluding the harness's own process. A test asserts on it; ReapStrays acts
+// on it.
+func (d *Daemon) StrayPIDs() []int { return d.strayPIDs() }
+
+func (d *Daemon) strayPIDs() []int {
+	if d.StateDir == "" {
+		return nil
+	}
+	out, err := exec.Command("ps", "-Ao", "pid=,args=").Output()
+	if err != nil {
+		return nil
+	}
+	self := os.Getpid()
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, d.StateDir) {
+			continue
+		}
+		fields := strings.Fields(line)
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid == self {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+// ProjectDir answers where the vendor CLI files one workspace's conversations
+// under one account root: `projects/<every non-alphanumeric byte of the
+// absolute cwd replaced by a dash>`.
+func ProjectDir(configDir, workspaceDir string) string {
+	return filepath.Join(configDir, "projects", projectDirRule.ReplaceAllString(workspaceDir, "-"))
+}
+
+var projectDirRule = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// RemoveTranscripts deletes every transcript a workspace has under BOTH account
+// roots, so a re-open resumes a conversation whose transcript is gone. That is
+// the state the daemon's resume guard exists for, and nothing else in the
+// harness can produce it: the fake shim lays a transcript down at every
+// StartSession, exactly as the vendor does.
+func (d *Daemon) RemoveTranscripts(workspaceDir string) {
+	d.t.Helper()
+	for _, root := range []string{d.DefaultConfigDir, d.MultiRepoConfigDir} {
+		if root == "" {
+			continue
+		}
+		if err := os.RemoveAll(ProjectDir(root, workspaceDir)); err != nil {
+			d.t.Fatalf("harness: remove the transcripts under %s: %v", root, err)
+		}
 	}
 }

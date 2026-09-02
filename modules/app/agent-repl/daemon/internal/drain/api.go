@@ -75,6 +75,11 @@ type Deps struct {
 	Announcer Announcer
 	// Exit performs the daemon's orderly exit once the drain is quiet.
 	Exit ExitFunc
+	// LeaseChanged tells the prompt queue that a workspace's lease set changed,
+	// so the holds taken against the departed lease are re-evaluated. Without
+	// it a prompt held during a hibernation stays held forever: the release
+	// changes a row the queue is not watching. Nil means nothing is told.
+	LeaseChanged func(ws ids.WorkspaceID)
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
@@ -161,6 +166,12 @@ func New(deps Deps) (Controller, error) {
 		return nil, err
 	}
 	deps.IdleCutoff = cutoff
+	// A SWEEP THAT RUNS LESS OFTEN THAN THE CUTOFF CANNOT HONOR IT. The cadence
+	// is the resolution at which idleness is noticed, so a cutoff shorter than
+	// the cadence would be observed a whole cadence late — every time.
+	if deps.IdleCutoff > 0 && deps.SweepEvery > deps.IdleCutoff {
+		deps.SweepEvery = deps.IdleCutoff
+	}
 	c := &controller{deps: deps, log: deps.Log.Global(), rearm: make(chan struct{}, 1)}
 	c.log.Debug(opNew, "the drain controller is up", dlog.Context{
 		"idle_cutoff":    deps.IdleCutoff.String(),

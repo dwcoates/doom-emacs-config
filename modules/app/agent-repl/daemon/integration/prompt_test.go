@@ -773,23 +773,31 @@ func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
-	awaitFooter(t, f, footer, "the background chip for live detached work", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBackground() != nil
-	})
+	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
+	// watcher's own record of it is the edge that says it changed. The footer's
+	// background chip cannot serve as the signal: a turn is in flight here, and
+	// thinking outranks background in the status tree.
+	awaitLiveWork(t, f, 1)
 
 	// Act
-	_, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: f.ws,
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "InterruptError.confirm_required") {
-		t.Fatalf("Interrupt{turn} with live detached agents = %v, want confirm_required", err)
+	// Assert: confirm_required IS a landed arm, so it answers as one.
+	if err != nil {
+		t.Fatalf("Interrupt{turn} with live detached work = transport error %v, want the confirm_required arm", err)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	challenge := resp.Msg.GetError().GetConfirmRequired()
+	if challenge == nil {
+		t.Fatalf("Interrupt{turn} with live detached work = %v, want InterruptError.confirm_required", resp.Msg)
+	}
+	if challenge.GetLiveAgentCount() != 1 {
+		t.Fatalf("confirm_required.live_agent_count = %d, want 1", challenge.GetLiveAgentCount())
+	}
+	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }
 
 func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
@@ -797,21 +805,23 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
-	awaitFooter(t, f, footer, "the background chip for live detached work", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBackground() != nil
-	})
-	if _, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
+	// watcher's own record of it is the edge that says it changed. The footer's
+	// background chip cannot serve as the signal: a turn is in flight here, and
+	// thinking outranks background in the status tree.
+	awaitLiveWork(t, f, 1)
+	first, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: f.ws,
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
-	})); !namesIntendedArm(err, "InterruptError.confirm_required") {
-		t.Fatalf("the first Interrupt{turn} = %v, want confirm_required to set up the challenge", err)
+	}))
+	if err != nil || first.Msg.GetError().GetConfirmRequired() == nil {
+		t.Fatalf("the first Interrupt{turn} = (%v, %v), want confirm_required to set up the challenge", first.Msg, err)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	f.d.ExpectWarnings(harness.AllowAllWarnings)
 
 	// Act
-	_, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+	_, err = f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace:     f.ws,
 		Target:        &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
 		ConfirmAgents: true,

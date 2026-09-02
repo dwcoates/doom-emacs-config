@@ -282,6 +282,21 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 			return fmt.Errorf("workspace: install a shim for %q: close the retired watches: %w", ws, err)
 		}
 	}
+
+	// AN INSTALLED SHIM IS WATCHED. The adoption's whole point is that the
+	// conversation keeps running under a daemon that can SEE it: a client with
+	// no watches leaves the daemon blind to the session it just adopted — no
+	// turn terminals, no live work, no connectivity truth.
+	//
+	// The opening level comes from the DURABLE RECORD rather than from a
+	// StartSession answer, because the session is already started on the shim
+	// and the contract offers no way to read a running shim's SessionStarted.
+	// The turn in flight and the live-work set are therefore NOT restated here:
+	// the shim's own pushes are what repopulate them.
+	if err := f.watchInstalled(ctx, ws, c); err != nil {
+		return err
+	}
+
 	f.deps.Log.Global().Debug(opFleetRollout, "installed a new shim client", dlog.Context{
 		"workspace": string(ws), "pid": c.PID(), "retired": previous != nil,
 	})
@@ -297,14 +312,71 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 // both halves of a handover; the probe finds the transferred shim's lock still
 // held, which is what selects the adopt path rather than a spawn.
 func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
-	if err := f.Start(ctx, ws); err != nil {
+	if client, ok := f.Client(ws); ok {
+		return client, nil
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
-	client, ok := f.Client(ws)
-	if !ok {
-		return nil, fmt.Errorf("workspace: adopt %q: the bring-up left no shim client", ws)
+	client, err := f.deps.Supervisor.Adopt(ctx, ws, record.Dir, f.deps.SocketPath(ws))
+	if err != nil {
+		return nil, fmt.Errorf("workspace: adopt %q: dial the transferred shim: %w", ws, err)
+	}
+	// ATTACH ONLY. The transferred shim's session is ALREADY STARTED — the
+	// whole point of a handover is that the conversation never stopped — and
+	// StartSession on it would either be refused or, worse, start a second one.
+	// The contract offers no way to read a running shim's SessionStarted, so
+	// the opening level comes from the durable record and the shim's own
+	// pushes repopulate the rest.
+	if err := f.Install(ctx, ws, client); err != nil {
+		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
 	return client, nil
+}
+
+// watchInstalled opens an adopted shim's watches from the session's durable
+// record. A workspace with NO session record has no conversation to watch, so
+// it is left alone.
+func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: install a shim for %q: %w", ws, err)
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return fmt.Errorf("workspace: install a shim for %q: resolve log sink: %w", ws, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
+
+	session, exists, err := f.deps.DB.Session(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("workspace: install a shim for %q: read the session record: %w", ws, err)
+	}
+	if !exists || session.VendorSessionID == "" {
+		log.Debug(opFleetRollout, "the installed shim has no recorded conversation to watch", nil)
+		return nil
+	}
+
+	started := &conversationv1.SessionStarted{
+		VendorSessionId: session.VendorSessionID,
+		EffectiveModel:  &conversationv1.AgentModel{Name: f.modelOrDefault(session.Model)},
+		PermissionMode:  permissionMode(session.PermissionMode),
+	}
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	if err != nil {
+		log.Error(opFleetRollout, "could not open the adopted session's watches", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("workspace: install a shim for %q: start the watcher: %w", ws, err)
+	}
+	f.mu.Lock()
+	if current, ok := f.sessions[ws]; ok && current.client == c {
+		current.watcher = watcher
+	}
+	f.mu.Unlock()
+	log.Info(opFleetRollout, "opened the adopted session's watches", dlog.Context{
+		"vendor_session_id": session.VendorSessionID, "shim_pid": c.PID(),
+	})
+	return nil
 }
 
 // Resume runs StartSession(resume) on c and, on success, opens the workspace's
@@ -379,10 +451,25 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 	return client.Hibernate(ctx, &shimv1.HibernateRequest{})
 }
 
-// KillSession ends a workspace's session. It is drain.Stand's second method
-// and Deps.Sessions' Stop in one behavior, so the two cannot disagree about
-// what stopping a session means.
+// KillSession ends a workspace's session: it ASKS THE SHIM to end the session
+// first and only then stops the process.
+//
+// The order is the whole point of the verb's name. The drain's stand-down and
+// the kill verb both need the shim to write its own terminals before its
+// process goes, and a signal alone gives it no chance to. A shim that will not
+// answer is not a reason to leave the process running, so the stop below is
+// unconditional and the refusal is evidence.
 func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
+	if shim, live := f.Shim(ws); live {
+		if err := shim.KillSession(ctx, force); err != nil {
+			if record, recErr := f.deps.DB.Workspace(ctx, ws); recErr == nil {
+				if log, logErr := f.deps.Log.Workspace(record.Dir); logErr == nil {
+					log.Warn(opBringUp, "the session kill did not answer; stopping the process anyway",
+						dlog.Context{"workspace": string(ws), "force": force, "cause": err.Error()})
+				}
+			}
+		}
+	}
 	return f.Stop(ctx, ws, force)
 }
 

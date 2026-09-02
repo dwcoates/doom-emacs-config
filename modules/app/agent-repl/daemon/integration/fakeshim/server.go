@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -84,9 +87,11 @@ type server struct {
 	profile Profile
 	log     *logSink
 
-	sessions *hub[*conversationv1.SessionUpdate]
-	agents   *hub[agentFrame]
-	bashes   *hub[bashFrame]
+	sessions            *hub[*conversationv1.SessionUpdate]
+	sessionStreamOpened bool
+
+	agents *hub[agentFrame]
+	bashes *hub[bashFrame]
 
 	mu      sync.Mutex
 	answers map[string][]scriptedAnswer
@@ -286,6 +291,18 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	return connect.NewResponse(resp), nil
 }
 
+// claimFirstSessionStream reports whether this open is the FIRST session
+// stream, which is the one DelayDiagnostics withholds its opening frames from.
+func (s *server) claimFirstSessionStream() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionStreamOpened {
+		return false
+	}
+	s.sessionStreamOpened = true
+	return true
+}
+
 // noteVendorSession takes the session kernel lock the moment a vendor session
 // id is assigned, exactly as the real shim does inside StartSession.
 func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
@@ -298,9 +315,40 @@ func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
 	s.vendorID = id
 	hook := s.onSessionStarted
 	s.mu.Unlock()
+	s.writeTranscript(id)
 	if first && hook != nil {
 		hook(id)
 	}
+}
+
+// nonAlphanumeric spells the vendor CLI's projects/<name> encoding rule.
+var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// writeTranscript creates the conversation's transcript file exactly where the
+// vendor CLI files it — $CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<vendor
+// session id>.jsonl. THE FILE IS THE RESUME'S DEATH EVIDENCE: the daemon's
+// resume guard refuses a resume whose transcript is gone, so a fake that starts
+// sessions without laying one down makes every re-open unresumable.
+func (s *server) writeTranscript(vendorSessionID string) {
+	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if configDir == "" {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(configDir, "projects", nonAlphanumeric.ReplaceAllString(cwd, "-"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	path := filepath.Join(dir, vendorSessionID+".jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
 }
 
 func (s *server) buildSHA() string {
@@ -320,7 +368,7 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 	id, ch := s.sessions.subscribe()
 	defer s.sessions.unsubscribe(id)
 
-	if !s.profile.DelayDiagnostics {
+	if !s.profile.DelayDiagnostics || !s.claimFirstSessionStream() {
 		if err := stream.Send(&shimv1.WatchSessionResponse{Update: HealthyDiagnostics()}); err != nil {
 			return err
 		}

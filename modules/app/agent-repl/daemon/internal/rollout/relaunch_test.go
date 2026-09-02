@@ -452,6 +452,34 @@ func TestABuildStaleReasonBouncesAShimOnAnOlderBuild(t *testing.T) {
 	}
 }
 
+// TestABuildStaleReasonBouncesEachReportedStampOnlyOnce pins the once-per-stamp
+// gate: a relaunched shim that comes back still reporting the stamp it was
+// bounced for is NOT bounced again. Without the gate the mount-time staleness
+// check re-triggers on every mount and spawns a shim per round forever.
+func TestABuildStaleReasonBouncesEachReportedStampOnlyOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.mu.Lock()
+	h.sessionSHA[ws] = "0ldbu1ld"
+	h.mu.Unlock()
+	if err := runRelaunch(t, h, ws, ReasonBuildStale); err != nil {
+		t.Fatalf("the first RelaunchShim: %v", err)
+	}
+	first := len(h.order.Taken())
+
+	// Act: the shim still reports the same older stamp.
+	if err := h.c.RelaunchShim(context.Background(), ws, ReasonBuildStale); err != nil {
+		t.Fatalf("the second RelaunchShim: %v", err)
+	}
+
+	// Assert
+	if got := len(h.order.Taken()); got != first {
+		t.Fatalf("steps after the second bounce = %v, want the %d of the first: the stamp was already bounced for",
+			h.order.Taken(), first)
+	}
+}
+
 func TestCheckStalenessBouncesAShimWhoseReportedBuildDisagrees(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

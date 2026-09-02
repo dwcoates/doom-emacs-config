@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"claude-repld/internal/boot"
 	"claude-repld/internal/daemonaddr"
@@ -309,11 +310,22 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 		}
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithCancel(context.Background())
+		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
+		// request, and this daemon's Watch* handlers are STANDING STREAMS that
+		// end only when their client goes away — so an unbounded wait is a
+		// daemon that never exits whenever anything is watching it, which is
+		// every handover. In-flight unary calls get the grace; whatever is
+		// still open when it expires is closed.
+		shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
-		if err := srv.Shutdown(shutdown); err != nil {
-			return err
+		err := srv.Shutdown(shutdown)
+		if errors.Is(err, context.DeadlineExceeded) {
+			return srv.Close()
 		}
-		return nil
+		return err
 	}
 }
+
+// shutdownGrace is how long in-flight requests have to finish before the
+// standing streams are closed underneath them.
+const shutdownGrace = 2 * time.Second
