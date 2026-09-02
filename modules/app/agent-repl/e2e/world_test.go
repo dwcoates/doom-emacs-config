@@ -585,6 +585,34 @@ func AwaitTurnEnded(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *
 	})
 }
 
+// awaitFeedRow opens ws's root feed and answers the first row satisfying
+// pred: it checks the already-materialized page first (a settled row from an
+// earlier driveScenarioToCompletion/AwaitTurnEnded call on this workspace is
+// normally already in the page by the time a caller reaches here), falling
+// back to watching the tail otherwise. Mirrors AwaitTurnEnded's
+// page-then-watch shape above, generalized to an arbitrary predicate. Bound
+// by the watch stream's own DefaultTimeout via harness.AwaitView; never
+// sleeps.
+func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if pred(row) {
+			return row
+		}
+	}
+	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
+	defer stream.Close()
+	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
+}
+
 // driveScenarioToCompletion submits a real "!"+scenario prompt (or a
 // caller-supplied full prompt string for scenarios with their own documented
 // form, e.g. "!compact [summary]"), waits for the turn's terminal
