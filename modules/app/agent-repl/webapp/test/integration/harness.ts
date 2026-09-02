@@ -45,6 +45,9 @@ import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v
 import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
+/** Where the page's clock starts: just after the fixtures' own timestamps. */
+const HARNESS_EPOCH_MS = 10_000;
+
 /** How many drain rounds `settle()` gives the DOM before it calls it a fault. */
 const SETTLE_ROUND_CAP = 60;
 /** How many consecutive quiet rounds mean the DOM has actually settled. */
@@ -194,7 +197,13 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     return () => new Promise<void>((resolve) => realSetImmediate(() => resolve()));
   })();
 
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  // THE CLOCK STARTS WHERE THE FIXTURES LIVE. Every wire timestamp in
+  // `fixtures.ts` is a small absolute epoch value (a queue at 3 s, a last
+  // progress at 2 s), because a fixture that hard-codes "now" would rot. So
+  // the page's clock is put ten seconds after the epoch rather than at the
+  // real wall clock, where those same timestamps would read as fifty years
+  // ago and every countdown would already have expired.
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: HARNESS_EPOCH_MS });
 
   const fake = createFakeDaemon();
   const { baseUrl } = await fake.start();
