@@ -44,6 +44,9 @@ func TestBootWritesAndRemovesTheAddressFile(t *testing.T) {
 func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 	// Arrange
 	incumbent := newDaemon(t, harness.Opts{})
+	// The run log is a symlink each runtime relinks onto its own file, so this
+	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
+	incumbent.ExpectWarnings("daemon.cmd.claim")
 	before, err := os.ReadFile(incumbent.AddrFile())
 	if err != nil {
 		t.Fatalf("read the incumbent's daemon.addr: %v", err)
@@ -384,6 +387,9 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 	// row can be corrupted (the daemon holds the sole writing handle while
 	// it runs).
 	d := newDaemon(t, harness.Opts{})
+	// The run log is a symlink each runtime relinks onto its own file, so this
+	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
+	d.ExpectWarnings("daemon.cmd.state", "daemon.wsm.open")
 	d.Stop()
 	d.WithDB(func(db *sql.DB) {
 		if _, err := db.Exec(`UPDATE layout SET version = version + 1`); err != nil {
@@ -421,6 +427,9 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 func TestBootRefusesACorruptTaskRow(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
+	// The run log is a symlink each runtime relinks onto its own file, so this
+	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
+	d.ExpectWarnings("daemon.cmd.serve", "daemon.workspace.register", "daemon.wsm.tasks")
 	created, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "land the rebuild"}))
 	if err != nil {
 		t.Fatalf("CreateTask = error %v, want a task ref", err)
@@ -522,6 +531,9 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	// as JSON regardless of how the row was written.
 	f := newRegistered(t, harness.Opts{})
 	f.d.Stop()
+	// The run log is a symlink each runtime relinks onto its own file, so this
+	// daemon's sweep reads the SUCCESSOR's records; it declares the same list.
+	f.d.ExpectWarnings("daemon.boot.recover_merges", "daemon.merge.recover", "daemon.wsm.creation_job")
 	f.d.WithDB(func(db *sql.DB) {
 		now := time.Now().UnixNano()
 		if _, err := db.Exec(

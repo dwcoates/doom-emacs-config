@@ -233,7 +233,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
