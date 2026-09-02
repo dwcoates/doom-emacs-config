@@ -21,7 +21,7 @@ import {
   syntheticMarkerLiteral,
 } from "../../src/topbar/model.js";
 import { oneofArms } from "../arms.js";
-import { appContext, openPanel, topbarContext } from "./fixtures.js";
+import { RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 const option = (name: string, init: Partial<{ displayName: string; description: string }> = {}) =>
   create(ModelOptionSchema, {
@@ -238,6 +238,71 @@ describe("the pick", () => {
       expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
     });
   }
+
+  it("files a response with no result arm as machinery, not a refusal", async () => {
+    // ARRANGE: an unset `result` is a MALFORMED VIEW arriving on a click. It is
+    // the same condition an unreadable push is, so it is reported once and
+    // NOTHING is drawn at the control: there is no refusal to state.
+    const sink = new RecordingSink();
+    const ctx = appContext({ setModel: () => create(SetModelResponseSchema, {}) }, sink);
+    const { host, tc } = topbarContext(ctx);
+    const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    openPanel(host)!
+      .querySelector("[data-model-option]")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toContain("frameUndecodable");
+  });
+
+  it("draws no refusal for a response with no result arm", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const ctx = appContext({ setModel: () => create(SetModelResponseSchema, {}) }, sink);
+    const { host, tc } = topbarContext(ctx);
+    const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    openPanel(host)!
+      .querySelector("[data-model-option]")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(host.querySelector(".refusal")).toBeNull();
+  });
+
+  it("clears the previous refusal before the next pick", async () => {
+    // ARRANGE: a stale refusal beside a control the reader just clicked again
+    // reads as the answer to the NEW click.
+    let answers = 0;
+    const ctx = appContext({
+      setModel: () => {
+        answers += 1;
+        return answers === 1
+          ? create(SetModelResponseSchema, {
+              result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+            })
+          : create(SetModelResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const { host, tc } = topbarContext(ctx);
+    const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const clickOption = (): void => {
+      openPanel(host)!
+        .querySelector("[data-model-option]")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    };
+    clickOption();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ACT: the reveal stays open on a refusal, so the second pick is one click.
+    clickOption();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(host.querySelector(".refusal")).toBeNull();
+  });
 
   it("refuses an error naming no cause", async () => {
     const host = await pick(() =>
