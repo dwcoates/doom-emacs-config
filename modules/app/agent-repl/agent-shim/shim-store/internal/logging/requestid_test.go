@@ -45,8 +45,16 @@ func TestAnEmptyRequestIDBindsNothing(t *testing.T) {
 }
 
 func TestRequestIDFromANilContextIsEmpty(t *testing.T) {
-	// Arrange, Act
-	got := RequestIDFrom(nil) //nolint:staticcheck // the guard is the subject
+	// Arrange, Act: PASSING nil IS THE SUBJECT. RequestIDFrom guards it, and
+	// the guard is the reason a logging helper reached from a layer that may
+	// have been handed a bare context never panics on the correlation lookup —
+	// so the test hands it the one input the guard exists for.
+	//
+	// The suppression is spelled the way staticcheck spells it. The former
+	// `//nolint:` directive is golangci-lint's syntax, which staticcheck does
+	// not read, so the warning stood.
+	//lint:ignore SA1012 passing a nil context is exactly what this subject asserts the guard survives
+	got := RequestIDFrom(nil)
 
 	// Assert
 	if got != "" {
