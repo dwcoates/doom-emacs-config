@@ -420,14 +420,35 @@ func (w *fakeWatcher) handovers() int {
 // fakeFeed records the synthesized rows.
 type fakeFeed struct {
 	feed.Resolver
-	mu   sync.Mutex
-	rows []*frontendv1.FeedRow
+	mu      sync.Mutex
+	rows    []*frontendv1.FeedRow
+	address *sessionwatcher.OutputAddress
 }
 
 func (f *fakeFeed) UpsertSynthesized(_ ids.WorkspaceID, _ feedid.Feed, row *frontendv1.FeedRow) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rows = append(f.rows, row)
+}
+
+// UpsertAtOutputAddress records the row the way the resolver does: the id is
+// composed from the recorded address (root when none stands) and the row key.
+func (f *fakeFeed) UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	feedAt := feedid.Feed{Root: true}
+	if f.address != nil {
+		feedAt = f.address.Feed
+	}
+	row.Id = feedid.Encode(feedid.Ref{WS: ws, Feed: feedAt, Row: key})
+	f.rows = append(f.rows, row)
+}
+
+// SetOutputAddress records the standing output address the mirror lands at.
+func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *sessionwatcher.OutputAddress) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.address = addr
 }
 
 func (f *fakeFeed) mirrored() []*frontendv1.FeedRow {
