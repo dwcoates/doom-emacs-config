@@ -1,0 +1,484 @@
+// refusals_e2e_test.go — SPEC.md section C, "Refusal arms" (#51-55).
+//
+// Every test here proves a REFUSAL crossed the real wire, driven either by a
+// named fake-SDK scenario through the real shim, or — for the one arm the
+// contract rules cannot be reached by any scenario prompt — by the
+// documented whole-process env lever. No test in this file writes a store
+// fact, a transcript file, or a wire frame by hand; every fact comes from a
+// real prompt through the real daemon+store+sidecar+shim stack (SPEC.md
+// section B).
+//
+// Contract citations, per test, are in each test's own header comment.
+//
+// NAMING: every unexported helper in this file is prefixed `rf` (area tag).
+// All 20 area files compile into one Go package; a bare, generic name like
+// `awaitFeedRow` has already collided across parallel writers once, so every
+// area's own helpers get their own short tag (project-lead instruction).
+package e2e
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"connectrpc.com/connect"
+
+	"claude-repld/integration/harness"
+)
+
+// ===========================================================================
+// Shared helpers. Local to this file — nothing here is exported for another
+// area file to import (SPEC.md section E: area files touch no shared file
+// but harness_e2e.go/world_test.go/main_test.go).
+// ===========================================================================
+
+// rfConnectCode reads a Connect error's code, or CodeUnknown for anything
+// else — this file's own copy of the same small helper
+// daemon/integration/support_test.go keeps (a different Go module; nothing
+// there is importable from here).
+func rfConnectCode(err error) connect.Code {
+	var cerr *connect.Error
+	if errors.As(err, &cerr) {
+		return cerr.Code()
+	}
+	return connect.CodeUnknown
+}
+
+// rfNamesIntendedArm reports whether a refusal names the exact unlanded
+// error arm daemon/ERROR-ARMS.md documents, in its contracted
+// `intended arm: <Rpc>Error.<arm>: <reason>` spelling.
+func rfNamesIntendedArm(err error, arm string) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "intended arm: ") && strings.Contains(msg, arm)
+}
+
+// rfUserSaid builds the one-block plain-text UserSaid every prompt in this
+// file sends — the same shape world_test.go's own SubmitPrompt helper
+// builds internally, duplicated here because rfSubmitBubblePrompt needs the
+// raw (non-success-asserting) response that helper deliberately does not
+// offer (see its own doc comment).
+func rfUserSaid(text string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{Content: &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
+		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}}},
+	}}}
+}
+
+// rfOpenFeed opens the workspace's root feed (feed == nil) or a subagent
+// bubble's own sub-feed (feed == that bubble row's FeedId, per
+// endpoint_open_feed.proto: "a subagent bubble row's own FeedId ... addresses
+// the feed within it"), failing the test loudly on anything but success.
+func rfOpenFeed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId) *agentreplv1.OpenFeedSuccess {
+	t.Helper()
+	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws, Feed: feed}))
+	if err != nil {
+		t.Fatalf("OpenFeed(feed=%v): %v", feed, err)
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed(feed=%v) = %v, want success", feed, resp.Msg)
+	}
+	return success
+}
+
+// rfAwaitFeedRow opens the given feed (root when feed is nil, a subagent
+// bubble's sub-feed otherwise) and waits until some row satisfies pred,
+// checking the already-served history page first and then the live tail —
+// the same two-step AwaitTurnEnded already uses in world_test.go,
+// generalized to an arbitrary predicate so this file can locate a subagent
+// bubble's own FeedId and a permission ask raised under it.
+func rfAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	t.Helper()
+	success := rfOpenFeed(t, w, ws, feed)
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if pred(row) {
+			return row
+		}
+	}
+	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
+	defer stream.Close()
+	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
+}
+
+// rfSubagentOf answers a feed row's FeedSubagent, whether it arrived as a
+// SYNC subagent's nested activity unit (FeedTurnActivity.subagent) or as a
+// detached subagent's own top-level placement (FeedRow.detached_subagent) —
+// feed.proto: "the same drawn component the detached wrapper carries; a
+// bubble is a sub-feed either way." Nil if the row is neither.
+func rfSubagentOf(row *frontendv1.FeedRow) *frontendv1.FeedSubagent {
+	if s := row.GetActivity().GetSubagent(); s != nil {
+		return s
+	}
+	return row.GetDetachedSubagent().GetSubagent()
+}
+
+// rfSubmitBubblePrompt submits a real prompt addressed at a subagent
+// bubble's own FeedId (SubmitPromptRequest.feed set —
+// endpoint_submit_prompt.proto: "SET = a subagent bubble's feed ... the
+// prompt is addressed to THAT agent"), returning the raw response/error
+// instead of asserting success — world_test.go's own SubmitPrompt helper
+// does the opposite (asserts success), so a refusal-expecting test cannot
+// use it (its own doc comment says as much).
+func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, feed *frontendv1.FeedId, text string) (*connect.Response[agentreplv1.SubmitPromptResponse], error) {
+	t.Helper()
+	return w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace:      ws,
+		Feed:           feed,
+		Said:           rfUserSaid(text),
+		IdempotencyKey: newIdempotencyKey(t),
+		Origin:         e2ePromptOrigin,
+	}))
+}
+
+// ===========================================================================
+// #51 — BubbleRefusedNotDeliverable
+//
+// PROTO-CHANGES.md Landing 7 / endpoint_submit_prompt.proto:
+// SubmitPromptError.bubble_refused{kind: not_deliverable}. shim.md's landing
+// 3 relay: "UpdateAgent to a subagent with a prompt refuses `not_deliverable`"
+// — landing 7 (shim.md's own landing 7 relay) narrowed this rule to carve out
+// ONLY the busy case (#52, `agent_busy`); an IDLE (already-settled) subagent
+// still answers not_deliverable, unchanged. Driven by the `subagent`
+// scenario (golden name `subagent-sync-nested-activity` in the manifest;
+// `!subagent` is its documented prompt — confirmed by reading
+// agent-shim/claude/shim/src/fake/scenarios/subagents.ts directly, since the
+// manifest's golden name and the scenario's own `name`/`prompt` fields
+// differ), whose subagent completes SYNCHRONOUSLY within the driving turn —
+// by the time the turn ends it is settled, never busy.
+// ===========================================================================
+
+func TestBubbleRefusedNotDeliverable(t *testing.T) {
+	// Arrange: drive a synchronous subagent to completion, then find its
+	// settled bubble row.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	turn := SubmitPrompt(t, w, ws, "!subagent")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	bubble := rfAwaitFeedRow(t, w, ws, nil, "the settled sync-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		s := rfSubagentOf(r)
+		return s != nil && s.GetSettled() != nil
+	})
+
+	// Act: address a fresh prompt at the now-idle subagent's own bubble.
+	resp, err := rfSubmitBubblePrompt(t, w, ws, bubble.GetId(), "are you still there?")
+
+	// Assert: SubmitPromptError.bubble_refused{not_deliverable}.
+	if err != nil {
+		t.Fatalf("SubmitPrompt(bubble) = error %v, want a typed SubmitPromptError", err)
+	}
+	refused := resp.Msg.GetError().GetBubbleRefused()
+	if refused == nil {
+		t.Fatalf("SubmitPrompt(bubble) = %v, want error.bubble_refused", resp.Msg)
+	}
+	if refused.GetNotDeliverable() == nil {
+		t.Fatalf("bubble_refused.kind = %v, want not_deliverable (settled subagent)", refused)
+	}
+}
+
+// ===========================================================================
+// #52 — BubbleRefusedAgentBusy
+//
+// shim.md landing 7 relay: "UpdateAgentFailure.agent_busy: an
+// UpdateAgent{prompt} to a subagent whose own turn is running is refused
+// with this arm"; endpoint_submit_prompt.proto:
+// SubmitPromptError.bubble_refused{kind: agent_busy}. Driven by the
+// `subagent-detached-live` scenario (agent-shim/claude/shim/src/fake/
+// scenarios/subagents.ts), whose subagent is "left LIVE after the turn ends"
+// and "Nothing here ever finishes the agent" (its own doc comment) — a
+// deterministic, never-settles busy target, avoiding any race against a
+// subagent that might complete on its own.
+// ===========================================================================
+
+func TestBubbleRefusedAgentBusy(t *testing.T) {
+	// Arrange: drive the never-settling detached subagent, then find its
+	// still-live bubble row.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	turn := SubmitPrompt(t, w, ws, "!subagent-detached-live")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	bubble := rfAwaitFeedRow(t, w, ws, nil, "the live detached-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		s := rfSubagentOf(r)
+		return s != nil && s.GetLive() != nil
+	})
+
+	// Act: address a fresh prompt at the still-running subagent's bubble.
+	resp, err := rfSubmitBubblePrompt(t, w, ws, bubble.GetId(), "status update please")
+
+	// Assert: SubmitPromptError.bubble_refused{agent_busy}.
+	if err != nil {
+		t.Fatalf("SubmitPrompt(bubble) = error %v, want a typed SubmitPromptError", err)
+	}
+	refused := resp.Msg.GetError().GetBubbleRefused()
+	if refused == nil {
+		t.Fatalf("SubmitPrompt(bubble) = %v, want error.bubble_refused", resp.Msg)
+	}
+	if refused.GetAgentBusy() == nil {
+		t.Fatalf("bubble_refused.kind = %v, want agent_busy (live subagent)", refused)
+	}
+}
+
+// ===========================================================================
+// #53 — UnknownAgentOnUpdateAgent
+//
+// shim.v1 UpdateAgentFailure.kind == unknown_agent (Landing 1, "OWN ACCORD"
+// arm list, PROTO-CHANGES.md). daemon/ERROR-ARMS.md ("Interrupt /
+// AnswerPermission / AnswerQuestion") records `unknown_agent` (among others)
+// as an arm relayed BY NAME but with NO landed `<Rpc>Error` field yet: the
+// daemon answers a raw Connect error, CodeFailedPrecondition, whose message
+// is exactly `intended arm: <RpcName>Error.<arm_name>: <reason>`
+// (daemon/ERROR-ARMS.md's own header spells this format; `server.UnlandedArm`
+// is the one helper that produces it). This row is unmodified by landing 7
+// (which touched only the bubble_refused/agent_busy rows above it), so it is
+// still the current, binding shape.
+//
+// No client-facing rpc lets a caller name an AgentId directly (Interrupt
+// addresses a TURN or a detached bubble's FeedId; AnswerPermission/
+// AnswerQuestion address a card's FeedId) — the daemon resolves the target
+// AgentId itself from the addressed card/bubble. So "an agent id the session
+// does not recognize" is reached by making the daemon resolve to an agent
+// the SHIM has already forgotten: raise a gated permission ask under a
+// detached subagent (`subagent-detached-live`, whose own doc comment
+// promises "an AgentPermission raised UNDER the subagent"), STOP that
+// subagent (its own doc comment: "AgentSubagentFailure.cause=stopped_by_user
+// when the stop lands"), then answer the now-orphaned permission card.
+//
+// OPEN QUESTION (flagged, not guessed around): whether an ended subagent's
+// own still-open ask is answered `unknown_agent` (this test's assertion) or
+// is itself auto-concluded by the stop (which would answer the ALREADY-
+// TYPED, ALREADY-LANDED `ask_not_standing` arm instead — a normal
+// AnswerPermissionError, not a Connect error at all). Neither daemon.md nor
+// ERROR-ARMS.md states which; this test asserts the ERROR-ARMS.md-documented
+// shape as the more specific, more recently recorded contract fact. If the
+// project lead's run shows `ask_not_standing` instead, that is exactly the
+// kind of "contract point turned out ambiguous" finding this suite exists to
+// surface, not a defect in this test's authorship.
+// ===========================================================================
+
+func TestUnknownAgentOnUpdateAgent(t *testing.T) {
+	// Arrange: raise a permission ask under a detached subagent, then stop
+	// that subagent out from under its own still-open ask.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	turn := SubmitPrompt(t, w, ws, "!subagent-detached-live")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	bubble := rfAwaitFeedRow(t, w, ws, nil, "the live detached-subagent bubble", func(r *frontendv1.FeedRow) bool {
+		s := rfSubagentOf(r)
+		return s != nil && s.GetLive() != nil
+	})
+	permission := rfAwaitFeedRow(t, w, ws, bubble.GetId(), "a permission ask raised under the subagent", func(r *frontendv1.FeedRow) bool {
+		return r.GetPermission().GetOpen() != nil
+	})
+
+	interruptResp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ws,
+		Target:    &agentreplv1.InterruptRequest_Detached{Detached: bubble.GetId()},
+	}))
+	if err != nil {
+		t.Fatalf("Interrupt(detached) = error %v, want success (stopping the live subagent)", err)
+	}
+	if interruptResp.Msg.GetSuccess().GetInterruptedDetached() == nil {
+		t.Fatalf("Interrupt(detached) = %v, want success.interrupted_detached", interruptResp.Msg)
+	}
+
+	// Act: answer the now-orphaned permission ask.
+	_, err = w.Client().AnswerPermission(w.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace:  ws,
+		Permission: permission.GetId(),
+		Answer:     &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{}},
+	}))
+
+	// Assert: the daemon/ERROR-ARMS.md documented unlanded-arm shape.
+	if err == nil {
+		t.Fatalf("AnswerPermission(orphaned ask) = success, want a refusal (the addressed agent is gone)")
+	}
+	if code := rfConnectCode(err); code != connect.CodeFailedPrecondition {
+		t.Fatalf("AnswerPermission(orphaned ask) code = %v, want CodeFailedPrecondition (%s)", code, err)
+	}
+	if !rfNamesIntendedArm(err, "AnswerPermissionError.unknown_agent") {
+		t.Fatalf("AnswerPermission(orphaned ask) = %v, want the intended-arm spelling for AnswerPermissionError.unknown_agent", err)
+	}
+}
+
+// ===========================================================================
+// #54 — StartSessionVendorStartFailed (+ its retry-recovery half)
+//
+// shim.v1 StartSessionFailure.cause.vendor_start_failed
+// (proto/src/shim/v1/endpoint_start_session.proto). SPEC.md section F item 3
+// (RULED): StartSessionRequest carries NO prompt text, so no scenario prompt
+// can ever select this arm — it is reached only through the fake SDK's
+// whole-process env lever, AGENT_REPL_FAKE_REFUSE=start(-once)
+// (src/fake/index.ts lines 124-142, quoted in SPEC.md), which makes
+// createFakeQuery throw synchronously on StartSession, which the shim turns
+// into vendor_start_failed (confirmed directly by that file's own comment at
+// the throw site: "StartSession turns this into `vendor_start_failed`").
+// This lever is a whole-PROCESS knob, safe here only because NewWorld gives
+// each test its own daemon+store+sidecar+shim world.
+//
+// OPEN QUESTION (flagged, not guessed around): neither daemon.md,
+// PROTO-CHANGES.md nor daemon/ERROR-ARMS.md states which daemon-visible fact
+// a StartSession-level vendor_start_failed becomes. The two typed candidates
+// on the client-facing OpenWorkspace verb this test drives
+// (OpenWorkspaceError.spawn_failed: "Spawning the session's shim failed")
+// and on SessionHealth/WatchHostWorkspace (SessionFault/HostFault
+// .shim_start_failed: "Starting the session's shim failed") both name the
+// SHIM PROCESS failing to start — a different failure layer than the vendor
+// SDK failing to start INSIDE an already-running shim, which is what this
+// lever actually provokes (the real shim process starts and runs fine; only
+// its StartSession RPC answer is refused). No arm in either vocabulary
+// names "the vendor failed to start" distinctly. This test therefore avoids
+// pinning a specific arm and instead asserts the two facts the contract DOES
+// commit to unconditionally: (1) OpenWorkspaceSuccess's own doc comment
+// ("every visible effect arrives on the streams") together with "Health
+// verdicts: unhealthy is an ANSWER" (daemon.md, "Failure classification")
+// means a refused vendor start must NEVER present as a silently healthy,
+// usable session; (2) start-once's own doc comment ("a failed start leaves
+// the engine as it found it ... the same warm shim serves the conversation")
+// means the SAME workspace recovers and serves a real turn once the
+// transient condition clears. The exact fault-kind mapping is left to the
+// project lead's run to confirm.
+// ===========================================================================
+
+// rfPollInterval is this test family's own re-ask cadence for the unary
+// SessionHealth verb (SPEC.md section B: "a bounded poll of a store read
+// verb" is one of the three sanctioned wait shapes; SessionHealth is a
+// point-in-time question with no server-streaming form, so a bounded re-ask
+// is its equivalent of a watch-stream frame). Matches world_test.go's own
+// pollInterval value; kept as this file's own named constant rather than
+// reusing that unexported one, per this file's `rf` naming convention.
+const rfPollInterval = 20 * time.Millisecond
+
+// rfAwaitUnhealthyOrOpenFailure is TestStartSessionVendorStartFailed's
+// shared "did the refusal become observable" check (see that test's OPEN
+// QUESTION paragraph for why it accepts either shape rather than pinning
+// one).
+func rfAwaitUnhealthyOrOpenFailure(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a typed OpenWorkspaceResponse", err)
+	}
+	if resp.Msg.GetError() != nil {
+		t.Logf("OpenWorkspace observed the refusal synchronously: %v", resp.Msg.GetError())
+		return
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace = %v, want success or error", resp.Msg)
+	}
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	ticker := time.NewTicker(rfPollInterval)
+	defer ticker.Stop()
+	for {
+		hresp, herr := w.Client().SessionHealth(ctx, connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
+		if herr == nil && len(hresp.Msg.GetSuccess().GetUnhealthy().GetFaults()) > 0 {
+			t.Logf("SessionHealth observed the refusal asynchronously: %v", hresp.Msg.GetSuccess().GetUnhealthy())
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("e2e: OpenWorkspace answered success and SessionHealth never reported unhealthy within %s "+
+				"(want: the refused vendor start to become observable one way or the other)", DefaultTimeout)
+		case <-ticker.C:
+		}
+	}
+}
+
+func TestStartSessionVendorStartFailed(t *testing.T) {
+	// Arrange: a world whose every StartSession is refused by the vendor.
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start"}}})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// Act + Assert: opening the workspace never presents a silently healthy
+	// session (see the OPEN QUESTION above for why this accepts either
+	// observable shape).
+	rfAwaitUnhealthyOrOpenFailure(t, w, ws)
+}
+
+func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
+	// Arrange: a world whose FIRST StartSession only is refused.
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start-once"}}})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// Act: the first open attempt consumes the one scripted refusal.
+	rfAwaitUnhealthyOrOpenFailure(t, w, ws)
+
+	// Act: retry the same verb — start-once's own doc comment: "something
+	// was wrong, it was fixed, the same warm shim serves the conversation."
+	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace (retry) = error %v, want success (the refusal was one-shot)", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace (retry) = %v, want success", resp.Msg)
+	}
+
+	// Assert: the recovered session serves a real turn end to end.
+	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
+	row := AwaitTurnEnded(t, w, ws, turn)
+	if row.GetTurnEnded() == nil {
+		t.Fatalf("the recovered session's turn ended row = %v, want a terminal", row)
+	}
+}
+
+// ===========================================================================
+// #55 — KillTurnNotTheOpenTurn: FLAGGED, NOT FABRICATED.
+//
+// shim.v1 KillTurnFailure.cause.not_the_open_turn
+// (proto/src/shim/v1/endpoint_kill_turn.proto): "The named turn is not the
+// open one." KillTurn is a shim.v1-only rpc (daemon <-> shim); no
+// client-facing agentrepl.v1 rpc lets a caller name a TurnId to kill
+// (confirmed: `grep -rn "conversation.v1.TurnId" proto/src/agentrepl/`
+// finds it only on SubmitPromptRequest's workspace-scoped echo and
+// UpdateHeldPrompt, never on anything that addresses a kill). The daemon's
+// own Interrupt{target: turn} carries NO turn id at all — it always means
+// "whichever turn is open now" — so the daemon must always pass ITS OWN
+// currently-tracked open turn id to shim.v1 KillTurn; a client cannot choose
+// a turn id at all, let alone a stale one.
+//
+// The only way this arm could fire for real is an internal TOCTOU race
+// between the daemon deciding which turn is open and the shim's own turn
+// state moving on (e.g. a held prompt's promotion) before the KillTurn RPC
+// lands — not a wire fact any documented scenario or env lever can select,
+// and not one this suite's harness exposes a synchronization primitive for
+// (no "pause the daemon between its open-turn read and its KillTurn call"
+// hook exists). Provoking it would require either fabricating the race with
+// concurrent goroutines and NO deterministic interleaving guarantee (this
+// project's own no-sleep, no-flaky-synchronization rule forbids shipping
+// that as a real assertion) or a new harness seam this brief expressly
+// forbids inventing.
+//
+// Per SPEC.md section F's own disposition menu for exactly this shape of
+// question (ruling 1's "flag rather than fabricate" precedent, and ruling 3's
+// original text before its env-lever resolution was found): this is left
+// OPEN rather than guessed at. Skipped, not deleted, so it stays visible in
+// `go test -list` and in coverage tallies as a known gap for the project
+// lead to rule on, instead of silently absent.
+// ===========================================================================
+
+func TestKillTurnNotTheOpenTurn(t *testing.T) {
+	t.Skip("e2e: KillTurnFailure.not_the_open_turn is driven by an internal " +
+		"daemon/shim race with no client-observable trigger and no documented " +
+		"scenario or env lever (see this test's own header comment); flagged " +
+		"as an open question for the project lead rather than fabricated")
+}
