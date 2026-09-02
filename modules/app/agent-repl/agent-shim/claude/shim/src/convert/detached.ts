@@ -164,6 +164,7 @@ export function bashDetachmentEntry(
   toolUseId: string,
   structured: unknown,
   resultContent?: conversationv1.ToolResultContent,
+  taskKinds?: TaskKindRegistry,
 ): PersistEntry | undefined {
   const output = structured as Record<string, unknown> | undefined;
   // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
@@ -182,6 +183,9 @@ export function bashDetachmentEntry(
     { vendor_task_id: vendorTaskId, work: toolUseId, tool_use_id: toolUseId, cause },
     "a shell command moved to the background rather than ending",
   );
+  // SO THE `task_notification` DOES NOT OVERWRITE IT with a hard-coded
+  // `requested` when it upserts the same row to add the output path.
+  taskKinds?.rememberCause(vendorTaskId, cause);
   return detachmentEntry(context, agentId, vendorUuid, {
     detachedFromToolUseId: toolUseId,
     cause,
@@ -279,6 +283,19 @@ export interface TaskKindRegistry {
   /** Remember one task's kind, forgetting the oldest when the cap is reached. */
   remember(taskId: string, taskType: string): void;
   /**
+   * Remember WHY a task's work left the turn.
+   *
+   * THE CAUSE IS STATED ONCE AND RESTATED NEVER. A shell's cause rides its own
+   * tool result (`backgroundedByUser`, `timedOutAfterMs`); an agent's rides
+   * `task_started` or, for a hand-backgrounded one, `task_updated`. The
+   * `task_notification` that later supplies the output path upserts THE SAME
+   * ROW, so a notification that restated a hard-coded `requested` would
+   * silently overwrite a `by_user` or `timed_out` cause with the wrong one.
+   */
+  rememberCause(taskId: string, cause: DetachCause): void;
+  /** The cause remembered for a task, or `undefined` if none was stated. */
+  causeOf(taskId: string): DetachCause | undefined;
+  /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
    *
    * A task whose kind was never stated answers `true`: the subagent terminal is
@@ -291,24 +308,33 @@ export interface TaskKindRegistry {
 }
 
 export function createTaskKindRegistry(): TaskKindRegistry {
-  const kinds = new Map<string, string>();
+  const facts = new Map<string, { kind?: string; cause?: DetachCause }>();
+  /** Make room for one more task, forgetting the oldest when the cap is hit. */
+  const reserve = (): void => {
+    if (facts.size < TASK_KIND_CAPACITY) return;
+    const [oldest] = facts.keys();
+    if (oldest === undefined) return;
+    facts.delete(oldest);
+    LOGGER.log(
+      { level: "warn", task_id: oldest },
+      "the task-facts table is full; the oldest task's kind and cause are forgotten and its notification cannot be typed",
+    );
+  };
   return {
     remember(taskId, taskType) {
-      if (kinds.size >= TASK_KIND_CAPACITY) {
-        const [oldest] = kinds.keys();
-        if (oldest !== undefined) {
-          kinds.delete(oldest);
-          LOGGER.log(
-            { level: "warn", task_id: oldest },
-            "the task-kind table is full; the oldest task's kind is forgotten and its notification cannot be typed",
-          );
-        }
-      }
-      kinds.set(taskId, taskType);
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), kind: taskType });
+    },
+    rememberCause(taskId, cause) {
+      reserve();
+      facts.set(taskId, { ...facts.get(taskId), cause });
+    },
+    causeOf(taskId) {
+      return facts.get(taskId)?.cause;
     },
     settlesAsSubagent(taskId) {
-      const kind = kinds.get(taskId);
-      kinds.delete(taskId);
+      const kind = facts.get(taskId)?.kind;
+      facts.delete(taskId);
       return kind === undefined || kind === "local_agent";
     },
   };
@@ -373,6 +399,26 @@ export function convertDetached(
       if (raw.task_type !== undefined && raw.task_type !== "") {
         taskKinds.remember(taskId, raw.task_type);
       }
+      // A SHELL TASK IS NOT A DETACHMENT YET. The vendor tracks a FOREGROUND
+      // shell as a task the moment it starts — that is what makes Ctrl-B
+      // addressable at all — so `task_started` says nothing about whether the
+      // work left the turn, let alone why. The Bash result is the one record
+      // that states the cause (`backgroundedByUser`, `timedOutAfterMs`, or
+      // neither for a `run_in_background` launch), and it is where the
+      // announcement is made. Announcing `requested` here instead put a
+      // WRONG-CAUSE announcement on the stream ahead of the right one, which is
+      // exactly what `!ctrl-b` observed. Symmetrical with `task_notification`,
+      // which already refuses to settle a shell task's unit for the same
+      // reason. (No real capture carries a `task` message at all; the ctrl-b
+      // and timeout captures announce from the result.)
+      if (raw.task_type === "local_bash") {
+        LOGGER.log(
+          { uuid, task_id: taskId, tool_use_id: toolUseId },
+          "a shell task started; its own tool result announces the detachment and states the cause",
+        );
+        return [];
+      }
+      taskKinds.rememberCause(taskId, "requested");
       LOGGER.log(
         { uuid, task_id: taskId, tool_use_id: toolUseId, task_type: raw.task_type ?? "" },
         "work left the turn",
@@ -404,6 +450,7 @@ export function convertDetached(
       // a person backgrounded running work by hand, which the shell path
       // harvests from its tool result and the agent path only states here.
       LOGGER.log({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
+      taskKinds.rememberCause(taskId, "by_user");
       return [
         detachmentEntry(context, agentId, uuid, {
           detachedFromToolUseId: toolUseId,
@@ -425,7 +472,10 @@ export function convertDetached(
         entries.push(
           detachmentEntry(context, agentId, uuid, {
             detachedFromToolUseId: toolUseId,
-            cause: "requested",
+            // THE REMEMBERED CAUSE, never a fresh `requested`: this row is an
+            // UPSERT of the announcement already made, and the notification
+            // states nothing about why the work left.
+            cause: taskKinds.causeOf(taskId) ?? "requested",
             outputPath: raw.output_file,
             outputReadable: true,
           }),

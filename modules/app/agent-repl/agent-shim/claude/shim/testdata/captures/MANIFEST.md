@@ -58,7 +58,7 @@ subagent, and no `compact_boundary` / `isCompactSummary` record anywhere —
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 56 KB |
 | `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | single turn | 96 KB |
 | `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | single turn | 108 KB |
-| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `subagent` → `success.completed` | single turn | 92 KB |
+| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | single turn | 92 KB |
 | `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | single turn | 108 KB |
 | `diagnostics` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 116 KB |
 | `edit` | 2026-09-01 | `hook`, `thinking`, `read`, `edit`, `response` → `success.completed` | single turn | 80 KB |
@@ -86,7 +86,7 @@ subagent, and no `compact_boundary` / `isCompactSummary` record anywhere —
 | `permission-denied-by-user` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 52 KB |
 | `permission-mode-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | single turn | 32 KB |
 | `permission-undecidable-parked` | 2026-09-02 | `hook`, `thinking`, `bash` → `success.interrupted` | single turn | 32 KB |
-| `plan-mode-enter-exit` | 2026-09-01 | `hook`, `thinking`, `planMode`, `response`, `bash` → `success.completed` | single turn | 116 KB |
+| `plan-mode-enter-exit` | 2026-09-01 | `hook`, `thinking`, `planMode`, `subagent`, `response`, `bash` → `success.completed` | single turn | 116 KB |
 | `prose-streamed` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 56 KB |
 | `push-notification-not-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | single turn | 92 KB |
 | `push-notification-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | single turn | 76 KB |
@@ -98,10 +98,10 @@ subagent, and no `compact_boundary` / `isCompactSummary` record anywhere —
 | `read-whole-head-range` | 2026-09-01 | `hook`, `thinking`, `response`, `read` → `success.completed` | single turn | 84 KB |
 | `report-findings` | 2026-09-01 | `hook`, `thinking`, `read`, `reportFindings`, `response` → `success.completed` | single turn | 80 KB |
 | `schedule-wakeup-schedule-and-stop` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `bash`, `response` → `success.completed` | single turn | 148 KB |
-| `send-message-queued-and-resumed` | 2026-09-01 | `hook`, `thinking`, `response`, `sendMessage`, `bash` → `success.completed` | single turn | 140 KB |
+| `send-message-queued-and-resumed` | 2026-09-01 | `hook`, `thinking`, `response`, `subagent`, `sendMessage`, `bash` → `success.completed` | single turn | 140 KB |
 | `skill-invocation` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `read`, `response` → `success.completed` | single turn | 76 KB |
-| `subagent-detached` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 92 KB |
-| `subagent-sync-nested-activity` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response`, `subagent` → `success.completed` | single turn | 104 KB |
+| `subagent-detached` | 2026-09-02 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | single turn | 92 KB |
+| `subagent-sync-nested-activity` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `read`, `response` → `success.completed` | single turn | 104 KB |
 | `task-acts-create-change-reject` | 2026-09-01 | `hook`, `thinking`, `taskAct`, `response` → `success.completed` | single turn | 144 KB |
 | `turn-stop-error-during-execution` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | single turn | 32 KB |
 | `turn-stop-hook-stop` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | residue `vendor_specific/system/notification` | 188 KB |
