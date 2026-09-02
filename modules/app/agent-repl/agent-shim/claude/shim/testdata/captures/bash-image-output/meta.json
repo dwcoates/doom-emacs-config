@@ -1,0 +1,29 @@
+{
+  "scenario": "bash-image-output",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `bash shot.sh`, which writes a small PNG, then read that PNG back with the Read tool and describe it.",
+  "prompts": [
+    {
+      "text": "Run `bash shot.sh`, which writes a small PNG, then read that PNG back with the Read tool and describe it.",
+      "resume": false
+    }
+  ],
+  "world": "bash-image-output",
+  "cwd_init": null,
+  "vendor_session_id": "43c594e1-943b-404c-8f55-f78c39b4755f",
+  "manual": null,
+  "expect": [
+    "tool:Bash",
+    "tool:Read(image)",
+    "tool_result:read(type=image)",
+    "content_block:image"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-image-output-mGCNZQ-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:36.911Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

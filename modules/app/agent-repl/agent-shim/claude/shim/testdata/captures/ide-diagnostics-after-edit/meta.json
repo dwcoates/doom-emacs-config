@@ -1,0 +1,27 @@
+{
+  "scenario": "ide-diagnostics-after-edit",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Edit broken.ts so the function returns a number instead of a string, then wait for any editor diagnostics to arrive and tell me what they said.",
+  "prompts": [
+    {
+      "text": "Edit broken.ts so the function returns a number instead of a string, then wait for any editor diagnostics to arrive and tell me what they said.",
+      "resume": false
+    }
+  ],
+  "world": "ide-diagnostics-after-edit",
+  "cwd_init": null,
+  "vendor_session_id": "5c4f1ee5-d4e2-4930-8828-ce26705e5ba4",
+  "manual": "Run with an IDE/LSP attached to the scratch cwd (the diagnostics record only exists when an editor integration is connected). Without one the edit still captures, but the diagnostics consequence arm will be absent.",
+  "expect": [
+    "tool:Edit",
+    "attachment:diagnostics"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-ide-diagnostics-after-edit-sdDDre-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:49:16.566Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
