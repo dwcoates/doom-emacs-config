@@ -37,7 +37,13 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import type { AppContext } from "./rpc/context.js";
 import { isMalformedView } from "./rpc/malformed.js";
-import { crossCuttingSentence } from "./rpc/refuse.js";
+import {
+  clearRefusals,
+  drawMalformedRefusal,
+  drawTransportRefusal,
+  drawTypedRefusal,
+  type SentenceTable,
+} from "./rpc/refuse.js";
 import { requireCase, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 
@@ -154,21 +160,24 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
     );
     const result = requireCase(response.result, "OpenExternalResponse.result");
     if (result.case === "success") return;
-    const cause = requireCase(
-      (result.value as OpenExternalError).cause,
+    const arm = drawTypedRefusal(
+      refusalHost(anchor),
       "OpenExternalError.cause",
+      "OpenExternal",
+      (result.value as OpenExternalError).cause,
+      EXTERNAL_SENTENCES,
     );
-    const say = crossCuttingSentence("OpenExternal", cause) ?? openExternalRefusal(cause);
-    drawRefusal(anchor, cause.case, say);
     log("warn", `OpenExternal refused ${url}`, {
       operation: "link.open-external-refused",
-      context: { url, arm: cause.case, sentence: say },
+      context: { url, arm },
     });
   } catch (err) {
     // A link that went nowhere must say so: the user just clicked expecting a
     // browser window, and silence would read as a dead rail.
-    if (isMalformedView(err)) throw err;
-    drawRefusal(anchor, "transport", "the daemon could not be reached");
+    if (drawMalformedRefusal(ctx, refusalHost(anchor), "link.open-external-unreadable", err)) {
+      return;
+    }
+    drawTransportRefusal(refusalHost(anchor));
     log("error", `OpenExternal failed for ${url}: ${String(err)}`, {
       operation: "link.open-external-failed",
       context: { url, cause: err },
@@ -192,19 +201,22 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
     );
     const result = requireCase(response.result, "OpenInEditorResponse.result");
     if (result.case === "success") return;
-    const cause = requireCase(
-      (result.value as OpenInEditorError).cause,
+    const arm = drawTypedRefusal(
+      refusalHost(anchor),
       "OpenInEditorError.cause",
+      "OpenInEditor",
+      (result.value as OpenInEditorError).cause,
+      EDITOR_SENTENCES,
     );
-    const say = crossCuttingSentence("OpenInEditor", cause) ?? openInEditorRefusal(cause);
-    drawRefusal(anchor, cause.case, say);
     log("warn", `OpenInEditor refused ${spec.path}`, {
       operation: "link.open-in-editor-refused",
-      context: { path: spec.path, line: spec.line, arm: cause.case, sentence: say },
+      context: { path: spec.path, line: spec.line, arm },
     });
   } catch (err) {
-    if (isMalformedView(err)) throw err;
-    drawRefusal(anchor, "transport", "the daemon could not be reached");
+    if (drawMalformedRefusal(ctx, refusalHost(anchor), "link.open-in-editor-unreadable", err)) {
+      return;
+    }
+    drawTransportRefusal(refusalHost(anchor));
     log("error", `OpenInEditor failed for ${spec.path}: ${String(err)}`, {
       operation: "link.open-in-editor-failed",
       context: { path: spec.path, line: spec.line, cause: err },
@@ -213,18 +225,17 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
 }
 
 /**
- * The refusal, AT THE CALL SITE.
+ * Where a link's refusal is drawn.
  *
- * A `<Method>Error` is an answer to this click and belongs on the control that
- * was clicked — never as pushed state, which would put it somewhere the user
- * is not looking. The anchor carries it as a `title` (the hover the platform
- * already gives) and as the shared `.refusal[data-arm]` marker the integration
- * suite targets.
+ * BESIDE the anchor, not on it: the sentence carries the arm's own facts (the
+ * registry dir, a successor's address) and an anchor whose text is a url has
+ * nowhere to put them. The anchor's parent is the row or line the link sits
+ * in, so the refusal lands as its next sibling exactly as the hook contract
+ * says; a detached anchor keeps it inside itself, which is still at the call
+ * site.
  */
-function drawRefusal(anchor: HTMLElement, arm: string, message: string): void {
-  anchor.classList.add("refusal");
-  anchor.setAttribute("data-arm", arm);
-  anchor.title = message;
+function refusalHost(anchor: HTMLElement): HTMLElement {
+  return anchor.parentElement ?? anchor;
 }
 
 /** `OpenExternalError`'s cause union, narrowed to a SET arm. */
@@ -268,8 +279,25 @@ export function openInEditorRefusal(cause: OpenInEditorCause): string {
   }
 }
 
+/**
+ * The two endpoints' OWN arms, in the shape the one refusal hook takes.
+ *
+ * The cross-cutting four are worded once in `rpc/refusal.ts` and never
+ * repeated here; these tables carry only what each verb alone can mean.
+ */
+const EXTERNAL_SENTENCES: SentenceTable = {
+  invalidUrl: () => openExternalRefusal({ case: "invalidUrl", value: {} } as OpenExternalCause),
+  noBrowserConfigured: () =>
+    openExternalRefusal({ case: "noBrowserConfigured", value: {} } as OpenExternalCause),
+  launchFailed: (value) =>
+    openExternalRefusal({ case: "launchFailed", value } as OpenExternalCause),
+};
+
+const EDITOR_SENTENCES: SentenceTable = {
+  pathEscapesWorkspace: () =>
+    openInEditorRefusal({ case: "pathEscapesWorkspace", value: {} } as OpenInEditorCause),
+};
+
 function clearRefusal(anchor: HTMLElement): void {
-  anchor.classList.remove("refusal");
-  anchor.removeAttribute("data-arm");
-  anchor.removeAttribute("title");
+  clearRefusals(refusalHost(anchor));
 }
