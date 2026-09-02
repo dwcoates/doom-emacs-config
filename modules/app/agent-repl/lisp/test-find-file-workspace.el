@@ -27,6 +27,8 @@
 (defvar agent-repl-find-file-workspace-root-function)
 (defvar agent-repl-find-file-workspace-open-function)
 (defvar agent-repl-find-file-workspace-create-function)
+(defvar agent-repl--ffw-pending)
+(defvar agent-repl-roster-update-functions)
 
 (defun agent-repl-test--ffw-home-path (relative)
   "Return the canonical form of RELATIVE under the user's home directory."
@@ -180,6 +182,7 @@
       (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
              (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
              (persp-names-cache nil)
+             (agent-repl--ffw-pending (make-hash-table :test 'equal))
              (opened nil)
              (agent-repl-find-file-workspace-open-function
               (lambda (ws) (setq opened ws))))
@@ -195,6 +198,7 @@
       (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
              (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
              (persp-names-cache nil)
+             (agent-repl--ffw-pending (make-hash-table :test 'equal))
              (created nil)
              (agent-repl-find-file-workspace-create-function
               (lambda (dir) (setq created dir))))
@@ -309,6 +313,110 @@
   "A filename handed to a display primitive names no buffer and is not routed."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--ffw-target-buffer "~/no-such-agent-repl-buffer.el"))))
+
+;;;; ---- Pending placements ----
+
+(defmacro agent-repl-test--ffw-with-pending (&rest body)
+  "Run BODY with an EMPTY pending-placement table of its own."
+  (declare (indent 0))
+  `(let ((agent-repl--ffw-pending (make-hash-table :test 'equal)))
+     ,@body))
+
+(ert-deftest agent-repl-test-ffw-pending-fires-when-the-tab-arrives ()
+  "A held file is placed by the roster push that opens its workspace's tab."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+               (placed nil))
+          (agent-repl--ffw-pending-register root buf)
+          ;; The tab arrives: the workspace is registered at the root and open.
+          (agent-repl--ws-put "ffw-ws" :project-dir root)
+          (let ((persp-names-cache '("ffw-ws")))
+            (cl-letf (((symbol-function 'agent-repl--ws-switch) (lambda (_ws &rest _) nil))
+                      ((symbol-function 'agent-repl--ffw-place)
+                       (lambda (b) (setq placed b))))
+              (agent-repl--ffw-pending-fire)))
+          (should (eq placed buf))
+          (should (zerop (hash-table-count agent-repl--ffw-pending))))))))
+
+(ert-deftest agent-repl-test-ffw-pending-latest-wins-for-one-root ()
+  "A second visit into a still-waiting root replaces the first file."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer first "ffw-repo/a.el"
+        (agent-repl-test--ffw-with-file-buffer second "ffw-repo/b.el"
+          (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+            (agent-repl--ffw-pending-register root first)
+            (agent-repl--ffw-pending-register root second)
+            (should (= (hash-table-count agent-repl--ffw-pending) 1))
+            (should (eq (gethash root agent-repl--ffw-pending) second))))))))
+
+(ert-deftest agent-repl-test-ffw-pending-dropped-when-the-verb-refuses ()
+  "A refused open verb drops the pending entry and falls back to ordinary display."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+          (should-not (agent-repl--ffw-acquire
+                       root buf (lambda () (error "daemon refused"))))
+          (should (zerop (hash-table-count agent-repl--ffw-pending))))))))
+
+(ert-deftest agent-repl-test-ffw-pending-holds-the-display-until-arrival ()
+  "A verb that returns before the tab exists HOLDS the display rather than losing it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+              (persp-names-cache nil))
+          (should (eq (agent-repl--ffw-acquire root buf #'ignore) 'pending))
+          (should (eq (gethash root agent-repl--ffw-pending) buf)))))))
+
+(ert-deftest agent-repl-test-ffw-pending-ignores-another-roots-arrival ()
+  "A tab arriving for a DIFFERENT root leaves this root's placement pending."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+               (other (agent-repl-test--ffw-home-path "ffw-other"))
+               (placed nil))
+          (agent-repl--ffw-pending-register root buf)
+          (agent-repl--ws-put "other-ws" :project-dir other)
+          (let ((persp-names-cache '("other-ws")))
+            (cl-letf (((symbol-function 'agent-repl--ffw-place)
+                       (lambda (b) (setq placed b))))
+              (agent-repl--ffw-pending-fire)))
+          (should-not placed)
+          (should (eq (gethash root agent-repl--ffw-pending) buf)))))))
+
+(ert-deftest agent-repl-test-ffw-pending-not-registered-when-disabled ()
+  "Routing off means no pending placement is ever taken."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let ((agent-repl-find-file-workspace-enabled nil)
+              (agent-repl-find-file-workspace-root-function
+               (lambda (_dir) (agent-repl-test--ffw-home-path "ffw-repo")))
+              (orig-calls 0))
+          (agent-repl--ffw-display-advice
+           (lambda (&rest _) (cl-incf orig-calls)) buf)
+          (should (= orig-calls 1))
+          (should (zerop (hash-table-count agent-repl--ffw-pending))))))))
+
+(ert-deftest agent-repl-test-ffw-pending-drops-a-dead-buffer ()
+  "A held buffer the user killed is dropped rather than placed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (let ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+            (dead (generate-new-buffer " *agent-repl-ffw-dead*")))
+        (agent-repl--ffw-pending-register root dead)
+        (kill-buffer dead)
+        (agent-repl--ffw-pending-fire)
+        (should (zerop (hash-table-count agent-repl--ffw-pending)))))))
+
+(ert-deftest agent-repl-test-ffw-pending-fire-is-on-the-roster-hook ()
+  "The arrival point is the roster's post-reconcile hook, not a timer."
+  (should (memq 'agent-repl--ffw-pending-fire agent-repl-roster-update-functions)))
 
 (provide 'test-find-file-workspace)
 
