@@ -300,6 +300,14 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   TEAMLEAD.md until no critiques; (3) final report with the dead-code
   deletion / kept-with-reason lists, rulings, deviations (R-DEADCODE ran
   opus-low), UX gaps filled, toss-ups for the user.
+- RESUMED (user go signal). R-AUDIT2-PROD MERGED + R-SUITE-2 MERGED
+  (b4cb2bc0e): promote hook + roster re-subscribe (#1), SubmitPrompt
+  handover arms route to the host (#32), fork-without-parent refused
+  (#26), hook containment + dead-conn drain refusal; all 46 audit-2
+  findings pinned, fake records request headers. R-SUITE-2 surfaced three
+  more production defects (see its report; follow-up R-AUDIT2-PROD-2).
+  R-DEADCODE-2 resumed by message (five commits landed). Worktrees left:
+  deadcode2 only.
 
 ## 1. Module map (final tree of lisp/)
 
@@ -507,7 +515,13 @@ are deleted by the verbs agent once verbs.el replaces them.
   it, record it, run `agent-repl-link-handover-functions` (OLD NEW). When
   the old conn's daemon stream later closes after a handover, PROMOTE the
   successor to primary silently (no down/up hooks: workspaces were
-  adopted). Without address (plain bounce): set the quiet-until instant
+  adopted) and run `agent-repl-link-promote-functions` (OLD NEW) — the
+  one hook that fires on promotion; roster.el registers on it and
+  re-subscribes WatchWorkspaceRoster on NEW (audit-2 #1). Every hook run in
+  daemon-link (up/down/handover/promote) goes through
+  `agent-repl-link--run-hook`, which contains a consumer's error (logged at
+  ERROR `elisp.link.hook-consumer-failed`, never swallowed silently) and
+  still runs the consumers behind it. Without address (plain bounce): set the quiet-until instant
   `minted_at_ms + expected_outage_ms` (ms epoch, compared against
   `(* 1000 (float-time))`); the reconnect loop waits until then before
   polling; the indicator reads "daemon restarting (<cause>)".
