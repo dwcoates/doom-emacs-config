@@ -193,3 +193,14 @@ each is graded against the grounding named below, or marked ungrounded.
   addition is test-tooling only and does not add a converter arm. Retires
   `detachedworksettle_e2e_test.go`'s and `detachedspooloffset_e2e_test.go`'s
   explicit-poll fabrication.
+
+- **`!subagent-detached-utterance`** (`src/fake/scenarios/subagents.ts`).
+  GROUNDED in shape: `subagent-detached` (this manifest, above) remains the
+  golden for the detach/completion machinery; this scenario reuses the same
+  launch shape but stops after ONE ordinary sidechain assistant text line and
+  never completes the agent — no capture records a live subagent's mid-flight
+  utterance in isolation (every capture with a detached subagent runs it to
+  completion), so the utterance's OWN placement (post-turn, no terminal) is
+  invented from the family's established pattern rather than a specific
+  recording. Retires `subagentrouting_e2e_test.go`'s `sidechainResponseLine`
+  fabrication.

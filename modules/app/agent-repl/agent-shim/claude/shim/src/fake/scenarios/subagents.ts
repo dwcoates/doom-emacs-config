@@ -278,6 +278,74 @@ const SUBAGENT_DETACHED_LIVE = scenario({
   },
 });
 
+const SUBAGENT_DETACHED_UTTERANCE = scenario({
+  name: "subagent-detached-utterance",
+  prompt: "!subagent-detached-utterance",
+  emits:
+    "a detached `Agent` left LIVE after the turn ends, whose only post-turn activity is ONE ordinary sidechain " +
+    "assistant text line — a mid-flight utterance with `IsSidechain`/`AgentId`/`SourceToolUseId` set and NO " +
+    "completion. Nothing here ever finishes the agent",
+  writes: "the agent's `.meta.json` and `agent-<id>.jsonl` (the utterance lands there too), its spool, and the main transcript's lines",
+  arms:
+    "AgentSubagent detached_work left live; the utterance itself proves the router keeps a live subagent's prose " +
+    "OUT of the top-level feed rather than adding a new arm",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "subagent-detached-utterance" }, "fake mid-flight detached-subagent utterance turn");
+    const description = "A sweep that talks while it works";
+    const agentPrompt = "Sweep and narrate as you go.";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: agentPrompt,
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description,
+      toolUseId: call.toolUseId,
+      spawnDepth: 1,
+    });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: agentPrompt },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      prompt: agentPrompt,
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    conclude(ctx, "Dispatched a narrating agent to the background.");
+    // The utterance lands AFTER the turn ended, which is what detached means.
+    // NO completion follows: the agent stays live, and this is its only
+    // post-turn activity.
+    await ctx.tick();
+    ctx.assistant([{ type: "text", text: "Still sweeping; found something interesting." }], {
+      agent: {
+        agentId,
+        parentToolUseId: call.toolUseId,
+        subagentType: "general-purpose",
+        taskDescription: description,
+      },
+      model: "fake-sonnet-5",
+    });
+    // ONE spool write, capturing everything written to the agent's own
+    // transcript so far (commission + utterance) — appending more than once
+    // would duplicate bytes, since a spool append is raw and never a diff.
+    ctx.files.spool(agentId).append(writer.read());
+  },
+});
+
 const SUBAGENT_FAILED = scenario({
   name: "subagent-failed",
   prompt: "!subagent-failed",
@@ -410,6 +478,7 @@ export const SUBAGENT_SCENARIOS = [
   SUBAGENT_SYNC,
   SUBAGENT_DETACHED,
   SUBAGENT_DETACHED_LIVE,
+  SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,
   CANCEL_ALL,
 ];
