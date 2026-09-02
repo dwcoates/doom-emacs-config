@@ -117,12 +117,17 @@ export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContex
   // selection — drawing both as the placeholder would erase the difference.
   button.textContent = u.selected?.displayName ?? MODEL_PLACEHOLDER;
   button.toggleAttribute("data-unselected", u.selected === undefined);
-  asAnchor(button, "model");
   wrap.append(button);
 
+  // THE CONTROL IS THE WRAP, not the label inside it. `.topbar-model` is the
+  // hook the DOM contract names (preamble §5b), so the anchor and the click
+  // both live on it: a reader clicking anywhere in the chip — the label or the
+  // padding beside it — opens the same reveal, and the layer's outside-click
+  // handler spares the whole control rather than one node of it.
+  asAnchor(wrap, "model");
   const body = (): HTMLElement => drawModelOptions(u, tc, wrap, button);
   tc.reveals.register("model", "model", body);
-  button.addEventListener("click", () => {
+  wrap.addEventListener("click", () => {
     tc.reveals.toggle("model", "model", body);
   });
   return wrap;
