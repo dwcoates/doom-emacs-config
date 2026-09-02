@@ -288,3 +288,91 @@ func TestRecoverRefusesACorruptCreationJobRatherThanFailingTheMerge(t *testing.T
 		t.Fatalf("Recover error = %v, want it to carry the *wsm.DecodeError", err)
 	}
 }
+
+// forgetJob removes a workspace's recorded merge geometry, which is what a nuke
+// between the shutdown and the restart leaves behind: a durable queue entry for
+// a workspace whose merge can no longer be described.
+func forgetJob(h *harness, ws ids.WorkspaceID) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	delete(h.db.jobs, ws)
+}
+
+// TestRecoverAbandonsAWaitingMergeItCannotRequeueWithTheShutdownAsTheCause is
+// the daemon-shutdown producer: the durable queue survives the shutdown, so the
+// restart is where a merge that cannot go back gives up, and the cause names
+// the shutdown rather than leaving the queue entry to fail at the front.
+func TestRecoverAbandonsAWaitingMergeItCannotRequeueWithTheShutdownAsTheCause(t *testing.T) {
+	// Arrange: a merge queued before the shutdown, whose geometry is gone.
+	h := newHarness(t)
+	enqueue(t, h)
+	forgetJob(h, theWorkspace)
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+
+	// Act.
+	if err := fresh.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	want := "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back"
+	if got := h.feed.lastAbandonedSummary(); got != want {
+		t.Fatalf("the unrecoverable merge's summary = %q, want the shutdown's own cause", got)
+	}
+}
+
+// TestRecoverTakesAnUnrequeueableMergeOffItsQueue covers the durable half: the
+// entry is removed, so the queue behind it is not held by a merge that can
+// never be admitted.
+func TestRecoverTakesAnUnrequeueableMergeOffItsQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	forgetJob(h, theWorkspace)
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+
+	// Act.
+	if err := fresh.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 0 {
+		t.Fatalf("the queue after the recovery is %+v, want the unrequeueable merge gone", entries)
+	}
+}
+
+// TestRecoverRefusesTheBootWhenAWaitingMergesJobRowWillNotDecode keeps the
+// corruption arm distinct from the abandon: a half-written row is evidence,
+// not a merge that legitimately lost its geometry.
+func TestRecoverRefusesTheBootWhenAWaitingMergesJobRowWillNotDecode(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.db.mu.Lock()
+	h.db.jobDecodeErrs[theWorkspace] = &wsm.DecodeError{Table: "creation_jobs", Row: string(theWorkspace), Field: "layout", Err: errors.New("bad json")}
+	h.db.mu.Unlock()
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+
+	// Act.
+	recoverErr := fresh.Recover(context.Background())
+
+	// Assert.
+	var decodeErr *wsm.DecodeError
+	if !errors.As(recoverErr, &decodeErr) {
+		t.Fatalf("Recover = %v, want the boot refused with the decode error", recoverErr)
+	}
+	if got := h.feed.lastMergeErrorArm(); got != "" {
+		t.Fatalf("the corrupt row drew the %q terminal, want the boot refused instead", got)
+	}
+}
