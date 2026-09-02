@@ -190,3 +190,32 @@ func (h *harness) promptRowID(turn string) string {
 		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: turn},
 	}).GetValue()
 }
+
+// TestAnIdenticalUpsertIsNotPublishedTwice covers the tail's no-churn rule: a
+// frame that restates the row already published states nothing, and a reader
+// must not have to filter the repeat itself.
+func TestAnIdenticalUpsertIsNotPublishedTwice(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "on the page")
+	_, token := h.openPage(rootFeed(), "reader-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tail, err := h.resolver.Tail(ctx, testWorkspace, rootFeed(), token)
+	if err != nil {
+		t.Fatalf("Tail: %v", err)
+	}
+	rows := tail.Rows(ctx)
+
+	// Act: the SAME prompt again, then a different one behind it.
+	h.deliverPrompt("turn-1", "on the page")
+	h.deliverPrompt("turn-2", "genuinely new")
+
+	// Assert: the first row streamed is turn-2's — the repeat published
+	// nothing at all.
+	first := <-rows
+	if first.GetId().GetValue() != h.promptRowID("turn-2") {
+		t.Fatalf("first streamed row = %q, want turn-2's: an identical upsert must not publish",
+			first.GetId().GetValue())
+	}
+}

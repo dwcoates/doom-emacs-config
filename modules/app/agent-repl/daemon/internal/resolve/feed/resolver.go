@@ -9,6 +9,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"google.golang.org/protobuf/proto"
+
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
@@ -361,7 +363,18 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if at.parent != nil && row.Parent == nil {
 		row.Parent = at.parent
 	}
-	if _, seen := f.rows[id]; !seen {
+	existing, seen := f.rows[id]
+	if seen && proto.Equal(existing, row) {
+		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
+		// re-opening with the start it already announced, a re-delivered
+		// upsert — states nothing new, and pushing it again is churn every
+		// reader would have to filter for itself.
+		r.logger(s.id).Debug("daemon.feed.row_unchanged",
+			"an upsert restated the row it already published",
+			dlog.Context{"feed": f.key, "row": id})
+		return
+	}
+	if !seen {
 		f.order = append(f.order, id)
 	}
 	f.rows[id] = row
