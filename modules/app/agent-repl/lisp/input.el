@@ -637,6 +637,32 @@ user is left able to see exactly what they wrote."
   (agent-repl-host-handle-refusal ws arm)
   (agent-repl-prompt-queue-offer ws said origin raw key))
 
+(defconst agent-repl--input-bubble-refusal-labels
+  '((:not-deliverable . "no route to that agent")
+    (:agent-busy . "that agent's own turn is running"))
+  "The user-facing sentence for each SubmitPromptBubbleRefused kind.
+The two kinds are the same user act meeting the same answer, so they are
+drawn alike -- only the sentence differs.")
+
+(defun agent-repl--input-on-bubble-refusal (ws origin refused)
+  "Draw REFUSED, the shim\='s refusal of WS\='s bubble-addressed prompt.
+ORIGIN is the submission\='s own.  REFUSED is the decoded
+`SubmitPromptBubbleRefused\=' (`:detail\=' `:kind\=').  An unknown kind is a
+contract breach the codec already refuses, so reaching one here is
+recorded at ERROR rather than drawn as a plain refusal."
+  (let* ((kind (plist-get (plist-get refused :kind) :arm))
+         (detail (plist-get refused :detail))
+         (label (cdr (assq kind agent-repl--input-bubble-refusal-labels))))
+    (if (null label)
+        (progn
+          (agent-repl--error ws "elisp.input.bubble-refused-unknown-kind ws=%s kind=%S" ws kind)
+          (message "agent-repl: the prompt was refused for this agent (%S)" kind))
+      (agent-repl--warn ws "elisp.input.bubble-refused ws=%s origin=%S kind=%S detail=%s"
+                        ws origin kind detail)
+      (agent-repl--input-flash ws (format "refused: %s" label))
+      (message "agent-repl: refused -- %s%s" label
+               (if (string-empty-p detail) "" (format " (%s)" detail))))))
+
 (defun agent-repl--input-on-error (ws said origin raw error key)
   "Handle a `SubmitPromptError' for WS.  The composer KEEPS its text.
 ERROR is the decoded error message.  Its `merging' arm means the prompt
@@ -644,7 +670,9 @@ arrived after a merge began and would be orphaned, so the user resubmits
 once the merge resolves.  Its two HANDOVER arms are not failures at all
 and are routed to host.el.  Its `duplicate_submission' arm says the key
 was already accepted, so the earlier submission stands and nothing is
-resent.  Every other arm is a refusal this composer
+resent.  Its `bubble_refused' arm is the SHIM's refusal of a
+bubble-addressed prompt, relayed by kind and drawn to the user without
+being queued.  Every other arm is a refusal this composer
 has no treatment for: it is recorded at ERROR naming the arm and drawn to
 the user, and the text stays where it is.
 
@@ -667,6 +695,14 @@ refusal can re-drive the very prompt that was refused."
                          ws origin arm key)
        (agent-repl--input-flash ws "already submitted")
        (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
+      (:bubble-refused
+       ;; The SHIM refused a bubble-addressed prompt and the daemon relayed
+       ;; the refusal BY KIND.  Both kinds are the same answer to the user
+       ;; ("not this agent, not now"), so both are drawn alike and neither
+       ;; is queued: a re-drive would meet the same refusal.  The shim's
+       ;; `detail' is echoed verbatim for the human and for the log; it is
+       ;; never switched on.
+       (agent-repl--input-on-bubble-refusal ws origin (plist-get reason :value)))
       ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
        (agent-repl--input-on-handover-refusal ws said origin raw reason key))
       (_
