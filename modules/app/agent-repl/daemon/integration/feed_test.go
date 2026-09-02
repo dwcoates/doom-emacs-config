@@ -1100,11 +1100,15 @@ func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *tes
 
 	// Assert: OpenFeed on the bubble's own FeedId serves the sub-feed, which
 	// carries the frame addressed to the created agent.
-	_, subToken := f.openFeed(bubble.GetId())
-	subTail := f.d.WatchFeed(subToken)
-	subRow := awaitRow(t, f, subTail, "the subagent's own work on its sub-feed", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetResponse().GetSuccess() != nil
-	})
+	// The pin puts a row on EXACTLY ONE side of the seam: whichever side the
+	// subagent's frame landed on, it is drawn once and never twice.
+	isWork := func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetResponse().GetSuccess() != nil }
+	subPage, subToken := f.openFeed(bubble.GetId())
+	subRow := findRow(subPage, isWork)
+	if subRow == nil {
+		subTail := f.d.WatchFeed(subToken)
+		subRow = awaitRow(t, f, subTail, "the subagent's own work on its sub-feed", isWork)
+	}
 	if md := subRow.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "subagent said this" {
 		t.Fatalf("the sub-feed's row = %q, want the subagent's own prose", md)
 	}
@@ -1654,4 +1658,14 @@ func itoa(i int) string {
 		buf[pos] = '-'
 	}
 	return string(buf[pos:])
+}
+
+// findRow answers a page's first row satisfying the predicate, or nil.
+func findRow(page *frontendv1.FeedPage, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	for _, r := range page.GetSuccess().GetRows() {
+		if pred(r) {
+			return r
+		}
+	}
+	return nil
 }
