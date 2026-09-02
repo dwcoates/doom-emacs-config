@@ -36,6 +36,8 @@
 
 ;;; Code:
 
+(declare-function agent-repl--kill-buffer-safely "worktree" (buf))
+
 ;;;; Defcustoms
 
 (defcustom agent-repl-prompt-summary-enabled t
@@ -527,8 +529,11 @@ the process exits."
                   (agent-repl--log ws "prompt-summary: sentinel rejected stale result; pending unchanged captured-raw-len=%d current-raw-len=%s"
                                     (length raw)
                                     (if (stringp current-raw) (length current-raw) "non-string")))))))
-        (when (buffer-live-p out-buf)
-          (kill-buffer out-buf))))))
+        ;; OUT-BUF is this process's OWN buffer: a bare `kill-buffer' here
+        ;; deletes the process from inside the kill and re-enters this very
+        ;; sentinel.  The shared teardown detaches the process first, so the
+        ;; re-delivered status has nowhere to go.
+        (agent-repl--kill-buffer-safely out-buf)))))
 
 (defun agent-repl--prompt-summary-process-start (ws out-buf cmd sentinel)
   "Start the headless summary process for WS.
@@ -609,7 +614,7 @@ state-mutation entry point."
             proc))
       (error
        (agent-repl--warn ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
-       (when (buffer-live-p out-buf) (kill-buffer out-buf))
+       (agent-repl--kill-buffer-safely out-buf)
        nil))))
 
 (defun agent-repl--kickoff-prompt-summary (ws raw)
