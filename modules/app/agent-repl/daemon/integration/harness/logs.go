@@ -247,3 +247,51 @@ func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Mes
 func ClientLogPath(ws *workspacev1.WorkspaceRef) string {
 	return WorkspaceLogPath(ws.GetDir(), "webapp")
 }
+
+// AwaitWorkspaceLogOperationCount waits until a workspace's own log sink holds
+// at least `n` records under `operation`.
+//
+// It is how a test synchronizes on a daemon-side step it cannot observe on the
+// wire. The fake shim records an rpc when the request ARRIVES, so a test that
+// acts the moment it sees one is racing the daemon's handling of that rpc's
+// ANSWER — pushing a turn's terminal frame before the daemon has opened the
+// turn, for one, which loses the terminal and hangs whatever was waiting on it.
+func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
+	d.t.Helper()
+	path := WorkspaceLogPath(workspaceDir, "daemon")
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		seen := 0
+		for _, r := range readLog(d.t, path) {
+			if r.Operation == operation {
+				seen++
+			}
+		}
+		if seen >= n {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, d.ctx.Err())
+		}
+	}
+}
+
+// WorkspaceLogOperationCount answers how many records a workspace's log sink
+// already holds under an operation, for a test that needs a baseline.
+func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int {
+	d.t.Helper()
+	seen := 0
+	for _, r := range readLog(d.t, WorkspaceLogPath(workspaceDir, "daemon")) {
+		if r.Operation == operation {
+			seen++
+		}
+	}
+	return seen
+}
+
+// OpTurnOpened is the record the session watcher writes once a turn is OPEN on
+// it — the point after which that turn's terminal frame will be attributed.
+const OpTurnOpened = "daemon.sessionwatcher.turn_opened"

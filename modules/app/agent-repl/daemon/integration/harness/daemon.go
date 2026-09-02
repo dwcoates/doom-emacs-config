@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -301,6 +302,18 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		env = append(env, "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS="+strconv.Itoa(opts.IdleCutoffMS))
 	}
 	env = append(env, opts.ExtraEnv...)
+
+	// A NON-JOINING START OWNS daemon.addr. A crash-restart test reuses a state
+	// root whose previous daemon was SIGKILLed, so the file it never removed is
+	// still there with the dead daemon's port: read as this daemon's address it
+	// dials a closed socket. The daemon is about to rewrite it, so removing it
+	// first makes AwaitAddrFile unambiguous. A JOINING successor shares the root
+	// with a live incumbent that owns the file, so it is left alone.
+	if opts.Joining == "" {
+		if err := os.Remove(filepath.Join(d.StateDir, "daemon.addr")); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("harness: remove the stale daemon.addr: %v", err)
+		}
+	}
 
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = root
@@ -683,4 +696,30 @@ func (d *Daemon) strayPIDs() []int {
 		pids = append(pids, pid)
 	}
 	return pids
+}
+
+// ProjectDir answers where the vendor CLI files one workspace's conversations
+// under one account root: `projects/<every non-alphanumeric byte of the
+// absolute cwd replaced by a dash>`.
+func ProjectDir(configDir, workspaceDir string) string {
+	return filepath.Join(configDir, "projects", projectDirRule.ReplaceAllString(workspaceDir, "-"))
+}
+
+var projectDirRule = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// RemoveTranscripts deletes every transcript a workspace has under BOTH account
+// roots, so a re-open resumes a conversation whose transcript is gone. That is
+// the state the daemon's resume guard exists for, and nothing else in the
+// harness can produce it: the fake shim lays a transcript down at every
+// StartSession, exactly as the vendor does.
+func (d *Daemon) RemoveTranscripts(workspaceDir string) {
+	d.t.Helper()
+	for _, root := range []string{d.DefaultConfigDir, d.MultiRepoConfigDir} {
+		if root == "" {
+			continue
+		}
+		if err := os.RemoveAll(ProjectDir(root, workspaceDir)); err != nil {
+			d.t.Fatalf("harness: remove the transcripts under %s: %v", root, err)
+		}
+	}
 }

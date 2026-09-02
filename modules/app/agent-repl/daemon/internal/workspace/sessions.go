@@ -227,6 +227,13 @@ func (f *Fleet) Running(ws ids.WorkspaceID) (Running, bool) {
 	if !ok {
 		return Running{}, false
 	}
+	// A SESSION PARKED BEHIND A COLD GATE HAS NO WATCHER: the client is up and
+	// the gate's answer re-opens through it, but no session was ever started,
+	// so nothing is in flight and nothing is live. That is an ANSWER — the
+	// close verb reads it as quiet, which is exactly right for a standing gate.
+	if session.watcher == nil {
+		return Running{}, true
+	}
 	return Running{Turn: session.watcher.TurnInFlight(), LiveWork: session.watcher.LiveWork()}, true
 }
 
@@ -238,6 +245,11 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 	f.mu.RUnlock()
 	if !ok {
 		return false, false
+	}
+	// A gate-parked session has no watcher and so no link truth: the session
+	// exists and is not serving.
+	if session.watcher == nil {
+		return true, false
 	}
 	return true, session.watcher.Connected()
 }

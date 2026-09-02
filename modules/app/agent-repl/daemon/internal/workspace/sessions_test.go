@@ -769,3 +769,50 @@ func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
 	// Assert.
 	asRefusal(t, err, ArmConversationOwned)
 }
+
+// TestRunningAnswersQuietForAGateParkedSessionWithNoWatcher pins the nil-watcher
+// guard: a session parked behind a cold gate keeps its client but never started
+// a session, so it has NO watcher. Reading freeness off it must answer "live and
+// quiet" rather than dereference nothing — the close verb reads exactly this,
+// and a standing gate is ruled not to block a close.
+func TestRunningAnswersQuietForAGateParkedSessionWithNoWatcher(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Act
+	running, live := f.fleet.Running(ws.ID)
+
+	// Assert
+	if !live {
+		t.Fatal("Running() reports no live session for a gate-parked workspace, want the session reported")
+	}
+	if running.Turn != nil || !running.LiveWork.Empty() {
+		t.Fatalf("Running() = %+v, want nothing in flight behind a standing gate", running)
+	}
+}
+
+// TestHealthAnswersNotServingForAGateParkedSession is the same guard on the
+// liveness probe: the session exists and its link truth is unknown, which is
+// "not serving", never a crash.
+func TestHealthAnswersNotServingForAGateParkedSession(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Act
+	exists, serving := f.fleet.Health(ws.ID)
+
+	// Assert
+	if !exists || serving {
+		t.Fatalf("Health() = (%v, %v), want the session to exist and not be serving", exists, serving)
+	}
+}

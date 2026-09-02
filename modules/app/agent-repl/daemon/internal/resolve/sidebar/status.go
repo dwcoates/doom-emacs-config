@@ -62,7 +62,13 @@ func mergeArm(facts footer.MergeFacts) string {
 		return "merge_queued"
 	case "merging":
 		return "merging"
-	case "conflict":
+	case "conflict", "parked":
+		// A PARKED merge is one stopped awaiting the user's resolution, which
+		// is exactly what merge_conflict spells ("the merge stopped on a
+		// conflict awaiting resolution"). The roster has no parked arm of its
+		// own, and a parked merge must never fall through to the session's
+		// status: the row would then read `ready` for a workspace whose merge
+		// is holding its lease.
 		return "merge_conflict"
 	case "failed":
 		return "merge_failed"
