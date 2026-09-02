@@ -122,6 +122,13 @@ export async function boot(): Promise<void> {
     // as `boot_failed` — the page has no workspace to show and says so.
     await adoptAtBoot(ctx);
 
+    // THE LIFECYCLE COMES NEXT, BEFORE ANY VIEW. `transferring_away` is the
+    // `transferred` push arriving as an ANSWER, and it can come back at the
+    // very first rpc a view makes — so the move hook this module registers has
+    // to exist before the first view mount, or that first refusal would find
+    // no handler and the page would keep drawing for a workspace it has lost.
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner });
+
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
     if (address.composer) shell.composer.hidden = false;
@@ -172,7 +179,6 @@ export async function boot(): Promise<void> {
       mountComposer(shell.composer, ctx, { gate, onPanel: showPanel });
     }
 
-    startLifecycle(ctx, { drainBannerHost: shell.drainBanner });
   } catch (err) {
     reportBootFailure(err, overlay);
     throw err;

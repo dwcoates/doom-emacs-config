@@ -20,6 +20,7 @@
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { transferableAbortController } from "node:util";
 import { vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -38,14 +39,73 @@ import { mountSidebar } from "../../src/sidebar/sidebar";
 import { mountHoldTray } from "../../src/tray/tray";
 import { mountComposer, createComposerGate } from "../../src/composer/composer";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
-import { startLifecycle } from "../../src/lifecycle/lifecycle";
+import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
+/** How many drain rounds `settle()` gives the DOM before it calls it a fault. */
+const SETTLE_ROUND_CAP = 60;
+/** How many consecutive quiet rounds mean the DOM has actually settled. */
+const SETTLE_STABLE_ROUNDS = 4;
+/** How much markup the non-convergence diagnostic quotes. */
+const SETTLE_DIAGNOSTIC_LIMIT = 2000;
+
 interface Handle {
   dispose(): void;
+}
+
+/**
+ * NODE'S FETCH, TAUGHT TO ACCEPT JSDOM'S AbortSignal.
+ *
+ * jsdom installs its own `AbortController`/`AbortSignal` over Node's, and
+ * undici refuses a signal that is not an instance of its own class
+ * ("RequestInit: Expected signal (\"AbortSignal {}\") to be an instance of
+ * AbortSignal"). Every stream the app opens carries one, so without this every
+ * `Watch*` request threw before it left the page, `watchStream` read that as a
+ * transport failure, and the whole app sat behind a `daemon_unreachable` card
+ * with no view ever drawn.
+ *
+ * The bridge is a capability the environment is missing, exactly like `fetch`
+ * itself — not a seam in the app. `node:util`'s transferable controller is a
+ * genuine Node one, so the app's abort still aborts the real request, and a
+ * cancelled watch still closes the socket the fake daemon is holding.
+ */
+function fetchAcceptingJsdomSignals(
+  underlying: typeof globalThis.fetch,
+  inFlight: { count: number },
+): typeof globalThis.fetch {
+  return (input, init) => {
+    const signal = init?.signal;
+    const bridged = ((): RequestInit | undefined => {
+      if (signal === undefined || signal === null) return init ?? undefined;
+      const bridge = transferableAbortController();
+      const abort = (): void => bridge.abort(signal.reason);
+      if (signal.aborted) abort();
+      else signal.addEventListener("abort", abort, { once: true });
+      return { ...init, signal: bridge.signal };
+    })();
+    // COUNTED SO `settle()` CANNOT RETURN MID-ROUND-TRIP. A request is in
+    // flight until its RESPONSE HEAD lands, which for a standing stream is the
+    // accept (the server flushes headers there) rather than the stream's end —
+    // so a watch never holds settle open, and a call that has not answered yet
+    // always does.
+    inFlight.count += 1;
+    const settled = (): void => {
+      inFlight.count -= 1;
+    };
+    return underlying(input, bridged).then(
+      (response) => {
+        settled();
+        return response;
+      },
+      (err: unknown) => {
+        settled();
+        throw err;
+      },
+    );
+  };
 }
 
 export interface Harness {
@@ -123,6 +183,17 @@ export interface HarnessOptions {
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
+  // CAPTURED BEFORE THE CLOCK IS FAKED. `settle()` needs a way to hand the
+  // event loop back to Node so the loopback round trip to the fake daemon can
+  // land; every scheduling primitive on the page is about to become fake, so
+  // the real one is taken now. This is NOT a sleep and never waits for a
+  // duration: it is a zero-length yield, the only thing that lets real socket
+  // I/O make progress between two microtask drains.
+  const yieldToIo = ((): (() => Promise<void>) => {
+    const realSetImmediate = globalThis.setImmediate;
+    return () => new Promise<void>((resolve) => realSetImmediate(() => resolve()));
+  })();
+
   vi.useFakeTimers({ shouldAdvanceTime: true });
 
   const fake = createFakeDaemon();
@@ -133,7 +204,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
-  const transport = createDaemonTransport(baseUrl, { fetch: globalThis.fetch });
+  const inFlight = { count: 0 };
+  const transport = createDaemonTransport(baseUrl, {
+    fetch: fetchAcceptingJsdomSignals(globalThis.fetch, inFlight),
+  });
   const client = createAgentReplClient(transport);
   const ticker = createTicker();
   const failures = mountFailureOverlay(shell.failureOverlay);
@@ -150,6 +224,14 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const panels: SubmitPromptCommandPanel[] = [];
   const gate = createComposerGate();
   const handles: Handle[] = [failures];
+
+  // PRODUCTION'S OWN BOOT ORDER, and it is load-bearing: adoption comes before
+  // any stream (a daemon still finishing its rendezvous refuses every
+  // per-workspace rpc), and the lifecycle comes IMMEDIATELY after it, before
+  // the first view mounts, so the `transferring_away` move hook is registered
+  // before any refusal can carry that arm back.
+  await adoptAtBoot(ctx);
+  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner }));
 
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
@@ -176,7 +258,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   handles.push(mountTopbar(shell.topbar, ctx, { openLogin: () => login.open() }));
   handles.push(mountSidebar(shell.sidebar, ctx));
   handles.push(mountHoldTray(shell.holdTray, ctx));
-  handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner }));
 
   if (composerEnabled) {
     shell.composer.hidden = false;
@@ -196,14 +277,31 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
    */
   const settle = async (): Promise<void> => {
     let previous = "";
-    for (let round = 0; round < 60; round += 1) {
+    let stable = 0;
+    for (let round = 0; round < SETTLE_ROUND_CAP; round += 1) {
       await vi.advanceTimersByTimeAsync(0);
+      await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
       const current = document.body.innerHTML;
-      if (current === previous && round > 1) return;
+      // An unanswered request is a change that has not happened YET, so a
+      // quiet DOM with one outstanding is not settled — it is early.
+      stable = current === previous && inFlight.count === 0 ? stable + 1 : 0;
       previous = current;
+      if (stable >= SETTLE_STABLE_ROUNDS) return;
     }
+    // NON-CONVERGENCE IS A FAULT, NEVER A QUIET RETURN. A settle that gave up
+    // silently is how a page that never stopped redrawing became "the element
+    // was not drawn" fifty assertions later; throwing here names the real
+    // fault at the moment it happens.
+    throw new Error(
+      `the DOM never stopped changing after ${SETTLE_ROUND_CAP} settle rounds; ` +
+        `failure arms: [${harnessFailureArms().join(", ")}]; ` +
+        `last markup: ${document.body.innerHTML.slice(0, SETTLE_DIAGNOSTIC_LIMIT)}`,
+    );
   };
+
+  const harnessFailureArms = (): string[] =>
+    $$('[data-component="failure-overlay"] [data-arm]').map((el) => el.dataset.arm ?? "");
 
   const harness: Harness = {
     fake,
