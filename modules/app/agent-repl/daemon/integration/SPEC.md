@@ -640,3 +640,10 @@ Every test runs with the daemon at ≥WARNING terminal mirror; the harness
 FAILS a test that produced any WARN/ERROR record it did not explicitly
 expect (`d.ExpectWarnings(ops...)`), so the remediation loop drives
 warnings to zero.
+
+THE SWEEP IS UNCONDITIONAL. `StartDaemon` arms it for every daemon with an
+EMPTY expected set, so a test that never calls `ExpectWarnings` still gets the
+assertion; `ExpectWarnings` only WIDENS that set. There is no escape hatch --
+the `"*"` allow-all was deliberately deleted so every list stays exact -- and a
+record on a GREEN path is a daemon defect to fix, never something to declare
+away.
