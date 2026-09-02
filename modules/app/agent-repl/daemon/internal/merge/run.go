@@ -182,6 +182,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	job, err := o.layoutFor(ctx, ws)
 	if err != nil {
 		lock.Release()
+		log.Error(op, "could not read the merge's geometry", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return err
 	}
 	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted at enqueue, so

@@ -644,3 +644,26 @@ func TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding(t *testing.T) {
 		t.Fatalf("footer merge state after the evict = %q, want none", got)
 	}
 }
+
+// TestOneMergesFailureDoesNotStopTheQueueBehindIt covers the pump's own
+// invariant: a run that ended on its own terminal has already reported itself,
+// so the next queued merge still gets admitted.
+func TestOneMergesFailureDoesNotStopTheQueueBehindIt(t *testing.T) {
+	// Arrange: a merge whose conclusion git refuses.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{}}
+	h.git.commitErr = errors.New("nothing to commit")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	err := h.admit(context.Background())
+
+	// Assert: the pump reports no queue-level failure, so its loop goes on.
+	if err != nil {
+		t.Fatalf("pumpOnce after a merge that ended on its own terminal = %v, want no queue-level error", err)
+	}
+}
