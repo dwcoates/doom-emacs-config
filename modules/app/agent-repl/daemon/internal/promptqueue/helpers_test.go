@@ -18,6 +18,8 @@ import (
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
+	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -431,10 +433,52 @@ func (f *fakeFeed) mirrored() []*frontendv1.FeedRow {
 }
 
 // fakeFooter records the waiting-interrupting status.
+// fakeSidebar records the roster's own turn facts.
+type fakeSidebar struct {
+	sidebar.Resolver
+	mu    sync.Mutex
+	turns []*footer.TurnStarted
+	ends  []sessionwatcher.TurnClose
+}
+
+func (f *fakeSidebar) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.turns = append(f.turns, turn)
+}
+
+func (f *fakeSidebar) SetTurnEnded(_ ids.WorkspaceID, how sessionwatcher.TurnClose) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ends = append(f.ends, how)
+}
+
+// rosterTurns answers the recorded roster turn facts.
+func (f *fakeSidebar) rosterTurns() []*footer.TurnStarted {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*footer.TurnStarted(nil), f.turns...)
+}
+
 type fakeFooter struct {
 	footer.Resolver
 	mu           sync.Mutex
 	interrupting []bool
+	turns        []*footer.TurnStarted
+}
+
+// SetTurn records what the queue told the footer a turn carries.
+func (f *fakeFooter) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.turns = append(f.turns, turn)
+}
+
+// startedTurns answers the recorded turn facts.
+func (f *fakeFooter) startedTurns() []*footer.TurnStarted {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*footer.TurnStarted(nil), f.turns...)
 }
 
 func (f *fakeFooter) SetInterrupting(_ ids.WorkspaceID, on bool) {
@@ -528,6 +572,7 @@ type harness struct {
 	watcher *fakeWatcher
 	feed    *fakeFeed
 	footer  *fakeFooter
+	sidebar *fakeSidebar
 	holds   *fakeHolds
 	judge   *scriptedJudge
 	drain   *noteRecorder
@@ -556,17 +601,19 @@ func newHarness(t *testing.T) *harness {
 		watcher: &fakeWatcher{},
 		feed:    &fakeFeed{},
 		footer:  &fakeFooter{},
+		sidebar: &fakeSidebar{},
 		holds:   &fakeHolds{},
 		judge:   &scriptedJudge{},
 		drain:   &noteRecorder{},
 	}
 	q, err := newQueue(Deps{
-		DB:     h.db,
-		Judge:  h.judge,
-		Feed:   h.feed,
-		Footer: h.footer,
-		Holds:  h.holds,
-		Client: func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		DB:      h.db,
+		Judge:   h.judge,
+		Feed:    h.feed,
+		Footer:  h.footer,
+		Sidebar: h.sidebar,
+		Holds:   h.holds,
+		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
 		Revive: func(context.Context, ids.WorkspaceID) error {
 			h.revivals++
 			if h.reviveErr != nil {
