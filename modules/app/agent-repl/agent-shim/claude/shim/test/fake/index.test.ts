@@ -6,7 +6,8 @@
  * scenario stands on, because a defect here is invisible in a scenario test
  * (which asserts what the scenario said, not how the engine said it).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 
 import {
   createFakeQuery,
@@ -755,6 +756,26 @@ describe("streamInput and close", () => {
   });
 });
 
+/**
+ * Resolve once the fake has logged that a turn PARKED on its gate.
+ *
+ * Yields through the macrotask queue rather than sleeping: every tick is work
+ * the drive actually did, so the wait is bounded by the mock's progress and not
+ * by how loaded the machine is.
+ */
+async function untilParked(): Promise<void> {
+  const parked = (): boolean =>
+    (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>).some(
+      ([, bytes, offset, length]) =>
+        bytes.subarray(offset, offset + length).toString("utf8").includes("PARKED on its gate"),
+    );
+  for (let i = 0; i < 1_000; i++) {
+    if (parked()) return;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error("the fake never parked on its gate");
+}
+
 describe("the turn gate", () => {
   it("parks a turn whose text matches the gate and releases it when the path appears", async () => {
     // Arrange
@@ -771,7 +792,12 @@ describe("the turn gate", () => {
       // Act
       const driven = await driveScenario(["gated turn"], {
         during: async () => {
-          await new Promise((r) => setTimeout(r, 20));
+          // Wait for the PARK to be a FACT, not for wall-clock time. A real
+          // timer here makes the test's duration a function of machine load
+          // (it once blew the 2500ms bound under four concurrent suites);
+          // the mock's own park record is the deterministic edge, and the
+          // gate's level-then-edge check makes an early release safe anyway.
+          await untilParked();
           released = true;
           writeFileSync(gate, "");
         },
