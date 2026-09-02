@@ -128,6 +128,43 @@ almost useless."
         ;; pending sentinel, then returns after the interval at the latest.
         (accept-process-output nil 0.02)))))
 
+(defconst agent-repl-itest--fixture-root
+  (expand-file-name (format "agent-repl-itest-fixtures-%d" (emacs-pid))
+                    temporary-file-directory)
+  "Root of this Emacs process's PRIVATE fixture directories.
+
+A FIXTURE DIRECTORY IS A WORKSPACE'S `:project-dir', AND PRODUCTION OWNS
+WHAT IT WRITES THERE.  A registered workspace's records route into
+`<project-dir>/.claude/emacs/emacs.log', a canonical SYMLINK
+`agent-repl--workspace-emacs-log-target' re-points at its own
+runtime-owned target whenever it finds the link naming someone else's --
+deliberately, because \"another Emacs runtime registering the same
+directory\" is exactly the case that rule exists for.
+
+Two suite runs on one machine are two such runtimes.  With a fixed
+`/tmp/itest-<suite>-ws' they share one canonical link and each re-points
+it under the other, so a scenario's `--await-log' reads a sink holding
+the OTHER process's records and waits out its whole deadline for a line
+that was written, findably, somewhere else.  That is a roaming timeout in
+whichever composer or verbs scenario happened to be running, which is
+indistinguishable from a flake and is not one.
+
+Keying the root by pid makes the sharing impossible rather than
+unlikely.")
+
+(defun agent-repl-itest--fixture-dir (name)
+  "Return this process's private fixture directory called NAME.
+The directory itself is NOT created: production creates a workspace's
+`.claude' tree the first time it routes a record there, and a scenario
+that needs the directory earlier makes it itself."
+  (expand-file-name name agent-repl-itest--fixture-root))
+
+(defun agent-repl-itest--delete-fixture-root ()
+  "Delete this process's fixture root.  Runs on `kill-emacs-hook'."
+  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+
+(add-hook 'kill-emacs-hook #'agent-repl-itest--delete-fixture-root)
+
 (defun agent-repl-itest--private-state-dir ()
   "Create and return a fresh private `AGENT_REPL_STATE_DIR'."
   (file-name-as-directory (make-temp-file "agent-repl-itest-state-" t)))

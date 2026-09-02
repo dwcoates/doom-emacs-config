@@ -119,9 +119,9 @@ always cancelled afterwards — a client cancel IS the graceful close."
   `(let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon))))
      (unwind-protect
          (let ((,ref nil))
-           (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+           (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
            (agent-repl-host-register
-            conn "/tmp/itest-host-ws"
+            conn (agent-repl-itest--fixture-dir "itest-host-ws")
             (lambda (minted) (setq ,ref minted)))
            (agent-repl-itest--wait-until (lambda () ,ref) nil
                                          "RegisterWorkspace to answer")
@@ -196,8 +196,8 @@ snapshot is how a fresh subscription learns the standing state."
            (ref nil))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
-            (agent-repl-host-register conn "/tmp/itest-host-ws"
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
+            (agent-repl-host-register conn (agent-repl-itest--fixture-dir "itest-host-ws")
                                       (lambda (minted) (setq ref minted)))
             (agent-repl-itest--wait-until (lambda () ref) nil "RegisterWorkspace to answer")
             ;; The standing state is stored BEFORE anyone subscribes.
@@ -566,10 +566,10 @@ fanout §7: \"error arm → `agent-repl--error' and ON-DONE nil.\""
           (result :never))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
             ;; Act.
             (agent-repl-host-register
-             conn "/tmp/itest-host-ws"
+             conn (agent-repl-itest--fixture-dir "itest-host-ws")
              (lambda (ref) (setq done-called t result ref)))
             (agent-repl-itest--wait-until (lambda () done-called) nil
                                           "RegisterWorkspace to answer")
@@ -913,11 +913,11 @@ code-level, the same ruling as the blink cadence.  Nothing acks."
           ;; Act.
           (agent-repl-itest--push
            daemon "host"
-           '((openInEditor . ((path . "/tmp/itest-host-ws/plan.md") (line . 42))))
+           `((openInEditor . ((path . ,(expand-file-name "plan.md" (agent-repl-itest--fixture-dir "itest-host-ws"))) (line . 42))))
            (plist-get ref :id))
           ;; Assert: the uint32 line rides through as a number.
           (agent-repl-itest--wait-until (lambda () opened) nil "the editor popup")
-          (should (equal (car opened) (list "/tmp/itest-host-ws/plan.md" 42))))))))
+          (should (equal (car opened) (list (expand-file-name "plan.md" (agent-repl-itest--fixture-dir "itest-host-ws")) 42))))))))
 
 (ert-deftest agent-repl-itest-host-open-in-editor-directory-with-no-line-opens-dired ()
   "An `open_in_editor' push with a directory and no `line' opens it in dired.
@@ -1412,11 +1412,11 @@ targeted one."
          (ws-b (concat agent-repl-itest-host--ws "-b")))
      (unwind-protect
          (let ((,ref-a nil) (,ref-b nil))
-           (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
-           (agent-repl--ws-put ws-b :project-dir "/tmp/itest-host-ws-b")
-           (agent-repl-host-register conn "/tmp/itest-host-ws"
+           (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
+           (agent-repl--ws-put ws-b :project-dir (agent-repl-itest--fixture-dir "itest-host-ws-b"))
+           (agent-repl-host-register conn (agent-repl-itest--fixture-dir "itest-host-ws")
                                      (lambda (minted) (setq ,ref-a minted)))
-           (agent-repl-host-register conn "/tmp/itest-host-ws-b"
+           (agent-repl-host-register conn (agent-repl-itest--fixture-dir "itest-host-ws-b")
                                      (lambda (minted) (setq ,ref-b minted)))
            (agent-repl-itest--wait-until (lambda () (and ,ref-a ,ref-b)) nil
                                          "both RegisterWorkspace calls to answer")
@@ -2129,10 +2129,10 @@ instead."
           (agent-repl-connect-unary-timeout-seconds 0.3))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
             ;; Act.
             (agent-repl-host-register
-             conn "/tmp/itest-host-ws"
+             conn (agent-repl-itest--fixture-dir "itest-host-ws")
              (lambda (ref) (setq done-called t result ref)))
             ;; Assert.
             (agent-repl-itest--wait-until (lambda () done-called) nil
@@ -2155,7 +2155,7 @@ still go through."
           (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
             (agent-repl--ws-put ws-no-dir :project-dir nil)
             ;; Act.
             (agent-repl-host-on-link-up conn)
@@ -2164,7 +2164,7 @@ still go through."
             (agent-repl-itest--await-call daemon "RegisterWorkspace")
             (should (equal 1 (length (agent-repl-itest--calls daemon "RegisterWorkspace"))))
             (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
-              (should (equal (agent-repl-itest--body-field body 'dir) "/tmp/itest-host-ws"))))
+              (should (equal (agent-repl-itest--body-field body 'dir) (agent-repl-itest--fixture-dir "itest-host-ws")))))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (ignore-errors (agent-repl-host-forget ws-no-dir))
         (agent-repl-connect-close conn)))))
@@ -2182,7 +2182,7 @@ it."
     (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
             ;; Act.
             (agent-repl-host-on-link-up conn)
             ;; Assert.
@@ -2239,8 +2239,8 @@ skipped forever."
           (ref nil))
       (unwind-protect
           (progn
-            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
-            (agent-repl-host-register conn "/tmp/itest-host-ws"
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir (agent-repl-itest--fixture-dir "itest-host-ws"))
+            (agent-repl-host-register conn (agent-repl-itest--fixture-dir "itest-host-ws")
                                       (lambda (r) (setq ref r)))
             (agent-repl-itest--wait-until (lambda () ref) nil "RegisterWorkspace to answer")
             (agent-repl-host-subscribe conn agent-repl-itest-host--ws ref)

@@ -60,7 +60,8 @@
 (defconst agent-repl-itest-composer--ws "itest-composer-ws"
   "The Doom workspace name this suite composes into.")
 
-(defconst agent-repl-itest-composer--dir "/tmp/itest-composer-ws"
+(defconst agent-repl-itest-composer--dir
+  (agent-repl-itest--fixture-dir "composer-ws")
   "The workspace directory registered for the composer's workspace.")
 
 (defun agent-repl-itest-composer--live (composer)
@@ -1478,7 +1479,7 @@ path — so an unregistered workspace has no submission to make."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       (agent-repl--ws-put "itest-composer-never-registered"
-                          :project-dir "/tmp/itest-composer-never-registered")
+                          :project-dir (agent-repl-itest--fixture-dir "composer-never-registered"))
       ;; Act / Assert.
       (should-error
        (agent-repl--send :user-sent "x" "itest-composer-never-registered"))
