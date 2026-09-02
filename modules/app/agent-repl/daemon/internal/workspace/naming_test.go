@@ -208,3 +208,34 @@ func TestIsWorktreeAcceptsAGitDirectory(t *testing.T) {
 		t.Fatal("IsWorktree(git directory) reported no worktree")
 	}
 }
+
+func TestWorktreeDirOfACommonDirReadsBackToTheMainWorktree(t *testing.T) {
+	// Arrange: the repository as the registry spells it — its COMMON DIR.
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "doom")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Act.
+	got, err := WorktreeDir(filepath.Join(repo, ".git"), "DWC/fix-login")
+
+	// Assert.
+	want := filepath.Join(parent, "doom-worktrees", "fix-login")
+	if err != nil || got != want {
+		t.Fatalf("WorktreeDir() = (%q, %v), want %q", got, err, want)
+	}
+}
+
+func TestMainWorktreeDirLeavesAWorktreeAlone(t *testing.T) {
+	// Arrange.
+	dir := filepath.Join("/tmp", "repos", "doom")
+
+	// Act.
+	got := MainWorktreeDir(dir)
+
+	// Assert.
+	if got != dir {
+		t.Fatalf("MainWorktreeDir(%q) = %q, want it unchanged", dir, got)
+	}
+}

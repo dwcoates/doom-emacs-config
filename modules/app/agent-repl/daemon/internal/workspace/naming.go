@@ -12,6 +12,10 @@ import (
 // hyphenated, at most three words — plus the branch-name length bound the old
 // system used.
 const (
+	// UnnamedSlugPrefix leads the name a create with neither a supplied name
+	// nor an initial prompt is given: the workspace's own minted id, prefixed
+	// so the roster reads it as an unnamed workspace rather than a hash.
+	UnnamedSlugPrefix = "workspace-"
 	// SlugWordLimit is the "3 words max" the naming briefs state.
 	SlugWordLimit = 3
 	// SlugMaxLen bounds the slug's length in characters.
@@ -114,12 +118,18 @@ func BareName(name string) string {
 //     parent is repoDir's own parent, so worktrees stay siblings of each other
 //     rather than nesting.
 //
+// A repository is identified throughout the daemon by its COMMON DIR
+// ("<repo>/.git"), which is what a create is handed; the placement rule is
+// about the WORKTREE, so a common dir is read back to the main worktree it
+// belongs to first.
+//
 // A branch with no safe directory component is an error rather than a guess.
 func WorktreeDir(repoDir, branch string) (string, error) {
 	bare := BareName(branch)
 	if bare == "" || bare == "." || bare == string(filepath.Separator) {
 		return "", fmt.Errorf("branch %q has no safe worktree directory name", branch)
 	}
+	repoDir = MainWorktreeDir(repoDir)
 	gitPath := filepath.Join(repoDir, ".git")
 	info, err := os.Stat(gitPath)
 	if err != nil {
@@ -130,6 +140,17 @@ func WorktreeDir(repoDir, branch string) (string, error) {
 		parent = filepath.Join(parent, filepath.Base(repoDir)+WorktreeDirSuffix)
 	}
 	return filepath.Join(parent, bare), nil
+}
+
+// MainWorktreeDir answers the worktree a repository directory names: a common
+// dir ("<repo>/.git", the spelling the registry keys repositories by) reads
+// back to "<repo>"; anything else is already a worktree and is answered as it
+// stands.
+func MainWorktreeDir(repoDir string) string {
+	if filepath.Base(repoDir) == ".git" {
+		return filepath.Dir(repoDir)
+	}
+	return repoDir
 }
 
 // IsWorktree reports whether dir is a git worktree at all: it holds a .git
