@@ -480,6 +480,65 @@ fake would not exercise them."
     (agent-repl--send :user-sent)
     (should (equal (agent-repl-test-input--composer-text) ""))))
 
+(ert-deftest agent-repl-input-command-acted-arm-clears-the-composer ()
+  "A session-acting command was acted on: answered, nothing awaited, so the
+input clears."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :success :value (:arm :command-acted :value nil))))
+    (agent-repl-test-input--type "/model opus")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-command-acted-arm-runs-no-posthooks ()
+  "No turn was minted, so there is nothing for a posthook to post-process."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :success :value (:arm :command-acted :value nil))))
+    (let* ((ran nil)
+           (agent-repl-send-posthooks
+            (list (cons "" (lambda (_ws _raw) (setq ran t))))))
+      (agent-repl-test-input--type "/model opus")
+      (agent-repl--send :user-sent)
+      (should-not ran))))
+
+(ert-deftest agent-repl-input-duplicate-submission-keeps-the-text ()
+  "The key was already accepted, but nothing here landed: the text stays."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-duplicate-submission-holds-nothing ()
+  "A duplicate key is an ANSWER, not an outage: nothing is queued for resend."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-duplicate-submission-states-the-key-was-accepted ()
+  "The user is told plainly that the earlier submission stands."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (seq-some (lambda (text) (string-match-p "already accepted" text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-duplicate-submission-routes-to-no-handover ()
+  "It is a refusal about identity, not a handover: host.el is not involved."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :duplicate-submission :value nil)))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--refusals)))
+
 (ert-deftest agent-repl-input-merging-error-keeps-the-text ()
   "The merging refusal KEEPS the text: the user resubmits after the merge."
   (agent-repl-test-input--with
@@ -651,29 +710,29 @@ fake would not exercise them."
     ;; Assert
     (should-not agent-repl-test-input--refusals)))
 
-(ert-deftest agent-repl-input-turn-already-open-error-holds-nothing ()
+(ert-deftest agent-repl-input-feed-undecodable-error-holds-nothing ()
   "A refusal is an ANSWER, so a non-handover arm is not an outage to hold for."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
-          '(:response (:arm :error :value (:reason (:arm :turn-already-open :value nil)))))
+          '(:response (:arm :error :value (:reason (:arm :feed-undecodable :value nil)))))
     (agent-repl-test-input--type "hello")
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
     (should-not agent-repl-test-input--queued)))
 
-(ert-deftest agent-repl-input-turn-already-open-error-names-the-arm ()
+(ert-deftest agent-repl-input-feed-undecodable-error-names-the-arm ()
   "An arm this composer has no treatment for is drawn naming the arm."
   (agent-repl-test-input--with
     ;; Arrange
     (setq agent-repl-test-input--answer
-          '(:response (:arm :error :value (:reason (:arm :turn-already-open :value nil)))))
+          '(:response (:arm :error :value (:reason (:arm :feed-undecodable :value nil)))))
     (agent-repl-test-input--type "hello")
     ;; Act
     (agent-repl--send :user-sent)
     ;; Assert
-    (should (seq-some (lambda (text) (string-match-p "turn-already-open" text))
+    (should (seq-some (lambda (text) (string-match-p "feed-undecodable" text))
                       agent-repl-test-input--messages))))
 
 (ert-deftest agent-repl-input-transport-failure-keeps-the-text ()
