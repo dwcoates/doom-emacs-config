@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -391,20 +393,100 @@ func (t *fakeTail) Token() *agentreplv1.FeedWatchToken { return t.token }
 type fakeFooter struct {
 	footer.Resolver
 	topic publish.Topic[*frontendv1.FooterView]
+
+	edges participantRecorder
 }
 
 func (f *fakeFooter) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.FooterView] {
 	return &f.topic
 }
 
+// SetParticipants records the stream-liveness edges the server states, which
+// is the other two hops of connectivity truth.
+func (f *fakeFooter) SetParticipants(ws ids.WorkspaceID, host, web bool) {
+	f.edges.record(participantEdge{WS: ws, Host: host, Web: web})
+}
+
+// Participants is the recorded edges, in order.
+func (f *fakeFooter) Participants() []participantEdge { return f.edges.all() }
+
+// AwaitEdge blocks for the next participant edge, so a test synchronizes on
+// the handler's own publication rather than on a delay.
+func (f *fakeFooter) AwaitEdge(t *testing.T) participantEdge { return f.edges.await(t) }
+
+// participantEdge is one stated host/web stream liveness for a workspace.
+type participantEdge struct {
+	WS   ids.WorkspaceID
+	Host bool
+	Web  bool
+}
+
+// participantRecorder records the edges and hands each one to a waiter, which
+// is what lets a test synchronize on an asynchronous close edge without a
+// delay. The channel is generously buffered: a dropped edge would be a silent
+// hang, so an overflow fails loudly instead.
+type participantRecorder struct {
+	mu   sync.Mutex
+	all_ []participantEdge
+	ch   chan participantEdge
+}
+
+func (p *participantRecorder) record(e participantEdge) {
+	p.mu.Lock()
+	if p.ch == nil {
+		p.ch = make(chan participantEdge, 64)
+	}
+	p.all_ = append(p.all_, e)
+	ch := p.ch
+	p.mu.Unlock()
+	select {
+	case ch <- e:
+	default:
+		panic("the participant edge channel overflowed; the recorder lost an edge")
+	}
+}
+
+func (p *participantRecorder) all() []participantEdge {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]participantEdge(nil), p.all_...)
+}
+
+func (p *participantRecorder) await(t *testing.T) participantEdge {
+	t.Helper()
+	p.mu.Lock()
+	if p.ch == nil {
+		p.ch = make(chan participantEdge, 64)
+	}
+	ch := p.ch
+	p.mu.Unlock()
+	select {
+	case e := <-ch:
+		return e
+	case <-time.After(10 * time.Second):
+		t.Fatal("no participant edge arrived")
+		return participantEdge{}
+	}
+}
+
 type fakeTopbar struct {
 	topbar.Resolver
 	topic publish.Topic[*frontendv1.TopbarView]
+
+	edges participantRecorder
 }
 
 func (f *fakeTopbar) Topic(ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView] {
 	return &f.topic
 }
+
+// SetParticipants records the stream-liveness edges the server states.
+func (f *fakeTopbar) SetParticipants(ws ids.WorkspaceID, host, web bool) {
+	f.edges.record(participantEdge{WS: ws, Host: host, Web: web})
+}
+
+// Participants is the recorded edges, in order.
+func (f *fakeTopbar) Participants() []participantEdge { return f.edges.all() }
 
 type fakeSidebar struct {
 	sidebar.Resolver

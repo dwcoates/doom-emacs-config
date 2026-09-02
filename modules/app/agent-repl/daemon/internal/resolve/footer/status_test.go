@@ -11,7 +11,13 @@ import (
 
 // connected puts a serving link under the workspace so the disconnected arm —
 // which outranks everything — does not mask the arm under test.
-func connected(h *harness) { h.r.OnLink(testWS, shimclient.LinkConnected) }
+// connected puts ALL THREE hops of connectivity truth up: the daemon-to-shim
+// link and both client streams (daemon.md invariant 11). A test that wants one
+// hop down states that hop itself.
+func connected(h *harness) {
+	h.r.SetParticipants(testWS, true, true)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+}
 
 // permissionStart is one open consent ask.
 func permissionStart(id, title string) *conversationv1.AgentPermission {
@@ -676,4 +682,104 @@ func statusArmsFromProto() []string {
 		out = append(out, statusName(probe))
 	}
 	return out
+}
+
+func TestAServingLinkWithNoWebStreamIsDisconnected(t *testing.T) {
+	// Arrange: the daemon-to-shim hop serves, the web hop does not.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, false)
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Assert
+	if got := h.status(t); got != "disconnected" {
+		t.Fatalf("status = %q, want disconnected: the workspace is connected only while all three hops are live", got)
+	}
+}
+
+func TestAServingLinkWithNoHostStreamIsDisconnected(t *testing.T) {
+	// Arrange: the daemon-to-shim hop serves, the host hop does not.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, false, true)
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Assert
+	if got := h.status(t); got != "disconnected" {
+		t.Fatalf("status = %q, want disconnected: the workspace is connected only while all three hops are live", got)
+	}
+}
+
+func TestADownPeerHopIsDrawnAsSevered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, false)
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Assert
+	arm := h.view(t).GetStrip().GetStatus().GetDisconnected()
+	if arm.GetSevered() == nil {
+		t.Fatalf("substatus = %+v, want severed: the route to a reader is broken", arm.GetSubstatus())
+	}
+}
+
+func TestTheLastPeerHopComingUpMakesTheWorkspaceConnected(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, true, false)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Act
+	h.r.SetParticipants(testWS, true, true)
+
+	// Assert
+	if got := h.status(t); got == "disconnected" {
+		t.Fatal("status = disconnected after every hop came up, want a connected status")
+	}
+}
+
+func TestAPeerHopGoingDownAgainDisconnectsTheWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.SetParticipants(testWS, true, false)
+
+	// Assert
+	if got := h.status(t); got != "disconnected" {
+		t.Fatalf("status = %q, want disconnected once a hop went back down", got)
+	}
+}
+
+func TestAPeerHopDownDoesNotOutrankTheShimLinksOwnStep(t *testing.T) {
+	// Arrange: a dialing shim link is a more specific truth than a peer hop.
+	h := newHarness(t)
+	h.r.SetParticipants(testWS, false, false)
+
+	// Act
+	h.r.OnLink(testWS, shimclient.LinkDialing)
+
+	// Assert
+	arm := h.view(t).GetStrip().GetStatus().GetDisconnected()
+	if arm.GetStarting() == nil {
+		t.Fatalf("substatus = %+v, want starting", arm.GetSubstatus())
+	}
+}
+
+func TestAPeerHopDownBeforeAnyLinkIsObservedIsNotDisconnected(t *testing.T) {
+	// Arrange: no session has been asked for, so there is no route to report.
+	h := newHarness(t)
+
+	// Act
+	h.r.SetParticipants(testWS, false, false)
+
+	// Assert
+	if got := h.status(t); got == "disconnected" {
+		t.Fatal("status = disconnected with no link ever observed, want the no-session statuses")
+	}
 }

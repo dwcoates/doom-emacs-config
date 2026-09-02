@@ -146,7 +146,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // NEVER builds a partial view: the contract's non-optional fields are
 // semantically non-optional, and a push that left one empty would violate them.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link))
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream))
 	if err != nil {
 		return nil, err
 	}
@@ -396,9 +396,20 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 // OnLink drives the connectivity glyph and its tone.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.topbar.on_link", "the topbar took a link state",
-		dlog.Context{"link": connectivityKey(true, link)}, func(s *wsState) {
+		dlog.Context{"shim_link": connectivityKey(true, link, true)}, func(s *wsState) {
 			s.link = link
 			s.linkSeen = true
+		})
+}
+
+// SetParticipants states the liveness of this workspace's host and web
+// streams, the other two hops of connectivity truth (daemon.md invariant 11).
+// The indicator reads connected only while all three are live.
+func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
+	r.mutate(ws, "daemon.topbar.set_participants", "the topbar took the participant streams' liveness",
+		dlog.Context{"host_stream": host, "web_stream": web}, func(s *wsState) {
+			s.hostStream = host
+			s.webStream = web
 		})
 }
 
