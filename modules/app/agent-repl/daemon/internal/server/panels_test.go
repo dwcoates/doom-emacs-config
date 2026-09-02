@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -11,20 +12,29 @@ import (
 	"claude-repld/internal/resolve/topbar"
 )
 
-// panelTopbar answers a context panel on demand.
+// panelTopbar answers a context panel and the status facts on demand.
 type panelTopbar struct {
 	topbar.Resolver
-	panel *frontendv1.ContextPanelView
+	panel     *frontendv1.ContextPanelView
+	facts     topbar.StatusFacts
+	factsHeld bool
 }
 
 func (p *panelTopbar) ContextPanel(ids.WorkspaceID) (*frontendv1.ContextPanelView, bool) {
 	return p.panel, p.panel != nil
 }
 
-// TestPanelsAnswersTheContextPanel pins the one panel that has a producer.
+func (p *panelTopbar) StatusFacts(ids.WorkspaceID) (topbar.StatusFacts, bool) {
+	return p.facts, p.factsHeld
+}
+
+// stamp is a build stamp that reads.
+func stamp(sha string) VersionFunc { return func() (string, error) { return sha, nil } }
+
+// TestPanelsAnswersTheContextPanel pins the context-tree producer.
 func TestPanelsAnswersTheContextPanel(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, fakeLogger{})
+	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), fakeLogger{})
 
 	// Act.
 	panel, err := source(context.Background(), testWorkspaceID,
@@ -36,15 +46,109 @@ func TestPanelsAnswersTheContextPanel(t *testing.T) {
 	}
 }
 
-// TestPanelsRefusesAPanelWithNoProducer pins that a command whose panel nothing
-// assembles fails LOUDLY rather than drawing an empty card.
-func TestPanelsRefusesAPanelWithNoProducer(t *testing.T) {
+// TestPanelsAnswersTheStatusPanel pins the settled thin panel: the version row
+// plus the three spliced session facts, and nothing else.
+func TestPanelsAnswersTheStatusPanel(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, fakeLogger{})
+	source := Panels(&panelTopbar{
+		factsHeld: true,
+		facts: topbar.StatusFacts{
+			Account: "someone@example.com", Model: "opus", PermissionMode: "default",
+		},
+	}, stamp("abc123"), fakeLogger{})
+
+	// Act.
+	panel, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_STATUS)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("status panel: %v", err)
+	}
+	want := [][2]string{
+		{"Version", "abc123"},
+		{"Account", "someone@example.com"},
+		{"Model", "opus"},
+		{"Permission mode", "default"},
+	}
+	rows := panel.GetStatus().GetRows()
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %v, want %v", rows, want)
+	}
+	for i, row := range rows {
+		if row.GetLabel() != want[i][0] || row.GetValue() != want[i][1] {
+			t.Fatalf("row %d = %q/%q, want %q/%q", i, row.GetLabel(), row.GetValue(), want[i][0], want[i][1])
+		}
+	}
+}
+
+// TestStatusPanelOmitsARowTheSessionHasNotStated pins that a blank value is
+// omitted rather than drawn: StatusPanelRow.value is never empty.
+func TestStatusPanelOmitsARowTheSessionHasNotStated(t *testing.T) {
+	// Arrange: a logged-out config root states no account.
+	source := Panels(&panelTopbar{
+		factsHeld: true,
+		facts:     topbar.StatusFacts{Model: "opus", PermissionMode: "plan"},
+	}, stamp("abc123"), fakeLogger{})
+
+	// Act.
+	panel, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_STATUS)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("status panel: %v", err)
+	}
+	for _, row := range panel.GetStatus().GetRows() {
+		if row.GetLabel() == "Account" {
+			t.Fatalf("rows = %v, want no Account row", panel.GetStatus().GetRows())
+		}
+	}
+}
+
+// TestStatusPanelRefusesWhenNoSessionFactsStand pins that a workspace whose
+// session never opened fails loudly rather than drawing a version-only card.
+func TestStatusPanelRefusesWhenNoSessionFactsStand(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
 		conversationv1.SessionCommand_SESSION_COMMAND_STATUS)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a status panel was answered for a workspace with no session facts")
+	}
+}
+
+// TestStatusPanelRefusesAnUnreadableBuildStamp pins that an unknown version is
+// a failure, never a drawn placeholder.
+func TestStatusPanelRefusesAnUnreadableBuildStamp(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{factsHeld: true}, func() (string, error) {
+		return "", errors.New("the deploy stamp is empty")
+	}, fakeLogger{})
+
+	// Act.
+	_, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_STATUS)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a status panel was answered without a version the daemon knows")
+	}
+}
+
+// TestPanelsRefusesAPanelWithNoProducer pins that a command whose panel nothing
+// assembles fails LOUDLY rather than drawing an empty card.
+func TestPanelsRefusesAPanelWithNoProducer(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{panel: &frontendv1.ContextPanelView{}}, stamp("abc123"), fakeLogger{})
+
+	// Act.
+	_, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_TODOS)
 
 	// Assert.
 	if err == nil {
@@ -56,7 +160,7 @@ func TestPanelsRefusesAPanelWithNoProducer(t *testing.T) {
 // failure rather than an empty one.
 func TestPanelsRefusesWhenNoContextPanelStands(t *testing.T) {
 	// Arrange.
-	source := Panels(&panelTopbar{}, fakeLogger{})
+	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
 
 	// Act.
 	_, err := source(context.Background(), testWorkspaceID,
