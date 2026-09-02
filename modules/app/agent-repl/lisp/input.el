@@ -78,6 +78,7 @@
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
+(declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm-plist))
 (declare-function agent-repl-prompt-queue-offer "agent-repl-prompt-queue"
                   (ws said origin raw &optional key))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
@@ -593,17 +594,51 @@ SUCCESS is the decoded outcome oneof."
     (arm
      (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
 
-(defun agent-repl--input-on-error (ws origin error)
+(defconst agent-repl--input-handover-arms '(:transferring-away :not-yet-adopted)
+  "Refusal arms that are HANDOVER SIGNALS rather than user-facing failures.
+The same two arms verbs.el routes, for the same reason: the fanout makes
+the handover ordering enforced BY REFUSAL on EVERY per-workspace rpc, and
+SubmitPrompt is one.  A lagging client self-heals from the refusal, so
+telling the user their submission was refused would be reporting a fault
+during the one rollout that is supposed to be invisible.")
+
+(defun agent-repl--input-on-handover-refusal (ws said origin raw arm key)
+  "Route ARM, a handover refusal of WS's submission, and HOLD the prompt.
+Two acts, both required.  host.el walks the handover -- the redial, the
+adopt, the webview -- because the refusal is the same fact its own pushes
+carry.  The prompt itself goes to the OUTAGE queue under THIS attempt\='s
+KEY: it was refused, not consumed, so re-driving it is a RETRY of this
+submission and must go back out under the same key for the daemon to
+recognize a duplicate.  The queue releases it on the promotion, which is
+the moment the successor is the primary and the workspace is adopted.
+
+The composer KEEPS its text: nothing here says the prompt landed, and the
+user is left able to see exactly what they wrote."
+  (agent-repl--info ws "elisp.input.handover-refusal ws=%s origin=%S arm=%S key=%s"
+                    ws origin (plist-get arm :arm) key)
+  (agent-repl-host-handle-refusal ws arm)
+  (agent-repl-prompt-queue-offer ws said origin raw key))
+
+(defun agent-repl--input-on-error (ws said origin raw error key)
   "Handle a `SubmitPromptError' for WS.  The composer KEEPS its text.
-ERROR is the decoded error message; its `merging' arm means the prompt
+ERROR is the decoded error message.  Its `merging' arm means the prompt
 arrived after a merge began and would be orphaned, so the user resubmits
-once the merge resolves."
-  (let ((arm (plist-get (plist-get error :reason) :arm)))
+once the merge resolves.  Its two HANDOVER arms are not failures at all
+and are routed to host.el.  Every other arm is a refusal this composer
+has no treatment for: it is recorded at ERROR naming the arm and drawn to
+the user, and the text stays where it is.
+
+SAID, RAW and KEY are the submission\='s own, carried so a handover
+refusal can re-drive the very prompt that was refused."
+  (let* ((reason (plist-get error :reason))
+         (arm (plist-get reason :arm)))
     (pcase arm
       (:merging
        (agent-repl--warn ws "elisp.input.refused-merging ws=%s origin=%S" ws origin)
        (agent-repl--input-flash ws "refused: merge in flight")
        (message "agent-repl: refused -- a merge is in flight for this workspace"))
+      ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
+       (agent-repl--input-on-handover-refusal ws said origin raw reason key))
       (_
        (agent-repl--error ws "elisp.input.unknown-error-arm ws=%s arm=%S" ws arm)
        (message "agent-repl: submission refused (%S)" arm)))))
@@ -653,7 +688,8 @@ value Emacs constructs from a path."
      (lambda (response)
        (pcase (plist-get response :arm)
          (:success (agent-repl--input-on-success ws raw origin (plist-get response :value)))
-         (:error (agent-repl--input-on-error ws origin (plist-get response :value)))
+         (:error (agent-repl--input-on-error
+                  ws said origin raw (plist-get response :value) key))
          (arm (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S" ws arm))))
      :on-failure
      (lambda (detail) (agent-repl--input-on-failure ws said origin raw detail key)))

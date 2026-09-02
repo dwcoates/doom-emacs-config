@@ -662,6 +662,64 @@ Re-selection is idempotent, which is what keeps this from looping."
         ;; Assert
         (should (equal cancelled '(fake-stream)))))))
 
+(ert-deftest agent-repl-test-roster-promotion-resubscribes-on-the-successor ()
+  "A promotion fires no up hooks, so THIS is what keeps the tabs reconciling."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((conns nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (conn _on-push _on-close &optional _on-open)
+                   (push conn conns) 'fake-stream)))
+        ;; Act
+        (agent-repl-roster-on-link-promote old successor)
+        ;; Assert
+        (should (equal conns (list successor)))))))
+
+(ert-deftest agent-repl-test-roster-promotion-resubscription-is-logged ()
+  "The re-subscription is news: it is the repair of a stream a rollout killed."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream nil))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        ;; Act
+        (agent-repl-roster-on-link-promote old successor)
+        ;; Assert
+        (should (seq-some (lambda (text)
+                            (string-search "elisp.roster.resubscribed-on-promotion" text))
+                          logs))))))
+
+(ert-deftest agent-repl-test-roster-promotion-cancels-the-stream-on-the-old-conn ()
+  "The prior stream is replaced, never stacked: one roster stream, always."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((cancelled nil)
+          (successor (agent-repl-connect-open "127.0.0.1:9100"))
+          (old (agent-repl-connect-open "127.0.0.1:9001"))
+          (agent-repl-roster--stream 'old-stream))
+      (cl-letf (((symbol-function 'agent-repl-rpc-watch-workspace-roster)
+                 (lambda (_conn _on-push _on-close &optional _on-open) 'fake-stream))
+                ((symbol-function 'agent-repl-connect-stream-cancel)
+                 (lambda (stream) (push stream cancelled))))
+        ;; Act
+        (agent-repl-roster-on-link-promote old successor)
+        ;; Assert
+        (should (equal cancelled '(old-stream)))))))
+
+(ert-deftest agent-repl-test-roster-registers-on-the-promote-hook ()
+  "The registration IS the fix: without it a rollout leaves no roster stream."
+  ;; Act / Assert
+  (should (memq #'agent-repl-roster-on-link-promote
+                (default-value 'agent-repl-link-promote-functions))))
+
 (ert-deftest agent-repl-test-roster-link-down-keeps-the-last-view ()
   "The last view is the newest thing anyone knows; blanking it would lie."
   ;; Arrange
