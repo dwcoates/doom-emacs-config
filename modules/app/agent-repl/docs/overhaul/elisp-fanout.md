@@ -338,6 +338,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   deletions merged onto R-SUITE-2's tests (that agent branched before
   suite2 landed). R-REGRESS dispatched (`opus-low`, elisp-agents/regress
   off eb2d55238). Running: red-host, red-misc, regress.
+- R-RED-MISC MERGED: roster 56/56, daemon 21/21, verbs 73/73, composer
+  54/54. Production: roster `--open-tab` writes `:project-dir` from the
+  ref's dir unconditionally; `agent-repl-frontend-daemon-restart` sequences
+  stop ack → teardown → await daemon.addr removal → ensure (it used to
+  re-adopt the departing daemon). Suite: `format-mode-line` renders empty
+  in batch — the notice helper reads the `:eval` segment function; fork
+  guard signals `user-error` (verbs-layer pre-send guard per §9). Surfaced:
+  composer suite has a load-correlated `--await-log` flake (the same three
+  tests R-REGRESS holds — likely one cause); test-roster's `--with-editor`
+  stub writes `:project-dir` itself and masked the gap (teamlead: leave the
+  stub; the new test overrides it locally — noted as a follow-up).
 
 ## 1. Module map (final tree of lisp/)
 
