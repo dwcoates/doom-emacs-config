@@ -508,21 +508,6 @@ collide with the real workspace in `agent-repl--ws-for-dir'."
                 (and p (string= canonical (agent-repl--path-canonical p))))))
        (agent-repl--live-ws-names)))))
 
-(defun agent-repl--ws-registered-dir-owner (dir &optional except)
-  "Return any registered workspace other than EXCEPT owning canonical DIR.
-Unlike `agent-repl--ws-dir-owner', this includes tombstones whose preserved
-`:project-dir' remains the identity of a closed workspace.  Inbound daemon
-state uses this query to recognize a closed workspace without creating a
-path-keyed stub."
-  (when dir
-    (let ((canonical (agent-repl--path-canonical dir)))
-      (cl-find-if
-       (lambda (ws)
-         (and (not (equal ws except))
-              (let ((p (agent-repl--ws-get ws :project-dir)))
-                (and p (string= canonical (agent-repl--path-canonical p))))))
-       (agent-repl--ws-registered-names)))))
-
 (defvar agent-repl-ws-del-hook nil
   "Abnormal hook run with WS just before `agent-repl--ws-del' tombstones it.
 Runs while the runtime keys (`agent-repl--ws-runtime-keys') are still
@@ -643,32 +628,6 @@ tab hiding died with the roster becoming the tab bar's source, so a
 tombstone no longer carries a reason marker anybody branches on."
   (and (agent-repl--ws-known-p ws)
        (not (null (agent-repl--ws-get ws :killed-at)))))
-
-(defun agent-repl--ws-tombstoned-names ()
-  "Return the names of every tombstoned workspace, regardless of reason.
-All entries in `agent-repl--workspaces' for which `--ws-tombstoned-p'
-returns non-nil.  Sorted by name for determinism.  Used by the picker to gather the
-identity records that must survive Emacs restart without pulling
-all-tombstones through a direct `hash-table-keys' walk at the call
-site."
-  (sort (cl-remove-if-not #'agent-repl--ws-tombstoned-p
-                          (hash-table-keys agent-repl--workspaces))
-        #'string<))
-
-(defun agent-repl--ws-names-cache-usable-p ()
-  "Return non-nil when `persp-names-cache' is bound and non-nil.
-`Usable' means the cache is available as a reliable tab-bar membership
-signal — the persp-mode cache has been populated with at least one
-entry.  Returns nil when:
-  - `persp-names-cache' is unbound (persp-mode not loaded), or
-  - `persp-names-cache' is bound but nil (startup init phase or test
-    stubs where persp-mode is not active and no persps exist yet).
-Callers (principally `--collect-snapshot-entries') use this to decide
-whether to consult the cache as the authoritative tab-bar source or fall
-back to a plain hash-traversal that includes all live entries.  Part of
-the persp-mode integration boundary owned by `workspace.el' (see file
-Commentary and AGENTS.md)."
-  (and (boundp 'persp-names-cache) persp-names-cache))
 
 (defun agent-repl--ws-open-p (ws)
   "Return non-nil iff WS is currently visible in the tab-bar.
@@ -801,34 +760,6 @@ the workspace.  Callers that need a total function should use
 `agent-repl--repo-key-unknown' sentinel."
   (or (agent-repl--ws-repo-key ws) agent-repl--repo-key-unknown))
 
-(defun agent-repl--repo-label (key)
-  "Derive a human-readable repo label from KEY (a canonical .git path).
-Returns the basename of KEY's parent directory — i.e. the project
-name, since git's common-dir is conventionally `<project>/.git'.
-Returns nil for a nil KEY, and KEY itself for the
-`agent-repl--repo-key-unknown' sentinel (which is already a label)."
-  (cond
-   ((null key) nil)
-   ((equal key agent-repl--repo-key-unknown) key)
-   (t (when-let ((parent (file-name-directory key)))
-        (file-name-nondirectory (directory-file-name parent))))))
-
-(defun agent-repl--main-worktree-dir (dir)
-  "Return the main worktree root of the git repository containing DIR.
-Derives from DIR's repo key (`agent-repl--repo-key-for-dir', the
-canonical git common-dir): the common-dir is conventionally
-`<main-worktree>/.git', so its parent IS the main checkout, no matter
-which linked worktree DIR itself is.
-
-Returns nil when DIR resolves to no repo, and nil when the parent is
-not an existing directory — the latter is the bare-repository case,
-where every worktree is linked and there is no main checkout to switch
-to.  Both are expected lookup outcomes rather than invariant
-violations, so callers own the \"no such workspace\" message."
-  (when-let* ((key (agent-repl--repo-key-for-dir dir))
-              (parent (file-name-directory (directory-file-name key))))
-    (and (file-directory-p parent) (directory-file-name parent))))
-
 (defvar agent-repl--folded-repos (make-hash-table :test 'equal)
   "Set of repo keys (see `agent-repl--ws-repo-group') currently folded.
 Keys are repo keys, values are `t' — presence is the signal.  Global
@@ -840,12 +771,6 @@ switchers alike.")
   "Return non-nil when repo GROUP (a repo key) is folded."
   (and group (gethash group agent-repl--folded-repos) t))
 
-(defun agent-repl--folded-repo-keys ()
-  "Return the folded repo keys, sorted, for cheap change-detection.
-Lets a renderer that caches its output detect that a fold/unfold
-happened by comparing successive snapshots of this list."
-  (sort (hash-table-keys agent-repl--folded-repos) #'string<))
-
 (defun agent-repl--toggle-repo-fold (group)
   "Toggle the fold state of repo GROUP (a repo key).
 Returns non-nil when GROUP is folded after the toggle."
@@ -855,10 +780,6 @@ Returns non-nil when GROUP is folded after the toggle."
       (progn (remhash group agent-repl--folded-repos) nil)
     (puthash group t agent-repl--folded-repos)
     t))
-
-(defun agent-repl--ws-repo-folded-p (ws)
-  "Return non-nil when WS belongs to a folded repo."
-  (agent-repl--repo-folded-p (agent-repl--ws-repo-group ws)))
 
 (defun agent-repl--ws-tabline-names ()
   "Return the workspace names the tab-bar shows, in ROSTER ORDER.
@@ -1238,71 +1159,6 @@ passing for an already-merged workspace."
                           ws (if (eq canonical-ws ws) "t" "nil") new-cache)
         (agent-repl--ws-update-names-cache new-cache))))))
 
-(defun agent-repl--reorder-workspace-next-to (ws anchor)
-  "Move workspace WS to sit immediately after ANCHOR in `persp-names-cache'.
-Places WS's tab-bar entry directly to the right of ANCHOR's entry so a
-child workspace surfaces next to the parent workspace it was generated
-from.
-
-Mirrors `agent-repl--reorder-workspace-by-priority' in structure:
-preserves cache string identity via the `(car (member ws cache))'
-canonicalization (`persp-remove-from-menu' relies on `eql' identity
-for string removal), and the `persp-nil-name' slot at the cache head.
-When ANCHOR is the `persp-nil-name' sentinel — the only case where a
-cache-present ANCHOR is absent from the visible portion — WS lands at
-the front of the visible portion, i.e. immediately after the sentinel.
-
-No-op when the cache does not contain WS, when ANCHOR is nil, absent
-from the cache, or `equal' to WS, when persp-mode is not loaded, or
-when `persp-update-names-cache' is unavailable.  Those bail-outs fall
-back to the caller's alternative placement (typically
-`agent-repl--reorder-workspace-by-priority').  Each entry, every
-bail-out, and the post-mutation cache state are logged so the silent
-no-op paths are observable when reproducing ordering bugs.
-
-This function is part of the persp-mode integration boundary owned
-by `workspace.el' (see file Commentary and AGENTS.md).  Callers must
-route through it; they may not mutate `persp-names-cache' directly."
-  (let ((cache-snapshot (if (boundp 'persp-names-cache) persp-names-cache "(unbound)")))
-    (agent-repl--log ws "reorder-workspace-next-to: ENTRY ws=%s anchor=%s cache=%S"
-                      ws anchor cache-snapshot)
-    (cond
-     ((not (boundp 'persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=cache-unbound" ws))
-     ((not (member ws persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=not-in-cache cache=%S"
-                        ws persp-names-cache))
-     ((null anchor)
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=no-anchor" ws))
-     ((not (member anchor persp-names-cache))
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-not-in-cache anchor=%s cache=%S"
-                        ws anchor persp-names-cache))
-     ((equal ws anchor)
-      (agent-repl--log ws "reorder-workspace-next-to: BAIL ws=%s reason=anchor-is-self" ws))
-     (t
-      (let* ((nil-name (and (boundp 'persp-nil-name) persp-nil-name))
-             (canonical-ws (car (member ws persp-names-cache)))
-             (without-ws (cl-remove canonical-ws persp-names-cache :test #'eq :count 1))
-             (visible (if nil-name
-                          (cl-remove nil-name without-ws :test #'equal :count 1)
-                        without-ws))
-             (anchor-pos (cl-position anchor visible :test #'equal))
-             (new-visible (if anchor-pos
-                              (append (cl-subseq visible 0 (1+ anchor-pos))
-                                      (list canonical-ws)
-                                      (cl-subseq visible (1+ anchor-pos)))
-                            ;; ANCHOR was the `persp-nil-name' sentinel (dropped
-                            ;; from `visible' above); put WS at the front so it
-                            ;; still lands immediately after the sentinel.
-                            (cons canonical-ws visible)))
-             (new-cache (if (and nil-name (member nil-name persp-names-cache))
-                            (cons nil-name new-visible)
-                          new-visible)))
-        (agent-repl--log ws "reorder-workspace-next-to: APPLY ws=%s canonical-eq-input=%s anchor=%s position=%s new-cache=%S"
-                          ws (if (eq canonical-ws ws) "t" "nil")
-                          anchor (or anchor-pos "front") new-cache)
-        (agent-repl--ws-update-names-cache new-cache))))))
-
 ;;;; ---- persp-mode identity / navigation boundary -----------------------
 ;;
 ;; These thin wrappers insulate callers from the +workspace-* API names so
@@ -1416,17 +1272,6 @@ directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-switch)
     (apply '+workspace-switch ws args)))
 
-(defun agent-repl--ws-exists-p (ws)
-  "Return non-nil when workspace WS exists in the tab-bar.
-Delegates to `+workspace-exists-p'.  Returns nil when that function is
-unbound (persp-mode not loaded).
-
-This is the persp-mode existence boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-exists-p'
-directly or wrapping it themselves with `fboundp'."
-  (and (fboundp '+workspace-exists-p)
-       (+workspace-exists-p ws)))
-
 (defun agent-repl--ws-repaint-sidebar (ws reason)
   "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
 Killing a perspective REMOVES that workspace's sidebar row
@@ -1474,16 +1319,6 @@ This is the persp-mode main-workspace boundary owned by `workspace.el'.
 Callers must use this function instead of reading `+workspaces-main'
 directly or guarding it themselves with `boundp'."
   (and (boundp '+workspaces-main) +workspaces-main))
-
-(defun agent-repl--ws-frame-switch (ws)
-  "Activate workspace WS on the current frame via `persp-frame-switch'.
-No-op when `persp-frame-switch' is unbound (persp-mode not loaded).
-
-This is the persp-mode frame-activation boundary owned by `workspace.el'.
-Callers must use this function instead of calling `persp-frame-switch'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp 'persp-frame-switch)
-    (persp-frame-switch ws)))
 
 (defun agent-repl--ws-frame-save-state ()
   "Save the current frame's persp window-configuration state.
@@ -1549,157 +1384,6 @@ workspaces return nil."
   (and (agent-repl--ws-live-p ws)
        (equal (agent-repl--ws-get ws :daemon-workspace-metadata)
               metadata)))
-
-(defun agent-repl--ws-materialize-daemon-workspace (ws metadata)
-  "Materialize daemon-owned workspace WS from authoritative METADATA.
-Creates only the perspective and the `agent-repl--workspaces' bookkeeping
-entry.  It never invokes git, session creation, shim startup, prompt
-delivery, projectile registration, or frontend mounting.
-
-NOTHING IS PERSISTED: the DAEMON is the source of which workspaces
-exist, and on connect Emacs opens tabs from the roster stream.  A
-durable Emacs-side roster snapshot would be a second, drifting answer to
-a question the roster already answers.
-
-Returns `created' for a new materialization and `existing' for an exact
-replay.  A same-name conflict, duplicate path owner, tombstone, or missing
-persp-mode primitive fails before mutation.  If perspective setup fails
-after creation, the perspective and fresh hash entry are rolled back before
-the original error is re-signaled."
-  (let ((path (plist-get metadata :project-dir))
-        (job-id (plist-get metadata :daemon-workspace-job-id)))
-    (agent-repl--log
-     ws
-     "ws-materialize-daemon: ENTRY ws=%s job-id=%s path=%s known=%S live=%S"
-     ws job-id path (agent-repl--ws-known-p ws)
-     (agent-repl--ws-live-p ws))
-    (cond
-     ((agent-repl--ws-daemon-materialization-matches-p ws metadata)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: IDEMPOTENT replay ws=%s job-id=%s path=%s"
-       ws job-id path)
-      'existing)
-     ((agent-repl--ws-known-p ws)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: CONFLICT known workspace ws=%s job-id=%s existing-job=%s existing-path=%s"
-       ws job-id (agent-repl--ws-get ws :daemon-workspace-job-id)
-       (agent-repl--ws-get ws :project-dir))
-      (error "agent-repl: daemon workspace %s conflicts with registered workspace" ws))
-     ((agent-repl--ws-dir-owner path)
-      (let ((owner (agent-repl--ws-dir-owner path)))
-        (agent-repl--log
-         ws
-         "ws-materialize-daemon: CONFLICT path=%s already owned by ws=%s job-id=%s"
-         path owner job-id)
-        (error "agent-repl: daemon workspace path %s is already owned by %s"
-               path owner)))
-     ((agent-repl--ws-resolve-persp ws)
-      (agent-repl--log
-       ws
-       "ws-materialize-daemon: CONFLICT perspective exists without bookkeeping ws=%s job-id=%s"
-       ws job-id)
-      (error "agent-repl: perspective %s exists without daemon bookkeeping" ws))
-     (t
-      ;; Check every rollback dependency before creating anything.
-      (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
-        (unless (fboundp fn)
-          (agent-repl--log
-           ws
-           "ws-materialize-daemon: MISSING required perspective primitive=%s ws=%s job-id=%s — aborting before mutation"
-           fn ws job-id)
-          (error "agent-repl: cannot materialize %s; %s is unavailable" ws fn)))
-      (let ((persp-created nil)
-            (hash-created nil))
-        ;; `prog1', so the roster write runs only after the guarded body
-        ;; returned normally.  Inside the `condition-case' a failing write
-        ;; would trip the rollback and destroy a workspace that was
-        ;; materialized correctly.
-        (prog1
-            (condition-case err
-		(let ((persp (persp-add-new ws)))
-		  (unless (and persp (not (keywordp persp)))
-                    (agent-repl--log
-                     ws
-                     "ws-materialize-daemon: CREATE-FAILED ws=%s job-id=%s reason=invalid-persp result=%S"
-                     ws job-id persp)
-                    (error "persp-add-new did not create perspective %s" ws))
-		  (setq persp-created t)
-		  (set-persp-parameter '+workspace-project path persp)
-		  ;; One write is the bookkeeping commit point.  Keeping all
-		  ;; metadata in one plist prevents observers from seeing a
-		  ;; project-dir-only or session-id-only partial workspace.
-		  (puthash
-		   ws
-		   (append
-                    (list :created-at (current-time)
-			  :worktree-p t
-			  ;; Preserve the immutable creation envelope separately
-			  ;; from mutable top-level fields such as :priority.
-			  ;; Reconnect replay compares this exact original value,
-			  ;; so a later user priority edit cannot turn the same
-			  ;; daemon job into a false conflict.  The copy is what
-			  ;; makes that true: `append' below SHARES METADATA's
-			  ;; cons cells as the plist tail, so without it a
-			  ;; `plist-put' on any metadata-supplied key would
-			  ;; rewrite the envelope in place.
-			  :daemon-workspace-metadata (copy-sequence metadata)
-			  ;; Derive the id through the SAME canonicalizer every
-			  ;; other ws-id producer uses (`agent-repl--workspace-id',
-			  ;; `--path-canonical'), or a symlinked worktree would get
-			  ;; two different ids for one directory.
-			  :ws-id (substring
-				  (md5 (agent-repl--path-canonical path))
-				  0 agent-repl-workspace-id-length))
-                    metadata)
-		   agent-repl--workspaces)
-		  (setq hash-created t)
-		  (agent-repl--log
-		   ws
-		   "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s branch=%s prompt-queued=%S"
-		   ws job-id path (plist-get metadata :branch-name)
-		   (plist-get metadata :initial-prompt-queued))
-		  'created)
-              (error
-               (when hash-created
-		 (remhash ws agent-repl--workspaces))
-               (when persp-created
-		 (condition-case rollback-err
-                     (persp-kill ws)
-		   (error
-                    (agent-repl--warn
-                     ws
-                     "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
-                     ws job-id rollback-err))))
-               (agent-repl--log
-		ws
-		"ws-materialize-daemon: FAILED and rolled back ws=%s job-id=%s hash-created=%S persp-created=%S err=%S"
-		ws job-id hash-created persp-created err)
-               (signal (car err) (cdr err))))))))))
-
-(defun agent-repl--ws-protected-p (ws)
-  "Return non-nil when workspace WS is protected from deletion/cycling.
-Delegates to `+workspace--protected-p'.  Returns nil when that function
-is unbound (persp-mode not loaded).
-
-This is the persp-mode protection boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace--protected-p'
-directly or wrapping it themselves with `fboundp'."
-  (and (fboundp '+workspace--protected-p)
-       (+workspace--protected-p ws)))
-
-(defun agent-repl--ws-error (message &optional noerror)
-  "Report a workspace error via `+workspace-error' with MESSAGE.
-With NOERROR non-nil, `+workspace-error' displays the message instead of
-signaling.  No-op when `+workspace-error' is unbound (persp-mode not
-loaded).  When it does signal, the error propagates to the caller.
-
-This is the persp-mode error boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-error'
-directly or wrapping it themselves with `fboundp'."
-  (when (fboundp '+workspace-error)
-    (+workspace-error message noerror)))
 
 (defun agent-repl--ws-add-buffer (buffer persp &optional switch)
   "Attach BUFFER to perspective PERSP via `persp-add-buffer'.
@@ -1811,18 +1495,6 @@ Callers must use this function instead of referring to
 `+workspace-tab-selected-face' directly."
   '+workspace-tab-selected-face)
 
-(defun agent-repl--workspace-for-buffer (buf)
-  "Return the workspace name whose perspective contains BUF, or nil.
-Scans `persp-persps' for the perspective that owns BUF.  Returns nil
-when the workspace system is unavailable.
-
-This is persp-mode buffer-ownership resolution; it lives in
-`workspace.el' because it touches the raw persp set directly."
-  (when (agent-repl--ws-system-available-p)
-    (cl-loop for persp in (persp-persps)
-             when (persp-contain-buffer-p buf persp)
-             return (safe-persp-name persp))))
-
 (defun agent-repl--ws-all-persps ()
   "Return the raw list of all perspective objects via `persp-persps'.
 Returns nil when `persp-persps' is unbound (persp-mode not loaded).  The
@@ -1857,16 +1529,6 @@ its aggregate record, so this boundary does not emit a duplicate record."
     (error "agent-repl--ws-persp-identity: perspective must be non-nil"))
   (format "persp@%x" (sxhash-eq persp)))
 
-(defun agent-repl--ws-nil-name ()
-  "Return persp-mode's sentinel \"no perspective\" name, or nil.
-Reads `persp-nil-name'.  Returns nil when that variable is unbound
-(persp-mode not loaded).
-
-This is the persp-mode sentinel-name boundary owned by `workspace.el'.
-Callers must use this function instead of reading `persp-nil-name'
-directly or guarding it themselves with `boundp'."
-  (and (boundp 'persp-nil-name) persp-nil-name))
-
 (defun agent-repl--ws-names-cache ()
   "Return the raw `persp-names-cache' list, or nil when unbound.
 Used mainly for diagnostic logging of cache state.  Returns nil both
@@ -1877,22 +1539,6 @@ This is the persp-mode names-cache read boundary owned by `workspace.el'.
 Callers must use this function instead of reading `persp-names-cache'
 directly or guarding it themselves with `boundp'."
   (and (boundp 'persp-names-cache) persp-names-cache))
-
-(defun agent-repl--ws-new (&optional name)
-  "Create a new workspace, named NAME when given.
-With NAME, delegates to `+workspace-new'.  Without NAME, delegates to
-the interactive `+workspace/new', which auto-generates a name (the
-caller then reads it back via `--ws-current-name').  No-op when the
-corresponding function is unbound (persp-mode not loaded).
-
-This is the persp-mode creation boundary owned by `workspace.el'.
-Callers must use this function instead of calling `+workspace-new' or
-`+workspace/new' directly or wrapping them with `fboundp'."
-  (if name
-      (when (fboundp '+workspace-new)
-        (+workspace-new name))
-    (when (fboundp '+workspace/new)
-      (+workspace/new))))
 
 (defun agent-repl--land-after-teardown (ws)
   "Leave the frame in a well-defined perspective now that WS is gone.
@@ -2008,15 +1654,6 @@ Projectile boundary owned by `workspace.el'."
   (when (fboundp 'projectile-add-known-project)
     (projectile-add-known-project dir)))
 
-(defun agent-repl--ws-unregister-project (dir)
-  "Drop DIR from projectile's known projects via `projectile-remove-known-project'.
-No-op when `projectile-remove-known-project' is unbound (projectile not
-loaded).
-
-Projectile boundary owned by `workspace.el'."
-  (when (fboundp 'projectile-remove-known-project)
-    (projectile-remove-known-project dir)))
-
 (defun agent-repl--ws-switch-project (project)
   "Switch to PROJECT via `projectile-switch-project-by-name'.
 No-op when `projectile-switch-project-by-name' is unbound (projectile
@@ -2025,15 +1662,6 @@ not loaded).
 Projectile boundary owned by `workspace.el'."
   (when (fboundp 'projectile-switch-project-by-name)
     (projectile-switch-project-by-name project)))
-
-(defun agent-repl--ws-known-projects ()
-  "Return the list of projectile-relevant known project roots.
-Delegates to `projectile-relevant-known-projects'.  Returns nil when
-that function is unbound (projectile not loaded).
-
-Projectile boundary owned by `workspace.el'."
-  (when (fboundp 'projectile-relevant-known-projects)
-    (projectile-relevant-known-projects)))
 
 ;;;; ---- persp-mode load-ordering / hook-registration boundary -----------
 ;;
@@ -2071,27 +1699,6 @@ callers do not name the feature directly.
 Boundary owned by `workspace.el'."
   (with-eval-after-load 'persp-mode
     (funcall thunk)))
-
-(defun agent-repl--ws-run-switch-project-function (dir)
-  "Invoke `+workspaces-switch-project-function' on DIR when it is set.
-No-op when that variable is unbound or nil.
-
-This is the Doom switch-project-function boundary owned by `workspace.el'.
-Callers must use this function instead of reading or funcalling
-`+workspaces-switch-project-function' directly."
-  (when (and (boundp '+workspaces-switch-project-function)
-             +workspaces-switch-project-function)
-    (funcall +workspaces-switch-project-function dir)))
-
-(defun agent-repl--ws-advise-kill-before (fn)
-  "Install FN as `:before' advice on `+workspace/kill'.
-Lets a caller run teardown while the workspace is still current.  This
-is load-time wiring registered once at module load.
-
-This is the persp-mode kill-advice boundary owned by `workspace.el'.
-Callers must use this function instead of calling `advice-add' on
-`+workspace/kill' directly."
-  (advice-add '+workspace/kill :before fn))
 
 ;;;; ---- persp-mode policy configuration ---------------------------------
 ;;
