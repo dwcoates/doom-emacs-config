@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RosterRowSchema } from "../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { FooterStatusSchema } from "../../proto/gen/ts/frontend/v1/footer_pb";
 import renderColors from "../../proto/vocab/render-colors.json";
