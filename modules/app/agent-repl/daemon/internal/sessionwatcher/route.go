@@ -293,16 +293,49 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 
 	w.sinks.Feed.OnActivity(w.ws, agent, act, w.addr)
 	w.sinks.Footer.OnActivity(w.ws, agent, act)
+	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
+	// but it also accumulates the SESSION's token spend from the usage every
+	// activity carries (internal/resolve/topbar's observeUsage), and a sink
+	// handed only the unmodeled frames would count nothing at all.
+	w.sinks.Topbar.OnActivity(w.ws, agent, act)
 	if act.GetUnmodeled() != nil {
-		// The topbar sees an activity for ONE reason: an activity the schema
-		// does not model is a warning it shows.
 		w.log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", dlog.Context{
 			"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(act.GetUnmodeled()),
 		})
-		w.sinks.Topbar.OnActivity(w.ws, agent, act)
 	}
 	w.reapEndedMonitorLocked(act)
 	w.watchSpawnedSubagentLocked(act)
+	w.notifyPushLocked(act)
+}
+
+// notifyPushLocked raises the host notification a PushNotification send earns.
+//
+// The agent reaching an ABSENT user is the attention marker's whole reason for
+// existing (agent_activity.proto: "the LOCAL attention presentation ... is this
+// system's own fan-out of the fact"), and nothing else in the daemon fans it
+// out. The kind is agent_addressed: the agent addressed the user directly, and
+// the pushed message IS the notification line.
+//
+// Only the START is a notification. The vendor's success and failure states
+// report on a send already announced, and re-raising attention for them would
+// mark the workspace twice for one message.
+func (w *watcher) notifyPushLocked(act *conversationv1.AgentActivity) {
+	push, ok := act.GetItem().(*conversationv1.AgentActivity_PushNotification)
+	if !ok {
+		return
+	}
+	start := push.PushNotification.GetStart()
+	if start == nil {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "push notification raised", dlog.Context{
+		"activity_id": act.GetActivityId().GetValue(),
+	})
+	w.sinks.Lifecycle.OnNotification(w.ws, HostNotification{
+		Text: start.GetMessage(),
+		At:   instantOf(start.GetStartedAt().GetAtMs()),
+		Kind: NotificationAgentAddressed,
+	})
 }
 
 // watchSpawnedSubagentLocked opens the WatchAgent stream a SYNC subagent's own

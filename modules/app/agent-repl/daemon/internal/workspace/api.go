@@ -218,8 +218,10 @@ type HostRelay interface {
 	OpenInEditor(ws ids.WorkspaceID, path string, line *uint32)
 	// ReloadWebapp pushes the reload_webapp arm.
 	ReloadWebapp(ws ids.WorkspaceID)
-	// Notify pushes a host notification.
-	Notify(ws ids.WorkspaceID, text string, kind string, toolName string)
+	// Notify pushes a host notification. THE WHOLE NOTIFICATION TRAVELS: a
+	// per-kind evidence field spread over positional strings is a field the
+	// next kind's arm silently loses.
+	Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification)
 	// PublishHostWorkspace recomposes and republishes the workspace's host
 	// STATE. Every edge that can move it calls this: the edges the server
 	// cannot see for itself -- a shim attaching or dying, a lease taken,
