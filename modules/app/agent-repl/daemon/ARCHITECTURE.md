@@ -110,9 +110,13 @@ lease) and at the shim client.
 - `intent/manifest.json` — the stand-down intent manifest (pid + intent per
   session), written by the outgoing daemon, reconciled by the incoming one.
 - `output/workspace_commands_*.json` — the command-file ingress.
-- Per-workspace durable log sinks are symlinks at
+- `logs/agent-repl-<workspace-log-id>-<sink>-*.log` — the per-workspace durable
+  sink TARGETS. The sinks themselves are symlinks at
   `<workspace>/.claude/emacs/{daemon,shim,webapp,sidecar}.log` per
-  `logging-contract.md`; targets live under the OS temp dir.
+  `logging-contract.md`, pointing here. They are NOT in the OS temp dir: a
+  durable log a person is asked to read must not live where the system may
+  sweep it, must not move with TMPDIR, and must not leave one orphan per run in
+  a directory nothing owns.
 
 ## Shim-held kernel locks (probe only)
 

@@ -26,8 +26,8 @@ var linkDirRel = filepath.Join(".claude", "emacs")
 var ErrPoisoned = errors.New("log sink poisoned")
 
 // sink is one workspace-owned durable JSONL file: a canonical symlink inside
-// the workspace pointing at a unique target the daemon created under the OS
-// temp dir, plus the append-mode descriptor on that target.
+// the workspace pointing at a unique target the daemon created under the state
+// root's logs directory, plus the append-mode descriptor on that target.
 //
 // The daemon never follows a workspace-provided regular file or foreign
 // symlink: it always creates its own target and atomically replaces the link,
@@ -57,13 +57,13 @@ type sink struct {
 // workspace-bound record must go on appending to the same file, or the
 // workspace's whole log narrative would be replaced by whatever came after the
 // eviction.
-func openSink(workspaceDir, workspaceID, name, target string) (*sink, error) {
+func openSink(logsDir, workspaceDir, workspaceID, name, target string) (*sink, error) {
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
 	if err := os.MkdirAll(linkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
 	}
 	if target == "" {
-		minted, err := createTarget(workspaceID, name)
+		minted, err := createTarget(logsDir, workspaceID, name)
 		if err != nil {
 			return nil, err
 		}
@@ -94,11 +94,23 @@ func openSink(workspaceDir, workspaceID, name, target string) (*sink, error) {
 	return s, nil
 }
 
-// createTarget makes a fresh, uniquely named target under the OS temp dir. A
-// restart never trusts the previous run's destination, so this is called once
-// per sink per runtime lifetime and the result is remembered in memory.
-func createTarget(workspaceID, name string) (string, error) {
-	f, err := os.CreateTemp("", "agent-repl-"+workspaceID+"-"+name+"-*.log")
+// createTarget makes a fresh, uniquely named target under the STATE ROOT's
+// logs directory, per ARCHITECTURE.md's "State root layout". A restart never
+// trusts the previous run's destination, so this is called once per sink per
+// runtime lifetime and the result is remembered in memory.
+//
+// IT IS NOT THE OS TEMP DIR. A durable log a person is asked to read must not
+// live where the operating system may sweep it, must not be scattered across a
+// TMPDIR that differs per launcher, and must not accumulate one orphan per run
+// in a directory nothing owns.
+func createTarget(logsDir, workspaceID, name string) (string, error) {
+	if logsDir == "" {
+		return "", fmt.Errorf("create log target for %s.log: no logs directory was resolved", name)
+	}
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		return "", fmt.Errorf("create the logs directory %q: %w", logsDir, err)
+	}
+	f, err := os.CreateTemp(logsDir, "agent-repl-"+workspaceID+"-"+name+"-*.log")
 	if err != nil {
 		return "", fmt.Errorf("create log target for %s.log: %w", name, err)
 	}

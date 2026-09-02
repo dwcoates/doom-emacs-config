@@ -747,3 +747,32 @@ func TestAReopenedSinkKeepsAppendingToTheEvictedTarget(t *testing.T) {
 		t.Fatal("the post-eviction record is not reachable through the canonical link")
 	}
 }
+
+// TestAWorkspaceSinkTargetLivesUnderTheStateRootsLogsDirectory pins the wiring
+// end to end: the surfaces derive the logs directory from the run log's own
+// path, so every per-workspace target lands beside it rather than in TMPDIR.
+func TestAWorkspaceSinkTargetLivesUnderTheStateRootsLogsDirectory(t *testing.T) {
+	// Arrange.
+	stateRoot := t.TempDir()
+	logsDir := filepath.Join(stateRoot, "logs")
+	s, err := openSurfaces(filepath.Join(logsDir, "daemon.run.log"), false, io.Discard)
+	if err != nil {
+		t.Fatalf("openSurfaces: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	dir := t.TempDir()
+
+	// Act.
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert.
+	target, err := os.Readlink(filepath.Join(dir, ".claude", "emacs", "daemon.log"))
+	if err != nil {
+		t.Fatalf("readlink the canonical daemon.log: %v", err)
+	}
+	if filepath.Dir(target) != logsDir {
+		t.Fatalf("daemon.log target = %q, want it under the state root's %q", target, logsDir)
+	}
+}
