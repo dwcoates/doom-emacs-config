@@ -509,6 +509,17 @@ describe("the queued-at age", () => {
     expect(card.querySelector("[data-queued]")?.textContent).toBe("queued 1m ago");
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange: the queue instant does not share the shared ticker's phase.
+    const ticker = fakeTicker();
+    const { tc } = trayContext(successResponse, [], ticker);
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Act: a repaint 80ms before the fifth second of the wait it draws.
+    ticker.tick(NOW - 12_000 + 4920);
+    // Assert: five real seconds queued reads 5s, not the lagging 4s.
+    expect(card.querySelector("[data-queued]")?.textContent).toBe("queued 5s ago");
+  });
+
   it("registers its unsubscriber with the tray's teardown", () => {
     const { ctx } = trayContext();
     const disposers: Array<() => void> = [];
