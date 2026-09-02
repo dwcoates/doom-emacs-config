@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -27,19 +28,67 @@ func (c *controller) Join(ctx context.Context) error {
 	c.joiningMode = true
 	c.mu.Unlock()
 
+	found, err := c.joinFromManifest(ctx)
+	if err != nil {
+		return err
+	}
+	if !found {
+		// THE MANIFEST ARRIVES LATE BY DESIGN: the incumbent writes it only
+		// after this daemon has reported its address, so a successor that
+		// boots first finds nothing. A participant's own adopt call re-arms
+		// from a manifest that arrived after boot — but a HEADLESS workspace
+		// has no participant to trigger that, so the successor keeps looking
+		// until the manifest lands, and the incumbent's transfer never waits
+		// out an adoption window for a workspace nobody was ever going to
+		// adopt on its behalf.
+		c.log.Debug(opJoin, "no intent manifest yet; watching for it",
+			dlog.Context{"path": c.deps.IntentManifest})
+		go c.awaitManifest(ctx)
+	}
+	return nil
+}
+
+// manifestPoll is how often a joining daemon looks for a manifest that has not
+// arrived yet.
+const manifestPoll = 25 * time.Millisecond
+
+// awaitManifest keeps looking for the intent manifest until it lands or the
+// daemon stops.
+func (c *controller) awaitManifest(ctx context.Context) {
+	ticker := time.NewTicker(manifestPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		found, err := c.joinFromManifest(ctx)
+		if err != nil {
+			c.log.Error(opJoin, "the intent manifest could not be joined from",
+				withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+			return
+		}
+		if found {
+			return
+		}
+	}
+}
+
+// joinFromManifest arms the rendezvous from the intent manifest and adopts
+// every headless workspace. It reports whether a manifest was there to read.
+func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opJoin, "could not read the intent manifest",
 			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
-		return err
+		return false, err
 	}
 	if !found {
-		c.log.Debug(opJoin, "no intent manifest is present; this daemon is not joining anything",
-			dlog.Context{"path": c.deps.IntentManifest})
-		return nil
+		return false, nil
 	}
 	if _, err := c.Reconcile(ctx); err != nil {
-		return err
+		return false, err
 	}
 
 	headless := make([]ids.WorkspaceID, 0, len(m.Sessions))
@@ -74,7 +123,7 @@ func (c *controller) Join(ctx context.Context) error {
 				withCause(dlog.Context{"workspace": string(ws)}, err))
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // armFromManifest arms the rendezvous from the intent manifest as it stands
@@ -236,6 +285,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		c.log.Error(opAdopt, "could not read the workspace being adopted", withCause(fields, err))
 		return fmt.Errorf("rollout: adopt %q: %w", ws, err)
 	}
+	// A FREE LOCK MEANS THERE IS NO PROCESS TO DIAL. A workspace registered but
+	// never opened transfers on its WSM facts alone; dialing a shim that was
+	// never spawned fails the adoption of a workspace that is in no trouble at
+	// all, and the incumbent then waits out an adoption window for it.
+	dial := true
 	if c.deps.LockProbe != nil {
 		state, probeErr := c.deps.LockProbe(record.Dir)
 		fields["lock"] = state.String()
@@ -244,7 +298,8 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			c.log.Warn(opAdopt, "the workspace lock probe could not tell; adopting on the WSM facts alone",
 				withCause(fields, probeErr))
 		case state == sessionlock.StateFree:
-			c.log.Warn(opAdopt, "no shim holds this workspace's lock; there is nothing running to adopt", fields)
+			c.log.Debug(opAdopt, "no shim holds this workspace's lock; adopting its facts with no session", fields)
+			dial = false
 		case state == sessionlock.StateUnknown:
 			// "Could not tell" is NEVER read as free, and it is never read as
 			// held either: it is said out loud.
@@ -254,9 +309,11 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 		}
 	}
 
-	if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
-		c.log.Error(opAdopt, "could not adopt the workspace's running shim", withCause(fields, err))
-		return fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
+	if dial {
+		if _, err := c.deps.Shims.Adopt(ctx, ws); err != nil {
+			c.log.Error(opAdopt, "could not adopt the workspace's running shim", withCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: dial the running shim: %w", ws, err)
+		}
 	}
 	if err := c.deps.DB.ClaimServing(ctx, ws, c.deps.Instance); err != nil {
 		c.log.Error(opAdopt, "could not claim serving ownership", withCause(fields, err))
@@ -293,12 +350,41 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	if complete && c.deps.WriteDaemonAddr != nil {
 		// A JOINING DAEMON OTHERWISE NEVER WRITES daemon.addr: until every
 		// workspace is its own, the incumbent's file is still the truth.
-		if err := c.deps.WriteDaemonAddr(ctx); err != nil {
-			c.log.Error(opAdopt, "could not write daemon.addr after adopting every workspace",
-				withCause(fields, err))
-			return fmt.Errorf("rollout: adopt %q: write daemon.addr: %w", ws, err)
-		}
-		c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
+		c.advertise(ctx, fields)
 	}
 	return nil
+}
+
+// advertise writes daemon.addr once every workspace is owned, retrying while
+// the OUTGOING daemon still holds the boot claim.
+//
+// THE ADVERTISEMENT IS NOT PART OF THE ADOPTION. The incumbent releases its
+// claim when it exits, and it exits when the adoptions complete — so failing an
+// adoption because the claim is still held deadlocks the handover on itself.
+// The workspace is adopted either way; only the address file waits.
+func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
+	if err := c.deps.WriteDaemonAddr(ctx); err == nil {
+		c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
+		return
+	}
+	c.log.Debug(opAdopt, "the outgoing daemon still holds the boot claim; advertising once it lets go", fields)
+	// THE RETRY OUTLIVES THE CALL. The context here is an rpc's, cancelled the
+	// moment the adopt answers — and the claim is released by the incumbent's
+	// exit, which happens after that answer.
+	ctx = context.WithoutCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(manifestPoll)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			if err := c.deps.WriteDaemonAddr(ctx); err == nil {
+				c.log.Info(opAdopt, "every workspace is owned; wrote daemon.addr", nil)
+				return
+			}
+		}
+	}()
 }

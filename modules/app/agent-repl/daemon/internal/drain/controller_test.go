@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -400,5 +401,61 @@ func TestResolveIdleCutoffFallsBackToTheDefault(t *testing.T) {
 	}
 	if got != DefaultIdleCutoff {
 		t.Fatalf("cutoff = %v, want the default %v", got, DefaultIdleCutoff)
+	}
+}
+
+// TestSchedulingTakesTheDrainHoldOnEveryWorkspace pins that intake is held from
+// the moment the shutdown is announced, not from its deadline: a prompt
+// submitted meanwhile would otherwise be delivered into a session the daemon is
+// about to stand down.
+func TestSchedulingTakesTheDrainHoldOnEveryWorkspace(t *testing.T) {
+	// Arrange
+	var told []ids.WorkspaceID
+	h := newHarness(t, func(d *Deps) {
+		d.LeaseChanged = func(ws ids.WorkspaceID) { told = append(told, ws) }
+	})
+	ws := h.workspace(t, instant)
+
+	// Act
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Assert
+	lease, held, err := h.db.Lease(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	if !held || lease.Holder != wsm.HolderDrain || lease.Policy != wsm.PolicyHold {
+		t.Fatalf("lease = (%+v, %v), want a drain lease holding the intake", lease, held)
+	}
+	if len(told) != 1 || told[0] != ws {
+		t.Fatalf("LeaseChanged calls = %v, want the held workspace %q", told, ws)
+	}
+}
+
+// TestCancellingAScheduleReleasesItsDrainHolds is the other half: a cancelled
+// shutdown must not leave the intake held, or every workspace refuses prompts
+// forever for a drain that is not coming.
+func TestCancellingAScheduleReleasesItsDrainHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act
+	if err := h.c.Cancel(context.Background()); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	// Assert
+	if _, held, err := h.db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("Lease after the cancel = (held %v, %v), want no lease", held, err)
 	}
 }

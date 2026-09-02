@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -38,17 +39,28 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// rather than drawing the prompt twice.
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 
+	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Nothing on the shim's streams
+	// says a turn was accepted — its first frame is an activity, by which time
+	// `submitting` is over — so a roster left to infer it reads `ready` for a
+	// workspace whose turn is running.
+	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
+
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
+		q.deps.Sidebar.SetTurn(sub.WS, nil)
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
+
+	// The shim TOOK the turn: the roster's `submitting` window is over.
+	q.deps.Sidebar.AckTurn(sub.WS)
 
 	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
 		watcher.SetMainAgent(agent)
 	}
 	watcher.OnTurnOpened(sub.WS, success.GetPrompt(), success.GetPage())
 
+	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
 		"agent": success.GetPrompt().GetAgent().GetValue(),
 	})
@@ -73,8 +85,25 @@ func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sende
 		})
 		return Disposition{}, fmt.Errorf("prompt agent %q on %q: %w", agent.GetValue(), sub.WS, err)
 	}
+	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the addressed agent", dlog.Context{"agent": agent.GetValue()})
 	return Disposition{Delivered: true}, nil
+}
+
+// touchEngagement records that the user just engaged this session. IT IS WHAT
+// THE IDLE SWEEP MEASURES: without it every session's engagement stands still
+// at whatever the record was created with, so an actively used workspace is
+// hibernated out from under its user — and a session revived BY a prompt is
+// hibernated again before the prompt's own turn has run.
+//
+// A failure to record it is a warning, never the submission's failure: the
+// prompt was delivered, and the worst a lost stamp costs is one early
+// hibernation.
+func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	if err := q.deps.DB.TouchEngagement(ctx, ws, q.deps.Now()); err != nil {
+		log.Warn(opDeliver, "could not record the session's engagement",
+			dlog.Context{"cause": err.Error()})
+	}
 }
 
 // mirrorAccepted draws an accepted prompt's user_prompt row. The sentinel

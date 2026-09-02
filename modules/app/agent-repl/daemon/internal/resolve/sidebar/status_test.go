@@ -395,6 +395,9 @@ func TestRosterResolvesEveryMergeArm(t *testing.T) {
 		{name: "queued", state: "queued", want: "merge_queued"},
 		{name: "merging", state: "merging", want: "merging"},
 		{name: "conflict", state: "conflict", want: "merge_conflict"},
+		// A parked merge holds its lease awaiting the user; the roster has no
+		// parked arm and spells it as the conflict awaiting resolution.
+		{name: "parked", state: "parked", want: "merge_conflict"},
 		{name: "failed", state: "failed", want: "merge_failed"},
 		{name: "merged", state: "merged", want: "merged"},
 	}
@@ -645,5 +648,23 @@ func TestRowTakesAPermissionWithNoAnnouncingAgent(t *testing.T) {
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "permission" {
 		t.Fatalf("status = %q, want permission — an agentless ask was dropped", got)
+	}
+}
+
+// TestRowIsThinkingOnceTheShimTakesTheTurn pins the ack edge: `submitting`
+// names the window before the shim answers StartTurn, and a turn that then
+// produces no activity at all would otherwise sit in that window for its whole
+// life.
+func TestRowIsThinkingOnceTheShimTakesTheTurn(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Act.
+	r.AckTurn(theWS)
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "thinking" {
+		t.Fatalf("status = %q, want thinking", got)
 	}
 }

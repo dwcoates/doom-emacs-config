@@ -82,6 +82,9 @@ type controller struct {
 	fired bool
 	// refusals is the rate-limited refusal record's state.
 	refusals refusalWindow
+	// scheduled are the drain holds taken when the schedule was put in force,
+	// by workspace.
+	scheduled map[ids.WorkspaceID]ids.LeaseID
 }
 
 // Schedule puts a schedule in force and announces it. The persisted row and
@@ -111,9 +114,70 @@ func (c *controller) Schedule(ctx context.Context, s wsm.DrainSchedule) error {
 		AtMs:   milliseconds(s.Deadline),
 		Reason: reason,
 	})
+	// THE HOLD BEGINS WITH THE SCHEDULE, not with its deadline. A prompt
+	// submitted while a shutdown stands would be delivered into a session the
+	// daemon is about to stand down; held instead, it survives the restart and
+	// the tray tells the user WHICH shutdown it is waiting on — which is why
+	// the contract's shutdown hold carries a schedule id at all.
+	c.holdForSchedule(ctx, fields)
+
 	c.wake()
 	c.log.Info(opSchedule, "a drain is scheduled and announced", fields)
 	return nil
+}
+
+// holdForSchedule takes the drain hold on every workspace, so intake is held
+// from the moment the shutdown is announced.
+func (c *controller) holdForSchedule(ctx context.Context, fields dlog.Context) {
+	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		c.log.Error(opSchedule, "could not list the workspaces to hold", withCause(fields, err))
+		return
+	}
+	taken := map[ids.WorkspaceID]ids.LeaseID{}
+	for _, ws := range workspaces {
+		lease, err := c.deps.DB.AcquireLease(ctx, ws.ID, wsm.HolderDrain, wsm.PolicyHold)
+		if err != nil {
+			// Another holder has the lease; its own policy already parks or
+			// refuses intake, so the drain needs none of its own.
+			c.log.Debug(opSchedule, "a workspace's lease is already held; leaving it as it stands",
+				merge(fields, dlog.Context{"workspace": string(ws.ID), "cause": err.Error()}))
+			continue
+		}
+		taken[ws.ID] = lease.ID
+	}
+	c.mu.Lock()
+	c.scheduled = taken
+	c.mu.Unlock()
+	for ws := range taken {
+		c.leaseChanged(ws)
+	}
+	c.log.Debug(opSchedule, "held the intake on every workspace for the standing schedule",
+		merge(fields, dlog.Context{"workspaces": len(taken)}))
+}
+
+// releaseScheduleHolds drops the holds the standing schedule took.
+func (c *controller) releaseScheduleHolds(ctx context.Context, operation string, fields dlog.Context) {
+	c.mu.Lock()
+	taken := c.scheduled
+	c.scheduled = nil
+	c.mu.Unlock()
+	for ws, lease := range taken {
+		if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
+			c.log.Warn(operation, "could not release a schedule's drain hold",
+				merge(fields, dlog.Context{"workspace": string(ws), "lease": string(lease), "cause": err.Error()}))
+			continue
+		}
+		c.leaseChanged(ws)
+	}
+}
+
+// leaseChanged tells the prompt queue a workspace's lease set moved, which is
+// what re-evaluates the holds taken against it.
+func (c *controller) leaseChanged(ws ids.WorkspaceID) {
+	if c.deps.LeaseChanged != nil {
+		c.deps.LeaseChanged(ws)
+	}
 }
 
 // Cancel clears the schedule in force and announces the cancellation. Nothing
@@ -137,6 +201,7 @@ func (c *controller) Cancel(ctx context.Context) error {
 	c.fired = false
 	c.mu.Unlock()
 
+	c.releaseScheduleHolds(ctx, opCancel, fields)
 	c.deps.Announcer.DrainCancelled(&agentreplv1.DaemonDrainCancelled{})
 	c.wake()
 	c.log.Info(opCancel, "the standing drain schedule was cancelled and the banner taken down", fields)

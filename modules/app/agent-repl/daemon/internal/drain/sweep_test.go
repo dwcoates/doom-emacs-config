@@ -7,6 +7,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
 
@@ -364,5 +365,32 @@ func TestRunStopsWithItsContext(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("Run returned nil on a cancelled context, want the context's error")
+	}
+}
+
+// TestTheHibernationReleaseTellsTheQueue pins the drain of the intake: a prompt
+// that arrives inside the hibernation window is held against the hibernation
+// lease, and the release alone changes a row the queue is not watching — so
+// without this the prompt that should have revived the session waits forever.
+func TestTheHibernationReleaseTellsTheQueue(t *testing.T) {
+	// Arrange
+	var told []ids.WorkspaceID
+	h := newHarness(t, func(d *Deps) {
+		d.LeaseChanged = func(ws ids.WorkspaceID) { told = append(told, ws) }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 {
+		t.Fatalf("hibernated = %v, want the one idle session", hibernated)
+	}
+	if len(told) != 1 || told[0] != ws {
+		t.Fatalf("LeaseChanged calls = %v, want exactly the hibernated workspace %q", told, ws)
 	}
 }

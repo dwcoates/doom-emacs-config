@@ -2,9 +2,11 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
@@ -227,6 +230,13 @@ func (f *Fleet) Running(ws ids.WorkspaceID) (Running, bool) {
 	if !ok {
 		return Running{}, false
 	}
+	// A SESSION PARKED BEHIND A COLD GATE HAS NO WATCHER: the client is up and
+	// the gate's answer re-opens through it, but no session was ever started,
+	// so nothing is in flight and nothing is live. That is an ANSWER — the
+	// close verb reads it as quiet, which is exactly right for a standing gate.
+	if session.watcher == nil {
+		return Running{}, true
+	}
 	return Running{Turn: session.watcher.TurnInFlight(), LiveWork: session.watcher.LiveWork()}, true
 }
 
@@ -238,6 +248,11 @@ func (f *Fleet) Health(ws ids.WorkspaceID) (bool, bool) {
 	f.mu.RUnlock()
 	if !ok {
 		return false, false
+	}
+	// A gate-parked session has no watcher and so no link truth: the session
+	// exists and is not serving.
+	if session.watcher == nil {
+		return true, false
 	}
 	return true, session.watcher.Connected()
 }
@@ -351,7 +366,18 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	if started == nil {
 		// The session is parked behind a standing cold gate. The client stays
 		// up: the gate's answer re-opens through it.
+		//
+		// THE LINK IS RESTATED HERE because no watcher opens on this path and
+		// nothing else would. Bring-up gated on the shim's first healthy
+		// diagnostics, so the link IS serving — and without saying so the
+		// surfaces keep drawing the DEAD link of whatever shim died before this
+		// one, which outranks the gate in the footer's status tree and hides
+		// the very thing the user has to answer.
+		f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
+		f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
+		f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
 		f.remember(ws, &live{client: client})
+		f.publishHost(ws)
 		return nil
 	}
 
@@ -440,7 +466,12 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
-			return nil, false, fmt.Errorf("start session for %q: spawn: %w", ws, err)
+			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.
+			// The rpc answers whoever asked; the fault and the dead link are
+			// what every OTHER surface reads, and without them a workspace
+			// whose shim will not start looks merely idle.
+			f.noteStartFailed(ctx, log, ws, err)
+			return nil, false, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
 		return client, false, nil
 	default:
@@ -449,6 +480,33 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, false, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
 	}
+}
+
+// noteStartFailed records a bring-up death as the workspace's own fault and
+// states the DEAD link on every surface. The link matters as much as the fault:
+// the footer's disconnected step reads a dead link that never connected as
+// `start_failed`, which is the sentence the user needs.
+func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, cause error) {
+	workspace := ws
+	fault := wsm.Fault{
+		Workspace: &workspace,
+		Kind:      health.KindShimStartFailed,
+		Detail:    "the workspace's shim would not come up",
+		Evidence:  map[string]string{"stderr_tail": cause.Error()},
+		OpenedAt:  f.now(),
+	}
+	var death *shimclient.BringUpDeathError
+	if errors.As(cause, &death) {
+		fault.Evidence["exit_code"] = strconv.Itoa(death.Exit.Code)
+		fault.Evidence["stderr_tail"] = death.Exit.Stderr
+	}
+	if _, err := f.deps.DB.OpenFault(ctx, fault); err != nil {
+		log.Error(opBringUp, "could not record the failed bring-up", dlog.Context{"cause": err.Error()})
+	}
+	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
+	f.publishHost(ws)
 }
 
 // resumeGuard refuses a RESUME whose vendor transcript is gone, before any

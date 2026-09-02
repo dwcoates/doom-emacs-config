@@ -93,12 +93,26 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "turn"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
-	liveAgents := len(running.LiveWork.Agents)
+	// THE CHALLENGE COUNTS EVERY DETACHED ITEM THE TURN KILL WOULD TAKE, not
+	// only the subagents: a detached shell dies with the query exactly as a
+	// detached subagent does, so a user who is about to lose one is asked
+	// about it. The arm's field keeps its contract name (live_agent_count).
+	liveAgents := len(running.LiveWork.Agents) + len(running.LiveWork.Shells)
 	if liveAgents > 0 && !confirm {
-		log.Warn(opInterrupt, "refused an unconfirmed turn interrupt while agents are live", dlog.Context{
+		log.Warn(opInterrupt, "refused an unconfirmed turn interrupt while detached work is live", dlog.Context{
 			"live_agent_count": liveAgents,
 		})
 		return InterruptOutcome{}, &ConfirmRequired{LiveAgentCount: liveAgents}
+	}
+
+	// A CONFIRMED interrupt stops the detached work ITSELF, before the turn
+	// kill: the confirmation is the user answering "also stop them", and the
+	// stop is what makes that answer true rather than relying on the vendor to
+	// reap the detached units as a side effect of the query dying.
+	if liveAgents > 0 {
+		if err := v.stopDetachedForConfirm(ctx, log, ws, shim, running); err != nil {
+			return InterruptOutcome{}, err
+		}
 	}
 
 	// The status fires now, not at the turn's real end.
@@ -129,6 +143,45 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		"turn": string(*running.Turn), "force": confirm, "live_agent_count": liveAgents,
 	})
 	return InterruptOutcome{Turn: true}, nil
+}
+
+// stopDetachedForConfirm stops every live detached item a confirmed turn
+// interrupt was told to take with it. A BENIGN shim refusal is one item that
+// finished on its own between the freeness read and the stop, which is the
+// state the caller asked for; every other refusal fails the interrupt, because
+// a user who confirmed must not be told the work is gone when it is not.
+func (v *verbs) stopDetachedForConfirm(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) error {
+	for _, agent := range running.LiveWork.Agents {
+		fields := dlog.Context{"agent": agent.GetValue()}
+		if err := shim.StopAgent(ctx, agent); err != nil {
+			if refusal, ok := AsShimRefusal(err); ok {
+				if refusal.Benign() {
+					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
+					continue
+				}
+				return refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+			}
+			log.Error(opInterrupt, "could not stop a confirmed detached agent", withCause(fields, err))
+			return fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
+		}
+		log.Debug(opInterrupt, "stopped a detached agent the confirmed interrupt takes", fields)
+	}
+	for _, shell := range running.LiveWork.Shells {
+		fields := dlog.Context{"shell": shell.GetValue()}
+		if err := shim.StopBash(ctx, shell); err != nil {
+			if refusal, ok := AsShimRefusal(err); ok {
+				if refusal.Benign() {
+					log.Debug(opInterrupt, "a detached shell was already not running", withArm(fields, refusal))
+					continue
+				}
+				return refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+			}
+			log.Error(opInterrupt, "could not stop a confirmed detached shell", withCause(fields, err))
+			return fmt.Errorf("interrupt %q: stop shell %q: %w", ws, shell.GetValue(), err)
+		}
+		log.Debug(opInterrupt, "stopped a detached shell the confirmed interrupt takes", fields)
+	}
+	return nil
 }
 
 // interruptDetached stops ONE detached bubble. The row's kind decides which
