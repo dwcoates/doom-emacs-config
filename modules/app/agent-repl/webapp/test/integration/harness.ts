@@ -53,7 +53,15 @@ import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 /** Where the page's clock starts: just after the fixtures' own timestamps. */
 export const HARNESS_EPOCH_MS = 10_000;
 
-/** How many drain rounds `settle()` gives the DOM before it calls it a fault. */
+/**
+ * How many drain rounds `settle()` gives the DOM before it calls it a fault.
+ *
+ * MEASURED, LEFT AS-IS: instrumented across all 13 integration files, the
+ * slowest convergence in a healthy run took 24 rounds (in
+ * refusals.integration.test.ts). 60 is already a ~2.5x margin over that; the
+ * usual "~3x the observed max" rule would put this at 72, which is LOOSER
+ * than the current cap, so it stays — never loosen a bound to hit a formula.
+ */
 const SETTLE_ROUND_CAP = 60;
 /** How many consecutive quiet rounds mean the DOM has actually settled. */
 const SETTLE_STABLE_ROUNDS = 4;

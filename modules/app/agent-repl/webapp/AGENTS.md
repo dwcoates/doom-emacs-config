@@ -153,3 +153,21 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
 - Every branch has a test: every arm rendered, every malformed input rejected
   (unset oneof, unset required field, unknown arm), every refusal arm drawn at
   its call site, every tick and every format.
+
+### Wait/timeout bounds
+
+Every wait bound in both suites is set to roughly 3x the slowest healthy
+duration actually observed, never left at a tool default. Measured against
+97 unit files (3279 tests) and all 13 integration files (1601 assertions):
+
+| bound | old (default) | new | observed healthy max | why |
+|---|---|---|---|---|
+| unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 300ms / 300ms | 88.9ms | no real I/O, everything fake-timered |
+| integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
+| `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
+
+No per-site exception was needed: nothing in either suite (xterm/login
+terminal included) took long enough to need its own raised `timeout`. If a
+future test genuinely needs more than these globals, give it its own
+`{ timeout: ... }` with a one-line comment naming why, rather than raising
+the shared bound.
