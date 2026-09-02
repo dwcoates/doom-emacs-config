@@ -2622,9 +2622,18 @@ which would otherwise kill that workspace's session along with WS's own."
 ;; below).  Each workspace also has an in-memory "-log" buffer, whose
 ;; ownership is set through `agent-repl--create-buffer'.
 
-(defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
+(defconst agent-repl--input-buffer-re
+  "^\\*agent-panel-input-[[:alnum:]_-]+\\( [^*]*\\)?\\*$"
   "Regexp matching agent input buffer names.
-For example, *agent-panel-input-my-workspace*.")
+For example, *agent-panel-input-my-workspace*.
+
+The OPTIONAL trailing segment is the workspace's display title
+\(`agent-repl-host-display-title'), which host.el appends to the name
+when the daemon pushes `naming' — titles name the buffers (fanout §7).
+It is separated by a space, which the workspace-identity segment can
+never contain, so the identity stays recoverable
+\(`agent-repl--extract-panel-id') and a titled buffer is still an agent
+panel everywhere the predicates ask.")
 
 (defconst agent-repl--workspace-log-buffer-re "^\\*agent-panel-log-[[:alnum:]_-]+\\*$"
   "Regexp matching workspace-owned live log buffers.
@@ -2670,6 +2679,25 @@ to delete the input panel as orphaned."
       (unless agent-repl--log-sink-reentrant
         (agent-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name))
       name)))
+
+(defun agent-repl--input-buffer-name (ws title)
+  "Return WS's input buffer name carrying TITLE.
+The canonical name (`agent-repl--buffer-name') with TITLE appended after
+a space, so `agent-repl--input-buffer-re' still matches it and the
+identity segment is still the first thing after the prefix.  TITLE equal
+to WS is the daemon's not-yet-derived fallback and adds nothing, so it
+yields the bare canonical name; asterisks are dropped from TITLE because
+they are the name form's own delimiter.
+
+The webview buffer is deliberately NOT titled this way: its name is a
+LOOKUP KEY (`agent-repl--frontend-webview-buffer-name'), derived from the
+workspace name by callers that never saw the title."
+  (let ((base (agent-repl--buffer-name "-input" ws))
+        (clean (and (stringp title)
+                    (string-trim (replace-regexp-in-string "[*\n]" "" title)))))
+    (if (or (null clean) (string-empty-p clean) (equal clean ws))
+        base
+      (concat (substring base 0 (1- (length base))) " " clean "*"))))
 
 (defun agent-repl--create-buffer (ws &optional suffix)
   "Create a workspace-owned buffer for WS and return it.
