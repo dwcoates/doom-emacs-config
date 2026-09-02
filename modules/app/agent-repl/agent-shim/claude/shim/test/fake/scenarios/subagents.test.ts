@@ -286,7 +286,7 @@ describe("the fan-wide cancel setup", () => {
     // subagent's agentID.
     const seen: unknown[] = [];
     const driven = await driveScenario(["!subagent-detached-live"], {
-      canUseTool: async (name, input, options) => {
+      canUseTool: async (_name, input, options) => {
         seen.push(options.agentID);
         return { behavior: "allow", updatedInput: input };
       },
