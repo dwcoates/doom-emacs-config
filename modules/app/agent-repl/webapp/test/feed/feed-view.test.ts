@@ -8,6 +8,8 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
+import { forgetOwnTurns, rememberOwnTurn } from "../../src/composer/own-turns.js";
 import {
   createFeedController,
   isBubbleRow,
@@ -144,6 +146,22 @@ describe("createFeedController: painting a page", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
     expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-turn")).toBe("turn-7");
+  });
+
+  it("marks a row whose turn this page submitted", () => {
+    const { controller, host } = fixture();
+    rememberOwnTurn(create(TurnIdSchema, { value: "turn-7" }));
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-mine")).toBe("true");
+    forgetOwnTurns();
+  });
+
+  it("makes no claim on a row from another submitter's turn", () => {
+    const { controller, host } = fixture();
+    rememberOwnTurn(create(TurnIdSchema, { value: "turn-mine" }));
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-mine")).toBe(false);
+    forgetOwnTurns();
   });
 
   it("stamps no turn on a row that belongs to none", () => {
