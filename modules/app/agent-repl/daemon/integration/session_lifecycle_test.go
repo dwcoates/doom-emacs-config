@@ -1036,15 +1036,28 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 
 // ---- critique 13: bounce accountability ----
 
-func TestCrashBootWithNoManifestProducesNoBounceFault(t *testing.T) {
-	t.Skip("unexpressible against current production code: internal/rollout/manifest.go's Reconcile() " +
-		"returns early with ZERO dispositions when no intent manifest is present (found=false at " +
-		"manifest.go:181-192), so a crash that leaves no manifest on disk never opens ANY fault -- " +
-		"bounce_unknown or otherwise -- for the surviving session. This is not a missing HARNESS " +
-		"capability; it is a missing PRODUCTION hook: Reconcile has no branch that treats an absent " +
-		"manifest as anything but an ordinary boot. SPEC.md's crash-boot-adoption note (\"the intent " +
-		"manifest absent -> reports UNKNOWN/PRESERVED per session in the host faults\") describes " +
-		"behavior this function does not implement; see the report for the proposed SPEC.md correction.")
+// TestCrashBootWithNoManifestRecordsBounceUnknown covers BOUNCE ACCOUNTABILITY
+// for the case the manifest cannot describe: the outgoing daemon crashed or was
+// force-killed, so it wrote NO manifest at all. Every session that survived
+// into this boot is one whose bounce nobody accounted for, and each is surfaced
+// per workspace as an OPEN bounce_unknown fault rather than passed over.
+func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
+	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
+	// the successor adopts it.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+
+	// Act: kill the daemon and leave the shim (and its workspace lock) alone,
+	// writing no manifest — which is exactly what a crash leaves behind.
+	f.d.Kill()
+	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
+
+	// Assert: the successor's host stream carries a bounce_unknown fault.
+	host := successor.WatchHost(f.ws)
+	awaitHostFault(t, successor, host, "a bounce_unknown fault", func(hf *agentreplv1.HostFault) bool {
+		return hf.GetBounceUnknown() != nil
+	})
+	successor.ExpectWarnings("daemon.rollout.reconcile")
 }
 
 func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
