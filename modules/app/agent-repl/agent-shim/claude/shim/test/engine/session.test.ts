@@ -20,6 +20,7 @@ import { agentIdPath } from "../../src/engine/identity.js";
 import { workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
+import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
@@ -2001,5 +2002,111 @@ describe("the per-turn verbs, through the engine's own dispatch surface", () => 
     expect(
       response.result.case === "failure" ? response.result.value.kind.case : undefined,
     ).toBe("noSession");
+  });
+});
+
+/**
+ * A standing grant's mode change: engine/turn.ts's `answer`/`answerOutcome`
+ * (UpdateAgent's "answer" input arm, driven for both a question answer and a
+ * permission decision) and engine/session.ts's `onPermissionModeSet` gate
+ * callback (`permissionMode = mode; pushPermissionMode();`) were all zero-hit
+ * -- nothing in this suite ever resolves a canUseTool ask THROUGH the engine's
+ * own UpdateAgent RPC (permission-gate.test.ts exercises the gate directly, in
+ * isolation, and its own onPermissionModeSet is a throwaway test callback).
+ */
+describe("a standing grant's mode change, delivered through UpdateAgent", () => {
+  it("updates the session's own permission mode and pushes the change", async () => {
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const pushed: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "permissionModeChanged") {
+          pushed.push(update.value.permissionMode?.mode.case ?? "");
+        }
+      }
+    })();
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_1",
+      requestId: "req_1",
+      suggestions: [{ type: "setMode", destination: "session", mode: "acceptEdits" }],
+    } as never);
+    await Promise.resolve();
+
+    const response = await h.engine.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: {
+            case: "answer",
+            value: create(conversationv1.AgentAnswerSchema, {
+              answer: {
+                case: "permissionDecision",
+                value: create(conversationv1.AgentPermissionDecisionSchema, {
+                  ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+                  decision: {
+                    case: "allowed",
+                    value: create(conversationv1.AgentPermissionAllowedSchema, {
+                      scope: {
+                        case: "standing",
+                        value: create(conversationv1.AgentPermissionAllowedStandingSchema, {
+                          standing: toStanding([
+                            { type: "setMode", destination: "session", mode: "acceptEdits" },
+                          ]),
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+    await pending;
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(response.result.case).toBe("success");
+    expect(pushed).toEqual(["default", "acceptEdits"]);
+  });
+
+  it("answerOutcome refuses noOpenAsk when the ask id names nothing open", async () => {
+    const h = harness();
+    await started(h);
+
+    const response = await h.engine.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: {
+            case: "answer",
+            value: create(conversationv1.AgentAnswerSchema, {
+              answer: {
+                case: "permissionDecision",
+                value: create(conversationv1.AgentPermissionDecisionSchema, {
+                  ask: create(conversationv1.AgentPermissionIdSchema, { value: "nope" }),
+                  decision: {
+                    case: "denied",
+                    value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: "no" }),
+                  },
+                }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noOpenAsk");
   });
 });
