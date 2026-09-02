@@ -526,3 +526,18 @@ purpose).
 ## Landing 6 relay (2026-09-01, project lead)
 
 - No shim.v1 or conversation.v1 change. For awareness: SubmitPromptError.turn_already_open (daemon side) is retired because YOUR UpdateAgentFailure refusal of a busy subagent is the one producer; keep that refusal typed and named.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- StartSessionFresh.model is optional: UNSET = pass no model to the SDK;
+  SessionStarted.effective_model reports what the SDK chose.
+- WatchSessionResponse is `oneof frame {update; session_started}`: on EVERY
+  new watch, right after the opening diagnostics, send the session's
+  original SessionStarted recovered from shim state (turn_in_flight and
+  live_work reflect NOW, not the original start).
+- UpdateAgentFailure.agent_busy: an UpdateAgent{prompt} to a subagent whose
+  own turn is running is refused with this arm (replaces the interim
+  not_deliverable / detail-only answer).
+- OpenAgentSessionFailure.unknown_agent (store): map to Code.NotFound;
+  retire the interim shim-side unknown-target rule once the store produces it.
