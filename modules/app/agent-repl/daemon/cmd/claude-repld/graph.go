@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -255,6 +257,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		StoreSocket:  p.Opts.storeSocket,
 		NodeBin:      p.Opts.node,
 		MainJS:       paths.ShimMain,
+		ShimBuildSHA: paths.ShimBuildSHA,
+		DefaultModel: os.Getenv(workspace.DefaultModelEnv),
 		Fake:         p.Contracts.Fake(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		Log:          p.Surfaces,
@@ -546,6 +550,40 @@ type paths struct {
 	SelfRepo string
 	// BuiltSHA is daemon/bin/.built-sha, the stamp the deploy chain writes.
 	BuiltSHA string
+	// ShimBuildSHA is the bundle sha every shim spawn is stamped with,
+	// resolved from the shim's own build stamp or the environment override.
+	ShimBuildSHA string
+}
+
+// envShimBuildSHA overrides the shim bundle's build sha when the shim's build
+// stamp is absent — a checkout that has not built the shim, and every test
+// harness, which runs a fake shim that has no bundle at all.
+const envShimBuildSHA = "SHIM_BUILD_SHA"
+
+// resolveShimBuildSHA answers the sha every shim spawn is stamped with. The
+// shim's own build stamp answers first, because that is the bundle the daemon
+// actually launches; the environment answers when the stamp is absent. With
+// neither, the boot REFUSES: an unstamped spawn cannot be checked for
+// staleness, and a blank stamp would silently call every shim current.
+func resolveShimBuildSHA(stampPath, fromEnv string) (string, error) {
+	raw, err := os.ReadFile(stampPath)
+	switch {
+	case err == nil:
+		sha := strings.TrimSpace(string(raw))
+		if sha == "" {
+			return "", fmt.Errorf("claude-repld: the shim build stamp %s is empty", stampPath)
+		}
+		return sha, nil
+	case errors.Is(err, fs.ErrNotExist):
+		if sha := strings.TrimSpace(fromEnv); sha != "" {
+			return sha, nil
+		}
+		return "", fmt.Errorf(
+			"claude-repld: the shim build sha is unresolvable: the shim build stamp %s does not exist and %s is unset",
+			stampPath, envShimBuildSHA)
+	default:
+		return "", fmt.Errorf("claude-repld: read the shim build stamp %s: %w", stampPath, err)
+	}
 }
 
 // envSelfRepo overrides the daemon's own-checkout identity for tests. The flag
@@ -574,6 +612,11 @@ func resolvePaths(opts options) (paths, error) {
 		SelfRepo:   firstNonEmpty(opts.selfRepo, os.Getenv(envSelfRepo), root),
 		BuiltSHA:   filepath.Join(root, "daemon", "bin", ".built-sha"),
 	}
+	sha, err := resolveShimBuildSHA(checkout.ShimBuildStamp(root), os.Getenv(envShimBuildSHA))
+	if err != nil {
+		return paths{}, err
+	}
+	out.ShimBuildSHA = sha
 	return out, nil
 }
 

@@ -719,3 +719,29 @@ func TestMain(m *testing.M) {
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	os.Exit(m.Run())
 }
+
+func TestModelOrDefaultAnswersTheRecordedModel(t *testing.T) {
+	// Arrange.
+	f := &Fleet{deps: FleetDeps{DefaultModel: "opus"}}
+
+	// Act.
+	got := f.modelOrDefault("sonnet")
+
+	// Assert.
+	if got != "sonnet" {
+		t.Fatalf("modelOrDefault(\"sonnet\") = %q, want the recorded model", got)
+	}
+}
+
+func TestModelOrDefaultFallsBackWhenTheCreateNamedNoModel(t *testing.T) {
+	// Arrange.
+	f := &Fleet{deps: FleetDeps{DefaultModel: "opus"}}
+
+	// Act.
+	got := f.modelOrDefault("")
+
+	// Assert.
+	if got != "opus" {
+		t.Fatalf("modelOrDefault(\"\") = %q, want the daemon's default", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -648,4 +649,37 @@ func TestSinkCallsAreSerializedPerWorkspace(t *testing.T) {
 	got := h.collect(t, 2*frames*2)
 	assertPerAgentOrder(t, got, "main-1", frames)
 	assertPerAgentOrder(t, got, "sub-1", frames)
+}
+
+// TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight covers the one
+// thing a stream Close may never do: hold the watcher's lock. The real
+// transport's Close drains the response body and returns only when the server
+// ends the stream, which a standing watch never does on its own, so closing
+// under the lock wedges every reader of the watcher.
+func TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight(t *testing.T) {
+	// Arrange: a session whose stream will not finish closing.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	release := make(chan struct{})
+	h.session.blockClose = release
+	t.Cleanup(func() { close(release) })
+
+	// Act: sever the link and bring it back, which re-opens the fleet.
+	h.session.fail(errors.New("connection reset"))
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+	h.client.nextSessionOpen(t)
+
+	answered := make(chan struct{})
+	go func() {
+		h.w.TurnInFlight()
+		close(answered)
+	}()
+
+	// Assert: the freeness read is answered while the close is still standing.
+	select {
+	case <-answered:
+	case <-time.After(waitDeadline):
+		t.Fatal("TurnInFlight never answered while a stream close was in flight")
+	}
 }

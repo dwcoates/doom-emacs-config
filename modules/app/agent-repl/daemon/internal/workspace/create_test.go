@@ -608,3 +608,44 @@ func TestCreateRecordsTheOneShotFinishAction(t *testing.T) {
 		t.Fatalf("recorded finish = %q, want open_pr+add_to_merge_queue", f.db.putJobs[0].Finish)
 	}
 }
+
+func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *testing.T) {
+	// Arrange: the empty standard form, which the create contract calls an
+	// empty workspace rather than a refusal.
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(LegacyPrefixEnv, "")
+	spec := standardSpec(t)
+	spec.InitialPrompt = ""
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.created) != 1 {
+		t.Fatalf("created worktrees = %+v, want exactly one", f.git.created)
+	}
+	branch := f.git.created[0].Branch
+	if !strings.HasPrefix(branch, "DWC/"+UnnamedSlugPrefix) {
+		t.Fatalf("branch = %q, want it named after the minted workspace id", branch)
+	}
+}
+
+func TestCreateWithAnUnresolvableBaseRefIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
+	spec := standardSpec(t)
+	spec.BaseRef = "does-not-exist"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBaseRefUnresolved)
+	if len(f.git.created) != 0 {
+		t.Fatalf("created worktrees = %+v, want none for an unresolvable base ref", f.git.created)
+	}
+}
