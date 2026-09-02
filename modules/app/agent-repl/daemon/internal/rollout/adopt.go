@@ -18,6 +18,15 @@ import (
 // participants means there is nothing to wait for, and Emacs may not even be
 // running.
 func (c *controller) Join(ctx context.Context) error {
+	// JOINING MODE IS THE FACT, not the manifest. A successor owns NOTHING
+	// until it adopts, and the manifest may not exist yet when it boots: the
+	// incumbent writes it only after the successor has reported its address.
+	// Until then every per-workspace rpc must answer not_yet_adopted rather
+	// than fall through to a read-only state handle.
+	c.mu.Lock()
+	c.joiningMode = true
+	c.mu.Unlock()
+
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opJoin, "could not read the intent manifest",
@@ -68,6 +77,37 @@ func (c *controller) Join(ctx context.Context) error {
 	return nil
 }
 
+// armFromManifest arms the rendezvous from the intent manifest as it stands
+// NOW, adding what is not already armed and touching nothing that is: an entry
+// a participant has already called on keeps its ledger.
+func (c *controller) armFromManifest() error {
+	m, found, err := ReadManifest(c.deps.IntentManifest)
+	if err != nil || !found {
+		return err
+	}
+	added := 0
+	c.mu.Lock()
+	for _, session := range m.Sessions {
+		if _, already := c.rendezvous[session.Workspace]; already {
+			continue
+		}
+		c.rendezvous[session.Workspace] = &entry{
+			expected: Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb},
+		}
+		if c.joining == nil {
+			c.joining = map[ids.WorkspaceID]bool{}
+		}
+		c.joining[session.Workspace] = true
+		added++
+	}
+	c.mu.Unlock()
+	if added > 0 {
+		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
+			dlog.Context{"workspaces": added})
+	}
+	return nil
+}
+
 // AdoptHost is Emacs's half of the rendezvous, called on the NEW daemon.
 func (c *controller) AdoptHost(ctx context.Context, ws ids.WorkspaceID) error {
 	return c.rendezvousCall(ctx, ws, opAdoptHost, func(e *entry) { e.hostCalled = true }, func(e *entry) bool {
@@ -98,6 +138,19 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
+	if !armed && c.joiningMode {
+		// THE MANIFEST MAY HAVE ARRIVED SINCE BOOT. The incumbent writes it
+		// only after the successor has reported its address, so a successor
+		// that armed nothing at boot is the ordinary case, not a refusal: it
+		// re-reads once, here, when a participant actually calls.
+		c.mu.Unlock()
+		if err := c.armFromManifest(); err != nil {
+			c.log.Error(operation, "could not re-read the intent manifest", withCause(fields, err))
+			return err
+		}
+		c.mu.Lock()
+		e, armed = c.rendezvous[ws]
+	}
 	if !armed {
 		c.mu.Unlock()
 		// INFO, not WARN: on the web side this is what a page boot looks like

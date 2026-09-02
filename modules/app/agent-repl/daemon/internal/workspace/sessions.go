@@ -319,16 +319,6 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID,
 	})
 
-	if !src.Fresh {
-		if _, err := f.deps.Accounts.FindTranscript(ctx, record.Dir, src.VendorSessionID); err != nil {
-			return refuse(log, "OpenWorkspace", ArmTranscriptMissing,
-				fmt.Sprintf("the transcript for conversation %q is missing: %v", src.VendorSessionID, err), false)
-		}
-		log.Debug(opBringUp, "the resume guard found the transcript", dlog.Context{
-			"vendor_session_id": src.VendorSessionID,
-		})
-	}
-
 	configDir := session.ConfigDir
 	if configDir == "" {
 		configDir = f.deps.Accounts.ConfigDirFor(record.Dir)
@@ -349,7 +339,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		})
 	}
 
-	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID)
+	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
 	if err != nil {
 		return err
 	}
@@ -405,7 +395,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
-func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string) (shimclient.Client, bool, error) {
+func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bool, error) {
 	lockPath := f.lockDir()
 	state, err := f.probe(lockPath, dir)
 	switch state {
@@ -418,6 +408,16 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, true, nil
 	case sessionlock.StateFree:
+		// THE RESUME GUARD BELONGS TO THE SPAWN, and only to it. A resume
+		// whose vendor transcript is gone yields no death evidence and the
+		// redial ladder would loop forever on an unchangeable fact -- but that
+		// is true only of a process this daemon is about to START. An ADOPTED
+		// shim already holds the conversation open in a running process, and
+		// refusing it for a transcript on disk would refuse a session that is
+		// demonstrably alive.
+		if err := f.resumeGuard(ctx, log, dir, src); err != nil {
+			return nil, false, err
+		}
 		log.Debug(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{"lock": lockPath})
 		sink, err := f.deps.Log.ShimSink(dir)
 		if err != nil {
@@ -449,6 +449,23 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, false, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
 	}
+}
+
+// resumeGuard refuses a RESUME whose vendor transcript is gone, before any
+// process spawns: a vanished file yields no death evidence and the redial
+// ladder would loop forever on an unchangeable fact.
+func (f *Fleet) resumeGuard(ctx context.Context, log dlog.Logger, dir string, src source) error {
+	if src.Fresh {
+		return nil
+	}
+	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID); err != nil {
+		return refuse(log, "OpenWorkspace", ArmTranscriptMissing,
+			fmt.Sprintf("the transcript for conversation %q is missing: %v", src.VendorSessionID, err), false)
+	}
+	log.Debug(opBringUp, "the resume guard found the transcript", dlog.Context{
+		"vendor_session_id": src.VendorSessionID,
+	})
+	return nil
 }
 
 // DefaultModelEnv names the model a session starts on when the create did not

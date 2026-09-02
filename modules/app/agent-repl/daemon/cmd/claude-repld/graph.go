@@ -443,6 +443,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	verbs, err := workspace.New(workspace.Deps{
+		Instance:     p.Instance,
 		DB:           p.DB,
 		Git:          git,
 		Accounts:     accounts,

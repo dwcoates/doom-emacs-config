@@ -2,7 +2,10 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 
 	"claude-repld/internal/dlog"
@@ -112,6 +115,17 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	if err := v.publishNaming(ctx, log, record, facts.DefaultBranch); err != nil {
 		return wsm.Workspace{}, fmt.Errorf("register %q: %w", normalized, err)
 	}
+	// THIS DAEMON SERVES IT from here. The claim is what a handover hands
+	// over, and what tells a joining successor which workspaces are still the
+	// incumbent's; a workspace nobody claimed is transferred by nobody.
+	if v.deps.Instance != "" {
+		if err := v.deps.DB.ClaimServing(ctx, record.ID, v.deps.Instance); err != nil {
+			log.Error(opRegister, "could not claim the workspace's serving ownership", dlog.Context{
+				"workspace": string(record.ID), "instance": string(v.deps.Instance), "cause": err.Error(),
+			})
+			return wsm.Workspace{}, fmt.Errorf("register %q: claim serving: %w", normalized, err)
+		}
+	}
 
 	v.republishRegistry(ctx, log, opRegister)
 	return record, nil
@@ -213,6 +227,18 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 		defaults[repo.ID] = repo.DefaultBranch
 	}
 	for _, ws := range workspaces {
+		// A WORKSPACE WHOSE WORKTREE IS GONE binds nothing: a merged or nuked
+		// workspace keeps its registry row (the roster draws it under
+		// recently_merged) while its directory has been removed, and its log
+		// sink lives inside that directory. It is an ordinary state, not a
+		// reason to refuse the whole roster -- and refusing it failed the BOOT
+		// of every daemon that inherited one, a handover's successor included.
+		if _, err := os.Stat(ws.Dir); errors.Is(err, fs.ErrNotExist) {
+			global.Debug(opRegister, "the workspace's directory is gone; its views are not bound", dlog.Context{
+				"workspace": string(ws.ID), "dir": ws.Dir,
+			})
+			continue
+		}
 		if err := v.bindResolvers(global, ws.ID, ws.Dir); err != nil {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}

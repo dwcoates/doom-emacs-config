@@ -29,6 +29,39 @@ func JoiningAddrPath(stateDir string) string {
 	return filepath.Join(stateDir, JoiningAddrFile)
 }
 
+// successorArgv is the incumbent's OWN command line with the joining flag
+// re-pointed at it.
+//
+// The successor inherits the incumbent's ARGV as well as its environment, for
+// the reason the environment is inherited whole: a successor assembled from a
+// curated list would differ from its incumbent in exactly the ways nobody
+// thought to list. Emacs launches the daemon with no argv at all, so in
+// production this is just the joining flag -- but every flag the operator or a
+// test did pass (the account roots, the shim entry, the webapp dist, the
+// prompts directory) is the incumbent's configuration, and a successor
+// without it is a different daemon.
+func successorArgv(incumbent []string, address string) []string {
+	out := make([]string, 0, len(incumbent)+2)
+	for i := 0; i < len(incumbent); i++ {
+		arg := incumbent[i]
+		bare := strings.TrimLeft(arg, "-")
+		name, _, hasValue := strings.Cut(bare, "=")
+		if name != joiningName {
+			out = append(out, arg)
+			continue
+		}
+		// An existing joining flag is DROPPED, value and all: this successor
+		// joins the daemon that spawned it, not the one its parent joined.
+		if !hasValue && i+1 < len(incumbent) {
+			i++
+		}
+	}
+	return append(out, JoiningFlag, address)
+}
+
+// joiningName is JoiningFlag without its dashes, for argv matching.
+const joiningName = "joining"
+
 // ReportJoiningAddr is the SUCCESSOR's half: write this daemon's bound address
 // where the incumbent that spawned it is waiting. It writes atomically, because
 // a half-written address would be dialed as a real one.
@@ -118,7 +151,7 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (st
 		return "", fmt.Errorf("rollout: clear the stale joining address report: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, s.Exe, JoiningFlag, incumbentAddress)
+	cmd := exec.CommandContext(ctx, s.Exe, successorArgv(os.Args[1:], incumbentAddress)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {

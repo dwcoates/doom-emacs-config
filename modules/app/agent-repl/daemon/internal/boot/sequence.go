@@ -48,21 +48,30 @@ func (s *sequence) Run(ctx context.Context) (Report, error) {
 		return Report{}, fmt.Errorf("boot: read the workspace registry: %w", err)
 	}
 
-	clientless, err := s.adopt(ctx, log, workspaces, &report)
-	if err != nil {
-		return Report{}, err
-	}
-	if err := s.reconcileManifest(ctx, log, &report); err != nil {
-		return Report{}, err
-	}
-	if err := s.restoreHolds(ctx, log, &report); err != nil {
-		return Report{}, err
-	}
-	if err := s.closeOrphans(ctx, log, clientless, &report); err != nil {
-		return Report{}, err
-	}
-	if err := s.recoverMerges(ctx, log, workspaces, &report); err != nil {
-		return Report{}, err
+	// A JOINING DAEMON RECONCILES NOTHING. It owns no workspace yet -- the
+	// incumbent still does, and is still writing -- so its state handle is
+	// READ-ONLY and every reconciliation step here is a write it must not
+	// make: adopting a shim the incumbent is serving, closing turns the
+	// incumbent's sessions are still running, recovering a merge the incumbent
+	// is still driving. Each workspace's state is reconciled as it is
+	// TRANSFERRED, which is the rendezvous the join arms below.
+	if !s.Joining() {
+		clientless, err := s.adopt(ctx, log, workspaces, &report)
+		if err != nil {
+			return Report{}, err
+		}
+		if err := s.reconcileManifest(ctx, log, &report); err != nil {
+			return Report{}, err
+		}
+		if err := s.restoreHolds(ctx, log, &report); err != nil {
+			return Report{}, err
+		}
+		if err := s.closeOrphans(ctx, log, clientless, &report); err != nil {
+			return Report{}, err
+		}
+		if err := s.recoverMerges(ctx, log, workspaces, &report); err != nil {
+			return Report{}, err
+		}
 	}
 	if err := s.join(ctx, log); err != nil {
 		return Report{}, err

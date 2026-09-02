@@ -53,7 +53,7 @@ func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 	if c.transferred[ws] != "" {
 		return StandingTransferringAway
 	}
-	if c.joining[ws] && !c.owned[ws] {
+	if (c.joiningMode || c.joining[ws]) && !c.owned[ws] {
 		return StandingNotYetAdopted
 	}
 	return StandingOwned
