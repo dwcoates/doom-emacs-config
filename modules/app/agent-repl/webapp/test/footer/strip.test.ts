@@ -528,6 +528,13 @@ describe("drawFooterClock", () => {
     expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the turn's start does not share the shared ticker's phase.
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 4920) });
+    // Assert: five real seconds of turn reads 5s, not the lagging 4s.
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("5s");
+  });
+
   it("re-reads the clock on the shared tick", () => {
     const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 42_000) });
     vi.advanceTimersByTime(3000);
