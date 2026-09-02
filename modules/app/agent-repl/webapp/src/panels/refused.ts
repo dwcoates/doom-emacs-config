@@ -31,7 +31,8 @@ import type { RowContext } from "../feed/cards/context.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { refusalSentence } from "../rpc/refusal.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 
@@ -121,7 +122,7 @@ export function drawFeedCommandAddSupportOffer(
 
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void requestSupport(ctx, command, button, row);
+    void guardMalformed(ctx, "panels.refused.add-support", requestSupport(ctx, command, button, row));
   });
   return row;
 }
@@ -168,7 +169,7 @@ async function requestSupport(
       (result.value as RequestCommandSupportError).cause,
       "RequestCommandSupportError.cause",
     );
-    const say = refusalSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);
+    const say = crossCuttingSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);
     drawRefusal(row, cause.case, say);
     log("warn", `RequestCommandSupport refused ${command}`, {
       operation: "panels.command-refused.support-refused",

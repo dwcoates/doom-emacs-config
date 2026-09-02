@@ -19,7 +19,8 @@
  */
 import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
-import { refusalSentence } from "../../rpc/refusal.js";
+import { guardMalformed } from "../../rpc/guard.js";
+import { crossCuttingSentence } from "../../rpc/refuse.js";
 import { callUnary } from "../../rpc/unary.js";
 import { isMalformedView } from "../../rpc/malformed.js";
 import { create } from "@bufbuild/protobuf";
@@ -112,7 +113,11 @@ export function drawFeedMergeQueueEntry(
   }
 
   line.addEventListener("click", () => {
-    void selectQueueEntryWorkspace(el, rc, ref);
+    void guardMalformed(
+      rc.ctx,
+      "feed.merge.queue.select",
+      selectQueueEntryWorkspace(el, rc, ref),
+    );
   });
   return el;
 }
@@ -155,7 +160,7 @@ export async function selectQueueEntryWorkspace(
     case "error": {
       const cause = requireCase(result.value.cause, "SelectWorkspaceError.cause");
       const sentence =
-        refusalSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
+        crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
       log("warn", `SelectWorkspace was refused: ${sentence}`, {
         operation: "merge.queue-select-refused",
         context: { arm: cause.case, workspace: workspace.id },

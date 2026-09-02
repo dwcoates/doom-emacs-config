@@ -86,14 +86,32 @@ export function refusalOf(
 ): { arm: string; text: string } {
   const arm = requireCase(cause, path);
   const say = own[arm.case];
-  const text = say !== undefined ? say(arm.value as never) : refusalSentence(rpcNameOf(path), arm);
+  const text = say !== undefined ? say(arm.value as never) : crossCuttingSentence(path, arm);
   if (text === undefined) {
     // A cause a NEWER daemon added. A generic sentence here would tell the
     // reader their click failed for a reason this build simply did not read.
     return unreachableArm(path, arm.case);
   }
-  if (arm.case === "transferringAway") raiseMoved(path, arm.value);
   return { arm: arm.case, text };
+}
+
+/**
+ * The sentence for one of the CROSS-CUTTING FOUR, or `undefined` when the arm
+ * is the endpoint's own — and the page-wide move notice as a side effect.
+ *
+ * THIS IS THE HOOK EVERY CALL SITE GOES THROUGH, whether it draws the sentence
+ * itself (the sidebar's verbs, the tray, the composer, `link.ts`) or lets
+ * `drawTypedRefusal` draw it. Calling `refusalSentence` from `./refusal.ts`
+ * directly is what let `transferring_away` be drawn as a small sentence beside
+ * one button while the rest of the page went on looking live; this wrapper is
+ * the reason no site has to remember to raise the notice itself.
+ */
+export function crossCuttingSentence(path: string, cause: Cause): string | undefined {
+  const arm = requireCase(cause, path);
+  const text = refusalSentence(rpcNameOf(path), arm);
+  if (text === undefined) return undefined;
+  if (arm.case === "transferringAway") raiseMoved(path, arm.value);
+  return text;
 }
 
 /**
