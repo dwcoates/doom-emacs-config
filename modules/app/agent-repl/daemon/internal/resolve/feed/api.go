@@ -98,6 +98,13 @@ type Resolver interface {
 	// and drawn with the metaprompt sentinel spans STRIPPED — the full text
 	// stays on the durable record.
 	UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow)
+	// UpsertAtOutputAddress upserts a daemon-synthesized row at the session's
+	// STANDING OUTPUT ADDRESS rather than a named feed: the mirror of an
+	// accepted user prompt belongs wherever the lease holder addressed the
+	// session's output (a merge tab), never unconditionally on the root feed,
+	// because the resolver's own later draw of that same row key lands at the
+	// address and would otherwise leave the root copy standing forever.
+	UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow)
 	// UpsertCommandPanel mints a NON-DURABLE root-feed row carrying a
 	// recognized command's panel. Its FeedId comes from (workspace, the
 	// per-workspace monotonically increasing synthesized sequence), so a

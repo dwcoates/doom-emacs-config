@@ -110,9 +110,7 @@ func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlo
 // spans are STRIPPED from the drawn text; the full text stays on the record and
 // on what the shim received.
 func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) {
-	root := feedid.Feed{Root: true}
 	row := &frontendv1.FeedRow{
-		Id:   feedid.Encode(feedid.Ref{WS: ws, Feed: root, Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}}),
 		Turn: &conversationv1.TurnId{Value: string(turn)},
 		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
 			Author: &frontendv1.FeedUserPromptAuthor{Label: feed.AuthorLabel(origin)},
@@ -121,7 +119,12 @@ func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conver
 			}},
 		}},
 	}
-	q.deps.Feed.UpsertSynthesized(ws, root, row)
+	// THE MIRROR LANDS AT THE SESSION'S OUTPUT ADDRESS, never unconditionally
+	// on the root feed: while a merge lease has addressed the session at one of
+	// its tabs, the guidance the user types belongs on that tab, and the
+	// resolver's own draw of the same row key lands there too — so the mirror
+	// and the draw are one row.
+	q.deps.Feed.UpsertAtOutputAddress(ws, feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}, row)
 }
 
 // mirrorBlocks renders a submission's content as drawn blocks. Only text is
