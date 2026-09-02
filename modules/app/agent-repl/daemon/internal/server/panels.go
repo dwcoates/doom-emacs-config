@@ -72,7 +72,10 @@ func contextPanel(resolver topbar.Resolver, ws ids.WorkspaceID, log dlog.Logger)
 // these rows and no others. A thin panel is the settled consequence, not a bug.
 // A row whose fact the session has not stated is OMITTED — StatusPanelRow.value
 // is never empty — and a build stamp that cannot be read fails the panel
-// LOUDLY rather than drawing a version the daemon does not know.
+// LOUDLY rather than drawing a version the daemon does not know. The Version
+// row obeys the same omission rule as the rest: a checkout the deploy chain
+// never stamped has NO version to state, and an empty-valued row would state
+// one anyway.
 func statusPanel(resolver topbar.Resolver, version VersionFunc, ws ids.WorkspaceID, log dlog.Logger) (*agentreplv1.SubmitPromptCommandPanel, error) {
 	stamp, err := version()
 	if err != nil {
@@ -86,10 +89,9 @@ func statusPanel(resolver topbar.Resolver, version VersionFunc, ws ids.Workspace
 			dlog.Context{"workspace": string(ws)})
 		return nil, fmt.Errorf("server: workspace %q has no session facts to draw a status panel from", ws)
 	}
-	view := &frontendv1.StatusPanelView{
-		Rows: []*frontendv1.StatusPanelRow{{Label: "Version", Value: stamp}},
-	}
+	view := &frontendv1.StatusPanelView{}
 	for _, row := range []struct{ label, value string }{
+		{"Version", stamp},
 		{"Account", facts.Account},
 		{"Model", facts.Model},
 		{"Permission mode", facts.PermissionMode},
