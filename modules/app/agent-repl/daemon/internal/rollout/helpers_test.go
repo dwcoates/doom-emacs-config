@@ -555,6 +555,7 @@ type harness struct {
 	mu           sync.Mutex
 	quiesced     []ids.WorkspaceID
 	drained      []ids.WorkspaceID
+	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
 	addrWrites   int
 	exits        chan struct{}
@@ -630,6 +631,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 			h.drained = append(h.drained, ws)
 			h.mu.Unlock()
 			return nil
+		},
+		LeaseChanged: func(ws ids.WorkspaceID) {
+			order.record("lease_changed")
+			h.mu.Lock()
+			h.leaseChanged = append(h.leaseChanged, ws)
+			h.mu.Unlock()
 		},
 		Freeness: h.freeness,
 		Shims:    h.fleet,

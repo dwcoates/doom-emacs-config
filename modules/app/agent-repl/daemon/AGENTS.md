@@ -136,9 +136,11 @@ start after the bindings, because each of them can push.
 The one collaborator with NO PRODUCER is the feed's image origin: nothing in
 the daemon serves an image reference as a fetchable `src`, so the resolver is
 wired with `feed.UnproducedImageResolver`, which refuses loudly and names the
-missing producer. `/todos` and `/mcp` (and `/status`, `/agents`, `/help`) have
-no producer either: `server.Panels` answers `/context` and fails loudly for
-every other recognized panel command.
+missing producer. `/todos` and `/mcp` have no producer either, and `/agents`
+and `/help` are ruled unproduced: `server.Panels` answers `/context` (the
+topbar resolver's context tree) and `/status` (the daemon's build stamp plus
+the resolver's spliced account/model/mode facts) and fails loudly for every
+other recognized panel command.
 
 ## Deploy chain
 

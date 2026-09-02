@@ -27,8 +27,6 @@ landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| UpdateMergeQueue | `unknown_repository` | `UpdateMergeQueuePause`/`UpdateMergeQueueResume` carries a `repository` ref that matches no registered repository (or names neither an id nor a dir) | merge |
-| SubmitPrompt | `duplicate_submission` | the request's `idempotency_key` already claimed a turn; the retry is refused rather than minting a second turn (`prompthandler.ErrDuplicateSubmission`) | prompthandler |
 
 One thing the batch did NOT land: `CloseWorkspaceError.blocked` exists but
 `CloseWorkspaceBlocked` is still an EMPTY message, so the composed reason the
@@ -69,29 +67,61 @@ here as the mapping the server handlers switch on, not as arms still owed:
 
 NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.
 
+## Watch* refusals are TRANSPORT-CLOSED by ruling (landing 6, project lead)
+
+A `Watch*` rpc has NO `<Rpc>Error` message at all: a refused open is a Connect
+error raised before the first frame, and the stream simply never opens. That is
+the SETTLED shape, not a gap — these refusals are NOT unlanded arms and no arm
+is owed for any of them. The daemon still spells the intended arm into the
+error's message through `server.UnlandedArm`, because that is the one carrier
+that names a refusal in a message rather than a field, and a client reading the
+closed stream learns exactly which condition closed it.
+
+| rpc | refusal | condition | package |
+| --- | --- | --- | --- |
+| WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
+| WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
+| WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
+| WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace before it opens | server |
+
 ## Landing 6 batch, opened by the server handlers (wave 3a)
 
 Every row below is a refusal the server MAKES and the contract has no arm for.
 Each answers through `server.UnlandedArm`.
 
+One consequence is recorded as a row rather than lost: the SHIM still refuses a
+bubble-addressed submit with its own `turn_already_open`, propagated by name.
+
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| SubmitPrompt | `command_acted` | a session-act command (`/clear`, `/compact`, `/model <arg>`) the handler reports as ACTED. `SubmitPromptSuccess` has `turn`, `command_panel` and `command_refused` and nothing for an act, so the daemon answers the loud sentinel rather than fabricating a turn or a panel (project-lead ruling; accepted for landing 6) | server |
-| WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
-| WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
-| WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
-| WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace, but a `Watch*` rpc has NO `<Rpc>Error` message — a refused open is a Connect error before any frame — so all four ownership arms are unlanded for the streams | server |
+| SubmitPrompt (the bubble path) | `turn_already_open` | the shim's `StartTurnFailure.turn_already_open` for a subagent whose turn runs, propagated by NAME rather than collapsed into a sentence. `SubmitPromptError` no longer carries the arm | workspace |
 
-The `turn_already_open` arm on `SubmitPromptError` HAS NO PRODUCER: the sentinel
-`promptqueue.ErrTurnAlreadyOpen` is declared and documented but is never
-returned by any code path in the daemon. The server maps it if it ever appears;
-the arm is a candidate for retirement.
+`SubmitPromptError.turn_already_open` is RETIRED (landing 6, tag 8 reserved):
+it never had a producer — the session watcher answers the MAIN turn's flight and
+nothing in the daemon tracks a subagent's own — so the sentinel, the mapping and
+the arm all went away together.
 
-## Panel commands with no producer (server, wave 3a)
+## Panel commands with no producer (server, NOTES — not unlanded arms)
 
-`server.Panels` is the prompt handler's panel source. Only `/context` has a
-producer (the topbar resolver's context tree). `/status`, `/todos`, `/mcp` have
-no resolver at all, and `/agents` and `/help` are ruled UNPRODUCED (Q1) — they
-answer as `command_refused` before recognition ever reaches a panel. A panel
-command with no producer fails LOUDLY out of the handler rather than drawing an
-empty card.
+`server.Panels` is the prompt handler's panel source. TWO panels have a
+producer: `/context` draws the topbar resolver's context tree, and `/status`
+draws the daemon's build stamp plus the resolver's spliced account, model and
+permission-mode facts (landing 6). `/agents` and `/help` are ruled UNPRODUCED
+(Q1) — they answer as `command_refused` before recognition ever reaches a panel.
+
+The two below are NOTES, not unlanded arms: the panel arms are landed and the
+contract owes nothing. What is missing is a daemon-side PRODUCER, and until one
+exists the command fails LOUDLY out of the handler rather than drawing an empty
+card.
+
+- NOTE `/todos`: `SubmitPromptCommandPanel.todos` is landed and
+  `TodosPanelView` is spelled, but no daemon resolver holds the tracker's
+  checklist this wave. The command fails loudly.
+- NOTE `/mcp`: `SubmitPromptCommandPanel.mcp` is landed and `McpPanelView` is
+  spelled, but nothing in the daemon observes the MCP server set this wave. The
+  command fails loudly.
+
+/status DEGRADES BY DESIGN (project lead): the vendor handshake is deferred, so
+the panel is the version row plus the spliced account/model/mode rows and
+nothing else. cwd, auth, plugins and memory return if the handshake deferral
+ever lands. A playtest seeing the thin panel is seeing the settled consequence.

@@ -209,6 +209,20 @@ func TestAnswerQuestionDeliversAServedAnswer(t *testing.T) {
 	}
 }
 
+func TestAnswerQuestionRefusesAnAnswerNamingNoAsk(t *testing.T) {
+	// Arrange: a card that is not standing is ask_not_standing, never the
+	// unserved-value arm.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.AnswerQuestion(context.Background(), "w1",
+		questionAnswer("", selection("pick one", "a")))
+
+	// Assert.
+	asRefusal(t, err, ArmAskNotStanding)
+}
+
 func TestAnswerQuestionRefusesAnUnservedQuestionText(t *testing.T) {
 	// Arrange: an unserved value means the client is answering a stale card.
 	f := newFixture(t)
@@ -281,7 +295,7 @@ func TestAnswerQuestionRefusesABatchThatIsNotStanding(t *testing.T) {
 	err := f.verbs.AnswerQuestion(context.Background(), "w1", questionAnswer("q-1", selection("pick one", "a")))
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmAskNotStanding)
 }
 
 func TestAnswerQuestionSurfacesADeliveryFailure(t *testing.T) {

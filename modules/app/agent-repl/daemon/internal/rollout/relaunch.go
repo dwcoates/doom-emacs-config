@@ -78,7 +78,7 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 
 	if hasOld {
 		if err := c.standDown(ctx, old, ws, reason, fields); err != nil {
-			c.release(ctx, lease.ID, fields)
+			c.release(ctx, ws, lease.ID, fields)
 			return err
 		}
 	} else {
@@ -86,7 +86,7 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	}
 
 	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
-		c.release(ctx, lease.ID, fields)
+		c.release(ctx, ws, lease.ID, fields)
 		c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
 		return fmt.Errorf("rollout: relaunch %q: install the new shim: %w", ws, err)
 	}
@@ -94,7 +94,7 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	resumed, err := c.deps.Shims.Resume(ctx, ws, fresh)
 	if err != nil {
 		c.recordRelaunchFault(ctx, ws, err, fields)
-		c.release(ctx, lease.ID, fields)
+		c.release(ctx, ws, lease.ID, fields)
 		return fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)
 	}
 	if resumed.Cold != nil {
@@ -103,7 +103,7 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 		c.log.Info(opRelaunch, "the resume answered cold; raising the ordinary cold gate", fields)
 		if err := c.deps.ColdGate(ctx, ws, resumed.Cold); err != nil {
 			c.log.Error(opRelaunch, "could not raise the cold gate", withCause(fields, err))
-			c.release(ctx, lease.ID, fields)
+			c.release(ctx, ws, lease.ID, fields)
 			return fmt.Errorf("rollout: relaunch %q: cold gate: %w", ws, err)
 		}
 	}
@@ -116,7 +116,7 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 
 	// RELEASING THE HOLD IS WHAT DRAINS THE INTAKE: the queue re-evaluates its
 	// holds against the lease that is no longer there.
-	c.release(ctx, lease.ID, fields)
+	c.release(ctx, ws, lease.ID, fields)
 	c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
 	return nil
 }
@@ -186,13 +186,15 @@ func killRefusal(failure *shimv1.KillSessionFailure) string {
 	}
 }
 
-// release drops the restart-pending hold, which is what lets the held intake
-// drain.
-func (c *controller) release(ctx context.Context, lease ids.LeaseID, fields dlog.Context) {
+// release drops the restart-pending hold and TELLS THE QUEUE, which is what
+// lets the held intake drain: the release alone changes a row the queue is not
+// watching, so a bounce without this leaves the intake held forever.
+func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, fields dlog.Context) {
 	if err := c.deps.DB.ReleaseLease(ctx, lease); err != nil {
 		c.log.Warn(opRelaunch, "could not release the restart-pending hold", withCause(fields, err))
 		return
 	}
+	c.deps.LeaseChanged(ws)
 	c.log.Debug(opRelaunch, "released the restart-pending hold; the held intake drains", fields)
 }
 

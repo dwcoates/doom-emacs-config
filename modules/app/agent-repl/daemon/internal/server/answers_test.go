@@ -161,6 +161,35 @@ func TestAnswerPermissionRenamesUnservedToAskNotStanding(t *testing.T) {
 	}
 }
 
+// TestAnswerQuestionAnswersAskNotStanding pins that the verb's own
+// ask_not_standing arm reaches AnswerQuestionError under that very name, with
+// no NotFound-driven rename in between.
+func TestAnswerQuestionAnswersAskNotStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.answerQuestionErr = &workspace.Refusal{
+		Arm: workspace.ArmAskNotStanding, Reason: "no question batch is standing", NotFound: true,
+	}
+
+	// Act.
+	resp, err := h.Client.AnswerQuestion(context.Background(),
+		connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+			Workspace: ref(),
+			Question:  questionIDFor(testWorkspaceID, "ask-2"),
+			Answers: []*agentreplv1.AnswerQuestionAnswer{
+				{QuestionText: "which?", Chosen: []string{"a"}},
+			},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AnswerQuestion: %v", err)
+	}
+	if resp.Msg.GetError().GetAskNotStanding() == nil {
+		t.Fatalf("result = %v, want ask_not_standing", resp.Msg.GetResult())
+	}
+}
+
 // TestAnswerQuestionRenamesUnservedToUnservedValue pins the OTHER half of the
 // rename: an unserved VALUE (not an unknown ask) is unserved_value.
 func TestAnswerQuestionRenamesUnservedToUnservedValue(t *testing.T) {
