@@ -168,7 +168,8 @@ func awaitBookLine(ctx context.Context, t *testing.T, c storev1connect.ShimStore
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		for _, at := range bookLines(ctx, t, c, agent, 200) {
+		held, _ := bookLinesIfKnown(ctx, t, c, agent, 200)
+		for _, at := range held {
 			if match(at.GetLine()) {
 				return at.GetLine()
 			}
