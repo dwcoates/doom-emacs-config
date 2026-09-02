@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -236,8 +235,12 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// Assert.
 	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
 	requireLostCause(t, cut, "file_vanished")
-	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "all it managed to say") {
-		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
+	// THE TERMINAL OWES EXACTLY THE RUN'S DELTAS, byte for byte: a reader that
+	// concatenates the deltas and a reader that takes the terminal's stdout must
+	// see the same output, and a containment check could not tell those apart.
+	wantStdout := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	if got := cut.GetOutput().GetText().GetStdout(); got != wantStdout {
+		t.Errorf("the LOST terminal carries stdout %q, wanted exactly the run's joined deltas %q", got, wantStdout)
 	}
 }
 
@@ -293,8 +296,9 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 	// Assert.
 	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
 	requireLostCause(t, cut, "went_silent")
-	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "started, then stopped") {
-		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
+	wantStdout := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	if got := cut.GetOutput().GetText().GetStdout(); got != wantStdout {
+		t.Errorf("the LOST terminal carries stdout %q, wanted exactly the run's joined deltas %q", got, wantStdout)
 	}
 }
 
@@ -378,8 +382,8 @@ func TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue(t *testing.T) {
 			continue
 		}
 		found = true
-		if !strings.Contains(residue.GetRaw(), strings.TrimSpace(payload)) {
-			t.Errorf("residue for %s carries %q, wanted the file's bytes %q", spoolPath, residue.GetRaw(), payload)
+		if residue.GetRaw() != payload {
+			t.Errorf("residue for %s carries %q, wanted the file's bytes exactly, %q", spoolPath, residue.GetRaw(), payload)
 		}
 	}
 	if !found {

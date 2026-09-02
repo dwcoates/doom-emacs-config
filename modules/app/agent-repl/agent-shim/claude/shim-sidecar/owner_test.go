@@ -158,7 +158,7 @@ func TestObserverNormalizesTheOutputPath(t *testing.T) {
 	spool := h.spoolFile(t, "b1", "hello\n")
 
 	// Act.
-	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"))
+	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"), false)
 	got, ok := h.sc.owners.resolve(spoolTarget(spool, "b1"))
 
 	// Assert: the same file must not read as two.
@@ -174,7 +174,7 @@ func TestAStopMintsTheCancelledTerminalThroughTheSpoolsReader(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1stopped", "partial work\n")
-	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool)
+	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool, false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestAStoppedRunIsNeverConcludedLost(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1stopswept", "partial work\n")
-	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool)
+	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool, false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
 	if cut := interruptedFor(store.writes, "toolu_late_run"); cut != nil {
 		t.Fatal("a terminal was minted for a spool that had no reader yet")
 	}
-	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool)
+	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool, false)
 	h.sc.rescan()
 	h.sc.pollAll()
 

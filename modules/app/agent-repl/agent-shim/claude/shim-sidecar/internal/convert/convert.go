@@ -41,13 +41,20 @@ import (
 // boundary neither of them owns.
 type Observer interface {
 	// TaskSpawned reports a launch read off a tool result: the vendor task id,
-	// the call that spawned it, the agent whose book the spawn happened in, and
-	// the spool path the vendor named (empty when it named none).
+	// the call that spawned it, the agent whose book the spawn happened in, the
+	// spool path the vendor named (empty when it named none), and whether the
+	// spawn went to the BACKGROUND.
 	//
 	// THE CREATED AGENT'S ID IS NOT A PARAMETER because it is not a separate
 	// fact: a subagent's AgentId IS the spawning call's tool_use_id, so a reader
 	// holding toolUseID already holds it.
-	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string)
+	//
+	// `backgrounded` IS reported, because nothing downstream can derive it. It
+	// is read off the launch result's own signature (an `isAsync` launch, and
+	// only that one), and it is what decides `top_level`: a backgrounded
+	// subagent's stream outlives the spawning turn, so the subagent is its own
+	// top level rather than the session's main agent.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool)
 
 	// TaskStopped reports a TaskStop result: a person stopped this task.
 	//
@@ -62,8 +69,8 @@ type Observer interface {
 // noopObserver is the default: a converter with nobody listening still converts.
 type noopObserver struct{}
 
-func (noopObserver) TaskSpawned(string, string, string, string) {}
-func (noopObserver) TaskStopped(string)                         {}
+func (noopObserver) TaskSpawned(string, string, string, string, bool) {}
+func (noopObserver) TaskStopped(string)                               {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map

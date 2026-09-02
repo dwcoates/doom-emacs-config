@@ -25,12 +25,12 @@ func (l *lostCapable) LostTerminal(taskID, runActivityID, ownerAgentID, reason s
 
 // observerCapable is a handler whose converter accepts spawn observations.
 type observerCapable struct {
-	observer func(taskID, toolUseID, agentID, outputPath string)
+	observer func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)
 }
 
 func (o *observerCapable) Handle([]tail.Frame, *tail.Context) []*storev1.StoreEntry { return nil }
 
-func (o *observerCapable) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string)) {
+func (o *observerCapable) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)) {
 	o.observer = fn
 }
 
@@ -128,7 +128,7 @@ func TestPlumbedObservationsReachTheOwnerIndex(t *testing.T) {
 	h.sc.plumbObserver(tail.KindSessionTranscript, handler, h.sc.log)
 
 	// Act.
-	handler.observer("b1", "call-1", "", "")
+	handler.observer("b1", "call-1", "", "", false)
 
 	// Assert.
 	if got := h.sc.owners.activityFor("b1"); got != "call-1" {
@@ -153,7 +153,7 @@ func TestLostSweepArmsFromSilence(t *testing.T) {
 	// Arrange: a claimed spool that stops growing.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}

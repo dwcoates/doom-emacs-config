@@ -29,7 +29,7 @@ func TestNoStoreAtBootProducesNothing(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitLog(ctx, t, opts.LogPath, "the suspension record", func(r logRecord) bool {
-		return r.Level == "warn"
+		return r.Operation == "production-suspended" && r.Level == "warn"
 	})
 
 	// Assert: nothing was written anywhere, because there was nowhere to write.
@@ -56,7 +56,7 @@ func TestTheSuspensionIsStatedOnceRatherThanPerRetry(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitLog(ctx, t, opts.LogPath, "the suspension record", func(r logRecord) bool {
-		return r.Level == "warn"
+		return r.Operation == "production-suspended" && r.Level == "warn"
 	})
 	// Binding the socket late and waiting for the first batch proves several
 	// retry cycles elapsed during the outage — so a per-retry WARNING would
@@ -100,7 +100,7 @@ func TestTheFirstRpcAfterTheStoreAppearsIsACursorRead(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitLog(ctx, t, opts.LogPath, "the suspension record", func(r logRecord) bool {
-		return r.Level == "warn"
+		return r.Operation == "production-suspended" && r.Level == "warn"
 	})
 
 	fake := startFakeStoreAt(t, socket)
@@ -131,7 +131,7 @@ func TestProductionResumesOnceTheStoreAppears(t *testing.T) {
 		g.AppendLine(line)
 	}
 	awaitLog(ctx, t, opts.LogPath, "the suspension record", func(r logRecord) bool {
-		return r.Level == "warn"
+		return r.Operation == "production-suspended" && r.Level == "warn"
 	})
 	fake := startFakeStoreAt(t, socket)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
