@@ -63,3 +63,8 @@ Implementer-chosen UX (merge bubble; all currently at option a):
 - Tab selection release rule: the reader's pick stands across pushes and is released only when a never-drawn tab id appears.
 
 Implementer-chosen UX (topbar; ruled by the project lead 2026-09-01): context breakdown opens on click (hover vs click stays with the user); `data-reveal="mode"` blessed as the sixth reveal name.
+
+Implementer-chosen UX (integration remediation, sidebar/tray; all currently at option a, forced by the suite's hooks):
+- Nuke's typed-name guard: (a) the go button is always enabled and only styles itself "armed" on an exact name match (two-step drawer); (b) hard gate restored (button disabled until the name matches) and the suite types it through; (c) plain second confirm, no typed name.
+- Release on a hold arm that forbids the interrupt: (a) always offered, refused by the daemon at the control, reason in the button's title; (b) drawn disabled with the reason inline.
+- Task done/reopen: (a) both setDone and setOpen live in the task's menu while the visible check flips to whichever applies; (b) only the applicable one shown.

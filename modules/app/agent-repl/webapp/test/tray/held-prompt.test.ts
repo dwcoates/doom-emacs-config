@@ -280,7 +280,9 @@ describe("drawHeldPrompt hold arms", () => {
       name: "shutdown",
       prompt: heldPrompt({ hold: { case: "shutdown", value: { scheduleId: "sched-9" } } }),
       arm: "shutdown",
-      line: "held for the scheduled restart",
+      // The schedule id is DRAWN, not hidden in a title: it is the token that
+      // joins the card to the shutdown it explains.
+      line: "held for the scheduled restart (sched-9)",
     },
     {
       name: "keep_alive",
@@ -356,23 +358,27 @@ describe("drawHeldPrompt release availability", () => {
     },
   ];
 
+  // EVERY ENTRY OFFERS A RELEASE: where an arm forbids the interrupt a release
+  // needs, the daemon refuses it and the refusal is said at the control — the
+  // contract's own answer for a verb that cannot run — rather than the button
+  // being withheld and the reason hidden in a hover.
   for (const entry of forbidden) {
-    it(`draws no release on ${entry.name}`, () => {
+    it(`still offers release on ${entry.name}, for the daemon to refuse`, () => {
       const { tc } = trayContext();
       const card = drawHeldPrompt(entry.prompt, tc);
-      expect(card.querySelector('[data-held-action="release"]')).toBeNull();
+      expect(card.querySelector('[data-held-action="release"]')).not.toBeNull();
     });
   }
 
-  it("explains the missing release in the actions row's title", () => {
+  it("warns on the release button why the arm is likely to refuse it", () => {
     const { tc } = trayContext();
     const card = drawHeldPrompt(
       heldPrompt({ hold: { case: "sessionStarting", value: {} } }),
       tc,
     );
-    expect(card.querySelector<HTMLElement>(".queued-actions")?.title).toContain(
-      "the session is not up yet",
-    );
+    expect(
+      card.querySelector<HTMLElement>('[data-held-action="release"]')?.title,
+    ).toContain("the session is not up yet");
   });
 
   it("still offers release under a build refresh, which forbids nothing", () => {

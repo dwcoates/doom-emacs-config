@@ -315,7 +315,9 @@ describe("a finding's location click", () => {
     const anchor = el.querySelector<HTMLAnchorElement>(".finding-location a");
     anchor?.click();
     await settle();
-    expect(anchor?.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
+    expect(
+      anchor?.parentElement?.querySelector(".refusal")?.getAttribute("data-arm"),
+    ).toBe("pathEscapesWorkspace");
   });
 });
 

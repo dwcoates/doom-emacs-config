@@ -31,6 +31,7 @@ import { createAppContext, type AppContext } from "../../src/rpc/context";
 import { workspaceRef } from "../../src/rpc/workspace-ref";
 import { createTicker } from "../../src/clock";
 import { mountFailureOverlay } from "../../src/failure/overlay";
+import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
 import { createRowRenderers } from "../../src/feed/renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
@@ -41,6 +42,7 @@ import { mountComposer, createComposerGate } from "../../src/composer/composer";
 import { drawCommandPanel } from "../../src/panels/panels";
 import { forgetOwnTurns } from "../../src/composer/own-turns";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
+import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
@@ -191,6 +193,52 @@ function installScrollIntoView(): void {
   Element.prototype.scrollIntoView = function scrollIntoView(): void {};
 }
 
+/**
+ * A TERMINAL FOR JSDOM, the second and last environment substitution.
+ *
+ * xterm.js is a browser bundle: it reads `self` at import time, measures the
+ * device pixel ratio through `window.matchMedia`, and paints through a canvas
+ * 2d context. jsdom has none of the three, so the real factory throws before
+ * the overlay has written a byte — the terminal cannot run here for the same
+ * reason `fetch` cannot, and for no reason that lives in the app.
+ *
+ * So the harness supplies the same `LoginTerminalView` the overlay is written
+ * against, backed by the DOM: bytes are appended as text (which is what the
+ * suite reads back), a keydown on the host is reported as keystrokes, and
+ * `fit()` answers a fixed geometry. Everything the tests actually assert —
+ * which rpcs are called, which arms are sent, when the stream is cancelled —
+ * is the app's own.
+ */
+const jsdomTerminalFactory: TerminalFactory = async (host) => {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const screen = document.createElement("pre");
+  screen.className = "login-term-screen";
+  host.replaceChildren(screen);
+  const listeners: ((data: Uint8Array) => void)[] = [];
+  const onKeydown = (event: KeyboardEvent): void => {
+    // One key, one report: the pty sees the bytes, never a key name.
+    const bytes = encoder.encode(event.key === "Enter" ? "\r" : event.key);
+    for (const fn of listeners) fn(bytes);
+  };
+  host.addEventListener("keydown", onKeydown);
+  return {
+    write: (data) => {
+      screen.textContent = (screen.textContent ?? "") + decoder.decode(data);
+    },
+    onData: (fn) => {
+      listeners.push(fn);
+    },
+    fit: () => ({ rows: 24, cols: 100 }),
+    focus: () => {},
+    dispose: () => {
+      host.removeEventListener("keydown", onKeydown);
+      listeners.length = 0;
+      screen.remove();
+    },
+  };
+};
+
 export interface HarnessOptions {
   /** Dev mode: mount the root composer (`&composer=1`). Default false. */
   composer?: boolean;
@@ -269,7 +317,20 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   // per-workspace rpc), and the lifecycle comes IMMEDIATELY after it, before
   // the first view mounts, so the `transferring_away` move hook is registered
   // before any refusal can carry that arm back.
-  await adoptAtBoot(ctx);
+  // MAIN.TS'S OWN BOOT PATH. A terminal adoption refusal throws
+  // `AdoptionFailed`, main mints `boot_failed` from it, and NOTHING is mounted
+  // over a workspace this page could not adopt. The harness mirrors that: it
+  // mints the same card, stops the daemon it started (no Harness is returned to
+  // stop it later), and lets the throw reach the test.
+  try {
+    await adoptAtBoot(ctx);
+  } catch (err) {
+    // The overlay is LEFT MOUNTED on purpose: its cards are the only account
+    // of the failed boot a test can read.
+    failures.report(bootFailed(err instanceof Error ? err.message : String(err)));
+    await fake.stop();
+    throw err;
+  }
   handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner }));
 
   const feed = mountFeed(shell.feed, ctx, {
@@ -291,9 +352,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ),
   );
 
-  const login = mountLoginOverlay(shell.loginOverlay, ctx);
+  const login = mountLoginOverlay(shell.loginOverlay, ctx, {
+    terminalFactory: jsdomTerminalFactory,
+  });
   handles.push(login);
-  handles.push(mountTopbar(shell.topbar, ctx, { openLogin: () => login.open() }));
+  handles.push(mountTopbar(shell.topbar, ctx, { openLogin: (control) => login.open(control) }));
   handles.push(mountSidebar(shell.sidebar, ctx));
   handles.push(mountHoldTray(shell.holdTray, ctx));
 

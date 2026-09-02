@@ -250,7 +250,11 @@ describe("release and drop", () => {
     await withTray({});
     harness.fake.answer(
       "updateHeldPrompt",
-      create(UpdateHeldPromptResponseSchema, { result: { case: "error", value: {} } }),
+      // Landing 4 TYPED every error: the cause oneof is set, and an unset one
+      // is a malformed view rather than a refusal.
+      create(UpdateHeldPromptResponseSchema, {
+        result: { case: "error", value: { cause: { case: "noSuchHold", value: {} } } },
+      }),
     );
     // Act
     await harness.click('[data-held-action="drop"]');
@@ -263,7 +267,11 @@ describe("release and drop", () => {
     await withTray({});
     harness.fake.answer(
       "updateHeldPrompt",
-      create(UpdateHeldPromptResponseSchema, { result: { case: "error", value: {} } }),
+      // Landing 4 TYPED every error: the cause oneof is set, and an unset one
+      // is a malformed view rather than a refusal.
+      create(UpdateHeldPromptResponseSchema, {
+        result: { case: "error", value: { cause: { case: "noSuchHold", value: {} } } },
+      }),
     );
     // Act
     await harness.click('[data-held-action="drop"]');

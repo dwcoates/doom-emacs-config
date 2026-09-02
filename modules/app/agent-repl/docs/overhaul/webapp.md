@@ -442,3 +442,14 @@ One file per drawn component; each file's header comment is its spec.
 - SubmitPromptSuccess.command_acted: a recognized act with no turn; the composer clears its text and draws nothing (the effect arrives on the topbar/footer streams). SubmitPromptError.duplicate_submission: refusal at the composer, text preserved, worded as "already submitted".
 - SubmitPromptError.turn_already_open is retired; remove its sentence and arm guard (schema-driven enumeration should already drop it).
 - UpdateMergeQueueError.unknown_repository: refusal at the merge-queue control.
+
+## Health surfaces ruling (2026-09-01, project lead)
+
+- The webapp draws NO pull-driven health surface this wave: DaemonHealth and
+  SessionHealth are operator/doctor pulls (Emacs-side) and WatchHostWorkspace is
+  Emacs's stream. No `[data-daemon-health]`, `[data-daemon-fault]`,
+  `[data-session-fault]` or `[data-host-fault]` hook exists.
+- Session faults have their one prescribed home: the topbar warning dropdown,
+  fed by the PUSHED TopbarView (the daemon routes diagnostics into it), drawn by
+  typed arm — that is what the Landing 4 relay line meant.
+- The integration suite's three extrapolated fault blocks (33 tests) are deleted.
