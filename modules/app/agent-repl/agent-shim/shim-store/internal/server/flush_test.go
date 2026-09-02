@@ -13,7 +13,11 @@ import (
 // openBound is how long a watch may take to become reachable. It is a FAILURE
 // BOUND, never a synchronization primitive: the stream itself is what the test
 // waits on, and this only stops an unopenable tail from hanging the suite.
-const openBound = 10 * time.Second
+// 1s: this package has no real subprocess or socket I/O (an in-process
+// httptest.Server over a fake Store), and its observed healthy max is 0.01s
+// even under -race; 1s keeps two orders of magnitude of margin for scheduler
+// and GC jitter while cutting the original bound 10x.
+const openBound = 1 * time.Second
 
 // TestWatchIsReachableBeforeItsFirstLine is the deadlock this file exists to
 // prevent: with nothing to replay, the tail must still open, because the

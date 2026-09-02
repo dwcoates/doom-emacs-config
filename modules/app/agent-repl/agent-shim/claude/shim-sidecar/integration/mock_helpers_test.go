@@ -68,8 +68,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // standDownGrace bounds how long a generated scenario waits for the mocked
-// vendor to leave after SIGTERM before killing it.
-const standDownGrace = 10 * time.Second
+// vendor to leave after SIGTERM before killing it. 3s: the mock writes every
+// vendor file synchronously and exits promptly on SIGTERM in every observed
+// run; the extra margin over shim-store's comparable 2s shutdown bound
+// accounts for this being a real node process rather than a compiled binary.
+const standDownGrace = 3 * time.Second
 
 var (
 	mockShimOnce sync.Once
