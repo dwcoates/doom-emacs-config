@@ -1050,6 +1050,37 @@ kind of blast-radius defect no unscoped assertion can catch."
         (should (equal (agent-repl-itest--body-field body 'pause 'repository 'dir)
                        "/tmp/itest-verbs-repo"))))))
 
+(ert-deftest agent-repl-itest-verbs-merge-queue-unknown-repository-is-reported ()
+  "A scoped pause the daemon's registry cannot resolve is REFUSED by arm.
+`UpdateMergeQueueUnknownRepository' is empty on purpose -- \"the echoed ref
+is the only identity involved\" -- so the repository the operator is told
+about is the one this pause sent, and it rides the log context."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateMergeQueue"
+                              '((error . ((unknownRepository . ())))))
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (if args (apply #'format fmt args) fmt) messages)
+                     nil)))
+          ;; Act.
+          (agent-repl-verb-merge-queue
+           (list :arm :pause :repository agent-repl-itest-verbs--repo))
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          (agent-repl-itest--await-log
+           daemon "elisp.verbs.merge-queue-unknown-repository" "warn")
+          ;; Assert.
+          (should (agent-repl-itest--logged-p
+                   daemon "elisp.verbs.merge-queue-unknown-repository" "warn"))
+          (agent-repl-itest--wait-until
+           (lambda ()
+             (seq-some (lambda (m) (string-match-p "does not hold repository" m)) messages))
+           nil "the unknown-repository message")
+          (should (seq-some (lambda (m) (string-match-p "repo-itest" m)) messages)))))))
+
 (ert-deftest agent-repl-itest-verbs-merge-queue-resume-scoped-names-the-repository ()
   "A resume that means ONE repository names it, rather than resuming everything.
 Pins UpdateMergeQueueResume's `repository' (endpoint_update_merge_queue.proto,
