@@ -275,3 +275,44 @@ func terminalOutput(output string, omitted uint64, observed bool) *conversationv
 	}
 	return spoolOutput(output, omitted)
 }
+
+// SubagentLost converts a BACKGROUNDED SUBAGENT we stopped being able to see
+// into its spawn unit's settled state.
+//
+// THE SPAWN UNIT IS THE LINE THAT GOES OPEN FOREVER. A backgrounded agent is
+// delivered through an `a*` task spool, and when that spool vanishes or goes
+// quiet the only thing downstream holding the run is the SPAWNING CALL's unit in
+// the parent's book — `activity:<tool_use_id>`. Without this the reader
+// concluded LOST, said so in its log, and settled nothing: the spawn drew as
+// still running in every consumer for the life of the store.
+//
+// THE CAUSE IS `lost`, AND THE ARM IS HOW WE CONCLUDED IT.
+// AgentSubagentFailure.cause.lost carries the same DetachedLost the shell run's
+// terminal carries (landing 3), so the two detached kinds state the SAME fact
+// the SAME way. It is deliberately not `stopped_by_user`: that names a decision,
+// and no decision was observed.
+//
+// The failure carries no `error`: we observed no error, only silence, and
+// inventing one would have this producer assert the run died.
+func (c *Converter) SubagentLost(at Attribution, run, ownerAgent string, reason LostReason) *storev1.StoreEntry {
+	c.log.With(at.ctxWarn("subagent-lost")).With(logging.Context{
+		ActivityID: run, UpsertKey: ActivityKey(run), BookAgentID: ownerAgent, Reason: string(reason),
+	}).Log("the backgrounded subagent is LOST (%s); its spawn unit settles failed with cause=lost naming that arm", reason)
+	return SubagentLostEntry(at, run, ownerAgent, reason)
+}
+
+// SubagentLostEntry is SubagentLost without a converter, so a caller that holds
+// no per-file converter can mint the same entry.
+//
+// THE WRITE IDENTITY IS STABLE FOR THE VERDICT, exactly as the bash terminal's
+// is: a run is lost once however many sweeps observe it, so a re-emission is
+// absorbed at the store rather than appending a second settle.
+func SubagentLostEntry(at Attribution, run, ownerAgent string, reason LostReason) *storev1.StoreEntry {
+	activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
+			Cause: &conversationv1.AgentSubagentFailure_Lost{Lost: DetachedLostArm(reason)},
+		}},
+	}})
+	activity.ActivityId = activityID(run)
+	return PageLine(at, "settle:"+run, ActivityKey(run), ownerAgent, activityFrame(ownerAgent, activity))
+}
