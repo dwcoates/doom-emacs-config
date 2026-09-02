@@ -504,3 +504,85 @@ describe("paging a sub-feed", () => {
     expect(harness.$('[data-feed-row="bubble"] [data-subfeed] [data-load-more]')).toBeNull();
   });
 });
+
+/**
+ * A SUB-FEED'S TAIL DIES.
+ *
+ * A bubble's tail is standing, so an end it did not ask for is a transport
+ * failure — and the reopen must go back through `OpenFeed` rather than
+ * re-echoing the token the dead tail was pinned to (feed_token.proto: a token
+ * pins the tail to begin exactly after the page its open answered with). The
+ * root feed already does this; a bubble that did not would resume against a
+ * page painted before the outage.
+ */
+describe("a sub-feed's tail after a transport death", () => {
+  const openBubble = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+  };
+
+  it("re-opens the sub-feed rather than reusing the dead token", async () => {
+    // Arrange
+    await openBubble();
+    const opensBefore = harness.fake.calls("openFeed").length;
+    // Act
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, "bubble");
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.fake.calls("openFeed").length).toBeGreaterThan(opensBefore);
+  });
+
+  it("tails the token the fresh open minted", async () => {
+    // Arrange
+    await openBubble();
+    // Act
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, "bubble");
+    await harness.tick(5_000);
+    // Assert
+    const watches = harness.fake.calls<{ watch?: { value: string } }>("watchFeed");
+    const minted = harness.fake.mintedTokens(WORKSPACE_ID, "bubble");
+    expect(watches.at(-1)?.watch?.value).toBe(minted.at(-1));
+  });
+
+  it("draws a row pushed on the reopened tail", async () => {
+    // Arrange
+    await openBubble();
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, "bubble");
+    await harness.tick(5_000);
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      "bubble",
+      responseRow("success", "after the death", { id: feedId("inner-after") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("bubble")?.textContent).toContain("after the death");
+  });
+
+  it("paints the fresh page over the rows the dead tail had left", async () => {
+    // Arrange
+    await openBubble();
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      "bubble",
+      responseRow("success", "live row", { id: feedId("inner-live") }),
+    );
+    await harness.settle();
+    // Act: the fresh page (still empty) REPLACES the sub-feed's rows.
+    harness.fake.endStream("watchFeed", WORKSPACE_ID, "bubble");
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("inner-live")).toBeNull();
+  });
+});
