@@ -858,9 +858,12 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	// answering fails, the client records the death, and each of the shim's two
 	// standing streams ends without the session ending. The relaunch then waits
 	// out its window before forcing. Every one of these is the same
-	// stand-down, honestly recorded once per observer.
+	// stand-down, honestly recorded once per observer -- including the client's
+	// own redial, which notices the broken link and stops once the death is
+	// registered, and which only wins the race to record it under load.
 	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.shimclient.exit",
-		"daemon.shimclient.kill_session", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.watch_session",
 		"daemon.sessionwatcher.watch_agent")
 }
 
@@ -969,7 +972,7 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	// TestABuildStampBounceFiresOnceAndStandsTheOldShimDown declares.
 	f.d.ExpectWarnings("daemon.workspace.close",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
-		"daemon.workspace.bring_up",
+		"daemon.shimclient.redial", "daemon.workspace.bring_up",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
 }
 
