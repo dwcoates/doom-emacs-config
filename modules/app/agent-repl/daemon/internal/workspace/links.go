@@ -54,6 +54,9 @@ func (v *verbs) OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path strin
 		return refuse(log, "OpenInEditor", ArmPathEscapesWorkspace, "no path was named", false)
 	}
 
+	// The resolved form is for the CONTAINMENT CHECK ONLY. The contract says
+	// the daemon relays the path VERBATIM — exactly as the feed row carried it
+	// — so what travels is the caller's spelling, not the daemon's.
 	absolute := path
 	if !filepath.IsAbs(absolute) {
 		absolute = filepath.Join(record.Dir, absolute)
@@ -64,9 +67,9 @@ func (v *verbs) OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path strin
 			fmt.Sprintf("%q resolves to %q, which is outside workspace %q", path, absolute, record.Dir), false)
 	}
 
-	v.deps.Host.OpenInEditor(ws, absolute, line)
+	v.deps.Host.OpenInEditor(ws, path, line)
 	log.Info(opOpenInEditor, "relayed an open-in-editor click", dlog.Context{
-		"path": absolute, "has_line": line != nil,
+		"path": path, "resolved": absolute, "has_line": line != nil,
 	})
 	return nil
 }
