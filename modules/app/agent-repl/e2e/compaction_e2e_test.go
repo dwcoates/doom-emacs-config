@@ -23,9 +23,9 @@
 //     cleared/compacted/compaction_failed).
 //   - proto/src/frontend/v1/feed.proto: FeedSessionSeparation is the drawn
 //     divider row; its `kind` oneof carries FeedContextCutCleared,
-//     FeedContextCutCompacted, FeedWorktreeEntered, FeedWorktreeLeft — NO
-//     compaction_failed arm (see TestCompactionFailed's header for the
-//     resulting open question).
+//     FeedContextCutCompacted, FeedWorktreeEntered, FeedWorktreeLeft, and
+//     (Landing 8, docs/overhaul/PROTO-CHANGES.md) FeedContextCutCompactionFailed
+//     — see TestCompactionFailed's header for the exact shape.
 //   - proto/src/frontend/v1/footer.proto: FooterSubStatusThinkingCompacting
 //     (the in-progress signal) and FooterStatusActivityContextBudget (the
 //     context-budget-warning carrier).
@@ -55,12 +55,12 @@ import (
 // Shared arrange/assert helpers, local to this file.
 // ---------------------------------------------------------------------------
 
-// newCompactionWorkspace registers and opens ONE workspace against a fresh
+// cpNewWorkspace registers and opens ONE workspace against a fresh
 // fake repository (harness.NewRepo — the daemon's scripted fake git; this
 // suite does NOT use real git and must stay fast). Answers the workspace ref
 // and the account config root it routes through (always DefaultConfigDir: a
 // fresh harness.NewRepo directory is never under MultiRepoRoot).
-func newCompactionWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
+func cpNewWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, string) {
 	t.Helper()
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
@@ -74,24 +74,24 @@ func newCompactionWorkspace(t *testing.T, w *World) (*workspacev1.WorkspaceRef, 
 	return ws, w.DefaultConfigDir
 }
 
-// awaitFooterView bounds a footer-stream wait at DefaultTimeout (this file's
+// cpAwaitFooterView bounds a footer-stream wait at DefaultTimeout (this file's
 // own budget: every wait here chains at most one real turn through the real
 // shim, the same shape DefaultTimeout was sized for — see world_test.go's own
 // doc comment on that constant).
-func awaitFooterView(t *testing.T, w *World, s *harness.Stream[*frontendv1.FooterView], what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
+func cpAwaitFooterView(t *testing.T, w *World, s *harness.Stream[*frontendv1.FooterView], what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
-// openFeedRows re-opens the workspace's root feed and answers its full
+// cpOpenFeedRows re-opens the workspace's root feed and answers its full
 // history page — the same read path AwaitTurnEnded itself uses to find a
 // historical row, used here to scan for the separation divider a compaction
 // leaves behind (a row whose own `turn` field is UNSET, per feed.proto's
 // FeedRow.turn doc: "Unset for a row that belongs to no turn (a separation
 // divider)" — so it cannot be found by matching the turn id).
-func openFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func cpOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -104,9 +104,9 @@ func openFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*front
 	return success.GetPage().GetSuccess().GetRows()
 }
 
-// findCompactedSeparation answers the first row whose separation carries a
+// cpFindCompactedSeparation answers the first row whose separation carries a
 // FeedContextCutCompacted, or nil if none does.
-func findCompactedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
+func cpFindCompactedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 	for _, row := range rows {
 		if row.GetSeparation().GetCompacted() != nil {
 			return row
@@ -115,8 +115,19 @@ func findCompactedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 	return nil
 }
 
-// findTurnEnded answers the row carrying turn's FeedTurnEnded terminal.
-func findTurnEnded(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
+// cpFindCompactionFailedSeparation answers the first row whose separation
+// carries a FeedContextCutCompactionFailed (Landing 8), or nil if none does.
+func cpFindCompactionFailedSeparation(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
+	for _, row := range rows {
+		if row.GetSeparation().GetCompactionFailed() != nil {
+			return row
+		}
+	}
+	return nil
+}
+
+// cpFindTurnEnded answers the row carrying turn's FeedTurnEnded terminal.
+func cpFindTurnEnded(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv1.TurnId) *frontendv1.FeedTurnEnded {
 	t.Helper()
 	for _, row := range rows {
 		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
@@ -127,11 +138,11 @@ func findTurnEnded(t *testing.T, rows []*frontendv1.FeedRow, turn *conversationv
 	return nil
 }
 
-// contextBudgetText answers the footer's standing context-budget activity
+// cpContextBudgetText answers the footer's standing context-budget activity
 // text, whichever status arm it currently stands under (idle or thinking —
 // footer.proto legalizes FooterStatusActivityContextBudget under both), or ""
 // if neither carries one.
-func contextBudgetText(v *frontendv1.FooterView) string {
+func cpContextBudgetText(v *frontendv1.FooterView) string {
 	status := v.GetStrip().GetStatus()
 	if cb := status.GetIdle().GetActivity().GetContextBudget(); cb != nil {
 		return cb.GetText()
@@ -142,7 +153,7 @@ func contextBudgetText(v *frontendv1.FooterView) string {
 	return ""
 }
 
-// driveCompactionObservingInProgress submits prompt, awaits the footer's
+// cpDriveObservingInProgress submits prompt, awaits the footer's
 // `compacting` sub-status WHILE the turn is still running (SPEC.md #22-25 all
 // name the `status{compacting}` signal explicitly — driveScenarioToCompletion
 // alone would race past it, since it does not return until the turn is fully
@@ -150,7 +161,7 @@ func contextBudgetText(v *frontendv1.FooterView) string {
 // sidecar's durable cursor advance exactly as driveScenarioToCompletion does.
 // The footer stream is opened BEFORE SubmitPrompt so the transient push is
 // queued in order rather than possibly missed.
-func driveCompactionObservingInProgress(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
+func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, configDir, prompt string) *conversationv1.TurnId {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	before := w.Store.Cursors(t, ctx)
@@ -161,7 +172,7 @@ func driveCompactionObservingInProgress(t *testing.T, w *World, ws *workspacev1.
 	defer footer.Close()
 
 	turn := SubmitPrompt(t, w, ws, prompt)
-	awaitFooterView(t, w, footer, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
+	cpAwaitFooterView(t, w, footer, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetThinking().GetCompacting() != nil
 	})
 
@@ -181,18 +192,18 @@ func driveCompactionObservingInProgress(t *testing.T, w *World, ws *workspacev1.
 func TestCompactionDirected(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	ws, configDir := newCompactionWorkspace(t, w)
+	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "Compacted the conversation."
 
 	// Act: drive the real `!compact` scenario, observing the in-progress
 	// compacting signal before the turn concludes.
-	turn := driveCompactionObservingInProgress(t, w, ws, configDir, "!compact")
+	turn := cpDriveObservingInProgress(t, w, ws, configDir, "!compact")
 
 	// Assert: the feed carries a separation divider compacting the context,
 	// whose summary is the assistant prose settleCompaction derived from
 	// (session.ts COMPACT: `conclude(ctx, summary)` — the same string).
-	rows := openFeedRows(t, w, ws)
-	compacted := findCompactedSeparation(rows)
+	rows := cpOpenFeedRows(t, w, ws)
+	compacted := cpFindCompactedSeparation(rows)
 	if compacted == nil {
 		t.Fatalf("no FeedContextCutCompacted separation row found among %d rows", len(rows))
 	}
@@ -208,7 +219,7 @@ func TestCompactionDirected(t *testing.T) {
 	}
 
 	// Assert: the turn itself concluded normally.
-	ended := findTurnEnded(t, rows, turn)
+	ended := cpFindTurnEnded(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -227,17 +238,17 @@ func TestCompactionDirected(t *testing.T) {
 func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	ws, configDir := newCompactionWorkspace(t, w)
+	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "e2e-distinctive-compaction-summary-23"
 
 	// Act
-	turn := driveCompactionObservingInProgress(t, w, ws, configDir, "!compact "+wantSummary)
+	turn := cpDriveObservingInProgress(t, w, ws, configDir, "!compact "+wantSummary)
 
 	// Assert: ContextCompacted.Summary carries the test's OWN string, not the
 	// fixed default — proving the override argument actually reaches the
 	// converter rather than a fabricated store row standing in for it.
-	rows := openFeedRows(t, w, ws)
-	compacted := findCompactedSeparation(rows)
+	rows := cpOpenFeedRows(t, w, ws)
+	compacted := cpFindCompactedSeparation(rows)
 	if compacted == nil {
 		t.Fatalf("no FeedContextCutCompacted separation row found among %d rows", len(rows))
 	}
@@ -245,7 +256,7 @@ func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 		t.Errorf("compacted summary = %q, want the override %q", got, wantSummary)
 	}
 
-	ended := findTurnEnded(t, rows, turn)
+	ended := cpFindTurnEnded(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -266,15 +277,15 @@ func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 func TestCompactionAuto(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	ws, configDir := newCompactionWorkspace(t, w)
+	ws, configDir := cpNewWorkspace(t, w)
 	const wantSummary = "The conversation was compacted automatically."
 
 	// Act
-	turn := driveCompactionObservingInProgress(t, w, ws, configDir, "!compact-auto")
+	turn := cpDriveObservingInProgress(t, w, ws, configDir, "!compact-auto")
 
 	// Assert
-	rows := openFeedRows(t, w, ws)
-	compacted := findCompactedSeparation(rows)
+	rows := cpOpenFeedRows(t, w, ws)
+	compacted := cpFindCompactedSeparation(rows)
 	if compacted == nil {
 		t.Fatalf("no FeedContextCutCompacted separation row found among %d rows", len(rows))
 	}
@@ -286,7 +297,7 @@ func TestCompactionAuto(t *testing.T) {
 		t.Error("separation.tokens = nil, want the before/after token-size fact every cut carries")
 	}
 
-	ended := findTurnEnded(t, rows, turn)
+	ended := cpFindTurnEnded(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome", ended)
 	}
@@ -295,7 +306,7 @@ func TestCompactionAuto(t *testing.T) {
 // ---------------------------------------------------------------------------
 // #25 CompactionFailed — `!compact-failed`. Terminal shape resolved by
 // reading session.ts's COMPACT_FAILED scenario body directly, per this
-// file's dispatch brief, rather than guessing SPEC.md's own open question:
+// file's dispatch brief, rather than guessing:
 //
 //	run(ctx) {
 //	  ctx.systemMessage("status", { status: "compacting" });
@@ -307,48 +318,55 @@ func TestCompactionAuto(t *testing.T) {
 // `conclude` is the SAME ordinary success-turn helper every plain-prose
 // scenario uses (assistant prose + `result{subtype:"success"}`) — there is NO
 // HibernateError and no turn-level failure arm here; the compaction failure
-// rides ONLY AgentUpdate.context_cut(ContextCompactionFailed), a page-line
-// fact on an otherwise normally-concluding turn. This resolves SPEC.md
-// F(original)#4's open question: the plain-turn path, not a hibernate path.
+// rides AgentUpdate.context_cut(ContextCompactionFailed), a page-line fact on
+// an otherwise normally-concluding turn.
 //
-// OPEN QUESTION (contract gap, not a guess this test papers over):
-// proto/src/frontend/v1/feed.proto's FeedSessionSeparation.kind oneof models
-// exactly four arms — cleared, compacted, worktree_entered, worktree_left —
-// and has NO compaction_failed arm, even though
-// proto/src/conversation/v1/slash_command.proto's ContextCut DOES model
-// `compaction_failed` as a first-class (non-residue) arm of AgentUpdate. This
-// suite cannot discover what, if anything, the daemon draws on the client
-// wire for a failed compaction from the contract docs alone — no WatchFeed,
-// WatchFooter or WatchTopbar shape in any of the six planning docs or
-// PROTO-CHANGES.md's landing ledger is named for it. This test therefore
-// asserts only the two facts the contract DOES settle: the turn concludes
-// normally, and no compacted-context divider appears (consistent with
-// session.ts's own "writes: nothing but the prompt line and the turn
-// record — a failed compaction cut nothing"). Whether a further,
-// undiscovered client-visible fact should exist for this arm is left to the
-// project lead rather than guessed here.
+// docs/overhaul/PROTO-CHANGES.md "Landing 8" (2026-09-02, user-approved)
+// settled the FeedRow-level gap this test originally flagged as an open
+// question: a compaction that was offered (`/compact`, the cold gate's
+// compact remedy) and did not happen now DOES draw a divider —
+// frontend.v1 FeedSessionSeparation.kind.compaction_failed (tag 7) =
+// FeedContextCutCompactionFailed{error}, drawn in the slot the compacted
+// divider would have taken, with `tokens` UNSET (nothing was cut, so there is
+// no before/after size to show). It relays
+// conversation.v1.ContextCut.compaction_failed verbatim. Previously — the
+// state this test used to pin — nothing was drawn on the client wire at all.
 // ---------------------------------------------------------------------------
 
 func TestCompactionFailed(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	ws, configDir := newCompactionWorkspace(t, w)
+	ws, configDir := cpNewWorkspace(t, w)
+	const wantError = "the summarizing request was rejected"
 
 	// Act
-	turn := driveCompactionObservingInProgress(t, w, ws, configDir, "!compact-failed")
+	turn := cpDriveObservingInProgress(t, w, ws, configDir, "!compact-failed")
 
 	// Assert: the turn concluded normally (conclude()'s ordinary success
 	// path, not a hibernate-error or a turn-level failure arm).
-	rows := openFeedRows(t, w, ws)
-	ended := findTurnEnded(t, rows, turn)
+	rows := cpOpenFeedRows(t, w, ws)
+	ended := cpFindTurnEnded(t, rows, turn)
 	if ended.GetConcluded() == nil {
 		t.Errorf("FeedTurnEnded = %v, want a concluded outcome (compact-failed still ends the turn normally)", ended)
 	}
 
-	// Assert: nothing was cut — no compacted-context divider was drawn for
-	// this turn (a failed compaction leaves the context exactly as it was).
-	if compacted := findCompactedSeparation(rows); compacted != nil {
-		t.Errorf("found a FeedContextCutCompacted separation row after !compact-failed, want none: %v", compacted)
+	// Assert: the Landing-8 compaction_failed divider was drawn, carrying the
+	// vendor's own rejection wording, with tokens UNSET (nothing was cut).
+	failed := cpFindCompactionFailedSeparation(rows)
+	if failed == nil {
+		t.Fatalf("no FeedContextCutCompactionFailed separation row found among %d rows", len(rows))
+	}
+	sep := failed.GetSeparation()
+	if got := sep.GetCompactionFailed().GetError(); got != wantError {
+		t.Errorf("compaction_failed.error = %q, want %q", got, wantError)
+	}
+	if sep.GetTokens() != nil {
+		t.Errorf("separation.tokens = %v, want UNSET on the compaction_failed arm (Landing 8: nothing was cut)", sep.GetTokens())
+	}
+
+	// Assert: no compacted (successful) divider was ALSO drawn for this turn.
+	if compacted := cpFindCompactedSeparation(rows); compacted != nil {
+		t.Errorf("found a FeedContextCutCompacted separation row after !compact-failed, want only compaction_failed: %v", compacted)
 	}
 }
 
@@ -362,17 +380,19 @@ func TestCompactionFailed(t *testing.T) {
 // OVERTURNED"). This test asserts the WIRE SHAPE reaches a client-visible
 // surface, not that it matches a real vendor recording.
 //
-// The surface used is FooterStatusActivityContextBudget
+// SETTLED (docs/overhaul/PROTO-CHANGES.md "Landing 8", 2026-09-02, RULED, no
+// proto change): context_budget_warning gets NO feed row — it is footer
+// only. The surface used below, FooterStatusActivityContextBudget
 // (proto/src/frontend/v1/footer.proto), legal under BOTH the thinking and
-// idle status arms ("standing while it holds") — the only client-visible
-// carrier of this fact any of the six contract docs or PROTO-CHANGES.md
-// names; frontend/v1/feed.proto's FeedRow has no arm for it at all.
+// idle status arms ("standing while it holds"), is therefore the ONLY
+// client-visible carrier of this fact by design, not merely the only one
+// this suite could find in the contract docs.
 // ---------------------------------------------------------------------------
 
 func TestContextBudgetWarning(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	ws, configDir := newCompactionWorkspace(t, w)
+	ws, configDir := cpNewWorkspace(t, w)
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
 
@@ -381,10 +401,10 @@ func TestContextBudgetWarning(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, configDir, "context-budget-warning")
 
 	// Assert: the footer's standing activity line carries the warning text.
-	view := awaitFooterView(t, w, footer, "context-budget activity line", func(v *frontendv1.FooterView) bool {
-		return contextBudgetText(v) != ""
+	view := cpAwaitFooterView(t, w, footer, "context-budget activity line", func(v *frontendv1.FooterView) bool {
+		return cpContextBudgetText(v) != ""
 	})
-	if got := contextBudgetText(view); got == "" {
+	if got := cpContextBudgetText(view); got == "" {
 		t.Errorf("footer context-budget activity text = %q, want non-empty", got)
 	}
 }
