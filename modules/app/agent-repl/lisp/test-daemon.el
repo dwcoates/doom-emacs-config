@@ -254,6 +254,40 @@ argument would hand the daemon input it is not supposed to need."
     ;; Assert
     (should (= agent-repl-test-daemon--link-connect-calls 1))))
 
+(ert-deftest agent-repl-test-daemon-cold-start-logs-own-adopted ()
+  "A daemon THIS Emacs cold-started is stated as its OWN before linking.
+The adopt path reports provenance from the probe verdict; a cold start
+never probes, so without this the own-spawn path publishes no provenance
+at all and the log cannot say whose daemon the session attached to."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (object) (eq object 'the-daemon-process))))
+      ;; Act
+      (agent-repl-daemon--boot-tick)
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.own-adopted")))))
+
+(ert-deftest agent-repl-test-daemon-cold-start-whose-daemon-died-logs-foreign-adopted ()
+  "A cold start whose own child is GONE by the time an address appears is foreign.
+The address was published by something this Emacs no longer owns, so the
+provenance line must not claim it -- the same liveness question the adopt
+path asks."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon-ensure)
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl--frontend-daemon-process nil)
+    ;; Act
+    (agent-repl-daemon--boot-tick)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.foreign-adopted"))))
+
 (ert-deftest agent-repl-test-daemon-boot-timeout-gives-up-loudly ()
   "A daemon that never publishes an address has not booted."
   (agent-repl-test-daemon--with-harness
