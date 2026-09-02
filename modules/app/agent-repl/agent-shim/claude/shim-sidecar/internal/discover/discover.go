@@ -1,8 +1,8 @@
 // Package discover enumerates the vendor's on-disk artifacts across BOTH
 // account config roots and the task-spool root, and classifies each path into a
 // tail Target: file kind, identity, codec, and the companion meta file a kind
-// requires. A periodic full Scan is the completeness backstop; fsnotify
-// (Watcher) supplies latency.
+// requires. Scan is the sole discovery path: a periodic full rescan, not
+// fsnotify — the sidecar polls rather than watches.
 //
 // FOUR KINDS OF FILE, all written by the vendor's agent binary:
 //
@@ -153,11 +153,8 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 // ConfigRoots returns the resolved config roots.
 func (d *Discoverer) ConfigRoots() []string { return d.configRoots }
 
-// SpoolRoot returns the resolved spool root.
-func (d *Discoverer) SpoolRoot() string { return d.spoolRoot }
-
 // Scan performs a full glob-based discovery across every root. It is the
-// backstop that catches files that appeared while fsnotify was down.
+// sidecar's only discovery path, run on RescanInterval.
 func (d *Discoverer) Scan() []Target {
 	d.log.With(logging.Context{Operation: "discover-scan"}).
 		LogVerbose("scan start config_roots=%d spool_root=%q", len(d.configRoots), d.spoolRoot)
