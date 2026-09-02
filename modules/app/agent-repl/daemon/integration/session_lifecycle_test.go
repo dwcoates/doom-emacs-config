@@ -1567,3 +1567,75 @@ func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
 	// hibernate.
 	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
 }
+
+// ---------------------------------------------------------------------------
+// audit-3 critique 5: spawn-on-mount revival.
+// ---------------------------------------------------------------------------
+
+// TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume covers OpenWorkspace
+// re-mounting a hibernated session DIRECTLY (rather than through a revived
+// prompt, which TestHibernationParksAnIdleSessionAndRevivesOnPrompt already
+// covers): the row's session.Terminal.Kind is drain.TerminalHibernated
+// ("hibernated"), decideSource (internal/workspace/sessions.go) treats
+// anything but "deleted" as resumable, so the mount resumes the vendor
+// session exactly as a revival does.
+func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
+	// Arrange: hibernate the session via the idle sweep.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	f.shim.AwaitGone()
+
+	// Act: OpenWorkspace re-mounts the parked session directly.
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+
+	// Assert
+	req := shim.ExpectStartSession()
+	if req.GetResume() == nil {
+		t.Fatalf("StartSession request = %v, want a resume source reviving the hibernated session", req)
+	}
+}
+
+// TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted covers
+// OpenWorkspaceError.session_deleted (endpoint_open_workspace.proto). NOTHING
+// in production ever writes the "deleted" session terminal today (grepped
+// every internal/**/*.go call to wsm.SetSessionTerminal: teardown.go writes
+// "killed", drain/sweep.go writes drain.TerminalHibernated) — so this test
+// produces the row the way harness.WithDB's own doc prescribes: corrupt one
+// column of a real (killed) session row, stop, and restart, watching the
+// successor refuse it. See internal/workspace/sessions.go's decideSource,
+// which refuses BEFORE any spawn.
+func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testing.T) {
+	// Arrange: kill to get a real, whole session-terminal row, then corrupt
+	// just its kind to "deleted" (wsm's terminalDeleted spelling).
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.Stop()
+	f.d.CorruptRow("sessions", "terminal_kind", "workspace_id", f.ws.GetId(), "deleted")
+
+	// Act: restart on the same state root and reopen.
+	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
+	resp, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the landed session_deleted arm, and nothing spawned to be
+	// refused BY (the guard reads the durable record before any process
+	// spawns, mirroring TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn).
+	if err != nil {
+		t.Fatalf("OpenWorkspace on a terminally deleted session = transport error %v, want the session_deleted arm", err)
+	}
+	if resp.Msg.GetError().GetSessionDeleted() == nil {
+		t.Fatalf("OpenWorkspace on a terminally deleted session = %v, want OpenWorkspaceError.session_deleted", resp.Msg)
+	}
+	if got := successor.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != 0 {
+		t.Fatalf("shim spawn records = %d after the refusal, want 0: the guard refuses BEFORE the spawn", got)
+	}
+}
