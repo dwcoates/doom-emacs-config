@@ -61,6 +61,17 @@ export interface AppContext {
    * than a list every caller has to remember to keep.
    */
   onQuiesced(fn: () => void): () => void;
+  /**
+   * Announce that a stream frame arrived and could be read.
+   *
+   * THE LINK BEING UP IS A PAGE-WIDE FACT, and only the stream loops can
+   * observe it. The lifecycle's restarting notice comes down when the daemon
+   * is answering again — from ANY stream, since a bounce takes them all — so
+   * the observation is published here rather than on one component's handle.
+   */
+  notePush(): void;
+  /** Run FN on every frame any stream reads. Returns its unsubscriber. */
+  onPush(fn: () => void): () => void;
 }
 
 export interface AppContextInit {
@@ -75,6 +86,7 @@ export interface AppContextInit {
 export function createAppContext(init: AppContextInit): AppContext {
   let quiesced = false;
   const quietListeners = new Set<() => void>();
+  const pushListeners = new Set<() => void>();
   return {
     client: init.client,
     workspace: init.workspace,
@@ -95,6 +107,16 @@ export function createAppContext(init: AppContextInit): AppContext {
     },
     isQuiesced(): boolean {
       return quiesced;
+    },
+    notePush(): void {
+      // A copy: a listener may unsubscribe itself as it runs.
+      for (const fn of [...pushListeners]) fn();
+    },
+    onPush(fn: () => void): () => void {
+      pushListeners.add(fn);
+      return () => {
+        pushListeners.delete(fn);
+      };
     },
     onQuiesced(fn: () => void): () => void {
       // A subscriber arriving AFTER the page went quiet is told at once, or a

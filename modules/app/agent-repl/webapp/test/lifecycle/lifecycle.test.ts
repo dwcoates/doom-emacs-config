@@ -75,10 +75,11 @@ function fakeTicker(): Ticker & { set(nowMs: number): void } {
   };
 }
 
-const reason = (kind: "deploy" | "maintenance", note = "") =>
-  kind === "deploy"
-    ? ({ kind: { case: "deploy" as const, value: {} } } as never)
-    : ({ kind: { case: "maintenance" as const, value: {} } } as never);
+const reason = (kind: "deploy" | "maintenance" | "operator", note = "the operator asked") => {
+  if (kind === "deploy") return { kind: { case: "deploy" as const, value: {} } } as never;
+  if (kind === "maintenance") return { kind: { case: "maintenance" as const, value: {} } } as never;
+  return { kind: { case: "operator" as const, value: { note } } } as never;
+};
 
 const drain = (atMs: number, reasonInit: unknown): DaemonDrainScheduled =>
   create(DaemonDrainScheduledSchema, {
@@ -214,6 +215,16 @@ describe("drawDrainNotice", () => {
     const { element, tick } = drawDrainNotice(drain(NOW + 1000, reason("maintenance")));
     tick(NOW);
     expect(element.textContent).toContain("maintenance");
+  });
+
+  it("carries the reason's own arm beside the words it composed", () => {
+    const { element } = drawDrainNotice(drain(NOW + 1000, reason("maintenance")));
+    expect(element.querySelector("[data-arm]")?.getAttribute("data-arm")).toBe("maintenance");
+  });
+
+  it("carries the operator arm even though its words are the note", () => {
+    const { element } = drawDrainNotice(drain(NOW + 1000, reason("operator")));
+    expect(element.querySelector("[data-arm]")?.getAttribute("data-arm")).toBe("operator");
   });
 });
 
@@ -542,6 +553,48 @@ describe("startLifecycle: the daemon stream", () => {
     handle.dispose();
     // ASSERT
     expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
+  });
+
+  it("takes the restarting notice down when any stream reads a frame again", async () => {
+    // ARRANGE: the daemon answering is what ends an outage, not the countdown,
+    // and a bounce takes every stream down together — so the FIRST frame any
+    // of them reads is the daemon being back.
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      daemon: async function* () {
+        yield create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: announced({
+              cause: { kind: { case: "selfMergeRollout", value: {} } },
+              outageMs: 8000,
+              mintedAtMs: NOW,
+            }),
+          },
+        });
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    // ACT
+    ctx.notePush();
+    // ASSERT
+    expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+
+  it("stops listening for frames once disposed", async () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({});
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    handle.dispose();
+    // ACT / ASSERT: the banner is gone with the mount, and a late frame
+    // reaches nothing that would draw into a host this page no longer owns.
+    expect(() => ctx.notePush()).not.toThrow();
   });
 
   it("draws the restarting notice from the announcement", async () => {
