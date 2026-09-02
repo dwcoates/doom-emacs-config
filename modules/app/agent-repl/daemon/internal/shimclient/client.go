@@ -300,8 +300,18 @@ func (c *client) openSupervisedSession(parent context.Context) (Stream[*conversa
 		err    error
 	}
 	result := make(chan opened, 1)
+	// The stream is opened against the CLIENT's own supervision lifetime, not
+	// the caller's: it is the link's liveness evidence and it outlives whoever
+	// asked for the spawn (an OpenWorkspace rpc, a create, the relaunch
+	// engine). Bound to the caller instead, the link "breaks" the instant that
+	// verb answers and the redial ladder runs for no reason. The WAIT below is
+	// still selected on the caller, so an abandoned bring-up returns at once.
+	//
+	// A refused open on this ladder is an ORDINARY branch, not a warning: the
+	// shim's socket does not exist yet on the first attempt of every spawn.
+	streamCtx := context.WithValue(c.monitorCtx, quietOpenKey{}, true)
 	go func() {
-		stream, err := c.watchSession(parent)
+		stream, err := c.watchSession(streamCtx)
 		result <- opened{stream: stream, err: err}
 	}()
 
@@ -666,6 +676,20 @@ func unary[Req any, Resp any](
 	return resp.Msg, nil
 }
 
+// quietOpenKey marks a context whose stream open is part of a RETRY LADDER,
+// where a refusal is an ordinary branch rather than a warning. The error is
+// still returned; only the record's level changes.
+type quietOpenKey struct{}
+
+// refusedOpen records a refused stream open at the level the context calls for.
+func (c *client) refusedOpen(ctx context.Context, operation, message string, fields dlog.Context) {
+	if quiet, _ := ctx.Value(quietOpenKey{}).(bool); quiet {
+		c.log.Debug(operation, message, fields)
+		return
+	}
+	c.log.Error(operation, message, fields)
+}
+
 // openStream is every watch verb's body. A Connect error on the OPEN is
 // returned as an error from the call — never a stream that fails later.
 func openStream[Req any, W any, T any](
@@ -687,11 +711,11 @@ func openStream[Req any, W any, T any](
 		}
 	}
 	c.log.Debug(operation, "opening shim stream", dlog.Context{"workspace_id": string(c.ws)})
-	ctx, cancel := context.WithCancel(ctx)
-	stream, err := open(ctx, connect.NewRequest(req))
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := open(streamCtx, connect.NewRequest(req))
 	if err != nil {
 		cancel()
-		c.log.Error(operation, "shim stream refused", dlog.Context{
+		c.refusedOpen(ctx, operation, "shim stream refused", dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 		})
 		return nil, &StreamOpenError{Procedure: verb, Err: err}
@@ -706,7 +730,7 @@ func openStream[Req any, W any, T any](
 		if err == nil {
 			err = io.EOF
 		}
-		c.log.Error(operation, "shim stream refused", dlog.Context{
+		c.refusedOpen(ctx, operation, "shim stream refused", dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 		})
 		return nil, &StreamOpenError{Procedure: verb, Err: err}

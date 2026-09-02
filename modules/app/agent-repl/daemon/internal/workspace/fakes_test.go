@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -243,6 +244,7 @@ type fakeGit struct {
 	gitclient.Git
 
 	commonDir     string
+	mainWorktree  string
 	commonDirErr  error
 	currentBranch string
 	branchErr     error
@@ -269,6 +271,13 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
 	return g.commonDir, g.commonDirErr
+}
+
+// MainWorktree answers what registration derives the repository from. The
+// fixture keys it the same way CommonDir is keyed, since a fake repository has
+// exactly one of each.
+func (g *fakeGit) MainWorktree(context.Context, string) (string, error) {
+	return g.mainWorktree, g.commonDirErr
 }
 
 func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
@@ -304,21 +313,34 @@ type fakeAccounts struct {
 	transcriptErr error
 	ported        []portedTranscript
 	portErr       error
+	// email is the signed-in address Read answers with; empty is logged out.
+	email string
+	// readErr makes Read fail, which registration must surface.
+	readErr error
 }
 
-type portedTranscript struct{ Path, ConfigDir, WorkspaceDir string }
+type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
+
+// Read answers the account the fixture holds; an unset email is the logged-out
+// arm, which is an answer and not a failure.
+func (a *fakeAccounts) Read(_ context.Context, configDir string) (account.Account, error) {
+	if a.readErr != nil {
+		return account.Account{}, a.readErr
+	}
+	return account.Account{ConfigDir: configDir, Email: a.email, LoggedIn: a.email != ""}, nil
+}
 
 func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
 	return a.transcript, a.transcriptErr
 }
 
-func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir string) error {
+func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) error {
 	if a.portErr != nil {
 		return a.portErr
 	}
-	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir})
+	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
 	return nil
 }
 
@@ -387,10 +409,15 @@ func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
 type fakeRollout struct {
 	rollout.Controller
 
+	mu          sync.Mutex
 	relaunches  []rolloutCall
 	relaunchErr error
 	reloads     []ids.WorkspaceID
 	reloadErr   error
+	// done fires once per finished relaunch. The restart verb ACCEPTS and
+	// runs the engine behind it, so a test synchronizes on this rather than
+	// on the verb's return.
+	done chan struct{}
 }
 
 type rolloutCall struct {
@@ -399,13 +426,54 @@ type rolloutCall struct {
 }
 
 func (r *fakeRollout) RelaunchShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason) error {
+	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{ws, reason})
-	return r.relaunchErr
+	err := r.relaunchErr
+	r.mu.Unlock()
+	if err != nil {
+		r.signal()
+	}
+	return err
 }
 
 func (r *fakeRollout) ReloadWebapp(_ context.Context, ws ids.WorkspaceID) error {
+	r.mu.Lock()
 	r.reloads = append(r.reloads, ws)
-	return r.reloadErr
+	err := r.reloadErr
+	r.mu.Unlock()
+	r.signal()
+	return err
+}
+
+func (r *fakeRollout) signal() {
+	select {
+	case r.done <- struct{}{}:
+	default:
+	}
+}
+
+// relaunchCalls answers the recorded relaunches under the fake's own lock.
+func (r *fakeRollout) relaunchCalls() []rolloutCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]rolloutCall(nil), r.relaunches...)
+}
+
+// reloadCalls answers the recorded webapp reloads under the fake's own lock.
+func (r *fakeRollout) reloadCalls() []ids.WorkspaceID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), r.reloads...)
+}
+
+// awaitRelaunch blocks until the restart's background engine has run.
+func (r *fakeRollout) awaitRelaunch(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restart's relaunch engine never ran")
+	}
 }
 
 // fakeFeed is a feed.Resolver that records the rows it was given.
@@ -427,6 +495,8 @@ type fakeFooter struct {
 	closingSet   int
 	coldGates    map[ids.WorkspaceID]footer.ColdGate
 	interrupting map[ids.WorkspaceID]bool
+	// dirs is what registration bound, keyed by workspace.
+	dirs map[ids.WorkspaceID]string
 }
 
 func newFakeFooter() *fakeFooter {
@@ -476,6 +546,12 @@ type fakeHost struct {
 	editorOpens []editorOpen
 	reloads     []ids.WorkspaceID
 	notes       []hostNote
+	// hostPublishes records every host-state republish the verbs asked for.
+	hostPublishes []ids.WorkspaceID
+}
+
+func (h *fakeHost) PublishHostWorkspace(ws ids.WorkspaceID) {
+	h.hostPublishes = append(h.hostPublishes, ws)
 }
 
 type editorOpen struct {
@@ -642,6 +718,8 @@ type fakeCards struct {
 	coldGate    *ServedColdGate
 	modes       []string
 	hasModes    bool
+	models      []string
+	hasModels   bool
 }
 
 func newFakeCards() *fakeCards {
@@ -670,6 +748,10 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 
 func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {
 	return c.modes, c.hasModes
+}
+
+func (c *fakeCards) Models(ids.WorkspaceID) ([]string, bool) {
+	return c.models, c.hasModels
 }
 
 // fakeSurfaces is a dlog.Surfaces backed by one capturing logger.
@@ -797,11 +879,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
 		db:      newFakeDB(),
-		git:     &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo"},
+		git:     &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
 		account: &fakeAccounts{configDir: "/config"},
 		queue:   newFakeQueue(),
 		merge:   newFakeMerge(),
-		rollout: &fakeRollout{},
+		rollout: &fakeRollout{done: make(chan struct{}, 8)},
 		feed:    &fakeFeed{},
 		footer:  newFakeFooter(),
 		sidebar: &fakeSidebar{},
@@ -904,6 +986,21 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct{ topbar.Resolver }
 type stubHolds struct{ holds.Resolver }
+
+// The three resolvers registration BINDS record the directory it bound, which
+// is all any verb test needs of them.
+func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
+	if f.dirs == nil {
+		f.dirs = map[ids.WorkspaceID]string{}
+	}
+	f.dirs[ws] = dir
+	return nil
+}
+
+func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
+func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
+func (stubTopbar) SetAccount(ids.WorkspaceID, string)            {}
+func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error  { return nil }
 
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {

@@ -179,7 +179,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		lock.Release()
 		return err
 	}
-	lease, err := o.deps.DB.AcquireLease(ctx, ws, wsm.HolderMerge, wsm.PolicyRefuse)
+	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted at enqueue, so
+	// the queued bubble and the running one are one bubble.
+	ledger := o.mintLedger(ws)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyRefuse)
 	if err != nil {
 		lock.Release()
 		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})
@@ -390,19 +393,21 @@ func (r *run) postPrompt(ctx context.Context) (bool, error) {
 // runConfiguredPrompt starts a session if the workspace has none — a configured
 // prompt is what revives it, which is why revival is implicit rather than a
 // verb — then submits the brief and waits for its turn to end.
-func (r *run) runConfiguredPrompt(ctx context.Context, name string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
+func (r *run) runConfiguredPrompt(ctx context.Context, prompt string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
 	if _, found, err := r.o.deps.DB.Session(ctx, r.ws); err != nil {
 		return wsm.CloseFailed, err
 	} else if !found {
 		if err := r.o.deps.StartSession(ctx, r.ws); err != nil {
-			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the configured prompt %q: %w", name, err)
+			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the configured prompt %q: %w", prompt, err)
 		}
 	}
-	text, err := r.o.deps.Briefs(name, map[string]string{})
-	if err != nil {
-		return wsm.CloseFailed, fmt.Errorf("merge: reading the configured prompt %q: %w", name, err)
-	}
-	return r.submit(ctx, text, origin)
+	// THE ACTION IS THE PROMPT, NOT A PROMPT'S NAME.
+	// CreateWorkspaceMergeActions carries `conversation.v1.UserSaid` for both
+	// arms -- "the pre-merge prompt", the words themselves -- so the recorded
+	// text is submitted verbatim. Reading it as a prompts-directory file name
+	// failed every configured action whose text was not also a file there,
+	// which is every one of them.
+	return r.submit(ctx, prompt, origin)
 }
 
 // submit sends one prompt down the queue's ONE delivery path and waits for its

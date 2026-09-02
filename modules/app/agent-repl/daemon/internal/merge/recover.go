@@ -126,6 +126,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	}
 	o.mu.Lock()
 	delete(o.repoOf, ws)
+	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	summary := fmt.Sprintf("the merge did not survive a daemon restart: %s", why)
 	if held {

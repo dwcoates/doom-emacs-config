@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -17,7 +18,7 @@ import (
 // version it opens. The file carries its own version in the layout table; a
 // file stamped with anything else is refused rather than migrated, because the
 // rebuild's store is recreated from scratch, never upgraded in place.
-const LayoutVersion = 2
+const LayoutVersion = 3
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -38,7 +39,10 @@ func WithLogger(log dlog.Logger) Option {
 // so every SELECT-then-write check in this package is race-free without a
 // table lock and two writers can never lose an update on the same file.
 type store struct {
-	db       *sql.DB
+	// mu guards the handle and the read-only flag across a PROMOTION, which
+	// swaps both. Every other field is set once at open.
+	mu       sync.RWMutex
+	handle   *sql.DB
 	path     string
 	readOnly bool
 	log      dlog.Logger
@@ -68,7 +72,7 @@ func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 		return nil, err
 	}
 	if err := s.ensureLayout(ctx); err != nil {
-		s.db.Close()
+		s.handle.Close()
 		return nil, err
 	}
 	return s, nil
@@ -90,7 +94,7 @@ func OpenReadOnly(ctx context.Context, path string, opts ...Option) (DB, error) 
 		return nil, err
 	}
 	if err := s.checkLayout(ctx); err != nil {
-		s.db.Close()
+		s.handle.Close()
 		return nil, err
 	}
 	return s, nil
@@ -121,7 +125,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 		handle.Close()
 		return nil, fmt.Errorf("wsm: open %q: %w", path, err)
 	}
-	s := &store{db: handle, path: path, readOnly: readOnly, log: discardLogger{}}
+	s := &store{handle: handle, path: path, readOnly: readOnly, log: discardLogger{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -132,7 +136,7 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 // existing file stamped with any other version.
 func (s *store) ensureLayout(ctx context.Context) error {
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
+	err := s.handle.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("wsm: probe layout table in %q: %w", s.path, err)
 	}
@@ -150,7 +154,7 @@ func (s *store) ensureLayout(ctx context.Context) error {
 // exact match.
 func (s *store) checkLayout(ctx context.Context) error {
 	var version int
-	err := s.db.QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
+	err := s.handle.QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		refusal := &DecodeError{Table: "layout", Row: "1", Err: errors.New("no layout row")}
 		s.log.Error("daemon.wsm.open", "state database carries no layout version", dlog.Context{"path": s.path, "error": refusal.Error()})
@@ -171,7 +175,7 @@ func (s *store) checkLayout(ctx context.Context) error {
 // transaction, so a crash mid-create can never leave a half-schema file that
 // the next open would read as a valid store.
 func (s *store) createSchema(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.handle.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("wsm: begin schema creation on %q: %w", s.path, err)
 	}
@@ -189,10 +193,66 @@ func (s *store) createSchema(ctx context.Context) error {
 }
 
 // Close releases the handle.
-func (s *store) Close() error { return s.db.Close() }
+func (s *store) Close() error { return s.db().Close() }
 
-// ReadOnly reports whether this handle was opened read-only.
-func (s *store) ReadOnly() bool { return s.readOnly }
+// db answers the handle in force. It is a method because a PROMOTION swaps it
+// under every reader.
+func (s *store) db() *sql.DB {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.handle
+}
+
+// ReadOnly reports whether this handle is read-only right now.
+func (s *store) ReadOnly() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.readOnly
+}
+
+// Promote turns a READ-ONLY handle into a writing one, IN PLACE.
+//
+// It exists for the handover's successor, which opens read-only because the
+// incumbent is still the sole writer, and becomes a writer the moment it adopts
+// its first workspace. The one-writer invariant holds across the swap because
+// WSM contention is WORKSPACE-SCOPED: the incumbent stops writing a
+// workspace's rows at that workspace's transfer notice, which is what the
+// adoption answers.
+//
+// Promoting an already-writing handle is success: the rollout calls it at the
+// first adoption and has no reason to remember whether that already happened.
+func (s *store) Promote(ctx context.Context) error {
+	const op = "daemon.wsm.promote"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.readOnly {
+		s.log.Debug(op, "the handle already writes; nothing to promote", dlog.Context{"path": s.path})
+		return nil
+	}
+	dsn := s.path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate&_pragma=foreign_keys(1)"
+	handle, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		s.log.Error(op, "the writing handle could not be opened", dlog.Context{"path": s.path, "error": err.Error()})
+		return fmt.Errorf("wsm: promote %q: %w", s.path, err)
+	}
+	handle.SetMaxOpenConns(1)
+	if err := handle.PingContext(ctx); err != nil {
+		handle.Close()
+		s.log.Error(op, "the writing handle could not be reached", dlog.Context{"path": s.path, "error": err.Error()})
+		return fmt.Errorf("wsm: promote %q: %w", s.path, err)
+	}
+	previous := s.handle
+	s.handle, s.readOnly = handle, false
+	if err := previous.Close(); err != nil {
+		// The writing handle is already in place; a stubborn read-only handle
+		// is reported and nothing is rolled back.
+		s.log.Warn(op, "the retired read-only handle would not close", dlog.Context{
+			"path": s.path, "error": err.Error(),
+		})
+	}
+	s.log.Info(op, "promoted the state handle to writing", dlog.Context{"path": s.path})
+	return nil
+}
 
 // write runs fn inside one immediate transaction and logs the operation
 // exactly once: DEBUG when it commits, ERROR when it refuses or fails.
@@ -203,7 +263,7 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 		s.log.Error(op, "refused a write on a read-only handle", withError(fields, ErrReadOnly))
 		return ErrReadOnly
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.handle.BeginTx(ctx, nil)
 	if err != nil {
 		wrapped := fmt.Errorf("wsm: begin transaction: %w", err)
 		s.log.Error(op, "could not begin the transaction", withError(fields, wrapped))

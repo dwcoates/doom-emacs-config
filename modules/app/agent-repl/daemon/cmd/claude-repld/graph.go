@@ -199,10 +199,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}
 		return record.Dir, nil
 	}
+	// The metaprompt sentinels are stripped from DRAWN text only; the record
+	// keeps the full text. Both the feed resolver and the queue's mirror draw
+	// prompt rows, so both take the same one implementation.
+	stripSentinels := sentinelStripper(log)
 	feedResolver, err := feed.New(feed.Deps{
-		Log:          p.Surfaces,
-		WorkspaceDir: workspaceDir,
-		Painter:      painter,
+		Log:            p.Surfaces,
+		WorkspaceDir:   workspaceDir,
+		Painter:        painter,
+		StripSentinels: stripSentinels,
 		// THE IMAGE ORIGIN HAS NO PRODUCER. The daemon serves the webapp's
 		// dist directory and nothing else, so an image reference has no
 		// servable source; the resolver refuses loudly and names what is
@@ -237,12 +242,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	mergeRef := &mergeForwarder{}
 
 	var queue promptqueue.Queue
-	lifecycle := &lifecycleSink{verbs: verbsRef, log: log}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, log: log}
 
 	fleet, err := workspace.NewFleet(workspace.FleetDeps{
-		DB:         p.DB,
-		Accounts:   accounts,
-		Supervisor: supervisor,
+		PublishHost: relay.PublishHostWorkspace,
+		DB:          p.DB,
+		Accounts:    accounts,
+		Supervisor:  supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:      feedResolver,
 			Footer:    footerResolver,
@@ -271,13 +277,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
-		DB:      p.DB,
-		Judge:   judge,
-		Feed:    feedResolver,
-		Footer:  footerResolver,
-		Holds:   holdsResolver,
-		Client:  fleet.Sender,
-		Watcher: fleet.Watcher,
+		StripSentinels: stripSentinels,
+		DB:             p.DB,
+		Judge:          judge,
+		Feed:           feedResolver,
+		Footer:         footerResolver,
+		Holds:          holdsResolver,
+		Client:         fleet.Sender,
+		Watcher:        fleet.Watcher,
 		// A submission that arrives under a PARKED merge lease goes to the
 		// orchestrator as guidance. The queue never imports merge, so the
 		// route is a function; the orchestrator does not exist yet, so the
@@ -329,6 +336,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
 	}
 	rolloutController, err := rollout.New(rollout.Deps{
+		PublishHost:     relay.PublishHostWorkspace,
 		Deploy:          scripts,
 		SelfExe:         selfExe,
 		SelfRepoDir:     paths.SelfRepo,
@@ -377,6 +385,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership := workspace.NewOwnership(rolloutController)
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		PublishHost: relay.PublishHostWorkspace,
+		// The verbs own the roster's durable half and are built AFTER the
+		// orchestrator, so the republish reads them out of the forwarder.
+		PublishRegistry: func(ctx context.Context) error {
+			verbs, ok := verbsRef.verbs()
+			if !ok {
+				return fmt.Errorf("claude-repld: a merge landed before the workspace verbs existed")
+			}
+			return verbs.PublishRegistry(ctx)
+		},
 		DB:               p.DB,
 		Git:              git,
 		Queue:            queue,
@@ -426,6 +444,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	verbs, err := workspace.New(workspace.Deps{
+		Instance:     p.Instance,
 		DB:           p.DB,
 		Git:          git,
 		Accounts:     accounts,
@@ -470,8 +489,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the prompt handler: %w", err)
 	}
 	ingress, err := commandfile.New(commandfile.Deps{
-		Dir:     p.Layout.OutputDir(),
-		Glob:    p.Layout.CommandFileGlob(),
+		Dir: p.Layout.OutputDir(),
+		// The ingress joins the pattern onto its own directory, so it takes
+		// the NAME pattern: the layout's CommandFileGlob is the whole path,
+		// and joining that onto the directory again yields a pattern that
+		// matches nothing at all.
+		Glob:    filepath.Base(p.Layout.CommandFileGlob()),
 		Verbs:   verbs,
 		DB:      p.DB,
 		Merge:   mergeOrchestrator,
@@ -489,6 +512,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	return &graph{
 		Server: server.Deps{
 			Instance:         p.Instance,
+			SessionFacts:     hostSessionFacts{fleet: fleet},
 			DB:               p.DB,
 			Prompts:          handler,
 			Queue:            queue,
@@ -656,9 +680,59 @@ func lockDir() string {
 // deployStamp reads the deployed build's sha from the stamp the deploy chain
 // writes. A missing stamp is an ERROR rather than an empty sha: a staleness
 // check against nothing would call every shim current.
+// hostSessionFacts adapts the session fleet to server.SessionFacts. The
+// conversion lives HERE because internal/workspace sits below internal/server
+// and cannot name its types: the composition root is the one place that knows
+// both sides.
+type hostSessionFacts struct{ fleet *workspace.Fleet }
+
+func (h hostSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (server.HostFacts, bool) {
+	facts, live := h.fleet.HostSessionFacts(ws)
+	if !live {
+		return server.HostFacts{}, false
+	}
+	// BACKFILL HAS NO PRODUCER HERE. It is the file plane's delivery into the
+	// store; the daemon never imports store.v1 and holds no store client, so
+	// the only honest arm is `none` -- "no transcript reached the store
+	// through anything this daemon can see". The fleet's BackfillKnown says
+	// the same, and it is always false.
+	return server.HostFacts{
+		SessionID:    facts.SessionID,
+		Generation:   facts.Generation,
+		ShimAttached: facts.ShimAttached,
+		Backfill:     server.BackfillNone,
+	}, true
+}
+
+// sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
+// seam. An UNBALANCED marker is a producer bug: it is recorded at WARNING and
+// the text is drawn as it stands, because losing the prompt row is worse than
+// drawing a marker the reader can see and report.
+func sentinelStripper(log dlog.Logger) func(string) string {
+	return func(text string) string {
+		drawn, err := prompts.StripSentinels(text)
+		if err != nil {
+			log.Warn("daemon.cmd.strip_sentinels",
+				"a prompt's injected spans are unbalanced; it is drawn unstripped",
+				dlog.Context{"error": err.Error()})
+			return text
+		}
+		return drawn
+	}
+}
+
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
 		raw, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			// NO STAMP AT ALL is an ordinary state, not a failure: this
+			// checkout was never put through the deploy chain (every test
+			// harness builds the binary with `go build -o <tmp>`). The
+			// staleness check reads an empty stamp as "leave the shim alone",
+			// which is exactly right, and nothing is warned about. A stamp
+			// that EXISTS and cannot be read, or is blank, is still an error.
+			return "", nil
+		}
 		if err != nil {
 			return "", fmt.Errorf("read the deploy stamp %s: %w", path, err)
 		}

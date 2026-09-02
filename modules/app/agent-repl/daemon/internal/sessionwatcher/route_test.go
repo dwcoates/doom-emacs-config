@@ -507,9 +507,12 @@ func TestRouteQueryDied(t *testing.T) {
 	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(queryDiedUpdate()) })
 
 	// Assert.
+	// OnTurnEnded comes LAST: it is handed over off the lock (the queue
+	// delivers the next prompt from it, which opens a turn back on this
+	// watcher), while the view sinks are told inside it.
 	assertNames(t, got, []string{
 		"footer.OnSessionUpdate", "feed.OnSessionUpdate", "sidebar.OnSessionUpdate",
-		"lifecycle.OnTurnEnded", "lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "lifecycle.OnTurnEnded",
 	})
 	if !h.w.Free() {
 		t.Fatal("a dead session is not free; a lease holder would wait forever")

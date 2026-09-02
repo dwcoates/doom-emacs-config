@@ -390,7 +390,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
-		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink",
+		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
 		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
@@ -428,6 +428,30 @@ func TestSeveredLinkReopensFromTheTrackedPointer(t *testing.T) {
 	}
 	if !h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
 		t.Fatal("the re-open was not warned about")
+	}
+}
+
+// TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen covers the
+// connectivity feed's HISTORY: the client publishes dialing and then connected
+// during bring-up, and the watcher is created afterwards holding a connected
+// link. Replaying those transitions is not a link that broke, so nothing is
+// re-opened -- a re-open here tears down the streams bring-up just
+// established, and the session is then left with no standing watch at all.
+func TestABringUpLinkReplayWithEveryStreamStandingDoesNotReopen(t *testing.T) {
+	// Arrange: a started session whose every stream is standing.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act: the bring-up transitions arrive after the watcher already exists.
+	h.client.links <- shimclient.LinkDialing
+	h.rec.until(t, "sidebar.OnLink")
+	h.client.links <- shimclient.LinkConnected
+	h.rec.until(t, "sidebar.OnLink")
+
+	// Assert.
+	h.client.noAgentOpen(t)
+	if h.hasRecord("warn", "daemon.sessionwatcher.reopen") {
+		t.Fatal("the fleet was re-opened on a link replay with every stream standing")
 	}
 }
 

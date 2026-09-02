@@ -176,6 +176,9 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		UDSPath:      uds,
 		StoreSocket:  f.deps.StoreSocket,
 		ConfigDir:    configDir,
+		// The relaunched shim carries the SAME host session identity: a
+		// relaunch rotates the process, never the session.
+		SessionID:    session.HostSessionID,
 		ShimBuildSHA: f.deps.ShimBuildSHA,
 		NodeBin:      f.deps.NodeBin,
 		MainJS:       f.deps.MainJS,
@@ -193,6 +196,53 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		"workspace": string(ws), "uds": uds, "pid": client.PID(),
 	})
 	return client, nil
+}
+
+// HostSessionFacts are the DAEMON's own facts about one workspace's live
+// session: exactly what the host stream's HostSessionExisting arm needs and
+// nothing a webview draws. The server composes the arm from them.
+type HostSessionFacts struct {
+	// SessionID is the daemon-minted host session identity.
+	SessionID string
+	// Generation is the controller generation operating the session. It
+	// rotates on a relaunch without the session id changing, which is what
+	// scopes a fault window.
+	Generation string
+	// ShimAttached reports whether the session's shim link is connected right
+	// now. It is what distinguishes "live but momentarily unwired" from "up".
+	ShimAttached bool
+	// BackfillKnown reports whether anything in this daemon can state the
+	// transcript's backfill. IT IS ALWAYS FALSE: backfill is the FILE PLANE's
+	// delivery into the store, the daemon never imports store.v1 and holds no
+	// store client, so there is no honest source for it here. The field exists
+	// so the seam states the absence rather than inventing an arm.
+	BackfillKnown bool
+}
+
+// HostSessionFacts answers one workspace's host-facing session facts. The bool
+// reports whether THIS DAEMON OPERATES a session for the workspace; anything
+// else is the host view's `none` arm, which is an answer and not a failure.
+//
+// It reads only what the fleet holds in memory: the durable row can outlive
+// the session it describes (a workspace this daemon has handed away, or has
+// not brought up), and the live half of the host view must never be composed
+// from a session nobody is operating.
+func (f *Fleet) HostSessionFacts(ws ids.WorkspaceID) (HostSessionFacts, bool) {
+	f.mu.RLock()
+	current := f.sessions[ws]
+	generation := f.generation[ws]
+	f.mu.RUnlock()
+	if current == nil || current.hostSessionID == "" {
+		return HostSessionFacts{}, false
+	}
+	// The FIRST shim of a session is generation 1: freshSocketPath bumps the
+	// counter only for a RELAUNCH's prelaunch, so an untouched session sits at
+	// zero, and a generation of "0" would read as no generation at all.
+	return HostSessionFacts{
+		SessionID:    current.hostSessionID,
+		Generation:   strconv.Itoa(generation + 1),
+		ShimAttached: current.watcher != nil && current.watcher.Connected(),
+	}, true
 }
 
 // freshSocketPath mints a socket path no running shim of this workspace holds.
@@ -217,7 +267,13 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	}
 	f.mu.Lock()
 	previous := f.sessions[ws]
-	f.sessions[ws] = &live{client: c}
+	// An INSTALL rotates the process, never the session: the adopted client
+	// serves the identity the retired one did.
+	carried := ""
+	if previous != nil {
+		carried = previous.hostSessionID
+	}
+	f.sessions[ws] = &live{client: c, hostSessionID: carried}
 	delete(f.coldGates, ws)
 	f.mu.Unlock()
 
@@ -229,6 +285,9 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	f.deps.Log.Global().Debug(opFleetRollout, "installed a new shim client", dlog.Context{
 		"workspace": string(ws), "pid": c.PID(), "retired": previous != nil,
 	})
+	// The process behind the session changed; the host view carries its pid's
+	// attachment and its generation.
+	f.publishHost(ws)
 	return nil
 }
 
@@ -296,10 +355,13 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		})
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: c, watcher: watcher})
-	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, c.PID()); err != nil {
+	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID})
+	// A resume keeps the session's host identity: the process rotated, the
+	// session did not.
+	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, session.HostSessionID, c.PID()); err != nil {
 		return rollout.Resumed{}, err
 	}
+	f.publishHost(ws)
 	log.Info(opFleetRollout, "resumed the conversation on the new shim", dlog.Context{
 		"vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})

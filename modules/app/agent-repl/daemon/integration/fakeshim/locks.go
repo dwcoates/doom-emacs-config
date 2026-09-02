@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,27 @@ func takeLock(path string) (*heldLock, error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		f.Close()
+		return nil, fmt.Errorf("fakeshim: flock %s: %w", path, err)
+	}
+	return &heldLock{path: path, file: f}, nil
+}
+
+// tryLock takes flock(LOCK_EX|LOCK_NB): it never blocks, and a lock another
+// process holds answers (nil, nil) so the caller can refuse rather than wait.
+// The daemon's own probe uses exactly this shape.
+func tryLock(path string) (*heldLock, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("fakeshim: lock dir %s: %w", filepath.Dir(path), err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("fakeshim: open lock %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("fakeshim: flock %s: %w", path, err)
 	}
 	return &heldLock{path: path, file: f}, nil

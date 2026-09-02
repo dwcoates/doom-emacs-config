@@ -318,6 +318,14 @@ func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
 // forkTranscript ports the parent's conversation into the CHILD's config root
 // before any session starts, which is what makes the forked workspace
 // resumable. It answers the vendor session id the child resumes.
+//
+// THE CHILD NEVER RESUMES THE PARENT'S OWN ID. shim.v1 StartSession has no
+// fork arm, and a vendor session id is single-occupancy: the shim takes
+// session-<vendor session id>.lock inside StartSession, so a child resuming a
+// live parent's id would block on that lock forever. The daemon mints a fresh
+// id, files the copy under it, and resumes that. The conversation's CONTENT is
+// untouched -- its original main-agent id included -- and the parent keeps its
+// own conversation, which is the whole point of a fork.
 func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, child wsm.Workspace, childConfigDir string) (string, error) {
 	parentRecord, err := v.deps.DB.Workspace(ctx, parent)
 	if err != nil {
@@ -338,17 +346,20 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		})
 		return "", fmt.Errorf("fork from %q: locate the transcript: %w", parent, err)
 	}
-	if err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir); err != nil {
+	forked := wsm.NewVendorSessionID()
+	if err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked); err != nil {
 		log.Error(opCreate, "could not port the parent transcript", dlog.Context{
 			"parent": string(parent), "transcript": transcript.Path,
 			"from_config_dir": transcript.ConfigDir, "cause": err.Error(),
 		})
 		return "", fmt.Errorf("fork from %q: port the transcript: %w", parent, err)
 	}
-	log.Debug(opCreate, "ported the parent transcript into the child config root", dlog.Context{
+	log.Debug(opCreate, "ported the parent transcript into the child config root under a fresh vendor session id", dlog.Context{
 		"parent": string(parent), "config_dir": childConfigDir,
+		"parent_vendor_session_id": parentSession.VendorSessionID,
+		"child_vendor_session_id":  forked,
 	})
-	return parentSession.VendorSessionID, nil
+	return forked, nil
 }
 
 // submitInitialPrompt sends the workspace's first message down the ONE delivery

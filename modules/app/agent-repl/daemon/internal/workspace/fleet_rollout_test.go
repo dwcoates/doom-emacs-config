@@ -136,3 +136,52 @@ func TestSessionBuildSHAReportsAnUnknownWorkspace(t *testing.T) {
 		t.Fatal("SessionBuildSHA answered a build for a workspace with no session")
 	}
 }
+
+// TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts covers the seam the
+// host stream's HostSessionExisting arm is composed from.
+func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	facts, ok := f.fleet.HostSessionFacts(ws.ID)
+
+	// Assert.
+	if !ok {
+		t.Fatalf("HostSessionFacts = (%+v, %v), want the operated session's facts", facts, ok)
+	}
+	if facts.SessionID == "" {
+		t.Fatalf("facts = %+v, want a minted host session id", facts)
+	}
+	if facts.Generation == "" || facts.Generation == "0" {
+		t.Fatalf("facts.Generation = %q, want the first generation", facts.Generation)
+	}
+	if !facts.ShimAttached {
+		t.Fatal("facts report the shim detached while the watcher is connected")
+	}
+	if facts.BackfillKnown {
+		t.Fatal("facts claim to know the backfill; the daemon holds no store client and can state none")
+	}
+	if recorded := f.db.sessions[ws.ID].HostSessionID; recorded != facts.SessionID {
+		t.Fatalf("recorded host session id = %q, want the answered %q", recorded, facts.SessionID)
+	}
+}
+
+// TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone covers the host
+// stream's `none` arm: a registered workspace that never had a session.
+func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	_, ok := f.fleet.HostSessionFacts("w1")
+
+	// Assert.
+	if ok {
+		t.Fatal("HostSessionFacts reports a session this daemon does not operate")
+	}
+}

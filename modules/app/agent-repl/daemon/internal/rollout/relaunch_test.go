@@ -34,6 +34,10 @@ func runRelaunch(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchRe
 	}
 }
 
+// TestTheEngineGoesPrelaunchThenHoldThenStandDownThenReapThenResume pins the
+// prescribed order: the inert shim comes up BESIDE the live one and waits
+// there. It holds neither kernel lock -- the shim takes both inside
+// StartSession -- so the two processes coexist until the swap.
 func TestTheEngineGoesPrelaunchThenHoldThenStandDownThenReapThenResume(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -58,6 +62,9 @@ func TestTheEngineGoesPrelaunchThenHoldThenStandDownThenReapThenResume(t *testin
 	}
 }
 
+// TestThePrelaunchedShimIsBroughtUpBeforeTheOldOneIsTouched is the same order
+// from the other side: nothing of the old shim is disturbed until the
+// replacement is standing by.
 func TestThePrelaunchedShimIsBroughtUpBeforeTheOldOneIsTouched(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -333,6 +340,9 @@ func TestTheNewShimsPidIsRecordedForTheNextManifest(t *testing.T) {
 	}
 }
 
+// TestAPrelaunchFailureLeavesTheOldShimUntouched covers the order's whole
+// point: nothing is disturbed until the replacement is standing by, so a
+// prelaunch that fails costs the live session nothing.
 func TestAPrelaunchFailureLeavesTheOldShimUntouched(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -349,6 +359,9 @@ func TestAPrelaunchFailureLeavesTheOldShimUntouched(t *testing.T) {
 	}
 	if len(old.KillRequests()) != 0 || len(old.ForceKills()) != 0 {
 		t.Fatalf("the old shim was touched after a failed prelaunch")
+	}
+	if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+		t.Fatalf("lease held = %v (err %v), want no restart hold after a failed prelaunch", held, dbErr)
 	}
 }
 

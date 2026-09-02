@@ -37,9 +37,17 @@ func (m *mappedStream[W, T]) Recv() (T, error) {
 
 // Close ends the stream from this side. Closing twice is harmless: a consumer
 // that closes on its own and a supervisor tearing the link down both do it.
+//
+// THE CANCEL IS WHAT ENDS IT; the drain is asynchronous. Connect's own Close
+// reads the response body to its end, and a standing watch has a RECEIVER
+// goroutine already blocked reading that same body: two readers on one body
+// is a deadlock, and the caller tearing a session down would wait on it
+// forever (a KillWorkspace that never answers). Cancelling the request is
+// synchronous and is what actually stops the stream; the body's drain is left
+// to run on its own, exactly as the fleet's re-open already does.
 func (m *mappedStream[W, T]) Close() {
 	m.closeOnce.Do(func() {
 		m.cancel()
-		_ = m.stream.Close()
+		go func() { _ = m.stream.Close() }()
 	})
 }

@@ -8,6 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/integration/harness"
 
@@ -446,8 +447,11 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 		t.Fatalf("KillWorkspace = %v, want a success", resp.Msg)
 	}
 
-	// Assert: KillSession{force:true} was sent.
-	killed := f.shim.ExpectKillSession()
+	// Assert: KillSession{force:true} was sent. It is read from the shim's own
+	// LOG, not its control socket: KillWorkspace reaps the process before it
+	// answers, and the fake's in-memory recorder dies with it.
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
 	if !killed.GetForce() {
 		t.Fatalf("KillSession.force = false, want true (KillWorkspace is the forced tear-down)")
 	}
@@ -617,11 +621,19 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
-	// A forced restart interrupts first: KillSession arrives WITHOUT waiting
-	// for the turn's own terminal frame.
-	killed := f.shim.ExpectKillSession()
-	if !killed.GetForce() {
-		t.Fatalf("KillSession.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
+	// A forced restart interrupts THE TURN first -- KillTurn{force:true} --
+	// which is what lets the relaunch engine's freeness wait complete without
+	// the turn's own terminal frame. The stand-down that follows is still the
+	// engine's GRACEFUL KillSession: the force is the caller's verdict on the
+	// running turn, never on the session's own shutdown.
+	killedTurn := f.shim.ExpectKillTurn()
+	if !killedTurn.GetForce() {
+		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
+	}
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	if killed.GetForce() {
+		t.Fatalf("KillSession.force = true, want the engine's graceful stand-down")
 	}
 }
 
@@ -641,6 +653,17 @@ func TestRestartWorkspaceGracefulHoldsPromptsWithBuildRefreshAndDrainsAfterReadi
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
+
+	// The verb ACCEPTS and the relaunch engine runs behind it, so the
+	// restart-pending hold stands a moment later. The host composer's
+	// `restarting` arm is that moment, and it is what a prompt submitted
+	// "meanwhile" has to arrive after to be held for the RESTART rather than
+	// for the turn still running.
+	hostStream := f.d.WatchHost(f.ws)
+	harness.AwaitView(t, f.d.Ctx(), hostStream, "the host composer restarting",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetLive().GetRestarting() != nil
+		})
 
 	// A prompt submitted meanwhile is held rather than forwarded.
 	held := f.submit("meanwhile", "k-restart-graceful-meanwhile", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

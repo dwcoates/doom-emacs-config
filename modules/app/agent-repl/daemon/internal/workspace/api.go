@@ -220,10 +220,22 @@ type HostRelay interface {
 	ReloadWebapp(ws ids.WorkspaceID)
 	// Notify pushes a host notification.
 	Notify(ws ids.WorkspaceID, text string, kind string, toolName string)
+	// PublishHostWorkspace recomposes and republishes the workspace's host
+	// STATE. Every edge that can move it calls this: the edges the server
+	// cannot see for itself -- a shim attaching or dying, a lease taken,
+	// parked or released, a restart -- happen in the fleet and the merge
+	// orchestrator. The topic dedupes, so a caller never has to decide
+	// whether its edge actually changed the view.
+	PublishHostWorkspace(ws ids.WorkspaceID)
 }
 
 // Deps are the verbs' collaborators.
 type Deps struct {
+	// Instance is THIS DAEMON's identity. Registration claims serving
+	// ownership of every workspace under it, which is what a handover hands
+	// over: without a claim the outgoing daemon serves nothing as far as the
+	// durable record is concerned, and transfers nothing.
+	Instance ids.InstanceID
 	DB       wsm.DB
 	Git      gitclient.Git
 	Accounts account.Resolver
@@ -366,6 +378,10 @@ type Cards interface {
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.
 	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
+	// Models answers exactly the model catalog the topbar's selector served,
+	// reporting false when none has been served. SetModel validates against
+	// it: the daemon accepts only the tokens it offered.
+	Models(ws ids.WorkspaceID) ([]string, bool)
 }
 
 // ServedPermission is one served permission ask: who asked, and whether a

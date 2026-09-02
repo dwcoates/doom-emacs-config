@@ -137,8 +137,16 @@ func run(ctx context.Context, opts options, h hooks) error {
 
 	// THE ADDRESS CLAIM IS THE EXCLUSIVITY CLAIM, and it is taken before any
 	// socket is touched. A successor is distinguishable because it was SPAWNED
-	// with -joining, never because it raced and won.
-	claim, err := daemonaddr.Bind(layout.DaemonAddr(), 0)
+	// with -joining, never because it raced and won -- and so it does NOT take
+	// the claim here: the incumbent that spawned it still holds it, and a
+	// successor racing for it would lose to its own predecessor and exit. It
+	// takes the claim when it advertises, which is when it has taken over.
+	joining := opts.joining != ""
+	bindClaim := daemonaddr.Bind
+	if joining {
+		bindClaim = daemonaddr.BindJoining
+	}
+	claim, err := bindClaim(layout.DaemonAddr(), 0)
 	if err != nil {
 		if errors.Is(err, daemonaddr.ErrClaimed) {
 			log.Warn("daemon.cmd.claim", "another daemon holds the boot claim; exiting without disturbing it", dlog.Context{
@@ -154,7 +162,6 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	defer claim.Close()
 
-	joining := opts.joining != ""
 	if joining {
 		// A JOINING DAEMON DOES NOT ADVERTISE. It reports its address where the
 		// incumbent that spawned it is waiting, and daemon.addr is written only

@@ -75,7 +75,11 @@ type Workspace struct {
 // Repository is one repository's durable record.
 type Repository struct {
 	ID RepoID
-	// Dir is the repository's canonicalized common dir (symlinks resolved).
+	// Dir is the repository's canonicalized MAIN WORKTREE (symlinks resolved),
+	// which is what workspace.v1's RepositoryRef.dir means and what a
+	// top-level workspace's merge targets. It is not the common dir: two
+	// worktrees of one repository still map to one repository, because they
+	// share one main worktree.
 	Dir string
 	// Name is the repository's display name.
 	Name string
@@ -166,9 +170,12 @@ type MergeLayout struct {
 // MergeActions are the configured prompts run in the workspace before and
 // after its merge.
 type MergeActions struct {
-	// Before are prompt names run in the source workspace before the merge.
+	// Before is the PROMPT TEXT run in the source workspace before the merge.
+	// CreateWorkspaceMergeActions carries the words themselves
+	// (conversation.v1.UserSaid), not the name of a file in the prompts
+	// directory, so this is what is submitted verbatim.
 	Before []string
-	// After are prompt names run after the merge lands.
+	// After is the prompt text run after the merge lands, on the same terms.
 	After []string
 }
 
@@ -176,6 +183,12 @@ type MergeActions struct {
 // shim process.
 type Session struct {
 	Workspace WorkspaceID
+	// HostSessionID is the DAEMON-minted session identity the host stream
+	// echoes and Emacs correlates against. Sessions rotate under one
+	// workspace; this is what distinguishes them, and it is not the vendor's
+	// id (a fork mints a fresh vendor id for the same host session, and a
+	// fresh conversation on one workspace is a new host session).
+	HostSessionID string
 	// VendorSessionID is the vendor's session identity, for resume.
 	VendorSessionID string
 	// ConfigDir is the account root the session was spawned under.

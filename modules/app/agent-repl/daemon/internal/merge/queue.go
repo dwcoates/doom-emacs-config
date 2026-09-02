@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -68,6 +69,9 @@ func (o *orchestrator) Enqueue(ctx context.Context, ws ids.WorkspaceID) error {
 	o.mu.Lock()
 	o.repoOf[ws] = repo
 	o.mu.Unlock()
+	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
+	// minted at enqueue, so republishQueue below can draw the queue tab on it.
+	o.mintLedger(ws)
 	log.Debug(op, "queued a merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "position": position})
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
@@ -201,6 +205,8 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.mu.Lock()
 	delete(o.repoOf, ws)
+	// The bubble goes with the merge: a dropped merge has no ledger.
+	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": cause})
 	o.publishAbandoned(ctx, ws, summary)
@@ -261,10 +267,13 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		frontTab = tabLabel(front.activeTab(), front.roundOf(front.activeTab()))
 	}
 	for _, entry := range entries {
-		// A merge that has not been admitted holds no lease, so it has no
-		// bubble to draw a queue tab on yet. Its FACTS still travel: the roster
-		// and the footer are how a waiting user learns their place.
+		// EVERY QUEUED MERGE HAS A BUBBLE. Its ledger identity is minted at
+		// enqueue, so a merge that has not been admitted still has a head to
+		// hang its queue tab on -- which is the tab a waiting user reads their
+		// place from, and the first of the tab sequence.
 		if lease, ok := o.leaseOf(entry.Workspace); ok {
+			o.deps.Feed.UpsertSynthesized(entry.Workspace, feedid.Feed{Root: true},
+				headRow(entry.Workspace, lease, branchLabel(names[entry.Workspace], dirs[entry.Workspace]), o.nowMS(), nil))
 			snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
 			o.deps.Feed.UpsertSynthesized(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
 				queueTab(snapshot, entry.Position == 1, o.nowMS())))
@@ -280,17 +289,29 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 	return nil
 }
 
-// leaseOf reports the merge lease a workspace's bubble is keyed by. A queued
-// merge has no lease yet, so its bubble does not exist and nothing is drawn for
-// it beyond its facts.
+// leaseOf reports the LEDGER identity a workspace's merge bubble is keyed by.
+// It is minted at ENQUEUE, so a merge that is only queued already has a bubble
+// -- the one its queue tab is drawn on -- and the occupancy lease taken at
+// admission carries the same identity, which is what makes the queued bubble
+// and the running one one bubble.
 func (o *orchestrator) leaseOf(ws ids.WorkspaceID) (ids.LeaseID, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	r, ok := o.runsByWorkspace[ws]
-	if !ok {
-		return "", false
+	id, ok := o.ledgerOf[ws]
+	return id, ok
+}
+
+// mintLedger mints a workspace's merge ledger identity, or answers the one it
+// already has: a re-enqueue of a merge already in the queue keeps its bubble.
+func (o *orchestrator) mintLedger(ws ids.WorkspaceID) ids.LeaseID {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if id, ok := o.ledgerOf[ws]; ok {
+		return id
 	}
-	return r.lease.ID, true
+	id := ids.LeaseID(wsm.NewLeaseID())
+	o.ledgerOf[ws] = id
+	return id
 }
 
 // kick starts the admission pump for one repository, unless one is already

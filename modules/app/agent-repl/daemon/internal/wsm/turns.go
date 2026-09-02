@@ -110,7 +110,7 @@ func (s *store) CloseTurn(ctx context.Context, turn TurnID, at time.Time, how Tu
 func (s *store) OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error) {
 	var out []Turn
 	err := s.read(ctx, "daemon.wsm.open_turns", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		loaded, err := openTurns(ctx, s.db, id)
+		loaded, err := openTurns(ctx, s.db(), id)
 		if err != nil {
 			return err
 		}

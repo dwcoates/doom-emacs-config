@@ -57,6 +57,11 @@ func (c *cards) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 	return c.fleet.ColdGate(ws)
 }
 
+// Models answers exactly the model catalog the topbar's selector served.
+func (c *cards) Models(ws ids.WorkspaceID) ([]string, bool) {
+	return c.topbar.ModelCatalog(ws)
+}
+
 // PermissionModes answers exactly the switchable mode set the topbar served.
 func (c *cards) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 	return c.topbar.PermissionModes(ws)

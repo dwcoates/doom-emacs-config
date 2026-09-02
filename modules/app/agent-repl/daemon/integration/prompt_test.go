@@ -61,7 +61,7 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 	}
 }
 
-func TestDuplicateIdempotencyKeyAnswersTheSameTurnIdAndSendsNoSecondStartTurn(t *testing.T) {
+func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -69,11 +69,14 @@ func TestDuplicateIdempotencyKeyAnswersTheSameTurnIdAndSendsNoSecondStartTurn(t 
 	first := f.submit("do the thing", "dup-key", origin)
 	second := f.submit("do the thing", "dup-key", origin)
 
-	// Assert
-	t1 := first.GetSuccess().GetTurn().GetTurn()
-	t2 := second.GetSuccess().GetTurn().GetTurn()
-	if t1.GetValue() == "" || t1.GetValue() != t2.GetValue() {
-		t.Fatalf("first turn = %q, second turn = %q, want the same minted turn for a duplicate idempotency key", t1.GetValue(), t2.GetValue())
+	// Assert: the contract's arm is `duplicate_submission` -- "the earlier
+	// submission stands (its turn, hold or panel is already visible); nothing
+	// is submitted twice" -- not a second echo of the first turn.
+	if first.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("the first submission = %v, want a minted turn", first)
+	}
+	if second.GetError().GetDuplicateSubmission() == nil {
+		t.Fatalf("the duplicate submission = %v, want error.duplicate_submission", second)
 	}
 	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
 		t.Fatalf("StartTurn count = %d, want exactly 1 (the duplicate sends no second StartTurn)", got)
@@ -312,14 +315,29 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	t.Helper()
 	selfRepo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
-	source := worktreeOfRepo(t, selfRepo, "feature")
-	ws := harness.Register(t, d, source)
-	d.WatchWorkspaceLogs(source)
-	f := &fixture{d: d, repo: selfRepo, ws: ws, t: t}
-	f.open()
+	// The workspace is CREATED, never merely registered: a merge runs off the
+	// creation job's recorded geometry and a registered worktree has none, so
+	// a registered one is refused before any lease is ever taken.
+	repoRef := mergeRepositoryRef(t, d, selfRepo)
+	f := mergeCreateChild(t, d, repoRef, "feature", "feature work", nil)
+	f.repo = selfRepo
+	source := f.ws.GetDir()
 	writeCommit(t, selfRepo, source, "feature.txt", "work\n")
-	selfRepo.ScriptConflict(source, "feature", "feature.txt")
+	// The conflict is scripted where the merge RUNS -- the target worktree --
+	// which for a top-level workspace is the repository's main worktree.
+	selfRepo.ScriptConflict(selfRepo.Dir, "feature", "feature.txt")
 	return f, selfRepo, source
+}
+
+// promptAwaitMergeLease blocks until the workspace's merge actually holds its
+// lease, which is what a submission is refused against. Enqueuing is not
+// holding: admission is the queue pump's own step.
+func promptAwaitMergeLease(t *testing.T, f *fixture) {
+	t.Helper()
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "the footer's merging status", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerging() != nil
+	})
 }
 
 func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
@@ -328,20 +346,23 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
+	promptAwaitMergeLease(t, f)
 
 	// Act
-	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
 		Workspace:      f.ws,
 		Said:           said("work while merging"),
 		IdempotencyKey: "k-merging",
 		Origin:         origin,
 	})
 
-	// Assert
-	if !namesIntendedArm(err, "SubmitPromptError.merging") {
-		t.Fatalf("SubmitPrompt during a merge lease = %v, want the merging refusal", err)
+	// Assert: `merging` is a LANDED arm of SubmitPromptError, so the refusal
+	// is a typed answer rather than a transport error.
+	if resp.GetError().GetMerging() == nil {
+		t.Fatalf("SubmitPrompt during a merge lease = %v, want error.merging", resp)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	// The refusal IS the subject, and the queue records it at WARNING.
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm", "daemon.promptqueue.submit")
 }
 
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
@@ -524,12 +545,21 @@ func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t
 			// Act
 			resp := f.submit(cmd, "k-cut", origin)
 
-			// Assert: routed as a session act, not an ordinary prompt turn.
+			// Assert: the cut goes down the queue's ONE delivery path and
+			// reaches the shim as a StartTurn carrying the literal -- shim.v1
+			// has no other verb for a context cut, and the vendor's own CLI is
+			// what answers /clear and /compact. It is answered with the TURN
+			// it runs as, not with command_acted: that arm is for an act that
+			// "mints no turn (/model <arg>)", and a cut mints and records one.
 			if resp.GetError() != nil {
 				t.Fatalf("SubmitPrompt(%s) = %v, want a success", cmd, resp)
 			}
-			if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
-				t.Fatalf("StartTurn count after %s = %d, want 0 (a session act, not a prompt turn)", cmd, got)
+			if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+				t.Fatalf("SubmitPrompt(%s) = %v, want the turn the cut runs as", cmd, resp)
+			}
+			req := f.shim.ExpectStartTurn()
+			if got := text(req.GetSaid()); got != cmd {
+				t.Fatalf("StartTurn.said after %s = %q, want the command's literal", cmd, got)
 			}
 
 			// Act: the resulting cut arrives as a page line.
@@ -627,14 +657,18 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
+	resp, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
 		Workspace: f.ws,
 		Model:     &conversationv1.AgentModel{Name: "not-a-real-model"},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetModelError.not_in_catalog") {
-		t.Fatalf("SetModel(not-a-real-model) = %v, want the not_in_catalog refusal", err)
+	// Assert: `not_in_catalog` is a LANDED arm of SetModelError, so the
+	// refusal is a typed answer rather than a transport error.
+	if err != nil {
+		t.Fatalf("SetModel(not-a-real-model) = error %v, want the typed not_in_catalog answer", err)
+	}
+	if resp.Msg.GetError().GetNotInCatalog() == nil {
+		t.Fatalf("SetModel(not-a-real-model) = %v, want error.not_in_catalog", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -692,14 +726,18 @@ func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
+	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
 		Workspace: f.ws,
 		Mode:      "not-a-real-mode",
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetPermissionModeError.mode_not_served") {
-		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want the mode_not_served refusal", err)
+	// Assert: `mode_not_served` is a LANDED arm of SetPermissionModeError, so
+	// the refusal is a typed answer rather than a transport error.
+	if err != nil {
+		t.Fatalf("SetPermissionMode(not-a-real-mode) = error %v, want the typed mode_not_served answer", err)
+	}
+	if resp.Msg.GetError().GetModeNotServed() == nil {
+		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want error.mode_not_served", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -711,15 +749,17 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
+	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
 		Workspace: f.ws,
 		Mode:      "bypass",
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetPermissionModeError.ungated_without_consent") &&
-		!namesIntendedArm(err, "SetPermissionModeError.mode_not_served") {
-		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want ungated_without_consent", err)
+	// Assert: both arms are LANDED, so the refusal is a typed answer.
+	if err != nil {
+		t.Fatalf("SetPermissionMode(bypass) = error %v, want a typed refusal", err)
+	}
+	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil && resp.Msg.GetError().GetModeNotServed() == nil {
+		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want ungated_without_consent", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -894,14 +934,17 @@ func TestAllowStandingOnACardWithoutStandingOfferedIsRefused(t *testing.T) {
 	row := awaitRow(t, f, feed, "the permission card with no standing offer", func(r *frontendv1.FeedRow) bool { return r.GetPermission() != nil })
 
 	// Act
-	_, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+	resp, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
 		Workspace: f.ws, Permission: row.GetId(),
 		Answer: &agentreplv1.AnswerPermissionRequest_AllowStanding{AllowStanding: &agentreplv1.AnswerPermissionAllowStanding{}},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "AnswerPermissionError.no_standing_offer") {
-		t.Fatalf("AnswerPermission{allow_standing} without standing_offered = %v, want no_standing_offer", err)
+	// Assert: `no_standing_offer` is a LANDED arm, so the refusal is typed.
+	if err != nil {
+		t.Fatalf("AnswerPermission = error %v, want the typed no_standing_offer answer", err)
+	}
+	if resp.Msg.GetError().GetNoStandingOffer() == nil {
+		t.Fatalf("AnswerPermission{allow_standing} without standing_offered = %v, want error.no_standing_offer", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -974,14 +1017,17 @@ func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
 	row := awaitRow(t, f, feed, "the question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
 
 	// Act
-	_, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
 		Workspace: f.ws, Question: row.GetId(),
 		Answers: []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"never served"}}},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "AnswerQuestionError.unserved_value") {
-		t.Fatalf("AnswerQuestion with an unserved label = %v, want unserved_value", err)
+	// Assert: `unserved_value` is a LANDED arm, so the refusal is typed.
+	if err != nil {
+		t.Fatalf("AnswerQuestion = error %v, want the typed unserved_value answer", err)
+	}
+	if resp.Msg.GetError().GetUnservedValue() == nil {
+		t.Fatalf("AnswerQuestion with an unserved label = %v, want error.unserved_value", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -996,14 +1042,17 @@ func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
 	row := awaitRow(t, f, feed, "the question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
 
 	// Act
-	_, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
 		Workspace: f.ws, Question: row.GetId(),
 		Answers: []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A", "B"}}},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "AnswerQuestionError.multi_pick_on_single_select") {
-		t.Fatalf("AnswerQuestion multi-pick on a single_select = %v, want multi_pick_on_single_select", err)
+	// Assert: `multi_pick_on_single_select` is a LANDED arm, so it is typed.
+	if err != nil {
+		t.Fatalf("AnswerQuestion = error %v, want the typed refusal", err)
+	}
+	if resp.Msg.GetError().GetMultiPickOnSingleSelect() == nil {
+		t.Fatalf("AnswerQuestion multi-pick on a single_select = %v, want error.multi_pick_on_single_select", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }

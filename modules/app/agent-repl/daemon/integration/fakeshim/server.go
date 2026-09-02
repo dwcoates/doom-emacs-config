@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"sync"
 
@@ -87,15 +88,24 @@ type server struct {
 	agents   *hub[agentFrame]
 	bashes   *hub[bashFrame]
 
-	mu       sync.Mutex
-	answers  map[string][]scriptedAnswer
-	hung     bool
-	unhang   chan struct{}
-	vendorID string
+	mu      sync.Mutex
+	answers map[string][]scriptedAnswer
+	hung    bool
+	unhang  chan struct{}
+	// sessionKilled records an accepted KillSession: the process exits once
+	// its answer has been written.
+	sessionKilled bool
+	vendorID      string
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
-	exit             func(code int, stderr string)
+	// claimWorkspace takes the WORKSPACE kernel lock inside StartSession,
+	// before anything else. False means another shim holds this conversation,
+	// which is the `conversation_owned` arm.
+	claimWorkspace func() bool
+	// releaseLocks drops both kernel locks; a kill or a stand-down calls it.
+	releaseLocks func()
+	exit         func(code int, stderr string)
 }
 
 type scriptedAnswer struct {
@@ -173,7 +183,15 @@ func (s *server) gate(ctx context.Context) error {
 // through it, so `expect` and `hang` work uniformly.
 func (s *server) enter(ctx context.Context, rpc string, req proto.Message) error {
 	s.rec.Record(rpc, req)
-	s.log.write(rpc, map[string]any{"verb": rpc})
+	// THE REQUEST RIDES THE LOG, not only the in-memory recorder. The recorder
+	// dies with the process, and the verbs that END the process -- a forced
+	// KillSession above all -- can only be asserted after the fact from
+	// something that outlives it.
+	fields := map[string]any{"verb": rpc}
+	if raw, err := proto.Marshal(req); err == nil {
+		fields["request"] = base64.StdEncoding.EncodeToString(raw)
+	}
+	s.log.write(rpc, fields)
 	return s.gate(ctx)
 }
 
@@ -203,6 +221,18 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	}
 	if s.profile.ExitOn == "start_session" {
 		s.exit(s.profile.ExitCode, s.profile.Stderr)
+	}
+	// THE WORKSPACE LOCK IS TAKEN HERE, before the SDK would be touched. A
+	// conversation another shim owns is refused, never waited on.
+	if s.claimWorkspace != nil && !s.claimWorkspace() {
+		return connect.NewResponse(&shimv1.StartSessionResponse{
+			Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+				Detail: "another shim holds this workspace's conversation",
+				Cause: &shimv1.StartSessionFailure_ConversationOwned{
+					ConversationOwned: &shimv1.StartSessionConversationOwned{},
+				},
+			}},
+		}), nil
 	}
 	if resp, done, err := scripted[shimv1.StartSessionResponse, *shimv1.StartSessionResponse](s, RPCStartSession); done {
 		if err == nil {
@@ -286,6 +316,11 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 
 	if !s.profile.DelayDiagnostics {
 		if err := stream.Send(&shimv1.WatchSessionResponse{Update: HealthyDiagnostics()}); err != nil {
+			return err
+		}
+		// The opening context usage rides the same open: the topbar publishes
+		// nothing until it holds one, exactly as against the real shim.
+		if err := stream.Send(&shimv1.WatchSessionResponse{Update: DefaultContextUsage()}); err != nil {
 			return err
 		}
 	}
@@ -407,6 +442,18 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	if resp, done, err := scripted[shimv1.KillTurnResponse, *shimv1.KillTurnResponse](s, RPCKillTurn); done {
 		return resp, err
 	}
+	// A KILLED TURN ENDS ON THE STREAM, as the real shim's does: the daemon
+	// learns a turn is over from the agent's terminal frame and from nothing
+	// else, so a fake that only ANSWERED would leave every waiter on freeness
+	// blocked forever.
+	s.agents.publish(agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: MainAgentID},
+		Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: &conversationv1.AgentInterrupted{
+				Cause: &conversationv1.AgentInterrupted_ByUser{ByUser: &conversationv1.AgentInterruptedByUser{}},
+			}},
+		}},
+	}})
 	return connect.NewResponse(&shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{
 			Killed: &conversationv1.TurnKilled{How: &conversationv1.TurnKilled_AgentOnly{AgentOnly: &conversationv1.TurnKilledAgentOnly{}}},
@@ -414,12 +461,34 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	}), nil
 }
 
+// killedSession reports that a KillSession was ACCEPTED, which is the process's
+// cue to exit once the answer is written.
+func (s *server) killedSession() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionKilled
+}
+
 func (s *server) KillSession(ctx context.Context, req *connect.Request[shimv1.KillSessionRequest]) (*connect.Response[shimv1.KillSessionResponse], error) {
 	if err := s.enter(ctx, RPCKillSession, req.Msg); err != nil {
 		return nil, err
 	}
 	if resp, done, err := scripted[shimv1.KillSessionResponse, *shimv1.KillSessionResponse](s, RPCKillSession); done {
+		if err == nil && resp.Msg.GetSuccess() != nil {
+			s.mu.Lock()
+			s.sessionKilled = true
+			s.mu.Unlock()
+		}
 		return resp, err
+	}
+	s.mu.Lock()
+	s.sessionKilled = true
+	s.mu.Unlock()
+	// BOTH LOCKS GO WITH THE SESSION. The process exits right after this
+	// answer is written, but releasing them here is what the real shim does
+	// and is what a stand-down's successor waits on.
+	if s.releaseLocks != nil {
+		s.releaseLocks()
 	}
 	return connect.NewResponse(&shimv1.KillSessionResponse{
 		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{

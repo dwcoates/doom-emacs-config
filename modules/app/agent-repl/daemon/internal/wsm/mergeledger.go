@@ -67,7 +67,7 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 func (s *store) MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error) {
 	var out []MergeLedgerEntry
 	err := s.read(ctx, "daemon.wsm.merge_ledger", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		rows, err := s.db.QueryContext(ctx, `SELECT lease_id, opened_at FROM merge_ledger WHERE workspace_id = ? ORDER BY opened_at, lease_id`, id)
+		rows, err := s.db().QueryContext(ctx, `SELECT lease_id, opened_at FROM merge_ledger WHERE workspace_id = ? ORDER BY opened_at, lease_id`, id)
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (s *store) MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerE
 
 // tabIntervals loads one lease's rounds in order, all-or-nothing.
 func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := s.db().QueryContext(ctx,
 		`SELECT round, kind, started_at, ended_at, outcome FROM merge_tab_intervals WHERE lease_id = ? ORDER BY round, started_at, kind`, lease)
 	if err != nil {
 		return nil, err

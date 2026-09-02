@@ -234,14 +234,11 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the webapp dist directory")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
-	}
-	if deps.SessionFacts == nil {
-		// The host view's live half has no source. That is recorded where it
-		// does HARM — at each withheld view, which names the workspace — and
-		// not here: a daemon serving no sessions is not damaged by the missing
-		// seam, and an unconditional record at construction would say every
-		// daemon is broken when most are not.
-		deps.SessionFacts = unwiredSessionFacts{}
+	case deps.SessionFacts == nil:
+		// The host view's live half is REQUIRED, like every other Deps field:
+		// without it no workspace with a session can be served a host view at
+		// all, and a daemon that cannot do that is not one to start.
+		return nil, missing("a session-facts source")
 	}
 
 	life, cancel := context.WithCancel(context.Background())
@@ -319,6 +316,13 @@ func (r hostRelay) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 func (r hostRelay) ReloadWebapp(ws ids.WorkspaceID) { r.s.ReloadWebapp(ws) }
 
 // Notify pushes a host notification onto the workspace's host stream.
+// PublishHostWorkspace republishes the workspace's host state. The lifetime is
+// the SERVER's, not any caller's: the edges that call it are async (a shim
+// dying, a lease released) and carry no request context of their own.
+func (r hostRelay) PublishHostWorkspace(ws ids.WorkspaceID) {
+	r.s.PublishHostWorkspace(r.s.life, ws)
+}
+
 func (r hostRelay) Notify(ws ids.WorkspaceID, text, kind, toolName string) {
 	r.s.notify(ws, text, kind, toolName)
 }

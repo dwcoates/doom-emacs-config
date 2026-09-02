@@ -470,3 +470,27 @@ func TestInterruptAllAgentsPropagatesANonBenignRefusal(t *testing.T) {
 	// Assert.
 	asRefusal(t, err, ArmShimNoSession)
 }
+
+// TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer covers the
+// case the offer exists for: a workspace whose merge is QUEUED and whose turn
+// has already ended. The interrupt has no turn to kill, and the user is asking
+// about the merge.
+func TestInterruptTurnOnAnIdleQueuedWorkspaceStillRaisesTheDequeueOffer(t *testing.T) {
+	// Arrange: a live session with nothing running.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
+
+	// Act.
+	out, err := f.verbs.Interrupt(context.Background(), ws.ID, InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !out.NothingRunning {
+		t.Fatalf("Interrupt = %+v, want nothing_running", out)
+	}
+	if len(f.merge.interrupted) != 1 || f.merge.interrupted[0] != ws.ID {
+		t.Fatalf("merge interrupts = %v, want the dequeue offer raised once", f.merge.interrupted)
+	}
+}

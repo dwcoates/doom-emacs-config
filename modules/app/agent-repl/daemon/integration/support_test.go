@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -120,6 +121,46 @@ func (f *fixture) openFeed(feed *frontendv1.FeedId) (*frontendv1.FeedPage, *agen
 		f.t.Fatalf("OpenFeed = %v, want a success", resp.Msg)
 	}
 	return success.GetPage(), success.GetWatch()
+}
+
+// openFeedOnceCarrying re-opens the root feed until its page satisfies the
+// predicate, and answers that page and its token. It exists because a fake
+// shim push is fire-and-forget: nothing tells a test when the daemon has
+// finished routing a frame, and re-taking the open is how a test synchronizes
+// on the page without sleeping.
+func (f *fixture) openFeedOnceCarrying(what string, pred func(*frontendv1.FeedPage) bool) (*frontendv1.FeedPage, *agentreplv1.FeedWatchToken) {
+	f.t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		page, token := f.openFeed(nil)
+		if pred(page) {
+			return page, token
+		}
+		select {
+		case <-ticker.C:
+		case <-f.d.Ctx().Done():
+			f.t.Fatalf("waiting for a feed page carrying %s: %v", what, f.d.Ctx().Err())
+			return nil, nil
+		}
+	}
+}
+
+// awaitRowInFeed answers a row of a feed that satisfies the predicate, looking
+// FIRST at the page the open serves and only then at the tail.
+//
+// A sub-feed's rows are usually already history by the time a test opens it --
+// a merge's tabs are all pushed before its terminal row exists to open a feed
+// on -- and a tail delivers only what arrives after the open.
+func (f *fixture) awaitRowInFeed(feed *frontendv1.FeedId, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	f.t.Helper()
+	page, token := f.openFeed(feed)
+	for _, row := range page.GetSuccess().GetRows() {
+		if pred(row) {
+			return row
+		}
+	}
+	return awaitRow(f.t, f, f.d.WatchFeed(token), what, pred)
 }
 
 // watchRootFeed opens the root feed and tails it.

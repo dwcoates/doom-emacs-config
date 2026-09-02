@@ -27,7 +27,18 @@ type claim struct {
 // comes FIRST so a second daemon loses before it has bound anything: it never
 // creates a listener, never writes daemon.addr, and so cannot disturb the
 // incumbent on its way out.
-func bind(addrPath string, port int) (Claim, error) {
+func bind(addrPath string, port int) (Claim, error) { return bindWith(addrPath, port, true) }
+
+// bindJoining binds WITHOUT the boot claim, for a successor.
+//
+// A successor does not race for exclusivity and must not: the INCUMBENT holds
+// the claim for as long as it is still serving, and a successor that tried for
+// it would lose to its own predecessor and exit -- which is exactly what
+// happened, so no handover ever completed. It takes the claim when it takes
+// over, at Publish, by which point the incumbent has stood down.
+func bindJoining(addrPath string, port int) (Claim, error) { return bindWith(addrPath, port, false) }
+
+func bindWith(addrPath string, port int, claimBoot bool) (Claim, error) {
 	if addrPath == "" {
 		return nil, fmt.Errorf("daemon.addr path is empty")
 	}
@@ -38,19 +49,27 @@ func bind(addrPath string, port int) (Claim, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create the state root %q: %w", dir, err)
 	}
-	lock, err := acquireBootLock(LockPath(addrPath))
-	if err != nil {
-		return nil, err
+	var lock *bootLock
+	if claimBoot {
+		var err error
+		if lock, err = acquireBootLock(LockPath(addrPath)); err != nil {
+			return nil, err
+		}
+	}
+	release := func() {
+		if lock != nil {
+			lock.release()
+		}
 	}
 	ln, err := net.Listen("tcp", net.JoinHostPort(LoopbackHost, strconv.Itoa(port)))
 	if err != nil {
-		lock.release()
+		release()
 		return nil, fmt.Errorf("bind the daemon listener on %s:%d: %w", LoopbackHost, port, err)
 	}
 	bound, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {
 		ln.Close()
-		lock.release()
+		release()
 		return nil, fmt.Errorf("bound listener address %q is not TCP", ln.Addr())
 	}
 	return &claim{
@@ -71,6 +90,17 @@ func (c *claim) Address() string { return c.address }
 // same directory, then a rename — so a reader either sees the previous
 // address or this one, never a half-written line.
 func (c *claim) Publish() error {
+	// A SUCCESSOR TAKES THE BOOT CLAIM WHEN IT TAKES OVER. It bound without
+	// one -- the incumbent held it -- and publishing daemon.addr is the moment
+	// it becomes the daemon of this state root. Failing to take it here is a
+	// refusal, never a publish that advertises an address nobody claims.
+	if c.lock == nil {
+		lock, err := acquireBootLock(LockPath(c.addrPath))
+		if err != nil {
+			return fmt.Errorf("take the boot claim before advertising %q: %w", c.addrPath, err)
+		}
+		c.lock = lock
+	}
 	dir := filepath.Dir(c.addrPath)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(c.addrPath)+".*")
 	if err != nil {
@@ -120,8 +150,11 @@ func (c *claim) Close() error {
 	if err := c.ln.Close(); err != nil {
 		firstErr = fmt.Errorf("close the daemon listener: %w", err)
 	}
-	if err := c.lock.release(); err != nil && firstErr == nil {
-		firstErr = err
+	// A SUCCESSOR THAT NEVER TOOK OVER holds no boot claim to release.
+	if c.lock != nil {
+		if err := c.lock.release(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
 	return firstErr
 }

@@ -229,10 +229,14 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	// Arrange: the merge target is the daemon's own checkout; a landed
 	// commit touching only the webapp subsystem classifies as webapp-only.
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
 	host := d.WatchHost(f.ws)
+	// The reload is pushed to a workspace whose WEBVIEW is open: a workspace
+	// with no page has nothing to reload. The arm rides the HOST stream, which
+	// is what Emacs listens on to reload the xwidget.
+	web := d.WatchWeb(f.ws)
+	defer web.Close()
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
 
 	// Act
@@ -250,8 +254,7 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.T) {
 	// Arrange: an ordinary, idle workspace whose host+web streams are open at
 	// the moment the handover is announced, so it is an expected participant.
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -354,8 +357,7 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 
 func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsInOrder(t *testing.T) {
 	// Arrange
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -416,8 +418,7 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	// Arrange: registered, never opened — no host or web stream ever existed
 	// for it, so it has zero rendezvous participants.
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	selfRepo, d := drainSelfRepoDaemon(t)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	roster := d.WatchRoster()
@@ -538,13 +539,37 @@ func drainOpenWorkspace(t *testing.T, d *harness.Daemon) *fixture {
 // drainTriggerRollout lands one commit touching the given path on the
 // daemon's own checkout (selfRepo), which fires rollout.Trigger classified
 // by that path's subsystem prefix.
+// drainSelfRepoDaemon starts a daemon whose OWN checkout is a fresh fake
+// repository, with a PASSING test gate.
+//
+// The gate matters: the rollout fires only off a merge that LANDED, and a
+// merge whose gate fails opens the fixes tab instead. Without the override the
+// gate runs the repository's own bin/test-all.sh, which a fake repository does
+// not have, and every rollout trigger died at exit 127.
+func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
+	t.Helper()
+	selfRepo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	d := harness.StartDaemon(t, harness.Opts{
+		SelfRepo: selfRepo.Dir,
+		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+	})
+	return selfRepo, d
+}
+
 func drainTriggerRollout(t *testing.T, d *harness.Daemon, selfRepo *harness.Repo, path string) {
 	t.Helper()
-	source := worktreeOfRepo(t, selfRepo, "trigger")
-	ws := harness.Register(t, d, source)
-	sha := writeCommit(t, selfRepo, source, path, "trigger\n")
+	// The trigger workspace is CREATED, never merely registered: a merge runs
+	// off the creation job's recorded geometry, and a registered worktree has
+	// none, so a registered one is refused with no_layout_facts and no merge
+	// ever lands to trigger the rollout.
+	repoRef := mergeRepositoryRef(t, d, selfRepo)
+	f := mergeCreateChild(t, d, repoRef, "trigger", "trigger work", nil)
+	sha := writeCommit(t, selfRepo, f.ws.GetDir(), path, "trigger\n")
 	selfRepo.SetPaths(sha, path)
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(trigger) = error %v, want the merge enqueued and landed", err)
 	}
 }
