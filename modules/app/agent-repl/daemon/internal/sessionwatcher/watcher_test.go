@@ -594,10 +594,35 @@ func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
 	got := h.drainNow()
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnHistoryPage"})
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnHistoryPage"})
 	turn := h.w.TurnInFlight()
 	if turn == nil || *turn != ids.TurnID("turn-9") {
 		t.Fatalf("turn in flight = %v, want turn-9", turn)
+	}
+}
+
+// TestOnTurnOpenedRaisesTheFootersTurnOpenEdge covers the edge nothing on the
+// shim's streams states: the accepted turn reaches the footer, which is what
+// raises `thinking submitting` before the first frame of the turn arrives.
+func TestOnTurnOpenedRaisesTheFootersTurnOpenEdge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, nil)
+	got := h.drainNow()
+
+	// Assert.
+	ev, ok := find(got, "footer.OnTurnOpened")
+	if !ok {
+		t.Fatalf("the footer never took the turn-open edge: %v", names(got))
+	}
+	if ev.detail != "turn-9" {
+		t.Fatalf("footer.OnTurnOpened turn = %q, want turn-9", ev.detail)
 	}
 }
 

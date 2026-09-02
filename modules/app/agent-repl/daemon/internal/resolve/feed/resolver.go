@@ -9,6 +9,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"google.golang.org/protobuf/proto"
+
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
@@ -361,20 +363,43 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	if at.parent != nil && row.Parent == nil {
 		row.Parent = at.parent
 	}
-	if _, seen := f.rows[id]; !seen {
+	// A ROW IS PUBLISHED AS A SNAPSHOT. A family composes its row from
+	// accumulated state it keeps mutating, so the value handed here can be the
+	// very object a later frame edits: retaining it would let a published row
+	// change under a reader, and would make it compare equal to its own
+	// successor.
+	snapshot, ok := proto.Clone(row).(*frontendv1.FeedRow)
+	if !ok {
+		r.logger(s.id).Error("daemon.feed.row_not_clonable",
+			"a composed row could not be snapshotted for publication",
+			dlog.Context{"feed": f.key, "row": id})
+		return
+	}
+	existing, seen := f.rows[id]
+	if seen && proto.Equal(existing, snapshot) {
+		// AN IDENTICAL ROW IS NOT A PUBLICATION. A repeated frame — a stream
+		// re-opening with the start it already announced, a re-delivered
+		// upsert — states nothing new, and pushing it again is churn every
+		// reader would have to filter for itself.
+		r.logger(s.id).Debug("daemon.feed.row_unchanged",
+			"an upsert restated the row it already published",
+			dlog.Context{"feed": f.key, "row": id})
+		return
+	}
+	if !seen {
 		f.order = append(f.order, id)
 	}
-	f.rows[id] = row
+	f.rows[id] = snapshot
 	if !durable {
 		f.nonDurable[id] = true
 	}
 	f.seq++
-	f.log = append(f.log, &loggedRow{seq: f.seq, row: row})
+	f.log = append(f.log, &loggedRow{seq: f.seq, row: snapshot})
 	if len(f.log) > f.retention {
 		f.log = f.log[len(f.log)-f.retention:]
 	}
 	for sub := range f.subs {
-		sub.enqueue(row)
+		sub.enqueue(snapshot)
 	}
 }
 
