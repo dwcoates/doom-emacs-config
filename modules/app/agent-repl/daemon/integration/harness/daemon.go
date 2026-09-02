@@ -313,13 +313,15 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
 	env = append(env, opts.ExtraEnv...)
 
-	// A NON-JOINING START OWNS daemon.addr. A crash-restart test reuses a state
+	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
 	// root whose previous daemon was SIGKILLed, so the file it never removed is
 	// still there with the dead daemon's port: read as this daemon's address it
 	// dials a closed socket. The daemon is about to rewrite it, so removing it
 	// first makes AwaitAddrFile unambiguous. A JOINING successor shares the root
-	// with a live incumbent that owns the file, so it is left alone.
-	if opts.Joining == "" {
+	// with a live incumbent that owns the file, so it is left alone — and so is
+	// a start the test expects to be REFUSED, which is a second daemon against
+	// a live incumbent whose file must survive its refusal untouched.
+	if opts.Joining == "" && !opts.ExpectEarlyExit {
 		if err := os.Remove(filepath.Join(d.StateDir, "daemon.addr")); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("harness: remove the stale daemon.addr: %v", err)
 		}
