@@ -85,3 +85,52 @@ describe("quiesce", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe("notePush", () => {
+  it("tells a subscriber that a frame arrived", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+    context.onPush(fn);
+    // Act
+    context.notePush();
+    // Assert
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells every subscriber", () => {
+    // Arrange
+    const context = ctx();
+    const first = vi.fn();
+    const second = vi.fn();
+    context.onPush(first);
+    context.onPush(second);
+    // Act
+    context.notePush();
+    // Assert
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells one that unsubscribed nothing", () => {
+    // Arrange
+    const context = ctx();
+    const fn = vi.fn();
+    context.onPush(fn)();
+    // Act
+    context.notePush();
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("tells a late subscriber nothing about frames already read", () => {
+    // Arrange: unlike `onQuiesced`, a push is an EVENT and not a state, so
+    // there is nothing for a subscriber arriving after one to be told.
+    const context = ctx();
+    context.notePush();
+    const fn = vi.fn();
+    // Act
+    context.onPush(fn);
+    // Assert
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
