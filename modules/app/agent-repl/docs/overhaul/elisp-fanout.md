@@ -396,6 +396,13 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   test waits for the message under test, not any message. Follow-up:
   `verbs-merge-success-messages-merge-enqueued` has the same racy wait
   predicate — fix at the next remediation touching that suite.
+- R-LANDING6 MERGED: command_acted `(:arm :command-acted :value nil)`
+  (composer clears), duplicate_submission (text kept, WARN + message +
+  flash "already submitted", never queued), turn_already_open dropped
+  (unknown arm → wire error; stand-in tests retargeted to
+  `:feed-undecodable`), unknown_repository on merge-queue verbs (WARN +
+  message naming the requested repository; evict names nil by design).
+  No agent worktrees remain. Only audit 3 in flight.
 
 ## 1. Module map (final tree of lisp/)
 
