@@ -91,6 +91,15 @@ daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
 
+## STEP 7 PROCEDURE (user, 2026-09-02): run once, table first, then remediation
+
+The project lead runs the rebuilt e2e suite ONCE with `-v -json` redirected to
+a file in the scratchpad (never read raw output into context), derives a
+per-test `test | duration | result` table sorted by duration into a second
+file, and shows the user that table plus totals BEFORE any remediation is
+dispatched. Failures are then dispatched to opus-low implementers (all
+collected in one run, never fail-fast).
+
 ## USER DECISION 2026-09-02: REBUILD the cross-system e2e suite
 
 Approved ("go for it"). New top-level package modules/app/agent-repl/e2e,
