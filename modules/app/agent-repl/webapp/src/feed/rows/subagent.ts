@@ -26,7 +26,7 @@
  * to see it" is not "it failed", and drawing the two the same way would state
  * something the daemon deliberately refused to state.
  */
-import { formatElapsed } from "../../duration.js";
+import { formatElapsed, formatTickedElapsed } from "../../duration.js";
 import { log } from "../../log.js";
 import { callUnary } from "../../rpc/unary.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -161,7 +161,7 @@ function drawLiveClock(runtime: FeedSubagentRuntime, rc: RowContext): HTMLElemen
   const el = document.createElement("span");
   el.className = "subagent-clock";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatElapsed(nowMs - startedMs);
+    el.textContent = formatTickedElapsed(nowMs - startedMs);
   });
   return el;
 }
