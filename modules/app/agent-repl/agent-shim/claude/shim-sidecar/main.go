@@ -305,7 +305,6 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 type bootstrapError struct{ err error }
 
 func (e bootstrapError) Error() string { return e.err.Error() }
-func (e bootstrapError) Unwrap() error { return e.err }
 
 func isBootstrapError(err error) bool {
 	var target bootstrapError
