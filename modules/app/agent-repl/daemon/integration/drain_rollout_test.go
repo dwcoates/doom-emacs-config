@@ -195,6 +195,73 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	f.d.ExpectWarnings("daemon.drain.refusal")
 }
 
+// TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts is critique
+// 11's second half: repeated refusals under the drain lease collapse to ONE
+// WARN per rate-limit window, and the suppressed ones still count.
+//
+// internal/drain/refusals.go's NoteRefusal fires its WARN the instant the
+// window opens (openedAt is zero), so the FIRST of a burst always emits it
+// with suppressed=0; every later refusal inside DefaultRefusalWindow (one
+// minute, internal/drain/controller.go — nothing wires a flag or env to
+// compress it) logs the running counts at DEBUG instead, never a second WARN.
+func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T) {
+	// Arrange: a drain in force, so every submission is held under the
+	// shutdown lease and reported to the rate limiter.
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.drain.refusal")
+	tray := f.d.WatchHolds(f.ws)
+	harness.AwaitNext(t, f.d.Ctx(), tray, "the empty tray")
+	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: time.Now().Add(time.Hour).UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+
+	// Act: three submissions held under the same drain lease, all inside the
+	// controller's one rate-limit window.
+	for _, key := range []string{"k-rate-1", "k-rate-2", "k-rate-3"} {
+		resp := f.submit("drain refusal "+key, key, conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+		if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+			t.Fatalf("SubmitPrompt(%s) during a drain = %v, want a minted TurnId (held, not refused)", key, resp)
+		}
+	}
+	// Wait for the tray to carry all three held prompts, so every NoteRefusal
+	// call has already landed on the run log by the time it is read below.
+	harness.AwaitView(t, f.d.Ctx(), tray, "three shutdown-held prompts", func(tr *frontendv1.DaemonHoldTray) bool {
+		n := 0
+		for _, item := range tr.GetItems() {
+			if item.GetPrompt().GetShutdown() != nil {
+				n++
+			}
+		}
+		return n == 3
+	})
+
+	// Assert: exactly one WARN, carrying the first refusal's counts.
+	warns := drainRunLogRecordsAt(t, f.d, "daemon.drain.refusal", "warn")
+	if len(warns) != 1 {
+		t.Fatalf("daemon.drain.refusal WARN records = %d, want exactly 1 (repeated refusals inside the window collapse to DEBUG)", len(warns))
+	}
+	if suppressed, total := drainRefusalCounts(t, warns[0]); suppressed != 0 || total != 1 {
+		t.Fatalf("the WARN record's (suppressed, total) = (%d, %d), want (0, 1): it fires on the very first refusal", suppressed, total)
+	}
+
+	// Assert: the second and third refusals are exact DEBUG records carrying
+	// the running counts, never a second WARN.
+	debugs := drainRunLogRecordsAt(t, f.d, "daemon.drain.refusal", "debug")
+	if len(debugs) != 2 {
+		t.Fatalf("daemon.drain.refusal DEBUG records = %d, want exactly 2 (the second and third refusals)", len(debugs))
+	}
+	if suppressed, total := drainRefusalCounts(t, debugs[0]); suppressed != 1 || total != 2 {
+		t.Fatalf("the first suppressed record's (suppressed, total) = (%d, %d), want (1, 2)", suppressed, total)
+	}
+	if suppressed, total := drainRefusalCounts(t, debugs[1]); suppressed != 2 || total != 3 {
+		t.Fatalf("the second suppressed record's (suppressed, total) = (%d, %d), want (2, 3)", suppressed, total)
+	}
+}
+
 func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor(t *testing.T) {
 	// Arrange: a turn in flight when the drain fires now.
 	f := newOpened(t, harness.Opts{})
@@ -424,6 +491,30 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 	if text(req1.GetSaid()) != "second" || text(req2.GetSaid()) != "third" {
 		t.Fatalf("held intake drained as (%q, %q), want (\"second\", \"third\") in order", text(req1.GetSaid()), text(req2.GetSaid()))
 	}
+}
+
+// TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout is critique 11's
+// first half: a workspace that never falls free leaves both daemons up
+// forever, naming the holdout in a periodic WARN
+// (internal/rollout/handover.go awaitFreeForever, operation
+// daemon.rollout.transfer).
+//
+// It is UNEXPRESSIBLE inside a bounded test today. The cadence is
+// rollout.Deps.HoldoutWarnEvery, which defaults to
+// rollout.DefaultHoldoutWarnEvery = 10 minutes
+// (internal/rollout/controller.go) and is READ FROM A REAL CLOCK
+// (rollout.Deps.Clock, defaulted to the system clock); cmd/claude-repld/graph.go
+// never sets HoldoutWarnEvery or Clock from a flag or an environment variable
+// when it builds the rollout controller, so nothing lets a test compress the
+// wait. Confirmed by grep: `grep -rn "HoldoutWarnEvery" cmd/` and
+// `grep -rn "rollout.Deps{" cmd/claude-repld/graph.go` show no call site
+// setting either field outside the production default.
+func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
+	t.Skip("needs a boot-wired knob for rollout.Deps.HoldoutWarnEvery (and/or an injectable Clock) — " +
+		"internal/rollout/controller.go's DefaultHoldoutWarnEvery is 10 minutes and cmd/claude-repld/graph.go " +
+		"sets neither HoldoutWarnEvery nor Clock from a flag or env when it builds the rollout controller, " +
+		"so a test cannot force the never-free periodic WARN daemon.rollout.transfer " +
+		"(internal/rollout/handover.go awaitFreeForever) to fire inside a bounded window")
 }
 
 func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
