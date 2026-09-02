@@ -393,7 +393,7 @@ nothing here can hang past it."
           ;; Assert: the timeout is surfaced in the production log ...
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.boot-timeout"))
-           5 "the boot timeout to be logged")
+           4 "the boot timeout to be logged")
           (should (agent-repl-itest--logged-p daemon "elisp.daemon.boot-timeout"))
           ;; ... and no link ever comes up from a daemon that never published.
           (should-not (agent-repl-link-up-p)))))))
@@ -502,9 +502,16 @@ the message is the whole recovery path."
           ;; Act.
           (agent-repl-daemon-ensure)
           ;; Assert.
+          ;; The capture buffer now exists from the moment the build process
+          ;; is spawned, so its EXISTENCE no longer means the output landed;
+          ;; the output itself is what this waits on.
           (agent-repl-itest--wait-until
-           (lambda () (get-buffer "*agent-repl-build-frontend*"))
-           nil "the build-output buffer")
+           (lambda ()
+             (let ((buffer (get-buffer "*agent-repl-build-frontend*")))
+               (and buffer
+                    (with-current-buffer buffer
+                      (string-match-p "compile error" (buffer-string))))))
+           nil "the build output to be captured")
           (with-current-buffer "*agent-repl-build-frontend*"
             (should (string-match-p "compile error" (buffer-string)))))))))
 
@@ -622,7 +629,7 @@ to the remediation loop that reads these runs by level."
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.boot-timeout"
                                                   "error"))
-           5 "the boot timeout to be logged at error")
+           4 "the boot timeout to be logged at error")
           (should (agent-repl-itest--logged-p daemon "elisp.daemon.boot-timeout"
                                               "error")))))))
 
@@ -656,10 +663,14 @@ the BUILD state, and this build succeeded — a timeout that painted
             ;; Assert: the timeout reaches the echo area.
             (agent-repl-itest--wait-until
              (lambda () (seq-some (lambda (m) (string-match-p "NOT ready" m)) messages))
-             5 "the boot timeout to be surfaced to the user"))
-          ;; Assert: and the build state is untouched.
+             4 "the boot timeout to be surfaced to the user"))
+          ;; Assert: and the build state is untouched.  The segment may be
+          ;; carrying the short-lived "stack built in N.Ns" note from the
+          ;; build that SUCCEEDED — what it must never say is that the build
+          ;; failed, which is the misdirection this scenario exists to catch.
           (should (null agent-repl-daemon-build-failure))
-          (should (null agent-repl-daemon-mode-line-segment)))))))
+          (should-not (equal agent-repl-daemon-mode-line-segment
+                             "daemon: build failed")))))))
 
 ;; audit-2 #41
 (ert-deftest agent-repl-itest-daemon-restart-asks-the-daemon-to-stop-itself ()
@@ -738,11 +749,11 @@ fresh build would ever happen."
           ;; Assert: the ensure half of the restart built and started one.
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-           5 "the restart's own ensure to run the build script")
+           3 "the restart's own ensure to run the build script")
           (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-           5 "the restart's own ensure to start a daemon")
+           3 "the restart's own ensure to start a daemon")
           (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
 
 ;; audit-2 #42
@@ -835,11 +846,11 @@ it actually exits does the build-and-start half of the restart run."
             ;; Assert: the ensure half proceeds once the address is gone.
             (agent-repl-itest--wait-until
              (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-             5 "the restart's own ensure to run the build script")
+             3 "the restart's own ensure to run the build script")
             (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
             (agent-repl-itest--wait-until
              (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-             5 "the restart's own ensure to start a daemon")
+             3 "the restart's own ensure to start a daemon")
             (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))))
 
 ;; audit-3 #12
@@ -922,7 +933,7 @@ that never happened."
             (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
             (agent-repl-itest--wait-until
              (lambda () (seq-some (lambda (m) (string-match-p "not restarting" m)) messages))
-             5 "the abandonment to be told to the user"))
+             3 "the abandonment to be told to the user"))
           ;; Assert: nothing was built or started, the link never came down,
           ;; and the fake is still there to prove nothing killed it.
           (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))

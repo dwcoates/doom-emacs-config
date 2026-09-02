@@ -40,6 +40,7 @@
   (load (expand-file-name "test-daemon.el" dir) nil t)
   (load (expand-file-name "test-daemon-link.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
+  (load (expand-file-name "test-find-file-workspace.el" dir) nil t)
   (load (expand-file-name "test-frontend.el" dir) nil t)
   (load (expand-file-name "test-frontends.el" dir) nil t)
   (load (expand-file-name "test-history.el" dir) nil t)
@@ -89,7 +90,8 @@
   (load (expand-file-name "test-integration-roster.el" dir) nil t)
   (load (expand-file-name "test-integration-composer.el" dir) nil t)
   (load (expand-file-name "test-integration-verbs.el" dir) nil t)
-  (load (expand-file-name "test-integration-daemon.el" dir) nil t))
+  (load (expand-file-name "test-integration-daemon.el" dir) nil t)
+  (load (expand-file-name "test-integration-fixture.el" dir) nil t))
 
 (provide 'test-agent-repl)
 
