@@ -644,6 +644,17 @@ EVIDENCE, ranked:
   the stream, at the moment of rotation. That is why the shim must capture it
   then and write it down: nobody can recover it afterwards.
 
+ROTATION, OBSERVED (real capture identity-rotation-clear, 2026-09-01): at
+/clear the stream carries ONE `conversation_reset` whose `session_id` is the
+OLD id and whose `new_conversation_id` is an id NOTHING later uses; the id
+the session rotates TO is the `session_id` of the SECOND `system:init` that
+follows (a third uuid), repeated by every later turn's init. On disk a new
+transcript file appears under that init id; the old file simply stops (no
+closing record — the mock's "closing system record" was declared-not-observed
+and is dropped). Rule: `SessionIdentityRotated.new` = the post-clear init's
+session_id; the link file is written for that id; `new_conversation_id` is
+never adopted as an identity.
+
 CONCLUSION FOR THE FILE PLANE: files alone suffice for resume and compaction;
 they do NOT suffice for rotation or fork, and the shim-written pointer file
 above is the smallest link that closes the gap. No store verb is involved.
