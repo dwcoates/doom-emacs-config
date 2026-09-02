@@ -1120,9 +1120,13 @@ export function feedPageSuccess(
       value: {
         rows,
         edge: { case: init?.edge ?? "atStart", value: {} },
-        breadcrumbs: init?.breadcrumbs
-          ? { crumbs: init.breadcrumbs.map((c) => ({ target: feedId(c.target), label: c.label })) }
-          : undefined,
+        // ALWAYS PRESENT, EVEN WHEN EMPTY. `breadcrumbs` is a non-optional
+        // message on the wire, so a page without a trail carries an EMPTY
+        // trail, not an absent one — the daemon sends it that way and the
+        // strict check refuses the absent form as a malformed view.
+        breadcrumbs: {
+          crumbs: (init?.breadcrumbs ?? []).map((c) => ({ target: feedId(c.target), label: c.label })),
+        },
       },
     },
   });
