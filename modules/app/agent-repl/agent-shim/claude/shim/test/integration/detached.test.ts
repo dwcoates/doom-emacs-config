@@ -70,13 +70,25 @@ async function openAgentStream(
   return stream;
 }
 
-/** Wait for a detached-work announcement on a stream and return it. */
+/**
+ * Wait for a detached-work announcement on a stream and return it.
+ *
+ * `withOutput` waits for the announcement that STATES an output. A detached
+ * shell is announced TWICE onto one row: `task_started` says the work left the
+ * turn, and the vendor names no output file there (corpus:
+ * stream/task_started.jsonl), so the path arrives with the tool result's upsert
+ * of the same row. A test about the path must wait for that one — waiting for
+ * the first frame asserts against a message the vendor cannot fill.
+ */
 async function awaitAnnouncement(
   stream: AgentStream,
+  withOutput = false,
 ): Promise<conversationv1.AgentDetachedWork> {
   const frame = await stream.until((f) => {
     if (f.frame.case !== "entry") return false;
-    return entryFrame(watchAgentEntry(f))?.result.case === "detachedWork";
+    const result = entryFrame(watchAgentEntry(f))?.result;
+    if (result?.case !== "detachedWork") return false;
+    return !withOutput || result.value.output !== undefined;
   });
   const agentFrame = entryFrame(watchAgentEntry(frame));
   if (agentFrame?.result.case !== "detachedWork") {
@@ -94,7 +106,7 @@ describe("a detached shell's announcement", () => {
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
-    const announced = await awaitAnnouncement(stream);
+    const announced = await awaitAnnouncement(stream, true);
 
     expect(announced.work?.value).not.toBe("");
     expect(announced.output?.path).not.toBe("");

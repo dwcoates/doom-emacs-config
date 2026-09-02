@@ -161,6 +161,16 @@ export interface FakeQueryOpts {
   readonly sessionId: string;
   /** The vendor session being continued, when this is a resume. */
   readonly resume?: string;
+  /**
+   * The transcript record the resume is REWOUND TO, when the shim named one.
+   *
+   * The keep-alive rewind's whole claim is that the resumed session stops at a
+   * particular record, and until now nothing on the vendor side recorded which
+   * uuid was named — the shim's own log said what it INTENDED, which is not
+   * evidence that the value reached the vendor at all. The mock records it (see
+   * the `resume_session_at` field of the mock's session-start record) so that claim is assertable.
+   */
+  readonly resumeSessionAt?: string;
   /** Mint a uuid. Injectable so goldens are stable. */
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
@@ -549,12 +559,19 @@ export function createFakeQuery(
   };
 
   const attachment = (payload: Record<string, unknown>): void => {
-    // An attachment is a FILE-PLANE fact only: the vendor records it and never
-    // streams it, so the mock writes it and emits nothing.
+    // BOTH PLANES, ONE UUID. The vendor records an attachment in the transcript
+    // AND puts it on the stream, so the sidecar and the shim each convert the
+    // same record. Sharing the uuid is what makes that safe rather than
+    // duplicating: residue is keyed `residue:<vendor record uuid>` (landing 5),
+    // so the two planes' rows collide on one key and the store absorbs the
+    // second. Writing only the file would leave the shim's whole attachment
+    // converter unreachable and its residue rows unwritten.
+    const uuid = opts.newUuid();
+    emitWithUuid(uuid, { attachment: payload, type: "attachment" });
     files.transcript.append({
       attachment: payload,
       type: "attachment",
-      uuid: opts.newUuid(),
+      uuid,
       timestamp: nowIso(),
     });
   };
@@ -680,6 +697,9 @@ export function createFakeQuery(
     return next;
   };
 
+  /** Scenarios parked on `awaitBackgrounded`, keyed by the call they own. */
+  const backgroundWaiters = new Map<string, (ack: () => void) => void>();
+
   const startTask = (task: Omit<LiveTask, "backgrounded">): LiveTask => {
     const live: LiveTask = { ...task, backgrounded: false };
     liveTasks.set(task.taskId, live);
@@ -745,6 +765,10 @@ export function createFakeQuery(
         : new Promise<void>((resolve) => {
             releaseInterrupt = resolve;
           }),
+    awaitBackgrounded: (toolUseId) =>
+      new Promise<() => void>((resolve) => {
+        backgroundWaiters.set(toolUseId, resolve);
+      }),
     tick: () => new Promise<void>((resolve) => setImmediate(resolve)),
     rotate,
     mintToolUseId,
@@ -792,7 +816,19 @@ export function createFakeQuery(
   const main = async (): Promise<void> => {
     emitInit();
     LOGGER.log(
-      { claude_session_id: sessionUuid, resumed: opts.resume !== undefined, workspace_dir: cwd },
+      {
+        claude_session_id: sessionUuid,
+        resumed: opts.resume !== undefined,
+        workspace_dir: cwd,
+        // THE REWIND TARGET, as the vendor received it. PRESENT ONLY WHEN THE
+        // SHIM NAMED ONE — a sentinel would make every plain start look like a
+        // rewind to a reader keying on the field. A spawned shim's only
+        // observable is its log, so this is where "the rewind actually reached
+        // the vendor" is asserted from.
+        ...(opts.resumeSessionAt === undefined
+          ? {}
+          : { vendor_resume_session_at: opts.resumeSessionAt }),
+      },
       opts.resume === undefined
         ? "fake vendor session STARTED"
         : "fake vendor session RESUMED; init reports the resumed id and re-emits NO history",
@@ -1016,9 +1052,24 @@ export function createFakeQuery(
         );
         return liveTasks.size > 0;
       }
+      // STATE FIRST, THEN THE ANNOUNCEMENTS. Every emit below must describe a
+      // world that is already true: a consumer that read the level while the
+      // flag was still unset would see the task listed as foreground in the
+      // very message that announces it left.
       live.backgrounded = true;
       systemMessage("task_updated", { task_id: live.taskId, patch: { is_backgrounded: true } });
       announceLiveTasks();
+      // THEN THE VENDOR'S OWN DETACHMENT RECORD, BEFORE THIS VERB ANSWERS. A
+      // real Ctrl-B has already put the backgrounded foreground result on the
+      // stream by the time the binary reports the detach; answering first would
+      // let a caller observe DetachForeground succeeding against a conversation
+      // that still shows the work in the foreground. The parked scenario
+      // acknowledges once it has emitted, so this is a happens-before.
+      const waiter = backgroundWaiters.get(toolUseId);
+      if (waiter !== undefined) {
+        backgroundWaiters.delete(toolUseId);
+        await new Promise<void>((resolve) => waiter(resolve));
+      }
       LOGGER.log(
         { claude_session_id: sessionUuid, task_id: live.taskId, tool_use_id: toolUseId },
         "fake vendor moved a foreground task to the background",

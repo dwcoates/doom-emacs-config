@@ -527,8 +527,14 @@ describe("ReadHistory", () => {
   });
 
   test("an unknown agent is refused unknown_agent", async () => {
+    // THE STORE DECIDES, AND IT SAYS SO IN A TYPED ARM. The shim does not know
+    // which books exist — it asks — so this refusal only happens if the store
+    // states it. The fake used to serve an empty page for a book nobody had
+    // written, which made the shim look wrong when it was the fake that never
+    // refused; it is now armed with the arm a real store would send.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    shim.store?.failReads("OpenAgentSession", "invalid_request", "no book named that");
 
     const response = await shim.clients.h1.readHistory(
       readHistoryFirst({ target: agentId("no-such-agent") }),
@@ -538,14 +544,35 @@ describe("ReadHistory", () => {
   });
 
   test("a stale pointer is refused stale_pointer", async () => {
+    // The pointer is the STORE's to recognize: it minted it, and only it can
+    // say the mark names no line of this book.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    // A pointer-bearing read WALKS OLDER through ReadAgentPage; only the
+    // pointerless first read goes through OpenAgentSession, so arming the
+    // opening verb here would arm one the request never reaches.
+    shim.store?.failReads("ReadAgentPage", "stale_pointer", "that mark is not in this book");
 
     const response = await shim.clients.h1.readHistory(
       readHistoryAfter(pointer("pointer-from-a-previous-store")),
     );
 
     expect(readHistoryKind(response)).toBe("stalePointer");
+  });
+
+  test("the refusal follows the ARM, not the store's prose", async () => {
+    // The negative that gives the two above their meaning: a detail saying the
+    // opposite of the arm must not change the answer. An earlier reader
+    // classified by substring, so a storage failure whose driver text happened
+    // to mention a pointer was reported as a stale pointer and the engine
+    // re-read a book that was actually unreachable.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    shim.store?.failReads("OpenAgentSession", "storage_failure", "that pointer names no such agent");
+
+    const response = await shim.clients.h1.readHistory(readHistoryFirst());
+
+    expect(readHistoryKind(response)).toBe("storeUnavailable");
   });
 
   test("an unreachable store is refused store_unavailable", async () => {
@@ -852,10 +879,19 @@ describe("keep-alives", () => {
     await keepaliveSubmitted(shim);
 
     const rewound = shim.log.record((record) => record.context.resume_session_at !== undefined);
+    // What the VENDOR received, not merely what the shim intended: the mock
+    // records the rewind target it was handed, and the shim's own record is no
+    // evidence the value ever reached the query.
+    const atVendor = shim.log.record(
+      (record) => record.context.vendor_resume_session_at !== undefined,
+    );
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" }));
     const record = await rewound;
 
     expect(record.context.discarded_keepalive_turns).toBeDefined();
+    expect((await atVendor).context.vendor_resume_session_at).toBe(
+      record.context.resume_session_at,
+    );
   });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {

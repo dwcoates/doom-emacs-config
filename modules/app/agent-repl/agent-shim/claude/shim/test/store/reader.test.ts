@@ -264,16 +264,91 @@ describe("readAgentPage", () => {
 });
 
 describe("failure translation", () => {
-  it("names an unknown agent", () => {
-    expect(readFailure("unknown agent book-9").kind).toBe("unknown_agent");
+  // THE TYPED ARM DECIDES, never the detail prose. The detail is the driver's
+  // text and a store maintainer may reword it at any time, so every case below
+  // pairs the arm with a detail that CONTRADICTS it: a classification that
+  // still read the string would fail here rather than in production.
+
+  it("maps stale_pointer to stale_pointer", () => {
+    // Arrange.
+    const failure = create(storev1.OpenAgentSessionFailureSchema, {
+      detail: "the disk is full",
+      kind: {
+        case: "stalePointer",
+        value: create(storev1.OpenAgentSessionStalePointerSchema, {}),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("stale_pointer");
   });
 
-  it("names a stale pointer", () => {
-    expect(readFailure("that pointer is not in this book").kind).toBe("stale_pointer");
+  it("maps invalid_request to unknown_agent, the condition the engine can act on", () => {
+    // Arrange.
+    const failure = create(storev1.OpenAgentSessionFailureSchema, {
+      detail: "that pointer is not in this book",
+      kind: {
+        case: "invalidRequest",
+        value: create(storev1.OpenAgentSessionInvalidRequestSchema, { field: "agent" }),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("unknown_agent");
   });
 
-  it("falls back to store_unavailable for anything else", () => {
-    expect(readFailure("the disk is full").kind).toBe("store_unavailable");
+  it("maps storage_failure to store_unavailable", () => {
+    // Arrange.
+    const failure = create(storev1.OpenAgentSessionFailureSchema, {
+      detail: "unknown agent book-9",
+      kind: {
+        case: "storageFailure",
+        value: create(storev1.OpenAgentSessionStorageFailureSchema, {}),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("store_unavailable");
+  });
+
+  it("treats an UNSET arm as store_unavailable rather than guessing a kinder one", () => {
+    // A refusal that names no reason is a store the shim cannot trust; a kinder
+    // arm would make the engine retry into a broken store.
+    // Arrange.
+    const failure = create(storev1.OpenAgentSessionFailureSchema, {
+      detail: "that pointer names no such agent",
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("store_unavailable");
+  });
+
+  it("carries the store's detail through onto the error", () => {
+    // Arrange.
+    const failure = create(storev1.ReadAgentPageFailureSchema, {
+      detail: "sqlite: database is locked",
+      kind: {
+        case: "storageFailure",
+        value: create(storev1.ReadAgentPageStorageFailureSchema, {}),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).message).toBe("sqlite: database is locked");
+  });
+
+  it("maps GetLiveWork's only arm, storage_failure, to store_unavailable", () => {
+    // Arrange.
+    const failure = create(storev1.GetLiveWorkFailureSchema, {
+      detail: "sqlite: no such table",
+      kind: {
+        case: "storageFailure",
+        value: create(storev1.GetLiveWorkStorageFailureSchema, {}),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("store_unavailable");
   });
 
   it("raises loudly on a page line whose item arm is unset", () => {

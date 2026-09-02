@@ -26,9 +26,14 @@
  *   - `known_through` IS THE CALLER'S HIGH-WATER MARK. The store remembers
  *     nothing about what it served; a set pointer means "only items strictly
  *     newer than this".
- *   - A WATCH TOKEN IS PINNED AFTER THE NEWEST ITEM at open. The tail is PURE:
- *     it never replays what the opening page already carried, which is what
- *     makes open-then-watch race-free.
+ *   - THE TAIL IS PURE: it carries WRITES, never replays. Opening a reading
+ *     session delivers nothing to the tail, so the opening page is never
+ *     repeated and open-then-watch is race-free. But EVERY write is a tail
+ *     line, INCLUDING an upsert of a row the opening page already carried: a
+ *     write supersedes the row whole, and a unit that started before the
+ *     reader opened and settles afterwards is a real change served at the
+ *     row's own stable pointer. Dropping those was what made a mid-turn
+ *     subscriber never learn how the turn's earlier units ended.
  *   - AN UNKNOWN WATCH TOKEN IS A CONNECT `NotFound`. A refused stream open has
  *     no failure message to live in — the response type is the frame it
  *     streams — so the refusal closes the stream at the transport.
@@ -58,8 +63,6 @@ interface StoredRow {
 /** An opened reading session: which book, and where its tail begins. */
 interface WatchSessionState {
   readonly book: string;
-  /** Rows at or below this pointer were already served by the opening page. */
-  readonly pinnedAfter: number;
   /** Lines waiting to be pulled by the tail, oldest first. */
   readonly pending: storev1.StoreLineAt[];
   /** Resolvers of pulls that arrived before any line did. */
@@ -75,12 +78,59 @@ export interface FakeStore {
   /** Stop serving, end every open tail, and remove the socket file. */
   close(): Promise<void>;
   /**
-   * Make every subsequent WriteBatch answer a `failure` with this detail, or
-   * pass `null` to accept writes again. The retry buffer has no other way to be
-   * exercised: a real store fails when it is down, and a test cannot take one
-   * down that it did not start.
+   * Make every subsequent WriteBatch answer a `failure` with this detail under
+   * the `storage_failure` arm, or pass `null` to accept writes again. The retry
+   * buffer has no other way to be exercised: a real store fails when it is
+   * down, and a test cannot take one down that it did not start.
+   *
+   * `storage_failure` is the RETRYABLE arm and therefore the right default for
+   * this lever; {@link FakeStore.failWritesWith} names the other one.
    */
   failWrites(detail: string | null): void;
+  /**
+   * Make every subsequent WriteBatch answer a `failure` under a NAMED arm.
+   *
+   * The two arms mean opposite things to the writer — `invalid_request` says
+   * the same bytes can never be accepted and a retry is pointless, while
+   * `storage_failure` says a retry may succeed — so a writer that treated them
+   * alike would either spin forever on a malformed batch or drop a transient
+   * one. Pass `null` to accept writes again.
+   */
+  failWritesWith(arm: StoreWriteFailureArm | null, detail: string): void;
+  /**
+   * Make every subsequent read of `verb` answer a `failure` under a NAMED arm,
+   * or pass `null` for the arm to serve that verb again.
+   *
+   * THE FAKE MUST BE ABLE TO REFUSE. Every typed refusal the store declares is
+   * a branch of the shim's reader, and a fake that only ever succeeds leaves
+   * those branches asserted nowhere: `stale_pointer` and `unknown_agent` could
+   * be declared and never observed. `detail` is deliberately the caller's to
+   * choose so a test can pair an arm with CONTRADICTING prose and catch a
+   * consumer that classifies by substring.
+   *
+   * `GetLiveWork` declares only `storage_failure`; any other arm is refused
+   * here rather than fabricating a response shape the proto forbids.
+   */
+  failReads(verb: StoreReadVerb, arm: StoreReadFailureArm | null, detail?: string): void;
+  /**
+   * The watch tokens whose `WatchAgentSession` tail is OPEN right now.
+   *
+   * A client that stops reading an agent must CANCEL its tail, not merely stop
+   * pulling: a store holding a stream open for a reader that will never return
+   * leaks a subscription per closed watch. Nothing on the client says whether
+   * it cancelled, so the only place that fact is observable is here.
+   */
+  openTails(): readonly string[];
+  /**
+   * Resolves the moment the tail on `token` closes, or immediately if it is
+   * already gone.
+   *
+   * The cancellation crosses a real socket, so the client returning from its
+   * iterator and the server's generator unwinding are two different instants.
+   * This is the second one, awaitable — a test that polled or slept instead
+   * would be asserting on a schedule rather than on the event.
+   */
+  tailClosed(token: string): Promise<void>;
   /** Every WriteBatch request the store received, in order, failures included. */
   writes(): storev1.WriteBatchRequest[];
   /** One book's rows, oldest first — the store's own order, for assertions. */
@@ -98,6 +148,15 @@ export interface FakeStore {
    */
   reads(): FakeStoreRead[];
 }
+
+/** A read verb that can be made to refuse. */
+export type StoreReadVerb = "OpenAgentSession" | "ReadAgentPage" | "GetLiveWork";
+
+/** The typed refusal arms a read can carry, as the protos declare them. */
+export type StoreReadFailureArm = "invalid_request" | "stale_pointer" | "storage_failure";
+
+/** The typed refusal arms `WriteBatch` declares. */
+export type StoreWriteFailureArm = "invalid_request" | "storage_failure";
 
 /** One read the fake served: which verb, and what was asked. */
 export interface FakeStoreRead {
@@ -142,7 +201,25 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   }>();
   let nextPointer = 1;
   let nextToken = 1;
-  let writeFailure: string | null = null;
+  let writeFailure: { arm: StoreWriteFailureArm; detail: string } | null = null;
+  /** Which read verbs are currently refusing, and under which arm. */
+  const readFailures = new Map<StoreReadVerb, { arm: StoreReadFailureArm; detail: string }>();
+  /** Watch tokens whose tail is streaming right now — see {@link FakeStore.openTails}. */
+  const openTailTokens = new Set<string>();
+  /** Whoever is waiting for a given tail to unwind — see {@link FakeStore.tailClosed}. */
+  const tailClosedWaiters = new Map<string, Array<() => void>>();
+
+  /**
+   * The refusal standing against one verb, if any.
+   *
+   * Each verb's arms are DIFFERENT MESSAGE TYPES that merely share names, so
+   * every rpc builds its own `kind` from this rather than sharing one builder —
+   * there is no cast that would let a `ReadAgentPage` arm ride on an
+   * `OpenAgentSession` failure.
+   */
+  const refusalFor = (
+    verb: StoreReadVerb,
+  ): { arm: StoreReadFailureArm; detail: string } | undefined => readFailures.get(verb);
 
   const pointerOf = (row: StoredRow): storev1.StoreItemPointer =>
     create(storev1.StoreItemPointerSchema, { value: row.pointer });
@@ -150,11 +227,23 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const lineAt = (row: StoredRow): storev1.StoreLineAt =>
     create(storev1.StoreLineAtSchema, { at: pointerOf(row), line: row.line });
 
-  /** Deliver a line to every tail watching its book, if the tail is past its pin. */
+  /**
+   * Deliver a line to every tail watching its book.
+   *
+   * EVERY WRITE IS SERVED, INCLUDING AN UPSERT OF A ROW OLDER THAN THE WATCH.
+   * A write supersedes the row WHOLE, so a unit that started before the reader
+   * opened and settles afterwards is a genuine change the tail must carry —
+   * served, per store.v1, at the row's own (stable, original) pointer. An
+   * earlier version of this fake compared that pointer against a pin taken at
+   * open and silently dropped exactly those settle frames, so a reader that
+   * subscribed mid-turn never learned how the turn's earlier units ended.
+   *
+   * The tail is still PURE: nothing is delivered without a write, so the
+   * opening page is never replayed and open-then-watch stays race-free.
+   */
   const fanOut = (bookId: string, row: StoredRow): void => {
     for (const state of watches.values()) {
       if (state.book !== bookId) continue;
-      if (Number(row.pointer) <= state.pinnedAfter) continue;
       const waiter = state.waiters.shift();
       if (waiter !== undefined) waiter(lineAt(row));
       else state.pending.push(lineAt(row));
@@ -235,6 +324,34 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     router.service(storev1.ShimStore, {
       async openAgentSession(request) {
         noteRead("OpenAgentSession", request);
+        const refusal = refusalFor("OpenAgentSession");
+        if (refusal !== undefined) {
+          return create(storev1.OpenAgentSessionResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.OpenAgentSessionFailureSchema, {
+                detail: refusal.detail,
+                kind:
+                  refusal.arm === "invalid_request"
+                    ? {
+                        case: "invalidRequest",
+                        value: create(storev1.OpenAgentSessionInvalidRequestSchema, {
+                          field: "agent",
+                        }),
+                      }
+                    : refusal.arm === "stale_pointer"
+                      ? {
+                          case: "stalePointer",
+                          value: create(storev1.OpenAgentSessionStalePointerSchema, {}),
+                        }
+                      : {
+                          case: "storageFailure",
+                          value: create(storev1.OpenAgentSessionStorageFailureSchema, {}),
+                        },
+              }),
+            },
+          });
+        }
         const bookId = request.agent?.value ?? "";
         const all = rowsOf(bookId);
         const floorPointer =
@@ -246,11 +363,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         const lines = [...window].reverse().map(lineAt);
         const olderExist = eligible.length > window.length;
         const oldestInPage = window[0];
-        const newestOverall = all[all.length - 1];
         const token = `watch-${nextToken++}`;
         watches.set(token, {
           book: bookId,
-          pinnedAfter: newestOverall === undefined ? 0 : Number(newestOverall.pointer),
           pending: [],
           waiters: [],
           closed: false,
@@ -277,7 +392,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         });
       },
 
-      async *watchAgentSession(request) {
+      async *watchAgentSession(request, context) {
         const token = request.watch?.value ?? "";
         const state = watches.get(token);
         if (state === undefined) {
@@ -288,18 +403,41 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
             Code.NotFound,
           );
         }
-        while (!state.closed) {
-          const next = state.pending.shift();
-          if (next !== undefined) {
-            yield create(storev1.WatchAgentSessionResponseSchema, { line: next });
-            continue;
+        // THE OPEN-TAIL LEDGER. `finally` runs when the generator is RETURNED
+        // into — which is what a cancelled Connect stream does — so the entry
+        // survives exactly as long as the subscription does, and a client that
+        // walks away without cancelling leaves it behind for the test to see.
+        openTailTokens.add(token);
+        try {
+          while (!state.closed && !context.signal.aborted) {
+            const next = state.pending.shift();
+            if (next !== undefined) {
+              yield create(storev1.WatchAgentSessionResponseSchema, { line: next });
+              continue;
+            }
+            // PARKED, BUT STILL CANCELLABLE. A generator suspended at an await
+            // does not run its `finally` when the handler returns into it — the
+            // return is queued behind the await — so a tail parked only on the
+            // next line would hold its ledger entry (and, in a real store, its
+            // subscription) forever after the caller hung up. Racing the
+            // request's own abort signal is what makes the cancellation land.
+            const awaited = await new Promise<storev1.StoreLineAt | null>((resolve) => {
+              const settle = (line: storev1.StoreLineAt | null): void => {
+                context.signal.removeEventListener("abort", onAbort);
+                resolve(line);
+              };
+              const onAbort = (): void => settle(null);
+              state.waiters.push(settle as (line: storev1.StoreLineAt) => void);
+              context.signal.addEventListener("abort", onAbort, { once: true });
+              if (state.closed || context.signal.aborted) settle(null);
+            });
+            if (awaited === null) return;
+            yield create(storev1.WatchAgentSessionResponseSchema, { line: awaited });
           }
-          const awaited = await new Promise<storev1.StoreLineAt | null>((resolve) => {
-            state.waiters.push(resolve as (line: storev1.StoreLineAt) => void);
-            if (state.closed) resolve(null);
-          });
-          if (awaited === null) return;
-          yield create(storev1.WatchAgentSessionResponseSchema, { line: awaited });
+        } finally {
+          openTailTokens.delete(token);
+          for (const resolve of tailClosedWaiters.get(token) ?? []) resolve();
+          tailClosedWaiters.delete(token);
         }
       },
 
@@ -352,6 +490,32 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
 
       async readAgentPage(request) {
         noteRead("ReadAgentPage", request);
+        const refusal = refusalFor("ReadAgentPage");
+        if (refusal !== undefined) {
+          return create(storev1.ReadAgentPageResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.ReadAgentPageFailureSchema, {
+                detail: refusal.detail,
+                kind:
+                  refusal.arm === "invalid_request"
+                    ? {
+                        case: "invalidRequest",
+                        value: create(storev1.ReadAgentPageInvalidRequestSchema, { field: "book" }),
+                      }
+                    : refusal.arm === "stale_pointer"
+                      ? {
+                          case: "stalePointer",
+                          value: create(storev1.ReadAgentPageStalePointerSchema, {}),
+                        }
+                      : {
+                          case: "storageFailure",
+                          value: create(storev1.ReadAgentPageStorageFailureSchema, {}),
+                        },
+              }),
+            },
+          });
+        }
         const bookId = request.book?.value ?? "";
         const after = Number(request.after?.value ?? "0");
         // Strictly OLDER than `after`, newest first.
@@ -405,6 +569,21 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
 
       async getLiveWork(request) {
         noteRead("GetLiveWork", request);
+        const refusal = refusalFor("GetLiveWork");
+        if (refusal !== undefined) {
+          return create(storev1.GetLiveWorkResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.GetLiveWorkFailureSchema, {
+                detail: refusal.detail,
+                kind: {
+                  case: "storageFailure",
+                  value: create(storev1.GetLiveWorkStorageFailureSchema, {}),
+                },
+              }),
+            },
+          });
+        }
         const liveAgents: conversationv1.AgentId[] = [];
         for (const [bookId, rows] of books) {
           if (bookId === "") continue;
@@ -449,10 +628,27 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         if (writeFailure !== null) {
           // DURABLE OR NOTHING: a failed batch lands no entry at all, which is
           // what makes a whole-batch retry correct rather than duplicating.
+          //
+          // THE ARM IS PART OF THE ANSWER. `invalid_request` says these bytes
+          // can never be accepted, `storage_failure` says a retry may succeed;
+          // a failure with no arm at all would let a writer that ignores the
+          // distinction pass here and spin forever in production.
           return create(storev1.WriteBatchResponseSchema, {
             result: {
               case: "failure",
-              value: create(storev1.WriteBatchFailureSchema, { detail: writeFailure }),
+              value: create(storev1.WriteBatchFailureSchema, {
+                detail: writeFailure.detail,
+                kind:
+                  writeFailure.arm === "invalid_request"
+                    ? {
+                        case: "invalidRequest",
+                        value: create(storev1.WriteBatchInvalidRequestSchema, { field: "batch" }),
+                      }
+                    : {
+                        case: "storageFailure",
+                        value: create(storev1.WriteBatchStorageFailureSchema, {}),
+                      },
+              }),
             },
           });
         }
@@ -478,7 +674,34 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   return {
     socketPath,
     failWrites: (detail) => {
-      writeFailure = detail;
+      writeFailure = detail === null ? null : { arm: "storage_failure", detail };
+    },
+    failWritesWith: (arm, detail) => {
+      writeFailure = arm === null ? null : { arm, detail };
+    },
+    failReads: (verb, arm, detail) => {
+      if (arm === null) {
+        readFailures.delete(verb);
+        return;
+      }
+      if (verb === "GetLiveWork" && arm !== "storage_failure") {
+        // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares one arm,
+        // so serving another would put a shape on the wire the proto forbids
+        // and let a consumer be tested against a store that cannot exist.
+        throw new Error(
+          `fake store: GetLiveWork declares only storage_failure, not ${arm}`,
+        );
+      }
+      readFailures.set(verb, { arm, detail: detail ?? `fake store refuses ${verb}` });
+    },
+    openTails: () => [...openTailTokens],
+    tailClosed: async (token) => {
+      if (!openTailTokens.has(token)) return;
+      await new Promise<void>((resolve) => {
+        const waiting = tailClosedWaiters.get(token) ?? [];
+        waiting.push(resolve);
+        tailClosedWaiters.set(token, waiting);
+      });
     },
     writes: () => [...receivedWrites],
     book: (agentId) => rowsOf(agentId).map(lineAt),
