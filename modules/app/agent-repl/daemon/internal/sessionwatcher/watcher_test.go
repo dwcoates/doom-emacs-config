@@ -697,7 +697,7 @@ func TestSinkCallsAreSerializedPerWorkspace(t *testing.T) {
 
 	// Assert: per agent, the feed saw its activities in the order they were
 	// sent, with nothing interleaved inside one frame's routing.
-	got := h.collect(t, 2*frames*2)
+	got := h.collect(t, 2*frames*3)
 	assertPerAgentOrder(t, got, "main-1", frames)
 	assertPerAgentOrder(t, got, "sub-1", frames)
 }
