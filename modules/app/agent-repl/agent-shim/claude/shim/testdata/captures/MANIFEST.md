@@ -157,3 +157,16 @@ each is graded against the grounding named below, or marked ungrounded.
   Retires every `sidecarCompactEvent(..., summary)` call site across
   `clearcompact_e2e_test.go`, `phaseword_e2e_test.go`, `revive_e2e_test.go`,
   `revivalhold_e2e_test.go` and `slashdurability_e2e_test.go`.
+
+- **`!context-budget-warning`** (`src/fake/scenarios/session.ts`). UNGROUNDED,
+  INVENTED, ORCHESTRATOR RULING (pending the project lead's): no capture in
+  this manifest — including the one literally NAMED `context-budget-warning`,
+  which the "Evidence gaps" section above and `golden-conformance.test.ts`'s
+  own `EXCLUDED` entry both record as holding no budget-warning record of any
+  kind — carries this record. `!context-tip` and `!tokens-reminder` are
+  UNCHANGED and still land 5's ruling (a generic `/goal` tip and the one
+  observed `total_tokens_reminder`, neither the budget warning): this is a
+  SEPARATE, separately-named producer, added only so the converter's
+  ALREADY-BUILT `context_budget_warning` arm
+  (`test/convert/attachments.test.ts`) has a fake-SDK path to drive it from,
+  pending a real grounding capture.
