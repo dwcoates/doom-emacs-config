@@ -767,3 +767,8 @@ every UX or contract gap you surfaced instead of improvising.
   the 21 engine facade functions through the engine harness (or name the
   integration coverage that hits them); pin the three interrupt-driven
   scenarios in-process; add knip.json naming scripts/dist-smoke.ts.
+- LEDGER (final, 2026-09-02): dead-code pass merged; FINAL CODE TIP
+  032a9f0ab — typecheck, unit 3806/98, build, smoke, integration 302/0/3
+  todo (30 s). shim-agents/ empty, no shim-* branches. Deletion and
+  kept-with-reason lists in STOP-shim.md §7. Parked per the user directive;
+  resume queue in STOP-shim.md.

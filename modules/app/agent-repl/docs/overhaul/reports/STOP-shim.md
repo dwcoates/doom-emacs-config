@@ -7,10 +7,9 @@ docs/overhaul/shim-fanout.md carries the per-dispatch history.
 ## Where things stand
 
 - Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. FINAL
-  CODE TIP: see the last ledger entry (the dead-code merge); the code tip
-  before the dead-code pass was `3a60a11b5`.
-- Verified at the tip: `npm run typecheck` clean; `npm test` 96 files
-  green; `npm run build` green; `npm run smoke` green (fake store + a
+  CODE TIP `032a9f0ab` (the dead-code pass); this file's commit is the tip.
+- Verified at the tip: `npm run typecheck` clean; `npm test` 3806 tests /
+  98 files green; `npm run build` green; `npm run smoke` green (fake store + a
   no-store exit-1 step); `npm run test:integration` GREEN — 302 passed /
   0 failed / 3 todo in ~30 s (was 99 failed / 90 passed / 4 todo in ~30 min
   at the 2026-08-31 pause). Every test environment exports
@@ -48,7 +47,44 @@ docs/overhaul/shim-fanout.md carries the per-dispatch history.
    target by wire id; non-zero bash exit = completed; workspace lock inside
    StartSession; signal handlers before "serving"; failed StartSession undoes
    itself; response compression off (early-head ruling); h1 multi-stream.
-7. Dead-code pass (sonnet-medium; lists in the final report and the ledger).
+7. Dead-code pass (sonnet-medium, 032a9f0ab): knip 0 unused files/exports/
+   dependencies in src (only the 22 sdk/types.ts vendor-canary aliases
+   remain flagged, intentional); tsc noUnusedLocals/Parameters 1 finding
+   (`_QueryStillSatisfiesQueryLike`, compile-time vendor-drift assertion);
+   zero-hit src functions 73 → 11, all live and named below; knip.json
+   added (config only).
+   DELETED: src/subscription-usage.ts (+test); convert/permission.ts
+   crossCheckDenials; store/reader.ts READER_COMPONENT; writer.ts dead
+   bashUpsertKey re-export; terminals.ts `empty`; fake/index.ts barrel
+   re-exports (FAKE_DEFAULT_MODEL, SCENARIOS, selectScenario, Scenario,
+   ScenarioContext) and the four unused ScenarioContext accessors
+   (sessionUuid, gate, interrupted, liveTasks); TurnEngine.turnLive() and
+   .workId() (zero callers); unused imports (PersistEntry, ToolOutcome x2,
+   bashUpsertKey, StoreClient, SdkUserMessage, readJsonl); ~245 needless
+   `export` keywords across src. Ruled-dead surfaces verified absent:
+   src/uds/ (framing.ts both halves), src/protocol.ts, src/session.ts,
+   runUdsMode, legacy flags, the three-surface AGENTS.md story.
+   KEPT WITH REASON (each pinned by a unit test unless noted): sdk/types.ts
+   22 Sdk* type aliases (compile-time upgrade canary; verified by tsc, no
+   test possible); sdk/real-query.ts createRealQuery (vendor chokepoint,
+   throws under FORBID; exercised by the dist smoke) and main.ts main()
+   (process entrypoint; dist smoke); store/persistence.ts
+   unavailablePersistence; the engine dispatch arrows; FAILURE_ARMS;
+   InvalidModeledUsageError; REAL_SCHEDULER; PermissionGate
+   noteVendorDenial/deniedCall; pushes return() path + default clock;
+   reader transportFailure/concludeThrough/awaitFirstRow;
+   stoppedBashTerminal; writer clearProducer/liveWork/default sleep; main
+   logCorrelation/queryFactory; server listen bind-failure; AsyncQueue
+   .return; vendor-files vendorSessionId/survivingShellRuns; scenarios
+   query-eof-mid-ask, perm-allow-standing-mode, perm-no-standing,
+   perm-hold, bash-hold, subagent-detached-live; 19 engine facade functions
+   pinned through test/engine/*. Pinned by the INTEGRATION suite only
+   (out-of-process; named tests): session.ts bookHead, withBudget,
+   watcherOpened, knowsAgent, bashWatcherOpened (session.test "a forced
+   kill concludes the detached stream with an interrupted arm FIRST");
+   pendingAsk, deniedCall (gate.test deny/undecidable cases); compact,
+   writeContextCut (session.test Hibernate + remediation.compact);
+   liveTask (detached/session subagent suites).
 
 ## Rulings received this wave (all recorded in shim.md / the ledger)
 
