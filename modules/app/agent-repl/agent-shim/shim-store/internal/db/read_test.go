@@ -79,9 +79,12 @@ func TestOpenPageReportsTheFloorWhenTheBookFitsInOnePage(t *testing.T) {
 }
 
 func TestOpenPageAnswersAnEmptyBookWithAnEmptyPageAtTheFloor(t *testing.T) {
-	// Arrange: an agent with no rows is a LEGAL empty book. Refusing it would
-	// make a freshly spawned subagent unwatchable until it happened to speak.
+	// Arrange: an agent the store KNOWS but that has no rows is a LEGAL empty
+	// book. Refusing it would make a freshly spawned subagent unwatchable until
+	// it happened to speak, so the spawn frame that registers it is the fixture.
 	d, _ := newStore(t)
+	writeOK(t, d, pageEntry("w-spawn-empty", "u-spawn-empty", "agent-1",
+		frameItem(activityFrame("agent-1", "act-spawn-empty", subagentStart("agent-never-spoke")))))
 
 	// Act
 	opened, err := d.OpenPage(ctx(), "agent-never-spoke", 10, nil)
@@ -96,6 +99,89 @@ func TestOpenPageAnswersAnEmptyBookWithAnEmptyPageAtTheFloor(t *testing.T) {
 	if opened.Page.GetFloor() == nil {
 		t.Fatal("boundary = more, want floor")
 	}
+}
+
+// TestOpenPageRefusesAnAgentTheStoreHasNeverHeardOf: an id naming no book is
+// refused rather than served an empty page, so a stale or mistyped target is
+// distinguishable from a live agent that has said nothing yet.
+func TestOpenPageRefusesAnAgentTheStoreHasNeverHeardOf(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+
+	// Assert
+	if !errors.Is(err, ErrUnknownAgent) {
+		t.Fatalf("OpenPage error = %v, want ErrUnknownAgent", err)
+	}
+}
+
+// TestOpenPageRefusalOfAnUnknownAgentNamesItsSite: the site is the vocabulary
+// an operator counts refusals by, and it is this check's own, not the generic
+// store_refused_request.
+func TestOpenPageRefusalOfAnUnknownAgentNamesItsSite(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+
+	// Assert
+	if got := RefusalSite(err); got != SiteUnknownAgent {
+		t.Fatalf("refusal site = %q, want %q", got, SiteUnknownAgent)
+	}
+}
+
+// TestOpenPageRefusalOfAnUnknownAgentBlamesTheAgentField: the caller reads
+// invalid_request-style field naming off every refusal, so the arm the wire
+// carries can say which field was at fault.
+func TestOpenPageRefusalOfAnUnknownAgentBlamesTheAgentField(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil)
+
+	// Assert
+	if got := RefusalField(err); got != "agent" {
+		t.Fatalf("refusal field = %q, want %q", got, "agent")
+	}
+}
+
+// TestOpenPageRefusesAnUnknownAgentBeforeItJudgesThePointer: the register is
+// asked first, because a known_through against a book that does not exist is
+// stale only as a consequence, and stale_pointer would send the caller off to
+// repaint a book nobody ever kept.
+func TestOpenPageRefusesAnUnknownAgentBeforeItJudgesThePointer(t *testing.T) {
+	// Arrange
+	d, _ := newStore(t)
+	pointers := seedBook(t, d, "agent-1", 1)
+
+	// Act
+	_, err := d.OpenPage(ctx(), "agent-never-existed", 10, pointers[0])
+
+	// Assert
+	if !errors.Is(err, ErrUnknownAgent) {
+		t.Fatalf("OpenPage error = %v, want ErrUnknownAgent rather than a stale pointer", err)
+	}
+}
+
+// TestOpenPageRefusalOfAnUnknownAgentIsNotAnErrorRecord: an id naming no book
+// is the caller's business and the SERVER writes the one normal-level record;
+// this layer only traces it, or a healthy store writes error records whenever
+// a consumer holds a stale target.
+func TestOpenPageRefusalOfAnUnknownAgentIsNotAnErrorRecord(t *testing.T) {
+	// Arrange
+	d, sink := newStore(t)
+
+	// Act
+	if _, err := d.OpenPage(ctx(), "agent-never-existed", 10, nil); err == nil {
+		t.Fatal("OpenPage served an agent this store never heard of")
+	}
+
+	// Assert
+	sink.assertTracedRefusal(t, "unknown agent")
 }
 
 func TestOpenPageCatchesUpFromKnownThrough(t *testing.T) {

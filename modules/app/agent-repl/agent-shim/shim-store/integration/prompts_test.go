@@ -80,6 +80,7 @@ func TestAPromptIsStreamedToAStandingWatcher(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "prompt-tail")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer stream.Close()

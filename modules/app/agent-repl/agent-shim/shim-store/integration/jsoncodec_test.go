@@ -106,6 +106,7 @@ func TestJSONCodecServesTheAgentSessionWatchStream(t *testing.T) {
 	defer cancel()
 	cli := store.jsonClient()
 	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "json-tail")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer stream.Close()

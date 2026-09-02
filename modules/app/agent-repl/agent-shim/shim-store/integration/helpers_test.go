@@ -847,6 +847,24 @@ func assertOpenStalePointer(t *testing.T, failure *storev1.OpenAgentSessionFailu
 	}
 }
 
+func assertOpenUnknownAgent(t *testing.T, failure *storev1.OpenAgentSessionFailure) {
+	t.Helper()
+	assertDetail(t, "the OpenAgentSession refusal", failure.GetDetail())
+	if failure.GetUnknownAgent() == nil {
+		t.Fatalf("OpenAgentSession failure kind = %v, want unknown_agent (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+}
+
+// openUnknownAgent is the whole refusal in one call, for the subjects that only
+// need to say "this id names no book of this store".
+func openUnknownAgent(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string) {
+	t.Helper()
+	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+		Agent:    agentID(agent),
+		PageSize: 10,
+	}))
+}
+
 func assertReadInvalidRequest(t *testing.T, failure *storev1.ReadAgentPageFailure, wantField string) {
 	t.Helper()
 	assertDetail(t, "the ReadAgentPage refusal", failure.GetDetail())
@@ -1347,6 +1365,28 @@ func cursorState(fileID, path string, offset int64, carry []byte) *storev1.Curso
 // ---- read-side call helpers ----
 
 // callContext bounds one rpc.
+// seedBook registers an agent with the store by writing ONE ordinary line of
+// its book, so a later open addresses a book that exists.
+//
+// A SUBJECT ABOUT THE TAIL NEEDS THIS AND IS NOT CHANGED BY IT: the seed line
+// is written before the open, so it lands in the opening PAGE and never on the
+// stream that follows.
+func seedBook(ctx context.Context, t *testing.T, p *producer, agent, tag string) {
+	t.Helper()
+	p.write(ctx, t, p.agentEntry("w-seed-"+tag, "u-seed-"+tag,
+		frameLine(agentID(agent), responseFrame(agent, "act-seed-"+tag, "seed:"+tag))))
+}
+
+// registerEmptyBook makes the store aware of an agent WITHOUT putting a line in
+// its book, exactly the way a real spawn does: the spawn frame is a page line of
+// the SPAWNER's book, and the agent row it creates is the spawned agent's own.
+// That is what makes a freshly spawned subagent openable before it has spoken.
+func registerEmptyBook(ctx context.Context, t *testing.T, p *producer, spawner, created, tag string) {
+	t.Helper()
+	p.write(ctx, t, p.agentEntry("w-spawn-"+tag, "u-spawn-"+tag,
+		frameLine(agentID(spawner), subagentSpawnFrame(spawner, "act-spawn-"+tag, created, "go", 1000))))
+}
+
 func callContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(context.Background(), callTimeout)
