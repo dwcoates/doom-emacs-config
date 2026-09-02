@@ -1179,3 +1179,38 @@ func TestTheBootRewindIsOncePerIdentityNotPerPath(t *testing.T) {
 		t.Fatalf("rewind ran %d times across a rename, want once per file per boot", got)
 	}
 }
+
+func TestJitterBackoffKeepsAZeroDelayImmediate(t *testing.T) {
+	// Arrange, Act, Assert: a fresh suspension arms a zero delay, which must
+	// stay an immediate retry rather than being spread into a small wait.
+	if got := jitterBackoff(0); got != 0 {
+		t.Fatalf("jitterBackoff(0) = %v, want 0", got)
+	}
+}
+
+func TestJitterBackoffSpreadsAPositiveDelayWithinItsFraction(t *testing.T) {
+	// Arrange
+	d := 10 * time.Second
+	spread := time.Duration(float64(d) * recoverJitterFraction)
+	lo, hi := d-spread, d+spread
+
+	// Act, Assert: run several draws since the spread is randomized.
+	for i := 0; i < 20; i++ {
+		got := jitterBackoff(d)
+		if got < lo || got > hi {
+			t.Fatalf("jitterBackoff(%v) = %v, want within [%v, %v]", d, got, lo, hi)
+		}
+	}
+}
+
+func TestBootTimeMillisNeverReturnsNegative(t *testing.T) {
+	// Arrange, Act: the real syscall path, exercised directly since the
+	// harness always overrides sc.bootTimeMs to keep tests deterministic.
+	got := bootTimeMillis()
+
+	// Assert: 0 is the documented "unavailable" answer; anything real is a
+	// millisecond timestamp, which is never negative.
+	if got < 0 {
+		t.Fatalf("bootTimeMillis() = %d, want >= 0", got)
+	}
+}
