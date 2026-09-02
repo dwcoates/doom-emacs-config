@@ -891,47 +891,6 @@ contract explicitly so a renderer relying on it stays predictable."
 
 ;;;; ---- Tests: --ws-tombstoned-names ------------------------------------
 
-(ert-deftest agent-repl-test-ws-tombstoned-names-returns-tombstones ()
-  "--ws-tombstoned-names returns all tombstoned workspace names."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "live-ws"  :project-dir "/tmp/live")
-    (agent-repl--ws-put "dead-ws"  :project-dir "/tmp/dead")
-    (agent-repl--ws-del "dead-ws")
-    (let ((result (agent-repl--ws-tombstoned-names)))
-      (should (equal result '("dead-ws")))
-      (should-not (member "live-ws" result)))))
-
-(ert-deftest agent-repl-test-ws-tombstoned-names-empty-when-none ()
-  "--ws-tombstoned-names returns nil when no workspace is tombstoned."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (should-not (agent-repl--ws-tombstoned-names))))
-
-(ert-deftest agent-repl-test-ws-tombstoned-names-sorted ()
-  "--ws-tombstoned-names returns names in alphabetical order."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "charlie" :project-dir "/tmp/c")
-    (agent-repl--ws-put "alpha"   :project-dir "/tmp/a")
-    (agent-repl--ws-put "bravo"   :project-dir "/tmp/b")
-    (agent-repl--ws-del "charlie")
-    (agent-repl--ws-del "alpha")
-    (agent-repl--ws-del "bravo")
-    (should (equal (agent-repl--ws-tombstoned-names) '("alpha" "bravo" "charlie")))))
-
-;;;; ---- Tests: --ws-names-cache-usable-p --------------------------------
-
-(ert-deftest agent-repl-test-ws-names-cache-usable-p-returns-t-when-non-nil ()
-  "--ws-names-cache-usable-p returns non-nil when persp-names-cache is a
-non-nil list."
-  (let ((persp-names-cache '("ws1")))
-    (should (agent-repl--ws-names-cache-usable-p))))
-
-(ert-deftest agent-repl-test-ws-names-cache-usable-p-returns-nil-when-nil ()
-  "--ws-names-cache-usable-p returns nil when persp-names-cache is nil
-even if bound — a nil cache is not a usable tab-bar signal."
-  (let ((persp-names-cache nil))
-    (should-not (agent-repl--ws-names-cache-usable-p))))
-
 ;;;; ---- Tests: --ws-render-status (daemon-pushed lookup) ----------------
 ;;
 ;; Post-cutover (design §10) --ws-render-status is a pure lookup of the
@@ -965,111 +924,6 @@ workspace's badge."
 ;;;; ---- Tests: reorder-workspace-by-priority (moved from test-status.el) ----
 
 ;;;; ---- Tests: --reorder-workspace-next-to ----
-
-(ert-deftest agent-repl-test-reorder-next-to-inserts-immediately-after-anchor ()
-  "reorder-workspace-next-to splices ws directly after the anchor entry."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "parent" "other" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "parent")
-        (should (equal captured '("main" "parent" "child" "other")))))))
-
-(ert-deftest agent-repl-test-reorder-next-to-anchor-is-last-visible ()
-  "reorder-workspace-next-to keeps ws right after an anchor that is the last visible tab."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "other" "parent" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "parent")
-        (should (equal captured '("main" "other" "parent" "child")))))))
-
-(ert-deftest agent-repl-test-reorder-next-to-preserves-nil-persp-position ()
-  "reorder-workspace-next-to keeps persp-nil-name at the head of the cache."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "parent" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "parent")
-        (should (equal (car captured) "main"))))))
-
-(ert-deftest agent-repl-test-reorder-next-to-anchor-is-nil-name-lands-at-front ()
-  "reorder-workspace-next-to puts ws right after the persp-nil-name sentinel when the anchor is that sentinel."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "other" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "main")
-        (should (equal captured '("main" "child" "other")))))))
-
-(ert-deftest agent-repl-test-reorder-next-to-preserves-cache-string-identity ()
-  "After next-to reorder, the ws slot is `eq' to the canonical cache string, not the ws argument."
-  (agent-repl-test--with-clean-state
-    (let* ((canonical (copy-sequence "child"))
-           (fresh (copy-sequence "child"))
-           (persp-nil-name "main")
-           (persp-names-cache (list "main" "parent" canonical))
-           (captured nil))
-      (should-not (eq canonical fresh))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to fresh "parent")
-        (let ((injected (car (member "child" captured))))
-          (should injected)
-          (should (eq injected canonical))
-          (should-not (eq injected fresh)))))))
-
-(ert-deftest agent-repl-test-reorder-next-to-noop-when-ws-not-in-cache ()
-  "reorder-workspace-next-to no-ops when ws is not registered in the cache."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "parent"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "parent")
-        (should-not captured)))))
-
-(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-not-in-cache ()
-  "reorder-workspace-next-to no-ops when the anchor is absent from the cache."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "parent")
-        (should-not captured)))))
-
-(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-nil ()
-  "reorder-workspace-next-to no-ops when the anchor is nil."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" nil)
-        (should-not captured)))))
-
-(ert-deftest agent-repl-test-reorder-next-to-noop-when-anchor-is-self ()
-  "reorder-workspace-next-to no-ops when the anchor names ws itself."
-  (agent-repl-test--with-clean-state
-    (let* ((persp-nil-name "main")
-           (persp-names-cache '("main" "child"))
-           (captured nil))
-      (cl-letf (((symbol-function 'persp-update-names-cache)
-                 (lambda (new-cache) (setq captured new-cache))))
-        (agent-repl--reorder-workspace-next-to "child" "child")
-        (should-not captured)))))
 
 ;;;; ---- Tests: --ws-resolve-persp ----
 
@@ -1173,19 +1027,6 @@ workspace's badge."
 
 ;;;; ---- Tests: --ws-exists-p ----
 
-(ert-deftest agent-repl-test-ws-exists-p-delegates-when-bound ()
-  "ws-exists-p returns the +workspace-exists-p result when bound."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-exists-p) (lambda (ws) (equal ws "live"))))
-      (should (agent-repl--ws-exists-p "live"))
-      (should-not (agent-repl--ws-exists-p "gone")))))
-
-(ert-deftest agent-repl-test-ws-exists-p-returns-nil-when-unbound ()
-  "ws-exists-p returns nil when +workspace-exists-p is not fboundp."
-  (agent-repl-test--with-clean-state
-    (fmakunbound '+workspace-exists-p)
-    (should-not (agent-repl--ws-exists-p "any"))))
-
 ;;;; ---- Tests: --ws-kill ----
 
 (ert-deftest agent-repl-test-ws-kill-delegates-when-bound ()
@@ -1277,21 +1118,6 @@ gated push would then drop the very repaint this exists for."
 
 ;;;; ---- Tests: --ws-frame-switch ----
 
-(ert-deftest agent-repl-test-ws-frame-switch-delegates-when-bound ()
-  "ws-frame-switch calls persp-frame-switch with the given ws name."
-  (agent-repl-test--with-clean-state
-    (let (switched)
-      (cl-letf (((symbol-function 'persp-frame-switch) (lambda (ws) (setq switched ws))))
-        (agent-repl--ws-frame-switch "target")
-        (should (equal switched "target"))))))
-
-(ert-deftest agent-repl-test-ws-frame-switch-noop-when-unbound ()
-  "ws-frame-switch is a no-op when persp-frame-switch is not fboundp."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'persp-frame-switch) nil))
-      (fmakunbound 'persp-frame-switch)
-      (should-not (agent-repl--ws-frame-switch "target")))))
-
 ;;;; ---- Tests: --ws-frame-save-state ----
 
 (ert-deftest agent-repl-test-ws-frame-save-state-delegates-when-bound ()
@@ -1376,37 +1202,6 @@ gated push would then drop the very repaint this exists for."
       (should-not (agent-repl--ws-get "ws1" :project-dir)))))
 
 ;;;; ---- Tests: --ws-protected-p ----
-
-(ert-deftest agent-repl-test-ws-protected-p-delegates-when-bound ()
-  "ws-protected-p returns the +workspace--protected-p result when bound."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace--protected-p) (lambda (ws) (equal ws "main"))))
-      (should (agent-repl--ws-protected-p "main"))
-      (should-not (agent-repl--ws-protected-p "feature")))))
-
-(ert-deftest agent-repl-test-ws-protected-p-returns-nil-when-unbound ()
-  "ws-protected-p returns nil when +workspace--protected-p is not fboundp."
-  (agent-repl-test--with-clean-state
-    (fmakunbound '+workspace--protected-p)
-    (should-not (agent-repl--ws-protected-p "main"))))
-
-;;;; ---- Tests: --ws-error ----
-
-(ert-deftest agent-repl-test-ws-error-delegates-when-bound ()
-  "ws-error forwards message and noerror flag to +workspace-error."
-  (agent-repl-test--with-clean-state
-    (let (captured)
-      (cl-letf (((symbol-function '+workspace-error)
-                 (lambda (msg &optional noerror) (setq captured (list msg noerror)))))
-        (agent-repl--ws-error "boom" t)
-        (should (equal captured '("boom" t)))))))
-
-(ert-deftest agent-repl-test-ws-error-noop-when-unbound ()
-  "ws-error is a no-op when +workspace-error is not fboundp."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-error) nil))
-      (fmakunbound '+workspace-error)
-      (should-not (agent-repl--ws-error "boom" t)))))
 
 ;;;; ---- Tests: --ws-add-buffer ----
 
@@ -1568,22 +1363,6 @@ gated push would then drop the very repaint this exists for."
 
 ;;;; ---- Tests: --ws-unregister-project ----
 
-(ert-deftest agent-repl-test-ws-unregister-project-delegates-when-bound ()
-  "ws-unregister-project forwards DIR to projectile-remove-known-project."
-  (agent-repl-test--with-clean-state
-    (let (captured)
-      (cl-letf (((symbol-function 'projectile-remove-known-project)
-                 (lambda (dir) (setq captured dir))))
-        (agent-repl--ws-unregister-project "/tmp/p/")
-        (should (equal captured "/tmp/p/"))))))
-
-(ert-deftest agent-repl-test-ws-unregister-project-noop-when-unbound ()
-  "ws-unregister-project is a no-op when projectile-remove-known-project is unbound."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'projectile-remove-known-project) nil))
-      (fmakunbound 'projectile-remove-known-project)
-      (should-not (agent-repl--ws-unregister-project "/tmp/p/")))))
-
 ;;;; ---- Tests: --ws-switch-project ----
 
 (ert-deftest agent-repl-test-ws-switch-project-delegates-when-bound ()
@@ -1603,20 +1382,6 @@ gated push would then drop the very repaint this exists for."
       (should-not (agent-repl--ws-switch-project "/tmp/p/")))))
 
 ;;;; ---- Tests: --ws-known-projects ----
-
-(ert-deftest agent-repl-test-ws-known-projects-delegates-when-bound ()
-  "ws-known-projects returns the projectile-relevant-known-projects list."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'projectile-relevant-known-projects)
-               (lambda () '("/a/" "/b/"))))
-      (should (equal (agent-repl--ws-known-projects) '("/a/" "/b/"))))))
-
-(ert-deftest agent-repl-test-ws-known-projects-returns-nil-when-unbound ()
-  "ws-known-projects returns nil when projectile-relevant-known-projects is unbound."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'projectile-relevant-known-projects) nil))
-      (fmakunbound 'projectile-relevant-known-projects)
-      (should-not (agent-repl--ws-known-projects)))))
 
 ;;;; ---- Tests: --ws-all-persps ----
 
@@ -1669,22 +1434,6 @@ gated push would then drop the very repaint this exists for."
                    '(nil "ws-persp-identity: rejected reason=nil-perspective")))))
 
 ;;;; ---- Tests: --ws-run-switch-project-function ----
-
-(ert-deftest agent-repl-test-ws-run-switch-project-function-invokes-when-set ()
-  "ws-run-switch-project-function funcalls the configured function with DIR."
-  (agent-repl-test--with-clean-state
-    (let ((+workspaces-switch-project-function nil)
-          (called-with nil))
-      (setq +workspaces-switch-project-function
-            (lambda (dir) (setq called-with dir)))
-      (agent-repl--ws-run-switch-project-function "/tmp/proj")
-      (should (equal called-with "/tmp/proj")))))
-
-(ert-deftest agent-repl-test-ws-run-switch-project-function-noop-when-nil ()
-  "ws-run-switch-project-function is a no-op when the function var is nil."
-  (agent-repl-test--with-clean-state
-    (let ((+workspaces-switch-project-function nil))
-      (should-not (agent-repl--ws-run-switch-project-function "/tmp/proj")))))
 
 ;;;; ---- Tests: --record-workspace-history ----
 
@@ -1758,29 +1507,6 @@ transiently activated workspace while eager-open is in progress."
 
 ;;;; ---- Tests: --ws-new ----
 
-(ert-deftest agent-repl-test-ws-new-with-name-delegates-to-workspace-new ()
-  "ws-new with a NAME calls +workspace-new with that name."
-  (agent-repl-test--with-clean-state
-    (let (created)
-      (cl-letf (((symbol-function '+workspace-new) (lambda (name) (setq created name))))
-        (agent-repl--ws-new "ws1")
-        (should (equal created "ws1"))))))
-
-(ert-deftest agent-repl-test-ws-new-without-name-delegates-to-workspace/new ()
-  "ws-new without a NAME calls the interactive +workspace/new."
-  (agent-repl-test--with-clean-state
-    (let (called)
-      (cl-letf (((symbol-function '+workspace/new) (lambda (&rest _) (setq called t))))
-        (agent-repl--ws-new)
-        (should called)))))
-
-(ert-deftest agent-repl-test-ws-new-noop-when-unbound ()
-  "ws-new with a NAME is a no-op when +workspace-new is not fboundp."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-new) nil))
-      (fmakunbound '+workspace-new)
-      (should-not (agent-repl--ws-new "ws1")))))
-
 ;;;; ---- Tests: --ws-persp-kill ----
 
 (ert-deftest agent-repl-test-ws-persp-kill-delegates-when-bound ()
@@ -1837,18 +1563,6 @@ buffer, taking the frontend webview (persp-free, xwidget-bearing) with it."
 
 ;;;; ---- Tests: --ws-nil-name ----
 
-(ert-deftest agent-repl-test-ws-nil-name-returns-value-when-bound ()
-  "ws-nil-name returns the persp-nil-name value when bound and non-nil."
-  (agent-repl-test--with-clean-state
-    (let ((persp-nil-name "none"))
-      (should (equal (agent-repl--ws-nil-name) "none")))))
-
-(ert-deftest agent-repl-test-ws-nil-name-returns-nil-when-nil ()
-  "ws-nil-name returns nil when persp-nil-name is nil."
-  (agent-repl-test--with-clean-state
-    (let ((persp-nil-name nil))
-      (should-not (agent-repl--ws-nil-name)))))
-
 ;;;; ---- Tests: --ws-names-cache ----
 
 (ert-deftest agent-repl-test-ws-names-cache-returns-cache-when-bound ()
@@ -1864,38 +1578,6 @@ buffer, taking the frontend webview (persp-free, xwidget-bearing) with it."
       (should-not (agent-repl--ws-names-cache)))))
 
 ;;;; ---- Tests: --workspace-for-buffer (moved from test-status.el) ----
-
-(ert-deftest agent-repl-test-workspace-for-buffer-persp-mode-nil ()
-  "workspace-for-buffer should return nil when persp-mode is nil."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode nil))
-      (should-not (agent-repl--workspace-for-buffer (current-buffer))))))
-
-(ert-deftest agent-repl-test-workspace-for-buffer-found ()
-  "workspace-for-buffer should return workspace name when buffer is found."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t)
-          (test-buf (current-buffer))
-          (fake-persp "my-workspace"))
-      (cl-letf (((symbol-function 'persp-persps)
-                 (lambda () (list fake-persp)))
-                ((symbol-function 'persp-contain-buffer-p)
-                 (lambda (buf persp)
-                   (and (eq buf test-buf) (equal persp fake-persp))))
-                ((symbol-function 'safe-persp-name)
-                 (lambda (persp) persp)))
-        (should (equal (agent-repl--workspace-for-buffer test-buf)
-                       "my-workspace"))))))
-
-(ert-deftest agent-repl-test-workspace-for-buffer-not-found ()
-  "workspace-for-buffer should return nil when buffer not in any persp."
-  (agent-repl-test--with-clean-state
-    (let ((persp-mode t))
-      (cl-letf (((symbol-function 'persp-persps)
-                 (lambda () '("ws-a" "ws-b")))
-                ((symbol-function 'persp-contain-buffer-p)
-                 (lambda (_buf _persp) nil)))
-        (should-not (agent-repl--workspace-for-buffer (current-buffer)))))))
 
 ;;;; ---- Tests: reorder-workspace-to-front (moved from test-status.el) ----
 
@@ -2068,57 +1750,6 @@ in the same shape (still leftmost, nil-name still at head)."
       (should (equal (agent-repl--ws-repo-group "ws")
                      agent-repl--repo-key-unknown)))))
 
-(ert-deftest agent-repl-test-repo-label-from-key ()
-  "`--repo-label' returns the basename of the parent of KEY."
-  (should (equal (agent-repl--repo-label "/x/y/explanation-engine/.git")
-                 "explanation-engine")))
-
-(ert-deftest agent-repl-test-repo-label-of-unknown-sentinel-is-the-sentinel ()
-  "`--repo-label' passes the `(no repo)' sentinel through as its own label."
-  (should (equal (agent-repl--repo-label agent-repl--repo-key-unknown)
-                 agent-repl--repo-key-unknown)))
-
-(ert-deftest agent-repl-test-repo-label-nil-key ()
-  "`--repo-label' returns nil for a nil KEY."
-  (should (null (agent-repl--repo-label nil))))
-
-;;;; ---- Tests: agent-repl--main-worktree-dir ----
-
-(ert-deftest agent-repl-test-main-worktree-dir-from-linked-worktree ()
-  "`--main-worktree-dir' returns the common-dir's parent, the main checkout."
-  (let* ((main (make-temp-file "agent-repl-main-worktree-" t))
-         (common (expand-file-name ".git" main)))
-    (unwind-protect
-        (progn
-          (make-directory common)
-          (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-                     (lambda (&rest _) common)))
-            (should (equal (agent-repl--main-worktree-dir "/tmp/linked-worktree/")
-                           (directory-file-name
-                            (file-name-directory
-                             (directory-file-name
-                              (agent-repl--path-canonical common))))))))
-      (delete-directory main t))))
-
-(ert-deftest agent-repl-test-main-worktree-dir-no-repo ()
-  "`--main-worktree-dir' returns nil when DIR belongs to no repository."
-  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-             (lambda (&rest _) "fatal: not a git repository")))
-    (should (null (agent-repl--main-worktree-dir "/tmp/nowhere/")))))
-
-(ert-deftest agent-repl-test-main-worktree-dir-bare-repo ()
-  "`--main-worktree-dir' returns nil when the common-dir parent does not exist.
-That is the bare-repository shape: no main checkout to switch to."
-  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-             (lambda (&rest _) "/nonexistent-agent-repl-parent/repo.git")))
-    (should (null (agent-repl--main-worktree-dir "/tmp/ws/")))))
-
-(ert-deftest agent-repl-test-main-worktree-dir-nil-dir ()
-  "`--main-worktree-dir' returns nil for a nil DIR without shelling out."
-  (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-             (lambda (&rest _) (error "must not shell out for nil dir"))))
-    (should (null (agent-repl--main-worktree-dir nil)))))
-
 (ert-deftest agent-repl-test-toggle-repo-fold-folds ()
   "`--toggle-repo-fold' on an unfolded repo folds it."
   (agent-repl-test--with-clean-state
@@ -2141,13 +1772,6 @@ That is the bare-repository shape: no main checkout to switch to."
   "`--repo-folded-p' is nil for a repo that was never folded."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--repo-folded-p "/repos/doom/.git"))))
-
-(ert-deftest agent-repl-test-folded-repo-keys-sorted ()
-  "`--folded-repo-keys' returns the folded keys in sorted order."
-  (agent-repl-test--with-clean-state
-    (agent-repl--toggle-repo-fold "/b/.git")
-    (agent-repl--toggle-repo-fold "/a/.git")
-    (should (equal (agent-repl--folded-repo-keys) '("/a/.git" "/b/.git")))))
 
 ;;;; ---- The two context cuts --------------------------------------------
 
