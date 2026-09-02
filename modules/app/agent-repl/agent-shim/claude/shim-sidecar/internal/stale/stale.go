@@ -1,32 +1,45 @@
-// Package stale implements the sidecar's completion-inference / staleness policy
-// (design §7.4). No terminal markers exist on disk, so open detached tasks are
-// resolved to the terminal status LOST — NEVER DONE — via three explicit,
-// loud-logged inferences:
+// Package stale is the sidecar's LOST policy.
 //
-//  1. vanished-file: a watched task file disappears while its task is open →
-//     after a grace period (default 30s) → LOST.
-//  2. silence-timeout: no new bytes for a per-kind window (shell 30m, agent 60m,
-//     workflow 60m) → LOST. The sidecar cannot observe stream-plane liveness, so
-//     it emits LOST and lets the store/daemon reconcile against any stream
-//     terminal (a real DONE from the stream already sits in the store).
-//  3. boot-sweep: at startup, an open task whose started_at predates the current
-//     boot time → LOST (nothing survives a reboot).
+// LOST IS ITS OWN WORD: it means "we stopped seeing it", never "we know it
+// failed". The sidecar reads files; it has no view of process liveness, so the
+// most it can ever say about a detached run whose file went quiet is HOW it
+// stopped seeing it. That statement is the reader's to make LOUDLY — never to
+// silently drop, and never to spell as a completion.
 //
-// LOST is a synthetic-plane inference and is never conflated with DONE.
+// THREE WAYS TO STOP SEEING A RUN, and the arm IS how we concluded it:
+//
+//  1. FileVanished — the run's file disappeared while the run was open. A grace
+//     window absorbs the ordinary rename/replace race before the conclusion.
+//  2. WentSilent   — the file is still there and has not grown for longer than
+//     its kind's silence window.
+//  3. SweptUp      — a run whose file has not been touched since before the
+//     machine booted. Nothing survives a reboot. It is checked at boot AND on
+//     every sweep, because a run discovered after the boot pass (a spool whose
+//     hold expired, say) is exactly as dead as one that was open during it.
+//
+// IT RE-DERIVES FROM FILES AND CURSORS, because there is nothing else left to
+// derive from: the store holds no open-task snapshot for the sidecar
+// (GetLiveWork is the shim's verb, and the sidecar's only recovery verb is
+// GetSidecarCursors). What the sidecar knows is which files exist, when they
+// were last written, and how far its cursors have read them — so that is what
+// the policy is built out of.
+//
+// IT MINTS NO RECORDS. A Lost is an OBSERVATION; turning one into the run's
+// terminal frame is conversion, and conversion lives behind the handler seam.
+// Keeping this package free of conversion is what lets the policy be tested for
+// what it concludes rather than for what it emits.
 package stale
 
 import (
-	"fmt"
+	"sort"
 	"sync"
 	"time"
 
-	storev1 "agentrepl/proto/store/v1"
-	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// Default grace / silence windows (§7.4), overridable via Options.
+// Default windows, overridable through Options.
 const (
 	DefaultGrace           = 30 * time.Second
 	DefaultShellSilence    = 30 * time.Minute
@@ -34,7 +47,16 @@ const (
 	DefaultWorkflowSilence = 60 * time.Minute
 )
 
-// Options tunes the tracker's windows. Zero values fall back to the defaults.
+// Reason names HOW we stopped seeing a run.
+type Reason string
+
+const (
+	ReasonFileVanished Reason = "file_vanished"
+	ReasonWentSilent   Reason = "went_silent"
+	ReasonSweptUp      Reason = "swept_up"
+)
+
+// Options tunes the windows. Zero values fall back to the defaults.
 type Options struct {
 	Grace           time.Duration
 	ShellSilence    time.Duration
@@ -42,33 +64,49 @@ type Options struct {
 	WorkflowSilence time.Duration
 }
 
-type task struct {
-	id           string
-	kind         tail.Kind
-	session      string
-	outputPath   string
-	startedAtMs  int64
-	lastActMs    int64
-	vanishedAtMs int64 // 0 = file present
+// Work is one detached run the reader is watching, as re-derived from its file.
+// Path is the run's identity here: it is what the reader actually observes, and
+// it is already symlink-resolved by discovery, so one file cannot enter the
+// tracker twice.
+type Work struct {
+	Path   string
+	TaskID string
+	Kind   tail.Kind
+	// OwnerAgentID is the agent whose stream spawned the run, when it is known.
+	OwnerAgentID string
+	// RunActivityID is the spawning call's activity id — the handle a terminal
+	// is keyed by. Empty until the spawn is observed.
+	RunActivityID string
+	// LastActivityMs is when the file was last known to have grown, seeded from
+	// its mtime at first observation.
+	LastActivityMs int64
 }
 
-// taskKey is the store's lifecycle identity.  Task ids originate in vendor
-// payloads and are only unique within a conversation; treating task_id alone
-// as global made recovery reject two perfectly valid open tasks from separate
-// sessions and kept the whole sidecar link down forever.
-type taskKey struct {
-	session string
-	id      string
+// Lost is one concluded observation, handed to the caller to state and to turn
+// into the run's terminal.
+type Lost struct {
+	Work
+	Reason Reason
+	// ObservedAtMs is when the conclusion was reached, NOT when the run ended:
+	// we do not know when it ended, which is the whole point of the word.
+	ObservedAtMs int64
 }
 
-// Tracker tracks open detached tasks and infers LOST transitions. Safe for
-// concurrent use (the poll loop and the sweep timer both touch it).
+type entry struct {
+	work         Work
+	vanishedAtMs int64 // 0 = the file is present
+}
+
+// Tracker holds the open runs and concludes LOST. Safe for concurrent use: the
+// poll loop and the sweep both touch it.
 type Tracker struct {
-	mu             sync.Mutex
-	tasks          map[taskKey]*task
-	restoreFailure string
-	opt            Options
-	log            *logging.Bound
+	mu   sync.Mutex
+	open map[string]*entry // by resolved path
+	opt  Options
+	log  *logging.Bound
+	// bootUnknownSaid keeps the "no boot time" statement to once per process:
+	// the sweep runs on a timer, and repeating it every tick would bury it.
+	bootUnknownSaid bool
 }
 
 // New builds a Tracker.
@@ -85,200 +123,188 @@ func New(opt Options, log *logging.Bound) *Tracker {
 	if opt.WorkflowSilence == 0 {
 		opt.WorkflowSilence = DefaultWorkflowSilence
 	}
-	log.With(logging.Context{Operation: "stale-new"}).LogVerbose("constructing tracker grace=%s shell_silence=%s agent_silence=%s workflow_silence=%s", opt.Grace, opt.ShellSilence, opt.AgentSilence, opt.WorkflowSilence)
-	return &Tracker{tasks: map[taskKey]*task{}, opt: opt, log: log}
+	log.With(logging.Context{Operation: "stale-new"}).LogVerbose(
+		"constructing lost tracker grace=%s shell_silence=%s agent_silence=%s workflow_silence=%s",
+		opt.Grace, opt.ShellSilence, opt.AgentSilence, opt.WorkflowSilence)
+	return &Tracker{open: map[string]*entry{}, opt: opt, log: log}
 }
 
-// Open registers (or refreshes) an open task. startedAtMs is the launch/observed
-// time; nowMs seeds last-activity.
-func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, startedAtMs, nowMs int64) {
-	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).LogVerbose("open requested kind=%d started_at_ms=%d now_ms=%d", kind, startedAtMs, nowMs)
-	if id == "" || session == "" {
-		err := fmt.Sprintf("stale: task identity is required session=%q task_id=%q", session, id)
-		// An incomplete identity cannot be routed to a session diagnostic.
-		t.log.With(logging.Context{Operation: "stale-open", Path: outputPath, Level: "error"}).Log("%s", err)
-		panic(err)
+// Windows reports the windows this tracker actually runs with, defaults filled
+// in. It exists so the flag wiring can be asserted where it lands rather than
+// where it is parsed: a window that never reached the tracker is a flag that
+// does nothing.
+func (t *Tracker) Windows() Options { return t.opt }
+
+// Observe records that a run's file is being watched. Re-observing a known run
+// refreshes what the reader has since learned about it (its owner, its run
+// handle) without disturbing its activity clock.
+func (t *Tracker) Observe(work Work, nowMs int64) {
+	if work.Path == "" {
+		panic("stale: a tracked run must name its file")
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	key := taskKey{session: session, id: id}
-	if existing, ok := t.tasks[key]; ok {
-		if outputPath != "" {
-			existing.outputPath = outputPath
+	if existing, ok := t.open[work.Path]; ok {
+		if work.OwnerAgentID != "" {
+			existing.work.OwnerAgentID = work.OwnerAgentID
 		}
-		t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: existing.outputPath}).LogVerbose("refreshed existing task")
+		if work.RunActivityID != "" {
+			existing.work.RunActivityID = work.RunActivityID
+		}
+		t.bound(existing.work).LogVerbose("re-observed an already tracked run")
 		return
 	}
-	t.tasks[key] = &task{
-		id: id, kind: kind, session: session, outputPath: outputPath,
-		startedAtMs: startedAtMs, lastActMs: nowMs,
+	if work.LastActivityMs == 0 {
+		work.LastActivityMs = nowMs
 	}
-	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).Log("tracking new task kind=%d", kind)
+	t.open[work.Path] = &entry{work: work}
+	t.bound(work).Log("tracking detached run kind=%s last_activity_ms=%d", work.Kind, work.LastActivityMs)
 }
 
-// Restore resets the in-memory tracker at the start of every established
-// connection.
-//
-// IT HAS NOTHING LEFT TO RESTORE FROM, AND THE REASON IS A SCHEMA HOLE RATHER
-// THAN A FAILURE. The store used to hand back an authoritative open-task set
-// (agentshim.v1 CursorList.open_tasks, each an OpenTaskState). The redesigned
-// contract deleted OpenTaskState AND CursorList: store.v1
-// GetSidecarCursorsResponse returns cursors and nothing else, so the store no
-// longer reports open tasks at all and there is no snapshot to key entries on.
-//
-// The consequences are stated rather than smoothed over, because every one of
-// them is a real behavior change:
-//
-//   - A task open when this process restarts is not tracked, so it is never
-//     LOST-swept. It sits in the feed as running until something else ends it.
-//   - The boot sweep has nothing to sweep, so tasks killed by a reboot stay
-//     running rather than being resolved to LOST.
-//   - The spool-owner index cannot be seeded (see the sidecar's seedOwners), so
-//     a live task's spool stays unattributed until the transcript that announced
-//     it is re-read.
-//
-// The error return is KEPT rather than dropped as now-unreachable: the reset is
-// still a step establishment must be able to refuse, and restoreError is still
-// how a refusal reaches the link exactly once.
-func (t *Tracker) Restore() error {
-	t.log.With(logging.Context{Operation: "restore-open-tasks"}).LogVerbose("restore requested")
-	// Loud, and at error level, because this is silent data loss in the user's
-	// feed: work that was running is now untracked and will never be resolved to
-	// a terminal status by this process.
-	t.log.With(logging.Context{Operation: "restore-open-tasks", Level: "error"}).Log(
-		"store.v1 reports no open tasks (OpenTaskState and CursorList were deleted with no successor); " +
-			"tasks open across this restart are neither tracked nor swept, and their spools stay unattributed until their transcripts are re-read")
-	t.mu.Lock()
-	t.tasks = map[taskKey]*task{}
-	t.restoreFailure = ""
-	t.mu.Unlock()
-	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log("open-task tracker reset; no persisted open tasks are recoverable")
-	return nil
-}
-
-// restoreError retains one canonical record for an identical invalid snapshot.
-// Establishment retries the same authoritative snapshot until the store changes;
-// enqueuing the same session diagnostic on every retry would grow the outbox
-// forever while the link is necessarily unable to flush it.
-func (t *Tracker) restoreError(ctx logging.Context, err error) error {
-	fingerprint := ctx.Session + "\x00" + ctx.Task + "\x00" + err.Error()
-	t.mu.Lock()
-	repeated := t.restoreFailure == fingerprint
-	if !repeated {
-		t.restoreFailure = fingerprint
-	}
-	t.mu.Unlock()
-	if !repeated {
-		ctx.Operation = "restore-open-tasks"
-		ctx.Level = "error"
-		t.log.With(ctx).Log("recovery validation failed: %v", err)
-	}
-	return err
-}
-
-// Activity records that a task's file produced new bytes at nowMs and clears any
-// vanish timer (the file is present again).
-func (t *Tracker) Activity(session, id string, nowMs int64) {
+// Activity records that the file grew, which is the only evidence of liveness a
+// file reader has. It also clears a vanish: a file that came back was a rename
+// race, not a disappearance.
+func (t *Tracker) Activity(path string, nowMs int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if tk, ok := t.tasks[taskKey{session: session, id: id}]; ok {
-		tk.lastActMs = nowMs
-		tk.vanishedAtMs = 0
+	existing, ok := t.open[path]
+	if !ok {
+		return
+	}
+	existing.work.LastActivityMs = nowMs
+	if existing.vanishedAtMs != 0 {
+		existing.vanishedAtMs = 0
+		t.bound(existing.work).Log("the vanished file is back and growing; its grace clock is cleared")
 	}
 }
 
-// MarkVanished notes that a task's file first went missing at nowMs (starts the
-// grace clock). Repeated calls keep the earliest vanish time.
-func (t *Tracker) MarkVanished(session, id string, nowMs int64) {
+// MarkVanished starts the grace clock for a file that disappeared.
+func (t *Tracker) MarkVanished(path string, nowMs int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if tk, ok := t.tasks[taskKey{session: session, id: id}]; ok && tk.vanishedAtMs == 0 {
-		tk.vanishedAtMs = nowMs
+	existing, ok := t.open[path]
+	if !ok {
+		return
 	}
-}
-
-// MarkPresent clears a vanish timer (the file reappeared before grace elapsed).
-func (t *Tracker) MarkPresent(session, id string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if tk, ok := t.tasks[taskKey{session: session, id: id}]; ok {
-		tk.vanishedAtMs = 0
+	if existing.vanishedAtMs != 0 {
+		return
 	}
+	existing.vanishedAtMs = nowMs
+	t.bound(existing.work).With(logging.Context{Level: "warn"}).Log(
+		"the run's file vanished; the grace window of %s decides whether that is a rename race or a LOST run", t.opt.Grace)
 }
 
-// Close removes a task that reached a real terminal elsewhere (a TaskStop twin
-// or a stream terminal); its slot is freed so it is never LOST-swept.
-func (t *Tracker) Close(session, id string) {
+// Settle stops tracking a run whose terminal the reader actually READ (a
+// spool's EXIT marker, say). A settled run is never swept: LOST is only ever
+// the answer for a run we stopped seeing, never for one we saw finish.
+func (t *Tracker) Settle(path string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.tasks, taskKey{session: session, id: id})
+	existing, ok := t.open[path]
+	if !ok {
+		return
+	}
+	delete(t.open, path)
+	t.bound(existing.work).Log("run settled by a terminal read from its own file; it can no longer be concluded LOST")
 }
 
-// Open reports whether id is currently tracked (test/introspection helper).
-func (t *Tracker) IsOpen(session, id string) bool {
+// Open reports whether a path is still being tracked.
+func (t *Tracker) Open(path string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	_, ok := t.tasks[taskKey{session: session, id: id}]
+	_, ok := t.open[path]
 	return ok
 }
 
-// Sweep evaluates every open task against the vanish-grace and silence windows,
-// emits a LOST TaskEnded for each that crossed a threshold, and closes them.
-func (t *Tracker) Sweep(nowMs int64) []*storev1.StoreEntry {
-	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep requested now_ms=%d", nowMs)
+// Sweep concludes every run whose grace or silence window has expired, and
+// stops tracking it. The conclusions are returned in path order so a sweep's
+// records are stable across runs.
+func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var out []*storev1.StoreEntry
-	for key, tk := range t.tasks {
-		switch {
-		case tk.vanishedAtMs != 0 && nowMs-tk.vanishedAtMs >= t.opt.Grace.Milliseconds():
-			out = append(out, t.lost(tk, "vanished-file"))
-			delete(t.tasks, key)
-		case nowMs-tk.lastActMs >= t.silence(tk.kind).Milliseconds():
-			out = append(out, t.lost(tk, "silence-timeout"))
-			delete(t.tasks, key)
-		}
+	if bootMs <= 0 && !t.bootUnknownSaid {
+		// BootSweep already said the loud part once; this records that the
+		// sweep's boot arm is inert too, rather than leaving it unstated.
+		t.bootUnknownSaid = true
+		t.log.With(logging.Context{Operation: "lost-policy"}).LogVerbose(
+			"boot time unavailable: the sweep's swept_up arm is inert and a pre-boot run can only be concluded by its silence")
 	}
-	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep complete inferred_lost=%d", len(out))
-	return out
+	var out []Lost
+	for path, existing := range t.open {
+		reason, concluded := t.conclude(existing, bootMs, nowMs)
+		if !concluded {
+			continue
+		}
+		delete(t.open, path)
+		out = append(out, Lost{Work: existing.work, Reason: reason, ObservedAtMs: nowMs})
+	}
+	return t.state(out, nowMs)
 }
 
-// BootSweep LOSTs every open task whose started_at predates bootMs (nothing
-// survives a reboot). Run once at startup.
-func (t *Tracker) BootSweep(bootMs, nowMs int64) []*storev1.StoreEntry {
-	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep requested boot_ms=%d now_ms=%d", bootMs, nowMs)
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	var out []*storev1.StoreEntry
-	for key, tk := range t.tasks {
-		if tk.startedAtMs > 0 && tk.startedAtMs < bootMs {
-			out = append(out, t.lost(tk, "boot-sweep"))
-			delete(t.tasks, key)
-		}
-	}
-	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep complete inferred_lost=%d", len(out))
-	return out
-}
-
-// lost builds the LOST end-of-work record and loud-logs the transition.
+// conclude decides whether one entry's window has expired. Caller holds mu.
 //
-// LOST IS ITS OWN OUTCOME AND IS NEVER FOLDED INTO FAILURE. We do not know that
-// the work died; we know only that we cannot see it any more. The inference is
-// carried so a reader can tell "we watched it exit" from "we stopped hearing
-// from it", and so a wrong threshold is diagnosable rather than merely wrong.
-func (t *Tracker) lost(tk *task, inference string) *storev1.StoreEntry {
-	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).
-		Log("LOST kind=%d inference=%s; never reported as succeeded", tk.kind, inference)
-	return convert.DetachedLost(convert.Attribution{
-		SessionID:    tk.session,
-		Path:         tk.outputPath,
-		ProducedAtMs: nowMillis(),
-	}, tk.id, inference)
+// A VANISHED FILE IS JUDGED ONLY BY ITS GRACE WINDOW: that we watched it
+// disappear is a better statement than any window could make, so nothing else
+// is consulted until the grace decides between a rename race and a LOST run.
+// Otherwise the BOOT rule comes first, because "the file predates the reboot"
+// says HOW we know rather than merely that the file is quiet.
+func (t *Tracker) conclude(e *entry, bootMs, nowMs int64) (Reason, bool) {
+	if e.vanishedAtMs != 0 && nowMs-e.vanishedAtMs >= t.opt.Grace.Milliseconds() {
+		return ReasonFileVanished, true
+	}
+	if e.vanishedAtMs != 0 {
+		return "", false
+	}
+	if bootMs > 0 && e.work.LastActivityMs < bootMs {
+		return ReasonSweptUp, true
+	}
+	if nowMs-e.work.LastActivityMs >= t.silence(e.work.Kind).Milliseconds() {
+		return ReasonWentSilent, true
+	}
+	return "", false
 }
 
-func (t *Tracker) silence(k tail.Kind) time.Duration {
-	switch k {
-	case tail.KindShellSpool:
+// BootSweep concludes every tracked run whose file has not been written since
+// before the machine booted. Nothing survives a reboot, so a run still open
+// across one was never going to report again.
+func (t *Tracker) BootSweep(bootMs, nowMs int64) []Lost {
+	if bootMs <= 0 {
+		// Without a boot time the sweep cannot run, and a pre-boot run stays
+		// "running" forever in every reader downstream. That is a real loss, so
+		// it is stated rather than passed over.
+		t.log.With(logging.Context{Operation: "boot-sweep", Level: "warn"}).Log(
+			"boot time unavailable: runs that predate the reboot cannot be swept and stay open")
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []Lost
+	for path, existing := range t.open {
+		if existing.work.LastActivityMs >= bootMs {
+			continue
+		}
+		delete(t.open, path)
+		out = append(out, Lost{Work: existing.work, Reason: ReasonSweptUp, ObservedAtMs: nowMs})
+	}
+	return t.state(out, nowMs)
+}
+
+// state logs each conclusion and returns them in a stable order. Caller holds mu.
+func (t *Tracker) state(out []Lost, nowMs int64) []Lost {
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	for _, lost := range out {
+		t.bound(lost.Work).With(logging.Context{Level: "warn"}).Log(
+			"run concluded LOST reason=%s: we stopped seeing it, which is not a claim that it failed (last_activity_ms=%d observed_at_ms=%d)",
+			lost.Reason, lost.LastActivityMs, nowMs)
+	}
+	return out
+}
+
+// silence is the per-kind window a quiet file is given before it counts as
+// silent. Caller holds mu.
+func (t *Tracker) silence(kind tail.Kind) time.Duration {
+	switch kind {
+	case tail.KindShellSpool, tail.KindResidueSpool:
 		return t.opt.ShellSilence
 	case tail.KindWorkflowJournal:
 		return t.opt.WorkflowSilence
@@ -287,5 +313,13 @@ func (t *Tracker) silence(k tail.Kind) time.Duration {
 	}
 }
 
-// nowMillis is overridable in tests.
-var nowMillis = func() int64 { return time.Now().UnixMilli() }
+// bound builds the log context for one run. Caller holds mu.
+func (t *Tracker) bound(work Work) *logging.Bound {
+	return t.log.With(logging.Context{
+		Operation:  "lost-policy",
+		Path:       work.Path,
+		TaskID:     work.TaskID,
+		AgentID:    work.OwnerAgentID,
+		ActivityID: work.RunActivityID,
+	})
+}
