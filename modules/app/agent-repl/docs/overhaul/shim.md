@@ -60,9 +60,14 @@ orchestration chain.
 
 ### Process-level obligations (rulings 2026-08-29)
 
-- KERNEL LOCKS — THE SHIM HOLDS BOTH: at startup, before anything else, the
-  shim takes two exclusive kernel flocks for its lifetime — one keyed by
-  session id, one keyed by workspace dir. They exist because on a fresh
+- KERNEL LOCKS — THE SHIM HOLDS BOTH, TAKEN INSIDE StartSession (ruled
+  2026-09-02, daemon relaunch flow): the shim takes two exclusive kernel
+  flocks for its lifetime — one keyed by session id, one keyed by workspace
+  dir — both inside StartSession, before the SDK is touched. An INERT shim
+  (spawned, serving, no session) holds NEITHER lock, so the rollout's
+  prelaunched shim is never blocked behind the live one; a workspace-lock
+  conflict answers StartSession `conversation_owned`. The daemon's probe
+  semantics are unchanged (a held lock = a live shim owns the conversation). They exist because on a fresh
   daemon boot a surviving shim may not have dialed in yet, so only a kernel
   lock answers "is this conversation already owned" (connection tracking
   says NO when the truth is NOT YET); the workspace key catches two session

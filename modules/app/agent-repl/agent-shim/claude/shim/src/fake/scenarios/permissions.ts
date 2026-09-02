@@ -188,9 +188,110 @@ export const PERM_UNDECIDABLE = scenario({
   },
 });
 
+export const PERM_ALLOW_STANDING_MODE = scenario({
+  name: "perm-allow-standing-mode",
+  prompt: "!perm-allow-standing-mode",
+  emits:
+    "a gated `Bash` whose ask OFFERS a standing that changes the session's permission mode: the suggestions carry " +
+    "an `addRules` and a `setMode` to `acceptEdits` on the SESSION destination, so a grant echoing the offered " +
+    "standing legitimately moves the session's mode",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms:
+    "AgentPermissionAllowed.scope=standing whose changes include set_mode — the ONE grounded producer of a " +
+    "mode-changing grant, and the negative for a set_mode the ask never offered",
+  async run(ctx) {
+    ctx.log(
+      { turn: ctx.turn, branch: "perm-allow-standing-mode" },
+      "fake permission (standing carrying a mode change) turn",
+    );
+    const call = ctx.toolUse("Bash", { command: "npm run build" });
+    const decision = await askPermission(ctx, call, {
+      title: "Claude wants to run npm run build",
+      decisionReason: "the command is not covered by an existing rule",
+      suggestions: [
+        {
+          type: "addRules",
+          rules: [{ toolName: call.name, ruleContent: "npm run build" }],
+          behavior: "allow",
+          destination: "localSettings",
+        },
+        { type: "setMode", mode: "acceptEdits", destination: "session" },
+      ],
+    });
+    if (decision?.behavior !== "allow") {
+      ctx.toolResult(call, "denied", { error: "denied" }, { isError: true });
+      conclude(ctx, "The user declined the command.");
+      return;
+    }
+    const standing = decision.updatedPermissions ?? [];
+    ctx.log({ standing_rules: standing.length }, "fake mode-carrying standing ask resolved");
+    ctx.toolResult(call, "built\n", {
+      stdout: "built\n",
+      stderr: "",
+      interrupted: false,
+      isImage: false,
+      noOutputExpected: false,
+    });
+    conclude(ctx, `Ran the command with ${standing.length} standing rule(s).`);
+  },
+});
+
+export const PERM_NO_STANDING_OFFERED = scenario({
+  name: "perm-no-standing",
+  prompt: "!perm-no-standing",
+  emits:
+    "a gated `Bash` whose ask offers NO `suggestions` at all — the shape the vendor sends when no standing rule " +
+    "could be written for the call. The ask can only ever produce a once-allow",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms: "AgentPermission.start with offered_standing UNSET — the negative for an unoffered standing grant",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "perm-no-standing" }, "fake permission turn offering no standing");
+    const call = ctx.toolUse("Bash", { command: "git log -1" });
+    const decision = await askPermission(ctx, call, { suggestions: [] });
+    if (decision?.behavior !== "allow") {
+      ctx.toolResult(call, "denied", { error: "denied" }, { isError: true });
+      conclude(ctx, "The user declined the command.");
+      return;
+    }
+    ctx.toolResult(call, "one commit\n", {
+      stdout: "one commit\n",
+      stderr: "",
+      interrupted: false,
+      isImage: false,
+      noOutputExpected: false,
+    });
+    conclude(ctx, "Ran the command.");
+  },
+});
+
+export const PERM_HOLD = scenario({
+  name: "perm-hold",
+  prompt: "!perm-hold",
+  emits:
+    "a gated `Bash` ask, and then a turn that PARKS however the ask resolves: the scenario never concludes on " +
+    "its own, so the only terminal it can reach is an interrupt's. It exists so a teardown during an open ask " +
+    "has both obligations observable at once — the callback resolved, and the turn interrupted",
+  writes: "the tool_use line, the prompt line and (at the interrupt) the turn record",
+  arms: "AgentPermissionDenied by a teardown, then AgentInterrupted.by_user",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "perm-hold" }, "fake permission turn that PARKS after the ask");
+    const call = ctx.toolUse("Bash", { command: "sleep 600" });
+    // Not awaited as the turn's outcome: whatever the gate answers, the turn
+    // stays in flight until an interrupt lands, which is what makes the
+    // interrupted terminal the only one this scenario can produce.
+    void askPermission(ctx, call);
+    await ctx.awaitInterrupt();
+    ctx.log({ turn: ctx.turn }, "fake perm-hold turn released by an interrupt");
+    // No explicit result: the engine emits the interrupt terminal.
+  },
+});
+
 export const PERMISSION_SCENARIOS = [
   PERM_ALLOW_ONCE,
   PERM_ALLOW_STANDING,
+  PERM_ALLOW_STANDING_MODE,
+  PERM_NO_STANDING_OFFERED,
+  PERM_HOLD,
   PERM_DENY_USER,
   PERM_DENY_POLICY,
   PERM_UNDECIDABLE,

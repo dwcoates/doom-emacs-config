@@ -9,11 +9,13 @@
  * restarted daemon able to reattach and miss nothing.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import {
   agentId,
+  allowOnce,
   freshSession,
   openStream,
   pointer,
@@ -24,6 +26,7 @@ import {
   stopAgent,
   turnId,
   watchAgentRequest,
+  workId,
 } from "../integration-support/client.js";
 import {
   entryFrame,
@@ -35,6 +38,7 @@ import {
   sessionStarted,
   sessionUpdate,
   startTurnKind,
+  stopBashAccepted,
   turnKilled,
   turnStarted,
   updateAccepted,
@@ -106,7 +110,7 @@ describe("StartTurn", () => {
     // paint was missing the turn it had just started. `floor` still says there
     // is no older history, which is a different statement from "no page".
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
 
     const response = await shim.clients.h1.startTurn(
       startTurnRequest({ turn: "t1", text: "!md" }),
@@ -115,8 +119,22 @@ describe("StartTurn", () => {
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const page = response.result.value.page;
     expect(page?.entries.length).toBe(1);
-    expect(page?.entries[0]?.entry?.entry.case).toBe("userPrompt");
     expect(page?.boundary.case).toBe("floor");
+    // THE ENTRY IS THAT PROMPT, not merely a prompt: its TurnId and its text
+    // are the ones this call carried. "A user_prompt is on the page" would pass
+    // on a shim that served some other turn's question.
+    const served = entryPrompt(page?.entries[0] ?? create(conversationv1.HistoryEntryAtSchema, {}));
+    expect(served?.id?.value).toBe("t1");
+    const blocks = served?.said?.content?.blocks ?? [];
+    expect(blocks.map((block) => (block.block.case === "text" ? block.block.value.text : ""))).toEqual([
+      "!md",
+    ]);
+    // AND THE FILE PLANE AGREES. Both values above are the shim's own; the
+    // vendor's transcript is the independent witness that the prompt it served
+    // is the prompt it actually delivered.
+    expect(userPrompts(readTranscript(shim.dirs, started.vendorSessionId)).map(promptText)).toEqual([
+      "!md",
+    ]);
   });
 
   test("a later turn's page carries the previous turn's settled entries, newest first", async () => {
@@ -137,9 +155,22 @@ describe("StartTurn", () => {
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const entries = response.result.value.page?.entries ?? [];
     expect(entries.length).toBeGreaterThan(0);
-    // Newest first: the pointers descend.
-    const pointers = entries.map((entry) => Number(entry.at?.value ?? 0));
-    expect([...pointers].sort((a, b) => b - a)).toEqual(pointers);
+    // NEWEST FIRST, ASSERTED WITHOUT READING THE POINTER. Pointers are OPAQUE:
+    // the store mints them and only it may interpret them, so parsing one as an
+    // integer here would build the suite against a store that happens to mint
+    // numbers. What "newest first" means on the wire is the SERVED SEQUENCE —
+    // the page's own order — against a ground truth this test already knows:
+    // the order the two turns were started in. t1's prompt must come AFTER t2's
+    // in the served list.
+    const promptOrder = entries
+      .map(entryPrompt)
+      .filter((prompt): prompt is conversationv1.AgentPrompt => prompt !== null)
+      .map((prompt) => prompt.id?.value ?? "");
+    expect(promptOrder).toEqual(["t2", "t1"]);
+    // Every pointer is distinct, which is the only other property a consumer
+    // may rely on.
+    const served = entries.map((entry) => entry.at?.value ?? "");
+    expect(new Set(served).size).toBe(served.length);
   });
 
   test("the page carries terminal frames AS ENTRIES", async () => {
@@ -268,6 +299,203 @@ describe("StartTurn", () => {
   });
 });
 
+/**
+ * The turn-stop taxonomy, as ONE table.
+ *
+ * `sdk.d.ts` declares FOUR `result` error subtypes; every finer stop is a
+ * `TerminalReason` riding the result, and THE PAIRING IS THE CONTRACT — a
+ * converter keyed on `subtype` alone reaches four of the sixteen
+ * conversation.v1 arms. So the mock's published table is walked here row by
+ * row: each `!name` names one (subtype, terminal_reason) pair, and the row
+ * states the frame arm that pair must reach. One case per row, so a regression
+ * names the arm it broke rather than "the taxonomy".
+ *
+ * WHAT IS DELIBERATELY NOT ASSERTED HERE, and why:
+ *
+ * - `AgentUpdate.api_error` is a RECORD-PLANE fact. The vendor writes
+ *   `system:api_error` to the transcript, never onto the SDK stream, so the
+ *   sidecar is its only producer and no `!api-*` row can put one on this live
+ *   WatchAgent. The rows below assert the terminal, which is the whole of what
+ *   the stream plane owes.
+ * - `!refusal-fallback`, `!refusal-no-fallback` and `!context-window` publish
+ *   an `AgentResponseFailure` reason. The refusals arrive as a `fallback`
+ *   content block (no text, so no response unit is minted) and
+ *   `!context-window` emits no assistant message at all, so those three reasons
+ *   have NO producer on this plane today. Recorded as a gap rather than
+ *   asserted from an invented fixture.
+ */
+interface StopRow {
+  /** The mock lever. */
+  readonly prompt: string;
+  /** The turn terminal's frame arm. */
+  readonly terminal: "success" | "failure";
+  /** The oneof arm inside that terminal. */
+  readonly arm: string;
+  /**
+   * The `ApiRequestFailed` kind the arm must carry.
+   *
+   * Twelve rows reach `api_request_failed`, so the arm alone says almost
+   * nothing: what a consumer acts on is the KIND inside it — whether waiting
+   * helps (429/529), whether the user must act (401/402/403), or whether the
+   * request itself was wrong (400/413).
+   */
+  readonly apiKind?: string;
+  /** True when the row parks until a stop lands (its terminal IS the stop's). */
+  readonly needsStop?: boolean;
+}
+
+const STOP_TAXONOMY: readonly StopRow[] = [
+  // The producer's own turn-ending vocabulary: `error_during_execution` plus a
+  // TerminalReason, which is where most of these live.
+  { prompt: "!fail-execution", terminal: "failure", arm: "executionError" },
+  { prompt: "!fail-max-turns", terminal: "failure", arm: "maxTurns" },
+  { prompt: "!fail-budget", terminal: "failure", arm: "budgetExhausted" },
+  {
+    prompt: "!fail-structured-output",
+    terminal: "failure",
+    arm: "structuredOutputRetryExhausted",
+  },
+  { prompt: "!fail-blocking-limit", terminal: "failure", arm: "blockingLimit" },
+  { prompt: "!fail-rapid-refill", terminal: "failure", arm: "rapidRefillBreaker" },
+  { prompt: "!fail-prompt-too-long", terminal: "failure", arm: "promptTooLong" },
+  { prompt: "!fail-image", terminal: "failure", arm: "imageError" },
+  { prompt: "!fail-model", terminal: "failure", arm: "modelError" },
+  {
+    prompt: "!fail-malformed-tool-use",
+    terminal: "failure",
+    arm: "malformedToolUseExhausted",
+  },
+  { prompt: "!fail-tool-deferred", terminal: "failure", arm: "toolDeferred" },
+  {
+    prompt: "!fail-tool-deferred-unavailable",
+    terminal: "failure",
+    arm: "toolDeferredUnavailable",
+  },
+  { prompt: "!fail-turn-setup", terminal: "failure", arm: "turnSetupFailed" },
+  { prompt: "!fail-stop-hook", terminal: "failure", arm: "stopHookPrevented" },
+  { prompt: "!fail-hook-stopped", terminal: "failure", arm: "hookStopped" },
+  // UNGROUNDED ARM, ASSERTED AS IT ACTUALLY LANDS: no `TerminalReason` names
+  // continuation-prevention, so the two declared prevent-continuation signals
+  // ride a `stop_hook_prevented` terminal and
+  // `AgentFailure.continuation_prevented` has no producer at all.
+  { prompt: "!fail-continuation-prevented", terminal: "failure", arm: "stopHookPrevented" },
+  // `aborted_tools` is the ONE reason that is not a failure: the tools were
+  // aborted because a user stopped them, which is an interruption.
+  { prompt: "!fail-aborted-tools", terminal: "success", arm: "interrupted" },
+  // The API family: twelve reasons, ONE arm, distinguished by the taxonomy the
+  // arm carries (asserted per-kind in the test that follows).
+  { prompt: "!api-400", terminal: "failure", arm: "apiRequestFailed", apiKind: "invalidRequest" },
+  { prompt: "!api-401", terminal: "failure", arm: "apiRequestFailed", apiKind: "authenticationFailed" },
+  { prompt: "!api-403", terminal: "failure", arm: "apiRequestFailed", apiKind: "permissionDenied" },
+  { prompt: "!api-404", terminal: "failure", arm: "apiRequestFailed", apiKind: "notFound" },
+  { prompt: "!api-413", terminal: "failure", arm: "apiRequestFailed", apiKind: "requestTooLarge" },
+  { prompt: "!api-429", terminal: "failure", arm: "apiRequestFailed", apiKind: "rateLimited" },
+  { prompt: "!api-500", terminal: "failure", arm: "apiRequestFailed", apiKind: "internal" },
+  { prompt: "!api-529", terminal: "failure", arm: "apiRequestFailed", apiKind: "overloaded" },
+  // THREE KINDS THE RESULT RECORD CANNOT NAME. `billing_error`,
+  // `oauth_org_not_allowed` and `max_output_tokens` are separated from their
+  // neighbours only by the vendor's own error CLASS, and the result record
+  // carries the HTTP status alone — 402 and a null status fall through to
+  // `unmodeled`, and the org refusal is indistinguishable from an ordinary 403.
+  // Asserted as they actually land, with the gap named, rather than as an arm
+  // nothing on this plane produces.
+  { prompt: "!api-billing", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  {
+    prompt: "!api-oauth-org",
+    terminal: "failure",
+    arm: "apiRequestFailed",
+    apiKind: "permissionDenied",
+  },
+  { prompt: "!api-max-output", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  { prompt: "!api-unmodeled", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  // The response-level stops. `!max-tokens` keeps the partial text and the turn
+  // itself completes; `!context-window` and the two refusals end the turn.
+  { prompt: "!max-tokens", terminal: "success", arm: "completed" },
+  { prompt: "!refusal-fallback", terminal: "success", arm: "completed" },
+  // `model_error`: the refusal with no fallback ends on the model's own
+  // failure, which is the reason the result carries.
+  { prompt: "!refusal-no-fallback", terminal: "failure", arm: "modelError" },
+  { prompt: "!context-window", terminal: "failure", arm: "promptTooLong" },
+  // The interrupt lands INSIDE a tool call, so the turn parks until the stop.
+  { prompt: "!interrupt", terminal: "success", arm: "interrupted", needsStop: true },
+];
+
+describe("the turn-stop taxonomy", () => {
+  test.each(STOP_TAXONOMY)("$prompt reaches its declared terminal", async (row) => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: row.prompt }));
+    if (row.needsStop === true) {
+      // The park is armed before the frame that announces it, so waiting for
+      // any entry is enough to know the interrupt has something to land on.
+      await watch.until((frame) => frame.frame.case === "entry");
+      updateAccepted(await shim.clients.h1.updateAgent(stopAgent()));
+    }
+    const terminal = await untilTerminal(watch);
+
+    const frame = entryFrame(terminal);
+    expect(frame?.result.case).toBe(row.terminal);
+    if (frame?.result.case === "failure") {
+      expect(frame.result.value.failure.case).toBe(row.arm);
+    } else if (frame?.result.case === "success") {
+      expect(frame.result.value.outcome.case).toBe(row.arm);
+    }
+    if (row.apiKind !== undefined) {
+      if (frame?.result.case !== "failure" || frame.result.value.failure.case !== "apiRequestFailed") {
+        throw new Error("the api row did not end AgentFailure.api_request_failed");
+      }
+      expect(frame.result.value.failure.value.kind.case).toBe(row.apiKind);
+    }
+    watch.close();
+  });
+
+  test("an api_error is MID-TURN EVIDENCE on the record plane, never a terminal", async () => {
+    // The two are distinct facts with distinct producers. The vendor writes
+    // `system:api_error` to the TRANSCRIPT and never onto the SDK stream, so
+    // the sidecar is the only producer of `AgentUpdate.api_error` and this live
+    // stream carries the terminal alone. A converter that raised the evidence
+    // into a terminal would end turns that recovered; one that read the
+    // terminal as evidence would draw a failed turn as still running.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!api-429" }));
+    const terminal = await untilTerminal(watch);
+
+    // The EVIDENCE, on the plane that has it.
+    const records = readTranscript(shim.dirs, started.vendorSessionId);
+    expect(records.filter((record) => record.subtype === "api_error").length).toBe(1);
+    // The TERMINAL, on this one, carrying the same classification.
+    const frame = entryFrame(terminal);
+    if (frame?.result.case !== "failure" || frame.result.value.failure.case !== "apiRequestFailed") {
+      throw new Error("the turn did not end AgentFailure.api_request_failed");
+    }
+    expect(frame.result.value.failure.value.kind.case).toBe("rateLimited");
+    // And no api_error page line rode the live stream — that arm is the
+    // sidecar's, and a second producer would double every recorded failure.
+    expect(
+      watch.frames().some((served) => {
+        if (served.frame.case !== "entry") return false;
+        const agentFrame = entryFrame(watchAgentEntry(served));
+        return (
+          agentFrame?.result.case === "update" &&
+          agentFrame.result.value.update.case === "apiError"
+        );
+      }),
+    ).toBe(false);
+    watch.close();
+  });
+});
+
 describe("WatchAgent", () => {
   test("opened before any turn, it opens with an EMPTY page and a floor boundary", async () => {
     // The counterpart to R15's StartTurn page: nothing has been written yet, so
@@ -361,8 +589,22 @@ describe("WatchAgent", () => {
       if (item.case !== "response" || item.value.result.case !== "success") return [];
       return [item.value.result.value];
     });
-    expect(settled.length).toBeGreaterThan(0);
-    expect(settled[0]?.prose?.markdown).not.toBe("");
+    // THE TERMINAL SELF-CORRECTS: a consumer that dropped every delta still
+    // ends up with the right text, which is only true if the whole IS the
+    // concatenation. "Not empty" would pass on a terminal carrying one word.
+    const deltas = watch.frames().flatMap((frame) => {
+      if (frame.frame.case !== "entry") return [];
+      const agentFrame = entryFrame(frame.frame.value);
+      if (agentFrame?.result.case !== "update") return [];
+      const update = agentFrame.result.value.update;
+      if (update.case !== "activity") return [];
+      const item = update.value.item;
+      if (item.case !== "response" || item.value.result.case !== "update") return [];
+      return [item.value.result.value.newMarkdown];
+    });
+    expect(settled.length).toBe(1);
+    expect(deltas.length).toBeGreaterThan(1);
+    expect(settled[0]?.prose?.markdown).toBe(deltas.join(""));
     expect(settled[0]?.authorship.case).toBe("fromModel");
     watch.close();
   });
@@ -398,6 +640,26 @@ describe("WatchAgent", () => {
       }),
     );
     expect(carryingIds.size).toBe(1);
+    // THE CARRIER IS THE MESSAGE'S FIRST BLOCK. Unit keys are
+    // `activity:<message>:<n>` 0-based, so the carrier's id ends in `:0` — and
+    // it is the EARLIEST-POINTERED unit of that message, which is the property
+    // a consumer relies on when it draws the cost beside the answer's opening.
+    const carrier = [...carryingIds][0] ?? "";
+    expect(carrier.endsWith(":0")).toBe(true);
+    const message = carrier.slice(0, carrier.lastIndexOf(":"));
+    // Served order IS pointer order on one tail, so "earliest-pointered" is the
+    // first frame of that message the stream served — no pointer is parsed.
+    const ofMessage = watch
+      .frames()
+      .filter((frame) => frame.frame.case === "entry")
+      .map((frame) => {
+        const agentFrame = entryFrame(watchAgentEntry(frame));
+        if (agentFrame?.result.case !== "update") return "";
+        const update = agentFrame.result.value.update;
+        return update.case === "activity" ? (update.value.activityId?.value ?? "") : "";
+      })
+      .filter((id) => id.startsWith(`${message}:`));
+    expect(ofMessage[0]).toBe(carrier);
     watch.close();
   });
 
@@ -423,9 +685,20 @@ describe("WatchAgent", () => {
     );
     const page = watchAgentPage(await second.next());
 
+    // POINTERS ARE OPAQUE: only the store may interpret one, so "newer" is
+    // asserted as the two facts a consumer actually has — the mark itself is
+    // not replayed, and every entry the FIRST watch already served (the whole
+    // turn, through its terminal) is absent from the catch-up page.
+    const alreadySeen = new Set(
+      first
+        .frames()
+        .filter((frame) => frame.frame.case === "entry")
+        .map((frame) => watchAgentEntry(frame).at?.value ?? ""),
+    );
+    expect(alreadySeen.has(highWater)).toBe(true);
     expect(
-      page.entries.every((entry) => Number(entry.at?.value ?? 0) > Number(highWater)),
-    ).toBe(true);
+      page.entries.map((entry) => entry.at?.value ?? "").filter((at) => alreadySeen.has(at)),
+    ).toEqual([]);
     second.close();
   });
 
@@ -466,7 +739,81 @@ describe("WatchAgent", () => {
     after.close();
   });
 
-  test("an unknown watch target closes the stream at the transport", async () => {
+  test("a known_through GAP wider than page_size serves a page and `more` INTO the gap", async () => {
+    // The reattach case where the daemon was away long enough for the book to
+    // outgrow one page: the catch-up cannot be served whole, so it is a page
+    // plus a boundary that says where to continue. A shim that served only what
+    // fit and reported `floor` would have the consumer silently missing the
+    // middle of the conversation.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    const mark = watchAgentEntry(await watch.next()).at?.value ?? "";
+    await untilTerminal(watch);
+    // A second turn, so the gap after `mark` is comfortably more than one entry.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!read" }));
+    await untilTerminal(watch);
+    watch.close();
+
+    const catchUp = openStream((options) =>
+      shim.clients.h1.watchAgent(
+        watchAgentRequest({ knownThrough: pointer(mark), pageSize: 2 }),
+        options,
+      ),
+    );
+    const page = watchAgentPage(await catchUp.next());
+
+    expect(page.entries.length).toBe(2);
+    // `more`, not `floor`: the boundary is the caller's handle on the rest of
+    // the gap, and it names an entry the page actually served.
+    expect(page.boundary.case).toBe("more");
+    if (page.boundary.case === "more") {
+      expect(page.entries.map((entry) => entry.at?.value)).toContain(
+        page.boundary.value.lastEntry?.value,
+      );
+    }
+    catchUp.close();
+  });
+
+  test("two subscribers share one book, and one closing mid-burst does not stall the other", async () => {
+    // A book is not a queue: every subscriber gets its own tail off the same
+    // rows. The failure this guards is a shared cursor or a shared write pump —
+    // one consumer going away mid-turn would then stop the other's frames, and
+    // the surviving surface would freeze with no error to explain it.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const first = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    const second = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await first.next();
+    await second.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    // Both are tailing; one dies partway through the burst.
+    await first.next();
+    await second.next();
+    first.close();
+    const terminal = await untilTerminal(second);
+
+    // The survivor reached the turn's end, which is the whole claim.
+    const frame = entryFrame(terminal);
+    expect(frame?.result.case).toBe("success");
+    second.close();
+  });
+
+  test("an unknown watch target is refused NOT_FOUND, naming the agent", async () => {
+    // INTERIM RULING (ledger, rebuild merge): `WatchAgent` has no refusal arm
+    // of its own, so an unknown target is a TRANSPORT refusal — and it is
+    // pinned rather than left as "some throw", because a store outage, a
+    // cancelled call and an id nobody minted all reach a caller as an
+    // exception and only the code tells them apart.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -476,8 +823,14 @@ describe("WatchAgent", () => {
         options,
       ),
     );
+    const failure = await stream.nextOrEnd().then(
+      () => undefined,
+      (err: unknown) => ConnectError.from(err),
+    );
 
-    await expect(stream.next()).rejects.toThrow();
+    if (failure === undefined) throw new Error("the unknown target was not refused");
+    expect(failure.code).toBe(Code.NotFound);
+    expect(failure.message).toContain("no-such-agent");
   });
 });
 
@@ -522,8 +875,52 @@ describe("ReadHistory", () => {
     );
 
     expect(older.boundary.case).toBe("floor");
-    const newest = Number(firstPage.entries[firstPage.entries.length - 1]?.at?.value ?? 0);
-    expect(older.entries.every((entry) => Number(entry.at?.value ?? 0) < newest)).toBe(true);
+    // "OLDER" WITHOUT READING A POINTER: the walk is disjoint from the page it
+    // continued, and it stopped at the floor. Parsing the marks as integers
+    // would assert against a store that happens to mint numbers.
+    const firstMarks = new Set(firstPage.entries.map((entry) => entry.at?.value ?? ""));
+    expect(older.entries.map((entry) => entry.at?.value ?? "").filter((at) => firstMarks.has(at))).toEqual(
+      [],
+    );
+    expect(older.entries.length).toBeGreaterThan(0);
+  });
+
+  test("after(last_entry) with a page_size larger than the remainder ends at the FLOOR", async () => {
+    // A budget bigger than what is left is not an error and not a `more`: the
+    // page is however many entries remain, and the boundary says there are no
+    // older ones. A shim that reported `more` here would have a consumer paging
+    // forever against an empty tail.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await untilTerminal(watch);
+    watch.close();
+    const whole = historyPage(
+      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })),
+    );
+    if (whole.boundary.case !== "floor") {
+      throw new Error("the fixture did not fit in one page, so there is no remainder to floor");
+    }
+    const firstPage = historyPage(
+      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 2 })),
+    );
+    if (firstPage.boundary.case !== "more") {
+      throw new Error("the fixture produced too few entries to page over");
+    }
+
+    const rest = historyPage(
+      await shim.clients.h1.readHistory(
+        readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"), { pageSize: 200 }),
+      ),
+    );
+
+    expect(rest.boundary.case).toBe("floor");
+    // EXACTLY the remainder: the whole book, less the page already served.
+    expect(rest.entries.length).toBe(whole.entries.length - firstPage.entries.length);
   });
 
   test("an unknown agent is refused unknown_agent", async () => {
@@ -766,25 +1163,46 @@ describe("KillTurn", () => {
     );
     await watch.next();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await watch.until((frame) => {
+    const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
     });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") {
+      throw new Error("expected the run's announcement");
+    }
+    const run = detached.result.value.work?.value ?? "";
 
     const response = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
     );
 
     expect(killTurnCause(response)).toBe("live");
-    expect(killTurnLive(response).liveWork.length).toBeGreaterThan(0);
+    // NAMING IT is the whole point of the refusal: a count says only that
+    // SOMETHING is live, and the refusal exists so a consumer can tell the user
+    // exactly what forcing would destroy.
+    expect(killTurnLive(response).liveWork.map((work) => work.value)).toEqual([run]);
     watch.close();
   });
 
   test("force ends it, naming the stopped work", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await shim.clients.h1.killTurn(
+    const announced = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") {
+      throw new Error("expected the run's announcement");
+    }
+    const run = detached.result.value.work?.value ?? "";
+    const refused = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
     );
 
@@ -794,9 +1212,13 @@ describe("KillTurn", () => {
 
     const killed = turnKilled(response);
     expect(killed.how.case).toBe("forced");
-    if (killed.how.case === "forced") {
-      expect(killed.how.value.stoppedWork.length).toBeGreaterThan(0);
-    }
+    if (killed.how.case !== "forced") throw new Error("the forced kill did not report forced");
+    // THE SAME ITEM THE REFUSAL NAMED, now named as stopped: the two lists are
+    // the consumer's before-and-after of one act, and a count would not say
+    // they are about the same work.
+    expect(killed.how.value.stoppedWork.map((work) => work.value)).toEqual([run]);
+    expect(killTurnLive(refused).liveWork.map((work) => work.value)).toEqual([run]);
+    watch.close();
   });
 
   test("a TurnId that is not the open turn is refused not_the_open_turn", async () => {
@@ -913,9 +1335,221 @@ describe("keep-alives", () => {
 
     const prompts = userPrompts(readTranscript(shim.dirs, started.vendorSessionId));
     expect(prompts.length).toBeGreaterThan(0);
-    expect(prompts.every((record) => !promptText(record).startsWith("<!--agent-repl:keepalive-->"))).toBe(
-      true,
+    expect(prompts.every((record) => !promptText(record).startsWith(KEEPALIVE_MARKER))).toBe(true);
+    watch.close();
+  });
+});
+
+describe("scope, arms and ordering the verbs owe", () => {
+  test("KillTurn kills THIS TURN ONLY: an earlier turn's live run survives", async () => {
+    // THE KILL IS SCOPED TO A TURN, and the refusal set is transitive only over
+    // the turn's OWN spawn set. t1 left a shell running; t2 is killed while it
+    // holds; a kill that reached across turns would destroy work the user never
+    // asked to stop and that nothing in the response named.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const announced = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") throw new Error("expected the run's announcement");
+    const run = detached.result.value.work?.value ?? "";
+    await untilTerminal(watch);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!hold" }));
+
+    const response = await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t2"), force: false }),
+    );
+
+    // t2 had nothing of its own, so it ends agent_only rather than refusing.
+    expect(turnKilled(response).how.case).toBe("agentOnly");
+    // AND t1'S RUN IS STILL LIVE: StopBash answers it, which only a live run
+    // does — an already-concluded one answers `already_ended`.
+    stopBashAccepted(
+      await shim.clients.h1.stopBash(create(shimv1.StopBashRequestSchema, { work: workId(run) })),
+    );
+    watch.close();
+  });
+
+  test("UpdateAgent.stop targeted at a LIVE detached subagent concludes it stopped_by_user", async () => {
+    // ONE API WHETHER THE AGENT IS THE MAIN THREAD OR A SUBAGENT: the same verb
+    // addresses the detached agent by its own AgentId, and the vendor's
+    // `task_notification{stopped}` is what settles it. The terminal is a page
+    // line of the SPAWNING agent's book, by the flatness rule — a subagent's
+    // work is never nested in its spawn, and its unit lives where the spawn is.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }),
+    );
+    const announced = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") throw new Error("expected the agent's announcement");
+    const subagent = detached.result.value.work?.value ?? "";
+
+    const response = await shim.clients.h1.updateAgent(stopAgent(agentId(subagent)));
+    const settled = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.activityId?.value === subagent &&
+        update.value.item.case === "subagent" &&
+        update.value.item.value.result.case === "failure"
+      );
+    });
+
+    updateAccepted(response);
+    const agentFrame = entryFrame(watchAgentEntry(settled));
+    if (agentFrame?.result.case !== "update") throw new Error("expected the settled frame");
+    const update = agentFrame.result.value.update;
+    if (update.case !== "activity" || update.value.item.case !== "subagent") {
+      throw new Error("expected a subagent activity");
+    }
+    const subagentUnit = update.value.item.value;
+    if (subagentUnit.result.case !== "failure") throw new Error("expected the failure arm");
+    expect(subagentUnit.result.value.cause.case).toBe("stoppedByUser");
+    watch.close();
+  });
+
+  test("StartTurn after the query DIED is refused query_dead", async () => {
+    // `!query-eof` ends the vendor's iterable with no result, so the session
+    // survives and the QUERY does not. The next prompt has nothing to go to,
+    // and saying so is different from `no_session`: the session is right there.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof" }));
+    // The shim's own record that the query died: waiting on it, never a timer.
+    await watch.until((frame) => sessionUpdate(frame).update.case === "queryDied");
+
+    const response = await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t2", text: "!md" }),
+    );
+
+    expect(startTurnKind(response)).toBe("queryDead");
+    watch.close();
+  });
+
+  test.todo(
+    "StartTurn is refused vendor_refused when the prompt queue rejects the submission — " +
+      "UNREACHABLE without a mock lever: the queue only throws once it is CLOSED, and every path " +
+      "that closes it also clears the query, which makes the refusal query_dead instead. Needs a " +
+      "fake-vendor lever whose streamInput refuses one submission with the query still alive.",
+  );
+
+  test("KillTurn before StartSession is refused no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+    );
+
+    expect(killTurnCause(response)).toBe("noSession");
+  });
+
+  test("UpdateAgent before StartSession is refused no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.updateAgent(stopAgent());
+
+    expect(updateAgentKind(response)).toBe("noSession");
+  });
+
+  test("an answer arriving AFTER the turn was killed is refused no_open_ask", async () => {
+    // The teardown resolved the callback as denied, so the ask is gone by the
+    // time the consumer's answer lands. It is refused with the arm that says
+    // there is nothing to answer — and it must not crash the shim, which is the
+    // half a refusal arm alone does not state.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await stream.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-hold" }));
+    const ask = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return update.case === "permission" && update.value.result.case === "start";
+    });
+    const agentFrame = entryFrame(watchAgentEntry(ask));
+    if (agentFrame?.result.case !== "update" || agentFrame.result.value.update.case !== "permission") {
+      throw new Error("expected the permission ask");
+    }
+    const askId = agentFrame.result.value.update.value.id?.value ?? "";
+    await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+    );
+    await untilTerminal(stream);
+
+    const response = await shim.clients.h1.updateAgent(
+      allowOnce(create(conversationv1.AgentPermissionIdSchema, { value: askId })),
+    );
+
+    expect(updateAgentKind(response)).toBe("noOpenAsk");
+    // AND THE SHIM IS STILL THERE: a further round trip resolves, which a
+    // process that had crashed on the late answer could not do.
+    const after = await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    expect(after.result.case).toBe("success");
+    stream.close();
+  });
+
+  test("R15: the first activity frame reaches WatchAgent only AFTER the prompt row is acked", async () => {
+    // ONE CALL SUBMITS AND PAINTS, and the prompt row is DURABLE before
+    // anything the turn produces is served — otherwise a feed can paint an
+    // answer above the question it answers. Held as an ORDERING rather than a
+    // timing: the store is armed to fail its writes, so the prompt's ack cannot
+    // land until the failure is released, and the first activity frame must
+    // still arrive after it.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    // Every write is refused from here until it is released.
+    shim.store?.failWrites("the store is holding every batch");
+
+    const started = shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // Nothing can be served while nothing is acked; releasing is what lets the
+    // prompt row land, and only then may the turn's frames follow it.
+    shim.store?.failWrites(null);
+    await started;
+    await untilTerminal(watch);
+
+    const keys = writtenKeys(shim.store?.writes() ?? []);
+    const promptAt = keys.indexOf("prompt:t1");
+    const firstActivityAt = keys.findIndex((key) => key.startsWith("activity:"));
+    expect(promptAt).toBeGreaterThanOrEqual(0);
+    expect(firstActivityAt).toBeGreaterThan(promptAt);
+    // And the SERVED order agrees with the written one: the prompt is the first
+    // thing the tail carries.
+    const servedKinds = watch
+      .frames()
+      .filter((frame) => frame.frame.case === "entry")
+      .map((frame) => watchAgentEntry(frame).entry?.entry.case ?? "");
+    expect(servedKinds[0]).toBe("userPrompt");
     watch.close();
   });
 });
