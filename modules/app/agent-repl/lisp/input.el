@@ -559,39 +559,56 @@ all -- an image-only submission is a legitimate thing to say, and an empty
                  (list (agent-repl--input-text-block text)))
                (mapcar #'agent-repl--input-image-block attachments)))))
 
-(defun agent-repl--input-accepted (ws raw arm)
-  "Finish an ACCEPTED submission for WS: clear the composer, keep the record.
+(defun agent-repl--input-accepted (ws raw arm &optional from-buffer)
+  "Finish an ACCEPTED submission for WS: keep the record, clear what was sent.
 ARM names which accepted arm answered, for the log.  Applies to every
 success arm: a minted turn, a resolved command panel, a
 recognized-but-unsupported command and a session-acting command the
-daemon acted on are all answers, and none of them leaves the user's text
-owed a resend."
+daemon acted on are all answers, and none of them leaves the sent text
+owed a resend.
+
+FROM-BUFFER says the submitted text WAS the composer\='s contents.  Only
+then is the composer erased: a canned command send (`agent-repl-update-pr\='
+and every other explicit-TEXT site) composed its own words, and erasing
+an unrelated half-written draft the user never submitted would destroy
+work the daemon was never told about (ruling on audit-3 #51).
+
+RAW is pushed onto the input history either way -- the ring is the record
+of what was sent from this workspace, and a canned prompt was sent.  The
+history POSITION is only reset when the composer itself was cleared,
+because a surviving draft keeps whatever navigation state it had.
+
+ATTACHMENTS are cleared either way: the submission carried them, whatever
+composed its text, so leaving them would re-send them on the next prompt."
   (let ((buf (agent-repl--input-buffer ws)))
     (when buf
       (with-current-buffer buf
         (agent-repl--history-push raw)
-        (agent-repl--history-reset)
-        (erase-buffer)))
+        (when from-buffer
+          (agent-repl--history-reset)
+          (erase-buffer))))
     (agent-repl--history-save ws)
     (agent-repl-input-clear-attachments ws)
-    (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s"
-                     ws arm (length raw) (and buf t))))
+    (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d buffer=%s from-buffer=%s"
+                     ws arm (length raw) (and buf t) (and from-buffer t))))
 
-(defun agent-repl--input-on-success (ws raw origin success)
+(defun agent-repl--input-on-success (ws raw origin success &optional from-buffer)
   "Handle a `SubmitPromptSuccess' for WS.  ORIGIN and RAW name the send.
-SUCCESS is the decoded outcome oneof."
+SUCCESS is the decoded outcome oneof.  FROM-BUFFER says RAW came from the
+composer, which is the only thing that entitles an acceptance to erase
+it."
   (pcase (plist-get success :arm)
     (:turn
      (agent-repl--info ws "elisp.input.turn-minted ws=%s origin=%S turn=%S"
                        ws origin (plist-get (plist-get success :value) :turn))
-     (agent-repl--input-accepted ws raw :turn)
+     (agent-repl--input-accepted ws raw :turn from-buffer)
      (agent-repl--run-send-posthooks ws raw))
     ((and (or :command-panel :command-refused :command-acted) arm)
      ;; Answered, nothing to await.  The webapp draws the panel or the
      ;; refusal card; Emacs's whole reaction is to stop waiting.
      (agent-repl--info ws "elisp.input.command-answered ws=%s origin=%S arm=%S value=%S"
                        ws origin arm (plist-get success :value))
-     (agent-repl--input-accepted ws raw arm))
+     (agent-repl--input-accepted ws raw arm from-buffer))
     (arm
      (agent-repl--error ws "elisp.input.unknown-success-arm ws=%s arm=%S" ws arm))))
 
@@ -671,7 +688,7 @@ back out under the same key and the daemon can refuse a duplicate."
   (agent-repl--input-flash ws "send failed -- held until the daemon is back")
   (message "agent-repl: the daemon did not answer; the prompt is held"))
 
-(cl-defun agent-repl--input-submit (ws said origin raw &optional key)
+(cl-defun agent-repl--input-submit (ws said origin raw &optional key from-buffer)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
 Resolves the workspace ref and the connection, mints the idempotency key,
 and dispatches the answer arms.  Returns the idempotency key.
@@ -679,6 +696,11 @@ and dispatches the answer arms.  Returns the idempotency key.
 KEY re-uses an earlier attempt\='s idempotency key instead of minting a
 fresh one -- the outage queue\='s re-drive passes the failed attempt\='s
 key, because a re-drive is a RETRY and not a second turn.
+
+FROM-BUFFER says RAW was read out of the composer, and rides all the way
+to the acceptance because only a composer-sourced submission may erase
+the composer.  A canned command, a metaprompt read and a queue re-drive
+all compose their own text and leave the user\='s draft alone.
 
 The ref is REQUIRED on every submit: it names WHICH workspace the
 submission belongs to, and it is the daemon-minted echo token, never a
@@ -700,7 +722,8 @@ value Emacs constructs from a path."
      :on-response
      (lambda (response)
        (pcase (plist-get response :arm)
-         (:success (agent-repl--input-on-success ws raw origin (plist-get response :value)))
+         (:success (agent-repl--input-on-success
+                    ws raw origin (plist-get response :value) from-buffer))
          (:error (agent-repl--input-on-error
                   ws said origin raw (plist-get response :value) key))
          (arm (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S" ws arm))))
@@ -749,7 +772,10 @@ Returns the submission's idempotency key, or nil when nothing was sent."
         (let* ((text (agent-repl--prepare-input ws raw force-metaprompt))
                (said (agent-repl--input-said text attachments)))
           (agent-repl--kickoff-prompt-summary ws raw)
-          (agent-repl--input-submit ws said origin raw))))))
+          ;; `(null prompt)' is the one fact that says the words came out
+          ;; of the composer, and it is the only thing that entitles the
+          ;; acceptance to erase it.
+          (agent-repl--input-submit ws said origin raw nil (null prompt)))))))
 
 ;;;; ---- The send sites --------------------------------------------------
 ;;

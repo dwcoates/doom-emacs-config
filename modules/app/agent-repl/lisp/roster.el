@@ -69,6 +69,7 @@
 ;; W2-A's names (host.el, daemon-link.el).  Declared, never defined here.
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
 (declare-function agent-repl-host-unsubscribe "host" (ws))
+(declare-function agent-repl-host-rename "host" (old new))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-last-selected-id)
 (defvar agent-repl-link-up-functions)
@@ -313,13 +314,41 @@ this file's verb — so the tab's whole birth is a perspective plus the
   "Rename the tab OLD to NEW, keeping every fact keyed on the ref id.
 A row's id is its identity, so a changed name is a RENAME and never a
 second tab."
-  (agent-repl--ws-rename-state old new (plist-get ref :dir))
-  (agent-repl--ws-rename-persp old new)
-  (agent-repl--ws-put new :ref ref)
-  (agent-repl--ws-put new :dir (plist-get ref :dir))
-  (agent-repl--info new "elisp.roster.tab-rename: old=%s new=%s id=%s"
-                    old new (plist-get ref :id))
-  new)
+  (if (not (agent-repl-roster--rename-state old new (plist-get ref :dir)))
+      ;; Refused WHOLE.  `agent-repl--ws-rename-state' validates before it
+      ;; mutates anything, so a refusal leaves every keyed fact under OLD
+      ;; and the tab keeps its old name rather than half-moving.  The ref
+      ;; is still written through, because the row's ref is the authority
+      ;; on the identity whatever the name ended up being.
+      (progn
+        (agent-repl--ws-put old :ref ref)
+        old)
+    ;; Host state is keyed on the workspace name too (fanout §7), so it is
+    ;; re-keyed in the SAME breath: a rename that moved only the workspace
+    ;; table leaves `agent-repl-host-ref' answering nil for the new name.
+    (agent-repl-host-rename old new)
+    (agent-repl--ws-rename-persp old new)
+    (agent-repl--ws-put new :ref ref)
+    (agent-repl--ws-put new :dir (plist-get ref :dir))
+    (agent-repl--info new "elisp.roster.tab-rename: old=%s new=%s id=%s"
+                      old new (plist-get ref :id))
+    new))
+
+(defun agent-repl-roster--rename-state (old new dir)
+  "Rename OLD to NEW with DIR, returning nil when the rename is REFUSED.
+`agent-repl--ws-rename-state' signals `user-error' on every refusal --
+a target colliding with a live OR TOMBSTONED name among them.  That
+signal must not escape the push handler: it would abort the reconcile
+walk mid-list, leaving the tab bar describing a roster nobody finished
+reading.  The refusal is recorded at ERROR with the reason and answered
+as nil, so the caller applies the rename or leaves it alone entire."
+  (condition-case err
+      (progn (agent-repl--ws-rename-state old new dir) t)
+    (user-error
+     (agent-repl--error old
+                        "elisp.roster.tab-rename-refused: old=%s new=%s dir=%S error=%s"
+                        old new dir (error-message-string err))
+     nil)))
 
 (defun agent-repl-roster--tear-down-tab (name)
   "Tear NAME's tab down: cancel its host stream, kill the persp, tombstone it.

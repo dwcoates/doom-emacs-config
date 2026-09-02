@@ -138,6 +138,91 @@ fake would not exercise them."
   (plist-get (plist-get (plist-get (agent-repl-test-input--request) :said) :content)
              :blocks))
 
+;;;; ---- Whose text was sent (audit-3 #51) ----
+
+(ert-deftest agent-repl-input-a-composer-send-clears-the-composer ()
+  "The words that went out came out of here, so here is emptied."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) ""))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-keeps-the-draft ()
+  "A canned command composed its own words and must not eat an unrelated draft."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl--send :command-update-pr "update the pr")
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "my draft"))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-still-sends-its-own-text ()
+  "The draft is untouched precisely because it was never what went out."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    ;; Act
+    (agent-repl--send :command-update-pr "update the pr")
+    ;; Assert
+    (should (equal (plist-get (plist-get (car (agent-repl-test-input--blocks)) :value) :text)
+                   "update the pr"))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-still-pushes-history ()
+  "The ring records what was SENT, and a canned prompt was sent."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    (let ((pushed nil))
+      (cl-letf (((symbol-function 'agent-repl--history-push)
+                 (lambda (&optional text) (push text pushed))))
+        ;; Act
+        (agent-repl--send :command-update-pr "update the pr"))
+      ;; Assert
+      (should (equal pushed '("update the pr"))))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-does-not-reset-history-position ()
+  "A surviving draft keeps whatever navigation state it had."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    (let ((reset 0))
+      (cl-letf (((symbol-function 'agent-repl--history-reset)
+                 (lambda () (cl-incf reset))))
+        ;; Act
+        (agent-repl--send :command-update-pr "update the pr"))
+      ;; Assert
+      (should (equal reset 0)))))
+
+(ert-deftest agent-repl-input-an-explicit-text-send-still-clears-attachments ()
+  "The submission carried them, whatever composed its text."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    (let ((cleared nil))
+      (cl-letf (((symbol-function 'agent-repl-input-clear-attachments)
+                 (lambda (ws) (push ws cleared))))
+        ;; Act
+        (agent-repl--send :command-update-pr "update the pr"))
+      ;; Assert
+      (should (equal cleared '("ws-one"))))))
+
+(ert-deftest agent-repl-input-a-command-panel-answer-to-an-explicit-send-keeps-the-draft ()
+  "Every accepted arm follows the same rule, not just the minted turn."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (agent-repl-test-input--type "my draft")
+    (setq agent-repl-test-input--answer
+          (list :response (list :arm :success
+                                :value (list :arm :command-panel :value nil))))
+    ;; Act
+    (agent-repl--send :command-update-pr "update the pr")
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "my draft"))))
+
 ;;;; ---- The uuid ----
 
 (ert-deftest agent-repl-input-uuid-has-the-rfc-4122-shape ()
