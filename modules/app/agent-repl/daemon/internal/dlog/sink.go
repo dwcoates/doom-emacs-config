@@ -52,14 +52,22 @@ type sink struct {
 // openSink creates this runtime's unique target for one workspace sink, opens
 // it with append semantics, and atomically replaces the canonical symlink so
 // it names that target.
-func openSink(workspaceDir, workspaceID, name string) (*sink, error) {
+// A target already minted for this workspace sink in THIS runtime is REUSED
+// (target != ""): a sink evicted on close and re-opened by the next
+// workspace-bound record must go on appending to the same file, or the
+// workspace's whole log narrative would be replaced by whatever came after the
+// eviction.
+func openSink(workspaceDir, workspaceID, name, target string) (*sink, error) {
 	linkDir := filepath.Join(workspaceDir, linkDirRel)
 	if err := os.MkdirAll(linkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create log directory %q: %w", linkDir, err)
 	}
-	target, err := createTarget(workspaceID, name)
-	if err != nil {
-		return nil, err
+	if target == "" {
+		minted, err := createTarget(workspaceID, name)
+		if err != nil {
+			return nil, err
+		}
+		target = minted
 	}
 	f, err := os.OpenFile(target, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {

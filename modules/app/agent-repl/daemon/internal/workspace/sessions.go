@@ -334,9 +334,18 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID,
 	})
 
-	configDir := session.ConfigDir
-	if configDir == "" {
-		configDir = f.deps.Accounts.ConfigDirFor(record.Dir)
+	// THE ACCOUNT ROUTING IS DECIDED AT EVERY START (daemon.md 10a), never
+	// inherited from the record: $MULTI_REPO_ROOT can move between boots, and
+	// a session resumed under the root it was FILED in rather than the one it
+	// now ROUTES to would run the whole conversation against the wrong
+	// account. When the two disagree, the vendor transcript is carried into
+	// the newly routed root BEFORE the resume is sent — a resume against a
+	// root that does not hold the transcript is a resume of nothing.
+	configDir := f.deps.Accounts.ConfigDirFor(record.Dir)
+	if session.ConfigDir != "" && session.ConfigDir != configDir {
+		if err := f.portAcrossAccounts(ctx, log, record.Dir, session, configDir, src); err != nil {
+			return err
+		}
 	}
 	udsPath := f.deps.SocketPath(ws)
 
@@ -358,6 +367,12 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
+	// THE HEALTHY ATTACH CLOSES THE LOST-LINK FAULTS. Bring-up gates on the
+	// shim's first healthy diagnostics, so reaching here IS the repair of
+	// whatever shim_died or link_severed the previous attachment recorded. A
+	// mid-stream redial is NOT this moment: the link coming back on a stream
+	// the daemon never re-attached leaves the evidence standing.
+	f.closeLinkFaults(ctx, log, ws)
 
 	started, err := f.startSession(ctx, log, ws, client, src, session)
 	if err != nil {
@@ -507,6 +522,81 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
 	f.publishHost(ws)
+}
+
+// linkFaultKinds are the fault kinds a lost daemon-to-shim link records, and
+// the ones a healthy attach retracts.
+var linkFaultKinds = []string{health.KindShimDied, health.KindLinkSevered}
+
+// closeLinkFaults retracts the lost-link faults of one workspace.
+func (f *Fleet) closeLinkFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	workspace := ws
+	for _, kind := range linkFaultKinds {
+		open, err := f.deps.DB.OpenFaults(ctx, wsm.FaultScope{Workspace: &workspace, Kind: kind})
+		if err != nil {
+			log.Error(opBringUp, "could not read the standing link faults", dlog.Context{
+				"kind": kind, "cause": err.Error(),
+			})
+			continue
+		}
+		for _, fault := range open {
+			if err := f.deps.DB.CloseFault(ctx, fault.ID, f.now()); err != nil {
+				log.Error(opBringUp, "could not close a standing link fault", dlog.Context{
+					"kind": kind, "fault": string(fault.ID), "cause": err.Error(),
+				})
+				continue
+			}
+			log.Info(opBringUp, "a healthy attach retracted a lost-link fault", dlog.Context{
+				"kind": kind, "fault": string(fault.ID),
+			})
+		}
+	}
+}
+
+// portAcrossAccounts carries a session's vendor transcript from the root it
+// was filed under into the one this boot routes the workspace to.
+//
+// A FRESH start ports nothing: there is no conversation to carry, and the new
+// root is simply where this one is filed.
+func (f *Fleet) portAcrossAccounts(
+	ctx context.Context,
+	log dlog.Logger,
+	dir string,
+	session wsm.Session,
+	routed string,
+	src source,
+) error {
+	log.Info(opBringUp, "the workspace's account routing changed since the session was recorded", dlog.Context{
+		"recorded_config_dir": session.ConfigDir, "routed_config_dir": routed, "fresh": src.Fresh,
+	})
+	if src.Fresh {
+		return nil
+	}
+	transcript, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID)
+	if err != nil {
+		// The resume guard below refuses a missing transcript with its own
+		// arm; nothing is invented here.
+		log.Warn(opBringUp, "no transcript to port across the account switch", dlog.Context{
+			"vendor_session_id": src.VendorSessionID, "cause": err.Error(),
+		})
+		return nil
+	}
+	if transcript.ConfigDir == routed {
+		log.Debug(opBringUp, "the transcript already lives under the routed root", dlog.Context{
+			"config_dir": routed,
+		})
+		return nil
+	}
+	if err := f.deps.Accounts.MoveTranscript(ctx, transcript.Path, routed, dir); err != nil {
+		log.Error(opBringUp, "could not port the transcript across the account switch", dlog.Context{
+			"from": transcript.ConfigDir, "to": routed, "cause": err.Error(),
+		})
+		return fmt.Errorf("port the transcript of %q into %q: %w", dir, routed, err)
+	}
+	log.Info(opBringUp, "ported the transcript across the account switch", dlog.Context{
+		"from": transcript.ConfigDir, "to": routed, "vendor_session_id": src.VendorSessionID,
+	})
+	return nil
 }
 
 // resumeGuard refuses a RESUME whose vendor transcript is gone, before any

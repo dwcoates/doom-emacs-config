@@ -713,3 +713,37 @@ func TestSinkPoisonSurfacesThroughShimSink(t *testing.T) {
 		t.Fatalf("error = %v, want ErrPoisoned", err)
 	}
 }
+
+// TestAReopenedSinkKeepsAppendingToTheEvictedTarget pins that eviction is a
+// release of the HANDLE, not of the workspace's log: a record written after
+// the eviction joins the ones written before it, through the same canonical
+// link.
+func TestAReopenedSinkKeepsAppendingToTheEvictedTarget(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	log.Info("daemon.workspace.opened", "opened", nil)
+	if err := s.Evict(dir); err != nil {
+		t.Fatalf("Evict: %v", err)
+	}
+
+	// Act.
+	reopened, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace after Evict: %v", err)
+	}
+	reopened.Info("daemon.workspace.close", "closed", nil)
+
+	// Assert.
+	records := workspaceRecords(t, dir, "daemon")
+	if !hasOperation(records, "daemon.workspace.opened") {
+		t.Fatal("the pre-eviction record is no longer reachable through the canonical link")
+	}
+	if !hasOperation(records, "daemon.workspace.close") {
+		t.Fatal("the post-eviction record is not reachable through the canonical link")
+	}
+}

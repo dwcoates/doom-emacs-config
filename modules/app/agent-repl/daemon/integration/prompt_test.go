@@ -331,7 +331,16 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 	f.shim.AwaitGone()
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	holds := f.d.WatchHolds(f.ws)
-	f.d.ExpectWarnings("daemon.promptqueue.release")
+	// The hibernation stands the old shim down: the kill does not answer, the
+	// client records the death, both standing streams end without the session
+	// ending, and the lost link is recorded as the session's own fault. Every
+	// one of these is that one stand-down, honestly recorded once per observer
+	// -- the same set TestCloseWorkspaceWithAHeldPromptRefuses declares.
+	f.d.ExpectWarnings("daemon.promptqueue.release",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.shimclient.redial", "daemon.workspace.bring_up",
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 
 	held := f.submit("wake up", "k-session-starting-hold", origin)
 	turn := held.GetSuccess().GetTurn().GetTurn()

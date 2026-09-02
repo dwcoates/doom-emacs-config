@@ -29,6 +29,7 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -74,6 +75,44 @@ type fakeDB struct {
 	taskChanges  map[ids.TaskID]wsm.TaskChange
 	assignments  map[ids.WorkspaceID]*ids.TaskID
 	taskErr      error
+
+	// dbFaults is the fault table the fleet opens and closes lost-link rows
+	// in; dbClosed records the ids CloseFault was called with.
+	dbFaults []wsm.Fault
+	dbClosed []ids.FaultID
+}
+
+func (d *fakeDB) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
+	id := ids.FaultID(fmt.Sprintf("db-fault-%d", len(d.dbFaults)+1))
+	f.ID = id
+	d.dbFaults = append(d.dbFaults, f)
+	return id, nil
+}
+
+func (d *fakeDB) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) error {
+	d.dbClosed = append(d.dbClosed, id)
+	kept := d.dbFaults[:0]
+	for _, f := range d.dbFaults {
+		if f.ID != id {
+			kept = append(kept, f)
+		}
+	}
+	d.dbFaults = kept
+	return nil
+}
+
+func (d *fakeDB) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	var out []wsm.Fault
+	for _, f := range d.dbFaults {
+		if scope.Kind != "" && f.Kind != scope.Kind {
+			continue
+		}
+		if scope.Workspace != nil && (f.Workspace == nil || *f.Workspace != *scope.Workspace) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 func newFakeDB() *fakeDB {
@@ -317,7 +356,12 @@ type fakeAccounts struct {
 	email string
 	// readErr makes Read fail, which registration must surface.
 	readErr error
+	// moved records MoveTranscript's account switches; moveErr fails them.
+	moved   []movedTranscript
+	moveErr error
 }
+
+type movedTranscript struct{ Path, ToConfigDir, WorkspaceDir string }
 
 type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
@@ -341,6 +385,16 @@ func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, worksp
 		return a.portErr
 	}
 	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
+	return nil
+}
+
+// MoveTranscript records the account switch's port, which is what makes a
+// resume land under the root the workspace now routes to.
+func (a *fakeAccounts) MoveTranscript(_ context.Context, path, toConfigDir, workspaceDir string) error {
+	if a.moveErr != nil {
+		return a.moveErr
+	}
+	a.moved = append(a.moved, movedTranscript{path, toConfigDir, workspaceDir})
 	return nil
 }
 
@@ -561,8 +615,8 @@ type editorOpen struct {
 }
 
 type hostNote struct {
-	WS               ids.WorkspaceID
-	Text, Kind, Tool string
+	WS                       ids.WorkspaceID
+	Text, Kind, Tool, Header string
 }
 
 func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
@@ -571,8 +625,8 @@ func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 
 func (h *fakeHost) ReloadWebapp(ws ids.WorkspaceID) { h.reloads = append(h.reloads, ws) }
 
-func (h *fakeHost) Notify(ws ids.WorkspaceID, text, kind, tool string) {
-	h.notes = append(h.notes, hostNote{ws, text, kind, tool})
+func (h *fakeHost) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
+	h.notes = append(h.notes, hostNote{ws, note.Text, string(note.Kind), note.ToolName, note.Header})
 }
 
 // fakeSessions is a Sessions fleet.
@@ -811,6 +865,11 @@ type fakeHealth struct {
 	health.Reporter
 
 	opened []wsm.Fault
+	// closed records the faults CloseFault was called with, and a closed
+	// fault leaves the standing list.
+	closed []ids.FaultID
+	// closeErr fails every CloseFault.
+	closeErr error
 	// openErr fails every OpenFault.
 	openErr error
 	// listErr fails every OpenFaults.
@@ -825,6 +884,21 @@ func (h *fakeHealth) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, err
 	f.ID = id
 	h.opened = append(h.opened, f)
 	return id, nil
+}
+
+func (h *fakeHealth) CloseFault(_ context.Context, id ids.FaultID) error {
+	if h.closeErr != nil {
+		return h.closeErr
+	}
+	h.closed = append(h.closed, id)
+	kept := h.opened[:0]
+	for _, f := range h.opened {
+		if f.ID != id {
+			kept = append(kept, f)
+		}
+	}
+	h.opened = kept
+	return nil
 }
 
 func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {

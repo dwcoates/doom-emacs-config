@@ -235,6 +235,13 @@ type LifecycleSink interface {
 	// OnNotification raises a host notification and the roster's attention
 	// marker.
 	OnNotification(ws ids.WorkspaceID, note HostNotification)
+	// OnLinkFault reports a link this daemon LOST, as evidence rather than as
+	// a view fact: a severed standing stream, or a reaped shim process with
+	// its exit code. Each becomes a per-session fault record, which is what
+	// SessionHealth answers with — the liveness probe's two booleans cannot
+	// carry an exit code and cannot tell a process that died from a stream
+	// that broke.
+	OnLinkFault(ws ids.WorkspaceID, fault LinkFault)
 	// OnLinkChanged reports the shim link's attachment. The VIEWS take the
 	// link on their own sinks; this arm exists because the HOST view's
 	// `shim_attached` is composed by the server, which cannot see the edge.
@@ -245,6 +252,29 @@ type LifecycleSink interface {
 	// that only reached a view would never reach that answer. The push is the
 	// WHOLE current verdict, so a healthy one retracts the standing faults.
 	OnSessionDiagnostics(ws ids.WorkspaceID, diagnostics *conversationv1.SessionDiagnostics)
+}
+
+// LinkFaultKind names how the daemon-to-shim link was lost.
+type LinkFaultKind string
+
+const (
+	// LinkFaultSevered is a standing stream that ended while the shim process
+	// is still alive. The daemon redials.
+	LinkFaultSevered LinkFaultKind = "severed"
+	// LinkFaultDead is a shim process that is gone. Redial stops here.
+	LinkFaultDead LinkFaultKind = "dead"
+)
+
+// LinkFault is one lost link, with whatever evidence the loss carried.
+type LinkFault struct {
+	// Kind is how the link was lost.
+	Kind LinkFaultKind
+	// ExitCode is the reaped process's decoded exit status. It is set only on
+	// LinkFaultDead, and only when the reap actually decoded one: presence,
+	// never a sentinel zero.
+	ExitCode *int32
+	// Detail is the sentence the fault record carries.
+	Detail string
 }
 
 // Sinks is the set a watcher routes into.

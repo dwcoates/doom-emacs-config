@@ -187,9 +187,28 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the classifier: %w", err)
 	}
-	browser, err := externalbrowser.New(externalbrowser.Config{Logger: log})
-	if err != nil {
-		return nil, fmt.Errorf("claude-repld: build the external browser: %w", err)
+	// THE BROWSER IS OPTIONAL, and its absence is a STATE THE CONTRACT SPELLS.
+	// A daemon with `--no-browser`, or one on a host with neither
+	// $AGENT_REPL_BROWSER_CMD nor the pinned default binary, has no launcher
+	// at all: the dependency is left nil and OpenExternal answers
+	// no_browser_configured rather than reporting a launch that never had
+	// anything to run.
+	var browser externalbrowser.Opener
+	switch {
+	case p.Opts.noBrowser:
+		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+			"reason": "--no-browser",
+		})
+	case os.Getenv(externalbrowser.EnvBrowserCmd) == "" && !externalbrowser.DefaultLauncherConfigured():
+		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
+			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
+			"default": externalbrowser.DefaultBinary,
+		})
+	default:
+		browser, err = externalbrowser.New(externalbrowser.Config{Logger: log})
+		if err != nil {
+			return nil, fmt.Errorf("claude-repld: build the external browser: %w", err)
+		}
 	}
 	supervisor, err := shimclient.NewSupervisor(p.Surfaces)
 	if err != nil {

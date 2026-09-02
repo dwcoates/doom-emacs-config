@@ -559,7 +559,37 @@ func (w *watcher) setLinkLocked(state LinkState) {
 	})
 	w.link = state
 	w.linkNow.Store(int32(state))
+	// THE EVIDENCE IS RECORDED BEFORE THE VIEWS DRAW THE LOSS. A client that
+	// sees `dead` in the footer and asks SessionHealth in the same breath must
+	// find the fault already standing; recorded after the publish, the answer
+	// would depend on which of the two won a race.
+	w.raiseLinkFaultLocked(state)
 	w.publishLinkLocked()
+}
+
+// raiseLinkFaultLocked reports a LOST link at the lifecycle sink, which records
+// it as the session's own fault. A link coming back is not a fault, so only the
+// two losing transitions are raised.
+func (w *watcher) raiseLinkFaultLocked(state LinkState) {
+	switch state {
+	case shimclient.LinkRedialing:
+		w.log.Warn("daemon.sessionwatcher.link_fault", "the shim link was severed", nil)
+		w.sinks.Lifecycle.OnLinkFault(w.ws, LinkFault{
+			Kind:   LinkFaultSevered,
+			Detail: "a standing stream ended while the shim was still running",
+		})
+	case shimclient.LinkDead:
+		fault := LinkFault{Kind: LinkFaultDead, Detail: "the shim process is gone"}
+		if info, ok := w.client.Reaped(); ok {
+			code := int32(info.Code)
+			fault.ExitCode = &code
+			fault.Detail = "the shim process exited"
+		}
+		w.log.Warn("daemon.sessionwatcher.link_fault", "the shim process is gone", dlog.Context{
+			"has_exit_code": fault.ExitCode != nil,
+		})
+		w.sinks.Lifecycle.OnLinkFault(w.ws, fault)
+	}
 }
 
 // publishLinkLocked hands the link to the three views that draw it, and the

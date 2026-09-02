@@ -118,6 +118,15 @@ type fakeClient struct {
 	mu           sync.Mutex
 	agentErr     error
 	sessionCount int
+	// reaped is the decoded exit Reaped answers, nil when nothing was reaped.
+	reaped *shimclient.ExitInfo
+}
+
+// setReaped arranges the decoded exit a dead link's fault carries.
+func (c *fakeClient) setReaped(info shimclient.ExitInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reaped = &info
 }
 
 func newFakeClient() *fakeClient {
@@ -271,6 +280,16 @@ func (c *fakeClient) Detach()                            { panic("sessionwatcher
 func (c *fakeClient) Exited() <-chan shimclient.ExitInfo { return c.exits }
 func (c *fakeClient) PID() int                           { return 4242 }
 
+// Reaped answers the decoded exit the fake was told to hold.
+func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reaped == nil {
+		return shimclient.ExitInfo{}, false
+	}
+	return *c.reaped, true
+}
+
 // ---- recording sinks ----
 
 // event is one sink call, as the recorder saw it.
@@ -286,6 +305,8 @@ type event struct {
 	link   LinkState
 	// attached is the lifecycle sink's bare shim-attachment edge.
 	attached *bool
+	// linkFault is the lost-link evidence the lifecycle sink was handed.
+	linkFault *LinkFault
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -518,6 +539,11 @@ func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 
 func (s *lifecycleSink) OnLinkChanged(_ ids.WorkspaceID, attached bool) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLinkChanged", attached: &attached})
+}
+
+func (s *lifecycleSink) OnLinkFault(_ ids.WorkspaceID, fault LinkFault) {
+	held := fault
+	s.rec.emit(event{sink: "lifecycle", method: "OnLinkFault", linkFault: &held})
 }
 
 func (s *lifecycleSink) OnSessionDiagnostics(_ ids.WorkspaceID, _ *conversationv1.SessionDiagnostics) {
@@ -1243,6 +1269,9 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 		if i+1 >= len(got) || got[i+1].name() != "footer.OnActivity" || got[i+1].detail != want {
 			t.Fatalf("%s activity %q was interrupted between the feed and the footer", agent, want)
 		}
+		if i+2 >= len(got) || got[i+2].name() != "topbar.OnActivity" || got[i+2].detail != want {
+			t.Fatalf("%s activity %q was interrupted between the footer and the topbar", agent, want)
+		}
 		seen++
 	}
 	if seen != frames {
@@ -1259,4 +1288,24 @@ func (h *harness) routeReaping(stream *fakeStream[*shimResponse], frame *shimRes
 	h.t.Helper()
 	stream.send(h.t, frame)
 	return h.rec.until(h.t, "lifecycle.OnLiveWorkChanged")
+}
+
+// awaitLinkFault reads events until the lifecycle sink's lost-link evidence
+// arrives, and answers it.
+func (h *harness) awaitLinkFault(t *testing.T) LinkFault {
+	t.Helper()
+	deadline := time.After(waitDeadline)
+	var seen []event
+	for {
+		select {
+		case e := <-h.rec.ch:
+			if e.name() == "lifecycle.OnLinkFault" {
+				return *e.linkFault
+			}
+			seen = append(seen, e)
+		case <-deadline:
+			t.Fatalf("no link fault arrived; saw %v", names(seen))
+			return LinkFault{}
+		}
+	}
 }

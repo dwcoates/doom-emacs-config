@@ -26,7 +26,12 @@ type surfaces struct {
 
 	mu         sync.Mutex
 	workspaces map[string]*workspaceSinks
-	closed     bool
+	// targets remembers each workspace sink's daemon-owned file for this
+	// runtime's whole lifetime, so an EVICTED sink that is re-opened keeps
+	// appending to the file the canonical link already names rather than
+	// minting a second one and orphaning everything written before.
+	targets map[string]string
+	closed  bool
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -67,6 +72,7 @@ func openSurfaces(runLogPath string, verbose bool, terminal interface{ Write([]b
 		pid:        os.Getpid(),
 		now:        time.Now,
 		workspaces: make(map[string]*workspaceSinks),
+		targets:    make(map[string]string),
 		scanEvery:  scanInterval,
 		stop:       make(chan struct{}),
 		scanDone:   make(chan struct{}),
@@ -239,10 +245,12 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	if sk, ok := ws.sinks[name]; ok {
 		return ws, sk, nil
 	}
-	sk, err := openSink(ws.dir, ws.id, name)
+	key := ws.id + "/" + name
+	sk, err := openSink(ws.dir, ws.id, name, s.targets[key])
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}
+	s.targets[key] = sk.target
 	ws.sinks[name] = sk
 	return ws, sk, nil
 }

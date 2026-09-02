@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -35,6 +36,89 @@ func (s *lifecycleSink) OnLinkChanged(ws ids.WorkspaceID, attached bool) {
 		"workspace": string(ws), "attached": attached,
 	})
 	s.relay.PublishHostWorkspace(ws)
+}
+
+// OnLinkFault records a LOST shim link as the session's own fault, which is
+// what SessionHealth answers with. The liveness probe cannot do this job: its
+// two booleans carry no exit code, and a shim that redialed back into place
+// would erase the evidence that it ever died.
+//
+// At most ONE fault of a kind stands per workspace: a redial ladder severing
+// the same link a dozen times is one condition, not a dozen. The faults are
+// closed on the next healthy attach (internal/workspace/sessions.go).
+func (s *lifecycleSink) OnLinkFault(ws ids.WorkspaceID, fault sessionwatcher.LinkFault) {
+	reporter, ok := s.health.reporter()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a link fault arrived before the health reporter existed", dlog.Context{
+			"workspace": string(ws), "kind": string(fault.Kind),
+		})
+		return
+	}
+	kind := health.KindLinkSevered
+	if fault.Kind == sessionwatcher.LinkFaultDead {
+		kind = health.KindShimDied
+	}
+	ctx := context.Background()
+	scoped := wsm.WorkspaceID(ws)
+	open, err := reporter.OpenFaults(ctx, wsm.FaultScope{Workspace: &scoped, Kind: kind})
+	if err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the standing link faults could not be read", dlog.Context{
+			"workspace": string(ws), "kind": kind, "cause": err.Error(),
+		})
+		return
+	}
+	if len(open) > 0 {
+		s.log.Debug("daemon.cmd.lifecycle", "a link fault of this kind already stands", dlog.Context{
+			"workspace": string(ws), "kind": kind,
+		})
+		return
+	}
+	record := wsm.Fault{
+		Workspace: &scoped,
+		Kind:      kind,
+		Detail:    fault.Detail,
+		Evidence:  map[string]string{},
+	}
+	if fault.ExitCode != nil {
+		record.Evidence["exit_code"] = strconv.FormatInt(int64(*fault.ExitCode), 10)
+	}
+	if _, err := reporter.OpenFault(ctx, record); err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the link fault could not be recorded", dlog.Context{
+			"workspace": string(ws), "kind": kind, "cause": err.Error(),
+		})
+		return
+	}
+	// DEATH OUTRANKS SEVERING, exactly as the watcher's own link rule has it:
+	// every standing stream breaks of the same cause the process died of, so
+	// the severing recorded moments earlier is a CONSEQUENCE of the death and
+	// not a second condition. It is retracted only AFTER the stronger record
+	// stands, so no read ever finds the session with neither.
+	if kind == health.KindShimDied {
+		s.retractLinkFaults(ctx, ws, health.KindLinkSevered)
+	}
+}
+
+// retractLinkFaults closes every standing fault of one kind on a workspace.
+func (s *lifecycleSink) retractLinkFaults(ctx context.Context, ws ids.WorkspaceID, kind string) {
+	reporter, ok := s.health.reporter()
+	if !ok {
+		return
+	}
+	scoped := wsm.WorkspaceID(ws)
+	open, err := reporter.OpenFaults(ctx, wsm.FaultScope{Workspace: &scoped, Kind: kind})
+	if err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the superseded link faults could not be read", dlog.Context{
+			"workspace": string(ws), "kind": kind, "cause": err.Error(),
+		})
+		return
+	}
+	for _, f := range open {
+		if err := reporter.CloseFault(ctx, f.ID); err != nil {
+			s.log.Error("daemon.cmd.lifecycle", "a superseded link fault could not be closed", dlog.Context{
+				"workspace": string(ws), "fault": string(f.ID), "cause": err.Error(),
+			})
+		}
+	}
 }
 
 // OnTurnEnded pops the queue and releases a hold-for-turn-end.

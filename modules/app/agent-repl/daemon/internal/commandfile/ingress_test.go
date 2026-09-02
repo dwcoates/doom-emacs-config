@@ -474,3 +474,28 @@ func TestSaidTextIsTheSharedPromptComposition(t *testing.T) {
 		t.Fatalf("SaidText() = %v, want one text block", said)
 	}
 }
+
+// TestAnEntryRefusedAtApplyTimeQuarantinesTheFile pins the file route's answer
+// to a refusal: the rpc route answers its caller, and a file has none, so the
+// refusal is recorded and the file retires to quarantine rather than sitting
+// in the claimed directory forever.
+func TestAnEntryRefusedAtApplyTimeQuarantinesTheFile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.err = errors.New("no layout facts")
+	path := f.write(t, "workspace_commands_refused.json",
+		`[{"type":"merge","workspace":"w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if !errors.Is(err, ErrQuarantined) {
+		t.Fatalf("ApplyFile = %v, want an error naming ErrQuarantined", err)
+	}
+	quarantined := filepath.Join(f.dir, "quarantine", "workspace_commands_refused.json")
+	if _, statErr := os.Stat(quarantined); statErr != nil {
+		t.Fatalf("stat %q: %v, want the refused file in quarantine", quarantined, statErr)
+	}
+}

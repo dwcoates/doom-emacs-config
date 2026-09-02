@@ -48,6 +48,13 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 	// closed, so nothing is blocking it any more.
 	v.deps.Footer.SetClosing(ws, nil)
 
+	// THE CLOSE IS RECORDED BEFORE THE SINKS ARE EVICTED. This logger writes
+	// through the workspace's own durable sink, and eviction releases exactly
+	// that: recorded afterwards, the one record explaining why the workspace's
+	// log ends here would be written into a sink nobody holds any more, and
+	// the workspace's log would simply stop mid-sentence.
+	log.Info(opClose, "closed the workspace", dlog.Context{"dir": record.Dir})
+
 	// The workspace's durable log sinks are evicted, which releases the shared
 	// descriptors the closed workspace no longer writes through; the canonical
 	// links and their targets stay on disk. A failed eviction is a LEAK rather
@@ -57,11 +64,8 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Warn(opClose, "could not evict the workspace log sinks", dlog.Context{
 			"dir": record.Dir, "cause": err.Error(),
 		})
-	} else {
-		log.Debug(opClose, "evicted the workspace log sinks", dlog.Context{"dir": record.Dir})
 	}
 
-	log.Info(opClose, "closed the workspace", dlog.Context{"dir": record.Dir})
 	v.republishRegistry(ctx, log, opClose)
 	return nil
 }

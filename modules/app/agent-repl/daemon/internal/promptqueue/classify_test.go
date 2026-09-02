@@ -257,3 +257,49 @@ func TestAFailedInterruptLeavesNoQueueJumpBehind(t *testing.T) {
 		t.Fatalf("started = %v, want the older prompt: the jump was stripped", started)
 	}
 }
+
+// TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush pins that
+// no `classifying` arm is ever recorded for an entry behind an uninterruptible
+// turn: the verdict is known before the entry is stored, so the tray's first
+// view of it already carries uninterruptible_turn.
+func TestAHoldBehindAContextCutIsStampedUninterruptibleOnItsFirstPush(t *testing.T) {
+	// Arrange: a context cut is the running turn.
+	h := newHarness(t)
+	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_CLEAR
+	h.watcher.running("t-running")
+
+	// Act.
+	got, err := h.q.Submit(context.Background(), submission("t1", "a follow-up"))
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert.
+	if got.Classification == nil || got.Classification.Arm != wsm.ArmUninterruptibleTurn {
+		t.Fatalf("disposition classification = %+v, want the uninterruptible_turn verdict", got.Classification)
+	}
+	first := h.holds.pushes[0]
+	if len(first) != 1 || first[0].Classification.Arm != wsm.ArmUninterruptibleTurn {
+		t.Fatalf("first tray push = %+v, want uninterruptible_turn with no classifying ahead of it", first)
+	}
+}
+
+// TestAHoldBehindAContextCutAsksNoClassifier pins the other half: the model is
+// never consulted for an entry nothing could interject.
+func TestAHoldBehindAContextCutAsksNoClassifier(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.q.state("ws-1").uninterruptible = conversationv1.SessionCommand_SESSION_COMMAND_COMPACT
+	h.watcher.running("t-running")
+
+	// Act.
+	if _, err := h.q.Submit(context.Background(), submission("t1", "a follow-up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.classifying.Wait()
+
+	// Assert.
+	if got := len(h.judge.questions()); got != 0 {
+		t.Fatalf("classifier calls = %d, want none behind a context cut", got)
+	}
+}

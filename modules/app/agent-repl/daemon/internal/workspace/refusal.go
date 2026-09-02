@@ -55,6 +55,10 @@ const (
 	// ArmTranscriptMissing is a resume whose vendor transcript file is gone —
 	// refused BEFORE any process spawns.
 	ArmTranscriptMissing = "transcript_missing"
+	// ArmUnknownTask is a task ref naming no task this daemon minted.
+	ArmUnknownTask = "unknown_task"
+	// ArmNoChange is a task update asking for what the task already holds.
+	ArmNoChange = "no_change"
 	// ArmBlankTitle is a task verb with a blank title.
 	ArmBlankTitle = "blank_title"
 	// ArmNoStandingOffer is allow_standing on an ask that offered no standing
@@ -91,6 +95,14 @@ const (
 	ArmSpawnFailed = "spawn_failed"
 	// ArmBriefMissing is a composed brief the prompts directory does not hold.
 	ArmBriefMissing = "brief_missing"
+	// ArmInvalidUrl is an OpenExternal link that is not an absolute url.
+	ArmInvalidUrl = "invalid_url"
+	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
+	// external browser launcher at all.
+	ArmNoBrowserConfigured = "no_browser_configured"
+	// ArmLaunchFailed is an OpenExternal whose launcher would not run. It
+	// carries the launcher's own account of the failure as `detail`.
+	ArmLaunchFailed = "launch_failed"
 )
 
 // Refusal is a state the daemon must refuse for which the contract has no

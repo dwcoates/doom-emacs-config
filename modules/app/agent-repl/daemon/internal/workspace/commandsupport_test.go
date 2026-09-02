@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"claude-repld/internal/health"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
@@ -249,4 +250,52 @@ func TestTheBriefRefusalSurvivesAFailingFaultWrite(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmBriefMissing)
+}
+
+// TestABriefThatReadsAgainClosesThePromptsDirectoryFault pins FAULT CLOSURE:
+// the successful read+splice is the health probe, and the condition the fault
+// records no longer holds.
+func TestABriefThatReadsAgainClosesThePromptsDirectoryFault(t *testing.T) {
+	// Arrange: a fault stands from an earlier failed read.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err == nil {
+		t.Fatal("RequestCommandSupport with no brief = success, want the brief_missing refusal")
+	}
+	addSupportBrief(f)
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status2"); err != nil {
+		t.Fatalf("RequestCommandSupport after the brief returned: %v", err)
+	}
+
+	// Assert.
+	if len(f.health.closed) != 1 {
+		t.Fatalf("closed faults = %v, want exactly the standing prompts-directory fault", f.health.closed)
+	}
+}
+
+// TestAWorkspaceScopedFaultIsNotClosedByABriefReading pins that the closure is
+// scoped to the DAEMON-scoped row raisePromptsFault opens: a workspace-scoped
+// fault of the same kind is another party's record and is left alone.
+func TestAWorkspaceScopedFaultIsNotClosedByABriefReading(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	ws := ids.WorkspaceID("w1")
+	if _, err := f.health.OpenFault(context.Background(), wsm.Fault{
+		Kind:      health.KindPromptsDirMissing,
+		Workspace: &ws,
+	}); err != nil {
+		t.Fatalf("arranging the workspace-scoped fault: %v", err)
+	}
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err != nil {
+		t.Fatalf("RequestCommandSupport: %v", err)
+	}
+
+	// Assert.
+	if len(f.health.closed) != 0 {
+		t.Fatalf("closed faults = %v, want none: the standing fault is workspace-scoped", f.health.closed)
+	}
 }

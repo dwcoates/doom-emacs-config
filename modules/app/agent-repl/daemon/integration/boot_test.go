@@ -250,11 +250,15 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
 	}
 
-	// Assert: the WARN record IS in the workspace's own daemon.log.
-	rec := f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.shimclient.spawn")
-	if lvl := strings.ToLower(rec.Level); lvl != "warn" && lvl != "warning" {
-		t.Fatalf("daemon.shimclient.spawn record level = %q, want WARN", rec.Level)
-	}
+	// Assert: the WARN record IS in the workspace's own daemon.log. The
+	// operation also carries the ordinary DEBUG/INFO records of a spawn, so
+	// the wait names the LEVEL as well: the subject is the warning, not the
+	// first record the operation happens to produce.
+	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
+		"the WARN daemon.shimclient.spawn record", func(r harness.LogRecord) bool {
+			lvl := strings.ToLower(r.Level)
+			return r.Operation == "daemon.shimclient.spawn" && (lvl == "warn" || lvl == "warning")
+		})
 
 	// Assert: it is NOT on the daemon-wide run log.
 	for _, r := range f.d.RunLog() {
@@ -264,20 +268,19 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 		}
 	}
 
-	f.d.ExpectWarnings("daemon.shimclient.spawn", "daemon.workspace.open")
+	f.d.ExpectWarnings("daemon.shimclient.spawn", "daemon.workspace.open",
+		"daemon.shimclient.exit", "daemon.workspace.bring_up")
 }
 
-// TestCloseWorkspaceRemovesTheLogSinkSymlink pins a claim from the audit's
-// critique 15: that CloseWorkspace removes the workspace's log-sink symlink.
+// TestCloseWorkspaceRemovesTheLogSinkSymlink covers what daemon.md's LOG
+// SURFACES ruling actually prescribes for a close: "eviction on workspace
+// close" — the SINK HANDLE is released, and the canonical link and its target
+// stay on disk (internal/workspace/close.go; pinned by
+// internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk,
+// because a closed workspace's log is still the record of what it did).
 //
-// UNEXPRESSIBLE as the intended-behavior arm: it CONTRADICTS the settled,
-// already-tested contract. internal/workspace/close.go evicts the sinks and
-// explicitly documents "the canonical links and their targets stay on disk";
-// internal/dlog/surfaces_test.go pins that exact behavior in
-// TestEvictLeavesTheCanonicalLinkAndTargetOnDisk. Asserting removal here
-// would fight a settled invariant, not catch a regression, so this proves
-// the DOCUMENTED behavior instead (the link survives Close, still readable)
-// and skips the removal claim by name.
+// It also pins the ordering the eviction imposes: the close record is written
+// through that same sink, so it must land BEFORE the eviction releases it.
 func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -297,7 +300,6 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("stat the workspace's daemon.log symlink after Close = %v, want it left on disk per internal/workspace/close.go and internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk", err)
 	}
-	t.Skip("critique 15's \"CloseWorkspace removes the workspace's log sink symlink\" contradicts the settled contract (internal/workspace/close.go: \"the canonical links and their targets stay on disk\"; pinned by internal/dlog/surfaces_test.go TestEvictLeavesTheCanonicalLinkAndTargetOnDisk) — no removal to assert; see the positive assertion above instead.")
 }
 
 // TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords pins the run
@@ -307,13 +309,16 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 	// Arrange: first boot; capture its own records and pid before stopping it.
 	d1 := newDaemon(t, harness.Opts{})
 	d1.AwaitRunLogOperation("daemon.pprof.disabled")
-	prior := d1.RunLog()
-	if len(prior) == 0 {
-		t.Fatal("the first boot's run log holds no records, want the boot sequence recorded before restart")
-	}
 	firstPID := d1.PID()
 	runLogPath := d1.RunLogPath()
 	d1.Stop()
+	// The snapshot is taken AFTER the stop: an orderly exit writes its own
+	// records, so a snapshot taken while the daemon still ran would be missing
+	// exactly the lines the rotation then preserves.
+	prior := harness.ReadLog(t, runLogPath)
+	if len(prior) == 0 {
+		t.Fatal("the first boot's run log holds no records, want the boot sequence recorded before restart")
+	}
 
 	// Act: restart on the same state root.
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
