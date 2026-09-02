@@ -256,10 +256,14 @@ describe("signals", () => {
     const exit = await shim.standDown();
 
     expect(exit.code).toBe(0);
-    const records = shim.log.records();
-    expect(
-      records.some((record) => record.context.outcome === "graceful_stand_down_complete"),
-    ).toBe(true);
+    // AWAITED, not scanned: the child's exit event and the last bytes of its
+    // log arriving in the parent's view of the file are two different moments,
+    // and a synchronous scan of the second from the first is a race that fails
+    // on whichever machine loses it.
+    const stoodDown = await shim.log.record(
+      (record) => record.context.outcome === "graceful_stand_down_complete",
+    );
+    expect(stoodDown.context.exit_code).toBe(0);
   });
 });
 
