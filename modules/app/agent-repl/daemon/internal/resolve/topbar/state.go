@@ -148,6 +148,11 @@ type wsState struct {
 	link shimclient.LinkState
 	// linkSeen reports whether any link state has been observed.
 	linkSeen bool
+	// hostStream and webStream are the other two hops of connectivity truth
+	// (daemon.md invariant 11): the WatchHostWorkspace and WatchWebWorkspace
+	// streams' liveness, stated by the server on every open and close edge.
+	hostStream bool
+	webStream  bool
 
 	// contextUsage is the vendor's own get_context_usage answer, the ONE fact
 	// the chip and the /context panel both resolve from.

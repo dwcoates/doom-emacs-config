@@ -598,3 +598,14 @@ func contextCutArm(cut *conversationv1.ContextCut) string {
 		return "unset"
 	}
 }
+
+// SetParticipants states whether this workspace's host and web streams are
+// held. It is the other two hops of connectivity truth (daemon.md invariant
+// 11); the footer draws not-connected while either is down.
+func (r *resolver) SetParticipants(ws ids.WorkspaceID, host, web bool) {
+	r.mutate(ws, "daemon.footer.set_participants", "the footer took the participant streams' liveness",
+		dlog.Context{"host_stream": host, "web_stream": web}, func(s *wsState) {
+			s.hostStream = host
+			s.webStream = web
+		})
+}

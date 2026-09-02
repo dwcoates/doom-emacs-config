@@ -161,7 +161,7 @@ func TestTheFirstFactPublishesACompleteView(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 
 	// Assert
 	view := h.view(t)
@@ -182,7 +182,7 @@ func TestEveryTokensPanelLineIsAlwaysSet(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 
 	// Assert
 	panel := h.view(t).GetExpanded().GetTokens()
@@ -196,11 +196,11 @@ func TestEveryTokensPanelLineIsAlwaysSet(t *testing.T) {
 func TestAnIdenticalRepublishIsDeduplicated(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	first := h.view(t)
 
 	// Act
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 
 	// Assert
 	if h.view(t) != first {
@@ -452,7 +452,7 @@ func createdShell(work, command string) *conversationv1.AgentDetachedWork {
 func TestTheMomentaryInterruptedStatusIsRetiredByTheDwell(t *testing.T) {
 	// Arrange
 	h := newHarness(t, WithMomentaryDwell(time.Second))
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
@@ -472,7 +472,7 @@ func TestTheMomentaryInterruptedStatusIsRetiredByTheDwell(t *testing.T) {
 func TestTheDwellDoesNotFireEarly(t *testing.T) {
 	// Arrange
 	h := newHarness(t, WithMomentaryDwell(time.Second))
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
@@ -489,7 +489,7 @@ func TestTheDwellDoesNotFireEarly(t *testing.T) {
 func TestAHostShutdownIsDrawnAsItsOwnInterruptedStep(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
@@ -506,7 +506,7 @@ func TestAHostShutdownIsDrawnAsItsOwnInterruptedStep(t *testing.T) {
 func TestAnUnstatedInterruptCauseReadsAsTheUserStop(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 
@@ -526,7 +526,7 @@ func TestAnUnstatedInterruptCauseReadsAsTheUserStop(t *testing.T) {
 func TestANewTurnSupersedesAStandingDwell(t *testing.T) {
 	// Arrange
 	h := newHarness(t, WithMomentaryDwell(time.Second))
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	turn := testTurnID
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
 	h.r.OnAgentTerminal(testWS, mainAgent, &turn, interruptedByUserStop(), nil)
@@ -544,7 +544,7 @@ func TestANewTurnSupersedesAStandingDwell(t *testing.T) {
 func TestTheDwellRetiresTheMomentaryLoadingStatus(t *testing.T) {
 	// Arrange
 	h := newHarness(t, WithMomentaryDwell(time.Second))
-	h.r.OnLink(testWS, shimclient.LinkConnected)
+	connected(h)
 	h.r.OnActivity(testWS, mainAgent, memoryInjection("CLAUDE.md"))
 	if got := h.status(t); got != "loading" {
 		t.Fatalf("status = %q, want loading before the dwell elapses", got)
