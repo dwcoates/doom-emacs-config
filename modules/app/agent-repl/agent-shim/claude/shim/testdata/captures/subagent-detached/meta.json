@@ -1,0 +1,35 @@
+{
+  "scenario": "subagent-detached",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Spawn a subagent in the background that counts from 1 to 60 with a one-second sleep between numbers, and do not wait for it. Tell me its id, then answer 'launched'.",
+  "prompts": [
+    {
+      "text": "Spawn a subagent in the background that counts from 1 to 60 with a one-second sleep between numbers, and do not wait for it. Tell me its id, then answer 'launched'.",
+      "resume": false
+    }
+  ],
+  "world": "subagent-detached",
+  "cwd_init": null,
+  "vendor_session_id": "8be46102-192b-46b0-a8d0-f0ae047ab55d",
+  "manual": null,
+  "expect": [
+    "tool:Agent(background)",
+    "tool_result:agent_async_launch",
+    "task_started",
+    "background_tasks_changed",
+    "file:spool a<hex>.output"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-subagent-detached-cDSlB0-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:32:58.656Z",
+  "controls": [
+    {
+      "verb": "backgroundTasks",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

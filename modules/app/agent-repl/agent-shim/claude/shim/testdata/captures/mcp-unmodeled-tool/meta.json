@@ -1,0 +1,30 @@
+{
+  "scenario": "mcp-unmodeled-tool",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Call the capture-probe MCP server's `echo` tool with the text 'unmodeled probe', then call its `slow` tool with ms 8000. Report what each returned.",
+  "prompts": [
+    {
+      "text": "Call the capture-probe MCP server's `echo` tool with the text 'unmodeled probe', then call its `slow` tool with ms 8000. Report what each returned.",
+      "resume": false
+    }
+  ],
+  "world": "mcp-unmodeled-tool",
+  "cwd_init": null,
+  "vendor_session_id": "1390ee2b-6bfe-4734-924c-5a16fc28674b",
+  "manual": null,
+  "expect": [
+    "tool:mcp__capture-probe__echo",
+    "tool:mcp__capture-probe__slow",
+    "AgentUnmodeled with mcp_server stated by the vendor",
+    "tool_progress beat on the slow call",
+    "system:init listing capture-probe as connected"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-mcp-unmodeled-tool-4ocIk3-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:48:51.409Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

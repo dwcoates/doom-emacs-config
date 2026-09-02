@@ -1,0 +1,46 @@
+{
+  "scenario": "diagnostics",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello.",
+  "prompts": [
+    {
+      "text": "Say hello.",
+      "resume": false
+    }
+  ],
+  "world": "diagnostics",
+  "cwd_init": null,
+  "vendor_session_id": "24e074a1-a993-4fa4-ba05-bd2f0b1eebe9",
+  "manual": null,
+  "expect": [
+    "SDKControlInitializeResponse",
+    "SlashCommand[]",
+    "AgentInfo[]",
+    "system:init"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-diagnostics-mG2YpC-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:47:08.188Z",
+  "controls": [
+    {
+      "verb": "initializationResult",
+      "ok": true
+    },
+    {
+      "verb": "supportedCommands",
+      "ok": true
+    },
+    {
+      "verb": "supportedAgents",
+      "ok": true
+    },
+    {
+      "verb": "initializationResult",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

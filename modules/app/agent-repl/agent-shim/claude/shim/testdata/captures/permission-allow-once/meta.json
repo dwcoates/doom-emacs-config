@@ -1,0 +1,28 @@
+{
+  "scenario": "permission-allow-once",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `rm -f throwaway.txt`.",
+  "prompts": [
+    {
+      "text": "Run `rm -f throwaway.txt`.",
+      "resume": false
+    }
+  ],
+  "world": "permission-allow-once",
+  "cwd_init": null,
+  "vendor_session_id": "a5adf70e-9710-47d8-82ff-49ae39ada403",
+  "manual": null,
+  "expect": [
+    "can_use_tool request with rendered prompt sentence",
+    "PermissionResult allow",
+    "tool:Bash"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-allow-once-vYixda-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:49:26.160Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
