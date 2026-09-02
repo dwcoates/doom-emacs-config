@@ -241,11 +241,14 @@ describe("the model selector", () => {
   });
 
   it("draws the refusal at the picker", async () => {
-    // Arrange
+    // Arrange: the error names its cause — since landing 4 an unset cause is a
+    // malformed view, reported through the failure sink rather than drawn here.
     await withTopbar({});
     harness.fake.answer(
       "setModel",
-      create(SetModelResponseSchema, { result: { case: "error", value: {} } }),
+      create(SetModelResponseSchema, {
+        result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+      }),
     );
     await harness.click(".topbar-model");
     // Act
@@ -304,11 +307,14 @@ describe("the permission-mode picker", () => {
   });
 
   it("draws the refusal at the mode button", async () => {
-    // Arrange
+    // Arrange: the error names its cause — an unset one is a malformed view,
+    // not a refusal, and states nothing at the control.
     await withTopbar({});
     harness.fake.answer(
       "setPermissionMode",
-      create(SetPermissionModeResponseSchema, { result: { case: "error", value: {} } }),
+      create(SetPermissionModeResponseSchema, {
+        result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+      }),
     );
     await harness.click(".topbar-mode");
     // Act
