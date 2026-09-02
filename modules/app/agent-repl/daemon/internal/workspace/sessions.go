@@ -105,6 +105,10 @@ type FleetDeps struct {
 type live struct {
 	client  shimclient.Client
 	watcher sessionwatcher.Watcher
+	// hostSessionID is the session's host-facing identity, remembered here so
+	// the host view's live half is answered from what this daemon IS
+	// operating rather than from a durable row that may outlive the session.
+	hostSessionID string
 }
 
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
@@ -360,7 +364,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: client, watcher: watcher})
+	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID})
 
 	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, client.PID()); err != nil {
 		return err
