@@ -58,12 +58,14 @@ export function drawTopbarPermissionModePicker(
   button.className = "topbar-mode-button";
   button.textContent = current.displayName;
   button.setAttribute("data-mode", current.mode);
-  asAnchor(button, "mode");
   wrap.append(button);
 
+  // The wrap is the control (`.topbar-mode` per the DOM contract), so it holds
+  // the anchor and the click; see the model selector for the reasoning.
+  asAnchor(wrap, "mode");
   const body = (): HTMLElement => drawPermissionModeOptions(u, tc, wrap, button);
   tc.reveals.register("mode", "mode", body);
-  button.addEventListener("click", () => {
+  wrap.addEventListener("click", () => {
     tc.reveals.toggle("mode", "mode", body);
   });
   return wrap;
