@@ -172,8 +172,6 @@ export interface ScenarioContext {
   readonly args: string;
 
   // -- identity and clock --------------------------------------------------
-  /** The vendor session id currently in force; changes on rotation. */
-  readonly sessionUuid: string;
   /** The model the session answers with. */
   readonly model: string;
   /** The gate's mode. */
@@ -236,12 +234,8 @@ export interface ScenarioContext {
   result(spec: ResultSpec): void;
 
   // -- control -------------------------------------------------------------
-  /** Park until the turn gate opens; resolves at once when no gate applies. */
-  gate(): Promise<void>;
   /** The permission callback the shim handed the query. */
   readonly canUseTool: CanUseToolLike;
-  /** Whether an interrupt has landed on this turn. */
-  interrupted(): boolean;
   /** Park until the turn is interrupted. */
   awaitInterrupt(): Promise<void>;
   /**
@@ -278,8 +272,6 @@ export interface ScenarioContext {
   // -- the live set --------------------------------------------------------
   /** Announce a task started and add it to the live set. */
   startTask(task: Omit<LiveTask, "backgrounded">): LiveTask;
-  /** Every live task, in announcement order. */
-  liveTasks(): readonly LiveTask[];
   /** Announce the live set after a change (REPLACE semantics). */
   announceLiveTasks(): void;
   /** Retire one task from the live set. */
