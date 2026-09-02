@@ -788,16 +788,26 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	if killed.GetForce() {
 		t.Fatalf("hibernation's KillSession.force = true, want a quiet close (the session is already compacted and idle)")
 	}
+	// Assert: the ORDER — the shim's hibernate ack is what earns the
+	// stand-down, so KillSession is never sent before it. The shim's own log
+	// is the record of both, and its order is the order they arrived in.
+	assertShimRequestOrder(t, f, harness.RPCHibernate, harness.RPCKillSession)
 	f.shim.AwaitGone()
 
-	// Assert: the roster shows the parked state per the sidebar arms — a
-	// session whose backing process is gone but the workspace is
-	// recoverable, distinct from a crash (RosterRowStatusSevered is the only
-	// arm matching that description; the sidebar proto has no dedicated
-	// "hibernated" arm — see report).
-	awaitRoster(t, f.d, roster, "the parked roster row", func(r *frontendv1.WorkspaceRoster) bool {
+	// Assert: the roster keeps an IDLE arm. A hibernation is a park, not a
+	// fault: the frontend must not be able to tell a parked workspace from an
+	// idle one, so `severed` and `dead` are both wrong here.
+	awaitRoster(t, f.d, roster, "the parked roster row staying idle", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetSevered() != nil
+		return row != nil && (row.GetReady() != nil || row.GetDone() != nil)
+	})
+
+	// Assert: the host stream keeps the workspace LIVE with the shim
+	// unattached, which is the whole of what a park is allowed to show.
+	host := f.d.WatchHost(f.ws)
+	harness.AwaitView(t, f.d.Ctx(), host, "the parked workspace live with the shim unattached", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		live := r.GetHost().GetExisting().GetLive()
+		return live != nil && !live.GetShimAttached()
 	})
 
 	// Act: a prompt revives the session.
@@ -1204,5 +1214,31 @@ func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
 	}
 	if !repo.HasBranch("kill-keep-data") {
 		t.Fatalf("branch %q is gone after KillWorkspace, want the workspace's data left intact", "kill-keep-data")
+	}
+}
+
+// assertShimRequestOrder fails unless the named rpcs appear in the fake shim's
+// own request log in the order given. The log is the shim's record of what
+// arrived, so its order IS the arrival order.
+func assertShimRequestOrder(t *testing.T, f *fixture, first, second string) {
+	t.Helper()
+	firstAt, secondAt := -1, -1
+	for i, r := range f.d.WorkspaceLog(f.repo.Dir, "shim") {
+		switch r.Operation {
+		case "shim.fake." + first:
+			if firstAt < 0 {
+				firstAt = i
+			}
+		case "shim.fake." + second:
+			if secondAt < 0 {
+				secondAt = i
+			}
+		}
+	}
+	if firstAt < 0 || secondAt < 0 {
+		t.Fatalf("the shim log records %s at %d and %s at %d, want both present", first, firstAt, second, secondAt)
+	}
+	if firstAt > secondAt {
+		t.Fatalf("the shim received %s before %s, want %s first", second, first, first)
 	}
 }

@@ -40,6 +40,16 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Log
 	if !s.live(session) && rec.Closed {
 		return "inactive"
 	}
+	// A PARKED SESSION IS IDLE, NOT BROKEN. The idle sweep stands the shim
+	// down deliberately and a prompt brings it straight back, so the row keeps
+	// an IDLE arm: nothing about a hibernation is visible to the user beyond
+	// the wait for the revival, and drawing `severed` or `dead` would report a
+	// fault where there is none. The link arm is skipped for exactly that
+	// reason — the route is down because the daemon put it down.
+	if parked(session) {
+		log.Debug("daemon.sidebar.status", "the session is parked by the idle sweep", nil)
+		return sessionArm(s, log)
+	}
 	if arm := mergeArm(s.merge); arm != "" {
 		return arm
 	}
@@ -88,6 +98,17 @@ func noSessionArm(s *wsState, session *wsm.Session) string {
 		return ""
 	}
 	return "none"
+}
+
+// terminalHibernated is wsm's spelling of the idle sweep's stand-down. It is a
+// PARK: the workspace is recoverable by a prompt, and the session record keeps
+// the mark only so the next boot knows why the shim is gone. It is spelled
+// here rather than imported from drain, which sits above this resolver.
+const terminalHibernated = "hibernated"
+
+// parked reports whether a session record carries the idle sweep's park.
+func parked(session *wsm.Session) bool {
+	return session != nil && session.Terminal != nil && session.Terminal.Kind == terminalHibernated
 }
 
 // linkArm names the route's arm, empty when the route serves undegraded. It

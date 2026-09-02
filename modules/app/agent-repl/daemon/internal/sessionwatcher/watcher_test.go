@@ -732,3 +732,23 @@ func TestAReopenWhoseStreamCloseBlocksStillAnswersTurnInFlight(t *testing.T) {
 		t.Fatal("TurnInFlight never answered while a stream close was in flight")
 	}
 }
+
+// TestADeadLinkIsNeverWalkedBackToRedialing covers the terminal-death
+// invariant: the shim process being gone is stronger evidence than any stream
+// break, and the breaks that follow the death are its consequence.
+func TestADeadLinkIsNeverWalkedBackToRedialing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.links <- shimclient.LinkDead
+	h.rec.until(t, "sidebar.OnLink")
+
+	// Act: a standing stream breaks after the death, as every one of them does.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.link")
+	if got := h.w.Link(); got != shimclient.LinkDead {
+		t.Fatalf("the link after a post-death stream break = %v, want LinkDead", got)
+	}
+}

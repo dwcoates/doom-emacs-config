@@ -93,11 +93,14 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "turn"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
-	// THE CHALLENGE COUNTS EVERY DETACHED ITEM THE TURN KILL WOULD TAKE, not
-	// only the subagents: a detached shell dies with the query exactly as a
-	// detached subagent does, so a user who is about to lose one is asked
-	// about it. The arm's field keeps its contract name (live_agent_count).
-	liveAgents := len(running.LiveWork.Agents) + len(running.LiveWork.Shells)
+	// THE CHALLENGE COUNTS LIVE AGENTS, AND ONLY THEM. The arm's field is
+	// `live_agent_count` and it means what it says: a detached SHELL is not an
+	// agent, so it neither raises the challenge nor is counted by it. A shell
+	// still dies with the query, and a confirmed interrupt still stops it —
+	// that is the `detached` count below, which is a different question from
+	// how many agents the user is being asked about.
+	liveAgents := len(running.LiveWork.Agents)
+	detached := liveAgents + len(running.LiveWork.Shells)
 	if liveAgents > 0 && !confirm {
 		log.Warn(opInterrupt, "refused an unconfirmed turn interrupt while detached work is live", dlog.Context{
 			"live_agent_count": liveAgents,
@@ -109,7 +112,7 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 	// kill: the confirmation is the user answering "also stop them", and the
 	// stop is what makes that answer true rather than relying on the vendor to
 	// reap the detached units as a side effect of the query dying.
-	if liveAgents > 0 {
+	if detached > 0 {
 		if err := v.stopDetachedForConfirm(ctx, log, ws, shim, running); err != nil {
 			return InterruptOutcome{}, err
 		}

@@ -113,8 +113,24 @@ func (q *queue) Accept(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID)
 func (q *queue) deliverHeld(ctx context.Context, ws ids.WorkspaceID, held wsm.HeldPrompt, log dlog.Logger) error {
 	sender, ok := q.deps.Client(ws)
 	if !ok {
-		log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
-		return ErrNoSession
+		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The hold that a hibernation
+		// parked is released by the sweep's own lease release, and the release
+		// is exactly the moment the prompt must go — so the same revival a
+		// fresh submission gets is taken here. Without it the prompt that
+		// should have woken the workspace is dropped at its one delivery
+		// point and waits forever.
+		revived, err := q.revive(ctx, ws, log)
+		if err != nil {
+			return err
+		}
+		if !revived {
+			log.Warn(opDeliver, "the workspace has no session to deliver the hold to", nil)
+			return ErrNoSession
+		}
+		if sender, ok = q.deps.Client(ws); !ok {
+			log.Error(opDeliver, "the revived workspace still has no session to deliver the hold to", nil)
+			return ErrNoSession
+		}
 	}
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {

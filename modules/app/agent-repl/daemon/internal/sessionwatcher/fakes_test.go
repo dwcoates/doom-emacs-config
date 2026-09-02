@@ -516,6 +516,10 @@ func (s *lifecycleSink) OnLinkChanged(_ ids.WorkspaceID, attached bool) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLinkChanged", attached: &attached})
 }
 
+func (s *lifecycleSink) OnSessionDiagnostics(_ ids.WorkspaceID, _ *conversationv1.SessionDiagnostics) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnSessionDiagnostics"})
+}
+
 func (s *lifecycleSink) OnNotification(_ ids.WorkspaceID, note HostNotification) {
 	held := note
 	s.rec.emit(event{sink: "lifecycle", method: "OnNotification", note: &held})
