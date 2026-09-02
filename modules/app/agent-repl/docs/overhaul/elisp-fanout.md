@@ -383,6 +383,9 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   real findings, final report with the §17 dead-code lists — then parks:
   no dispatch after the report; STOP-elisp.md rewritten with the
   resumption state; the teamlead stays resident.
+- AUDIT 3 dispatched (fable, fresh context, read-only at 44476838d; told
+  the landing-6 adaptations and the composer `--await-log` flake are in
+  flight). Running: regress, landing6, audit 3 (cap).
 
 ## 1. Module map (final tree of lisp/)
 
