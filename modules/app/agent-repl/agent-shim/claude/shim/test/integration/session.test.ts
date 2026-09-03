@@ -1716,3 +1716,46 @@ describe("a stand-down with an ask still open", () => {
     expect(terminals.length).toBeGreaterThan(0);
   });
 });
+
+describe("WatchAgent before the session's first turn", () => {
+  // THE DIRECT REPRO of the fresh-session link fault. The endpoint contract has
+  // the daemon open the main agent's watch as soon as the session starts, and
+  // says "a fresh agent simply yields an empty page" — but the store's agent row
+  // is created by the agent's FIRST WRITE, so the open used to be refused
+  // `unknown_agent` and the daemon read the closed stream as a severed link on
+  // every bring-up.
+
+  test("an UNSET target on a fresh session yields an empty opening page", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    // Act.
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    const first = await watch.next();
+
+    // Assert.
+    expect(watchAgentPage(first).entries).toEqual([]);
+    watch.close();
+  });
+
+  test("that stream STAYS OPEN and tails the first turn", async () => {
+    // Arrange.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    // Act.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    const entry = await watch.next();
+
+    // Assert.
+    expect(watchAgentEntry(entry).entry).toBeDefined();
+    watch.close();
+  });
+});

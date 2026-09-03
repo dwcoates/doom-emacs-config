@@ -238,11 +238,20 @@ export interface Persistence {
    *
    * `knownThrough` is the CALLER'S own high-water mark: unset repaints, set
    * returns only entries newer than it.
+   *
+   * `known` is the CALLER'S belief that the agent exists — the producer's own
+   * answer. The store refuses `unknown_agent` for a book it holds no row for,
+   * and the row is created by the agent's FIRST WRITE, so a watcher opened on a
+   * fresh agent beats it there. With this predicate holding, that refusal is
+   * waited out: the opening page comes back EMPTY and its tail stands until the
+   * first row lands. Without it — or once it stops holding — the store's
+   * refusal is surfaced as it stands.
    */
   openAgentPage(
     agent: conversationv1.AgentId,
     pageSize: number,
     knownThrough?: conversationv1.HistoryPointer,
+    known?: () => boolean,
   ): Promise<AgentPageSession>;
   /** An OLDER page of one book, walking down from a pointer already served. */
   readAgentPage(

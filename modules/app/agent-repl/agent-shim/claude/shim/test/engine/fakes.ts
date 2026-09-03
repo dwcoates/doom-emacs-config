@@ -230,7 +230,15 @@ export class RecordingPersistence implements Persistence {
     this.flushes++;
     return Promise.resolve({ lostRows: this.lostRows });
   }
-  openAgentPage(): Promise<AgentPageSession> {
+  /** The `known` predicate the caller passed on its last openAgentPage, if any. */
+  lastKnownAgent: (() => boolean) | undefined;
+  openAgentPage(
+    _agent?: conversationv1.AgentId,
+    _pageSize?: number,
+    _knownThrough?: conversationv1.HistoryPointer,
+    known?: () => boolean,
+  ): Promise<AgentPageSession> {
+    this.lastKnownAgent = known;
     if (this.openError !== undefined) return Promise.reject(this.openError);
     const entries = this.tail;
     const self = this;
