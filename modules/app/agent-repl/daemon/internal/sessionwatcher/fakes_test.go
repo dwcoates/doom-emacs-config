@@ -2,10 +2,13 @@ package sessionwatcher
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -159,6 +162,14 @@ func (c *fakeClient) WatchAgent(_ context.Context, req *shimv1.WatchAgentRequest
 	stream := newFakeStream[*shimv1.WatchAgentResponse]()
 	c.agentOpens <- agentOpen{req: req, stream: stream}
 	return stream, nil
+}
+
+// setAgentErr arranges the refusal WatchAgent answers with. The shim really
+// does refuse a book its store has not registered yet.
+func (c *fakeClient) setAgentErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.agentErr = err
 }
 
 // setBashErr arranges the refusal WatchBash answers with. The shim really does
@@ -322,6 +333,8 @@ type event struct {
 	attached *bool
 	// linkFault is the lost-link evidence the lifecycle sink was handed.
 	linkFault *LinkFault
+	// refusal is the refused-open evidence the lifecycle sink was handed.
+	refusal *WatchOpenRefusal
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -353,6 +366,21 @@ func (r *recorder) until(t *testing.T, name string) []event {
 		case <-time.After(waitDeadline):
 			t.Fatalf("the sentinel %s never arrived; saw %v", name, names(seen))
 			return nil
+		}
+	}
+}
+
+// drain returns every event already recorded, without waiting for another. It
+// is for a NEGATIVE assertion whose subject has already happened: the
+// watcher's start queues every sink call it made before Start returned.
+func (r *recorder) drain() []event {
+	var seen []event
+	for {
+		select {
+		case e := <-r.ch:
+			seen = append(seen, e)
+		default:
+			return seen
 		}
 	}
 }
@@ -550,6 +578,11 @@ func (s *lifecycleSink) OnLinkFault(_ ids.WorkspaceID, fault LinkFault) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnLinkFault", linkFault: &held})
 }
 
+func (s *lifecycleSink) OnWatchOpenRefused(_ ids.WorkspaceID, refusal WatchOpenRefusal) {
+	held := refusal
+	s.rec.emit(event{sink: "lifecycle", method: "OnWatchOpenRefused", refusal: &held})
+}
+
 func (s *lifecycleSink) OnSessionDiagnostics(_ ids.WorkspaceID, _ *conversationv1.SessionDiagnostics) {
 	s.rec.emit(event{sink: "lifecycle", method: "OnSessionDiagnostics"})
 }
@@ -592,7 +625,41 @@ type harness struct {
 // sends.
 func newHarness(t *testing.T, session Session) *harness {
 	t.Helper()
+	h := startHarness(t, session, nil)
+	h.session = h.client.nextSessionOpen(t)
+	open := h.client.nextAgentOpen(t)
+	h.main, h.mainReq = open.stream, open.req
+	return h
+}
+
+// newHarnessRefusingAgents starts a watcher whose every WatchAgent open the
+// shim refuses, which is the fresh-bring-up race: the store has not registered
+// the main agent's book yet. The MAIN watch is therefore never opened, so the
+// caller takes only the session stream.
+func newHarnessRefusingAgents(t *testing.T, session Session, refusal error) *harness {
+	t.Helper()
+	h := startHarness(t, session, func(c *fakeClient) { c.setAgentErr(refusal) })
+	h.session = h.client.nextSessionOpen(t)
+	return h
+}
+
+// refusedOpenError is a watch open the SHIM refused, shaped exactly as the
+// shim client shapes one: a StreamOpenError wrapping the Connect refusal.
+func refusedOpenError(procedure string, code connect.Code, message string) error {
+	return &shimclient.StreamOpenError{
+		Procedure: procedure,
+		Err:       connect.NewError(code, errors.New(message)),
+	}
+}
+
+// startHarness starts a watcher, applying prep to the fake client first, and
+// consumes nothing the start emitted.
+func startHarness(t *testing.T, session Session, prep func(*fakeClient)) *harness {
+	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
+	if prep != nil {
+		prep(h.client)
+	}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
 		Feed:      &feedSink{rec: h.rec},
@@ -606,10 +673,6 @@ func newHarness(t *testing.T, session Session) *harness {
 	}
 	h.w = started.(*watcher)
 	t.Cleanup(func() { _ = h.w.Close() })
-
-	h.session = h.client.nextSessionOpen(t)
-	open := h.client.nextAgentOpen(t)
-	h.main, h.mainReq = open.stream, open.req
 	return h
 }
 
@@ -1289,6 +1352,26 @@ func (h *harness) awaitLinkFault(t *testing.T) LinkFault {
 		case <-deadline:
 			t.Fatalf("no link fault arrived; saw %v", names(seen))
 			return LinkFault{}
+		}
+	}
+}
+
+// awaitRefusal waits for the refused-open evidence the lifecycle sink is
+// handed.
+func (h *harness) awaitRefusal(t *testing.T) WatchOpenRefusal {
+	t.Helper()
+	deadline := time.After(waitDeadline)
+	var seen []event
+	for {
+		select {
+		case e := <-h.rec.ch:
+			if e.name() == "lifecycle.OnWatchOpenRefused" {
+				return *e.refusal
+			}
+			seen = append(seen, e)
+		case <-deadline:
+			t.Fatalf("no refused-open fault arrived; saw %v", names(seen))
+			return WatchOpenRefusal{}
 		}
 	}
 }

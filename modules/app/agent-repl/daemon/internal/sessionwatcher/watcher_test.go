@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -1086,4 +1088,211 @@ func TestShellStreamEndingAfterTheTerminalIsNotReopened(t *testing.T) {
 
 	// Assert.
 	h.client.noBashOpen(t)
+}
+
+// ---------------------------------------------------------------------------
+// A REFUSED watch open is not a severed link
+// ---------------------------------------------------------------------------
+
+// TestRefusedOpenClassification pins which failures on a watch OPEN are the
+// shim's semantic refusal and which are the transport failing.
+func TestRefusedOpenClassification(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "not found on the open is a refusal",
+			err:  refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"),
+			want: true,
+		},
+		{
+			name: "failed precondition on the open is a refusal",
+			err:  refusedOpenError("WatchBash", connect.CodeFailedPrecondition, "no rows yet"),
+			want: true,
+		},
+		{
+			name: "unavailable on the open is the transport failing",
+			err:  refusedOpenError("WatchAgent", connect.CodeUnavailable, "connection refused"),
+			want: false,
+		},
+		{
+			name: "a bare transport error is not a refusal",
+			err:  errors.New("connection reset"),
+			want: false,
+		},
+		{
+			name: "a connect refusal that is NOT an open error is not a refusal",
+			err:  connect.NewError(connect.CodeNotFound, errors.New("no such agent")),
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := refusedOpen(tc.err)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("refusedOpen(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestARefusedMainWatchOpenAtBringUpNeverSeversTheLink is the defect: the
+// store has not registered the main agent's book at a fresh bring-up, and the
+// refusal that answers is a semantic one — not a transport that broke.
+func TestARefusedMainWatchOpenAtBringUpNeverSeversTheLink(t *testing.T) {
+	// Arrange & Act: bring up a watcher whose main watch the shim refuses.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Assert: the link is intact, and the refusal was logged rather than raised.
+	if got := h.w.Link(); got != shimclient.LinkConnected {
+		t.Fatalf("the link after a refused main open = %v, want LinkConnected", got)
+	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.watch_agent") {
+		t.Fatalf("a refused main open logged %v, want an info record", h.log.Records())
+	}
+}
+
+// TestARefusedMainWatchOpenRaisesNoLinkFault is the evidence half: nothing
+// severed, so nothing is recorded as severed.
+func TestARefusedMainWatchOpenRaisesNoLinkFault(t *testing.T) {
+	// Arrange & Act.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Assert: the start's own events are drained; no fault is among them.
+	for _, e := range h.rec.drain() {
+		if e.name() == "lifecycle.OnLinkFault" || e.name() == "lifecycle.OnWatchOpenRefused" {
+			t.Fatalf("a refused main open raised %s, want no fault", e.name())
+		}
+	}
+}
+
+// TestARefusedMainWatchIsReopenedWhenTheBookAppears pins the retry: nothing
+// re-announces the main agent, so a frame on the session's own stream is the
+// occasion to open its watch again.
+func TestARefusedMainWatchIsReopenedWhenTheBookAppears(t *testing.T) {
+	// Arrange: a bring-up whose main open was refused, then a shim that holds
+	// the book.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	h.client.setAgentErr(nil)
+
+	// Act.
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	if open := h.client.nextAgentOpen(t); open.req.GetTarget() != nil {
+		t.Fatalf("the re-opened watch targeted %q, want the main agent's unset target", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault pins the bound: a
+// shim that refuses forever is reported, and still never severs the link.
+func TestARefusedMainWatchStopsBeingRetriedAndRaisesItsOwnFault(t *testing.T) {
+	// Arrange: a shim that refuses every open.
+	h := newHarnessRefusingAgents(t, Session{Started: sessionStarted("")},
+		refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act: drive the retries past the bound.
+	for i := 0; i < openRefusalLimit; i++ {
+		h.sendSessionUpdate(t, compactingUpdate())
+	}
+
+	// Assert.
+	got := h.awaitRefusal(t)
+	if got.Operation != "watch_agent" {
+		t.Fatalf("refusal operation = %q, want watch_agent", got.Operation)
+	}
+	if link := h.w.Link(); link != shimclient.LinkConnected {
+		t.Fatalf("the link after exhausted retries = %v, want LinkConnected", link)
+	}
+}
+
+// TestARefusedOpenOnAnUnannouncedHandleRaisesItsOwnFault pins the other half
+// of the classification: nothing announced this agent, so the refusal is a
+// disagreement about what exists and is reported at once.
+func TestARefusedOpenOnAnUnannouncedHandleRaisesItsOwnFault(t *testing.T) {
+	// Arrange: a healthy watcher whose shim refuses agent opens.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act: open a watch for a handle no announcement ever registered.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("ghost-1")})
+	h.w.mu.Unlock()
+
+	// Assert.
+	got := h.awaitRefusal(t)
+	if got.Handle != "ghost-1" {
+		t.Fatalf("refusal handle = %q, want ghost-1", got.Handle)
+	}
+	if link := h.w.Link(); link != shimclient.LinkConnected {
+		t.Fatalf("the link after an unannounced refusal = %v, want LinkConnected", link)
+	}
+}
+
+// TestARefusedOpenOnAnUnannouncedHandleIsWarned pins the level: an unexpected
+// refusal is a warning, not the ordinary bring-up race's info line.
+func TestARefusedOpenOnAnUnannouncedHandleIsWarned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+
+	// Act.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("ghost-1")})
+	h.w.mu.Unlock()
+	h.awaitRefusal(t)
+
+	// Assert.
+	if !h.hasRecord("warn", "daemon.sessionwatcher.watch_open_refused") {
+		t.Fatalf("an unannounced refusal logged %v, want a warn record", h.log.Records())
+	}
+}
+
+// TestAnAgentStreamEndingAfterOpeningStillSevers pins that the fix narrowed
+// nothing else: a stream that OPENED and then ended while the session is live
+// is a transport failure exactly as before.
+func TestAnAgentStreamEndingAfterOpeningStillSevers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.main.fail(errors.New("connection reset"))
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+}
+
+// TestAnUnavailableWatchOpenStillSevers pins the same for the OPEN: a
+// transport that will not carry the stream is a severed link, refusals or no
+// refusals.
+func TestAnUnavailableWatchOpenStillSevers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeUnavailable, "connection refused"))
+
+	// Act.
+	h.w.mu.Lock()
+	h.w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")})
+	h.w.mu.Unlock()
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
 }

@@ -476,6 +476,23 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 					"agent_id": agent.GetValue(), "work_id": handle.GetValue(),
 				})
 				w.publishLiveWorkLocked()
+				// The promotion is not an excuse to leave a refused watch
+				// dark: a spawn whose open the shim refused has no stream,
+				// and this announcement is an occasion to open one.
+				if entry.stream == nil {
+					w.openAgentStreamLocked(entry)
+				}
+				return
+			}
+			// A REPEAT IS ALSO A RETRY, exactly as it is for a shell: the
+			// shim refuses WatchAgent for a book it has not registered yet,
+			// so an entry can be carrying no stream, and the repeated
+			// announcement is the occasion to open one.
+			if entry.stream == nil {
+				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached subagent's watch", dlog.Context{
+					"agent_id": agent.GetValue(),
+				})
+				w.openAgentStreamLocked(entry)
 				return
 			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the subagent is already watched", dlog.Context{
