@@ -122,6 +122,8 @@ func TestDegradedDuringRealStoreOutage(t *testing.T) {
 	// healthy at session start (GetLiveWork, shim.md, succeeds before the
 	// outage begins).
 	w := NewWorld(t, WorldOpts{})
+	// The store outage this test provokes is exactly a health fault.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
@@ -169,6 +171,8 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
 	w := NewWorld(t, WorldOpts{})
+	// The store outage this test provokes is exactly a health fault.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
