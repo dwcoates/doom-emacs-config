@@ -315,6 +315,22 @@ func (r *resolver) ContextPanel(ws ids.WorkspaceID) (*frontendv1.ContextPanelVie
 	return r.contextPanel(usage), true
 }
 
+// McpPanel resolves the /mcp panel from the retained mcp_server healths. It
+// answers unconditionally: an empty catalog draws an empty panel rather than
+// failing, because "no MCP server is configured here" is a fact the daemon can
+// state.
+func (r *resolver) McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView {
+	r.mu.Lock()
+	s := r.stateLocked(ws)
+	servers := append([]*conversationv1.SessionMcpServer(nil), s.mcpServers...)
+	log := r.logOf(ws, s)
+	r.mu.Unlock()
+
+	log.Debug("daemon.topbar.mcp_panel", "the topbar resolved the /mcp panel",
+		dlog.Context{"servers": len(servers)})
+	return mcpPanel(servers)
+}
+
 // ---- daemon-fact setters --------------------------------------------------
 
 // SetNaming installs the WSM-derived title and session line.
@@ -539,7 +555,7 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 	case *conversationv1.SessionUpdate_FastMode:
 		return "fast_mode", func(*wsState) {}
 	case *conversationv1.SessionUpdate_McpServer:
-		return "mcp_server", func(*wsState) {}
+		return "mcp_server", func(s *wsState) { s.putMcpServer(u.McpServer) }
 	case *conversationv1.SessionUpdate_RateLimitStatus:
 		return "rate_limit_status", func(*wsState) {}
 	case *conversationv1.SessionUpdate_Compacting:

@@ -1267,3 +1267,57 @@ func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 		return v.GetConnectivity().GetTitle() != "connected to the session"
 	})
 }
+
+// TestMcpPanelListsEveryServerTheSessionStatedAHealthFor pins the /mcp
+// producer end to end: the shim's per-server mcp_server updates are retained
+// by the topbar resolver and drawn as the panel's rows, one per server, each
+// carrying the health the shim stated.
+func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Act
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_McpServer{McpServer: &conversationv1.SessionMcpServer{
+			Name:   "github",
+			Health: &conversationv1.SessionMcpServer_Connected{Connected: &conversationv1.SessionMcpServerConnected{}},
+		}},
+	})
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_McpServer{McpServer: &conversationv1.SessionMcpServer{
+			Name: "linear",
+			Health: &conversationv1.SessionMcpServer_Failed{Failed: &conversationv1.SessionMcpServerFailed{
+				Error: "connection refused",
+			}},
+		}},
+	})
+	// The two updates carry nothing the topbar draws, so a LATER update on the
+	// SAME stream is the synchronizing edge: the stream is ordered, so a chip
+	// carrying this usage proves both mcp_server frames were already applied.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens: 50_000, MaxTokens: 200_000, Percentage: 25, Model: "claude-opus-5",
+		}},
+	})
+	awaitTopbar(t, f, topbar, "the context chip that follows the mcp_server updates", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() != ""
+	})
+
+	// Assert
+	resp := f.submit("/mcp", "k-mcp-panel", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	panel := resp.GetSuccess().GetCommandPanel().GetMcp()
+	if panel == nil {
+		t.Fatalf("SubmitPrompt(/mcp) = %v, want a command_panel.mcp", resp)
+	}
+	rows := panel.GetRows()
+	if len(rows) != 2 {
+		t.Fatalf("the /mcp panel rows = %v, want one row per stated server", rows)
+	}
+	if rows[0].GetName() != "github" || rows[0].GetConnected() == nil {
+		t.Fatalf("row 0 = %v, want github connected", rows[0])
+	}
+	if rows[1].GetName() != "linear" || rows[1].GetFailed().GetDetail().GetText() != "connection refused" {
+		t.Fatalf("row 1 = %v, want linear failed with the stated error", rows[1])
+	}
+}
