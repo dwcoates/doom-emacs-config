@@ -89,6 +89,15 @@ type Orchestrator interface {
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
+	// Drain stops admitting merges and waits, WITHIN A BOUND
+	// (TerminalDrainBound), for every run that has already reached its
+	// TERMINAL to finish its durable stamps and its teardown. The daemon's
+	// orderly exit calls it with the state client STILL OPEN: without it a
+	// SIGTERM landing mid-terminal closed the store under those writes, and
+	// merged_at, closed and the lease release were lost to failed
+	// transactions. A merge still in a long phase is announced at INFO and
+	// left to the boot recovery, never waited for.
+	Drain(ctx context.Context)
 	// Recover resumes or LOUDLY FAILS every in-flight merge at boot, and
 	// re-enqueues every merge that was queued but not started, in the order it
 	// was waiting in. It never silently abandons one.
@@ -182,6 +191,12 @@ type Deps struct {
 	// — nothing in the daemon's own graph builds one unless the test-only
 	// knob names a rendezvous file.
 	PauseAfterCapture AdmissionPause
+	// PauseInTerminal is a TEST-ONLY seam: when set, a run blocks in it at the
+	// TOP of its terminal — the terminal work already registered with the
+	// shutdown drain, and not one durable stamp written yet. It is what lets a
+	// suite land a deliberate stop exactly in the window the drain covers.
+	// Nil in production, where a terminal runs straight through.
+	PauseInTerminal AdmissionPause
 	// ParkedRoute delivers a parked submission to the resolution agent as
 	// guidance, landing it in the parked tab.
 	ParkedRoute ParkedRouter
