@@ -55,6 +55,16 @@ export interface PendingCall {
   readonly startedAtMs: number;
   /** Whose work it is: a subagent's own id for a subagent's call. */
   readonly agentId: conversationv1.AgentId;
+  /**
+   * The tool allowances a DECLINED result stated, kept for the frame that does
+   * settle the unit.
+   *
+   * A skill's acknowledgement is the only record that carries the skill's
+   * declared allowances, and it settles nothing; the document that settles the
+   * unit carries none. UNSET means the declining record stated no allowances at
+   * all, which the proto distinguishes from an empty declared set.
+   */
+  readonly retainedAllowedTools?: readonly string[] | undefined;
 }
 
 /** What the vendor said when a call returned. */
@@ -121,6 +131,15 @@ export interface ToolConverter {
   ): conversationv1.AgentActivity["item"] | undefined;
   /** The unit's `progress` arm, for the kinds that declare one. */
   progress?(beat: conversationv1.AgentToolCallProgress): conversationv1.AgentActivity["item"];
+  /**
+   * What to keep remembered when {@link settle} DECLINED to conclude the unit.
+   *
+   * The declining result is the last time its own fields are seen, so a kind
+   * whose terminal frame restates something only that result carried answers
+   * the call to re-remember here. Kinds with nothing to carry omit this and the
+   * call is re-remembered unchanged.
+   */
+  retain?(call: PendingCall, outcome: ToolOutcome): PendingCall;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,7 +423,7 @@ export function convertToolResult(
     );
     // The unit is NOT settled, so the call must stay remembered: a skill's
     // document and a backgrounded shell's detachment both still need it.
-    registry.remember(call);
+    registry.remember(converter.retain?.(call, outcome) ?? call);
     return [];
   }
   LOGGER.logVerbose(
