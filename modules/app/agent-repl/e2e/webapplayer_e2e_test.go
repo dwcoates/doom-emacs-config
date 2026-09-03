@@ -140,6 +140,11 @@ func TestWebappLayerPanels(t *testing.T) {
 	wlDriveArea(t, "panels.layer.test.ts")
 }
 
+// TestWebappLayerRefusals is section F8: refusal wording and placement.
+func TestWebappLayerRefusals(t *testing.T) {
+	wlDriveArea(t, "refusals.layer.test.ts")
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
