@@ -827,3 +827,7 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
 ## Landing 8 relay (2026-09-02, project lead)
 
 - No shim.v1 / store.v1 / conversation.v1 change in landing 8 (frontend.v1 only).
+
+## Landing 9 relay (2026-09-03)
+
+- No shim.v1 change (the daemon relays the existing StartSessionFailure arm).

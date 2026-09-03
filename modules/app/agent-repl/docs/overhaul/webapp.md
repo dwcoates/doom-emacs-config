@@ -484,3 +484,9 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   execution_error, turn_failed, stop_hook_prevented) render through the
   existing headline path (the daemon composes the sentence); the schema-driven
   arm enumeration must pick them up; one test per arm.
+
+## Landing 9 relay (2026-09-03, project lead)
+
+- OpenWorkspaceError.vendor_start_failed{detail}: the schema-driven refusal
+  enumeration picks it up; wording "the vendor failed to start the session"
+  with detail appended when non-empty; one test.
