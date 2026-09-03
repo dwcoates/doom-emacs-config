@@ -107,6 +107,15 @@ type wsState struct {
 	// answerRows maps a response activity id to the row it drew, so the turn's
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
+
+	// apiResponseSeq numbers the API responses observed so far; a unit
+	// arriving with usage opens the next one.
+	apiResponseSeq uint64
+	// unitAPIResponse files each unit under the API response it arrived in.
+	unitAPIResponse map[string]uint64
+	// apiResponseUsage is each API response's formatted cost stamp, keyed by
+	// the response's number. Absent means that response stated no usage.
+	apiResponseUsage map[uint64]string
 }
 
 // subFeedHead is the bubble row a sub-feed lives inside.
@@ -261,6 +270,9 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		gatedCalls:     map[string]string{},
 		turnEvidence:   map[string][]string{},
 		answerRows:     map[string]*frontendv1.FeedId{},
+
+		unitAPIResponse:  map[string]uint64{},
+		apiResponseUsage: map[uint64]string{},
 	}
 	r.workspaces[ws] = s
 	return s
