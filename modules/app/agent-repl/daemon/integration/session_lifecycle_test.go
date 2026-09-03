@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2047,5 +2048,39 @@ func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
 	}
 	if refused.GetDetail() != "the vendor refused the kill" {
 		t.Fatalf("shim_refused.detail = %q, want the shim's own detail %q", refused.GetDetail(), "the vendor refused the kill")
+	}
+}
+
+// A VENDOR THAT FAILS TO START INSIDE A HEALTHY SHIM IS A TYPED REFUSAL. The
+// shim process is up and serving — only its StartSession answer is a refusal —
+// so the daemon must relay the shim's own verdict by name rather than let it
+// escape as an untyped Connect internal. OpenWorkspaceError has no arm for it,
+// so the relay is the `intended arm:` spelling (daemon/ERROR-ARMS.md).
+func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm", "daemon.workspace.bring_up", "daemon.workspace.open",
+		"daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.redial", "daemon.shimclient.spawn")
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+		VendorStartFailed: "the vendor SDK threw before its first message",
+	})
+
+	// Act
+	_, err := f.openRaw()
+
+	// Assert
+	if err == nil {
+		t.Fatal("OpenWorkspace onto a refused vendor start = success, want the relayed refusal")
+	}
+	cerr := new(connect.Error)
+	if !errors.As(err, &cerr) {
+		t.Fatalf("OpenWorkspace error = %T (%v), want a connect error", err, err)
+	}
+	if cerr.Code() == connect.CodeInternal {
+		t.Fatalf("OpenWorkspace answered CodeInternal (%v); the shim's verdict must be relayed, never swallowed", cerr)
+	}
+	if !strings.Contains(cerr.Message(), "intended arm: OpenWorkspaceError.vendor_start_failed") {
+		t.Fatalf("OpenWorkspace message = %q, want the intended-arm spelling for OpenWorkspaceError.vendor_start_failed",
+			cerr.Message())
 	}
 }
