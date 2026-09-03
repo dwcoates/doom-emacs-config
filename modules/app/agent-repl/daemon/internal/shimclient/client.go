@@ -55,6 +55,14 @@ type client struct {
 	monitorCtx    context.Context
 	cancelMonitor context.CancelFunc
 
+	// sigMu serializes signalling against the reap. A kill may only reach the
+	// process group WHILE the group's leader — our own child — is unreaped,
+	// because the instant cmd.Wait returns the kernel may hand that pid, and
+	// with it the group id, to a stranger. reaped is set under this lock the
+	// moment Wait returns, so a signal and a reap can never interleave.
+	sigMu  sync.Mutex
+	reaped bool
+
 	mu          sync.Mutex
 	pid         int
 	occupant    string
@@ -173,11 +181,15 @@ func (c *client) Kill(attr KillAttribution) error {
 	})
 
 	if !attr.Force {
-		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		gone, err := c.signalGroup(syscall.SIGTERM, pgid)
+		if err != nil {
 			c.log.Error("daemon.shimclient.kill", "SIGTERM failed", dlog.Context{
 				"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
 			})
 			return fmt.Errorf("shimclient: SIGTERM %d: %w", pgid, err)
+		}
+		if gone {
+			return nil
 		}
 		timer := time.NewTimer(grace)
 		defer timer.Stop()
@@ -191,14 +203,75 @@ func (c *client) Kill(attr KillAttribution) error {
 		}
 	}
 
-	if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	gone, err := c.signalGroup(syscall.SIGKILL, pgid)
+	if err != nil {
 		c.log.Error("daemon.shimclient.kill", "SIGKILL failed", dlog.Context{
 			"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
 		})
 		return fmt.Errorf("shimclient: SIGKILL %d: %w", pgid, err)
 	}
+	if gone {
+		return nil
+	}
 	<-c.dead
 	return nil
+}
+
+// signalGroup signals the supervised child's process group, and can only ever
+// reach OUR OWN child's group. Two things make that structural: the group was
+// created by us (the spawn sets Setpgid, so the leader is the child itself, and
+// a group id cannot be recycled while its leader is unreaped), and the signal
+// is delivered under sigMu, which the reap takes the instant cmd.Wait returns.
+// A child that is already gone is SUCCESS, never a kill failure — including the
+// kernel's EPERM, which on a recycled pid means the process is not ours.
+func (c *client) signalGroup(sig syscall.Signal, pgid int) (gone bool, err error) {
+	c.mu.Lock()
+	proc := (*os.Process)(nil)
+	if c.cmd != nil {
+		proc = c.cmd.Process
+	}
+	c.mu.Unlock()
+
+	// A pid we never owned is refused LOUDLY, without signalling anything: an
+	// adopted shim, or a pgid that does not belong to the retained handle.
+	if proc == nil || proc.Pid != pgid {
+		held := 0
+		if proc != nil {
+			held = proc.Pid
+		}
+		c.log.Error("daemon.shimclient.kill", "refused to signal a pid we do not own", dlog.Context{
+			"workspace_id": string(c.ws), "pgid": pgid, "held_pid": held,
+		})
+		return false, ErrNoProcess
+	}
+
+	c.sigMu.Lock()
+	defer c.sigMu.Unlock()
+	if c.reaped {
+		c.log.Debug("daemon.shimclient.kill", "child already reaped; nothing signaled", dlog.Context{
+			"workspace_id": string(c.ws), "pgid": pgid, "signal": sig.String(),
+		})
+		return true, nil
+	}
+	if err := syscall.Kill(-pgid, sig); err != nil {
+		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
+			c.log.Debug("daemon.shimclient.kill", "process group already gone", dlog.Context{
+				"workspace_id": string(c.ws), "pgid": pgid,
+				"signal": sig.String(), "errno": err.Error(),
+			})
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+// markReaped records, under the signal lock, that cmd.Wait has returned and the
+// child's pid is therefore free for reuse. No signal may follow it.
+func (c *client) markReaped() {
+	c.sigMu.Lock()
+	c.reaped = true
+	c.sigMu.Unlock()
 }
 
 // Detach stops supervising while LEAVING THE PROCESS RUNNING — the handover's
@@ -224,6 +297,7 @@ func (c *client) Detach() {
 // evidence. It is the ONLY place a spawned shim's death is decided.
 func (c *client) reap() {
 	err := c.cmd.Wait()
+	c.markReaped()
 
 	c.mu.Lock()
 	if c.detached {
