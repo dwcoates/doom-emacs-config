@@ -229,7 +229,7 @@ interface Reader {
   ): Promise<conversationv1.HistoryPage>;
   openBashRun(
     work: conversationv1.DetachedWorkId,
-    stillLive?: () => boolean,
+    announcement?: () => BashRunStanding,
   ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Relay one shell-run frame to whoever is watching that run. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
@@ -262,6 +262,25 @@ interface ReaderOptions {
 const BASH_ROW_RECHECK_MS = 25;
 
 /**
+ * How long a waiter keeps waiting for a run's first row AFTER the run has left
+ * the live set with no terminal row of its own written.
+ *
+ * THE CONCLUDED-BUT-UNWRITTEN WINDOW. A run announced to the daemon can retire
+ * before its first row is committed: the daemon subscribes within a few
+ * milliseconds of the announcement, and a shell that ends immediately leaves
+ * the live set on the very message whose fold produces its rows. Waiting only
+ * while the run is LIVE therefore refuses `WatchBash` for a run that plainly
+ * exists, purely on write ordering.
+ *
+ * The wait's real bound is the terminal row LANDING — that write wakes the
+ * waiter — so this is only the backstop for the one path that retires a run
+ * without a terminal of its own: a vendor LEVEL that simply omits it. Twenty
+ * rechecks of the cadence above, against an observed window of about five
+ * milliseconds.
+ */
+const BASH_CONCLUDED_WINDOW_MS = 500;
+
+/**
  * How long a waiter sleeps before re-asking the store for an AGENT's book.
  *
  * The note from {@link Reader.noteAgentRows} is the real signal here, and it is
@@ -273,6 +292,23 @@ const BASH_ROW_RECHECK_MS = 25;
  * loop against an external resource.
  */
 const AGENT_ROW_RECHECK_MS = 250;
+
+/**
+ * Where an ANNOUNCED shell run stands, as the caller that announced it sees it.
+ *
+ * The store refuses a run it holds no row for, and the daemon subscribes within
+ * a few milliseconds of the announcement, so that refusal is routinely a race
+ * rather than an answer. Which race it is depends on this:
+ *
+ * - `live` — the run is still in the live set; its rows are simply not written
+ *   yet, and the wait stands for as long as that holds.
+ * - `concluded` — the run was announced and has already left the live set. Its
+ *   rows may still be unwritten (the fold that retires a run is the same fold
+ *   that produces them), so the wait stands through that window.
+ * - `unknown` — nothing was ever announced under this handle. There is no
+ *   promise to wait on, and the store's refusal is the answer.
+ */
+export type BashRunStanding = "live" | "concluded" | "unknown";
 
 /** One "wait for the first row" rendezvous, keyed by whatever names the thing. */
 interface FirstRowGate {
@@ -347,6 +383,15 @@ export function createReader(options: ReaderOptions): Reader {
 
   /** Wait for this run's first row to land, or for the recheck cadence. */
   const awaitFirstRow = (runValue: string): Promise<void> => bashRows.wait(runValue);
+
+  /**
+   * Runs whose TERMINAL row this shim has written, by run value.
+   *
+   * The concluded-but-unwritten wait ends on exactly this fact: once the
+   * terminal has landed, a store that still holds no row for the run is
+   * answering about a run that really is absent, and the refusal is the truth.
+   */
+  const bashTerminalsWritten = new Set<string>();
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -680,7 +725,7 @@ export function createReader(options: ReaderOptions): Reader {
       });
     },
 
-    async openBashRun(work, stillLive) {
+    async openBashRun(work, announcement) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
       // is no side table to consult and no way for a lookup to go stale — and a
@@ -700,6 +745,7 @@ export function createReader(options: ReaderOptions): Reader {
       const abort = new AbortController();
       LOGGER.log({ run: runValue, work: work.value }, "following a shell run's stored rows");
       let opened = false;
+      let concludedSince: number | undefined;
       return {
         async *[Symbol.asyncIterator]() {
           try {
@@ -734,8 +780,22 @@ export function createReader(options: ReaderOptions): Reader {
                 // has given none, so the store's refusal stands — only a caller
                 // that says "I still hold this run" turns the refusal into a
                 // race worth waiting out.
-                if (stillLive === undefined || !stillLive()) throw error;
+                if (announcement === undefined) throw error;
+                const standing = announcement();
+                if (standing === "unknown") throw error;
                 if (abort.signal.aborted) throw error;
+                if (standing === "concluded") {
+                  // THE CONCLUDED-BUT-UNWRITTEN WINDOW. A run that has already
+                  // left the live set was still ANNOUNCED, and an announced run
+                  // whose rows are merely late is not a run that does not
+                  // exist. This leg ends when the run's terminal row lands —
+                  // after that write the store's refusal is about a genuinely
+                  // absent run — or, for the one path that retires a run
+                  // without writing a terminal at all, at the backstop.
+                  if (bashTerminalsWritten.has(runValue)) throw error;
+                  concludedSince ??= Date.now();
+                  if (Date.now() - concludedSince >= BASH_CONCLUDED_WINDOW_MS) throw error;
+                }
                 LOGGER.logVerbose(
                   { run: runValue, work: work.value },
                   "the store has no row for this shell run yet; waiting for its first row",
@@ -770,6 +830,10 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     noteBashFrame(runValue, frame) {
+      // A TERMINAL ROW ENDS THE CONCLUDED-BUT-UNWRITTEN WAIT: after this write
+      // the store either holds the run or the run is genuinely absent.
+      const arm = frame.result.case;
+      if (arm === "success" || arm === "failure") bashTerminalsWritten.add(runValue);
       // THE FIRST-ROW SIGNAL. A watcher that arrived before this run had a row
       // is blocked on exactly this commit, so waking it here is what makes the
       // wait a synchronization rather than a poll.
