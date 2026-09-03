@@ -16,7 +16,8 @@
     "pretypecheck": "npm run ensure-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest:integration": "npm run ensure-deps",
-    "test:integration": "vitest run -c vitest.integration.config.ts"
+    "test:integration": "vitest run -c vitest.integration.config.ts",
+    "test:webapp-layer": "vitest run -c vitest.webapp-layer.config.ts"
   },
   "devDependencies": {
     "@connectrpc/connect-node": "^2.1.2",
