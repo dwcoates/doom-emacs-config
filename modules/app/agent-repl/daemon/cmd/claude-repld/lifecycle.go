@@ -98,6 +98,57 @@ func (s *lifecycleSink) OnLinkFault(ws ids.WorkspaceID, fault sessionwatcher.Lin
 	}
 }
 
+// OnWatchOpenRefused records a watch open the shim refused for a handle
+// nothing announced. It is a SESSION fault of its own kind, never a severed
+// link: the shim answered the open, so the hop is serving and a redial would
+// change nothing. At most one stands per workspace, as every session fault
+// does.
+func (s *lifecycleSink) OnWatchOpenRefused(ws ids.WorkspaceID, refusal sessionwatcher.WatchOpenRefusal) {
+	record := wsm.Fault{
+		Kind:   health.KindWatchOpenRefused,
+		Detail: refusal.Detail,
+		Evidence: map[string]string{
+			"operation": refusal.Operation,
+			"handle":    refusal.Handle,
+		},
+	}
+	s.recordSessionFault(ws, record)
+}
+
+// recordSessionFault opens one workspace-scoped fault unless one of its kind
+// already stands. Every read and write failure is surfaced rather than
+// swallowed.
+func (s *lifecycleSink) recordSessionFault(ws ids.WorkspaceID, record wsm.Fault) {
+	reporter, ok := s.health.reporter()
+	if !ok {
+		s.log.Error("daemon.cmd.lifecycle", "a session fault arrived before the health reporter existed", dlog.Context{
+			"workspace": string(ws), "kind": record.Kind,
+		})
+		return
+	}
+	ctx := context.Background()
+	scoped := wsm.WorkspaceID(ws)
+	record.Workspace = &scoped
+	open, err := reporter.OpenFaults(ctx, wsm.FaultScope{Workspace: &scoped, Kind: record.Kind})
+	if err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the standing session faults could not be read", dlog.Context{
+			"workspace": string(ws), "kind": record.Kind, "cause": err.Error(),
+		})
+		return
+	}
+	if len(open) > 0 {
+		s.log.Debug("daemon.cmd.lifecycle", "a session fault of this kind already stands", dlog.Context{
+			"workspace": string(ws), "kind": record.Kind,
+		})
+		return
+	}
+	if _, err := reporter.OpenFault(ctx, record); err != nil {
+		s.log.Error("daemon.cmd.lifecycle", "the session fault could not be recorded", dlog.Context{
+			"workspace": string(ws), "kind": record.Kind, "cause": err.Error(),
+		})
+	}
+}
+
 // retractLinkFaults closes every standing fault of one kind on a workspace.
 func (s *lifecycleSink) retractLinkFaults(ctx context.Context, ws ids.WorkspaceID, kind string) {
 	reporter, ok := s.health.reporter()

@@ -1,12 +1,14 @@
 package sessionwatcher
 
 import (
-	"errors"
 	"testing"
+
+	"connectrpc.com/connect"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -691,7 +693,7 @@ func TestRefusedShellWatchIsNotKept(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(errors.New("not_found"))
+	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 
 	// Act.
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
@@ -705,6 +707,44 @@ func TestRefusedShellWatchIsNotKept(t *testing.T) {
 	}
 }
 
+// TestARefusedShellWatchOpenNeverSeversTheLink pins the classification for a
+// shell: the shim refuses WatchBash until its store holds the handle's rows,
+// and that refusal says nothing about the link.
+func TestARefusedShellWatchOpenNeverSeversTheLink(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	if got := h.w.Link(); got != shimclient.LinkConnected {
+		t.Fatalf("the link after a refused shell open = %v, want LinkConnected", got)
+	}
+}
+
+// TestRepeatedAnnouncementReopensARefusedSubagentWatch is the subagent's half
+// of the retry: the shim refuses WatchAgent for a book it has not registered,
+// and the repeated announcement is the occasion to open one.
+func TestRepeatedAnnouncementReopensARefusedSubagentWatch(t *testing.T) {
+	// Arrange: a first announcement the shim refused.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setAgentErr(refusedOpenError("WatchAgent", connect.CodeNotFound, "no such agent"))
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	h.client.setAgentErr(nil)
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+
+	// Assert.
+	if open := h.client.nextAgentOpen(t); open.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("re-opened watch = %q, want sub-1", open.req.GetTarget().GetValue())
+	}
+}
+
 // TestRepeatedAnnouncementReopensARefusedShellWatch covers the retry: the shim
 // refuses WatchBash until its store holds the handle, and the repeat is what
 // gets the shell watched and drawn.
@@ -712,7 +752,7 @@ func TestRepeatedAnnouncementReopensARefusedShellWatch(t *testing.T) {
 	// Arrange: a first announcement the shim refused.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
-	h.client.setBashErr(errors.New("not_found"))
+	h.client.setBashErr(refusedOpenError("WatchBash", connect.CodeNotFound, "no rows for the handle yet"))
 	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
 	h.client.setBashErr(nil)
 
