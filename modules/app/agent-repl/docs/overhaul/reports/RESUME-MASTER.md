@@ -1,3 +1,9 @@
+## DORMANCY 2026-09-03 — READ reports/RESUME-2026-09-03.md FIRST
+
+That file carries the integration tip, the three e2e layers' state, the
+sandbox blocker (Emacs 30.2 + xwidgets from source), the in-flight worktrees
+that were NOT merged, and the ordered remaining queue.
+
 # RESUME-MASTER — agent-repl overhaul, paused 2026-08-31
 
 The single entry point for resuming the overhaul. Written by the project
