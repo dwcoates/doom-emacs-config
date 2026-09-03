@@ -498,12 +498,21 @@ func planModeSuccess(call openCall, result map[string]any, ts int64) *conversati
 // findingsSuccess reads the review's typed report in the TOOL'S OWN ORDER —
 // most-severe first by its contract; a consumer never re-sorts. Empty is a real
 // report: a review that found nothing.
-func findingsSuccess(call openCall, ts int64) *conversationv1.AgentReportFindingsSuccess {
+//
+// THE TOOL'S OWN OUTPUT IS PREFERRED over the call's input: what the review
+// actually reported is what the tool answered with, and the verify pass's
+// VERDICT and a re-report's OUTCOME exist only there. The input is the fallback
+// for a vendor that echoed nothing, since the report is otherwise lost.
+func findingsSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentReportFindingsSuccess {
 	success := &conversationv1.AgentReportFindingsSuccess{SettledAt: settledAt(ts)}
 	if level := readEffort(pick(call.input, "effort", "level")); level != nil {
 		success.Level = *level
 	}
-	for _, raw := range list(pick(call.input, "findings")) {
+	reported := pick(result, "findings")
+	if !has(result, "findings") {
+		reported = pick(call.input, "findings")
+	}
+	for _, raw := range list(reported) {
 		f := obj(raw)
 		if f == nil {
 			continue
@@ -512,13 +521,40 @@ func findingsSuccess(call openCall, ts int64) *conversationv1.AgentReportFinding
 			File:            str(f["file"]),
 			Line:            optionalUint32(f, "line"),
 			Summary:         str(f["summary"]),
-			ShortSummary:    optionalString(f["short_summary"]),
+			ShortSummary:    optionalString(pick(f, "short_summary", "shortSummary")),
 			FailureScenario: str(pick(f, "failure_scenario", "failureScenario")),
 			Category:        optionalString(f["category"]),
 		}
+		setFindingVerdict(finding, str(f["verdict"]))
+		setFindingOutcome(finding, str(pick(f, "outcome")))
 		success.Findings = append(success.Findings, finding)
 	}
 	return success
+}
+
+// setFindingVerdict states what the verify pass concluded. UNSET when no verify
+// pass ran, and UNSET for a word this contract has no arm for — a verdict
+// nobody stated is not a verdict of "plausible".
+func setFindingVerdict(finding *conversationv1.AgentFinding, verdict string) {
+	switch verdict {
+	case "CONFIRMED":
+		finding.Verdict = &conversationv1.AgentFinding_Confirmed{Confirmed: &conversationv1.AgentFindingConfirmed{}}
+	case "PLAUSIBLE":
+		finding.Verdict = &conversationv1.AgentFinding_Plausible{Plausible: &conversationv1.AgentFindingPlausible{}}
+	}
+}
+
+// setFindingOutcome states what became of a finding, which only a RE-REPORT
+// after fixes were applied carries.
+func setFindingOutcome(finding *conversationv1.AgentFinding, outcome string) {
+	switch outcome {
+	case "fixed":
+		finding.Outcome = &conversationv1.AgentFinding_Fixed{Fixed: &conversationv1.AgentFindingFixed{}}
+	case "skipped":
+		finding.Outcome = &conversationv1.AgentFinding_Skipped{Skipped: &conversationv1.AgentFindingSkipped{}}
+	case "no_change_needed", "noChangeNeeded":
+		finding.Outcome = &conversationv1.AgentFinding_NoChangeNeeded{NoChangeNeeded: &conversationv1.AgentFindingNoChangeNeeded{}}
+	}
 }
 
 func worktreeSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentWorktreeSuccess {
