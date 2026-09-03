@@ -71,7 +71,7 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `bash-interrupted-by-timeout` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-timeout` | single turn | 60 KB |
 | `bash-nonzero-exit` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-fail` | single turn | 52 KB |
 | `bash-partial-output-with-spill` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-spill` | single turn | 1.8 MB |
-| `compaction-directed` | 2026-09-03 (re-captured; Haiku) | `hook`, `thinking`, `response` → `success.completed` | `!compact` | 9 turn terminals (6 filler turns added so `/compact` has enough transcript to actually compact — the 2026-09-02 run's `/compact` had only 3 turns and answered `Not enough messages to compact.`); real `compact_boundary` with `compact_metadata{trigger:"manual", pre_tokens:48374, post_tokens:3759, cumulative_dropped_tokens:44615, duration_ms:45767, preserved_segment, preserved_messages}`; no `system:local_command_output` line appears anywhere in the run (the row's old `expect` list named one; the real capture has none) | 196 KB |
+| `compaction-directed` | 2026-09-03 (re-captured; Haiku) | `hook`, `thinking`, `response` → `success.completed` | `!compact` | GROUNDED. 9 turn terminals (6 filler turns added so `/compact` has enough transcript to actually compact — the 2026-09-02 run's `/compact` had only 3 turns and answered `Not enough messages to compact.`); real `compact_boundary` with `compact_metadata{trigger:"manual", pre_tokens:48374, post_tokens:3759, cumulative_dropped_tokens:44615, duration_ms:45767, preserved_segment{head_uuid, anchor_uuid, tail_uuid}, preserved_messages{anchor_uuid, uuids, all_uuids}}`, plus a `logical_parent_uuid` naming the preserved head; no `preCompactDiscoveredTools` field anywhere on either plane (the fake used to invent one; fixed) and no `system:local_command_output` line anywhere in the run; the real post-boundary summary is a plain `user`-role message (not assistant prose) beginning "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent: ..." | 196 KB |
 | `context-budget-warning` | 2026-09-01 | `hook`, `thinking`, `response`, `bash`, `read` → `success.completed` | `!context-budget-warning` — NAME MATCHES, GROUNDING DOES NOT: the capture holds no budget-warning record of any kind (see Evidence gaps); UNGROUNDED | single turn | 120 KB |
 | `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!memory` | single turn | 40 KB |
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
@@ -313,12 +313,12 @@ the narrower/alternate state**:
   well inside any plausible threshold, so either the setting is not honored
   from `settingSources: local` in this SDK version or its semantics differ
   from what the field's doc comment ("Auto-compact window size") suggests.
-  Not captured; bailed per cost discipline after the second attempt. The
-  fake's `compact_metadata.preCompactDiscoveredTools` field
-  (`src/fake/scenarios/session.ts`) does NOT appear anywhere in the real
-  `compaction-directed` capture's `compact_boundary`/`compactMetadata`
-  record — that field is the fake's own invention, contradicted by the real
-  shape now on disk.
+  Not captured; bailed per cost discipline after the second attempt. Both
+  declared variants' shapes are now aligned to the `compaction-directed`
+  grounding (`src/fake/scenarios/session.ts`): same `compact_metadata`/
+  `compactMetadata` field set as `!compact`, differing only in `trigger` and
+  the chosen (ungrounded, since neither variant has a capture) token/duration
+  figures.
 - `!read-truncated`, `!read-image` — declared `Read` extents; no capture's
   model truncated a read by length or read an image back through `Read`
   itself (the one captured image round trip, `bash-image-output`, read it
