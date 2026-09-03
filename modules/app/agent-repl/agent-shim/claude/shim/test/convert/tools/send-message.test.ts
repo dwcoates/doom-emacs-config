@@ -27,18 +27,18 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
 }
 
 function armOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentSendMessage["result"] {
-  expect(item.case).toBe("sendMessage");
-  return (item.value as conversationv1.AgentSendMessage).result;
+  expect(item?.case).toBe("sendMessage");
+  return (item?.value as conversationv1.AgentSendMessage).result;
 }
 
-function startOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentSendMessageStart {
+function startOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentSendMessageStart {
   return armOf(item).value as conversationv1.AgentSendMessageStart;
 }
 
 function successOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentSendMessageSuccess {
   const arm = armOf(item);
   expect(arm.case).toBe("success");

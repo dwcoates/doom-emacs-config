@@ -101,8 +101,18 @@ export interface ToolConverter {
   readonly kind: string;
   /** Whether the vendor emits a per-call heartbeat for this kind. */
   readonly carriesProgress: boolean;
-  /** The unit's `start` arm. */
-  start(call: PendingCall, environment?: ToolEnvironment): conversationv1.AgentActivity["item"];
+  /**
+   * The unit's `start` arm, or `undefined` when THIS CALL HAS NO ANNOUNCEMENT.
+   *
+   * A `TaskCreate` has no identity until it returns, and a malformed call names
+   * nothing the frame could restate. In both cases the entry is SKIPPED rather
+   * than written with no arm set: the store refuses an activity that sets no
+   * item arm, and a refused batch blocks the queue behind it.
+   */
+  start(
+    call: PendingCall,
+    environment?: ToolEnvironment,
+  ): conversationv1.AgentActivity["item"] | undefined;
   /** The unit's terminal arm, or `undefined` when this result does not settle it. */
   settle(
     call: PendingCall,
@@ -298,11 +308,19 @@ export function convertToolUse(
         { tool: call.toolName, kind: disposition.converter.kind, tool_use_id: call.toolUseId },
         "converting a tool call's start",
       );
+      const item = disposition.converter.start(call, environmentOf(context));
+      if (item === undefined) {
+        LOGGER.logVerbose(
+          { tool: call.toolName, kind: disposition.converter.kind, tool_use_id: call.toolUseId },
+          "this call has no announcement frame; the start entry is skipped",
+        );
+        return [];
+      }
       return [
         activityEntry(
           context,
           { ...origin, discriminator: `activity.${disposition.converter.kind}.start` },
-          toolActivity(call, disposition.converter.start(call, environmentOf(context)), envelope),
+          toolActivity(call, item, envelope),
         ),
       ];
     }
@@ -315,11 +333,15 @@ export function convertToolUse(
       if (unmodeled === undefined) {
         throw new Error("shim convert: the unmodeled converter is missing from the registry");
       }
+      const item = unmodeled.start(call, environmentOf(context));
+      if (item === undefined) {
+        throw new Error("shim convert: the unmodeled converter produced no start frame");
+      }
       return [
         activityEntry(
           context,
           { ...origin, discriminator: "activity.unmodeled.start" },
-          toolActivity(call, unmodeled.start(call, environmentOf(context)), envelope),
+          toolActivity(call, item, envelope),
         ),
       ];
     }

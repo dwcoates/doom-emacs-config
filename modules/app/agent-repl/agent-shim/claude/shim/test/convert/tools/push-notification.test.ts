@@ -33,10 +33,10 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
 }
 
 function pushOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentPushNotification {
-  expect(item.case).toBe("pushNotification");
-  return item.value as conversationv1.AgentPushNotification;
+  expect(item?.case).toBe("pushNotification");
+  return item?.value as conversationv1.AgentPushNotification;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentPushNotificationStart {

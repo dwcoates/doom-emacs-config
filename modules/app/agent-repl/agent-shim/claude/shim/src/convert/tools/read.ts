@@ -226,7 +226,7 @@ export const readConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "a read was announced with no file path; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "read",

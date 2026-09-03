@@ -215,3 +215,28 @@ each is graded against the grounding named below, or marked ungrounded.
   (`tokenutilization_e2e_test.go`), the daemon/e2e harness's own invented
   fixture, since no vendor recording exists to ground them from. Retires
   `tokenutilization_e2e_test.go`'s `sidecarAssistantUsageEvent` call sites.
+
+- **`!monitor-deadline` / `!monitor-persistent`** (`src/fake/scenarios/automation.ts`).
+  GROUNDED IN THE TOOL'S OWN DECLARED SCHEMA, `MonitorInput` in
+  `@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts`, which declares
+  `description`, `timeout_ms` and `persistent` REQUIRED on the CALL and names
+  `command` / `ws.url` as the only two sources. Both scenarios previously
+  supplied the description only through `task_started` and spelled the deadline
+  `timeoutMs` (the OUTPUT's spelling), and the persistent one named its source
+  with `server`/`tool`, which appear on no declared input — so a shim reading
+  the call, as the shim does, saw a monitor with no description, no lifetime
+  and no source. The tool RESULT keeps `timeoutMs`, which is how `MonitorOutput`
+  spells it.
+
+- **task spools, created by `startTask`** (`src/fake/index.ts`). GROUNDED in the
+  vendor's own behavior rather than in a capture: a background run's spool
+  exists from the moment the run does, and `task_notification.output_file`
+  (declared in `sdk.d.ts`) names a file the vendor has been writing all along.
+  The fake used to create a spool only where a scenario appended to one, so a
+  run that ended by TIMING OUT or by being CANCELLED had no file on disk for a
+  tailer to open. `task_started` now names the path too, for the two kinds that
+  OWN a spool (`local_bash`, whose spool is its output, and `local_agent`, whose
+  spool is its own transcript) and for no other — a monitor has no spool, and an
+  empty file under a `b*` name is bytes the vendor never writes. `sdk.d.ts` does
+  not declare `output_file` on `task_started`, so the FIELD's presence there is
+  the fake's own, and only the path it carries is grounded.

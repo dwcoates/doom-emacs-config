@@ -62,6 +62,7 @@ async function harness(): Promise<Harness> {
   );
   const gate = new PermissionGate({
     mainAgentId: () => identity.agentId,
+    agentFor: () => undefined,
     persist: (entries) => persistence.write(entries),
     keepalive: () => false,
     nowMs: () => 1,

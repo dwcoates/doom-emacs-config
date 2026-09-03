@@ -79,7 +79,7 @@ export const editConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "an edit was announced with no file path; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "edit",

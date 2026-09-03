@@ -405,8 +405,17 @@ export function validateAnswers(
 
 /** What the gate needs from the session around it. */
 interface PermissionGateDeps {
-  /** The book every gate frame lands on. */
+  /** The book a gate frame lands on when the vendor named no agent. */
   mainAgentId(): conversationv1.AgentId;
+  /**
+   * The minted AgentId behind a vendor `agentID`, or undefined when this
+   * session has never announced that agent.
+   *
+   * A DETACHED SUBAGENT RAISES ITS OWN GATED CALL, and `canUseTool` carries its
+   * `agentID`. Writing that ask on the main agent's book put a subagent's
+   * question in front of the wrong conversation.
+   */
+  agentFor(vendorAgentId: string): conversationv1.AgentId | undefined;
   /** Record a frame. Enqueued, never awaited: the vendor is blocked on us. */
   persist(entries: PersistEntry[]): void;
   /** True while the open turn is a keep-alive. */
@@ -452,6 +461,24 @@ export class PermissionGate {
   private readonly pendingByToolUse = new Map<string, Pending>();
 
   constructor(private readonly deps: PermissionGateDeps) {}
+
+  /**
+   * Whose book this ask belongs on.
+   *
+   * An `agentID` this session never announced is NEVER dropped: the ask still
+   * blocks the vendor and still has to reach somebody, so it lands on the main
+   * agent with the vendor's own spelling recorded in the log.
+   */
+  private bookFor(vendorAgentId: string | undefined): conversationv1.AgentId {
+    if (vendorAgentId === undefined || vendorAgentId === "") return this.deps.mainAgentId();
+    const resolved = this.deps.agentFor(vendorAgentId);
+    if (resolved !== undefined) return resolved;
+    LOGGER.log(
+      { level: "warn", vendor_agent_id: vendorAgentId },
+      "the vendor raised an ask under an agent this session never announced; it lands on the main agent",
+    );
+    return this.deps.mainAgentId();
+  }
 
   /** The callback handed to the SDK. */
   readonly canUseTool = async (
@@ -559,7 +586,7 @@ export class PermissionGate {
     const batch = toQuestionBatch(input);
     const id = questionId(options.toolUseID);
     const startedAtMs = this.deps.nowMs();
-    const agentId = this.deps.mainAgentId();
+    const agentId = this.bookFor(options.agentID);
     return new Promise<PermissionResultLike>((resolve) => {
       this.pendingByToolUse.set(options.toolUseID, {
         kind: "question",
@@ -656,12 +683,13 @@ export class PermissionGate {
       title?: string;
       displayName?: string;
       description?: string;
+      agentID?: string;
       matchedAskRule?: { source: string; toolName: string; ruleContent?: string };
     },
   ): Promise<PermissionResultLike> {
     const id = permissionId(options.toolUseID);
     const startedAtMs = this.deps.nowMs();
-    const agentId = this.deps.mainAgentId();
+    const agentId = this.bookFor(options.agentID);
     const offeredStanding =
       options.suggestions === undefined || options.suggestions.length === 0
         ? undefined

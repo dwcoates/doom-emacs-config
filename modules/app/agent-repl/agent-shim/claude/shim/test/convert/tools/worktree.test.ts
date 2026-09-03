@@ -32,9 +32,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function worktreeOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentWorktree {
-  expect(item.case).toBe("worktree");
-  return item.value as conversationv1.AgentWorktree;
+function worktreeOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentWorktree {
+  expect(item?.case).toBe("worktree");
+  return item?.value as conversationv1.AgentWorktree;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentWorktreeStart {

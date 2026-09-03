@@ -46,7 +46,7 @@ describe("grepConverter.start", () => {
     const item = grepConverter.start(pending);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentGrep).result
+    const start = (item?.value as conversationv1.AgentGrep).result
       .value as conversationv1.AgentGrepStart;
     expect(start.query).toEqual(
       create(conversationv1.AgentGrepQuerySchema, {
@@ -65,7 +65,7 @@ describe("grepConverter.start", () => {
     const item = grepConverter.start(call({ pattern: "TODO" }));
 
     // Assert.
-    const start = (item.value as conversationv1.AgentGrep).result
+    const start = (item?.value as conversationv1.AgentGrep).result
       .value as conversationv1.AgentGrepStart;
     expect(start.query?.path).toBeUndefined();
     expect(start.query?.glob).toBeUndefined();
@@ -78,7 +78,7 @@ describe("grepConverter.start", () => {
     const item = grepConverter.start(call({ path: "/src" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 
