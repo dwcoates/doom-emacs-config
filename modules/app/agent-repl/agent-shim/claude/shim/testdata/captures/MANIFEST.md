@@ -39,8 +39,12 @@ an invented fixture: `glob`, `grep`, `artifact`, `scheduleWakeup`, `worktree`,
 `AgentPermission` frame (those are the engine gate's, not the fold's). Recorded
 negatives from the same run: no `context_tip` or budget-warning attachment (the
 nearest carrier observed is a `total_tokens_reminder` attachment), no failed
-subagent, and no `compact_boundary` / `isCompactSummary` record anywhere —
-`/compact` answered `Not enough messages to compact.`
+subagent. The original `compaction-directed` run's `/compact` answered
+`Not enough messages to compact.`; that golden was RE-CAPTURED 2026-09-03 (see
+the row below) by lengthening the shared world's own prompt list until
+`/compact` had enough transcript to actually compact, so this manifest's
+`compaction-directed` row is now a real `compact_boundary` capture, not a
+`Not enough messages` non-event.
 
 Three TURN-STOP FAILURE terminals are DECLARED-ONLY — the mock keeps them
 because `sdk.d.ts` declares them, but no capture reaches them, so nothing here
@@ -67,7 +71,7 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `bash-interrupted-by-timeout` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-timeout` | single turn | 60 KB |
 | `bash-nonzero-exit` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-fail` | single turn | 52 KB |
 | `bash-partial-output-with-spill` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-spill` | single turn | 1.8 MB |
-| `compaction-directed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!compact` | 3 turn terminals | 84 KB |
+| `compaction-directed` | 2026-09-03 (re-captured; Haiku) | `hook`, `thinking`, `response` → `success.completed` | `!compact` | 9 turn terminals (6 filler turns added so `/compact` has enough transcript to actually compact — the 2026-09-02 run's `/compact` had only 3 turns and answered `Not enough messages to compact.`); real `compact_boundary` with `compact_metadata{trigger:"manual", pre_tokens:48374, post_tokens:3759, cumulative_dropped_tokens:44615, duration_ms:45767, preserved_segment, preserved_messages}`; no `system:local_command_output` line appears anywhere in the run (the row's old `expect` list named one; the real capture has none) | 196 KB |
 | `context-budget-warning` | 2026-09-01 | `hook`, `thinking`, `response`, `bash`, `read` → `success.completed` | `!context-budget-warning` — NAME MATCHES, GROUNDING DOES NOT: the capture holds no budget-warning record of any kind (see Evidence gaps); UNGROUNDED | single turn | 120 KB |
 | `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!memory` | single turn | 40 KB |
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
@@ -169,7 +173,20 @@ each is graded against the grounding named below, or marked ungrounded.
   SEPARATE, separately-named producer, added only so the converter's
   ALREADY-BUILT `context_budget_warning` arm
   (`test/convert/attachments.test.ts`) has a fake-SDK path to drive it from,
-  pending a real grounding capture.
+  pending a real grounding capture. STILL UNGROUNDED after two further
+  Haiku attempts (2026-09-03): attempt 1 gave the model a real 40×200KB
+  `bulk/` corpus (via a new `cwd_init`, replacing the old fully-manual note)
+  but the model shortcut the "read every file" instruction with `Bash`+`md5`
+  after one real `Read`, so it never occupied enough window to be warned.
+  Attempt 2 forbade `Bash`/hashing and demanded literal reads, but each
+  200KB file exceeds the `Read` tool's own 25000-token per-call cap, and the
+  model declined the task outright rather than page through a file — so this
+  scenario, too, produced no budget-warning attachment. Bailed per cost
+  discipline after the second attempt. `prompts.json`'s `cwd_init` now
+  generates smaller (80000-byte) files and the prompt tells the model to page
+  a file with successive offset/limit `Read` calls rather than one call per
+  file; this combination was written but NOT run (attempt budget spent), so
+  it is an untested lever for the next attempt, not a result.
 
 - **`!skill [skill-name] [args]` parameterization** (`src/fake/scenarios/skills.ts`).
   GROUNDED: `skill-invocation` (this manifest, above) remains the golden for
@@ -288,7 +305,20 @@ the narrower/alternate state**:
 - `!compact-auto`, `!compact-failed` — declared compaction variants; the only
   captured `/compact` was the manual one `compaction-directed` grounds
   (`!compact`) — no run recorded an automatic trigger or a compaction
-  failure.
+  failure. Two attempts (2026-09-03, Haiku) to force `!compact-auto`'s real
+  counterpart via `.claude/settings.local.json`'s `autoCompactWindow` (tried
+  500, then 195000, `autoCompactEnabled: true`, against an eight-turn
+  conversation) produced NO `status{compacting}` and NO `compact_boundary`
+  in either run — cache-read usage stayed near 45k tokens across the run,
+  well inside any plausible threshold, so either the setting is not honored
+  from `settingSources: local` in this SDK version or its semantics differ
+  from what the field's doc comment ("Auto-compact window size") suggests.
+  Not captured; bailed per cost discipline after the second attempt. The
+  fake's `compact_metadata.preCompactDiscoveredTools` field
+  (`src/fake/scenarios/session.ts`) does NOT appear anywhere in the real
+  `compaction-directed` capture's `compact_boundary`/`compactMetadata`
+  record — that field is the fake's own invention, contradicted by the real
+  shape now on disk.
 - `!read-truncated`, `!read-image` — declared `Read` extents; no capture's
   model truncated a read by length or read an image back through `Read`
   itself (the one captured image round trip, `bash-image-output`, read it
@@ -343,9 +373,39 @@ the narrower/alternate state**:
   capture reached it.
 - `!fault-converter`, `!fault-recover` — shim-internal fault-injection
   scenarios, not vendor shapes at all; no capture could ground them.
-- `!query-eof`, `!query-eof-mid-ask`, `!query-fail`, `!keepalive` — declared
+- `!query-eof`, `!query-eof-mid-ask`, `!keepalive` — declared
   vendor-process-death and keepalive shapes; unrecordable by definition (a
   capture is, by the harness's own rule, a completed run).
+- `!query-fail` — PARTIALLY GROUNDED, evidence only, not a golden: a Haiku
+  run (2026-09-03, `--only prose-streamed` into a scratch `--out`, not this
+  repo's `captures/`) had its spawned vendor child `kill -9`'d mid-stream
+  (`pgrep -P <capture pid>` found the real
+  `.../claude-agent-sdk-darwin-arm64/claude` child). The SDK's async
+  iterator does NOT end silently and does NOT synthesize a result message:
+  it THROWS synchronously — `Error: Claude Code process terminated by signal
+  SIGKILL` (`sdk.mjs`'s `getProcessExitError`) — and the turn never reaches
+  any `result`/terminal message at all. capture.mjs's own quarantine rule
+  (a run that threw, or never reached a terminal, is never promoted to a
+  golden) applies here exactly as documented, so this is NOT committed to
+  `testdata/captures/` — the raw evidence (`stream.jsonl`, `meta.json`) is
+  kept at `~/.config/doom-overhaul/captures/_failed/query-death/` for the
+  project lead's own read, per this scenario's own manual note ("the golden
+  is whatever the SDK's async iterator does at that moment"). Whichever
+  shim arm answers `query_died`/`query_eof` must therefore treat vendor
+  child death as a THROW to catch, never a result to interpret.
+- `cold-resume` — NOT CAPTURED (two Haiku attempts, 2026-09-03, both via
+  the harness's own `--only cold-resume`, its built-in `resume: true` turn):
+  BOTH attempts threw `Error: Operation aborted` from the SDK on the
+  resume-turn's `query()` call, before any turn-2 prompt was answered. The
+  `_failed` transcript shows the resumed query DOES start correctly
+  (`SessionStart:resume` hook fires, the same vendor `session_id` is kept)
+  but the query itself aborts moments later — this looks like the capture
+  harness's own resume path reusing an already-fired `AbortController`
+  rather than a vendor-side cold-cache problem, since this is the WARM-resume
+  path (same process run), not the TTL-lapsed cold one the scenario's manual
+  note describes. Bailed per cost discipline after the second attempt;
+  reported as a harness-side finding rather than a vendor shape, since
+  neither run got far enough to observe one.
 
 This reconciliation is now COMPLETE and AUTHORITATIVE: every one of the 69
 goldens above names its registered scenario(s), every registered scenario
