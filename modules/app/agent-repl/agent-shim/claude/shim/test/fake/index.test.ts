@@ -909,3 +909,33 @@ describe("MCP arm switching", () => {
     expect(servers).toHaveLength(FAKE_MCP_SERVERS.length);
   });
 });
+
+describe("a task's spool, from the moment the task starts", () => {
+  it("names the spool on task_started, so a tailer learns the path from the start", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-timeout"]);
+    const started = ofType(driven, "system", "task_started")[0];
+
+    // Assert.
+    expect(String(started?.output_file)).toMatch(/\/tasks\/b[0-9a-z]+\.output$/);
+  });
+
+  it("CREATES the spool for a run that timed out, which no scenario line opens", async () => {
+    // A run that ends by timing out or by being cancelled never writes output
+    // of its own; without the file the tailer has nothing to open at all.
+    const driven = await driveScenario(["!bash-timeout"]);
+    const taskId = String(ofType(driven, "system", "task_started")[0]?.task_id);
+
+    // Assert.
+    expect(driven.spool(taskId)).not.toBeNull();
+  });
+
+  it("creates a spool for every item of a fan-wide cancel", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!cancel-all"]);
+    const taskIds = ofType(driven, "system", "task_started").map((m) => String(m.task_id));
+
+    // Assert.
+    expect(taskIds.map((id) => driven.spool(id) !== null)).toEqual([true, true, true]);
+  });
+});
