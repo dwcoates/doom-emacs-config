@@ -164,7 +164,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
-	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), "SHIM_BUILD_SHA="+shimBuildSHA)
+	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...)
 
 	d := harness.StartDaemon(t, daemonOpts)
 
