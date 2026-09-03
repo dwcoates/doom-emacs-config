@@ -176,19 +176,30 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
-	// THE ORIGINAL DAEMON GETS NO RE-ANNOUNCEMENT. The shim re-announces
-	// only what a prior StartSession already announced — reannounceStart
-	// returns undefined while `announcedStart` is unset
-	// (agent-shim/claude/shim/src/engine/session.ts:2263-2267, "UNSET before
-	// StartSession, which is the one state with nothing to re-state") — and
-	// this daemon's own watch is the one established AT StartSession. So it
-	// takes no re-announced facts at all, and logs no "ignored" record
-	// either (its watcher never reconnected).
+	// THE ORIGINAL DAEMON TAKES NO FACTS FROM A RE-ANNOUNCEMENT, BUT DOES
+	// SEE ONE. The shim re-announces on EVERY new watch (PROTO-CHANGES.md
+	// landing 7) and re-announces only what a prior StartSession already
+	// announced — reannounceStart returns undefined while `announcedStart`
+	// is unset (agent-shim/claude/shim/src/engine/session.ts:2263-2267,
+	// "UNSET before StartSession, which is the one state with nothing to
+	// re-state").
+	//
+	// This daemon opens TWO distinct streams before any restart: the ready
+	// probe first (which predates StartSession, so it draws no
+	// re-announcement at all), then the session watch itself — established
+	// AFTER StartSession set `announcedStart`, so it DOES draw one. That
+	// watcher already holds the facts from StartSession's own answer, so
+	// reannouncedLocked takes the ordinary ignore branch
+	// (internal/sessionwatcher/watcher.go:804-808, "A watcher that ALREADY
+	// HOLDS the facts ignores it ... It is the ORDINARY case"). One ignored
+	// record, and no "took" record, is therefore the pre-crash truth — the
+	// earlier expectation of zero ignored records assumed a single
+	// pre-restart stream.
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 0 {
-		t.Fatalf("the original daemon's watch_session log holds %d %q records, want 0 (its watch predates any announced start)", got, adTookSessionFactsMessage)
+		t.Fatalf("the original daemon's watch_session log holds %d %q records, want 0 (it took the facts from StartSession's own answer)", got, adTookSessionFactsMessage)
 	}
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
-		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want 0", got)
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 1 {
+		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want exactly 1 (its session watch, opened after StartSession, draws one)", got)
 	}
 	baseline := w.WorkspaceLogOperationCount(repo.Dir, adWatchSessionOp)
 
@@ -203,14 +214,17 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	// successor's fresh watcher — the first watch this session has seen
 	// since StartSession set `announcedStart` — took the re-announced facts
 	// up exactly once (the ONE "took" record across the two daemons'
-	// combined, cumulative log), and NOTHING was ever logged as an ignored
-	// re-announcement — which would mean the same WATCHER, not just the
+	// combined, cumulative log), and the only ignored re-announcement in
+	// that log is still the incumbent's own pre-crash one — a SECOND
+	// successor-side ignore would mean the same WATCHER, not just the
 	// process, survived the crash, the wrong shape for a cold boot.
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
-		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 1 (only the successor's watch finds an announced start to re-state)", got, adTookSessionFactsMessage)
+		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 1 (only the successor's fresh watcher has no facts yet)", got, adTookSessionFactsMessage)
 	}
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
-		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want 0 (each daemon's own watcher saw the re-announcement exactly once, as its first watch)", got)
+	// CUMULATIVE, so the incumbent's own pre-crash ignore is still counted:
+	// the log sink is per-workspace and survives the crash.
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 1 {
+		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want exactly 1 (the incumbent's own session watch; the successor's fresh watcher took the facts instead)", got)
 	}
 }
 
@@ -516,11 +530,28 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 
 	// Act: the lagging client self-heals by completing the rendezvous.
-	if _, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("AdoptHostWorkspace = error %v, want a success", err)
-	}
-	if _, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("AdoptWebWorkspace = error %v, want a success", err)
+	//
+	// THE TWO ADOPTS MUST BE CONCURRENT. "EVERY EXPECTED PARTICIPANT
+	// SUCCEEDS TOGETHER. The callers arrive concurrently and the one that
+	// arrives first has not failed: it waits for the one that completes the
+	// rendezvous" (daemon/internal/rollout/adopt.go:222-251). Issuing them
+	// one after the other blocks the host call inside the rendezvous until
+	// its own context expires — the web call is never made, and the caller
+	// gets ErrNotYetAdopted — so this test issued them concurrently and
+	// joins both.
+	adopts := make(chan error, 2)
+	go func() {
+		_, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	go func() {
+		_, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-adopts; err != nil {
+			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
+		}
 	}
 
 	// Assert: both watchers see the transfer, naming the successor.

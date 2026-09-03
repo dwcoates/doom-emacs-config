@@ -433,7 +433,7 @@ func TestCronCreateListDelete(t *testing.T) {
 	// reach — the footer's ⏱ chip, set while the created job stands.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
+	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetCrons() != nil
 	})
 	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got == 0 {
@@ -684,29 +684,83 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 // #96 TaskActsCreateChangeReject — golden "task-acts-create-change-reject",
 // registered as THREE scenario names (tasks.ts TASK_CREATE "task-create",
 // TASK_CHANGE "task-change", TASK_REJECT "task-reject") — driven as one
-// combined test. task-reject is the negative: the board REFUSES the update
-// (`success: false`, `isError: true`), so its TaskUpdate call settles
-// FAILED rather than succeeded.
+// combined test.
+//
+// A TASK ACT DRAWS NO TOOL CARD. feed.proto:279 retires the feed's task arm
+// outright — "Tag 4 is RETIRED: the task bubble left the feed — tracker tasks
+// draw in the FOOTER's checklist only" — and the feed resolver's own sink
+// answers every task act with errNotARow, recording
+// `daemon.feed.activity_draws_nothing` ("task acts" are named in that
+// default arm's comment, internal/resolve/feed/sink.go:87-97). The earlier
+// assertion here awaited a settled `TaskUpdate` tool card for each of the
+// three turns, which the contract says can never exist; the contracted
+// surfaces are the turn's own terminal and the footer's ☑ checklist, which
+// footer/chips.go applyTaskAct maintains from these very acts. This mirrors
+// TestCronCreateListDelete above, whose acts are footer-only for the same
+// reason.
+//
+// task-reject stays the negative: the board REFUSES the update
+// (`success: false`, `isError: true`), and applyTaskAct's own contract is
+// that "a REJECTED act still carries the task as it stands, so the state is
+// applied either way" — so the checklist survives the rejection rather than
+// being torn down by it.
 // ===========================================================================
 
 func TestTaskActsCreateChangeReject(t *testing.T) {
-	// Arrange
+	// Arrange. The footer is watched before the first turn is driven, so
+	// every checklist state each turn publishes is queued in order.
 	w, ws := rmNewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act + Assert: create (two TaskCreate calls plus a linking TaskUpdate).
 	createTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "task-create")
-	row := rmAwaitFeedRow(t, w, ws, "the task-create's linking TaskUpdate settled tool card", rmToolCallSettled(createTurn, "TaskUpdate"))
-	rmRequireSucceeded(t, row, "TaskUpdate")
+	if ended := AwaitTurnEnded(t, w, ws, createTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the task-create turn ended = %v, want a concluded outcome", ended)
+	}
+	// Both created tasks stand, neither done: the ☑ chip's fraction is the
+	// checklist's summary (footer.proto FooterChipTasks).
+	rmAwaitFooter(t, w, footer, "the ☑ chip carrying both created tasks", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetTasks().GetTotal() == 2
+	})
 
-	// Act + Assert: change (status pending -> in_progress).
+	// Act + Assert: change (status pending -> in_progress). applyTaskAct
+	// projects `running` onto the checklist row, which the panel draws as
+	// FooterTaskRowRunning.
 	changeTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "task-change")
-	row = rmAwaitFeedRow(t, w, ws, "the task-change settled tool card", rmToolCallSettled(changeTurn, "TaskUpdate"))
-	rmRequireSucceeded(t, row, "TaskUpdate")
+	if ended := AwaitTurnEnded(t, w, ws, changeTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the task-change turn ended = %v, want a concluded outcome", ended)
+	}
+	rmAwaitFooter(t, w, footer, "the checklist's running row after task-change", func(v *frontendv1.FooterView) bool {
+		for _, row := range v.GetExpanded().GetTasks().GetRows() {
+			if row.GetStatus().GetRunning() != nil {
+				return true
+			}
+		}
+		return false
+	})
 
-	// Act + Assert: reject (the board refuses the update).
+	// Act + Assert: reject (the board refuses the update). The turn still
+	// concludes, and the checklist still stands.
 	rejectTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "task-reject")
-	row = rmAwaitFeedRow(t, w, ws, "the task-reject settled tool card", rmToolCallSettled(rejectTurn, "TaskUpdate"))
-	rmRequireFailed(t, row, "TaskUpdate")
+	if ended := AwaitTurnEnded(t, w, ws, rejectTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the task-reject turn ended = %v, want a concluded outcome", ended)
+	}
+	view := rmAwaitFooter(t, w, footer, "the checklist standing after the rejected act", func(v *frontendv1.FooterView) bool {
+		return len(v.GetExpanded().GetTasks().GetRows()) > 0
+	})
+	if got := view.GetStrip().GetLiveWork().GetTasks(); got == nil {
+		t.Fatalf("the footer's ☑ chip is unset after the rejected act, want the checklist still summarized: %v", view.GetStrip().GetLiveWork())
+	}
+}
+
+// rmAwaitFooter waits for a footer view satisfying pred, on this area's
+// ordinary per-wait budget.
+func rmAwaitFooter(t *testing.T, w *World, footer *FooterWatch, what string, pred func(*frontendv1.FooterView) bool) *frontendv1.FooterView {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	return harness.AwaitView(t, ctx, footer.Stream, what, pred)
 }
 
 // ===========================================================================

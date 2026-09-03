@@ -319,6 +319,19 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 			opts := harness.Opts{}
 			if tc.selfRepo {
 				opts.SelfRepo = repo.Dir
+				// The self-repo method runs the merge TEST GATE, whose
+				// command line defaults to `bash bin/test-all.sh` in the
+				// merge target worktree (daemon/AGENTS.md's
+				// AGENT_REPL_TEST_ALL_SCRIPT row; resolved by
+				// merge.TestCommandFor). This suite's repos are scripted
+				// fixtures with no bin/test-all.sh, so the gate exited 127
+				// and the merge could never reach its landed terminal.
+				// Provide a passing gate script exactly as
+				// daemon/integration/merge_test.go does.
+				script := harness.NewTestAllScript(t, repo.Dir)
+				script.SetExitCode(0)
+				script.SetStdout("e2e: passed in 1s\n")
+				opts.ExtraEnv = []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}
 			}
 			w := NewWorld(t, WorldOpts{DaemonOpts: opts})
 			repoRef := mqRepositoryRef(t, w, repo)
@@ -406,7 +419,8 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 	// scenario), and — since nothing in this suite's harness surface can
 	// clear a scripted conflict — the run PARKS rather than landing.
 	footer := w.WatchFooter(child)
-	fv := harness.AwaitView(t, w.Ctx(), footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
+	defer footer.Close()
+	fv := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
 	})
 	if fv.GetStrip().GetStatus().GetMerging().GetParked().GetLine() == "" {
