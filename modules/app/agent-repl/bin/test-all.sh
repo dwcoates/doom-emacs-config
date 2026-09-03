@@ -43,6 +43,13 @@ FAILURE_COUNT=0
 # SELECTED is the --suites narrowing. EMPTY MEANS EVERY SUITE.
 SELECTED=()
 SKIPPED_SUITES=()
+# DECLINED_SUITES are suites that reported a PRECONDITION they could not meet
+# (exit 77), as opposed to suites --suites did not select. The distinction
+# matters in the output: "not selected" means the caller narrowed the run,
+# while "declined" means the run TRIED and the suite could not execute — which
+# must never read as a pass.
+DECLINED_SUITES=()
+DECLINED_DURATIONS=()
 
 # ALL_SUITES is the declared roster, in run order. It is the list --suites is
 # validated against and the list the merge gate's mapping is written against, so
@@ -67,6 +74,8 @@ ALL_SUITES=(
     shim
     proto
     logging-density
+    e2e
+    e2e-emacs
 )
 
 cleanup() {
@@ -157,6 +166,13 @@ require_executable() {
     [ -x "$1" ] || die "required test runner is not executable: $1"
 }
 
+# EXIT_DECLINED is the exit status a suite uses to say "my precondition is not
+# met, I did not run". It is autotools' "skipped" convention. A suite that
+# exits 0 without running would show as a PASS, which is exactly the silent
+# green this code exists to prevent; a suite that exits 1 would fail the gate
+# for a missing container, which is not a defect in the change under test.
+readonly EXIT_DECLINED=77
+
 run_timed() {
     local suite="$1"
     local timing_file="$RUN_TMP/$suite.time"
@@ -182,6 +198,13 @@ run_timed() {
         die "$suite timing output is missing"
     [[ "$duration" =~ ^[0-9]+([.][0-9]+)?$ ]] ||
         die "$suite timing output is malformed: $duration"
+    if [ "$rc" -eq "$EXIT_DECLINED" ]; then
+        # Loud, and not a pass: the suite's own stderr has already said why.
+        log "$suite: DECLINED after ${duration}s — its precondition is not met (exit $EXIT_DECLINED); see its message above"
+        DECLINED_SUITES+=("$suite")
+        DECLINED_DURATIONS+=("$duration")
+        return 0
+    fi
     if [ "$rc" -ne 0 ]; then
         err "$suite failed after ${duration}s with exit code $rc"
         FAILED_SUITES+=("$suite")
@@ -308,6 +331,19 @@ print_timing_summary() {
     done < <(sort -t, -k2,2nr "$summary_file")
 }
 
+print_declined_summary() {
+    local index suite duration
+
+    [ "${#DECLINED_SUITES[@]}" -gt 0 ] || return 0
+
+    log "declined summary, ${#DECLINED_SUITES[@]} suite(s) could not run"
+    for index in "${!DECLINED_SUITES[@]}"; do
+        suite="${DECLINED_SUITES[$index]}"
+        duration="${DECLINED_DURATIONS[$index]}"
+        log "declined: $suite did not run (precondition unmet) after ${duration}s"
+    done
+}
+
 print_failure_summary() {
     local index suite duration code
 
@@ -327,6 +363,8 @@ require_executable "$THIS_DIR/test-report-logging-density.sh"
 require_executable "$THIS_DIR/test-build-frontend.sh"
 require_executable "$THIS_DIR/test-deploy-all.sh"
 require_executable "$THIS_DIR/test-readiness-report.sh"
+require_executable "$THIS_DIR/test-e2e.sh"
+require_executable "$THIS_DIR/test-e2e-emacs.sh"
 require_executable "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 require_executable "$REPO_ROOT/.githooks/test-pre-commit.sh"
 require_executable "$THIS_DIR/report-nonlisp-coverage.sh"
@@ -361,7 +399,15 @@ done
 
 run_timed logging-density "$THIS_DIR/report-logging-density.sh"
 
+# The cross-system suites run LAST because they are the heaviest: `e2e` builds
+# five real binaries, and `e2e-emacs` starts a container. `e2e-emacs` declines
+# with exit 77 when the sandbox image is not available, which run_timed reports
+# as a skip rather than as a pass or a failure.
+run_timed e2e "$THIS_DIR/test-e2e.sh"
+run_timed e2e-emacs "$THIS_DIR/test-e2e-emacs.sh"
+
 print_timing_summary
+print_declined_summary
 
 if [ "$FAILURE_COUNT" -gt 0 ]; then
     print_failure_summary
@@ -374,9 +420,21 @@ else
     log "timings were not recorded, pass --record only for a canonical history run"
 fi
 
+# A DECLINED suite did not pass — it did not run. Saying "passed" here would
+# undo the whole point of the exit-77 disposition, so the closing line names
+# what actually ran and what declined, separately.
 if [ "${#SELECTED[@]}" -eq 0 ]; then
-    log "all agent-repl tests and coverage suites passed"
+    if [ "${#DECLINED_SUITES[@]}" -eq 0 ]; then
+        log "all agent-repl tests and coverage suites passed"
+    else
+        log "every agent-repl suite that could run passed; DECLINED: ${DECLINED_SUITES[*]}"
+    fi
 else
-    log "selected agent-repl suites passed: ${SELECTED[*]}"
+    if [ "${#DECLINED_SUITES[@]}" -eq 0 ]; then
+        log "selected agent-repl suites passed: ${SELECTED[*]}"
+    else
+        log "selected agent-repl suites that ran passed: ${SUITES[*]-none}"
+        log "selected but DECLINED, did NOT run: ${DECLINED_SUITES[*]}"
+    fi
     log "not selected, NOT run: ${SKIPPED_SUITES[*]-none}"
 fi
