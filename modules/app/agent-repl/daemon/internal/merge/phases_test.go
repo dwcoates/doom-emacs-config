@@ -624,8 +624,11 @@ func TestTestsTabCarriesPaintedSpans(t *testing.T) {
 	h := newHarness(t)
 	h.emacsRepo()
 	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gatePasses("daemon")
+	// The sandbox image is the one region whose blast radius is a SINGLE
+	// suite, which is what keeps this test about one painted span rather than
+	// about the selector's fan-out.
+	h.git.changed = []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"}
+	h.gatePasses("e2e-emacs")
 	enqueue(t, h)
 
 	// Act.
@@ -636,7 +639,7 @@ func TestTestsTabCarriesPaintedSpans(t *testing.T) {
 	// Assert.
 	tab := h.feed.lastTabOfKind(TabTests)
 	suites := tab.GetTests().GetSuites()
-	if len(suites) != 1 || suites[0].GetName() != "daemon" {
+	if len(suites) != 1 || suites[0].GetName() != "e2e-emacs" {
 		t.Fatalf("the tests tab drew %d suite(s), want the one that ran", len(suites))
 	}
 	if _, passed := suites[0].GetState().(*frontendv1.FeedMergeTestSuite_Passed); !passed {

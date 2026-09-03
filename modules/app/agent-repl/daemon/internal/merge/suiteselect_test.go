@@ -19,19 +19,19 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  []string{"build-frontend-harness", "webapp"},
 		},
 		{
-			name:  "a daemon change selects the daemon suite alone",
+			name:  "a daemon change also selects the cross-system suites",
 			paths: []string{"modules/app/agent-repl/daemon/internal/merge/run.go"},
-			want:  []string{"daemon"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
 		},
 		{
 			name:  "a proto change selects every generated consumer",
 			paths: []string{"modules/app/agent-repl/proto/src/frontend/v1/feed.proto"},
-			want:  []string{"daemon", "webapp", "shim", "proto"},
+			want:  []string{"daemon", "webapp", "shim", "proto", "e2e"},
 		},
 		{
 			name:  "the shared logging module selects its Go consumers",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "logging", "logging-density"},
+			want:  []string{"daemon", "sidecar", "store", "logging", "logging-density", "e2e"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -39,19 +39,46 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 			want:  scriptHarnessSuites,
 		},
 		{
-			name:  "module-root elisp selects the ert suite",
+			name:  "module-root elisp selects the ert and Emacs-client suites",
 			paths: []string{"modules/app/agent-repl/config.el"},
-			want:  []string{"ert"},
+			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
-			name:  "lisp/ selects the ert suite",
+			name:  "lisp/ selects the ert and Emacs-client suites",
 			paths: []string{"modules/app/agent-repl/lisp/core.el"},
-			want:  []string{"ert"},
+			want:  []string{"ert", "e2e-emacs"},
 		},
 		{
 			name:  "several regions union their radii",
 			paths: []string{"modules/app/agent-repl/webapp/src/App.tsx", "modules/app/agent-repl/daemon/main.go"},
-			want:  []string{"build-frontend-harness", "daemon", "webapp"},
+			want:  []string{"build-frontend-harness", "daemon", "webapp", "e2e", "e2e-emacs"},
+		},
+		{
+			// The sandbox image is the Emacs client layer's precondition and
+			// nothing else's, so it is the one region that selects e2e-emacs
+			// WITHOUT the containerless cross-system suite.
+			name:  "the sandbox image selects only the Emacs client layer",
+			paths: []string{"modules/app/agent-repl/e2e/sandbox/Dockerfile"},
+			want:  []string{"e2e-emacs"},
+		},
+		{
+			name:  "the e2e harness selects both cross-system suites",
+			paths: []string{"modules/app/agent-repl/e2e/world_test.go"},
+			want:  []string{"e2e", "e2e-emacs"},
+		},
+		{
+			// Blast radius, not name: the cross-system suites RUN a real
+			// claude-repld, so a daemon change can break them.
+			name:  "a daemon change reaches the cross-system suites",
+			paths: []string{"modules/app/agent-repl/daemon/main.go"},
+			want:  []string{"daemon", "e2e", "e2e-emacs"},
+		},
+		{
+			// The shim runs for real in the containerless suite, but the Emacs
+			// client layer's own claim is the elisp seam, so it stays out.
+			name:  "a shim change reaches the containerless cross-system suite",
+			paths: []string{"modules/app/agent-repl/agent-shim/claude/shim/src/main.ts"},
+			want:  []string{"shim", "e2e"},
 		},
 	}
 	for _, tc := range tests {
@@ -146,7 +173,7 @@ func TestSelectSuitesReportsInRosterOrder(t *testing.T) {
 	got := SelectSuites(paths)
 
 	// Assert.
-	if strings.Join(got.Suites, ",") != "ert,daemon,webapp,shim,proto" {
+	if strings.Join(got.Suites, ",") != "ert,daemon,webapp,shim,proto,e2e,e2e-emacs" {
 		t.Fatalf("selection order is %v, want the roster's own order", got.Suites)
 	}
 }
