@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
 )
@@ -223,4 +224,53 @@ func TestAnAgentsOwnRowsFollowItsSubFeedOnceItsSpawnIsSeen(t *testing.T) {
 	if rows[0].GetParent() != nil {
 		t.Fatal("a subagent's row named a parent; its rows arrive on the bubble's own feed")
 	}
+}
+
+// A UNIT'S TURN SURVIVES ITS REPLAY. The store replays a unit long after the
+// turn that ran it closed: the replayed frame names no turn and no turn is in
+// flight, so the only place its turn can come from is the row already
+// published for it.
+func TestAReplayedUnitKeepsTheTurnItsLiveRowWasStampedWith(t *testing.T) {
+	// Arrange: a live edit inside an open turn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "edit it")
+	edit := activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Success{Success: &conversationv1.AgentEditSuccess{
+			Path: &conversationv1.ReadPath{Path: "a.go"},
+		}},
+	})
+	h.send(edit)
+	if got := h.activityRow("unit-1").GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("live turn = %q, want turn-1", got)
+	}
+	h.terminal("turn-1", &conversationv1.AgentSuccess{}, nil)
+
+	// Act: the store replays the very same unit, with no turn of its own.
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		frameEntry(mainAgent(), &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Activity{Activity: edit},
+		}),
+	))
+
+	// Assert.
+	if got := h.activityRow("unit-1").GetTurn().GetValue(); got != "turn-1" {
+		t.Fatalf("replayed turn = %q, want turn-1", got)
+	}
+}
+
+// activityRow is the root feed's row for one activity unit.
+func (h *harness) activityRow(unit string) *frontendv1.FeedRow {
+	h.t.Helper()
+	want := testEncode(feedid.Ref{
+		WS:   testWorkspace,
+		Feed: rootFeed(),
+		Row:  feedid.RowKey{Kind: feedid.KindActivity, ID: unit},
+	}).GetValue()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == want {
+			return row
+		}
+	}
+	h.t.Fatalf("no row for unit %q", unit)
+	return nil
 }
