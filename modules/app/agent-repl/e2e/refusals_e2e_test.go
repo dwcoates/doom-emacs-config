@@ -17,11 +17,9 @@
 package e2e
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -332,96 +330,49 @@ func TestUnknownAgentOnUpdateAgent(t *testing.T) {
 // This lever is a whole-PROCESS knob, safe here only because NewWorld gives
 // each test its own daemon+store+sidecar+shim world.
 //
-// OPEN QUESTION (flagged, not guessed around): neither daemon.md,
-// PROTO-CHANGES.md nor daemon/ERROR-ARMS.md states which daemon-visible fact
-// a StartSession-level vendor_start_failed becomes. The two typed candidates
-// on the client-facing OpenWorkspace verb this test drives
-// (OpenWorkspaceError.spawn_failed: "Spawning the session's shim failed")
-// and on SessionHealth/WatchHostWorkspace (SessionFault/HostFault
-// .shim_start_failed: "Starting the session's shim failed") both name the
-// SHIM PROCESS failing to start — a different failure layer than the vendor
-// SDK failing to start INSIDE an already-running shim, which is what this
-// lever actually provokes (the real shim process starts and runs fine; only
-// its StartSession RPC answer is refused). No arm in either vocabulary
-// names "the vendor failed to start" distinctly. This test therefore avoids
-// pinning a specific arm and instead asserts the two facts the contract DOES
-// commit to unconditionally: (1) OpenWorkspaceSuccess's own doc comment
-// ("every visible effect arrives on the streams") together with "Health
-// verdicts: unhealthy is an ANSWER" (daemon.md, "Failure classification")
-// means a refused vendor start must NEVER present as a silently healthy,
-// usable session; (2) start-once's own doc comment ("a failed start leaves
-// the engine as it found it ... the same warm shim serves the conversation")
-// means the SAME workspace recovers and serves a real turn once the
-// transient condition clears. The exact fault-kind mapping is left to the
-// project lead's run to confirm.
+// LANDING 9 SETTLED THE ARM: OpenWorkspaceError.vendor_start_failed{detail}
+// (docs/overhaul/PROTO-CHANGES.md "Landing 9"). The vendor failing to start
+// INSIDE an already-running shim is a layer of its own — the shim process is
+// up and serving, so neither OpenWorkspaceError.spawn_failed nor
+// SessionFault.shim_start_failed, both of which name the SHIM PROCESS failing
+// to start, describes it. The daemon relays the shim's own verdict on the
+// TYPED arm, carrying the shim's account as `detail`, so these tests pin that
+// arm rather than settling for "not silently healthy". The recovery half is
+// unchanged: start-once's own doc comment ("a failed start leaves the engine
+// as it found it ... the same warm shim serves the conversation") means the
+// SAME workspace recovers and serves a real turn once the refusal clears.
 // ===========================================================================
 
-// rfPollInterval is this test family's own re-ask cadence for the unary
-// SessionHealth verb (SPEC.md section B: "a bounded poll of a store read
-// verb" is one of the three sanctioned wait shapes; SessionHealth is a
-// point-in-time question with no server-streaming form, so a bounded re-ask
-// is its equivalent of a watch-stream frame). Matches world_test.go's own
-// pollInterval value; kept as this file's own named constant rather than
-// reusing that unexported one, per this file's `rf` naming convention.
-const rfPollInterval = 20 * time.Millisecond
-
-// rfAwaitUnhealthyOrOpenFailure is TestStartSessionVendorStartFailed's
-// shared "did the refusal become observable" check (see that test's OPEN
-// QUESTION paragraph for why it accepts either shape rather than pinning
-// one).
+// rfAwaitVendorStartFailed drives OpenWorkspace and asserts the typed
+// vendor_start_failed arm carrying the shim's own detail.
 //
-// "Either shape" means either shape OF THE VENDOR REFUSAL. It does NOT mean
-// any failure at all: the bring-up arms — OpenWorkspaceError.spawn_failed,
-// and SessionFault.shim_start_failed / .shim_died — say the shim PROCESS
-// never came up, which is a broken harness (a mis-staged bundle, missing
-// vendor deps), not the refusal this lever provokes. Accepting them would
-// let this test pass green on a world where the shim never ran at all, so
-// they fail the test by name instead.
-func rfAwaitUnhealthyOrOpenFailure(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+// The neighbouring arm is named and failed EXPLICITLY rather than lumped in
+// with "some other error": OpenWorkspaceError.spawn_failed says the shim
+// PROCESS never came up, which is a broken harness (a mis-staged bundle,
+// missing vendor deps), not the refusal this lever provokes. Accepting it
+// would let this test pass green on a world where the shim never ran at all.
+func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenWorkspace = error %v, want a typed OpenWorkspaceResponse", err)
 	}
-	if oerr := resp.Msg.GetError(); oerr != nil {
-		if oerr.GetSpawnFailed() != nil {
-			t.Fatalf("OpenWorkspace = spawn_failed (%v), want a VENDOR start refusal: the shim PROCESS "+
-				"never came up, so this test never reached the arm it exists to cover — the harness or "+
-				"the shim's own bring-up is broken, not the vendor", oerr)
-		}
-		t.Logf("OpenWorkspace observed the refusal synchronously: %v", oerr)
-		return
+	oerr := resp.Msg.GetError()
+	if oerr == nil {
+		t.Fatalf("OpenWorkspace = %v, want error.vendor_start_failed: a refused vendor start must never "+
+			"present as a silently healthy, usable session", resp.Msg)
 	}
-	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("OpenWorkspace = %v, want success or error", resp.Msg)
+	if oerr.GetSpawnFailed() != nil {
+		t.Fatalf("OpenWorkspace = spawn_failed (%v), want vendor_start_failed: the shim PROCESS "+
+			"never came up, so this test never reached the arm it exists to cover — the harness or "+
+			"the shim's own bring-up is broken, not the vendor", oerr)
 	}
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	ticker := time.NewTicker(rfPollInterval)
-	defer ticker.Stop()
-	for {
-		hresp, herr := w.Client().SessionHealth(ctx, connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
-		if herr == nil {
-			if faults := hresp.Msg.GetSuccess().GetUnhealthy().GetFaults(); len(faults) > 0 {
-				for _, f := range faults {
-					if f.GetShimStartFailed() != nil || f.GetShimDied() != nil {
-						t.Fatalf("SessionHealth reported a BRING-UP fault (%v), want a VENDOR start refusal: "+
-							"the shim process failed to start or died, so this test never reached the arm it "+
-							"exists to cover — the harness or the shim's own bring-up is broken, not the vendor",
-							f)
-					}
-				}
-				t.Logf("SessionHealth observed the refusal asynchronously: %v", hresp.Msg.GetSuccess().GetUnhealthy())
-				return
-			}
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("e2e: OpenWorkspace answered success and SessionHealth never reported unhealthy within %s "+
-				"(want: the refused vendor start to become observable one way or the other)", DefaultTimeout)
-		case <-ticker.C:
-		}
+	failed := oerr.GetVendorStartFailed()
+	if failed == nil {
+		t.Fatalf("OpenWorkspace error = %v, want the typed vendor_start_failed arm", oerr)
+	}
+	if failed.GetDetail() == "" {
+		t.Fatal("vendor_start_failed.detail is empty, want the shim's own account of the refused start")
 	}
 }
 
@@ -431,10 +382,9 @@ func TestStartSessionVendorStartFailed(t *testing.T) {
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
-	// Act + Assert: opening the workspace never presents a silently healthy
-	// session (see the OPEN QUESTION above for why this accepts either
-	// observable shape).
-	rfAwaitUnhealthyOrOpenFailure(t, w, ws)
+	// Act + Assert: opening the workspace answers the typed arm carrying the
+	// shim's own account, never a silently healthy session.
+	rfAwaitVendorStartFailed(t, w, ws)
 }
 
 func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
@@ -444,7 +394,7 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act: the first open attempt consumes the one scripted refusal.
-	rfAwaitUnhealthyOrOpenFailure(t, w, ws)
+	rfAwaitVendorStartFailed(t, w, ws)
 
 	// Act: retry the same verb — start-once's own doc comment: "something
 	// was wrong, it was fixed, the same warm shim serves the conversation."
