@@ -26,11 +26,15 @@ import {
 
 const AGENT = create(conversationv1.AgentIdSchema, { value: "agent-1" });
 
+/** The one subagent this session has announced. */
+const SUBAGENT = create(conversationv1.AgentIdSchema, { value: "agent-sub" });
+
 function gateWith(): { gate: PermissionGate; written: PersistEntry[]; modes: conversationv1.AgentPermissionMode[] } {
   const written: PersistEntry[] = [];
   const modes: conversationv1.AgentPermissionMode[] = [];
   const gate = new PermissionGate({
     mainAgentId: () => AGENT,
+    agentFor: (vendorAgentId) => (vendorAgentId === SUBAGENT.value ? SUBAGENT : undefined),
     persist: (entries) => written.push(...entries),
     keepalive: () => false,
     nowMs: () => 1000,
@@ -652,5 +656,60 @@ describe("noteVendorDenial and deniedCall", () => {
     gate.noteVendorDenial("");
 
     expect(gate.deniedCall("")).toBe(false);
+  });
+});
+
+describe("whose book an ask lands on", () => {
+  it("writes a permission ask on the SUBAGENT that raised it", async () => {
+    // Arrange.
+    const { gate, written } = gateWith();
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: SUBAGENT.value }));
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+  });
+
+  it("writes a question on the SUBAGENT that raised it", async () => {
+    // Arrange.
+    const { gate, written } = gateWith();
+
+    // Act.
+    void gate.canUseTool(
+      ASK_USER_QUESTION_TOOL,
+      QUESTION_INPUT,
+      callOptions({ agentID: SUBAGENT.value }),
+    );
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(SUBAGENT.value);
+  });
+
+  it("leaves a main-agent ask on the main agent's book", async () => {
+    // Arrange.
+    const { gate, written } = gateWith();
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions());
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(AGENT.value);
+  });
+
+  it("lands an ask under an UNKNOWN agent on the main agent rather than dropping it", async () => {
+    // The vendor is blocked on this callback; an ask nobody can see never
+    // resolves and wedges the process.
+    const { gate, written } = gateWith();
+
+    // Act.
+    void gate.canUseTool("Bash", { command: "ls" }, callOptions({ agentID: "agent-nobody" }));
+    await Promise.resolve();
+
+    // Assert.
+    expect(written[0]?.agentId.value).toBe(AGENT.value);
   });
 });
