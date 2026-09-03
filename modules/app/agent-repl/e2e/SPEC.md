@@ -327,6 +327,28 @@ itself.**
   sidecar/daemon would race a live writer against a closed socket and turn
   an unrelated test failure into a spurious one.
 
+### Failure artifacts
+
+Every real log sink the daemon and its shims write — the restart-scoped
+`daemon.run.log` and each per-workspace `daemon`/`shim`/`webapp` sink — is a
+file under the state root's `logs/` directory (`daemon/internal/dlog/sink.go`
+`createTarget`); the `<workspace>/.claude/emacs/<sink>.log` paths are symlinks
+into it. The state root is a per-test temp dir the testing package deletes on
+the way out, so a failure used to leave nothing behind and the next diagnosis
+had to re-run the test with instrumentation added.
+
+`preserveLogsOnFailure` (registered in `NewWorld` immediately after the daemon
+starts, so LIFO cleanup runs it AFTER the daemon and its shims have exited and
+flushed) collects that one directory, and only when `t.Failed()`:
+
+- `AGENT_REPL_E2E_ARTIFACTS=<dir>` set → every sink is copied whole into
+  `<dir>/<test name with '/' flattened>/`, and the destination is named in the
+  test output.
+- unset (the default) → each sink's last 64 KiB, cut forward to a record
+  boundary, goes into `t.Log` output. Bounded, but never nothing.
+
+A passing test writes no artifacts and logs nothing.
+
 ### Store stop/restart control (ruling 2 — real degraded-state outages)
 
 The store helper exposes:
@@ -750,6 +772,17 @@ docs. File-per-area grouping is given in section E.
     the opening diagnostics, on EVERY new watch, so an adopting daemon
     (crash boot, handover) attaches purely" — assert the exact ONE-per-watch
     cardinality, not merely presence.
+
+    CARVE-OUT (2026-09-03): "every new watch" excludes the watch that opens
+    the session. `reannounceStart` returns `undefined` while `announcedStart`
+    is unset — "UNSET before StartSession, which is the one state with
+    nothing to re-state" (`agent-shim/claude/shim/src/engine/session.ts`:
+    2263-2267) — and the ORIGINAL daemon's watch is the one established AT
+    StartSession. So the original daemon's "took the session facts" count is
+    **0**, and the cold-booted successor's fresh watch is the first with an
+    announced start to re-state, making the cumulative count **1**, not 2.
+    The one-per-watch rule still holds; it simply has no prior announcement
+    to apply to on the opening watch.
 49. **HandoverTransfersAtFreeness** — `daemon.md` §"Rollout / handover" —
     blue-green: new daemon boots joining, workspaces transfer one by one
     ONLY at freeness (no in-flight turn, no live detached work); uses
@@ -1169,6 +1202,39 @@ conflicts, per the binding instruction not to read production code looking
 for bugs.
 
 ## G. Open items for the project lead
+
+- **A response-level failure does not reach the feed as `FeedResponse.error`.**
+  (Raised 2026-09-03, observed against the real shim.) For `!max-tokens` the
+  shim's own converter settles the block as a failure
+  (`shim.convert.stream`: "settling a prose block ... settled=failure") and
+  `daemon/internal/resolve/feed/response.go`'s `AgentResponse_Failure` case
+  builds `FeedResponse.error`, yet the row the feed finally publishes for
+  that block does not carry the error arm. `TestMaxTokens` therefore asserts
+  the response-level fact the contract states in words — "the text is kept,
+  the answer is incomplete" (`agent-shim/claude/shim/AGENTS.md:335`) — by
+  the KEPT PROSE, and accepts either settled arm. Whether the last upsert of
+  the block restates it as settled-success, or the failure never reaches the
+  resolver, is the daemon's to determine.
+
+- **An activity row published after its turn's terminal carries no turn id.**
+  (Same investigation.) `stampTurn` (`daemon/internal/resolve/feed/sink.go`)
+  stamps from the turn IN FLIGHT, so a block whose last upsert lands after
+  the terminal loses the stamp its earlier upserts had. Any test matching an
+  activity row by turn id is therefore racing the upsert order; `TestMaxTokens`
+  matches on content instead. Whether a row should be able to lose a stamp it
+  once had is a daemon question.
+
+- **`HibernateError.kind.turn_in_flight` is effectively dead.** (Raised
+  2026-09-03 by the e2e triage.) The idle sweep short-circuits on its OWN
+  freeness pre-check — `if !c.deps.Freeness.Free(ws.ID) { ... "the idle
+  session is not free; deferring its hibernation" ... continue }`
+  (`daemon/internal/drain/sweep.go:64-66`) — BEFORE it ever calls
+  `hibernate`, so a session with a turn in flight never receives a Hibernate
+  directive and the shim never gets the chance to refuse with
+  `turn_in_flight`. No path in the daemon reaches that arm today.
+  `TestHibernateOnIdleCutoff` therefore asserts the pre-check's own record.
+  Either the daemon should stop pre-checking and let the shim arbitrate (the
+  structural answer: one arbiter, not two), or the arm should be retired.
 
 - **The e2e harness must launch the daemon with EXACTLY the argv the Emacs
   launcher builds.** (Raised 2026-09-02 by the elisp daemon-argv landing; NOT

@@ -148,8 +148,11 @@ func TestAccountUsage(t *testing.T) {
 	// account_usage arm off the session stream for this workspace — the
 	// structured-log wait signal SPEC.md §B names for exactly this
 	// situation (a fact with no user-visible surface at this scenario's own
-	// figures).
-	w.AwaitLogRecord(w.RunLogPath(), "the footer resolver to file an account_usage session update", func(r harness.LogRecord) bool {
+	// figures), read from the WORKSPACE's own daemon sink.
+	// The resolver files through the WORKSPACE-BOUND logger (its mutate
+	// helper is keyed by workspace), so the record lands on the workspace's
+	// own daemon sink, never on the restart-scoped daemon.run.log.
+	w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "daemon"), "the footer resolver to file an account_usage session update", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == "account_usage"
 	})
 }

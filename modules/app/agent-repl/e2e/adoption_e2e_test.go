@@ -176,11 +176,16 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
-	// The ORIGINAL daemon's own first (and only) watch on this session took
-	// the shim's re-announced facts up exactly once, and never logged an
-	// "ignored" record (its watcher never reconnected).
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
-		t.Fatalf("the original daemon's watch_session log holds %d %q records, want exactly 1", got, adTookSessionFactsMessage)
+	// THE ORIGINAL DAEMON GETS NO RE-ANNOUNCEMENT. The shim re-announces
+	// only what a prior StartSession already announced — reannounceStart
+	// returns undefined while `announcedStart` is unset
+	// (agent-shim/claude/shim/src/engine/session.ts:2263-2267, "UNSET before
+	// StartSession, which is the one state with nothing to re-state") — and
+	// this daemon's own watch is the one established AT StartSession. So it
+	// takes no re-announced facts at all, and logs no "ignored" record
+	// either (its watcher never reconnected).
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 0 {
+		t.Fatalf("the original daemon's watch_session log holds %d %q records, want 0 (its watch predates any announced start)", got, adTookSessionFactsMessage)
 	}
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
 		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want 0", got)
@@ -194,14 +199,15 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	successor.WatchWorkspaceLogs(repo.Dir)
 	successor.AwaitWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
 
-	// Assert: the exact ONE-per-watch cardinality (SPEC.md #48), not merely
-	// presence. The successor's fresh watcher took the re-announced facts up
-	// exactly once more (a SECOND "took" record across the two daemons'
+	// Assert: the exact cardinality (SPEC.md #48), not merely presence. The
+	// successor's fresh watcher — the first watch this session has seen
+	// since StartSession set `announcedStart` — took the re-announced facts
+	// up exactly once (the ONE "took" record across the two daemons'
 	// combined, cumulative log), and NOTHING was ever logged as an ignored
 	// re-announcement — which would mean the same WATCHER, not just the
 	// process, survived the crash, the wrong shape for a cold boot.
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 2 {
-		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 2 (one per fresh watch)", got, adTookSessionFactsMessage)
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
+		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 1 (only the successor's watch finds an announced start to re-state)", got, adTookSessionFactsMessage)
 	}
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
 		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want 0 (each daemon's own watcher saw the re-announcement exactly once, as its first watch)", got)
@@ -497,19 +503,8 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 	successor := adDial(addr)
 
-	// Assert: the OLD daemon refuses further intake for the departing
-	// workspace, naming the successor.
-	oldResp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
-	}))
-	if err != nil {
-		t.Fatalf("SubmitPrompt on the old daemon after the announcement = error %v, want a typed transferring_away answer", err)
-	}
-	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
-		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
-	}
-
 	// Assert: the NEW daemon refuses the same workspace before adoption.
+	// This one holds from the announcement onward and so is asserted first.
 	newResp, err := successor.SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
 	}))
@@ -529,6 +524,14 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 
 	// Assert: both watchers see the transfer, naming the successor.
+	//
+	// THE TRANSFER PUSH IS THE BARRIER FOR THE OLD DAEMON'S REFUSAL. The old
+	// daemon only starts answering transferring_away once recordTransfer has
+	// run, and transfer() runs it AFTER awaitFreeForever and Quiesce, one
+	// line before PushTransferred (daemon/internal/rollout/handover.go:129-
+	// 130). Asserting the refusal off the shutdown announcement alone races
+	// that whole sequence; awaiting the push is the event-driven signal that
+	// the record is set.
 	harness.AwaitView(t, w.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
@@ -537,6 +540,18 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}).GetTransferred()
 	if webTransfer.GetAddress() != addr {
 		t.Fatalf("WatchWebWorkspace transferred.address = %q, want the announced %q", webTransfer.GetAddress(), addr)
+	}
+
+	// Assert: the OLD daemon refuses further intake for the departing
+	// workspace, naming the successor.
+	oldResp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
+	}))
+	if err != nil {
+		t.Fatalf("SubmitPrompt on the old daemon after the transfer = error %v, want a typed transferring_away answer", err)
+	}
+	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
+		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
 	}
 
 	// Assert: the self-heal is complete — the workspace now answers

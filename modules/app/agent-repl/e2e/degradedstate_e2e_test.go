@@ -122,18 +122,24 @@ func TestDegradedDuringRealStoreOutage(t *testing.T) {
 	// healthy at session start (GetLiveWork, shim.md, succeeds before the
 	// outage begins).
 	w := NewWorld(t, WorldOpts{})
+	// The store outage this test provokes is exactly a health fault.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
 
 	// Act: provoke a REAL store outage (never a fabricated fact — ruling 2),
-	// then drive a real turn so the shim actually attempts to persist
-	// something against the now-dead store link. The turn itself still
-	// completes: its liveness rides the shim's direct connection to the
-	// daemon, not the store (see this file's header comment).
+	// then submit a real prompt so the shim actually attempts to persist
+	// something against the now-dead store link.
+	//
+	// NO TERMINAL IS AWAITED INSIDE THE OUTAGE. The daemon's turn terminal
+	// is STORE-DERIVED (docs/overhaul/shim.md:422-425 — the daemon's reads
+	// of a turn, including its terminal, are served from the store), so
+	// while Store.Stop() holds there is no terminal for AwaitTurnEnded to
+	// find and the wait could only time out. The submission alone provokes
+	// the degraded window this test is about.
 	w.Store.Stop()
-	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
-	AwaitTurnEnded(t, w, ws, turn)
+	SubmitPrompt(t, w, ws, "!prose-streamed")
 
 	ctx, cancel := context.WithTimeout(w.Ctx(), StoreOutageWindow)
 	defer cancel()
@@ -165,13 +171,18 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
 	w := NewWorld(t, WorldOpts{})
+	// The store outage this test provokes is exactly a health fault.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
 
+	// No terminal is awaited inside the outage — see
+	// TestDegradedDuringRealStoreOutage's own note: the daemon's turn
+	// terminal is store-derived (shim.md:422-425), so none exists while the
+	// store is down.
 	w.Store.Stop()
-	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
-	AwaitTurnEnded(t, w, ws, turn)
+	SubmitPrompt(t, w, ws, "!prose-streamed")
 
 	openCtx, openCancel := context.WithTimeout(w.Ctx(), StoreOutageWindow)
 	defer openCancel()
