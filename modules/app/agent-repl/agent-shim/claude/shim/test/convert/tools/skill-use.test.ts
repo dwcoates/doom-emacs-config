@@ -26,9 +26,9 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
   return { content: undefined, isError, structured, settledAtMs: 7_000 };
 }
 
-function armOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentSkillUse["result"] {
-  expect(item.case).toBe("skillUse");
-  return (item.value as conversationv1.AgentSkillUse).result;
+function armOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentSkillUse["result"] {
+  expect(item?.case).toBe("skillUse");
+  return (item?.value as conversationv1.AgentSkillUse).result;
 }
 
 describe("skillUseConverter.start", () => {
@@ -77,7 +77,7 @@ describe("skillUseConverter.start", () => {
     const item = skillUseConverter.start(call({ args: "--branch x" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 
@@ -155,7 +155,7 @@ describe("skillDocumentSettle", () => {
     const item = skillDocumentSettle(call({}), "doc", undefined, 7_000);
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 

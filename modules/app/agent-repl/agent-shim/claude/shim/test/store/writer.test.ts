@@ -151,6 +151,50 @@ describe("the bounded retry buffer", () => {
     expect(fake.book("book-1")).toHaveLength(0);
   });
 
+  it("does NOT replay a batch the store called invalid_request: the same bytes cannot become valid", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("invalid-once");
+    fake.failWritesWith("invalid_request", "entry 0 sets no item arm");
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert. ONE attempt, not the whole schedule.
+    expect(fake.writes()).toHaveLength(1);
+  });
+
+  it("keeps the queue draining after a refused batch, so a later batch still lands", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("invalid-drains");
+    fake.failWritesWith("invalid_request", "entry 0 sets no item arm");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Act.
+    fake.failWritesWith(null, "");
+    plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
+    await plane.flush();
+
+    // Assert.
+    expect(fake.book("book-1")).toHaveLength(1);
+  });
+
+  it("raises the refusal as a fault, so a refused batch is surfaced rather than swallowed", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("invalid-fault");
+    const faults: conversationv1.SessionFault[] = [];
+    plane.onFault((fault) => faults.push(fault));
+    fake.failWritesWith("invalid_request", "entry 0 sets no item arm");
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    expect(faults.map((fault) => fault.kind.case)).toContain("storeUnreachable");
+  });
+
   it("opens a degraded window while the store is unreachable", async () => {
     const { store: fake, persistence: plane } = await persistence("degraded-open");
     const windows: conversationv1.SessionDegradedWindow[] = [];

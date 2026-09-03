@@ -43,9 +43,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function monitorOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentMonitor {
-  expect(item.case).toBe("monitor");
-  return item.value as conversationv1.AgentMonitor;
+function monitorOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentMonitor {
+  expect(item?.case).toBe("monitor");
+  return item?.value as conversationv1.AgentMonitor;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentMonitorStart {

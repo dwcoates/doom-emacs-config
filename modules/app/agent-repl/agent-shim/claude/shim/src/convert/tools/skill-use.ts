@@ -69,9 +69,9 @@ export function skillDocumentSettle(
   document: string,
   allowedTools: readonly string[] | undefined,
   settledAtMs: number,
-): conversationv1.AgentActivity["item"] {
+): conversationv1.AgentActivity["item"] | undefined {
   const skill = skillNameOf(call);
-  if (skill === undefined) return { case: undefined };
+  if (skill === undefined) return undefined;
   LOGGER.logVerbose(
     { tool_use_id: call.toolUseId, skill: skill.name, markdown_length: document.length },
     "a skill's document landed; the invocation settles on it",
@@ -98,7 +98,7 @@ export const skillUseConverter: ToolConverter = {
 
   start(call) {
     const skill = skillNameOf(call);
-    if (skill === undefined) return { case: undefined };
+    if (skill === undefined) return undefined;
     return skillItem({
       case: "start",
       value: create(conversationv1.AgentSkillUseStartSchema, {

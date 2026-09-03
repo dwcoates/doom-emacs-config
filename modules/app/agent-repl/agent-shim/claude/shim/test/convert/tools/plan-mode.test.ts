@@ -31,9 +31,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function planOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentPlanMode {
-  expect(item.case).toBe("planMode");
-  return item.value as conversationv1.AgentPlanMode;
+function planOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentPlanMode {
+  expect(item?.case).toBe("planMode");
+  return item?.value as conversationv1.AgentPlanMode;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentPlanModeStart {

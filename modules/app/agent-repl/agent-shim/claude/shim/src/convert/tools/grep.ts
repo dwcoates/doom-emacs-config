@@ -204,7 +204,7 @@ export const grepConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "a search was announced with no pattern; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "grep",

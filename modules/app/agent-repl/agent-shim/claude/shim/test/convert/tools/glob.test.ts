@@ -39,7 +39,7 @@ describe("globConverter.start", () => {
     const item = globConverter.start(pending);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentGlob).result
+    const start = (item?.value as conversationv1.AgentGlob).result
       .value as conversationv1.AgentGlobStart;
     expect(start.query?.pattern).toBe("**/AGENTS.md");
     expect(start.query?.path).toBeUndefined();
@@ -50,7 +50,7 @@ describe("globConverter.start", () => {
     const item = globConverter.start(call({ pattern: "*.go", path: "/src" }));
 
     // Assert.
-    const start = (item.value as conversationv1.AgentGlob).result
+    const start = (item?.value as conversationv1.AgentGlob).result
       .value as conversationv1.AgentGlobStart;
     expect(start.query?.path).toBe("/src");
   });
@@ -60,7 +60,7 @@ describe("globConverter.start", () => {
     const item = globConverter.start(call({ path: "/src" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 

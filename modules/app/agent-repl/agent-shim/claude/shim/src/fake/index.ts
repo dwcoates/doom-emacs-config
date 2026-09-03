@@ -940,11 +940,22 @@ export function createFakeQuery(
   const startTask = (task: Omit<LiveTask, "backgrounded">): LiveTask => {
     const live: LiveTask = { ...task, backgrounded: false };
     liveTasks.set(task.taskId, live);
+    // THE SPOOL EXISTS FROM THE MOMENT THE TASK DOES. A detached run that ends
+    // by TIMING OUT or by being CANCELLED never gets a scenario line that opens
+    // one, so whatever tails the run had no file to open at all — the spool has
+    // to be created by the task's own start, exactly as the vendor's does.
+    //
+    // ONLY FOR THE KINDS THAT OWN A SPOOL. A shell run's spool is its output and
+    // an agent's is its own transcript; a monitor has neither, and inventing an
+    // empty file for one puts bytes on disk the vendor never writes.
+    const spooled = task.kind === "local_bash" || task.kind === "local_agent";
+    const outputFile = spooled ? files.spool(task.taskId).path : undefined;
     systemMessage("task_started", {
       task_id: task.taskId,
       tool_use_id: task.toolUseId,
       description: task.description,
       task_type: task.kind,
+      ...(outputFile === undefined ? {} : { output_file: outputFile }),
     });
     return live;
   };

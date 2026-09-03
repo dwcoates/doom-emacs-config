@@ -31,9 +31,9 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function actOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentTaskAct {
-  expect(item.case).toBe("taskAct");
-  return item.value as conversationv1.AgentTaskAct;
+function actOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentTaskAct {
+  expect(item?.case).toBe("taskAct");
+  return item?.value as conversationv1.AgentTaskAct;
 }
 
 describe("taskActConverter.start", () => {
@@ -41,8 +41,9 @@ describe("taskActConverter.start", () => {
     // Arrange, Act.
     const item = taskActConverter.start(call("TaskCreate", { subject: "s", description: "d" }));
 
-    // Assert.
-    expect(item.case).toBeUndefined();
+    // Assert. UNDEFINED, not an item with no arm: the store refuses an activity
+    // that sets no item arm, so the caller has to be able to skip the entry.
+    expect(item).toBeUndefined();
   });
 
   it("produces the act an update's input implies, keyed by the task it names", () => {
@@ -58,7 +59,7 @@ describe("taskActConverter.start", () => {
     const item = taskActConverter.start(call("TaskUpdate", { status: "completed" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item).toBeUndefined();
   });
 });
 

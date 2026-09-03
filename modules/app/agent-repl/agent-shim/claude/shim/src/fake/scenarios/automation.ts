@@ -222,7 +222,15 @@ const MONITOR_DEADLINE = scenario({
   arms: "AgentMonitor.lifetime=deadline",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "monitor-deadline" }, "fake deadline-monitor turn");
-    const call = ctx.toolUse("Monitor", { command: "tail -f /var/log/build.log", timeoutMs: 600_000 });
+    // MonitorInput (sdk-tools.d.ts) declares `description`, `timeout_ms` and
+    // `persistent` REQUIRED on the tool's own input — the shim reads the watch's
+    // lifetime and its footer text off the call, never off the task record.
+    const call = ctx.toolUse("Monitor", {
+      description: "build log",
+      timeout_ms: 600_000,
+      persistent: false,
+      command: "tail -f /var/log/build.log",
+    });
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "monitor", description: "build log" });
     ctx.announceLiveTasks();
@@ -239,7 +247,14 @@ const MONITOR_PERSISTENT = scenario({
   arms: "AgentMonitor.lifetime=persistent",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "monitor-persistent" }, "fake persistent-monitor turn");
-    const call = ctx.toolUse("Monitor", { server: "echo", tool: "watch", persistent: true });
+    // `timeout_ms` is required even when `persistent` ignores it, and the
+    // source is a `ws` object — `server`/`tool` are on no declared input.
+    const call = ctx.toolUse("Monitor", {
+      description: "echo watch",
+      timeout_ms: 0,
+      persistent: true,
+      ws: { url: "ws://127.0.0.1:8787/echo" },
+    });
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "monitor", description: "echo watch" });
     ctx.announceLiveTasks();

@@ -126,7 +126,7 @@ export const globConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "a match was announced with no pattern; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "glob",

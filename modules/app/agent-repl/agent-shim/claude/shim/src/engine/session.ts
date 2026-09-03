@@ -351,6 +351,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   const gate = new PermissionGate({
     mainAgentId: () => requireIdentity().agentId,
+    // The SAME set the daemon's own WatchAgent is answered from: an agent this
+    // session announced is addressable, and nothing else is.
+    agentFor: (vendorAgentId) => {
+      const main = requireIdentity().agentId;
+      if (vendorAgentId === main.value) return main;
+      return announcedAgents.has(vendorAgentId) ? subagentId(vendorAgentId) : undefined;
+    },
     persist: (entries) => deps.persistence.write(entries),
     keepalive: () => open?.keepalive === true,
     nowMs: deps.nowMs,
