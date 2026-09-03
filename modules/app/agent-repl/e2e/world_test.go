@@ -159,7 +159,23 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// t.Cleanup's LIFO unwind tears down daemon -> sidecar -> store — daemon
 	// (and its shims) first, so nothing is left writing to a store or
 	// sidecar that already went away.
-	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"))
+	// ONE directory holds every log this world produces. The daemon's own
+	// sinks already live under the state root's logs/ directory, so routing
+	// the store's and the sidecar's logs there too means
+	// preserveLogsOnFailure's single-directory sweep collects all of them
+	// with no extra bookkeeping (SPEC.md section B, "Failure artifacts").
+	// The state root is minted HERE rather than by harness.StartDaemon
+	// because the store starts first and needs the logs directory already.
+	stateRoot := opts.DaemonOpts.StateDir
+	if stateRoot == "" {
+		stateRoot = shortStateRoot(t)
+	}
+	logsDir := filepath.Join(stateRoot, "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir %s: %v", logsDir, err)
+	}
+
+	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"), filepath.Join(logsDir, "store.log"))
 
 	// ONE spool root for the whole world. The fake SDK inside every shim
 	// this daemon spawns writes its task spools here (via
@@ -175,6 +191,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
+	daemonOpts.StateDir = stateRoot
 	// Appended LAST so this suite's own invariant wins over any ExtraEnv a
 	// caller supplied: the shim's env is scanned front-to-back and the last
 	// assignment of a name is the effective one.
@@ -193,7 +210,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		StoreSocket: store.Socket,
 		ConfigRoots: []string{d.DefaultConfigDir, d.MultiRepoConfigDir},
 		SpoolRoot:   spoolRoot,
-		LogPath:     filepath.Join(t.TempDir(), "sidecar.log"),
+		LogPath:     filepath.Join(logsDir, "sidecar.log"),
 	})
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
@@ -280,8 +297,9 @@ const ArtifactsEnv = "AGENT_REPL_E2E_ARTIFACTS"
 // of kilobytes) while refusing to dump an unbounded file into a CI transcript.
 const artifactTailBytes = 64 << 10
 
-// preserveLogsOnFailure keeps the daemon's and every shim's structured logs
-// alive past the world's teardown, but only when the test FAILED.
+// preserveLogsOnFailure keeps the whole world's structured logs — the
+// daemon's, every shim's, the store's and the sidecar's — alive past the
+// world's teardown, but only when the test FAILED.
 //
 // Every real sink file — the restart-scoped run log and each per-workspace
 // daemon/shim/webapp sink — is created under the state root's logs directory
@@ -292,6 +310,11 @@ const artifactTailBytes = 64 << 10
 // with instrumentation bolted on. Collecting the one directory therefore
 // collects everything, with no per-test bookkeeping of which workspaces were
 // registered.
+//
+// NewWorld routes the store's and the sidecar's own log files into that same
+// directory (they otherwise landed in anonymous t.TempDir()s that vanished
+// with the test, leaving a failed run with no store or sidecar log at all),
+// so the one sweep below collects them alongside the daemon's sinks.
 func preserveLogsOnFailure(t *testing.T, d *harness.Daemon) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -420,6 +443,20 @@ func shortSocketPath(t *testing.T, tag string) string {
 	return p
 }
 
+// shortStateRoot mints a state root short enough to hold a shim's unix socket
+// (the 103-byte path cap), the same way harness.StartDaemon mints its own —
+// t.TempDir() encodes the whole test name and blows that budget for this
+// suite's longer names.
+func shortStateRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "are2e")
+	if err != nil {
+		t.Fatalf("e2e: mkdir a short state root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // ===========================================================================
 // Store: the real shim-store, restartable on the same socket + database, for
 // the degraded-state family's real outage window (ruling 2).
@@ -442,13 +479,12 @@ type Store struct {
 // startStore launches the store on a named socket + database and blocks
 // until a real rpc against it succeeds — readiness is the store's own
 // statement, never an elapsed duration.
-func startStore(t *testing.T, socket, dbPath string) *Store {
+func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 	t.Helper()
 	bin := requireStoreBinary(t)
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		t.Fatalf("e2e: mkdir %s: %v", filepath.Dir(dbPath), err)
 	}
-	logPath := filepath.Join(t.TempDir(), "store.log")
 	cmd := exec.Command(bin, "--socket", socket, "--db", dbPath, "--log", logPath)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+socket,
