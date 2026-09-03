@@ -59,7 +59,7 @@ func (s *server) WatchLoginTerminal(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
@@ -73,7 +73,7 @@ func (s *server) WatchLoginTerminal(
 		if errors.Is(err, login.ErrNoSession) {
 			return TransportClosed(subject.Log, rpc, "no_login_open", err.Error(), false)
 		}
-		return fail(subject.Log, rpc, err)
+		return endStream(subject.Log, rpc, err)
 	}
 	s.acceptStream(ctx, rpc)
 	subject.Log.Debug(rpc, "accepted a login terminal stream", nil)
