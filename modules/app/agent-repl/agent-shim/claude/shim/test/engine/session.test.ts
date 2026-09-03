@@ -23,6 +23,7 @@ import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type { AccountUsageLike, McpServerStatusLike } from "../../src/sdk/types.js";
+import { mainAgentId } from "../../src/convert/ids.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -2487,5 +2488,95 @@ describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () =>
       return result.value.outcome.case === "interrupted";
     });
     expect(wrote).toBe(true);
+  });
+});
+
+/**
+ * A gated call raised INSIDE a subagent (engine/session.ts's `agentFor`).
+ *
+ * The vendor mints `canUseTool`'s `agentID` from the spawning `tool_use_id`,
+ * which is the key the LIVE detached-work table is addressable by -- and not a
+ * key the announced-agent set holds, so before this every permission and
+ * question raised under a subagent landed on the main agent's book with "the
+ * vendor raised an ask under an agent this session never announced".
+ */
+describe("an ask raised under a subagent's vendor agent id", () => {
+  /** Announce a live detached agent task spawned by `toolu_spawn`. */
+  const spawnSubagent = async (h: Harness): Promise<void> => {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_spawn",
+      task_type: "agent",
+      subagent_type: "general-purpose",
+      description: "look something up",
+      uuid: "00000000-0000-4000-8000-00000000000a",
+      session_id: "s",
+    } as never);
+  };
+
+  /** The book the gate's permission frame landed on. */
+  const permissionBook = (h: Harness): string | undefined => {
+    for (const entry of h.persistence.buffered) {
+      if (entry.item.kind !== "frame") continue;
+      const result = entry.item.frame.result;
+      if (result.case !== "update") continue;
+      if (result.value.update.case !== "permission") continue;
+      return entry.agentId.value;
+    }
+    return undefined;
+  };
+
+  it("books the ask under the live subagent", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "toolu_spawn",
+      requestId: "req_1",
+    } as never);
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    expect(permissionBook(h)).toBe("toolu_spawn");
+  });
+
+  it("falls back to the main agent once the subagent has concluded", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a01",
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-00000000000b",
+      session_id: "s",
+    } as never);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "toolu_spawn",
+      requestId: "req_1",
+    } as never);
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    expect(permissionBook(h)).toBe(mainAgentId(sessionId).value);
   });
 });
