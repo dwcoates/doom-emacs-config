@@ -12,11 +12,25 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { SCENARIOS, scenarioNames, selectScenario } from "../../src/fake/registry.js";
+import { ALIASES, SCENARIOS, scenarioNames, selectScenario } from "../../src/fake/registry.js";
 import { renderScenarioTable, TABLE_HEADING } from "../../scripts/scenario-table.js";
 
 const agentsMd = (): string =>
   readFileSync(fileURLToPath(new URL("../../AGENTS.md", import.meta.url)), "utf8");
+
+const manifestMd = (): string =>
+  readFileSync(fileURLToPath(new URL("../../testdata/captures/MANIFEST.md", import.meta.url)), "utf8");
+
+/**
+ * Every `` `!token` `` mentioned in MANIFEST.md — the golden table's
+ * `Scenarios:` column, the `e2ecleanup/fakesdk-ext` additions and the
+ * reconciliation section all spell scenario names this way.
+ */
+function tokensNamedInManifest(): Set<string> {
+  const found = new Set<string>();
+  for (const m of manifestMd().matchAll(/`!([a-z0-9-]+)`/g)) found.add(m[1]);
+  return found;
+}
 
 describe("selection", () => {
   it("falls through to plain prose for text naming no scenario", () => {
@@ -159,5 +173,63 @@ describe("the published table", () => {
 
     // Assert
     expect(rows).toHaveLength(SCENARIOS.length);
+  });
+});
+
+describe("MANIFEST.md against the registry (naming-drift guard)", () => {
+  // The golden captures under testdata/captures/ and the registry's own
+  // `!name` prompts drifted apart once already (`hook-succeeded` vs.
+  // `!hook-success`, and a dozen more) before MANIFEST.md's `Scenarios:`
+  // column and its reconciliation section closed the gap by hand. These two
+  // checks are the STRUCTURAL guard against that drift recurring silently: a
+  // scenario renamed or removed without updating MANIFEST.md fails here, and
+  // so does a scenario added without a mention there.
+
+  it("every scenario token MANIFEST.md names resolves in the registry", () => {
+    // Arrange
+    const registered = new Set(scenarioNames());
+
+    // Act. `fail-marker` is spelled `!fail-marker` throughout even though it
+    // is selected by a prose marker, not a prefix — still a real registered
+    // name.
+    const unresolved = [...tokensNamedInManifest()].filter((token) => !registered.has(token));
+
+    // Assert
+    expect(unresolved).toEqual([]);
+  });
+
+  it("every registered scenario is named at least once in MANIFEST.md", () => {
+    // Arrange. The default scenario's name is `""`, which cannot be spelled
+    // as a `!token` — MANIFEST.md names it in prose ("the default `\"\"`
+    // prose scenario") instead, so it is exempted rather than required to
+    // match the token regex.
+    const named = tokensNamedInManifest();
+
+    // Act
+    const unmentioned = scenarioNames().filter((name) => name !== "" && !named.has(name));
+
+    // Assert
+    expect(unmentioned).toEqual([]);
+  });
+
+  it("every ALIAS key round-trips to its target scenario through selectScenario", () => {
+    // Arrange + Act
+    const wrong = Object.entries(ALIASES).filter(
+      ([alias, target]) => selectScenario(`!${alias}`).name !== target,
+    );
+
+    // Assert
+    expect(wrong).toEqual([]);
+  });
+
+  it("every ALIAS target is a real registered scenario", () => {
+    // Arrange
+    const registered = new Set(scenarioNames());
+
+    // Act
+    const dangling = Object.values(ALIASES).filter((target) => !registered.has(target));
+
+    // Assert
+    expect(dangling).toEqual([]);
   });
 });

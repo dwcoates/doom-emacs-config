@@ -297,44 +297,141 @@ either way rather than depending on the fix).
 
 ---
 
-## Manifest/registry naming drift (recorded 2026-09-02; NOT a blocker)
+## Manifest/registry naming drift — RECONCILED (2026-09-03)
 
 While writing the rebuilt `modules/app/agent-repl/e2e` suite, area writers
 found that a GOLDEN's name and the fake SDK's REGISTERED scenario prompt
 often differ. `src/fake/registry.ts` matches on the scenario's own registered
-name, so driving a golden by its capture name silently reaches nothing. Every
+name, so driving a golden by its capture name silently reached nothing. Every
 writer resolved this by reading the scenario source and documenting the
 mapping in its test header; no test guessed.
 
-The project lead has ruled this a SHIM-SIDE CLEANUP for later. It blocks
-nothing: the e2e tests drive the registered names and are correct as written.
+That per-writer, partial list (recorded below in 2026-09-02, marked NOT a
+blocker) has now been superseded by a FULL reconciliation, done in
+`agent-shim/claude/shim`:
 
-### One golden, one differently-named scenario
+- `testdata/captures/MANIFEST.md`'s golden table carries a `Scenarios:`
+  column naming every registered `!name`(s) that reproduces each of the 69
+  goldens, and a new "Reconciliation: every registered scenario's grounding"
+  section states the same fact in the OTHER direction — every one of the
+  registry's ~149 registered names either names its grounding golden or
+  carries an explicit UNGROUNDED reason.
+- `src/fake/registry.ts` now carries an `ALIASES` map: every golden whose
+  name reproduces from EXACTLY ONE registered scenario can now be driven by
+  ITS OWN NAME too (`selectScenario("!hook-succeeded")` now resolves the same
+  scenario `!hook-success` does) — existing scenario names are UNCHANGED
+  (the e2e suite's own `!hook-success`-shaped calls keep working verbatim),
+  this only ADDS a second selector.
+- `test/fake/registry.test.ts` gained a structural guard
+  ("MANIFEST.md against the registry (naming-drift guard)") that walks
+  MANIFEST.md's own text and fails if a scenario token it names does not
+  resolve in the registry, or if a registered scenario is never named there
+  — so this reconciliation cannot go stale the way the first list did.
 
-| Golden (capture / manifest) | Registered prompt |
-|---|---|
-| `hook-succeeded` | `!hook-success` |
-| `mcp-server-healths` | `!mcp-all` |
-| `mcp-unmodeled-tool` | `!unmodeled` |
-| `context-injected-memory` | `!memory` |
-| `context-injected-skills` | `!skills-injected` |
+This is now a CLOSED reconciliation, not an open blocker. The full table:
 
-### One golden, SEVERAL scenarios driven in combination
+### One golden, one registered scenario (now ALIASED — driving the golden's
+### own name works too)
 
-| Golden (capture / manifest) | Registered prompts |
+| Golden (capture / manifest) | Registered scenario | Alias added? |
+|---|---|---|
+| `account-usage` | `!usage-full` | yes |
+| `bash-detached` | `!bash-detach` | yes |
+| `bash-foreground-completed` | `!bash` | yes |
+| `bash-image-output` | `!bash-image` | yes |
+| `bash-interrupted-by-timeout` | `!bash-timeout` | yes |
+| `bash-nonzero-exit` | `!bash-fail` | yes |
+| `bash-partial-output-with-spill` | `!bash-spill` | yes |
+| `compaction-directed` | `!compact` | yes |
+| `context-injected-memory` | `!memory` | yes |
+| `context-injected-skills` | `!skills-injected` | yes |
+| `context-usage` | `!context-usage-drift` | yes |
+| `cron-create-list-delete` | `!cron` | no — already the same name |
+| `edit` | `!edit` | no — already the same name |
+| `fan-wide-cancel` | `!cancel-all` | yes |
+| `fast-mode` | `!fast-on` | yes |
+| `glob` | `!glob` | no — already the same name |
+| `held-turn-gate` | `!hold` | yes |
+| `hook-blocked` / `hook-cancelled` / `hook-failed` | same name | no — already the same name |
+| `hook-succeeded` | `!hook-success` | yes |
+| `ide-diagnostics-after-edit` | `!ide-diagnostics` | yes |
+| `identity-rotation-clear` | `!rotate` | yes |
+| `interrupt` | `!interrupt` | no — already the same name |
+| `max-tokens` | `!max-tokens` | no — already the same name |
+| `mcp-server-healths` | `!mcp-all` | yes |
+| `mcp-unmodeled-tool` | `!unmodeled` | yes |
+| `model-changed` | `!model-fallback` | yes |
+| `monitor-deadline` / `monitor-persistent` | same name | no — already the same name |
+| `permission-allow-once` / `-allow-standing` / `-denied-by-policy` / `-denied-by-user` | same name | no — already the same name |
+| `permission-mode-changed` | `!perm-allow-standing-mode` | yes |
+| `permission-undecidable-parked` | `!perm-hold` (NOT `!perm-undecidable`) | yes |
+| `plan-mode-enter-exit` | `!plan` | yes |
+| `prose-streamed` | the default `""` scenario | yes |
+| `push-notification-sent` | `!push-sent` | yes |
+| `question-free-text` | `!ask-free` | yes |
+| `question-multi-select` | `!ask-multi` | yes |
+| `question-multiple-in-one-batch` | `!ask-multi` (shared with the row above) | yes |
+| `question-single-select` | `!ask-single` | yes |
+| `question-unanswered` | `!ask-unanswered` | yes |
+| `report-findings` | `!findings` | yes |
+| `skill-invocation` | `!skill` | yes |
+| `subagent-detached` | `!subagent-detached` | no — already the same name |
+| `subagent-sync-nested-activity` | `!subagent` | yes |
+| `turn-stop-error-during-execution` | `!fail-execution` (DECLARED-ONLY) | yes |
+| `turn-stop-hook-stop` | `!fail-stop-hook` (DECLARED-ONLY) | yes |
+| `turn-stop-max-budget-usd` | `!fail-budget` | yes |
+| `turn-stop-max-structured-output-retries` | `!fail-structured-output` (DECLARED-ONLY) | yes |
+| `turn-stop-max-turns` | `!fail-max-turns` | yes |
+| `vendor-answered-slash-commands` | `!slash` | yes |
+| `web-fetch` / `web-search` | same name | no — already the same name |
+
+### One golden, SEVERAL scenarios driven in combination (no alias possible —
+### the mapping is inherently N:1, not renameable to a single token)
+
+| Golden (capture / manifest) | Registered scenarios |
 |---|---|
 | `artifact-publish-and-list` | `!artifact-publish` + `!artifact-list` |
+| `grep-content-files-count` | `!grep-content` + `!grep-files` + `!grep-count` |
+| `push-notification-not-sent` | `!push-config-off` + `!push-user-present` + `!push-no-transport` |
+| `read-whole-head-range` | `!read` + `!read-head` + `!read-range` |
 | `schedule-wakeup-schedule-and-stop` | `!wakeup-schedule` + `!wakeup-stop` |
 | `send-message-queued-and-resumed` | `!send-message` + `!send-message-resumed` |
 | `task-acts-create-change-reject` | `!task-create` + `!task-change` + `!task-reject` |
 | `worktree-enter-exit-kept-and-removed` | `!worktree-keep` + `!worktree-remove` |
+| `write-created-and-updated` | `!write-create` + `!write-update` |
 
 ### A golden with NO registered scenario at all
 
 - `diagnostics` — no `!`-prefixed scenario exists. RULED: a healthy shim's
   diagnostics push produces no topbar warning, so the e2e test asserts
   exactly that, plus that the topbar stream delivered at least one view (so
-  "no warning" can never pass as "no stream").
+  "no warning" can never pass as "no stream"). Reproduced by ANY plain
+  prompt that falls through to the default `""` scenario.
+
+### Two goldens whose grounding is imperfect, RULED out of scope
+
+- `ctrl-b-detach-of-foreground-work` → `!ctrl-b` and
+  `ctrl-b-detach-of-foreground-subagent` → `!subagent` are each the closest
+  REACHABLE scenario, not a true reproduction: no scenario backgrounds a
+  subagent, and nothing makes a real `DetachForeground` resolve a parked
+  foreground call. Per `docs/overhaul/PROTO-CHANGES.md`, Landing 8,
+  RULED-no-proto, both e2e tests stay `t.Skip`. No alias was added for
+  either, since aliasing a golden name to a scenario that does not actually
+  reproduce it would misstate the mapping.
+
+### One golden whose name matches a scenario's, but the grounding is false
+
+- `context-budget-warning` — the registered scenario `!context-budget-warning`
+  shares the golden's exact name, but the capture directory of that name
+  carries NO budget-warning record of any kind (see MANIFEST.md's own
+  "Evidence gaps" section and `golden-conformance.test.ts`'s `EXCLUDED`
+  entry). UNGROUNDED, INVENTED, pending a real grounding capture — unchanged
+  from the prior ruling, restated here for completeness now that every other
+  golden has a stated grounding.
+
+See `testdata/captures/MANIFEST.md`'s reconciliation section for the FULL
+reverse direction (every registered scenario named, grounded or UNGROUNDED
+with a reason) — this document states only the 69-golden forward direction.
 
 This list comes from the area writers' own reports and is not claimed to be
 exhaustive; a shim-side pass should reconcile the manifest against
