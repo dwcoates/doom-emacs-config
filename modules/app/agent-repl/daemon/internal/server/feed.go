@@ -131,7 +131,7 @@ func (s *server) WatchFeed(
 	}
 	log, err := s.workspaceLog(ctx, rpc, target.WS)
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 
 	streamCtx, cancel := s.streamContext(ctx)
@@ -145,7 +145,7 @@ func (s *server) WatchFeed(
 		case errors.Is(err, feed.ErrTokenExpired):
 			return TransportClosed(log, rpc, "token_expired", err.Error(), false)
 		}
-		return fail(log, rpc, err)
+		return endStream(log, rpc, err)
 	}
 
 	rows := tail.Rows(streamCtx)
