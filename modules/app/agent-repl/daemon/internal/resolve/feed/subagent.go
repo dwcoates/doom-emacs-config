@@ -40,7 +40,13 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		// stream when the spawn detaches, and it repeats the same instant, so
 		// the clock never resets when work moves.
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: frame.Start.GetStartedAt().GetAtMs()}
-		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
+		// A START AFTER A TERMINAL DOES NOT REOPEN. The same re-announcement
+		// the instant above is guarded against also replays the start of work
+		// that has ALREADY SETTLED, and taking it as live would un-settle a
+		// finished bubble that nothing will ever settle again.
+		if _, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled {
+			bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
+		}
 	case *conversationv1.AgentSubagent_Update:
 		applyPrompt(bubble, frame.Update.GetPrompt())
 		progress := frame.Update.GetProgress()
