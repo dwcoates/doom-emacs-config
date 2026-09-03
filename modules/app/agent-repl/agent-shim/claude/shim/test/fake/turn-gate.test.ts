@@ -55,3 +55,34 @@ describe("the turn gate without its edge", () => {
     }
   });
 });
+
+describe("a parked turn that is killed", () => {
+  it("emits its interrupt terminal instead of waiting for a gate that never opens", async () => {
+    // Arrange: a gate that is NEVER written. A parked turn is a live turn, and
+    // interrupt() is exactly what a consumer sends one that is taking too long
+    // -- a gate settling only on the file appearing swallowed the kill, so the
+    // shim reported a stopped turn with no terminal behind it.
+    const { mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "fake-gate-killed-"));
+    process.env[TURN_GATE_PATH_ENV] = join(dir, "open");
+    process.env[TURN_GATE_TEXT_ENV] = "gated turn";
+
+    try {
+      // Act
+      const driven = await driveScenario(["gated turn"], {
+        during: async (query) => {
+          for (let i = 0; i < 1_000; i++) await new Promise((r) => setImmediate(r));
+          await query.interrupt?.();
+        },
+      });
+
+      // Assert
+      expect(theResult(driven).subtype).toBe("error_during_execution");
+    } finally {
+      delete process.env[TURN_GATE_PATH_ENV];
+      delete process.env[TURN_GATE_TEXT_ENV];
+    }
+  });
+});
