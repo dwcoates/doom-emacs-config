@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"connectrpc.com/connect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -41,6 +43,10 @@ type agentWatch struct {
 	// done marks a watch REAPED at its terminal, so its goroutine reads the
 	// end of its own stream as the reaping rather than a transport failure.
 	done bool
+	// refusals counts how many times this watch's OPEN was refused before any
+	// frame. It is BOUNDED: a shim that refuses forever is reported as a
+	// fault rather than retried forever.
+	refusals int
 }
 
 // shellWatch is one open WatchBash stream for one detached shell.
@@ -53,12 +59,19 @@ type shellWatch struct {
 	// shell settled and was opened again. It is BOUNDED: a shim that ends the
 	// stream the instant it is opened must sever rather than spin.
 	reopens int
+	// refusals counts refused OPENs, as on agentWatch.
+	refusals int
 }
 
 // shellReopenLimit is how many times one detached shell's watch is re-opened
 // after its stream ends early before the failure is treated as the link being
 // severed.
 const shellReopenLimit = 3
+
+// openRefusalLimit is how many times one watch's REFUSED open is retried
+// before the refusal is reported as a fault. A refused open is not a transport
+// failure, so exhausting it never severs the link.
+const openRefusalLimit = 3
 
 // watcher is one live workspace's watch fleet: every shim watch the session
 // owns, the daemon-to-shim hop of connectivity truth, and the routing of every
@@ -737,9 +750,15 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 	}
 	stream, err := w.client.WatchAgent(w.ctx, req)
 	if err != nil {
+		a.stream = nil
+		if refusedOpen(err) {
+			w.openRefusedLocked("watch_agent", watchKey(a.id), w.agentExpectedLocked(a), &a.refusals, err)
+			return
+		}
 		w.severedLocked("watch_agent", "WatchAgent could not be opened", err)
 		return
 	}
+	a.refusals = 0
 	a.stream = stream
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
 		"agent_id": a.id.GetValue(), "catch_up": req.KnownThrough != nil,
@@ -756,15 +775,99 @@ func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
 	stream, err := w.client.WatchBash(w.ctx, s.work)
 	if err != nil {
 		s.stream = nil
+		if refusedOpen(err) {
+			w.openRefusedLocked("watch_bash", s.work.GetValue(), w.shells[s.work.GetValue()] == s, &s.refusals, err)
+			return false
+		}
 		w.severedLocked("watch_bash", "WatchBash could not be opened", err)
 		return false
 	}
+	s.refusals = 0
 	s.stream = stream
 	w.log.Debug("daemon.sessionwatcher.watch_bash", "shell watch opened", dlog.Context{
 		"work_id": s.work.GetValue(),
 	})
 	go w.runShell(gen, s, stream)
 	return true
+}
+
+// refusedOpen reports whether err is a watch OPEN the shim REFUSED, as opposed
+// to a transport that failed. Only the open call can carry it -- a stream that
+// dies on Recv is a StreamOpenError for nothing -- and only two codes mean it:
+// not_found (the store holds no such book or handle YET) and
+// failed_precondition (the shim has no such agent YET). Both are SEMANTIC
+// answers from a shim that is serving, and neither says anything about the
+// link.
+func refusedOpen(err error) bool {
+	var refusal *shimclient.StreamOpenError
+	if !errors.As(err, &refusal) {
+		return false
+	}
+	switch connect.CodeOf(refusal.Err) {
+	case connect.CodeNotFound, connect.CodeFailedPrecondition:
+		return true
+	}
+	return false
+}
+
+// agentExpectedLocked reports whether the daemon legitimately expects the
+// handle this agent watch addresses: the MAIN agent's watch (which the session
+// always has), or an entry that is the REGISTERED watch for its agent -- which
+// it is exactly because an announcement or a spawn put it there. Anything else
+// is a handle nothing announced.
+func (w *watcher) agentExpectedLocked(a *agentWatch) bool {
+	if a == w.main {
+		return true
+	}
+	return a.id != nil && w.agents[a.id.GetValue()] == a
+}
+
+// openRefusedLocked records a REFUSED open. It never severs the link and never
+// raises a link fault: the shim answered, so the hop is serving.
+//
+// An EXPECTED handle's refusal is the ordinary fresh-bring-up race -- the book
+// or the shell's rows are not registered yet -- so it is logged at INFO and
+// left for the re-open path (a session frame for the main watch, a repeated
+// announcement for detached work, the fleet re-open for everything) to open
+// again. A handle NOTHING announced, or an expected one whose refusals ran out
+// of retries, is a disagreement about what exists and is reported as its own
+// fault at WARN.
+func (w *watcher) openRefusedLocked(operation, handle string, expected bool, refusals *int, err error) {
+	*refusals++
+	ctx := dlog.Context{"handle": handle, "refusals": *refusals, "expected": expected}
+	if err != nil {
+		ctx["error"] = err.Error()
+	}
+	if expected && *refusals <= openRefusalLimit {
+		w.log.Info("daemon.sessionwatcher."+operation,
+			"the shim refused a watch open for a handle it does not hold yet; it will be re-opened", ctx)
+		return
+	}
+	w.log.Warn("daemon.sessionwatcher.watch_open_refused",
+		"the shim refused a watch open for a handle it will not serve", ctx)
+	w.sinks.Lifecycle.OnWatchOpenRefused(w.ws, WatchOpenRefusal{
+		Operation: operation,
+		Handle:    handle,
+		Detail:    shimclient.Detail(err),
+	})
+}
+
+// retryRefusedMainLocked re-opens the MAIN agent's watch after a REFUSED open.
+// Nothing re-announces the main agent, so the session's own stream is the
+// occasion: a frame on it proves the shim is serving this session, and by then
+// the book the refusal was about is the one the shim is writing.
+func (w *watcher) retryRefusedMainLocked() {
+	if w.main == nil || w.main.stream != nil || w.main.refusals == 0 {
+		return
+	}
+	if w.main.refusals > openRefusalLimit {
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.watch_agent",
+		"a session frame re-opened the main agent's refused watch", dlog.Context{
+			"refusals": w.main.refusals,
+		})
+	w.openMainLocked()
 }
 
 // watchKey is a watch's key in the known_through map.
@@ -790,6 +893,7 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchS
 			w.mu.Unlock()
 			return
 		}
+		w.retryRefusedMainLocked()
 		switch {
 		case frame.GetUpdate() != nil:
 			w.routeSessionUpdateLocked(frame.GetUpdate())

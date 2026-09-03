@@ -205,6 +205,29 @@ func TestSessionAbsentHasNoTypedArm(t *testing.T) {
 	}
 }
 
+// TestWatchOpenRefusedIsNotASeveredLink pins that a refused watch open is its
+// OWN kind: the shim answered the open, so nothing about the link was lost and
+// the severed arm must not be what a reader sees.
+func TestWatchOpenRefusedIsNotASeveredLink(t *testing.T) {
+	// Arrange.
+	fault := wsm.Fault{
+		Kind:     KindWatchOpenRefused,
+		Detail:   "no such agent",
+		Evidence: map[string]string{"operation": "watch_agent", "handle": "sub-1"},
+	}
+
+	// Act.
+	got := sessionFault(fault)
+
+	// Assert.
+	if got.GetLinkSevered() != nil {
+		t.Fatalf("kind = %v, want no severed-link arm", got.GetKind())
+	}
+	if !strings.HasPrefix(got.GetDetail(), KindWatchOpenRefused) {
+		t.Fatalf("detail = %q, want it to lead with the kind", got.GetDetail())
+	}
+}
+
 func TestSelfCheckFaultNamesTheUnreadableState(t *testing.T) {
 	// Arrange. Act.
 	got := selfCheckFault(errors.New("database is locked"))
