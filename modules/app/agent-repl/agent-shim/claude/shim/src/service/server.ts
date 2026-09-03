@@ -214,7 +214,9 @@ export async function serve(
   // ruling behind it: acceptance must be observable before the first frame. So
   // the server never compresses a response. `acceptCompression` is deliberately
   // left alone — the server still UNDERSTANDS a compressed REQUEST, which no
-  // head of ours is involved in.
+  // head of ours is involved in — and the client's RESPONSE accept list is
+  // declined per stream in `flushStreamHead`, so the adapter never negotiates a
+  // response encoding our head could not carry.
   const served = withEarlyStreamHeaders(
     connectNodeAdapter({ routes, compressMinBytes: Number.MAX_SAFE_INTEGER }),
   );
@@ -354,6 +356,14 @@ export function isStreamingContentType(contentType: string | undefined): boolean
 interface StreamableRequest {
   readonly headers: Record<string, string | string[] | undefined>;
 }
+
+/**
+ * The request headers that offer the server a RESPONSE compression to use.
+ *
+ * Both dialects' spellings, because the router accepts both and a spelling
+ * missed here is a negotiation that still happens behind our back.
+ */
+const ACCEPT_ENCODING_HEADERS = ["connect-accept-encoding", "grpc-accept-encoding"] as const;
 interface StreamableResponse {
   readonly headersSent: boolean;
   // BOTH HEADER SHAPES. `writeHead` accepts an object or a flat array, the
@@ -394,6 +404,25 @@ export function flushStreamHead(request: StreamableRequest, response: Streamable
   const header = request.headers["content-type"];
   const contentType = Array.isArray(header) ? header[0] : header;
   if (!isStreamingContentType(contentType) || response.headersSent) return false;
+  // DECLINE THE RESPONSE COMPRESSION BEFORE THE ADAPTER NEGOTIATES IT.
+  //
+  // The adapter answers the client's accept list by setting
+  // `Connect-Content-Encoding` on the response header — a decision it makes
+  // when the handler is invoked, which is AFTER this head has gone out, so the
+  // announcement can never reach the client and the guard below fired on every
+  // healthy accept. Nothing was actually compressed (`compressMinBytes` is
+  // MAX_SAFE_INTEGER), so the header was a promise about a body that was never
+  // made good on either way.
+  //
+  // ONE FACT, ONE SOURCE: this server never compresses a response, so the
+  // accept list is not negotiable and is rewritten to `identity` here rather
+  // than re-deriving the adapter's negotiation into our own head. The REQUEST's
+  // own `connect-content-encoding` is untouched — a compressed request is still
+  // understood, and no head of ours is involved in reading one.
+  for (const name of ACCEPT_ENCODING_HEADERS) {
+    if (request.headers[name] === undefined) continue;
+    request.headers[name] = "identity";
+  }
   response.writeHead(200, { "content-type": contentType as string });
   if (typeof response.flushHeaders === "function") response.flushHeaders();
   // The adapter WILL call writeHead again. Once the head is out that is an
