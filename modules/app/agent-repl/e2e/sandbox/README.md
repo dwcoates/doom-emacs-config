@@ -129,7 +129,8 @@ Baked into the image at **build** time, so no test pays for it and no run
 needs the network:
 
 - Debian packages (`emacs-nox`, `git`, `curl`, `rsync`, `ca-certificates`,
-  `xz-utils`) from a fixed `snapshot.debian.org` archive.
+  `xz-utils`, and `bsdutils` + `util-linux` for `script(1)`) from a fixed
+  `snapshot.debian.org` archive.
 - Node 22.14.0 and Go 1.24.6, from upstream release tarballs.
 - Doom Emacs, cloned and checked out at an exact SHA, into `/sandbox/emacs.d`.
 - The minimal Doom profile (`doom/`), and `doom install` + **`doom sync`**.
@@ -172,6 +173,45 @@ Two omissions worth restating:
   the module never reaches one. A test that actually *drives* the xwidget
   webview cannot run in this sandbox; that is a real limitation, not an
   oversight.
+
+## `script(1)` is a guarantee, not an inference
+
+The Emacs client layer allocates its own pty with `script -q -c CMD
+/dev/null`, because Emacs needs a tty for a real frame and the run script
+only passes `-t` when its own stdout is a terminal — which under `go test` it
+is not. `script` lives in `bsdutils` on bookworm, a Debian `required`
+package, so it was already there; **`bsdutils` and `util-linux` are now in
+the apt list by name anyway**, so it is pinned to `SNAPSHOT_STAMP` like every
+other package and a reshuffle of the binary between those two packages cannot
+silently remove it. The harness keeps a runtime `exec.LookPath("script")`
+check as a backstop for an image built before that line existed.
+
+## The Emacs client layer boots this profile
+
+`e2e/emacs_test.go` does **not** run `emacs -Q` any more. It boots the Doom
+baked here, so `map!`, `set-popup-rule!` and module load order are all real.
+Three things in `doom/` exist for it, and all three are inert without the
+environment variables the Go layer sets:
+
+- **`doom/init.el`** loads `$AGENT_REPL_E2E_SETTINGS` right after its `doom!`
+  form — before any module's `config.el`, which is the last moment at which
+  `agent-repl-frontend-auto-start` nil can still stop cold start from
+  spawning a daemon against the host's defaults.
+- **`doom/config.el`** defines the file-based readback helper
+  (`agent-repl-e2e--eval`) and, on Doom's own after-init edge, enables
+  `tab-bar-mode`, calls `server-start`, and writes the readiness stamp at
+  `$AGENT_REPL_E2E_READY` **last** — so the stamp means "Doom is up AND
+  emacsclient answers". A boot failure writes the same file with
+  `"ok": false` and the elisp error.
+- **Emacs is 28.2** (bookworm's `emacs-nox`), so `--init-directory` (Emacs
+  29) does not exist. The layer aims Emacs at a per-test `~/.emacs.d` through
+  `HOME` instead, staged from `/sandbox/emacs.d`: sources symlinked, the
+  `.local` tree copied minus `straight/`. That staging exists because the
+  container is `--read-only` and `/sandbox/emacs.d` is not a tmpfs, so Doom's
+  local tree cannot be written in place.
+
+`$S shell` and `$S run doom sync` are unaffected: none of the environment
+variables above is set there.
 
 ## Preflight
 
@@ -236,6 +276,14 @@ Explicitly, so nothing here reads as a tested claim:
   the prime.
 - **`doom install --no-config --no-env --no-fonts --no-hooks` flag names**
   are from Doom's documented CLI, not from a run of this Doom SHA.
+- **Nothing about the Emacs client layer's Doom boot has been observed.**
+  That Doom boots from a staged `~/.emacs.d` under a scratch `HOME`; that the
+  copy set the staging uses is exactly the set Doom writes at startup (a
+  read-only path Doom insists on writing would fail the boot, loudly, with
+  the pty output); that `doom-after-init-hook` exists in whichever `DOOM_REF`
+  a build picks (the profile falls back to `emacs-startup-hook`); and that
+  `apt-get install bsdutils util-linux` resolves at `SNAPSHOT_STAMP` — all
+  unexecuted.
 - **Base image digest, tarball checksums and the Doom SHA are not pinned in
   this checkout** — resolving any of them needs a registry or a download,
   i.e. a working runtime. They are passed in as build args, and `build`
