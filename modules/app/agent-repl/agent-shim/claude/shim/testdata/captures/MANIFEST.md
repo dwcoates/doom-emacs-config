@@ -57,77 +57,77 @@ grounds the pairing and none may be asserted from a golden:
 Their `!fail-execution`, `!fail-stop-hook` and `!fail-structured-output` rows
 in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 
-| Scenario | Captured | Golden for (unit kinds → terminal) | Notes | Size |
-|---|---|---|---|---|
-| `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | single turn | 44 KB |
-| `artifact-publish-and-list` | 2026-09-01 | `hook`, `thinking`, `read`, `bash`, `response` → `success.completed` | single turn | 188 KB |
-| `bash-detached` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 52 KB |
-| `bash-foreground-completed` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 56 KB |
-| `bash-image-output` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | single turn | 92 KB |
-| `bash-interrupted-by-timeout` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 60 KB |
-| `bash-nonzero-exit` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 52 KB |
-| `bash-partial-output-with-spill` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | single turn | 1.8 MB |
-| `compaction-directed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | 3 turn terminals | 84 KB |
-| `context-budget-warning` | 2026-09-01 | `hook`, `thinking`, `response`, `bash`, `read` → `success.completed` | single turn | 120 KB |
-| `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 40 KB |
-| `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 56 KB |
-| `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | single turn | 96 KB |
-| `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | single turn | 108 KB |
-| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | single turn | 92 KB |
-| `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | single turn | 108 KB |
-| `diagnostics` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 116 KB |
-| `edit` | 2026-09-01 | `hook`, `thinking`, `read`, `edit`, `response` → `success.completed` | single turn | 80 KB |
-| `fan-wide-cancel` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 96 KB |
-| `fast-mode` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 40 KB |
-| `glob` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 64 KB |
-| `grep-content-files-count` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 80 KB |
-| `held-turn-gate` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 76 KB |
-| `hook-blocked` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 60 KB |
-| `hook-cancelled` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 56 KB |
-| `hook-failed` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 56 KB |
-| `hook-succeeded` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 52 KB |
-| `ide-diagnostics-after-edit` | 2026-09-01 | `hook`, `thinking`, `response`, `read`, `edit`, `bash` → `success.completed` | single turn | 156 KB |
-| `identity-rotation-clear` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | 3 turn terminals | 116 KB |
-| `interrupt` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | single turn | 36 KB |
-| `max-tokens` | 2026-09-01 | `hook`, `response` → `success.completed` | single turn | 40 KB |
-| `mcp-server-healths` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 100 KB |
-| `mcp-unmodeled-tool` | 2026-09-01 | `hook`, `thinking`, `response`, `unmodeled` → `success.completed` | single turn | 88 KB |
-| `model-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | single turn | 72 KB |
-| `monitor-deadline` | 2026-09-01 | `hook`, `thinking`, `bash`, `monitor`, `response` → `success.completed` | single turn | 92 KB |
-| `monitor-persistent` | 2026-09-01 | `hook`, `thinking`, `monitor`, `response` → `success.completed` | single turn | 84 KB |
-| `permission-allow-once` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 60 KB |
-| `permission-allow-standing` | 2026-09-01 | `hook`, `thinking`, `response`, `bash` → `success.completed` | single turn | 60 KB |
-| `permission-denied-by-policy` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 60 KB |
-| `permission-denied-by-user` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | single turn | 52 KB |
-| `permission-mode-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | single turn | 32 KB |
-| `permission-undecidable-parked` | 2026-09-02 | `hook`, `thinking`, `bash` → `success.interrupted` | single turn | 32 KB |
-| `plan-mode-enter-exit` | 2026-09-01 | `hook`, `thinking`, `planMode`, `subagent`, `response`, `bash` → `success.completed` | single turn | 116 KB |
-| `prose-streamed` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 56 KB |
-| `push-notification-not-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | single turn | 92 KB |
-| `push-notification-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | single turn | 76 KB |
-| `question-free-text` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 64 KB |
-| `question-multi-select` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 60 KB |
-| `question-multiple-in-one-batch` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 68 KB |
-| `question-single-select` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 92 KB |
-| `question-unanswered` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | single turn | 60 KB |
-| `read-whole-head-range` | 2026-09-01 | `hook`, `thinking`, `response`, `read` → `success.completed` | single turn | 84 KB |
-| `report-findings` | 2026-09-01 | `hook`, `thinking`, `read`, `reportFindings`, `response` → `success.completed` | single turn | 80 KB |
-| `schedule-wakeup-schedule-and-stop` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `bash`, `response` → `success.completed` | single turn | 148 KB |
-| `send-message-queued-and-resumed` | 2026-09-01 | `hook`, `thinking`, `response`, `subagent`, `sendMessage`, `bash` → `success.completed` | single turn | 140 KB |
-| `skill-invocation` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `read`, `response` → `success.completed` | single turn | 76 KB |
-| `subagent-detached` | 2026-09-02 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | single turn | 92 KB |
-| `subagent-sync-nested-activity` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `read`, `response` → `success.completed` | single turn | 104 KB |
-| `task-acts-create-change-reject` | 2026-09-01 | `hook`, `thinking`, `taskAct`, `response` → `success.completed` | single turn | 144 KB |
-| `turn-stop-error-during-execution` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | single turn | 32 KB |
-| `turn-stop-hook-stop` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | residue `vendor_specific/system/notification` | 188 KB |
-| `turn-stop-max-budget-usd` | 2026-09-01 | `hook`, `thinking`, `response` → `failure.budgetExhausted` | single turn | 60 KB |
-| `turn-stop-max-structured-output-retries` | 2026-09-01 | `hook`, `thinking`, `response`, `unmodeled` → `success.completed` | single turn | 128 KB |
-| `turn-stop-max-turns` | 2026-09-01 | `hook`, `thinking`, `bash` → `failure.maxTurns` | single turn | 88 KB |
-| `vendor-answered-slash-commands` | 2026-09-01 | `hook`, `response` → `success.completed` | single turn | 44 KB |
-| `web-fetch` | 2026-09-01 | `hook`, `thinking`, `webFetch`, `response` → `success.completed` | single turn | 72 KB |
-| `web-search` | 2026-09-01 | `hook`, `thinking`, `webSearch`, `response` → `success.completed` | single turn | 76 KB |
-| `worktree-enter-exit-kept-and-removed` | 2026-09-01 | `hook`, `thinking`, `response`, `skillUse`, `read`, `bash`, `write` → `success.completed` | residue `vendor_specific/system/vcs_state_changed` | 664 KB |
-| `write-created-and-updated` | 2026-09-01 | `hook`, `thinking`, `read`, `write`, `response` → `success.completed` | single turn | 92 KB |
+| Scenario | Captured | Golden for (unit kinds → terminal) | Scenarios: (registered `!<name>`(s) that reproduce it) | Notes | Size |
+|---|---|---|---|---|---|
+| `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!usage-full` (same shape as `!usage-available`) | single turn | 44 KB |
+| `artifact-publish-and-list` | 2026-09-01 | `hook`, `thinking`, `read`, `bash`, `response` → `success.completed` | `!artifact-publish` + `!artifact-list` | single turn | 188 KB |
+| `bash-detached` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-detach` | single turn | 52 KB |
+| `bash-foreground-completed` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash` | single turn | 56 KB |
+| `bash-image-output` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-image` | single turn | 92 KB |
+| `bash-interrupted-by-timeout` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-timeout` | single turn | 60 KB |
+| `bash-nonzero-exit` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-fail` | single turn | 52 KB |
+| `bash-partial-output-with-spill` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-spill` | single turn | 1.8 MB |
+| `compaction-directed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!compact` | 3 turn terminals | 84 KB |
+| `context-budget-warning` | 2026-09-01 | `hook`, `thinking`, `response`, `bash`, `read` → `success.completed` | `!context-budget-warning` — NAME MATCHES, GROUNDING DOES NOT: the capture holds no budget-warning record of any kind (see Evidence gaps); UNGROUNDED | single turn | 120 KB |
+| `context-injected-memory` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!memory` | single turn | 40 KB |
+| `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
+| `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | `!context-usage-drift` | single turn | 96 KB |
+| `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | `!cron` | single turn | 108 KB |
+| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | `!subagent` — REACHABLE-ONLY: no scenario backgrounds a subagent the way a real Ctrl-B would; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 92 KB |
+| `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | `!ctrl-b` — REACHABLE-ONLY: parks a live foreground Bash call but nothing can make a real DetachForeground resolve it; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 108 KB |
+| `diagnostics` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | (none registered — reproduced by ANY plain prompt falling through to the default `""` prose scenario; the e2e test asserts by absence of a topbar warning) | single turn | 116 KB |
+| `edit` | 2026-09-01 | `hook`, `thinking`, `read`, `edit`, `response` → `success.completed` | `!edit` | single turn | 80 KB |
+| `fan-wide-cancel` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!cancel-all` | single turn | 96 KB |
+| `fast-mode` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!fast-on` | single turn | 40 KB |
+| `glob` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!glob` | single turn | 64 KB |
+| `grep-content-files-count` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!grep-content` + `!grep-files` + `!grep-count` | single turn | 80 KB |
+| `held-turn-gate` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!hold` | single turn | 76 KB |
+| `hook-blocked` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!hook-blocked` | single turn | 60 KB |
+| `hook-cancelled` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!hook-cancelled` | single turn | 56 KB |
+| `hook-failed` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!hook-failed` | single turn | 56 KB |
+| `hook-succeeded` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!hook-success` | single turn | 52 KB |
+| `ide-diagnostics-after-edit` | 2026-09-01 | `hook`, `thinking`, `response`, `read`, `edit`, `bash` → `success.completed` | `!ide-diagnostics` | single turn | 156 KB |
+| `identity-rotation-clear` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!rotate` | 3 turn terminals | 116 KB |
+| `interrupt` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | `!interrupt` | single turn | 36 KB |
+| `max-tokens` | 2026-09-01 | `hook`, `response` → `success.completed` | `!max-tokens` | single turn | 40 KB |
+| `mcp-server-healths` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!mcp-all` | single turn | 100 KB |
+| `mcp-unmodeled-tool` | 2026-09-01 | `hook`, `thinking`, `response`, `unmodeled` → `success.completed` | `!unmodeled` | single turn | 88 KB |
+| `model-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!model-fallback` | single turn | 72 KB |
+| `monitor-deadline` | 2026-09-01 | `hook`, `thinking`, `bash`, `monitor`, `response` → `success.completed` | `!monitor-deadline` | single turn | 92 KB |
+| `monitor-persistent` | 2026-09-01 | `hook`, `thinking`, `monitor`, `response` → `success.completed` | `!monitor-persistent` | single turn | 84 KB |
+| `permission-allow-once` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!perm-allow-once` | single turn | 60 KB |
+| `permission-allow-standing` | 2026-09-01 | `hook`, `thinking`, `response`, `bash` → `success.completed` | `!perm-allow-standing` | single turn | 60 KB |
+| `permission-denied-by-policy` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!perm-deny-policy` | single turn | 60 KB |
+| `permission-denied-by-user` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!perm-deny-user` | single turn | 52 KB |
+| `permission-mode-changed` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!perm-allow-standing-mode` | single turn | 32 KB |
+| `permission-undecidable-parked` | 2026-09-02 | `hook`, `thinking`, `bash` → `success.interrupted` | `!perm-hold` — NOT `!perm-undecidable` (see `!perm-undecidable`'s own entry below) | single turn | 32 KB |
+| `plan-mode-enter-exit` | 2026-09-01 | `hook`, `thinking`, `planMode`, `subagent`, `response`, `bash` → `success.completed` | `!plan` | single turn | 116 KB |
+| `prose-streamed` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `` (the default `""` prose scenario) | single turn | 56 KB |
+| `push-notification-not-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | `!push-config-off` + `!push-user-present` + `!push-no-transport` | single turn | 92 KB |
+| `push-notification-sent` | 2026-09-01 | `hook`, `thinking`, `pushNotification`, `response` → `success.completed` | `!push-sent` | single turn | 76 KB |
+| `question-free-text` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!ask-free` | single turn | 64 KB |
+| `question-multi-select` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!ask-multi` | single turn | 60 KB |
+| `question-multiple-in-one-batch` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!ask-multi` (same scenario as `question-multi-select`, different assertion) | single turn | 68 KB |
+| `question-single-select` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!ask-single` | single turn | 92 KB |
+| `question-unanswered` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!ask-unanswered` | single turn | 60 KB |
+| `read-whole-head-range` | 2026-09-01 | `hook`, `thinking`, `response`, `read` → `success.completed` | `!read` + `!read-head` + `!read-range` | single turn | 84 KB |
+| `report-findings` | 2026-09-01 | `hook`, `thinking`, `read`, `reportFindings`, `response` → `success.completed` | `!findings` | single turn | 80 KB |
+| `schedule-wakeup-schedule-and-stop` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `bash`, `response` → `success.completed` | `!wakeup-schedule` + `!wakeup-stop` | single turn | 148 KB |
+| `send-message-queued-and-resumed` | 2026-09-01 | `hook`, `thinking`, `response`, `subagent`, `sendMessage`, `bash` → `success.completed` | `!send-message` + `!send-message-resumed` | single turn | 140 KB |
+| `skill-invocation` | 2026-09-01 | `hook`, `thinking`, `skillUse`, `read`, `response` → `success.completed` | `!skill` | single turn | 76 KB |
+| `subagent-detached` | 2026-09-02 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | `!subagent-detached` | single turn | 92 KB |
+| `subagent-sync-nested-activity` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `read`, `response` → `success.completed` | `!subagent` | single turn | 104 KB |
+| `task-acts-create-change-reject` | 2026-09-01 | `hook`, `thinking`, `taskAct`, `response` → `success.completed` | `!task-create` + `!task-change` + `!task-reject` | single turn | 144 KB |
+| `turn-stop-error-during-execution` | 2026-09-01 | `hook`, `thinking`, `response` → `success.interrupted` | `!fail-execution` (DECLARED-ONLY) | single turn | 32 KB |
+| `turn-stop-hook-stop` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!fail-stop-hook` (DECLARED-ONLY) | residue `vendor_specific/system/notification` | 188 KB |
+| `turn-stop-max-budget-usd` | 2026-09-01 | `hook`, `thinking`, `response` → `failure.budgetExhausted` | `!fail-budget` | single turn | 60 KB |
+| `turn-stop-max-structured-output-retries` | 2026-09-01 | `hook`, `thinking`, `response`, `unmodeled` → `success.completed` | `!fail-structured-output` (DECLARED-ONLY) | single turn | 128 KB |
+| `turn-stop-max-turns` | 2026-09-01 | `hook`, `thinking`, `bash` → `failure.maxTurns` | `!fail-max-turns` | single turn | 88 KB |
+| `vendor-answered-slash-commands` | 2026-09-01 | `hook`, `response` → `success.completed` | `!slash` | single turn | 44 KB |
+| `web-fetch` | 2026-09-01 | `hook`, `thinking`, `webFetch`, `response` → `success.completed` | `!web-fetch` | single turn | 72 KB |
+| `web-search` | 2026-09-01 | `hook`, `thinking`, `webSearch`, `response` → `success.completed` | `!web-search` | single turn | 76 KB |
+| `worktree-enter-exit-kept-and-removed` | 2026-09-01 | `hook`, `thinking`, `response`, `skillUse`, `read`, `bash`, `write` → `success.completed` | `!worktree-keep` + `!worktree-remove` | residue `vendor_specific/system/vcs_state_changed` | 664 KB |
+| `write-created-and-updated` | 2026-09-01 | `hook`, `thinking`, `read`, `write`, `response` → `success.completed` | `!write-create` + `!write-update` | single turn | 92 KB |
 
 ## `e2ecleanup/fakesdk-ext` additions (test tooling, not new captures)
 
@@ -240,3 +240,116 @@ each is graded against the grounding named below, or marked ungrounded.
   empty file under a `b*` name is bytes the vendor never writes. `sdk.d.ts` does
   not declare `output_file` on `task_started`, so the FIELD's presence there is
   the fake's own, and only the path it carries is grounded.
+
+## Reconciliation: every registered scenario's grounding (2026-09-03)
+
+The table above states, per golden, which registered `!<name>`(s) reproduce it
+(the `Scenarios:` column). This section states the same fact in the OTHER
+direction — for every name `scenarioNames()` returns, either the golden(s)
+above it grounds, or an explicit UNGROUNDED reason — so neither list can
+drift from `src/fake/registry.ts` without a human seeing it (guarded by
+`test/fake/registry.test.ts`'s `MANIFEST.md agrees with the registry, in
+both directions` case).
+
+**Grounded, beyond the table above** (same arm, a second name or a residue
+carrier, not a distinct golden of its own):
+
+- `!usage-available` — the SAME `available` shape `account-usage` grounds
+  through `!usage-full` (`session.ts`'s own comment: "two names for one
+  arm").
+- `!tokens-reminder` — GROUNDED (residue): the ONE token-budget carrier any
+  real capture holds, observed in `artifact-publish-and-list`'s own run (see
+  "Evidence gaps" above: "the nearest carrier observed is a
+  `total_tokens_reminder` attachment").
+- `!fail-marker` — GROUNDED IN PRODUCTION USAGE, not a capture: the daemon's
+  own merge-pipeline acceptance gate (`mergeactions_e2e_test.go`) spells this
+  exact marker; no capture backs it and none is needed (see registry.ts's own
+  doc comment on `FAIL_TURN_MARKER`).
+
+**Already reconciled above, in `e2ecleanup/fakesdk-ext`** (GROUNDED-IN-SHAPE
+or UNGROUNDED/INVENTED, each with its own paragraph there — not repeated
+here): `!slash-shape-a`, `!slash-shape-a-unnamed`, `!bash-detach-poll`,
+`!subagent-detached-utterance`, `!usage-historical`.
+
+**UNGROUNDED — declared sibling of a grounded family, no capture recorded
+the narrower/alternate state**:
+
+- `!usage-opus-absent`, `!usage-service-unavailable`,
+  `!usage-window-unavailable`, `!usage-utilization-unavailable`,
+  `!usage-sampling-failure` — declared `account-usage` outcomes; every
+  capture that touches account usage recorded the `available` shape only.
+- `!fast-off`, `!fast-cooldown` — declared fast-mode states; no capture ran
+  with fast mode off or in cooldown.
+- `!mcp-healthy` — a narrower MCP catalog than `!mcp-all` (which
+  `mcp-server-healths` grounds); no capture recorded a single-healthy-server
+  session.
+- `!rate-limit`, `!rate-limit-five-hour`, `!rate-limit-seven-day` — declared
+  `rate_limit_event` shapes; no capture recorded one.
+- `!compact-auto`, `!compact-failed` — declared compaction variants; the only
+  captured `/compact` was the manual one `compaction-directed` grounds
+  (`!compact`) — no run recorded an automatic trigger or a compaction
+  failure.
+- `!read-truncated`, `!read-image` — declared `Read` extents; no capture's
+  model truncated a read by length or read an image back through `Read`
+  itself (the one captured image round trip, `bash-image-output`, read it
+  back through `Bash`).
+- `!bash-hold`, `!bash-detach-fail`, `!bash-detach-live` — declared `Bash`
+  states (parked, a failed detach, a still-live tail); no capture recorded
+  any of the three.
+- `!web-fetch-redirect` — declared `WebFetch` redirect; no capture recorded
+  one.
+- `!skill-fail` — declared failed `Skill` invocation; no capture recorded
+  one.
+- `!send-message-refused` — declared `SendMessage` refusal; no capture
+  recorded one.
+- `!subagent-detached-live`, `!subagent-failed` — declared subagent states;
+  no capture recorded either.
+- `!perm-no-standing` — declared "ask offered no standing" arm; untested by
+  any capture.
+- `!perm-undecidable` — a KNOWN-OPEN arm by the scenario's own doc comment:
+  `sdk.d.ts` declares no discriminator separating "nobody could decide" from
+  an ordinary policy deny, so this is the closest producer, not a grounded
+  one; `permission-undecidable-parked` is grounded through `!perm-hold`
+  instead (see that row's note above).
+- `!context-tip` — despite the scenario's own doc comment, the "Evidence
+  gaps" section above is explicit: no capture carries a `context_tip`
+  attachment of any kind (only `total_tokens_reminder` was observed).
+  UNGROUNDED.
+- `!away-summary`, `!residue`, `!cold-seed` — declared vendor-residue /
+  bookkeeping producers; no capture recorded any of the three.
+- `!md` — a webapp markdown-rendering demo, not a vendor shape at all; no
+  capture could ground it.
+
+**UNGROUNDED — declared taxonomy arm, unrecordable by a successful capture
+(the capture harness's own rule: "a failed run is never a golden")**:
+
+- `!fail-blocking-limit`, `!fail-rapid-refill`, `!fail-prompt-too-long`,
+  `!fail-image`, `!fail-model`, `!fail-malformed-tool-use`,
+  `!fail-tool-deferred`, `!fail-tool-deferred-unavailable`,
+  `!fail-turn-setup`, `!fail-aborted-tools`, `!fail-hook-stopped`,
+  `!fail-continuation-prevented` — declared turn-stop failure taxonomy
+  (`sdk.d.ts`'s stop-reason arms), the same DECLARED-ONLY status as the three
+  already named in "Evidence gaps" above (`!fail-execution`,
+  `!fail-stop-hook`, `!fail-structured-output`) — no capture reaches any of
+  these either.
+- `!api-429`, `!api-529`, `!api-401`, `!api-403`, `!api-400`, `!api-413`,
+  `!api-404`, `!api-500`, `!api-billing`, `!api-oauth-org`,
+  `!api-max-output`, `!api-unmodeled` — declared API-error shapes; no capture
+  recorded a real API error.
+- `!refusal-fallback`, `!refusal-no-fallback` — declared model-REFUSAL
+  shapes, distinct from the GROUNDED `!model-fallback` (an unsolicited swap,
+  not a refusal); no capture recorded a refusal.
+- `!context-window` — declared `context-window-exceeded` terminal; no
+  capture reached it.
+- `!fault-converter`, `!fault-recover` — shim-internal fault-injection
+  scenarios, not vendor shapes at all; no capture could ground them.
+- `!query-eof`, `!query-eof-mid-ask`, `!query-fail`, `!keepalive` — declared
+  vendor-process-death and keepalive shapes; unrecordable by definition (a
+  capture is, by the harness's own rule, a completed run).
+
+This reconciliation is now COMPLETE and AUTHORITATIVE: every one of the 69
+goldens above names its registered scenario(s), every registered scenario
+either names its grounding golden (here or in the table above) or carries an
+explicit UNGROUNDED reason, and `test/fake/registry.test.ts` walks this file
+mechanically to keep both directions honest as scenarios are added or
+renamed.
