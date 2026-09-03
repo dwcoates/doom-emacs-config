@@ -35,7 +35,7 @@ import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
-import { asRecord, bool, failureOf, resultText, settle, str, strOr, uint } from "./support.js";
+import { asRecord, bool, failureOf, num, resultText, settle, str, strOr, uint } from "./support.js";
 
 const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.bash" });
 
@@ -134,13 +134,18 @@ function bashOutput(
 /**
  * The exit status a foreground result STATED, when it stated one.
  *
- * `returnCodeInterpretation` ("exited with code 3") is the only place a
- * foreground call carries the shell's status. A result without one says
- * nothing about how the command ended, which is why `termination` stays unset
- * for it rather than being synthesized as a zero.
+ * `exitCode` is the PRECISE datum when the vendor gives one: a number, not
+ * prose to parse. `returnCodeInterpretation` ("exited with code 3") is prose
+ * ABOUT that same status, so it is read only as a fallback for a result that
+ * carries no `exitCode` — camelCase before the vendor's snake_case spelling,
+ * `return_code_interpretation`, since the disk carries both. A result that
+ * states neither says nothing about how the command ended, which is why
+ * `termination` stays unset for it rather than being synthesized as a zero.
  */
 function exitedCode(record: Record<string, unknown> | undefined): number | undefined {
-  const interpretation = str(record, "returnCodeInterpretation");
+  const exitCode = num(record, "exitCode");
+  if (exitCode !== undefined) return Math.trunc(exitCode);
+  const interpretation = str(record, "returnCodeInterpretation") ?? str(record, "return_code_interpretation");
   if (interpretation === undefined) return undefined;
   return firstSignedInt(interpretation);
 }
@@ -221,8 +226,8 @@ function bashOutcome(
       // UNSET unless the result STATED a status. A foreground call ordinarily
       // carries none, and synthesizing `exited(0)` would be the shim inventing
       // a fact nothing reported; a non-zero exit, however, IS stated -- in
-      // `returnCodeInterpretation` -- and dropping it would lose the command's
-      // own verdict on itself.
+      // `exitCode` or, failing that, `returnCodeInterpretation` -- and dropping
+      // it would lose the command's own verdict on itself.
       ...(exited === undefined
         ? { termination: undefined }
         : {

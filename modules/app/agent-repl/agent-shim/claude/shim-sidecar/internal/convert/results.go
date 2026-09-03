@@ -365,10 +365,12 @@ func bashSuccess(call openCall, result map[string]any, exit *int32, ts int64) *c
 }
 
 // statedExitCode reads the exit status a result STATED, if it stated one.
-// `returnCodeInterpretation` ("exited with code 3") is the only place a
-// foreground call carries the shell's status, so reading `exitCode` alone lost
-// the command's own verdict on itself. A result that states neither leaves
-// termination UNSET rather than synthesizing a zero.
+// `exitCode` is the PRECISE datum when the vendor gives one; a result without
+// it may still carry `returnCodeInterpretation` ("exited with code 3"), prose
+// ABOUT the same status, read here only as the fallback — camelCase before the
+// vendor's snake_case spelling, `return_code_interpretation`, since the disk
+// carries both. A result that states neither leaves termination UNSET rather
+// than synthesizing a zero.
 func statedExitCode(result map[string]any) *int32 {
 	if code := optionalInt64(result, "exitCode"); code != nil {
 		v := int32(*code)
