@@ -480,11 +480,27 @@ way a refusal does.
   route to a named agent), and a `local_bash` run under the same handle is not
   an agent at all.
 - **`OpenAgentSessionFailure.unknown_agent`** maps to `unknown_agent`, which
-  `WatchAgent` already closes at the transport as `Code.NotFound`.
-  - **THE INTERIM SHIM-SIDE RULE STAYS** (`SessionContext.knowsAgent`, the
-    empty-book refusal in `watchAgent`): no store implementation produces the
-    arm yet, and the relay conditions its retirement on the store producing it.
-    Retire it — and `knowsAgent` with it — once the store does.
+  `WatchAgent` closes at the transport as `Code.NotFound` — but ONLY for a
+  target the producer does not vouch for.
+  - **A FRESH AGENT IS NOT AN UNKNOWN ONE.** The store's `agent` row is created
+    by the agent's FIRST WRITE (`db.ensureAgent`, and `db.createSpawnedAgent`
+    for a subagent's own book), while the endpoint contract has the daemon open
+    the main agent's `WatchAgent` with an UNSET target the moment the session
+    starts — "a fresh agent simply yields an empty page". The open therefore
+    races the first write and loses on every fresh bring-up, and refusing there
+    reached the daemon as `link_fault` → `open_fault{link_severed}`.
+  - **THE PRODUCER IS THE ARBITER** (`SessionContext.knowsAgent`). It rides down
+    into the record plane as `openAgentPage`'s `known` predicate, the exact
+    counterpart of `openBashRun`'s `stillLive`:
+    - vouched for → the refusal is WAITED OUT: an empty opening page now, and
+      the tail stood on the book's first row (woken by the write that lands it,
+      `Reader.noteAgentRows`). `ReadHistory` answers the same empty page rather
+      than refusing, which is what a keep-alive-only session's book is.
+    - not vouched for → the store's refusal stands, as `Code.NotFound`.
+    - any other refusal (`storage_failure`) is untouched.
+  - The empty-book refusal in `watchAgent` also stays, for a store that serves
+    an empty page instead of refusing. Retire both — and `knowsAgent` with them
+    — only once an id's existence is answerable without the producer.
 
 ## Verification
 
