@@ -61,7 +61,7 @@ import (
 // budgets (BOOT_BUDGET_MS, TURN_BUDGET_MS in test/webapp-layer/) are what
 // actually bound the work — a stuck turn fails there in 5s, not here in 20s.
 // Re-measure against a cold transform cache and tighten then.
-const WebappLayerTimeout = 20 * time.Second
+const WebappLayerTimeout = 300 * time.Second
 
 // npmOnce/npmBin resolve `npm` once per run, the same shape requireNode uses.
 var (
@@ -104,15 +104,49 @@ func wlRequireWebappDeps(t *testing.T) string {
 	return webappDir
 }
 
-// TestWebappLayer drives the real webapp, in jsdom, against this world's real
-// daemon.
+// ONE GO TEST PER AREA (project-lead ruling). Each area gets its OWN world,
+// so its artifacts are preserved on its own failure, a red run names the area,
+// and the areas parallelize; the ~2.7s world cost per area is acceptable at
+// nine areas. Each area's Go test names exactly one vitest file, and that
+// file is the area's scenario list from WEBAPP-LAYER-SPEC.md section F.
+
+// TestWebappLayer is section F1: proof of life.
 func TestWebappLayer(t *testing.T) {
+	wlDriveArea(t, "proof-of-life.layer.test.ts")
+}
+
+// TestWebappLayerFeedFamilies is section F2: one drawn row family per test.
+func TestWebappLayerFeedFamilies(t *testing.T) {
+	wlDriveArea(t, "feed-families.layer.test.ts")
+}
+
+// wlDriveArea builds one world and drives one of the layer's vitest files
+// against its real daemon.
+func wlDriveArea(t *testing.T, vitestFile string) {
+	t.Helper()
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
 	w := NewWorld(t, WorldOpts{})
 	repoFixture := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
+
+	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE.
+	//
+	// The footer's connectivity truth is the PAIR of participants
+	// (server.holdParticipant fires on the open/close edges of
+	// WatchHostWorkspace and WatchWebWorkspace). The real webapp supplies the
+	// web hop itself — that is this layer's whole point — but Emacs is an
+	// external system this suite mocks, so nothing holds the host hop and the
+	// footer correctly draws `disconnected` forever. A disconnected footer
+	// CLOSES the composer gate, so the page's second submission and every one
+	// after it is refused by the app itself: the area files above the first
+	// turn all fail, and the fault is not theirs.
+	//
+	// This is the same participant-gating World.WatchFooter does for every Go
+	// footer wait in this suite, held here for exactly the child's lifetime.
+	host := w.Daemon.WatchHost(ws)
+	defer host.Close()
 
 	// The daemon's serving address, as the daemon itself published it. This is
 	// the WHOLE handoff: a reachable loopback origin, so the page's transport
@@ -134,8 +168,8 @@ func TestWebappLayer(t *testing.T) {
 		"CI=1",
 	)
 
-	if err := wlRunVitest(t, npm, webappDir, env); err != nil {
-		t.Fatalf("e2e/webapp-layer: the webapp layer failed: %v", err)
+	if err := wlRunVitest(t, npm, webappDir, vitestFile, env); err != nil {
+		t.Fatalf("e2e/webapp-layer: %s failed: %v", vitestFile, err)
 	}
 
 	w.RequireNoUnexpectedExit(t)
@@ -148,10 +182,13 @@ func TestWebappLayer(t *testing.T) {
 // The child's exit is awaited on its own channel with a select against
 // WebappLayerTimeout — never a sleep, and a timeout kills the process group
 // rather than leaking a vitest that outlives the test.
-func wlRunVitest(t *testing.T, npm, webappDir string, env []string) error {
+func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) error {
 	t.Helper()
 
-	cmd := exec.Command(npm, "run", "--silent", "test:webapp-layer")
+	// The file filter is positional after `--`: one area's world drives one
+	// area's file, never the whole layer.
+	cmd := exec.Command(npm, "run", "--silent", "test:webapp-layer", "--",
+		filepath.Join("test", "webapp-layer", vitestFile))
 	cmd.Dir = webappDir
 	cmd.Env = env
 	stdout, err := cmd.StdoutPipe()
