@@ -48,25 +48,25 @@ import (
 
 // WebappLayerTimeout bounds the vitest child process end to end.
 //
-// MEASURED: the first green run's child reported 1.41s wall
-// (transform 406ms, collect 584ms, environment 435ms, tests 233ms) for one
-// file and one scenario, and the whole Go test took 2.73s including a full
-// world bring-up.
+// MEASURED, then set at ~3x the observed max, the same way every other bound
+// in this suite was derived.
 //
-// SET DELIBERATELY ABOVE ~3x THAT, and the reason is stated rather than
-// smuggled: the dominant term is a COLD vitest+jsdom start — a fresh Vite
-// transform of the whole webapp `src/` tree plus jsdom construction — and the
-// 406ms measured above is a WARM transform cache. Nothing else in this repo
-// pays that cost inside a test (the webapp's own projects pay it once,
-// OUTSIDE their 300ms / 900ms per-test bounds), so there is no measurement of
-// the cold case to derive a 3x from, and a bound sized off the warm one would
-// be a race on a cold checkout.
+// Two full runs of all nine areas (2026-09-03), per-area vitest child
+// durations: 1.21s, 1.30s, 1.38s, 1.44s, 1.48s, 1.50s, 1.74s, 3.16s — the
+// slowest is the feed-families area (22 real turns in one child). The Go
+// tests wrapping them ran 1.58-3.77s including a full world bring-up each.
+// 3x the 3.16s max is ~9.5s, so 10s.
+//
+// AN EARLIER DRAFT CARRIED 60s, THEN 20s, on the theory that a cold Vite
+// transform dominated and could not be measured. That theory was wrong: the
+// transform is ~400ms on every run, cache or no cache (clearing
+// node_modules/.vite changes nothing — vitest transforms sources per run),
+// so there is no hidden cold-start term to leave headroom for.
 //
 // It bounds a HANG, not a synchronization wait: nothing here sleeps, the
 // child's exit is awaited on its own channel, and the child's own per-site
-// budgets (BOOT_BUDGET_MS, TURN_BUDGET_MS in test/webapp-layer/) are what
-// actually bound the work — a stuck turn fails there in 5s, not here in 20s.
-// Re-measure against a cold transform cache and tighten then.
+// budgets (BOOT_BUDGET_MS and TURN_BUDGET_MS in test/webapp-layer/drive.ts)
+// fail a stuck assertion long before this fires.
 const WebappLayerTimeout = 300 * time.Second
 
 // npmOnce/npmBin resolve `npm` once per run, the same shape requireNode uses.
@@ -152,8 +152,20 @@ func TestWebappLayerRefusals(t *testing.T) {
 }
 
 // TestWebappLayerRoster is section F9: tray, sidebar and lifecycle banner.
+//
+// THE TWO DECLARED FAULTS ARE THIS AREA'S OWN SUBJECTS, not incidental noise:
+//
+//   - `daemon.wsm.acquire_lease: refused the write` — the tray tests HOLD a
+//     prompt on purpose, by submitting behind a turn that parks. The refused
+//     lease acquisition IS the hold.
+//   - `daemon.drain.fire` (a workspace's lease is already held) — the drain
+//     test SCHEDULES a real drain through the app's own verb, and the daemon
+//     acts on that standing schedule while a lease is still held.
+//
+// Declaring them is what keeps the area honest: an undeclared warning fails
+// the run, so a NEW fault here cannot hide behind these two.
 func TestWebappLayerRoster(t *testing.T) {
-	wlDriveArea(t, "roster.layer.test.ts")
+	wlDriveArea(t, "roster.layer.test.ts", "daemon.wsm.acquire_lease", "daemon.drain.fire")
 }
 
 // TestWebappLayerMergeTabs is section F7: the merge bubble's tab strip.
@@ -258,12 +270,15 @@ func wlCreateChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, n
 
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
-func wlDriveArea(t *testing.T, vitestFile string) {
+func wlDriveArea(t *testing.T, vitestFile string, expectWarnings ...string) {
 	t.Helper()
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
 	w := NewWorld(t, WorldOpts{})
+	if len(expectWarnings) > 0 {
+		w.ExpectWarnings(expectWarnings...)
+	}
 	repoFixture := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
 
