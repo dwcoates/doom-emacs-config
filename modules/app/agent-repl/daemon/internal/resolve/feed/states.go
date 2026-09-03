@@ -35,6 +35,16 @@ type unitState struct {
 	row *frontendv1.FeedRow
 	// feedKey is the feed that row landed on.
 	feedKey string
+	// sendAddressedTo is WHO a send addressed, exactly as the caller wrote it.
+	// Kept because the send's success arm resolves an identity but never
+	// restates the addressed string, and the address line prefers a name a
+	// reader recognizes.
+	sendAddressedTo string
+	// sendSummary is the one-line preview a send's caller supplied. Kept
+	// because it arrives only on the start arm and the row is recomposed from
+	// scratch on every later frame. EMPTY MEANS NONE WAS GIVEN, which draws no
+	// body rather than falling back to the message itself.
+	sendSummary string
 }
 
 // unit resolves a unit's accumulation, creating it on first sight.
