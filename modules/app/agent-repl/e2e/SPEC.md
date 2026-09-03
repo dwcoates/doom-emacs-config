@@ -209,7 +209,7 @@ value.
 ### Building (once per `go test` run, shared across every test)
 
 | Binary | Built by | Source | Skip condition |
-|---|---|---|---|
+|---|---|---|---|---|
 | `claude-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/claude-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
 | fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
 | real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `t.Skip`, never an implicit `npm ci`** |
@@ -929,77 +929,77 @@ Section D is the authoritative row-by-row mapping.
 
 ## D. Scenario mapping table — all 69 goldens
 
-| # | Golden scenario | Test(s) (§C) | New fake-SDK scenario needed? |
-|---|---|---|---|
-| 1 | account-usage | #58 | no |
-| 2 | artifact-publish-and-list | #72 | no |
-| 3 | bash-detached | #31 | no |
-| 4 | bash-foreground-completed | #35 | no |
-| 5 | bash-image-output | #37 | no |
-| 6 | bash-interrupted-by-timeout | #19 | no |
-| 7 | bash-nonzero-exit | #36 | no |
-| 8 | bash-partial-output-with-spill | #38 | no |
-| 9 | compaction-directed | #22, #23 | no |
-| 10 | context-budget-warning | #26 | no (landed, UNGROUNDED per manifest — see F) |
-| 11 | context-injected-memory | #73 | no |
-| 12 | context-injected-skills | #74 | no |
-| 13 | context-usage | #59 | no |
-| 14 | cron-create-list-delete | #75 | no |
-| 15 | ctrl-b-detach-of-foreground-subagent | #34 | no |
-| 16 | ctrl-b-detach-of-foreground-work | #33 | no |
-| 17 | diagnostics | #76 | no |
-| 18 | edit | #66 | no |
-| 19 | fan-wide-cancel | #43 | no (see F: possible production spool defect) |
-| 20 | fast-mode | #8 | no |
-| 21 | glob | #67 | no |
-| 22 | grep-content-files-count | #68 | no |
-| 23 | held-turn-gate | #16 | no |
-| 24 | hook-blocked | #78 | no |
-| 25 | hook-cancelled | #80 | no |
-| 26 | hook-failed | #79 | no |
-| 27 | hook-succeeded | #77 | no |
-| 28 | ide-diagnostics-after-edit | #71 | no |
-| 29 | identity-rotation-clear | #20, #21 | no |
-| 30 | interrupt | #18 | no |
-| 31 | max-tokens | #9 | no |
-| 32 | mcp-server-healths | #81 | no |
-| 33 | mcp-unmodeled-tool | #82 | no |
-| 34 | model-changed | #7 | no |
-| 35 | monitor-deadline | #83 | no |
-| 36 | monitor-persistent | #84 | no |
-| 37 | permission-allow-once | #11 | no |
-| 38 | permission-allow-standing | #12 | no |
-| 39 | permission-denied-by-policy | #14 | no |
-| 40 | permission-denied-by-user | #13 | no |
-| 41 | permission-mode-changed | #17 | no |
-| 42 | permission-undecidable-parked | #15 | no |
-| 43 | plan-mode-enter-exit | #85 | no |
-| 44 | prose-streamed | #1, #10 | no |
-| 45 | push-notification-not-sent | #87 | no |
-| 46 | push-notification-sent | #86 | no |
-| 47 | question-free-text | #88 | no |
-| 48 | question-multi-select | #90 | no |
-| 49 | question-multiple-in-one-batch | #91 | no |
-| 50 | question-single-select | #89 | no |
-| 51 | question-unanswered | #92 | no |
-| 52 | read-whole-head-range | #69 | no |
-| 53 | report-findings | #93 | no |
-| 54 | schedule-wakeup-schedule-and-stop | #94 | no |
-| 55 | send-message-queued-and-resumed | #95 | no |
-| 56 | skill-invocation | #64 | no |
-| 57 | subagent-detached | #28 | no |
-| 58 | subagent-sync-nested-activity | #27 | no |
-| 59 | task-acts-create-change-reject | #96 | no |
-| 60 | turn-stop-error-during-execution | #5 | no (DECLARED-ONLY, see manifest) |
-| 61 | turn-stop-hook-stop | #6 | no (DECLARED-ONLY) |
-| 62 | turn-stop-max-budget-usd | #3 | no |
-| 63 | turn-stop-max-structured-output-retries | #4 | no (DECLARED-ONLY) |
-| 64 | turn-stop-max-turns | #2 | no |
-| 65 | vendor-answered-slash-commands | #60 | no |
-| 66 | web-fetch | #97 | no |
-| 67 | web-search | #98 | no |
-| 68 | worktree-enter-exit-kept-and-removed | #99 | no |
-| 69 | write-created-and-updated | #70 | no |
+| # | Golden scenario | Registered scenario(s) | Test(s) (§C) | New fake-SDK scenario needed? |
+|---|---|---|---|---|
+| 1 | account-usage | `!usage-full` | #58 | no |
+| 2 | artifact-publish-and-list | `!artifact-publish` + `!artifact-list` | #72 | no |
+| 3 | bash-detached | `!bash-detach` | #31 | no |
+| 4 | bash-foreground-completed | `!bash` | #35 | no |
+| 5 | bash-image-output | `!bash-image` | #37 | no |
+| 6 | bash-interrupted-by-timeout | `!bash-timeout` | #19 | no |
+| 7 | bash-nonzero-exit | `!bash-fail` | #36 | no |
+| 8 | bash-partial-output-with-spill | `!bash-spill` | #38 | no |
+| 9 | compaction-directed | `!compact` | #22, #23 | no |
+| 10 | context-budget-warning | `!context-budget-warning` (UNGROUNDED) | #26 | no (landed, UNGROUNDED per manifest — see F) |
+| 11 | context-injected-memory | `!memory` | #73 | no |
+| 12 | context-injected-skills | `!skills-injected` | #74 | no |
+| 13 | context-usage | `!context-usage-drift` | #59 | no |
+| 14 | cron-create-list-delete | `!cron` | #75 | no |
+| 15 | ctrl-b-detach-of-foreground-subagent | `!subagent` (reachable-only) | #34 | no |
+| 16 | ctrl-b-detach-of-foreground-work | `!ctrl-b` (reachable-only) | #33 | no |
+| 17 | diagnostics | (none; default `""` scenario) | #76 | no |
+| 18 | edit | `!edit` | #66 | no |
+| 19 | fan-wide-cancel | `!cancel-all` | #43 | no (see F: possible production spool defect) |
+| 20 | fast-mode | `!fast-on` | #8 | no |
+| 21 | glob | `!glob` | #67 | no |
+| 22 | grep-content-files-count | `!grep-content` + `!grep-files` + `!grep-count` | #68 | no |
+| 23 | held-turn-gate | `!hold` | #16 | no |
+| 24 | hook-blocked | `!hook-blocked` | #78 | no |
+| 25 | hook-cancelled | `!hook-cancelled` | #80 | no |
+| 26 | hook-failed | `!hook-failed` | #79 | no |
+| 27 | hook-succeeded | `!hook-success` | #77 | no |
+| 28 | ide-diagnostics-after-edit | `!ide-diagnostics` | #71 | no |
+| 29 | identity-rotation-clear | `!rotate` | #20, #21 | no |
+| 30 | interrupt | `!interrupt` | #18 | no |
+| 31 | max-tokens | `!max-tokens` | #9 | no |
+| 32 | mcp-server-healths | `!mcp-all` | #81 | no |
+| 33 | mcp-unmodeled-tool | `!unmodeled` | #82 | no |
+| 34 | model-changed | `!model-fallback` | #7 | no |
+| 35 | monitor-deadline | `!monitor-deadline` | #83 | no |
+| 36 | monitor-persistent | `!monitor-persistent` | #84 | no |
+| 37 | permission-allow-once | `!perm-allow-once` | #11 | no |
+| 38 | permission-allow-standing | `!perm-allow-standing` | #12 | no |
+| 39 | permission-denied-by-policy | `!perm-deny-policy` | #14 | no |
+| 40 | permission-denied-by-user | `!perm-deny-user` | #13 | no |
+| 41 | permission-mode-changed | `!perm-allow-standing-mode` | #17 | no |
+| 42 | permission-undecidable-parked | `!perm-hold` | #15 | no |
+| 43 | plan-mode-enter-exit | `!plan` | #85 | no |
+| 44 | prose-streamed | default `""` scenario | #1, #10 | no |
+| 45 | push-notification-not-sent | `!push-config-off` + `!push-user-present` + `!push-no-transport` | #87 | no |
+| 46 | push-notification-sent | `!push-sent` | #86 | no |
+| 47 | question-free-text | `!ask-free` | #88 | no |
+| 48 | question-multi-select | `!ask-multi` | #90 | no |
+| 49 | question-multiple-in-one-batch | `!ask-multi` | #91 | no |
+| 50 | question-single-select | `!ask-single` | #89 | no |
+| 51 | question-unanswered | `!ask-unanswered` | #92 | no |
+| 52 | read-whole-head-range | `!read` + `!read-head` + `!read-range` | #69 | no |
+| 53 | report-findings | `!findings` | #93 | no |
+| 54 | schedule-wakeup-schedule-and-stop | `!wakeup-schedule` + `!wakeup-stop` | #94 | no |
+| 55 | send-message-queued-and-resumed | `!send-message` + `!send-message-resumed` | #95 | no |
+| 56 | skill-invocation | `!skill` | #64 | no |
+| 57 | subagent-detached | `!subagent-detached` | #28 | no |
+| 58 | subagent-sync-nested-activity | `!subagent` | #27 | no |
+| 59 | task-acts-create-change-reject | `!task-create` + `!task-change` + `!task-reject` | #96 | no |
+| 60 | turn-stop-error-during-execution | `!fail-execution` (DECLARED-ONLY) | #5 | no (DECLARED-ONLY, see manifest) |
+| 61 | turn-stop-hook-stop | `!fail-stop-hook` (DECLARED-ONLY) | #6 | no (DECLARED-ONLY) |
+| 62 | turn-stop-max-budget-usd | `!fail-budget` | #3 | no |
+| 63 | turn-stop-max-structured-output-retries | `!fail-structured-output` (DECLARED-ONLY) | #4 | no (DECLARED-ONLY) |
+| 64 | turn-stop-max-turns | `!fail-max-turns` | #2 | no |
+| 65 | vendor-answered-slash-commands | `!slash` | #60 | no |
+| 66 | web-fetch | `!web-fetch` | #97 | no |
+| 67 | web-search | `!web-search` | #98 | no |
+| 68 | worktree-enter-exit-kept-and-removed | `!worktree-keep` + `!worktree-remove` | #99 | no |
+| 69 | write-created-and-updated | `!write-create` + `!write-update` | #70 | no |
 
 **0 of 69 goldens need a new fake-SDK scenario.** Every scenario, and every
 extra option `E2E-EVENT-INVENTORY.md`'s remediation list asked for (10
@@ -1025,6 +1025,21 @@ turn-stop-* DECLARED-ONLY arms). Tests against them (§C #4, #5, #6, #26,
 #30, #32, #61, #62) MUST say so in their own header comments, the way the
 manifest itself does, so a future reader does not mistake "compiles and
 passes" for "grounded in a real vendor recording."
+
+**"Registered scenario(s)" naming drift — RECONCILED.** This table's own
+column above states, per golden, which registered `!name` selects it —
+often a different name than the golden's own (`hook-succeeded` selects
+`!hook-success`, and so on), and sometimes several names in combination
+(`+`-joined rows). This was a known drift, recorded in
+`docs/overhaul/reports/E2E-SCENARIO-COVERAGE.md`'s "Manifest/registry naming
+drift" section; that section, and `agent-shim/claude/shim/testdata/captures/
+MANIFEST.md`'s own `Scenarios:` column and reconciliation section, now carry
+the FULL mapping in both directions, and `src/fake/registry.ts` grew an
+`ALIASES` map so every golden with a 1:1 mapping can also be driven by ITS
+OWN NAME (docs-only from this file's side; the alias mechanism and its test
+guard live in the shim package). The tests in this suite are UNCHANGED —
+they already drove the correct registered names — this is purely a
+naming-drift cleanup on the shim side.
 
 ---
 
