@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -720,6 +721,34 @@ func (s *server) SetSessionModel(ctx context.Context, req *connect.Request[shimv
 	if resp, done, err := scripted[shimv1.SetSessionModelResponse, *shimv1.SetSessionModelResponse](s, RPCSetSessionModel); done {
 		return resp, err
 	}
+	// THE FAKE JUDGES THE CALLER'S THRESHOLD THE WAY THE REAL SHIM DOES: a
+	// model switch is a cold cache, and the shim refuses `cold` when the
+	// context is STRICTLY ABOVE the threshold the request stated. A fake that
+	// always succeeded would pass a daemon that stated no threshold at all —
+	// which is exactly the defect that broke the model cell against the real
+	// shim, where an unset field reads as zero and refuses every switch.
+	if req.Msg.GetModel().GetName() != DefaultModel &&
+		DefaultColdContextTokens > req.Msg.GetColdThresholdTokens() &&
+		req.Msg.ColdRemediation == nil {
+		return connect.NewResponse(&shimv1.SetSessionModelResponse{
+			Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{
+				Detail: fmt.Sprintf("switching to %q discards a %d-token warm cache",
+					req.Msg.GetModel().GetName(), DefaultColdContextTokens),
+				Cause: &shimv1.SetSessionModelFailure_Cold{Cold: &conversationv1.SessionCold{
+					ContextTokens:  DefaultColdContextTokens,
+					RequestedModel: req.Msg.GetModel(),
+					Reason: &conversationv1.SessionCold_ModelSwitch{
+						ModelSwitch: &conversationv1.SessionColdModelSwitch{},
+					},
+				}},
+			}},
+		}), nil
+	}
+	// The success body carries the change; the AUTHORITATIVE statement is the
+	// `model_changed` push on the session stream, which a test states through
+	// ShimControl.PushSessionUpdate. Publishing it from here would hide the
+	// daemon invariant that the topbar moves on the PUSH and never on this
+	// response body.
 	return connect.NewResponse(&shimv1.SetSessionModelResponse{
 		Result: &shimv1.SetSessionModelResponse_Success{Success: &shimv1.SetSessionModelSuccess{
 			ModelChanged: &conversationv1.SessionModelChanged{EffectiveModel: req.Msg.GetModel()},

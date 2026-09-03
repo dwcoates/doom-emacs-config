@@ -16,6 +16,11 @@ const (
 	DefaultBuildSHA = "fake"
 	DefaultModel    = "opus"
 	MainAgentID     = "main"
+	// DefaultColdContextTokens is the context size the fake measures a model
+	// switch against, matching DefaultContextUsage's own figure. A switch is
+	// refused `cold` when the caller's stated threshold is BELOW it, which is
+	// the real shim's own rule.
+	DefaultColdContextTokens = 1000
 )
 
 // DefaultCatalog is the model catalog a fresh StartSession answers with.

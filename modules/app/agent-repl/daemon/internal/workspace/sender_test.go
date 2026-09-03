@@ -19,6 +19,7 @@ type fakeSenderClient struct {
 	setMode        *shimv1.SetSessionPermissionModeResponse
 	startTurnReq   *shimv1.StartTurnRequest
 	updateAgentReq *shimv1.UpdateAgentRequest
+	setModelReq    *shimv1.SetSessionModelRequest
 }
 
 func (c *fakeSenderClient) StartTurn(_ context.Context, req *shimv1.StartTurnRequest) (*shimv1.StartTurnResponse, error) {
@@ -35,7 +36,8 @@ func (c *fakeSenderClient) KillTurn(context.Context, *shimv1.KillTurnRequest) (*
 	return c.killTurn, nil
 }
 
-func (c *fakeSenderClient) SetSessionModel(context.Context, *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error) {
+func (c *fakeSenderClient) SetSessionModel(_ context.Context, req *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error) {
+	c.setModelReq = req
 	return c.setModel, nil
 }
 
@@ -206,5 +208,52 @@ func TestSenderKillTurnCarriesTheNotTheOpenTurnRefusal(t *testing.T) {
 	refusal, ok := AsShimRefusal(err)
 	if !ok || refusal.Arm != ArmShimNotTheOpenTurn {
 		t.Fatalf("KillTurn = %v, want the not_the_open_turn refusal", err)
+	}
+}
+
+// TestSenderSetModelStatesTheColdThresholdPolicy covers the field whose unset
+// ZERO refused every switch: the shim refuses `cold` STRICTLY ABOVE the stated
+// threshold, so a zero threshold made a served model come back refused, and
+// the refusal had no arm to land on.
+func TestSenderSetModelStatesTheColdThresholdPolicy(t *testing.T) {
+	// Arrange
+	client := &fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
+		Result: &shimv1.SetSessionModelResponse_Success{Success: &shimv1.SetSessionModelSuccess{}},
+	}}
+	s := &sender{client: client}
+
+	// Act
+	if err := s.SetModel(context.Background(), "sonnet"); err != nil {
+		t.Fatalf("SetModel: %v", err)
+	}
+
+	// Assert
+	if got := client.setModelReq.GetColdThresholdTokens(); got != coldThresholdPolicy {
+		t.Fatalf("cold_threshold_tokens = %d, want the daemon's stated policy %d", got, uint64(coldThresholdPolicy))
+	}
+}
+
+// TestSenderSetModelCarriesTheColdRefusal covers the arm the shim raises when
+// it judges the switch cold anyway. It has no `SetModelError` arm yet
+// (ERROR-ARMS.md holds the row), so it must at least reach the caller NAMED
+// rather than collapsed into a bare sentence.
+func TestSenderSetModelCarriesTheColdRefusal(t *testing.T) {
+	// Arrange
+	s := &sender{client: &fakeSenderClient{setModel: &shimv1.SetSessionModelResponse{
+		Result: &shimv1.SetSessionModelResponse_Failure{Failure: &shimv1.SetSessionModelFailure{
+			Detail: "switching discards a warm cache",
+			Cause: &shimv1.SetSessionModelFailure_Cold{
+				Cold: &conversationv1.SessionCold{ContextTokens: 42},
+			},
+		}},
+	}}}
+
+	// Act
+	err := s.SetModel(context.Background(), "sonnet")
+
+	// Assert
+	refusal, ok := AsShimRefusal(err)
+	if !ok || refusal.Arm != ArmShimCold {
+		t.Fatalf("SetModel = %v, want the cold refusal", err)
 	}
 }
