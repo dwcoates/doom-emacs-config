@@ -94,7 +94,7 @@ interface Handle {
 function fetchAcceptingJsdomSignals(
   underlying: typeof globalThis.fetch,
   inFlight: { count: number },
-  dispatcher: Agent,
+  dispatcher: Agent | undefined,
 ): typeof globalThis.fetch {
   return (input, init) => {
     const signal = init?.signal;
@@ -104,7 +104,10 @@ function fetchAcceptingJsdomSignals(
       // agent is pinned to that daemon's unix socket, so every request the app
       // forms against that origin lands on that listener and no ephemeral port
       // is ever consumed.
-      const routed = { ...init, dispatcher } as RequestInit;
+      // A REAL DAEMON NEEDS NO DISPATCHER. The e2e layer's base url is a
+      // reachable loopback origin (the daemon writes it to daemon.addr), so
+      // the init is left alone and Node's fetch resolves it itself.
+      const routed = (dispatcher === undefined ? { ...init } : { ...init, dispatcher }) as RequestInit;
       if (signal === undefined || signal === null) return routed;
       const bridge = transferableAbortController();
       const abort = (): void => bridge.abort(signal.reason);
@@ -134,11 +137,16 @@ function fetchAcceptingJsdomSignals(
   };
 }
 
-export interface Harness {
-  /** The daemon the app is talking to. */
-  readonly fake: FakeDaemon;
-  /** A second daemon, started only by `startSecondDaemon` (the transfer case). */
-  secondFake?: FakeDaemon;
+/**
+ * THE MOUNTED APP: every query and control that is about the PAGE.
+ *
+ * Split out of `Harness` so the identical mount can be driven against a
+ * daemon this harness did not start — the real `claude-repld` the Go e2e
+ * world spawns (see `e2e/WEBAPP-LAYER-SPEC.md`). Everything a test asserts on
+ * lives here; only the three fake-daemon-scripting members `Harness` adds do
+ * not, so no existing integration file changes.
+ */
+export interface MountedApp {
   readonly ctx: AppContext;
   readonly shell: ShellElements;
   readonly feed: FeedHandle;
@@ -151,8 +159,6 @@ export interface Harness {
   settle(): Promise<void>;
   /** Advance fake time by `ms` and settle. */
   tick(ms: number): Promise<void>;
-  /** Boot a SECOND fake daemon, for the transfer/adopt case. */
-  startSecondDaemon(): Promise<FakeDaemon>;
   /**
    * Dispose every mount while LEAVING the daemon up, so a test can observe
    * what the app's own cancellation does to the server's live streams.
@@ -182,6 +188,16 @@ export interface Harness {
   failureArms(): string[];
   /** The refusal arms currently drawn anywhere, with their host selectors. */
   refusalArms(): string[];
+}
+
+/** The mounted app plus the fake daemon this harness started for it. */
+export interface Harness extends MountedApp {
+  /** The daemon the app is talking to. */
+  readonly fake: FakeDaemon;
+  /** A second daemon, started only by `startSecondDaemon` (the transfer case). */
+  secondFake?: FakeDaemon;
+  /** Boot a SECOND fake daemon, for the transfer/adopt case. */
+  startSecondDaemon(): Promise<FakeDaemon>;
 }
 
 /** The body of the real index.html, so the shell under test is the shipped one. */
@@ -279,7 +295,64 @@ export interface HarnessOptions {
   clientLog?: boolean;
 }
 
+/** Where the app's transport points, and how a request gets routed there. */
+interface Endpoint {
+  /** The transport's base url. */
+  readonly baseUrl: string;
+  /**
+   * A unix socket the base url's origin is really served on, when it is an
+   * identity rather than an address (the in-process fake). Absent for a real
+   * daemon, whose base url is a reachable loopback origin.
+   */
+  readonly socketPath?: string;
+}
+
+/**
+ * Mount the app against a daemon SOMEONE ELSE started.
+ *
+ * The Go e2e world owns the real quartet's lifecycle and hands its daemon's
+ * loopback address to the vitest child that calls this (see
+ * `e2e/WEBAPP-LAYER-SPEC.md`). Everything past the endpoint is identical to
+ * `startHarness`: the same shell, the same mounts, the same boot order.
+ */
+export async function startAppAgainst(
+  baseUrl: string,
+  options: HarnessOptions = {},
+): Promise<MountedApp> {
+  if (options.arrange !== undefined) {
+    throw new Error(
+      "startAppAgainst cannot arrange: there is no fake daemon to script, the daemon is real",
+    );
+  }
+  return mountApp({ baseUrl }, options);
+}
+
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
+  const fake = createFakeDaemon();
+  const { baseUrl, socketPath } = await fake.start();
+  const app = await mountApp({ baseUrl, socketPath }, options, fake);
+  const harness: Harness = {
+    ...app,
+    fake,
+    async startSecondDaemon() {
+      const second = createFakeDaemon();
+      await second.start();
+      harness.secondFake = second;
+      return second;
+    },
+    async stop() {
+      await app.stop();
+      await harness.secondFake?.stop();
+    },
+  };
+  return harness;
+}
+
+async function mountApp(
+  endpoint: Endpoint,
+  options: HarnessOptions,
+  fake?: FakeDaemon,
+): Promise<MountedApp> {
   // CAPTURED BEFORE THE CLOCK IS FAKED. `settle()` needs a way to hand the
   // event loop back to Node so the loopback round trip to the fake daemon can
   // land; every scheduling primitive on the page is about to become fake, so
@@ -299,18 +372,17 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   // ago and every countdown would already have expired.
   vi.useFakeTimers({ shouldAdvanceTime: true, now: HARNESS_EPOCH_MS });
 
-  const fake = createFakeDaemon();
-  const { baseUrl, socketPath } = await fake.start();
-  const dispatcher = new Agent({ connect: { socketPath } });
+  const { baseUrl, socketPath } = endpoint;
+  const dispatcher = socketPath === undefined ? undefined : new Agent({ connect: { socketPath } });
   // `stop()` is idempotent (a test may stop explicitly and the afterEach stops
   // again), and undici throws on a second close, so the close is claimed once.
   let dispatcherClosed = false;
   const closeDispatcher = async (): Promise<void> => {
-    if (dispatcherClosed) return;
+    if (dispatcher === undefined || dispatcherClosed) return;
     dispatcherClosed = true;
-    await closeDispatcher();
+    await dispatcher.close();
   };
-  options.arrange?.(fake);
+  if (fake !== undefined) options.arrange?.(fake);
 
   installShell(document);
   installScrollIntoView();
@@ -383,7 +455,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     // The overlay is LEFT MOUNTED on purpose: its cards are the only account
     // of the failed boot a test can read.
     failures.report(bootFailed(err instanceof Error ? err.message : String(err)));
-    await fake.stop();
+    await fake?.stop();
     await closeDispatcher();
     throw err;
   }
@@ -481,8 +553,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const harnessFailureArms = (): string[] =>
     $$('[data-component="failure-overlay"] [data-arm]').map((el) => el.dataset.arm ?? "");
 
-  const harness: Harness = {
-    fake,
+  const harness: MountedApp = {
     ctx,
     shell,
     feed,
@@ -495,12 +566,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       await vi.advanceTimersByTimeAsync(ms);
       await settle();
     },
-    async startSecondDaemon() {
-      const second = createFakeDaemon();
-      await second.start();
-      harness.secondFake = second;
-      return second;
-    },
     async disposeMounts() {
       for (const handle of [...handles].reverse()) handle.dispose();
       handles.length = 0;
@@ -508,8 +573,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     async stop() {
       for (const handle of [...handles].reverse()) handle.dispose();
-      await fake.stop();
-      await harness.secondFake?.stop();
+      // A daemon this mount did not start is the caller's to stop; the fake
+      // one it did start is stopped here.
+      await fake?.stop();
       // The agent holds this daemon's sockets open; a run leaves ~1600 of them
       // otherwise, and the next test's daemon is a different socket anyway.
       await closeDispatcher();
