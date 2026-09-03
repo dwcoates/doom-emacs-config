@@ -146,6 +146,24 @@ describe("IDE diagnostics", () => {
     });
   });
 
+  it("states a REAL hunk for the edit the diagnostics concern", async () => {
+    // Arrange + Act. An empty structuredPatch is a shape the vendor never
+    // sends (testdata/captures/ide-diagnostics-after-edit states the changed
+    // line with one context line either side), and it made this the one edit
+    // whose diff a consumer could not draw.
+    const result = (await firstResult("!ide-diagnostics")) as {
+      structuredPatch: { oldStart: number; lines: string[] }[];
+    };
+
+    // Assert
+    expect(result.structuredPatch[0]?.lines).toEqual([
+      " export const two = 2;",
+      "-export const three = 3;",
+      "+export const three = missing;",
+      " export const four = 4;",
+    ]);
+  });
+
   it("places the attachment AFTER the edit's tool result, so adjacency resolves", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!ide-diagnostics"]);

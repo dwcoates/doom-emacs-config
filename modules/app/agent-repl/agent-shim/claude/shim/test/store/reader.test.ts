@@ -600,7 +600,7 @@ describe("openBashRun", () => {
     // a race to wait out rather than a real "unknown_work".
     const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
-      () => true,
+      () => "live",
     );
     const iterator = run[Symbol.asyncIterator]();
     const pending = iterator.next();
@@ -610,6 +610,42 @@ describe("openBashRun", () => {
 
     const first = await pending;
     expect((first.value as conversationv1.AgentBash | undefined)?.result.case).toBe("start");
+  });
+
+  it("waits out a refused open through the concluded-but-unwritten window", async () => {
+    const { plane } = await seeded("bash-concluded", 0);
+
+    // THE WINDOW e2e run 5 hit: the run left the live set before its first row
+    // was committed, so the caller's standing is "concluded" rather than
+    // "live" -- and an announced run whose rows are merely late is not a run
+    // that does not exist.
+    const run = await plane.openBashRun(
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      () => "concluded",
+    );
+    const iterator = run[Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    plane.write([bashStartEntry()]);
+    await plane.flush();
+
+    const first = await pending;
+    expect((first.value as conversationv1.AgentBash | undefined)?.result.case).toBe("start");
+  });
+
+  it("refuses a run nothing was ever announced under", async () => {
+    const { plane } = await seeded("bash-unknown-standing", 0);
+
+    const run = await plane.openBashRun(
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      () => "unknown",
+    );
+
+    await expect(
+      (async () => {
+        for await (const frame of run) void frame;
+      })(),
+    ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 });
 
