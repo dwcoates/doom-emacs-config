@@ -66,3 +66,27 @@
        ;; every `map! :leader' form off. Without it those forms have no
        ;; prefix to attach to.
        (default +bindings))
+
+;; ---------------------------------------------------------------------------
+;; The e2e harness's own settings, loaded HERE and nowhere else.
+;; ---------------------------------------------------------------------------
+;;
+;; Doom loads this file before any module's `config.el', and
+;; `modules/app/agent-repl/config.el' decides AT LOAD TIME whether to register
+;; cold start (`(if (and agent-repl-frontend-auto-start (not noninteractive))
+;; ...)'). So the Go layer's settings -- which daemon binary, which state root,
+;; which account roots, and above all `agent-repl-frontend-auto-start' nil --
+;; have to be in effect BEFORE that form runs, or Emacs spawns a daemon
+;; pointed at the host's own defaults before a test can say otherwise.
+;;
+;; Setting them with `setq' ahead of the `defcustom' in `lisp/daemon.el' is the
+;; ordinary Doom pattern and it holds: `custom-declare-variable' leaves an
+;; already-bound variable's value alone.
+;;
+;; Absent the variable, this is inert, so an interactive `$S shell' session and
+;; a `doom sync' behave exactly as they did before.
+(let ((settings (getenv "AGENT_REPL_E2E_SETTINGS")))
+  (when (and settings (not (string-empty-p settings)))
+    (unless (file-readable-p settings)
+      (error "AGENT_REPL_E2E_SETTINGS=%s is not readable" settings))
+    (load settings nil t)))

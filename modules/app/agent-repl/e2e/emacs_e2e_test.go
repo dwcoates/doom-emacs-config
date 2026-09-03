@@ -177,16 +177,25 @@ func TestEmacsProofOfLife(t *testing.T) {
 		})
 
 	// 4. Submit a prompt FROM THE COMPOSER: put text in the input buffer the
-	//    way a user types it, then run the command RET is bound to. The fake
-	//    SDK answers; a plain prompt with no "!" prefix falls through to the
-	//    default prose scenario.
+	//    way a user types it, then PRESS RET. The fake SDK answers; a plain
+	//    prompt with no "!" prefix falls through to the default prose
+	//    scenario.
+	//
+	//    RET is pressed rather than `agent-repl-send` called, and that is a
+	//    deliberate consequence of booting real Doom: the composer's RET
+	//    comes from `map! :map agent-repl-input-mode-map :ni "RET"` in
+	//    `input.el`, which under the old `-Q` boot expanded to nothing at
+	//    all. Pressing it asserts the binding AND the command; calling the
+	//    command would have asserted only half of what a user does.
+	inputBuffer := e.EvalString(`(buffer-name (agent-repl--input-buffer ` + elispString(wsName) + `))`)
 	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(wsName) + `)
                  (erase-buffer)
                  (insert "hello from the emacs client layer")
                  t)`)
-	e.Eval(`(with-current-buffer (agent-repl--input-buffer ` + elispString(wsName) + `)
-                 (agent-repl-send)
-                 t)`)
+	if want, got := "agent-repl-send", e.BindingForIn(inputBuffer, "RET"); got != want {
+		t.Fatalf("composer RET resolves to %q, want %q: the Doom `map!' for agent-repl-input-mode-map did not take", got, want)
+	}
+	e.KeysIn(inputBuffer, "RET")
 
 	// 5. The response is visible in EMACS's own state: the roster row for
 	//    this workspace settles on a settled arm, which is the finish edge
