@@ -42,7 +42,17 @@ message OpenWorkspaceError {
     OpenWorkspaceTranscriptMissing transcript_missing = 6;
     // Spawning the session's shim failed.
     OpenWorkspaceSpawnFailed spawn_failed = 7;
+    // The shim came up but the VENDOR failed to start the session
+    // (shim.v1 StartSessionFailure.vendor_start_failed relayed by name):
+    // the SDK threw before its first message. Distinct from spawn_failed
+    // (our process) and from transcript_missing (our record). `detail` is
+    // the shim's account, for a human and for logs; never switched on.
+    // (Landing 9, 2026-09-03, user-approved.)
+    OpenWorkspaceVendorStartFailed vendor_start_failed = 8;
   }
+}
+message OpenWorkspaceVendorStartFailed {
+  string detail = 1;
 }
 message OpenWorkspaceUnknownWorkspace {}
 message OpenWorkspaceWorkspaceRefMismatch {
