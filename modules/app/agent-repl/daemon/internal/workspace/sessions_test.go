@@ -12,6 +12,7 @@ import (
 
 	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
@@ -256,16 +257,17 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 	}
 }
 
-func TestDecideSourceTable(t *testing.T) {
+func TestClassifySourceTable(t *testing.T) {
 	deleted := &wsm.SessionTerminal{Kind: "deleted", Detail: "the user deleted it"}
 	killed := &wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"}
 	tests := []struct {
-		name      string
-		session   wsm.Session
-		exists    bool
-		wantFresh bool
-		wantID    string
-		wantErr   bool
+		name         string
+		session      wsm.Session
+		exists       bool
+		noTranscript bool
+		wantFresh    bool
+		wantID       string
+		wantErr      bool
 	}{
 		{
 			name:      "no session record at all is the only proof of a fresh start",
@@ -278,10 +280,17 @@ func TestDecideSourceTable(t *testing.T) {
 			wantFresh: true,
 		},
 		{
-			name:    "a recorded conversation resumes",
+			name:    "a recorded conversation whose transcript is found resumes",
 			session: wsm.Session{VendorSessionID: "vendor-1"},
 			exists:  true,
 			wantID:  "vendor-1",
+		},
+		{
+			name:         "a recorded conversation with NO transcript comes up fresh",
+			session:      wsm.Session{VendorSessionID: "vendor-1"},
+			exists:       true,
+			noTranscript: true,
+			wantFresh:    true,
 		},
 		{
 			name:    "a killed session still resumes its conversation",
@@ -298,22 +307,58 @@ func TestDecideSourceTable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange in the table. Act.
-			got, err := decideSource(tt.session, tt.exists)
+			// Arrange.
+			f := newFleetFixture(t)
+			if tt.noTranscript {
+				f.accounts.transcriptErr = errors.New("no such file")
+			}
+
+			// Act.
+			got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", tt.session, tt.exists)
+
 			// Assert.
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("decideSource() = %+v, want a refusal", got)
+					t.Fatalf("classifySource() = %+v, want a refusal", got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("decideSource: %v", err)
+				t.Fatalf("classifySource: %v", err)
 			}
 			if got.Fresh != tt.wantFresh || got.VendorSessionID != tt.wantID {
-				t.Fatalf("decideSource() = %+v, want fresh=%v id=%q", got, tt.wantFresh, tt.wantID)
+				t.Fatalf("classifySource() = %+v, want fresh=%v id=%q", got, tt.wantFresh, tt.wantID)
 			}
 		})
+	}
+}
+
+func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
+	// Arrange: the same recorded conversation classified twice must leave ONE
+	// record of what was abandoned, naming the old vendor session id.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
+
+	// Act.
+	for range 2 {
+		if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+			t.Fatalf("classifySource: %v", err)
+		}
+	}
+
+	// Assert.
+	var opened []wsm.Fault
+	for _, fault := range f.db.dbFaults {
+		if fault.Kind == health.KindConversationAbandoned {
+			opened = append(opened, fault)
+		}
+	}
+	if len(opened) != 1 {
+		t.Fatalf("abandoned-conversation faults = %d, want exactly one", len(opened))
+	}
+	if got := opened[0].Evidence["vendor_session_id"]; got != "vendor-old" {
+		t.Fatalf("fault evidence vendor_session_id = %q, want the abandoned id", got)
 	}
 }
 
@@ -369,9 +414,9 @@ func TestStartRefusesADeletedSession(t *testing.T) {
 	asRefusal(t, err, ArmSessionDeleted)
 }
 
-func TestStartRefusesAResumeWhoseTranscriptIsMissingBeforeAnySpawn(t *testing.T) {
-	// Arrange: a vanished file yields no death evidence, so the redial ladder
-	// would otherwise loop forever on an unchangeable fact.
+func TestStartComesUpFreshWhenTheRecordedTranscriptIsMissing(t *testing.T) {
+	// Arrange: a session that pre-minted a vendor id but never took a turn has
+	// no transcript, and refusing it left the workspace with no session at all.
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
@@ -381,13 +426,32 @@ func TestStartRefusesAResumeWhoseTranscriptIsMissingBeforeAnySpawn(t *testing.T)
 	err := f.fleet.Start(context.Background(), ws.ID)
 
 	// Assert.
-	asRefusal(t, err, ArmTranscriptMissing)
-	if len(f.supervisor.spawns) != 0 || len(f.supervisor.adopts) != 0 {
-		t.Fatalf("bring-ups = %d spawns, %d adopts; want none before the guard", len(f.supervisor.spawns), len(f.supervisor.adopts))
+	if err != nil {
+		t.Fatalf("Start = %v, want a fresh session rather than a refusal", err)
+	}
+	if got := f.client.requests[0].GetFresh(); got == nil {
+		t.Fatalf("StartSession source = %+v, want the fresh arm", f.client.requests[0].GetSource())
 	}
 }
 
-func TestStartFreshSkipsTheResumeGuard(t *testing.T) {
+func TestStartDoesNotDrawTranscriptMissingForANeverTurnedSession(t *testing.T) {
+	// Arrange: the retired refusal. The classifier answers fresh instead.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.accounts.transcriptErr = errors.New("no such file")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	var refusal *Refusal
+	if errors.As(err, &refusal) && refusal.Arm == ArmTranscriptMissing {
+		t.Fatalf("Start = %v, want no transcript_missing refusal", err)
+	}
+}
+
+func TestStartFreshSpawnsWithNoTranscriptOnDisk(t *testing.T) {
 	// Arrange: a fresh start names no conversation, so there is no transcript
 	// to guard.
 	f := newFleetFixture(t)

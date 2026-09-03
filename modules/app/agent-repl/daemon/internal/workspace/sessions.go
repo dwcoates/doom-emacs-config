@@ -285,11 +285,26 @@ type source struct {
 	VendorSessionID string
 }
 
-// decideSource makes the FRESH-CONVERSATION decision. StartSession(fresh) is
-// legal ONLY with proof the workspace never had a conversation at all —
-// abandonment is irreversible, every alternative is recoverable — so anything
-// else resumes, and a DELETED session refuses outright rather than resurrecting.
-func decideSource(session wsm.Session, exists bool) (source, error) {
+// classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
+// classifier both bring-up paths use: Fleet.Start and Fleet.Resume.
+//
+// StartSession(fresh) is legal ONLY with proof the workspace has no
+// conversation to resume — abandonment is irreversible, every alternative is
+// recoverable — and the transcript IS that proof, so the decision is
+// transcript-aware rather than a test of the recorded id alone:
+//
+//   - no session record, or an empty vendor id: FRESH;
+//   - a DELETED session: refused outright rather than resurrected;
+//   - a vendor id whose transcript is found: RESUME;
+//   - a vendor id whose transcript is MISSING: FRESH, with a fault opened once
+//     naming the abandoned conversation. A pre-minted id that never took a
+//     turn writes no transcript, so this is the ORDINARY state of a session
+//     bounced before its first turn — and resuming it names a conversation the
+//     shim rightly refuses as `unknown_session`, which left the workspace with
+//     no client at all. The fault is loud because a genuinely VANISHED
+//     transcript reaches the same branch; what it must not do is cost the
+//     workspace its live session.
+func (f *Fleet) classifySource(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir string, session wsm.Session, exists bool) (source, error) {
 	if !exists {
 		return source{Fresh: true}, nil
 	}
@@ -299,7 +314,47 @@ func decideSource(session wsm.Session, exists bool) (source, error) {
 	if session.VendorSessionID == "" {
 		return source{Fresh: true}, nil
 	}
+	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, session.VendorSessionID); err != nil {
+		log.Warn(opBringUp, "the recorded conversation has no transcript on disk; the session comes up FRESH", dlog.Context{
+			"vendor_session_id": session.VendorSessionID, "cause": err.Error(),
+		})
+		f.noteConversationAbandoned(ctx, log, ws, session.VendorSessionID, err)
+		return source{Fresh: true}, nil
+	}
+	log.Debug(opBringUp, "the classifier found the transcript; the session resumes", dlog.Context{
+		"vendor_session_id": session.VendorSessionID,
+	})
 	return source{VendorSessionID: session.VendorSessionID}, nil
+}
+
+// noteConversationAbandoned records the abandoned conversation ONCE, keyed on
+// the vendor id it names: the workspace keeps a live session, so the fault is
+// the only record that the recorded conversation was left behind, and a
+// re-classification of the SAME id must not stack a second copy of it.
+func (f *Fleet) noteConversationAbandoned(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, vendorSessionID string, cause error) {
+	workspace := ws
+	standing, err := f.deps.DB.OpenFaults(ctx, wsm.FaultScope{Workspace: &workspace, Kind: health.KindConversationAbandoned})
+	if err != nil {
+		log.Error(opBringUp, "could not read the standing abandoned-conversation faults", dlog.Context{"cause": err.Error()})
+		return
+	}
+	for _, fault := range standing {
+		if fault.Evidence["vendor_session_id"] == vendorSessionID {
+			log.Debug(opBringUp, "the abandoned conversation already carries its fault", dlog.Context{
+				"vendor_session_id": vendorSessionID,
+			})
+			return
+		}
+	}
+	if _, err := f.deps.DB.OpenFault(ctx, wsm.Fault{
+		Workspace: &workspace,
+		Kind:      health.KindConversationAbandoned,
+		Detail:    "the recorded conversation had no transcript; the session came up fresh",
+		Evidence:  map[string]string{"vendor_session_id": vendorSessionID, "cause": cause.Error()},
+		OpenedAt:  f.now(),
+	}); err != nil {
+		log.Error(opBringUp, "could not record the abandoned conversation", dlog.Context{"cause": err.Error()})
+	}
 }
 
 // Start brings a workspace's session up: the mount IS the revival.
@@ -336,7 +391,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		return fmt.Errorf("start session for %q: read the session record: %w", ws, err)
 	}
 
-	src, err := decideSource(session, exists)
+	src, err := f.classifySource(ctx, log, ws, record.Dir, session, exists)
 	if err != nil {
 		return refuse(log, "OpenWorkspace", ArmSessionDeleted, err.Error(), false)
 	}
@@ -459,16 +514,11 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, true, nil
 	case sessionlock.StateFree:
-		// THE RESUME GUARD BELONGS TO THE SPAWN, and only to it. A resume
-		// whose vendor transcript is gone yields no death evidence and the
-		// redial ladder would loop forever on an unchangeable fact -- but that
-		// is true only of a process this daemon is about to START. An ADOPTED
-		// shim already holds the conversation open in a running process, and
-		// refusing it for a transcript on disk would refuse a session that is
-		// demonstrably alive.
-		if err := f.resumeGuard(ctx, log, dir, src); err != nil {
-			return nil, false, err
-		}
+		// THE CLASSIFIER ALREADY SETTLED FRESH-VERSUS-RESUME, transcript and
+		// all, before this probe ran: a resume reaching here names a
+		// transcript that was found, and a recorded conversation with none
+		// comes up FRESH with its own fault rather than being refused. There
+		// is nothing left for a spawn-side guard to test.
 		log.Debug(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{"lock": lockPath})
 		sink, err := f.deps.Log.ShimSink(dir)
 		if err != nil {
@@ -609,23 +659,6 @@ func (f *Fleet) portAcrossAccounts(
 	return nil
 }
 
-// resumeGuard refuses a RESUME whose vendor transcript is gone, before any
-// process spawns: a vanished file yields no death evidence and the redial
-// ladder would loop forever on an unchangeable fact.
-func (f *Fleet) resumeGuard(ctx context.Context, log dlog.Logger, dir string, src source) error {
-	if src.Fresh {
-		return nil
-	}
-	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID); err != nil {
-		return refuse(log, "OpenWorkspace", ArmTranscriptMissing,
-			fmt.Sprintf("the transcript for conversation %q is missing: %v", src.VendorSessionID, err), false)
-	}
-	log.Debug(opBringUp, "the resume guard found the transcript", dlog.Context{
-		"vendor_session_id": src.VendorSessionID,
-	})
-	return nil
-}
-
 // freshModel answers the model a fresh session names, or nil when the user
 // chose none.
 //
@@ -677,6 +710,16 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			// The refusal is the shim's own verdict, relayed.
 			return nil, refuse(log, "OpenWorkspace", ArmConversationOwned,
 				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
+		}
+		if failure.GetUnknownSession() != nil {
+			// THE RESUME NAMED A CONVERSATION THE SHIM HAS NO TRANSCRIPT FOR.
+			// The classifier is what keeps a never-turned session off this
+			// path; reaching it anyway is a real vanished transcript, and it
+			// gets its NAMED arm rather than a generic sentence, because
+			// "no transcript exists" is remediated differently from every
+			// other StartSession refusal.
+			return nil, refuse(log, "OpenWorkspace", ArmUnknownSession,
+				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false)
 		}
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
 		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())

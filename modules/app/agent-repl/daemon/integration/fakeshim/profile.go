@@ -41,6 +41,12 @@ type Profile struct {
 	// ColdOnResume answers StartSession(resume) with the cold failure carrying
 	// these facts.
 	ColdOnResume *ColdFacts `json:"cold_on_resume,omitempty"`
+	// NoTranscriptUntilTurn withholds the conversation's transcript until its
+	// FIRST TURN, which is what the real vendor does: StartSession assigns the
+	// vendor session id, and the file only appears once there is something to
+	// write into it. A session bounced before its first turn therefore names a
+	// conversation with no transcript at all.
+	NoTranscriptUntilTurn bool `json:"no_transcript_until_turn,omitempty"`
 	// VendorSessionID pins the id a fresh StartSession mints, so a test can
 	// predict the session lock's path.
 	VendorSessionID string `json:"vendor_session_id,omitempty"`
