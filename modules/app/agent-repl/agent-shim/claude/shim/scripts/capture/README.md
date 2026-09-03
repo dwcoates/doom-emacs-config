@@ -136,7 +136,8 @@ taken under different options is a golden for something nobody ships:
   emits the `permission_denied` messages the permission gate relies on);
 - `includePartialMessages` (the entire streamed-prose plane);
 - `forwardSubagentText` (without it a subagent's prose never arrives at all);
-- `persistSession`, a per-scenario `cwd`, and an `AbortController`.
+- `persistSession`, a per-scenario `cwd`, and a **per-open `AbortController`**
+  (never one shared across opens — see the resume note below).
 
 ## What it writes
 
@@ -201,6 +202,13 @@ compact.
 run on ONE query by default. A turn spelled `{ text, resume: true }` closes the
 query and opens a fresh one resuming the same vendor session id — the shim's own
 resume path, and the only way to capture what a resume actually costs.
+
+Every open gets a **fresh `AbortController`**, minted by `createQuerySession`.
+Closing a query aborts the controller it was opened with, so a controller shared
+across opens handed the resumed `query()` an already-fired signal and the
+resumed turn died with `Error: Operation aborted` immediately after the
+`SessionStart:resume` hook fired. `createQuerySession.open()` tears the previous
+query down, aborts only that open's controller, and then mints a new one.
 
 **`cwd_init`** is a shell command run in the scratch cwd before the query. The
 worktree scenario uses it to make a real git repository; it previously shipped a
