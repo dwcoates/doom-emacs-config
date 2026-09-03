@@ -56,6 +56,12 @@ const (
 	// or the daemon RAISED, it is the liveness probe's answer, so it is
 	// reported as an untyped detail line.
 	KindSessionAbsent = "session_absent"
+	// KindConversationAbandoned is a bring-up whose recorded conversation had
+	// no transcript on disk: the session came up FRESH and the old vendor
+	// session id is left behind. It has no typed arm — it is reported as an
+	// untyped detail line — because the workspace has a LIVE session and the
+	// fault is the record of what was abandoned, not a failure to serve.
+	KindConversationAbandoned = "conversation_abandoned"
 	// KindStateUnreadable is the liveness self-check's own fault when the
 	// state client will not answer. It likewise has no typed arm.
 	KindStateUnreadable = "daemon_state_unreadable"
