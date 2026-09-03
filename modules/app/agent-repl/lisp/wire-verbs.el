@@ -643,6 +643,14 @@ Spawning the session's shim failed."
     (list :detail (agent-repl-wire-verbs--decode-string
                        message 'detail json))))
 
+(defun agent-repl-wire-decode-open-workspace-vendor-start-failed (json)
+  "Decode OpenWorkspaceVendorStartFailed from JSON into a plist (`:detail\').
+The shim came up but the VENDOR failed to start the session."
+  (let ((message "OpenWorkspaceVendorStartFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                       message 'detail json))))
+
 (defun agent-repl-wire-decode-open-workspace-error-unknown-workspace (json)
   "Decode OpenWorkspaceError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-open-workspace-unknown-workspace json))
@@ -671,12 +679,16 @@ Spawning the session's shim failed."
   "Decode OpenWorkspaceError's `spawn_failed' cause arm from JSON."
   (agent-repl-wire-decode-open-workspace-spawn-failed json))
 
+(defun agent-repl-wire-decode-open-workspace-error-vendor-start-failed (json)
+  "Decode OpenWorkspaceError's `vendor_start_failed\' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-vendor-start-failed json))
+
 (defun agent-repl-wire-decode-open-workspace-error (json)
   "Decode OpenWorkspaceError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "OpenWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed vendorStartFailed))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -686,7 +698,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-open-workspace-error-not-yet-adopted)
          (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-open-workspace-error-session-deleted)
          (list 'transcriptMissing :transcript-missing #'agent-repl-wire-decode-open-workspace-error-transcript-missing)
-         (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-open-workspace-error-spawn-failed))))))
+         (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-open-workspace-error-spawn-failed)
+         (list 'vendorStartFailed :vendor-start-failed #'agent-repl-wire-decode-open-workspace-error-vendor-start-failed))))))
 
 (defun agent-repl-wire-decode-open-workspace-response-success (json)
   "Decode OpenWorkspaceResponse's `success' arm from JSON."
