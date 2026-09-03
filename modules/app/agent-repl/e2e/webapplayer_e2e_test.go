@@ -37,6 +37,12 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"connectrpc.com/connect"
+
 	"claude-repld/integration/harness"
 )
 
@@ -150,6 +156,106 @@ func TestWebappLayerRoster(t *testing.T) {
 	wlDriveArea(t, "roster.layer.test.ts")
 }
 
+// TestWebappLayerMergeTabs is section F7: the merge bubble's tab strip.
+//
+// THIS AREA NEEDS A DIFFERENT WORLD from every other one: a merge needs a
+// REPOSITORY the daemon knows and a CHILD workspace to merge into it, so the
+// page is addressed to the child rather than to a plain registered worktree.
+// The scripted fake git (harness.NewRepo plus a test-all script) is the only
+// git involved — no real repository, exactly as SPEC.md section B requires.
+func TestWebappLayerMergeTabs(t *testing.T) {
+	npm := wlRequireNPM(t)
+	webappDir := wlRequireWebappDeps(t)
+
+	repo := harness.NewRepo(t)
+	// THE MERGE TEST GATE. The self-repo method runs `bash bin/test-all.sh` in
+	// the merge target worktree; these scripted repos have none, so without a
+	// provided gate the merge exits 127 and NEVER reaches a terminal — which
+	// showed up here as a merge bubble that sometimes never appeared at all.
+	// Provided exactly as daemon/integration/merge_test.go and the merge-queue
+	// area do, and named through the env var the daemon reads.
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("webapp layer: passed in 1s\n")
+
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		SelfRepo: repo.Dir,
+		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+	}})
+	repoRef := wlRepositoryRef(t, w, repo)
+	ws := wlCreateChild(t, w, repoRef, "wl-merge")
+
+	// A SCRIPTED CONFLICT, so the merge PARKS instead of landing.
+	//
+	// A landed merge tears the child workspace's worktree down and releases
+	// its lease — which would pull the page's own workspace out from under it
+	// mid-file. A conflict keeps the workspace alive, opens the merge tab, and
+	// gives the strip its agentic tabs (conflicts, and PARKED), which is what
+	// section F7 is about. The conflict is scripted into the FAKE git's state;
+	// no real repository is involved.
+	repo.ScriptConflict(repo.Dir, filepath.Base(ws.GetDir()), "conflict.txt")
+	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+
+	host := w.Daemon.WatchHost(ws)
+	defer host.Close()
+
+	if err := wlRunVitest(t, npm, webappDir, "merge-tabs.layer.test.ts",
+		wlChildEnv(t, w, ws)); err != nil {
+		t.Fatalf("e2e/webapp-layer: merge-tabs.layer.test.ts failed: %v", err)
+	}
+
+	w.RequireNoUnexpectedExit(t)
+}
+
+// wlRepositoryRef registers a repository's main worktree and reads the
+// daemon-minted RepositoryRef back off the roster stream.
+func wlRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
+	t.Helper()
+	harness.Register(t, w.Daemon, repo.Dir)
+	roster := w.WatchRoster()
+	defer roster.Close()
+	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section",
+		func(r *frontendv1.WorkspaceRoster) bool { return wlFindRepo(r, repo.Dir) != nil })
+	ref := wlFindRepo(got, repo.Dir)
+	if ref == nil {
+		t.Fatalf("e2e/webapp-layer: no roster repository section for %s", repo.Dir)
+	}
+	return ref
+}
+
+// wlFindRepo finds a repository section by its worktree dir. A repository is
+// keyed by its COMMON DIR, which for an ordinary checkout is
+// `<worktree>/.git`, so both spellings are accepted.
+func wlFindRepo(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
+	for _, section := range r.GetRepository().GetSections() {
+		switch section.GetKey().GetRepository().GetDir() {
+		case dir, filepath.Join(dir, ".git"):
+			return section.GetKey().GetRepository()
+		}
+	}
+	return nil
+}
+
+// wlCreateChild creates a top-level child workspace of a repository, which is
+// what a merge merges.
+func wlCreateChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, name string) *workspacev1.WorkspaceRef {
+	t.Helper()
+	resp, err := w.Client().CreateWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repoRef,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Name: &name,
+		}},
+	}))
+	if err != nil {
+		t.Fatalf("CreateWorkspace(%s) = error %v, want a success", name, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	if ws.GetId() == "" {
+		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
+	}
+	return ws
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
@@ -185,7 +291,23 @@ func wlDriveArea(t *testing.T, vitestFile string) {
 		t.Fatal("e2e/webapp-layer: the daemon published no address to hand the webapp")
 	}
 
-	env := append(os.Environ(),
+	env := wlChildEnv(t, w, ws)
+
+	if err := wlRunVitest(t, npm, webappDir, vitestFile, env); err != nil {
+		t.Fatalf("e2e/webapp-layer: %s failed: %v", vitestFile, err)
+	}
+
+	w.RequireNoUnexpectedExit(t)
+}
+
+// wlChildEnv is the environment one vitest child is handed: the gate, the
+// daemon's own published address, and the workspace the page is addressed to.
+func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
+	t.Helper()
+	if w.Addr == "" {
+		t.Fatal("e2e/webapp-layer: the daemon published no address to hand the webapp")
+	}
+	return append(os.Environ(),
 		"AGENT_REPL_WEBAPP_LAYER=1",
 		"AGENT_REPL_E2E_DAEMON_URL=http://"+w.Addr,
 		"AGENT_REPL_E2E_WORKSPACE_ID="+ws.GetId(),
@@ -197,12 +319,6 @@ func wlDriveArea(t *testing.T, vitestFile string) {
 		// vitest's own CI mode: no watch, no interactive reporter.
 		"CI=1",
 	)
-
-	if err := wlRunVitest(t, npm, webappDir, vitestFile, env); err != nil {
-		t.Fatalf("e2e/webapp-layer: %s failed: %v", vitestFile, err)
-	}
-
-	w.RequireNoUnexpectedExit(t)
 }
 
 // wlRunVitest runs the layer's vitest project as a child of this test,
