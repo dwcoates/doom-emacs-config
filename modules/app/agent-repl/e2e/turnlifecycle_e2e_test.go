@@ -433,16 +433,22 @@ func TestFastMode(t *testing.T) {
 // TestMaxTokens pins the same failure-arm family as #2/#3 for the
 // output-token ceiling. Scenario: `!max-tokens` (failures.ts's MAX_TOKENS).
 //
-// Unlike max-turns/budget/structured-output/execution-error, this one HAS a
-// grounded, wired path: `frontend/v1/feed.proto`'s `FeedTurnEndedErrored.
-// error` oneof declares `FeedTurnErrorMaxTokens max_tokens = 11` with the
-// doc comment "The vendor stopped at its output ceiling; whatever prose
-// landed may be cut short" — matching the scenario's own `result` exactly
-// (`stopReason: "max_tokens"`, partial text kept), even though the mock's
-// own `result.subtype` is `"success"` (max-tokens has no dedicated
-// `sdk.d.ts` error subtype; the ceiling is carried entirely by `stop_reason`,
-// per failures.ts's own comment on this scenario). So this test asserts the
-// specific Errored{MaxTokens} arm, not just the structural terminal fact.
+// MAX-TOKENS IS A RESPONSE-LEVEL FACT, NOT A TURN FAILURE. The producer's
+// turn-ending vocabulary (`conversation/v1/agent.proto:218-278`,
+// `AgentFailure.failure`) has NO max-tokens arm at all; the ceiling lives on
+// `AgentResponseFailure.reason` as `AgentResponseStoppedAtMaxTokens
+// max_tokens = 1` ("The vendor stopped at its output ceiling; the prose is
+// cut short"). The shim's own scenario table says the same for `!max-tokens`
+// (`agent-shim/claude/shim/AGENTS.md:335`: "AgentResponseFailure.reason=
+// max_tokens — the text is kept, the answer is incomplete"), and the mock's
+// `result.subtype` is `"success"`, so THE TURN CONCLUDES.
+//
+// The daemon draws that response-level fact as the prose bubble's broken
+// state — `FeedResponse.error`, "the prose that landed stays drawn, marked
+// broken" (daemon/internal/resolve/feed/response.go's AgentResponse_Failure
+// arm). `FeedTurnEndedErrored.max_tokens` exists for the case where the TURN
+// itself errored at the ceiling; this scenario is not that case, so the old
+// assertion could only ever have failed.
 func TestMaxTokens(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -452,17 +458,24 @@ func TestMaxTokens(t *testing.T) {
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "max-tokens")
 	row := AwaitTurnEnded(t, w, ws, turn)
 
-	// Assert
+	// Assert: the turn concluded — the mock's own result subtype.
 	ended := row.GetTurnEnded()
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	errored := ended.GetErrored()
-	if errored == nil {
-		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{MaxTokens}", ended)
+	if ended.GetConcluded() == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Concluded (the mock's result subtype is success)", ended)
 	}
-	if errored.GetMaxTokens() == nil {
-		t.Fatalf("FeedTurnEndedErrored.Error = %T, want MaxTokens", errored.GetError())
+
+	// Assert: the response-level fact — the truncated prose bubble is drawn
+	// BROKEN, with what landed before the ceiling kept on screen.
+	// rmAwaitFeedRow (remainder_e2e_test.go) is the package's one
+	// page-then-tail row wait; reused rather than re-minted here.
+	broken := rmAwaitFeedRow(t, w, ws, "the truncated response bubble, drawn broken", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == turn.GetValue() && r.GetActivity().GetResponse().GetError() != nil
+	})
+	if got := broken.GetActivity().GetResponse().GetError().GetProse().GetMarkdown(); got == "" {
+		t.Fatal("the broken response bubble carries no prose, want the partial text the ceiling cut short (failures.ts keeps it)")
 	}
 }
 
