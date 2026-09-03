@@ -115,7 +115,7 @@ draws the daemon's build stamp plus the resolver's spliced account, model and
 permission-mode facts (landing 6). `/agents` and `/help` are ruled UNPRODUCED
 (Q1) — they answer as `command_refused` before recognition ever reaches a panel.
 
-The two below are NOTES, not unlanded arms: the panel arms are landed and the
+The one below is a NOTE, not an unlanded arm: the panel arm is landed and the
 contract owes nothing. What is missing is a daemon-side PRODUCER, and until one
 exists the command fails LOUDLY out of the handler rather than drawing an empty
 card.
@@ -123,9 +123,12 @@ card.
 - NOTE `/todos`: `SubmitPromptCommandPanel.todos` is landed and
   `TodosPanelView` is spelled, but no daemon resolver holds the tracker's
   checklist this wave. The command fails loudly.
-- NOTE `/mcp`: `SubmitPromptCommandPanel.mcp` is landed and `McpPanelView` is
-  spelled, but nothing in the daemon observes the MCP server set this wave. The
-  command fails loudly.
+
+`/mcp` is PRODUCED as of this landing: the topbar resolver retains the
+`SessionUpdate.mcp_server` health the shim already delivers, one row per server
+in first-named order, and `server.Panels` assembles `McpPanelView` from them.
+It never fails for want of a fact — a session that named no server draws an
+EMPTY panel, which is the daemon stating there is no MCP server here.
 
 /status DEGRADES BY DESIGN (project lead): the vendor handshake is deferred, so
 the panel is the version row plus the spliced account/model/mode rows and

@@ -18,6 +18,14 @@ type panelTopbar struct {
 	panel     *frontendv1.ContextPanelView
 	facts     topbar.StatusFacts
 	factsHeld bool
+	mcp       *frontendv1.McpPanelView
+}
+
+func (p *panelTopbar) McpPanel(ids.WorkspaceID) *frontendv1.McpPanelView {
+	if p.mcp == nil {
+		return &frontendv1.McpPanelView{}
+	}
+	return p.mcp
 }
 
 func (p *panelTopbar) ContextPanel(ids.WorkspaceID) (*frontendv1.ContextPanelView, bool) {
@@ -195,5 +203,46 @@ func TestStatusPanelOmitsTheVersionRowWhenNoStampWasWritten(t *testing.T) {
 		if row.GetLabel() == "Version" {
 			t.Fatalf("rows = %v, want no Version row when the deploy chain wrote no stamp", panel.GetStatus().GetRows())
 		}
+	}
+}
+
+// TestPanelsAnswersTheMcpPanel pins the /mcp producer: the retained server
+// healths are drawn as the panel's rows.
+func TestPanelsAnswersTheMcpPanel(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{mcp: &frontendv1.McpPanelView{
+		Rows: []*frontendv1.McpPanelRow{{Name: "github"}},
+	}}, stamp("abc123"), fakeLogger{})
+
+	// Act.
+	panel, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_MCP)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("mcp panel: %v", err)
+	}
+	rows := panel.GetMcp().GetRows()
+	if len(rows) != 1 || rows[0].GetName() != "github" {
+		t.Fatalf("rows = %v, want one github row", rows)
+	}
+}
+
+// TestMcpPanelAnswersAnEmptyCatalogAsAnEmptyPanel pins that a workspace with no
+// MCP server stated is an empty panel, never a refusal.
+func TestMcpPanelAnswersAnEmptyCatalogAsAnEmptyPanel(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{}, stamp("abc123"), fakeLogger{})
+
+	// Act.
+	panel, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_MCP)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("mcp panel: %v", err)
+	}
+	if panel.GetMcp() == nil || len(panel.GetMcp().GetRows()) != 0 {
+		t.Fatalf("panel = %v, want an empty mcp panel", panel)
 	}
 }
