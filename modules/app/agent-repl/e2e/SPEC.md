@@ -327,6 +327,28 @@ itself.**
   sidecar/daemon would race a live writer against a closed socket and turn
   an unrelated test failure into a spurious one.
 
+### Failure artifacts
+
+Every real log sink the daemon and its shims write — the restart-scoped
+`daemon.run.log` and each per-workspace `daemon`/`shim`/`webapp` sink — is a
+file under the state root's `logs/` directory (`daemon/internal/dlog/sink.go`
+`createTarget`); the `<workspace>/.claude/emacs/<sink>.log` paths are symlinks
+into it. The state root is a per-test temp dir the testing package deletes on
+the way out, so a failure used to leave nothing behind and the next diagnosis
+had to re-run the test with instrumentation added.
+
+`preserveLogsOnFailure` (registered in `NewWorld` immediately after the daemon
+starts, so LIFO cleanup runs it AFTER the daemon and its shims have exited and
+flushed) collects that one directory, and only when `t.Failed()`:
+
+- `AGENT_REPL_E2E_ARTIFACTS=<dir>` set → every sink is copied whole into
+  `<dir>/<test name with '/' flattened>/`, and the destination is named in the
+  test output.
+- unset (the default) → each sink's last 64 KiB, cut forward to a record
+  boundary, goes into `t.Log` output. Bounded, but never nothing.
+
+A passing test writes no artifacts and logs nothing.
+
 ### Store stop/restart control (ruling 2 — real degraded-state outages)
 
 The store helper exposes:
