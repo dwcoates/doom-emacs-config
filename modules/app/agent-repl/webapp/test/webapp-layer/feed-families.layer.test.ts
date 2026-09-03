@@ -29,19 +29,9 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import {
-  BOOT_BUDGET_MS,
-  TURN_TEST_MS,
-  awaitTurnEnded,
-  bootLayer,
-  driveScenarioRow,
-  rows,
-  textOf,
-} from "./drive";
+import { BOOT_BUDGET_MS, TURN_TEST_MS, bootLayer, driveTurn, rows, textOf } from "./drive";
 
 let app: MountedApp;
-/** How many turns this file has completed; each test waits out its own. */
-let turns = 0;
 
 beforeAll(async () => {
   app = await bootLayer();
@@ -51,11 +41,9 @@ afterAll(async () => {
   await app?.stop();
 });
 
-/** Drive one scenario, read the newest row of a family, and end the turn. */
+/** Drive one scenario to a completed turn and read the row it added. */
 async function family(scenario: string, kind: string, unit?: string): Promise<HTMLElement> {
-  const row = await driveScenarioRow(app, scenario, kind, unit);
-  await awaitTurnEnded(app, ++turns);
-  return row;
+  return driveTurn(app, scenario, kind, unit);
 }
 
 // §F2 #2 — user_prompt.
@@ -63,8 +51,7 @@ it(
   "draws the composer's own submission as a user_prompt row, and no row before the daemon pushes one",
   async () => {
     // Arrange / Act
-    const row = await driveScenarioRow(app, "md", "userPrompt");
-    await awaitTurnEnded(app, ++turns);
+    const row = await family("md", "userPrompt");
     // Assert — the row carries the text this page sent.
     expect(textOf(row)).toContain("!md");
   },
@@ -314,8 +301,8 @@ it(
     const before = rows(app, "turnEnded").length;
     // Act
     await family("md", "activity", "response");
-    // Assert — one more terminal row than before, and it is a row like any
-    // other (history replays it).
+    // Assert — exactly one more terminal row than before, and it is a row like
+    // any other (history replays it).
     expect(rows(app, "turnEnded").length).toBe(before + 1);
   },
   TURN_TEST_MS,
