@@ -488,9 +488,24 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		"daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds",
 	}
 
-	// Arrange
+	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
+	// (hibernation_e2e_test.go's turnGatePathEnv/turnGateTextEnv, documented
+	// in agent-shim/claude/shim/src/fake/index.ts:110-114): a turn carrying
+	// exactly the gate text does not begin emitting until the gate path
+	// exists. Without it the real shim answers `keep going` in microseconds
+	// and the turn is very likely already over by the time MergeWorkspace
+	// admits — which is not a displacement at all. The gate path is never
+	// created: the turn must still be in flight when the merge takes the
+	// workspace, and the crash below ends the shim.
+	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		SelfRepo: repo.Dir,
+		ExtraEnv: []string{
+			turnGatePathEnv + "=" + gatePath,
+			turnGateTextEnv + "=" + displacedText,
+		},
+	}})
 	w.ExpectWarnings(mqExpectedBounceWarnings...)
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-displaced")
