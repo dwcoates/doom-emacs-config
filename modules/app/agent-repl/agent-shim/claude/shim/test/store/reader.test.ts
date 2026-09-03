@@ -151,6 +151,120 @@ describe("openAgentPage", () => {
   });
 });
 
+describe("openAgentPage on a book with no rows yet", () => {
+  /** A fake store holding NOTHING, and a live persistence pointed at it. */
+  async function empty(name: string) {
+    const started = await startFakeStore(socketPathForTest(name));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+    });
+    return { started, plane };
+  }
+
+  it("serves an EMPTY page when the producer vouches for the agent", async () => {
+    // Arrange.
+    const { plane } = await empty("deferred-empty-page");
+
+    // Act.
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    session.close();
+
+    // Assert.
+    expect(session.page.entries).toHaveLength(0);
+  });
+
+  it("stands the tail on the book's first row", async () => {
+    // Arrange.
+    const { plane } = await empty("deferred-tail-stands");
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-first", "/tmp/first")]);
+    await plane.flush();
+    const first = await pending;
+    session.close();
+
+    // Assert.
+    expect(unitOf(first.value as conversationv1.HistoryEntryAt)).toBe("unit-first");
+  });
+
+  it("refuses unknown_agent when the producer does not vouch for the agent", async () => {
+    // Arrange.
+    const { plane } = await empty("deferred-unknown");
+
+    // Act, Assert.
+    await expect(plane.openAgentPage(BOOK, 10, undefined, () => false)).rejects.toMatchObject({
+      kind: "unknown_agent",
+    });
+  });
+
+  it("refuses unknown_agent when the caller vouches for nothing at all", async () => {
+    // Arrange.
+    const { plane } = await empty("deferred-no-predicate");
+
+    // Act, Assert.
+    await expect(plane.openAgentPage(BOOK, 10)).rejects.toMatchObject({
+      kind: "unknown_agent",
+    });
+  });
+
+  it("surfaces a storage_failure even for a vouched-for agent", async () => {
+    // A store that cannot be read is not a book waiting to be written.
+    // Arrange.
+    const { started, plane } = await empty("deferred-storage-failure");
+    started.failReads("OpenAgentSession", "storage_failure", "sqlite: disk I/O error");
+
+    // Act, Assert.
+    await expect(plane.openAgentPage(BOOK, 10, undefined, () => true)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
+  it("ends a tail that was concluded before the book ever existed", async () => {
+    // The teardown writes what it owes BEFORE concluding, so a book still
+    // absent here holds nothing this consumer is owed.
+    // Arrange.
+    const { plane } = await empty("deferred-conclude");
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => true);
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    session.concludeThrough(undefined);
+    const first = await Promise.race([pending.then(() => "ended"), hangGuard()]);
+    session.close();
+
+    // Assert.
+    expect(first).toBe("ended");
+  });
+
+  it("stops waiting once the producer withdraws the announcement", async () => {
+    // Arrange.
+    const { plane } = await empty("deferred-withdrawn");
+    let known = true;
+    const session = await plane.openAgentPage(BOOK, 10, undefined, () => known);
+    const pending = session.tail[Symbol.asyncIterator]().next();
+
+    // Act.
+    known = false;
+    const outcome = await Promise.race([
+      pending.then(
+        () => "ended",
+        (error: unknown) => (error instanceof PersistenceError ? error.kind : "other"),
+      ),
+      hangGuard(),
+    ]);
+    session.close();
+
+    // Assert.
+    expect(outcome).toBe("unknown_agent");
+  });
+});
+
 describe("the tail", () => {
   it("delivers entries written after the page, and never replays the page", async () => {
     const { plane } = await seeded("tail-pin", 1);
