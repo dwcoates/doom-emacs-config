@@ -308,7 +308,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const closeDispatcher = async (): Promise<void> => {
     if (dispatcherClosed) return;
     dispatcherClosed = true;
-    await closeDispatcher();
+    await dispatcher.close();
   };
   options.arrange?.(fake);
 
