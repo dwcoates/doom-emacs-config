@@ -41,6 +41,12 @@ type Profile struct {
 	// ColdOnResume answers StartSession(resume) with the cold failure carrying
 	// these facts.
 	ColdOnResume *ColdFacts `json:"cold_on_resume,omitempty"`
+	// VendorStartFailed answers EVERY StartSession with the
+	// `vendor_start_failed` refusal carrying this detail: the shim process is
+	// up and serving and only the vendor failed to start inside it. It is a
+	// PROFILE rather than a scripted answer because StartSession is the
+	// daemon's very first request, which a control-socket script would race.
+	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
 	// NoTranscriptUntilTurn withholds the conversation's transcript until its
 	// FIRST TURN, which is what the real vendor does: StartSession assigns the
 	// vendor session id, and the file only appears once there is something to
