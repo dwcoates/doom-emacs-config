@@ -1203,6 +1203,27 @@ for bugs.
 
 ## G. Open items for the project lead
 
+- **A response-level failure does not reach the feed as `FeedResponse.error`.**
+  (Raised 2026-09-03, observed against the real shim.) For `!max-tokens` the
+  shim's own converter settles the block as a failure
+  (`shim.convert.stream`: "settling a prose block ... settled=failure") and
+  `daemon/internal/resolve/feed/response.go`'s `AgentResponse_Failure` case
+  builds `FeedResponse.error`, yet the row the feed finally publishes for
+  that block does not carry the error arm. `TestMaxTokens` therefore asserts
+  the response-level fact the contract states in words — "the text is kept,
+  the answer is incomplete" (`agent-shim/claude/shim/AGENTS.md:335`) — by
+  the KEPT PROSE, and accepts either settled arm. Whether the last upsert of
+  the block restates it as settled-success, or the failure never reaches the
+  resolver, is the daemon's to determine.
+
+- **An activity row published after its turn's terminal carries no turn id.**
+  (Same investigation.) `stampTurn` (`daemon/internal/resolve/feed/sink.go`)
+  stamps from the turn IN FLIGHT, so a block whose last upsert lands after
+  the terminal loses the stamp its earlier upserts had. Any test matching an
+  activity row by turn id is therefore racing the upsert order; `TestMaxTokens`
+  matches on content instead. Whether a row should be able to lose a stamp it
+  once had is a daemon question.
+
 - **`HibernateError.kind.turn_in_flight` is effectively dead.** (Raised
   2026-09-03 by the e2e triage.) The idle sweep short-circuits on its OWN
   freeness pre-check — `if !c.deps.Freeness.Free(ws.ID) { ... "the idle
