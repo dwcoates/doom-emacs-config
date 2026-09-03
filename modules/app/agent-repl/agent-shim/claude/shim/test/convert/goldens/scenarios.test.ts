@@ -33,7 +33,11 @@ const UNIT_KINDS: readonly (readonly [string, readonly string[]])[] = [
   ["bash-interrupted-by-timeout", ["hook", "thinking", "bash", "response"]],
   ["bash-nonzero-exit", ["hook", "thinking", "bash", "response"]],
   ["bash-partial-output-with-spill", ["hook", "thinking", "bash", "read", "response"]],
-  ["compaction-directed", ["hook", "thinking", "response"]],
+  // The 2026-09-03 re-capture's first 6 filler turns answer directly with no
+  // `thinking` unit at all — only turn 7 ("Recap, at length...") produces
+  // one, so `response` (turn 1's) is the SECOND kind seen, `thinking` the
+  // THIRD.
+  ["compaction-directed", ["hook", "response", "thinking"]],
   ["context-budget-warning", ["hook", "thinking", "response", "bash", "read"]],
   ["context-injected-memory", ["hook", "thinking", "response"]],
   ["context-injected-skills", ["hook", "thinking", "response"]],
@@ -106,7 +110,12 @@ const SESSION_ARMS: readonly (readonly [string, readonly string[]])[] = [
   ["bash-interrupted-by-timeout", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["bash-nonzero-exit", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["bash-partial-output-with-spill", ["mcpServer", "fastMode", "rateLimitStatus"]],
-  ["compaction-directed", ["mcpServer", "fastMode", "rateLimitStatus", "compacting"]],
+  // The real capture's OPENING `system:init` states `fast_mode_state` but an
+  // EMPTY `mcp_servers` array (the vendor has not yet probed the MCP catalog
+  // at session start), and a `rate_limit_event` follows before any LATER
+  // `system:init` finally carries a populated `mcp_servers` array — so
+  // `fastMode` and `rateLimitStatus` are seen before `mcpServer`, not after.
+  ["compaction-directed", ["fastMode", "rateLimitStatus", "mcpServer", "compacting"]],
   ["context-budget-warning", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["context-injected-memory", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["context-injected-skills", ["mcpServer", "fastMode", "rateLimitStatus"]],
@@ -185,7 +194,24 @@ const TERMINALS: readonly (readonly [string, readonly string[]])[] = [
   ["bash-interrupted-by-timeout", ["success.completed"]],
   ["bash-nonzero-exit", ["success.completed"]],
   ["bash-partial-output-with-spill", ["success.completed"]],
-  ["compaction-directed", ["success.completed", "success.completed", "success.completed"]],
+  // 9 turns, not 3: the 2026-09-03 re-capture added 6 filler turns (so
+  // `/compact` has enough transcript to actually cut) ahead of the original
+  // 3 (`/compact` itself plus the follow-up question) — all 9 end
+  // `success.completed`.
+  [
+    "compaction-directed",
+    [
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+    ],
+  ],
   ["context-budget-warning", ["success.completed"]],
   ["context-injected-memory", ["success.completed"]],
   ["context-injected-skills", ["success.completed"]],

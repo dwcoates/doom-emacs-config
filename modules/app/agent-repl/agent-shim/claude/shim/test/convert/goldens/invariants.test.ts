@@ -302,31 +302,41 @@ describe("the residue the captures actually produce", () => {
 });
 
 describe("the shim never invents a context cut", () => {
-  // RULED: `compacting` is a STATUS beat, and the cut is the `compact_boundary`
-  // record. `compaction-directed` is the one capture whose session says it
-  // compacted — and it carries NO boundary (the run answered "Not enough
-  // messages to compact."), so the honest output has a `compacting` session arm
-  // and no `context_cut` anywhere. A shim that manufactured one from the status
-  // alone would draw a divider through a conversation nothing cut.
-  it("compaction-directed says `compacting` and cuts nothing", () => {
+  // GROUNDED (2026-09-03 re-capture): `compacting` is a STATUS beat, and the
+  // cut is the `compact_boundary` record. `compaction-directed` USED TO be
+  // the one capture whose session said it compacted but carried NO boundary
+  // (the old run answered "Not enough messages to compact."). The re-capture
+  // lengthened the shared world's own prompt list until `/compact` had
+  // enough transcript to actually cut, so this capture now carries a REAL
+  // boundary — the honest output has both the `compacting` session arm AND a
+  // real `context_cut.compacted`, because the vendor genuinely cut here. A
+  // shim that omitted it would hide a cut the vendor actually made.
+  it("compaction-directed says `compacting` and cuts via a real compact_boundary", () => {
     const run = foldScenario("compaction-directed");
     expect(sessionUpdateArms(run)).toContain("compacting");
-    expect(arms(run).filter((arm) => arm.includes("context_cut"))).toEqual([]);
+    expect(arms(run).filter((arm) => arm.includes("context_cut"))).toEqual([
+      "agent_update.context_cut.compacted",
+    ]);
   });
 
-  it("the ONLY capture that cuts is the /clear, and the compaction arms stay ungrounded", () => {
-    // A `/clear` IS a cut and the vendor records it, so exactly one capture
-    // produces one. The COMPACTION arms (`ContextCompacted`,
-    // `ContextCompactionFailed`) have no capture at all — the MANIFEST records
-    // that gap — so naming the whole set here keeps a manufactured cut from
-    // appearing anywhere without a human noticing.
+  it("the captures that cut are the /clear and the real compaction, and the failed-compaction arm stays ungrounded", () => {
+    // A `/clear` IS a cut and the vendor records it, and — since the
+    // 2026-09-03 re-capture — so does `compaction-directed`'s real
+    // `/compact`. `ContextCompactionFailed` (a FAILED compaction) has no
+    // capture at all — the MANIFEST records that gap — so naming the whole
+    // set here keeps a manufactured cut from appearing anywhere without a
+    // human noticing.
     const withCuts = SCENARIOS.filter((scenario) =>
       arms(foldScenario(scenario)).some((arm) => arm.includes("context_cut")),
     );
-    expect(withCuts).toEqual(["identity-rotation-clear"]);
-    const compacted = arms(foldScenario("identity-rotation-clear")).filter((arm) =>
+    expect(withCuts).toEqual(["compaction-directed", "identity-rotation-clear"]);
+    const cleared = arms(foldScenario("identity-rotation-clear")).filter((arm) =>
       arm.includes("context_cut"),
     );
-    expect(compacted.some((arm) => arm.includes("compact"))).toBe(false);
+    expect(cleared.some((arm) => arm.includes("compact"))).toBe(false);
+    const compacted = arms(foldScenario("compaction-directed")).filter((arm) =>
+      arm.includes("context_cut"),
+    );
+    expect(compacted).toEqual(["agent_update.context_cut.compacted"]);
   });
 });
