@@ -831,6 +831,10 @@ type fakeRunner struct {
 	mu sync.Mutex
 
 	runs []scriptedRun
+	// before, when set, is called before an invocation answers. It is the seam
+	// a test holds a run inside its LONG phase with, so the drain can be
+	// exercised against a merge that is mid-gate.
+	before func()
 	// argv records every invocation, which is what the --suites contract is
 	// asserted against.
 	argv [][]string
@@ -845,6 +849,12 @@ type scriptedRun struct {
 }
 
 func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+	r.mu.Lock()
+	before := r.before
+	r.mu.Unlock()
+	if before != nil {
+		before()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.argv = append(r.argv, argv)
@@ -861,20 +871,22 @@ func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, 
 type harness struct {
 	t *testing.T
 
-	o        *orchestrator
-	db       *fakeDB
-	git      *fakeGit
-	queue    *fakeQueue
-	feed     *fakeFeed
-	footer   *fakeFooter
-	sidebar  *fakeSidebar
-	holds    *fakeHolds
-	runner   *fakeRunner
-	logs     *dlog.TestSurfaces
-	rollout  *fakeRollout
-	stateDir string
-	targetD  string
-	sourceD  string
+	o       *orchestrator
+	db      *fakeDB
+	git     *fakeGit
+	queue   *fakeQueue
+	feed    *fakeFeed
+	footer  *fakeFooter
+	sidebar *fakeSidebar
+	holds   *fakeHolds
+	runner  *fakeRunner
+	logs    *dlog.TestSurfaces
+	// pauseInTerminal is the terminal seam the drain's tests wire.
+	pauseInTerminal AdmissionPause
+	rollout         *fakeRollout
+	stateDir        string
+	targetD         string
+	sourceD         string
 
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
@@ -1016,6 +1028,7 @@ func (h *harness) deps() Deps {
 			return *h.displaced, true, nil
 		},
 		PauseAfterCapture: h.pauseAfterCapture,
+		PauseInTerminal:   h.pauseInTerminal,
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()

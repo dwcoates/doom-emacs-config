@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
@@ -662,4 +664,181 @@ func TestAReleaseResubmitsNothingWhenTheDisplacedRecordIsAlreadyClaimed(t *testi
 	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
 		t.Fatalf("the release resubmitted %d turns for a record it does not own, want none", n)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The shutdown drain: what a SIGTERM landing mid-merge does.
+// ---------------------------------------------------------------------------
+
+// TestTheDrainLetsATerminalFinishItsDurableStamps covers the defect the drain
+// exists for: a stop landing inside a run's terminal must not take the state
+// client away from the landing's own stamps.
+func TestTheDrainLetsATerminalFinishItsDurableStamps(t *testing.T) {
+	// Arrange: a merge held at the top of its terminal, with the drain
+	// releasing it from inside its own wait — so the wait is real rather
+	// than assumed.
+	h := newHarness(t)
+	held, release := make(chan struct{}), make(chan struct{})
+	h.pauseInTerminal = func(context.Context, ids.WorkspaceID) {
+		close(held)
+		<-release
+	}
+	o, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the orchestrator: %v", err)
+	}
+	h.o = o
+	o.onDrainWait = func() { close(release) }
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-held
+
+	// Act: the orderly exit's drain.
+	o.Drain(context.Background())
+
+	// Assert: the terminal's durable stamps all landed, and nothing failed.
+	if err := <-done; err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+	h.db.mu.Lock()
+	_, stamped := h.db.mergedAt[theWorkspace]
+	closed := h.db.closed[theWorkspace]
+	h.db.mu.Unlock()
+	if !stamped {
+		t.Fatal("merged_at was never stamped, want the drain to have held the store open for it")
+	}
+	if !closed {
+		t.Fatal("the merged workspace was never closed, want the drain to have held the store open for it")
+	}
+	if failures := recordsAtLevel(h, "error"); len(failures) > 0 {
+		t.Fatalf("the drained terminal produced %d error records, want none: %v", len(failures), failures)
+	}
+}
+
+// TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt covers what is NOT
+// drained: a merge in its long phases is abandoned to the boot recovery, and
+// the record of that is an INFO naming the phase rather than a pile of failed
+// writes.
+func TestTheDrainAnnouncesAMidPhaseMergeInsteadOfWaitingForIt(t *testing.T) {
+	// Arrange: a merge held inside its test gate, which is a long phase.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	inGate, release := make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+
+	// Act.
+	h.o.Drain(context.Background())
+
+	// Assert: one INFO naming the phase, and no error record at all.
+	record, found := recordWith(h, "info", "daemon.merge.drain")
+	if !found {
+		t.Fatal("the drain wrote no INFO record for the mid-phase merge")
+	}
+	if record.Context["phase"] != TabTests {
+		t.Fatalf("the mid-phase record names phase %v, want %q", record.Context["phase"], TabTests)
+	}
+	if record.Context["workspace"] != string(theWorkspace) {
+		t.Fatalf("the mid-phase record names workspace %v, want %q", record.Context["workspace"], theWorkspace)
+	}
+	if failures := recordsAtLevel(h, "error"); len(failures) > 0 {
+		t.Fatalf("the abandoned mid-phase merge produced %d error records, want none: %v", len(failures), failures)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+}
+
+// TestTheDrainWarnsWhatOneExpiredBoundLeftUnstamped covers the bound itself:
+// the drain gives up, and what it gave up on is named so the boot recovery's
+// work is visible before that boot rather than after it.
+func TestTheDrainWarnsWhatOneExpiredBoundLeftUnstamped(t *testing.T) {
+	tests := []struct {
+		name          string
+		owed          string
+		wantUnstamped string
+	}{
+		{name: "a landing's terminal", owed: terminalOwedLanded, wantUnstamped: terminalOwedLanded},
+		{name: "a failure's terminal", owed: terminalOwedFailed, wantUnstamped: terminalOwedFailed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a registered terminal that never completes, under a
+			// bound short enough that the assertion is not a wait.
+			h := newHarness(t)
+			h.o.drainBound = time.Millisecond
+			h.o.terminals = map[ids.WorkspaceID]*terminal{
+				theWorkspace: {ws: theWorkspace, done: make(chan struct{}), owed: tc.owed, lease: "lease-1"},
+			}
+
+			// Act.
+			h.o.Drain(context.Background())
+
+			// Assert.
+			record, found := recordWith(h, "warn", "daemon.merge.drain")
+			if !found {
+				t.Fatal("the expired bound wrote no WARN record")
+			}
+			if record.Context["workspace"] != string(theWorkspace) {
+				t.Fatalf("the WARN names workspace %v, want %q", record.Context["workspace"], theWorkspace)
+			}
+			if record.Context["unstamped"] != tc.wantUnstamped {
+				t.Fatalf("the WARN names %v as unstamped, want %q", record.Context["unstamped"], tc.wantUnstamped)
+			}
+		})
+	}
+}
+
+// TestADrainingOrchestratorAdmitsNothing covers the drain's other half: the
+// bound cannot be outrun by a merge admitted inside it.
+func TestADrainingOrchestratorAdmitsNothing(t *testing.T) {
+	// Arrange: a queued merge under a draining orchestrator.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.o.mu.Lock()
+	h.o.draining = true
+	h.o.mu.Unlock()
+
+	// Act.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the pump errored while draining: %v", err)
+	}
+	if ran {
+		t.Fatal("the pump admitted a merge while draining, want nothing admitted")
+	}
+}
+
+// recordsAtLevel is every captured record at one level, which is how the
+// drain's tests assert the ABSENCE of the failed-transaction records the
+// defect produced.
+func recordsAtLevel(h *harness, level string) []dlog.Record {
+	var out []dlog.Record
+	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
+		if record.Level == level {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+// recordWith finds the first captured record at one level and operation.
+func recordWith(h *harness, level, operation string) (dlog.Record, bool) {
+	for _, record := range h.logs.Global().(*dlog.TestLogger).Records() {
+		if record.Level == level && record.Operation == operation {
+			return record, true
+		}
+	}
+	return dlog.Record{}, false
 }
