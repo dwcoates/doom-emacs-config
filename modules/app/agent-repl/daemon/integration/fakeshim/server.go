@@ -272,6 +272,16 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 			}},
 		}), nil
 	}
+	if detail := s.profile.VendorStartFailed; detail != "" {
+		return connect.NewResponse(&shimv1.StartSessionResponse{
+			Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+				Detail: detail,
+				Cause: &shimv1.StartSessionFailure_VendorStartFailed{
+					VendorStartFailed: &shimv1.StartSessionVendorStartFailed{},
+				},
+			}},
+		}), nil
+	}
 	if resp, done, err := scripted[shimv1.StartSessionResponse, *shimv1.StartSessionResponse](s, RPCStartSession); done {
 		if err == nil {
 			s.noteVendorSession(resp.Msg)

@@ -52,6 +52,13 @@ const (
 	// lock first, and two vendor processes on one conversation is what that
 	// lock exists to prevent. OpenWorkspaceError has no arm for it.
 	ArmConversationOwned = "conversation_owned"
+	// ArmVendorStartFailed is a StartSession the shim refused because the
+	// VENDOR failed to start inside an already-running shim: the shim process
+	// itself is up and serving, so this is neither `spawn_failed` nor
+	// `shim_start_failed`, both of which name the SHIM PROCESS failing.
+	// OpenWorkspaceError has no arm for it, so the shim's verdict is relayed
+	// by name rather than collapsed into an untyped Connect internal.
+	ArmVendorStartFailed = "vendor_start_failed"
 	// ArmUnknownSession is a StartSession(resume) the shim refused because it
 	// has no transcript for the named conversation. The transcript-aware
 	// source classifier keeps a never-turned session off this path, so the arm
