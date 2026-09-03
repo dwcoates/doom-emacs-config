@@ -551,3 +551,114 @@ func TestSpawnedClientNeverWitnessesDeathFromTheLock(t *testing.T) {
 		t.Fatal("witnessAdoptedDeath() = true for a spawned shim")
 	}
 }
+
+// TestKillOnlyEverSignalsOurOwnChild asserts a kill can reach the supervised
+// child's group and NOTHING else: a live child dies, a child that is already
+// reaped is success with no failure recorded, and a pid the client never owned
+// is refused loudly without a signal leaving the daemon.
+func TestKillOnlyEverSignalsOurOwnChild(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange yields the kill under test and, when the case has one, a
+		// witness asserted after the kill returned.
+		arrange func(t *testing.T) (kill func() error, witness func(t *testing.T))
+		wantErr error
+	}{
+		{
+			name: "a live child is killed",
+			arrange: func(t *testing.T) (func() error, func(*testing.T)) {
+				dir := shortDir(t)
+				f, uds := startFakeShim(t, dir)
+				spec, sink := newTestSpec(t, dir, uds, helperIdle)
+				c := spawnReady(t, f, spec)
+				record := sink.record(t)
+				kill := func() error {
+					return c.Kill(KillAttribution{Actor: "test", Reason: "live child"})
+				}
+				return kill, func(t *testing.T) {
+					info := <-c.Exited()
+					if info.PID != record.PID {
+						t.Fatalf("exit pid = %d, want %d", info.PID, record.PID)
+					}
+				}
+			},
+		},
+		{
+			name: "an already reaped child is success",
+			arrange: func(t *testing.T) (func() error, func(*testing.T)) {
+				dir := shortDir(t)
+				f, uds := startFakeShim(t, dir)
+				spec, sink := newTestSpec(t, dir, uds, helperIdle)
+				c := spawnReady(t, f, spec)
+				record := sink.record(t)
+				if err := syscall.Kill(record.PID, syscall.SIGKILL); err != nil {
+					t.Fatalf("external SIGKILL: %v", err)
+				}
+				<-c.Exited()
+				kill := func() error {
+					return c.Kill(KillAttribution{Actor: "test", Reason: "already gone"})
+				}
+				return kill, nil
+			},
+		},
+		{
+			name: "a pid we never owned is refused",
+			arrange: func(t *testing.T) (func() error, func(*testing.T)) {
+				stranger := exec.Command("/bin/sh", "-c", "sleep 30")
+				stranger.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+				if err := stranger.Start(); err != nil {
+					t.Fatalf("start the stranger: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = syscall.Kill(-stranger.Process.Pid, syscall.SIGKILL)
+					_ = stranger.Wait()
+				})
+
+				// A child of our own, so the client holds a real handle whose
+				// pid is NOT the pgid it was asked to signal.
+				ours := exec.Command("/bin/sh", "-c", "sleep 30")
+				ours.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+				if err := ours.Start(); err != nil {
+					t.Fatalf("start our own child: %v", err)
+				}
+				t.Cleanup(func() {
+					_ = syscall.Kill(-ours.Process.Pid, syscall.SIGKILL)
+					_ = ours.Wait()
+				})
+
+				c := newBareClient()
+				c.cmd = ours
+				c.pid = ours.Process.Pid
+				c.pgid = stranger.Process.Pid
+
+				kill := func() error {
+					return c.Kill(KillAttribution{Actor: "test", Reason: "not ours", Force: true})
+				}
+				return kill, func(t *testing.T) {
+					if err := syscall.Kill(stranger.Process.Pid, 0); err != nil {
+						t.Fatalf("the stranger was signaled: probe error = %v", err)
+					}
+				}
+			},
+			wantErr: ErrNoProcess,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			kill, witness := tc.arrange(t)
+
+			// Act.
+			err := kill()
+
+			// Assert.
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Kill() error = %v, want %v", err, tc.wantErr)
+			}
+			if witness != nil {
+				witness(t)
+			}
+		})
+	}
+}
