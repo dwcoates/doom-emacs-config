@@ -604,6 +604,136 @@ func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
 	}
 }
 
+// TestOnTurnOpeningRecordsTheTurnBeforeTheShimTakesIt covers the pre-record:
+// the caller has not yet dispatched StartTurn, and the turn must already stand
+// in flight so a terminal arriving first is attributable.
+func TestOnTurnOpeningRecordsTheTurnBeforeTheShimTakesIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-9") {
+		t.Fatalf("turn in flight = %v, want turn-9", turn)
+	}
+}
+
+// TestATerminalAheadOfTheAcceptanceStillEndsTheTurn covers the race the
+// pre-record exists for: the shim put the turn's terminal on the agent stream
+// before StartTurn's response was processed, and the turn must still end.
+func TestATerminalAheadOfTheAcceptanceStillEndsTheTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	if _, ok := find(got, "lifecycle.OnTurnEnded"); !ok {
+		t.Fatalf("the turn did not end: %v", names(got))
+	}
+}
+
+// TestAnAcceptanceDoesNotReopenATurnThatAlreadyEnded covers the other half of
+// that race: the late acceptance must not stand the dead turn back up, because
+// no edge is left to take it down again.
+func TestAnAcceptanceDoesNotReopenATurnThatAlreadyEnded(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Act.
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-9"},
+		Agent: agentID("main-1"),
+	}, &conversationv1.HistoryPage{})
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none: the turn had already ended", *turn)
+	}
+}
+
+// TestOnTurnOpenFailedRetiresTheRecordedTurn covers the refusal: the shim never
+// took the turn, so it must not stand in flight and block the next submission.
+func TestOnTurnOpenFailedRetiresTheRecordedTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-9"))
+
+	// Act.
+	h.w.OnTurnOpenFailed("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	if turn := h.w.TurnInFlight(); turn != nil {
+		t.Fatalf("turn in flight = %v, want none after the shim refused it", *turn)
+	}
+}
+
+// TestOnTurnOpenFailedLeavesALaterTurnAlone covers the stale refusal: it clears
+// only the turn it names, never whatever is running now.
+func TestOnTurnOpenFailedLeavesALaterTurnAlone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.OnTurnOpening("ws-1", ids.TurnID("turn-10"))
+
+	// Act.
+	h.w.OnTurnOpenFailed("ws-1", ids.TurnID("turn-9"))
+
+	// Assert.
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-10") {
+		t.Fatalf("turn in flight = %v, want turn-10 left standing", turn)
+	}
+}
+
+// TestOnTurnOpeningRefusesAnotherWorkspacesTurn covers the same invariant
+// OnTurnOpened holds: a watcher is one workspace's.
+func TestOnTurnOpeningRefusesAnotherWorkspacesTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-other", ids.TurnID("turn-9"))
+
+	// Assert.
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("another workspace's turn was adopted")
+	}
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opening_foreign") {
+		t.Fatal("a foreign opening turn was not recorded as an error")
+	}
+}
+
+// TestOnTurnOpeningRefusesAnUnidentifiedTurn covers the empty id: nothing can
+// be attributed to it, so it is recorded rather than stored.
+func TestOnTurnOpeningRefusesAnUnidentifiedTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.w.OnTurnOpening("ws-1", ids.TurnID(""))
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.sessionwatcher.turn_opening_unidentified") {
+		t.Fatal("an unidentified opening turn was not recorded as an error")
+	}
+}
+
 // TestOnTurnOpenedRaisesTheFootersTurnOpenEdge covers the edge nothing on the
 // shim's streams states: the accepted turn reaches the footer, which is what
 // raises `thinking submitting` before the first frame of the turn arrives.

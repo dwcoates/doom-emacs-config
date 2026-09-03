@@ -321,6 +321,20 @@ type Watcher interface {
 	// two has named it, a terminal cannot be attributed to the main agent and
 	// OnTurnEnded is withheld rather than guessed.
 	SetMainAgent(agent *conversationv1.AgentId)
+	// OnTurnOpening records the turn a caller is ABOUT to hand to the shim,
+	// before StartTurn is dispatched. It exists because the shim can put the
+	// turn's first frames — its terminal included — on the agent stream
+	// before StartTurn's response has been processed here: a terminal routed
+	// while no turn is recorded in flight is attributable to nothing and the
+	// turn's end is lost, hanging every AwaitTurnEnd on it forever. Recording
+	// the turn first makes the attribution independent of that ordering.
+	//
+	// The caller MUST pair it with either OnTurnOpened (the shim accepted the
+	// turn) or OnTurnOpenFailed (it did not).
+	OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnOpenFailed retires a turn recorded by OnTurnOpening that the shim
+	// then refused, so a turn that never started does not stand as in flight.
+	OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnTurnOpened is the prompt queue handing over an accepted turn: the
 	// prompt as StartTurn delivered it, and the opening page
 	// StartTurnSuccess now carries. It is the ONE entry point for a turn the
