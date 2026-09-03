@@ -66,6 +66,58 @@ function pageLineEntry(book: string, upsertKey: string, text: string): storev1.S
   });
 }
 
+/** A spawning agent's frame whose subagent start CREATES `created`. */
+function spawnEntry(book: string, upsertKey: string, created: string): storev1.StoreEntry {
+  return create(storev1.StoreEntrySchema, {
+    plane: streamPlane(),
+    writeId: `w-${upsertKey}`,
+    upsertKey,
+    entry: {
+      case: "agentUpdate",
+      value: create(storev1.StoreAgentUpdateSchema, {
+        agentInfo: {
+          case: "serveableFrame",
+          value: create(storev1.StorePageLineSchema, {
+            pageAgentId: agentId(book),
+            agentItem: create(storev1.StoreAgentItemSchema, {
+              item: {
+                case: "agentFrame",
+                value: create(conversationv1.AgentFrameSchema, {
+                  agentId: agentId(book),
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: upsertKey,
+                          }),
+                          item: {
+                            case: "subagent",
+                            value: create(conversationv1.AgentSubagentSchema, {
+                              result: {
+                                case: "start",
+                                value: create(conversationv1.AgentSubagentStartSchema, {
+                                  createdAgentId: agentId(created),
+                                }),
+                              },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          }),
+        },
+      }),
+    },
+  });
+}
+
 /** A frame carrying one of the terminal arms, which concludes an agent. */
 function terminalEntry(book: string, upsertKey: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
@@ -422,20 +474,10 @@ describe("OpenAgentSession", () => {
     expect(success.page?.lines.map((line) => line.at?.value)).toEqual(["2"]);
   });
 
-  it("serves an empty page for a book nobody has written", async () => {
-    // Arrange.
-    const { client } = await store();
-
-    // Act.
-    const success = await open(client, "unknown", 10);
-
-    // Assert.
-    expect(success.page?.lines).toEqual([]);
-  });
-
   it("mints a watch token with the page", async () => {
     // Arrange.
     const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
 
     // Act.
     const success = await open(client, "a", 10);
@@ -448,7 +490,10 @@ describe("OpenAgentSession", () => {
 describe("WatchAgentSession", () => {
   it("tails lines written AFTER the open", async () => {
     // Arrange.
+    // The book is EMPTY at the open — the agent is known only because a spawn
+    // in another book created it — so everything the tail carries is news.
     const { client } = await store();
+    await write(client, spawnEntry("parent", "k-spawn", "a"));
     const success = await open(client, "a", 10);
     const tail = client.watchAgentSession(
       create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
@@ -459,7 +504,8 @@ describe("WatchAgentSession", () => {
     const first = await tail.next();
 
     // Assert.
-    expect(first.value?.line?.at?.value).toBe("1");
+    const item = first.value?.line?.line?.agentItem?.item;
+    expect(item?.case === "agentPrompt" ? item.value.id?.value : undefined).toBe("after-open");
   });
 
   it("is a PURE tail: it never replays what the opening page carried", async () => {
@@ -771,12 +817,13 @@ describe("the read ledger", () => {
   it("records an OpenAgentSession with the request it was asked", async () => {
     // Arrange.
     const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
 
     // Act.
     await open(client, "a", 5);
 
     // Assert.
-    const read = fake.reads()[0];
+    const read = fake.reads().filter((entry) => entry.rpc === "OpenAgentSession")[0];
     expect({
       rpc: read?.rpc,
       agent: (read?.request as storev1.OpenAgentSessionRequest | undefined)?.agent?.value,
@@ -903,10 +950,11 @@ describe("typed read refusals", () => {
     ).toBe("storageFailure");
   });
 
-  it("serves OpenAgentSession the unknown_agent arm", async () => {
+  it("refuses OpenAgentSession with unknown_agent before any write names the agent", async () => {
+    // `db.ensureAgent` creates the agent row on the first write, so a book
+    // opened before then does not exist (landing 7).
     // Arrange.
-    const { store: fake, client } = await store();
-    fake.failReads("OpenAgentSession", "unknown_agent", "no book under that id");
+    const { client } = await store();
 
     // Act.
     const response = await client.openAgentSession(
@@ -919,15 +967,34 @@ describe("typed read refusals", () => {
     ).toBe("unknownAgent");
   });
 
-  it("REFUSES to serve unknown_agent on a verb whose failure does not declare it", async () => {
-    // Only OpenAgentSessionFailure declares the arm (landing 7).
+  it("serves OpenAgentSession once a write has named the agent", async () => {
     // Arrange.
-    const { store: fake } = await store();
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "k1", "one"));
 
-    // Act, Assert.
-    expect(() => fake.failReads("ReadAgentPage", "unknown_agent")).toThrow(
-      /ReadAgentPage declares no unknown_agent arm/,
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
     );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+
+  it("registers the agent a spawn frame CREATED, before that agent writes anything", async () => {
+    // `db.createSpawnedAgent`: the created agent's book is addressable from the
+    // spawn frame on.
+    // Arrange.
+    const { client } = await store();
+    await write(client, spawnEntry("parent", "k-spawn", "child"));
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("child"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
   });
 
   it("REFUSES to serve GetLiveWork an arm the proto does not declare", async () => {
@@ -945,6 +1012,7 @@ describe("typed read refusals", () => {
   it("serves the verb again once its arm is cleared", async () => {
     // Arrange.
     const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
     fake.failReads("OpenAgentSession", "storage_failure");
 
     // Act.
@@ -960,6 +1028,7 @@ describe("typed read refusals", () => {
   it("refuses ONLY the verb that was armed", async () => {
     // Arrange.
     const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "t1"));
     fake.failReads("ReadAgentPage", "storage_failure");
 
     // Act.
