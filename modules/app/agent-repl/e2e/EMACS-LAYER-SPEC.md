@@ -81,6 +81,21 @@ belongs. **This layer drives the COMMAND each binding names**, which is the
 user-facing entry point; asserting that `SPC j x` reaches
 `agent-repl-kill-workspace` is a different, already-covered claim.
 
+**But the shipped image makes this reversible, and that is worth recording.**
+`sandbox/doom/init.el` enables `:app agent-repl` and
+`:config (default +bindings)`, and the image bakes `doom install` + `doom
+sync`. So a real Doom session — with a real `map!` and therefore real leader
+bindings — IS available in the sandbox; this layer simply does not use it,
+booting `emacs -nw -Q -l bootstrap.el` and loading `config.el` directly.
+
+Driving the module through the image's Doom profile instead would be strictly
+more faithful: real keybindings, and the real `set-popup-rule!` that
+`config.el` skips when `set-popup-rule!` is unbound (which is exactly the
+notes-popup rule scenario 34's family depends on). It is not done here
+because it needs a hook the sandbox's own `doom/config.el` would have to
+carry, and that file is the sandbox agent's. Raised as a follow-up rather
+than taken.
+
 ### Commands are invoked as commands, not as internals
 
 Each scenario calls the interactive command through `call-interactively` (or
@@ -216,61 +231,68 @@ and a sweep for an orphaned `claude-repld` under the scratch state root
 follow unconditionally, so a wedged Emacs cannot leak a daemon into the next
 test.
 
-## The sandbox dependency
+## The sandbox dependency (AMENDED once `sandbox/` landed)
 
 Tests write nothing outside the sandbox and never touch the host's Emacs,
 `~/.claude`, `~/.emacs.d`, or `~/.config`. `modules/app/agent-repl/e2e/sandbox/`
-DOES NOT EXIST at this document's revision, so this layer defines the
-interface it needs and gates on a stub that SKIPS LOUDLY.
+has since landed (`cfaea2bdb`), and **its model is inside-out from what the
+first revision of this document assumed.** This section is rewritten to what
+shipped; the interface the earlier revision proposed (a Go `sandbox` package
+driving containers from the host) is withdrawn, not deferred.
 
-Required interface (package `sandbox`, importable from package `e2e`):
+### What shipped
 
-```go
-// Available reports whether a container-sandboxed Emacs can run here, and
-// why not when it cannot. The string is used verbatim in the skip message.
-func Available() (ok bool, reason string)
+`bin/e2e-sandbox.sh` has four verbs: `build`, `run`, `shell`, `preflight`.
+`run` is a **one-shot `docker run --rm`** — there is no persistent container,
+no container name, and no `exec` verb. Its documented usage runs the whole
+test binary inside the container:
 
-// Start brings up one sandbox container for a single test, with the repo
-// checkout mounted read-only and one writable scratch root. It fails the
-// test loudly rather than returning an error.
-func Start(t *testing.T, opts Opts) *Sandbox
-
-type Opts struct {
-    // Mounts are host->container read-only bind mounts (the repo checkout,
-    // the built binaries directory, the shim bundle).
-    Mounts map[string]string
-    // Env is added to every process the sandbox runs.
-    Env []string
-}
-
-type Sandbox struct { /* opaque */ }
-
-// Scratch is a container path, writable, unique per test, swept on cleanup.
-// EVERYTHING this layer writes -- Emacs init dir, daemon state root, store
-// db, sockets, the server socket -- lives under it.
-func (s *Sandbox) Scratch() string
-
-// Exec runs one command inside the sandbox and returns its combined output.
-// This is how emacsclient is invoked.
-func (s *Sandbox) Exec(ctx context.Context, argv ...string) (string, error)
-
-// StartPTY launches a long-lived process inside the sandbox attached to a
-// pty, which is what gives Emacs a real tty frame. The handle exposes
-// Wait, Signal and Kill.
-func (s *Sandbox) StartPTY(ctx context.Context, argv ...string) (*Proc, error)
-
-// HasEmacs reports whether the image provides an Emacs new enough for the
-// module (tab-bar and `--init-directory` both required, so 27+). False
-// makes every scenario in this layer skip loudly, naming the version found.
-func (s *Sandbox) HasEmacs() (ok bool, version string)
+```bash
+modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh run go test ./e2e/...
 ```
 
-Until `sandbox/` lands, `requireSandbox(t)` in this layer returns a stub
-whose `Available()` is `false, "modules/app/agent-repl/e2e/sandbox is not
-implemented yet"`, so every scenario in this layer skips with that exact
-reason. The skip is LOUD -- it names the missing package -- and the
-proof-of-life test is written and compiled against the real interface, so
-the day `sandbox/` lands the only change here is deleting the stub.
+### Consequence: the layer runs INSIDE, and does not drive the container
+
+The Go test process is itself containerized, so every process this layer
+starts is an ordinary local child. That removes both capabilities the project
+lead flagged as missing, rather than needing them added:
+
+- **A PTY-capable exec is not needed from the script.** The layer allocates
+  its own pty in-container via `script -q -c CMD /dev/null` (util-linux,
+  Debian-essential, so present in the base image). Relying on the script's
+  `-t` would not work anyway: `do_run` passes `-t` only when its own stdout
+  is a terminal, and under `go test` it is not.
+- **A writable swept Scratch is not needed from the script.** `/tmp` is
+  already `--tmpfs rw,exec,size=2g`, per-container and gone when the
+  container exits. `Scratch()` is an `os.MkdirTemp("/tmp", ...)` per test,
+  also removed on cleanup so `-count=N` does not accumulate.
+
+`Available()` is therefore three-way, because the three cases have completely
+different answers and a reader of a skipped run must tell them apart:
+
+| situation | detected by | skip says |
+|---|---|---|
+| inside the sandbox | `AGENT_REPL_SANDBOX_SHA` set **and** `/repo-src` is a directory | nothing; it runs |
+| on the host, image usable | `preflight` exits 0 | the exact `e2e-sandbox.sh run go test ...` command to use instead |
+| on the host, image unusable | `preflight` exits non-zero | preflight's own output, **verbatim** |
+
+Both in-container signals are required: a stray environment variable on the
+host must not convince this layer it is containerized.
+
+Quoting preflight verbatim is the sandbox README's own requirement -- "The
+harness must turn a non-zero exit into a loud skip that quotes this output
+verbatim -- never a silent pass, and never a fallback to an unsandboxed run."
+
+### Emacs in the image is 28.2, not 30
+
+The image installs Debian **bookworm**'s `emacs-nox`, which is Emacs 28.2.
+This corrects a "Emacs 30-era" expectation and cost one design change:
+`--init-directory` landed in **Emacs 29** and is gone from this layer. It was
+redundant regardless -- `-Q` reads no init file, no site file and no package
+directory, so there is nothing for it to point at, and host `~/.emacs.d`
+isolation comes from `-Q` plus the container's own `HOME` rather than from
+that flag. `HasEmacs()` requires **27 or later**, for `tab-bar-tabs`, and
+28.2 satisfies it.
 
 ## What this layer does not cover, deliberately
 

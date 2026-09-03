@@ -2,60 +2,66 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 )
 
 // THE SANDBOX SEAM.
 //
-// The Emacs client layer runs Emacs inside a container sandbox, because it
-// starts a REAL editor that spawns a REAL daemon: nothing it does may reach
-// the host's own Emacs, `~/.claude`, `~/.emacs.d` or `~/.config`, and
-// nothing it writes may land outside a scratch directory that is swept on
-// the way out.
+// The Emacs client layer runs Emacs inside the container sandbox at
+// `modules/app/agent-repl/e2e/sandbox/`, because it starts a REAL editor that
+// spawns a REAL daemon: nothing it does may reach the host's own Emacs,
+// `~/.claude`, `~/.emacs.d` or `~/.config`, and nothing it writes may land
+// outside a scratch directory that is swept on the way out.
 //
-// `modules/app/agent-repl/e2e/sandbox/` is another agent's work and DOES NOT
-// EXIST YET. This file is the interface EMACS-LAYER-SPEC.md declares against
-// it, plus a stub whose Available() is always false — so every scenario in
-// this layer skips LOUDLY, naming the missing package, rather than silently
-// passing or quietly reaching the host.
+// THE SANDBOX'S MODEL IS INSIDE-OUT FROM WHAT EMACS-LAYER-SPEC.md FIRST
+// ASSUMED, and this file is written to the model that actually shipped.
+// `bin/e2e-sandbox.sh` has four verbs -- build, run, shell, preflight -- and
+// `run` is a one-shot `docker run --rm`: there is no persistent container and
+// no `exec` verb. Its documented usage is to run the WHOLE test binary inside
+// the container (`e2e-sandbox.sh run go test ./e2e/...`).
 //
-// When `sandbox/` lands, THIS FILE is the only thing that changes: the stub
-// is deleted and `newSandbox` returns the real implementation. Nothing in
-// `emacs_test.go` or the scenarios refers to the stub.
+// So this layer does not drive the container from the host. It detects
+// whether IT IS ITSELF running inside the sandbox, and every Exec is then an
+// ordinary local process. That needs nothing new from the sandbox: `/tmp` is
+// already a writable exec tmpfs swept with the container, and a pty comes
+// from `script`, which is Debian-essential.
+//
+// Run on the HOST, every scenario skips loudly and says how to run it
+// properly. With no usable image, preflight's own message is quoted VERBATIM,
+// per the sandbox README: "The harness must turn a non-zero exit into a loud
+// skip that quotes this output verbatim -- never a silent pass, and never a
+// fallback to an unsandboxed run."
 
 // sandbox is the container the Emacs client layer runs inside.
-//
-// Every method is expected to fail the test loudly rather than return an
-// error for conditions a caller cannot do anything about; only Exec returns
-// an error, because a non-zero emacsclient exit is ordinary information a
-// wait loop acts on.
 type sandbox interface {
 	// Available reports whether a container-sandboxed Emacs can run here,
-	// and why not when it cannot. The reason is used VERBATIM in the skip
-	// message, so it must name the thing that is missing.
+	// and why not when it cannot. The reason is used VERBATIM in the skip.
 	Available() (ok bool, reason string)
 
 	// HasEmacs reports whether the image carries an Emacs new enough for
-	// this module — `tab-bar-tabs` and `--init-directory` are both required,
-	// so 27 or later — and the version string it found either way.
+	// this module -- `tab-bar-tabs` is required, so 27 or later -- and the
+	// version string it found either way.
 	HasEmacs() (ok bool, version string)
 
-	// Scratch is a container-absolute, writable directory, unique per test
-	// and swept on cleanup. EVERYTHING this layer writes lives under it: the
-	// Emacs init directory, the server socket, the daemon state root, the
-	// store database and socket, the sidecar spool root, and the eval
-	// request/response files.
+	// Scratch is an absolute, writable directory, unique per test and swept
+	// on cleanup. EVERYTHING this layer writes lives under it.
 	Scratch() string
 
-	// Exec runs one short command inside the sandbox and returns its
-	// combined output. This is how `emacsclient` is invoked, so it is on the
-	// hot path of every readback and every heartbeat probe.
+	// Exec runs one short command and returns its combined output. This is
+	// how `emacsclient` is invoked, so it is on the hot path of every
+	// readback and every heartbeat probe.
 	Exec(ctx context.Context, argv ...string) (string, error)
 
-	// StartPTY launches a long-lived process inside the sandbox attached to
-	// a pty. Emacs needs one to have a real tty frame, which is what makes
-	// `window-list`, `tab-bar-tabs` and `mode-line-format` behave the way
-	// they do for a user.
+	// StartPTY launches a long-lived process attached to a pty. Emacs needs
+	// one to have a real tty frame, which is what makes `window-list`,
+	// `tab-bar-tabs` and `mode-line-format` behave as they do for a user.
 	StartPTY(ctx context.Context, argv ...string) (sandboxProc, error)
 }
 
@@ -71,19 +77,26 @@ type sandboxProc interface {
 	// reporting the timeout that death causes downstream.
 	Exited() bool
 
-	// Output returns whatever the pty has produced so far, for failure
-	// artifacts.
+	// Output returns whatever the pty has produced so far, for artifacts.
 	Output() string
 }
 
+// sandboxScriptRel is the sandbox entry point, relative to the repo root.
+const sandboxScriptRel = "modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh"
+
+// insideSandboxEnv is set by `e2e-sandbox.sh run` on every container it
+// starts, and is this layer's primary in-container signal.
+const insideSandboxEnv = "AGENT_REPL_SANDBOX_SHA"
+
+// sandboxReadOnlyMount is where the sandbox bind-mounts the repo read-only.
+// Checked alongside the env var so a stray environment variable on the host
+// cannot convince this layer it is containerized.
+const sandboxReadOnlyMount = "/repo-src"
+
 // requireSandbox returns the sandbox for one test, or skips loudly.
-//
-// The skip is deliberately specific: a reader of a skipped run must be able
-// to tell "the container work has not landed" apart from "this host cannot
-// run containers", because those have completely different answers.
 func requireSandbox(t *testing.T) sandbox {
 	t.Helper()
-	s := newSandbox(t)
+	s := &localSandbox{t: t}
 	ok, reason := s.Available()
 	if !ok {
 		t.Skipf("emacs client layer needs the e2e sandbox: %s", reason)
@@ -92,38 +105,217 @@ func requireSandbox(t *testing.T) sandbox {
 	if !ok {
 		t.Skipf("emacs client layer needs Emacs 27 or later in the sandbox image; found %q", version)
 	}
+	if _, err := exec.LookPath("script"); err != nil {
+		t.Skipf("emacs client layer needs 'script' for a pty (Debian-essential, expected in the image): %v", err)
+	}
 	return s
 }
 
-// newSandbox is the one construction point. It returns the stub until
-// `modules/app/agent-repl/e2e/sandbox/` lands.
-func newSandbox(t *testing.T) sandbox {
-	t.Helper()
-	return stubSandbox{}
+// localSandbox is the sandbox as seen from INSIDE it: every process it starts
+// is an ordinary child of the test binary, which is itself containerized.
+type localSandbox struct {
+	t *testing.T
+
+	scratchOnce sync.Once
+	scratchDir  string
 }
 
-// stubSandbox stands in for the unimplemented sandbox package.
+// Available reports readiness, and is deliberately three-way.
 //
-// It is NOT a fake that pretends to work: every method that could be
-// mistaken for a working sandbox fails the test outright, so a scenario that
-// somehow gets past requireSandbox cannot run against the host by accident.
-type stubSandbox struct{}
+// The three cases have completely different answers, so a reader of a skipped
+// run must be able to tell them apart:
+//   - inside the sandbox: ready.
+//   - on the host with a usable image: the test was invoked the wrong way, and
+//     the skip names the command that invokes it the right way.
+//   - on the host with no usable image: preflight's own message, verbatim.
+func (s *localSandbox) Available() (bool, string) {
+	if insideSandbox() {
+		return true, ""
+	}
 
-const stubSandboxReason = "modules/app/agent-repl/e2e/sandbox is not implemented yet " +
-	"(see EMACS-LAYER-SPEC.md, \"The sandbox dependency\", for the interface it must provide)"
+	script := filepath.Join(repoRoot(), sandboxScriptRel)
+	if _, err := os.Stat(script); err != nil {
+		return false, fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
+	}
 
-func (stubSandbox) Available() (bool, string) { return false, stubSandboxReason }
+	out, err := exec.Command(script, "preflight").CombinedOutput()
+	if err != nil {
+		// Quoted VERBATIM: preflight's message is actionable (start Docker,
+		// build the image) and paraphrasing it would throw away the only
+		// instructions the reader needs.
+		return false, fmt.Sprintf(
+			"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
+			strings.TrimRight(string(out), "\n"))
+	}
 
-func (stubSandbox) HasEmacs() (bool, string) { return false, "unknown: " + stubSandboxReason }
-
-func (stubSandbox) Scratch() string {
-	panic("e2e: the stub sandbox has no scratch directory — " + stubSandboxReason)
+	return false, fmt.Sprintf(
+		"the sandbox image is ready, but this test process is running ON THE HOST. "+
+			"This layer starts a real Emacs that spawns a real daemon, so it must run INSIDE the container. Run:\n"+
+			"    %s run go test ./e2e/ -run %s -v",
+		sandboxScriptRel, s.t.Name())
 }
 
-func (stubSandbox) Exec(context.Context, ...string) (string, error) {
-	panic("e2e: the stub sandbox cannot exec — " + stubSandboxReason)
+// repoRoot is the checkout root, three levels above the module.
+func repoRoot() string {
+	return filepath.Clean(filepath.Join(repo.repoDir, "..", "..", ".."))
 }
 
-func (stubSandbox) StartPTY(context.Context, ...string) (sandboxProc, error) {
-	panic("e2e: the stub sandbox cannot start a process — " + stubSandboxReason)
+// insideSandbox reports whether this process is running in the sandbox. It
+// requires BOTH signals: the env var the runner sets, and the read-only mount
+// the entrypoint verifies.
+func insideSandbox() bool {
+	if os.Getenv(insideSandboxEnv) == "" {
+		return false
+	}
+	info, err := os.Stat(sandboxReadOnlyMount)
+	return err == nil && info.IsDir()
+}
+
+// HasEmacs asks the Emacs in the image for its own version.
+//
+// The requirement is 27 or later, for `tab-bar-tabs`. It is NOT 29: an
+// earlier revision of this layer passed `--init-directory`, which landed in
+// Emacs 29, while the image is Debian BOOKWORM's `emacs-nox` -- Emacs 28.2.
+// The flag was redundant anyway, because `-Q` reads no init file at all, so
+// it is gone and 28.2 satisfies the real requirement.
+func (s *localSandbox) HasEmacs() (bool, string) {
+	if !insideSandbox() {
+		return false, "not inside the sandbox"
+	}
+	out, err := exec.Command("emacs", "--version").CombinedOutput()
+	if err != nil {
+		return false, fmt.Sprintf("emacs --version failed: %v", err)
+	}
+	version := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+	major, ok := majorVersion(version)
+	if !ok {
+		return false, version
+	}
+	return major >= 27, version
+}
+
+// majorVersion pulls the leading major number out of "GNU Emacs 28.2".
+func majorVersion(line string) (int, bool) {
+	for _, field := range strings.Fields(line) {
+		head := field
+		if dot := strings.IndexByte(head, '.'); dot >= 0 {
+			head = head[:dot]
+		}
+		if n, err := strconv.Atoi(head); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// Scratch is a per-test directory under /tmp, which the sandbox mounts as a
+// writable exec tmpfs and which dies with the container. It is removed on
+// cleanup as well, so a `-count=N` run does not accumulate.
+func (s *localSandbox) Scratch() string {
+	s.scratchOnce.Do(func() {
+		dir, err := os.MkdirTemp("/tmp", "emacs-e2e-")
+		if err != nil {
+			s.t.Fatalf("e2e: create the sandbox scratch directory: %v", err)
+		}
+		s.scratchDir = dir
+		s.t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	})
+	return s.scratchDir
+}
+
+func (s *localSandbox) Exec(ctx context.Context, argv ...string) (string, error) {
+	if len(argv) == 0 {
+		return "", fmt.Errorf("exec: no command given")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// StartPTY runs argv under `script`, which allocates a pty.
+//
+// A pty is what gives Emacs a REAL tty frame. `e2e-sandbox.sh run` only
+// passes `-t` when its own stdout is a terminal, and under `go test` it is
+// not, so the container's stdin/stdout cannot be relied on to be a terminal:
+// this layer allocates its own rather than depending on how it was invoked.
+func (s *localSandbox) StartPTY(ctx context.Context, argv ...string) (sandboxProc, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("startpty: no command given")
+	}
+
+	// `script -q -c CMD /dev/null` runs CMD on a pty and discards the
+	// typescript. CMD is one shell word, so the argv is quoted for the shell
+	// rather than passed through; every element is a path or a flag this
+	// layer composed itself.
+	quoted := make([]string, 0, len(argv))
+	for _, a := range argv {
+		quoted = append(quoted, shellQuote(a))
+	}
+	cmd := exec.CommandContext(ctx, "script", "-q", "-c", strings.Join(quoted, " "), "/dev/null")
+
+	p := &localProc{done: make(chan struct{})}
+	cmd.Stdout = &p.out
+	cmd.Stderr = &p.out
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start %q on a pty: %w", argv[0], err)
+	}
+	p.cmd = cmd
+	go func() {
+		_ = cmd.Wait()
+		close(p.done)
+	}()
+	return p, nil
+}
+
+// shellQuote renders one argv element as a single shell word.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// localProc is a process started by localSandbox.
+type localProc struct {
+	cmd  *exec.Cmd
+	done chan struct{}
+	out  syncBuffer
+}
+
+func (p *localProc) Kill() {
+	if p.Exited() {
+		return
+	}
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	<-p.done
+}
+
+func (p *localProc) Exited() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *localProc) Output() string { return p.out.String() }
+
+// syncBuffer is an io.Writer safe for the pty reader goroutine to write while
+// a test reads it for failure artifacts.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	return len(p), nil
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }
