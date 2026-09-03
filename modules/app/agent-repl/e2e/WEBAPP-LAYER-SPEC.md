@@ -191,23 +191,26 @@ missing prerequisite and the exact command that supplies it.
 
 - The Go test's own budget: `WebappLayerTimeout`, a NAMED constant. It bounds
   one real world bring-up plus a Node/vitest child process start plus a real
-  turn through the real shim, store and sidecar. Sized at **60 s** — the only
-  new bound in this work — because the dominant term is a cold vitest+jsdom
-  start (a fresh Vite transform of the whole `src/` tree plus jsdom
-  construction), which no existing bound in this repo covers and which the
-  webapp's own suites never pay inside a test. It is a HANG bound, not a
-  synchronization wait: nothing in the test sleeps, and the child's exit is
-  awaited on its own channel. It is re-measured and tightened to ~3x the
-  observed healthy child duration on the first green run, and the constant's
-  doc comment records that this number is provisional until then.
+  turn through the real shim, store and sidecar. **20 s** — the only new bound
+  in this work. MEASURED on the first green run: the child reported 1.41 s
+  wall (transform 406 ms, collect 584 ms, environment 435 ms, tests 233 ms)
+  and the whole Go test 2.73 s. It sits deliberately above ~3x that because
+  the dominant term is a COLD vitest+jsdom start and the 406 ms transform
+  above is a WARM cache — no measurement of the cold case exists to derive a
+  3x from, and a bound sized off the warm one would be a race on a cold
+  checkout. It is a HANG bound, not a synchronization wait: nothing sleeps,
+  the child's exit is awaited on its own channel, and a stuck turn fails
+  inside the child's own 5 s budget long before this fires.
 - The vitest project's own `testTimeout`/`hookTimeout`: **900 ms is NOT
   widened**, and the existing 300 ms unit / 900 ms integration bounds are not
   touched. Instead the two things that genuinely cost real time here get
   per-site budgets with stated reasons, per the same discipline
   `vitest.integration.config.ts` states: the `beforeAll` that boots the app
   against the real daemon, and any test that drives a real turn. Both are
-  provisional until measured on the first green run, and each carries a
-  one-line reason at its own site — never a raised global.
+  measured on the first green run (boot plus one real turn: 233 ms of test
+  time), and each carries a one-line reason at its own site — never a raised
+  global. Both reuse the Go suite's own measured 5 s per-rpc/turn budget
+  rather than minting a third number.
 - No `sleep`, no `sit-for`, no fixed interval anywhere: waits are `settle()`
   (DOM quiescence plus zero in-flight requests) on the webapp side and
   channel/`cmd.Wait` on the Go side.
@@ -221,8 +224,11 @@ wire frame the Go area tests already assert.
 ### F1. Proof of life (1 scenario) — built now
 
 1. A prompt typed into the webapp's own composer and sent reaches the real
-   daemon, the real shim answers the named fake-SDK scenario, and the
-   response row is drawn in the real webapp DOM.
+   daemon, the real shim answers it (the fake SDK's default PROSE turn, whose
+   conclusion echoes the prompt this page sent), and both the prompt row and
+   the response row are drawn in the real webapp DOM.
+   BUILT AND GREEN: `webapp/test/webapp-layer/proof-of-life.layer.test.ts`,
+   driven by `TestWebappLayer`.
 
 ### F2. Feed row rendering, one per drawn family (14)
 
