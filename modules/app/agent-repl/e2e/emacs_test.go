@@ -138,9 +138,12 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		env = append(env, "AGENT_REPL_STORE_SOCKET="+opts.StoreSocket)
 	}
 
+	// `-Q` reads no init file, no site file and no package directory, so the
+	// module's sources are the only elisp loaded and there is nothing for an
+	// --init-directory to point at. That also keeps this off Emacs 29+: the
+	// image is Debian bookworm's emacs-nox, which is 28.2.
 	argv := append(envPrefix(env),
 		"emacs", "-nw", "-Q",
-		"--init-directory", filepath.Join(root, "emacs.d"),
 		"-l", e.bootstrapPath(),
 	)
 
@@ -171,7 +174,6 @@ func (e *Emacs) writeBootstrap(opts EmacsOpts) {
 
 	for _, dir := range []string{
 		e.Root,
-		filepath.Join(e.Root, "emacs.d"),
 		e.StateDir,
 		e.DefaultConfigDir,
 		e.MultiRepoConfigDir,
