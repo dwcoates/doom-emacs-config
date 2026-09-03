@@ -180,14 +180,8 @@ func buildShimBundle(node string) (string, error) {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("make shim build dir: %w", err)
 	}
-	pkg, err := os.ReadFile(filepath.Join(repo.shimDir, "package.json"))
-	if err != nil {
-		return "", fmt.Errorf("read shim package.json: %w", err)
-	}
-	// The bundle resolves its own version via a require of "../package.json"
-	// relative to itself, so it is staged one directory up from the bundle.
-	if err := os.WriteFile(filepath.Join(outDir, "..", "package.json"), pkg, 0o644); err != nil {
-		return "", fmt.Errorf("stage shim package.json: %w", err)
+	if err := stageShimSiblings(outDir); err != nil {
+		return "", err
 	}
 	out := filepath.Join(outDir, "main.js")
 	cmd := exec.Command(node, "build.mjs")
@@ -204,7 +198,66 @@ func buildShimBundle(node string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve shim bundle path: %w", err)
 	}
+	if err := checkShimBundleLayout(outDir); err != nil {
+		return "", err
+	}
 	return real, nil
+}
+
+// sdkProbe is the file whose presence beside the staged bundle proves the
+// SDK is resolvable from it. The shim keeps @anthropic-ai/claude-agent-sdk
+// EXTERNAL (agent-shim/claude/shim/build.mjs), so the bundle resolves it at
+// runtime by walking up from its own URL; build-identity.ts's sdkPackageDir()
+// does exactly that, on the `main` path, before anything else runs. Without
+// this file the shim dies at startup with "Cannot find module".
+const sdkProbe = "@anthropic-ai/claude-agent-sdk/package.json"
+
+// stageShimSiblings reproduces, beside the staged bundle, the sibling layout
+// bin/build-frontend.sh gives the production shim: a node_modules the bundle's
+// runtime `require.resolve` walks into, and the package.json it reads its own
+// version from. Both are staged at BOTH levels the bundle can reach —
+// alongside main.js (Node's resolver walks up from the bundle's own
+// directory) and one directory up (src/main.ts reads its version through a
+// literal require of "../package.json") — so neither lookup depends on how
+// deep in e2eBinDir the bundle happens to sit.
+//
+// Idempotent: TestMain re-entry re-stages over whatever a previous pass left.
+func stageShimSiblings(outDir string) error {
+	pkg, err := os.ReadFile(filepath.Join(repo.shimDir, "package.json"))
+	if err != nil {
+		return fmt.Errorf("read shim package.json: %w", err)
+	}
+	mods := filepath.Join(repo.shimDir, "node_modules")
+	for _, dir := range []string{outDir, filepath.Dir(outDir)} {
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), pkg, 0o644); err != nil {
+			return fmt.Errorf("stage shim package.json in %s: %w", dir, err)
+		}
+		link := filepath.Join(dir, "node_modules")
+		if err := os.Remove(link); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("clear stale %s: %w", link, err)
+		}
+		if err := os.Symlink(mods, link); err != nil {
+			return fmt.Errorf("link shim node_modules into %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+// checkShimBundleLayout is this harness's self-test for the invariant
+// stageShimSiblings exists to hold: the vendor SDK the bundle deliberately
+// does NOT contain must be resolvable from beside the bundle. It runs on
+// every build, because a bundle that cannot find the SDK does not fail
+// visibly here — it fails as ninety-odd unrelated tests timing out on a shim
+// that died in its first millisecond.
+func checkShimBundleLayout(outDir string) error {
+	probe := filepath.Join(outDir, "node_modules", sdkProbe)
+	if _, err := os.Stat(probe); err != nil {
+		return fmt.Errorf("staged shim bundle cannot resolve the vendor SDK: %s is not readable (%w)\n"+
+			"the shim keeps @anthropic-ai/claude-agent-sdk external and resolves it from beside the bundle; "+
+			"without it every shim dies at startup with `Cannot find module`. "+
+			"Run `npm ci` in %s", probe, err, repo.shimDir)
+	}
+	return nil
 }
 
 var (
