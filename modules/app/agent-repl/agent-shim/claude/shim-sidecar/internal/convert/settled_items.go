@@ -51,7 +51,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Grep{Grep: &conversationv1.AgentGrep{
-			Result: &conversationv1.AgentGrep_Success{Success: grepSuccess(call, block, ts)},
+			Result: &conversationv1.AgentGrep_Success{Success: grepSuccess(call, result, block, ts)},
 		}})
 	case kindGlob:
 		if failed {
@@ -60,7 +60,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Glob{Glob: &conversationv1.AgentGlob{
-			Result: &conversationv1.AgentGlob_Success{Success: globSuccess(call, block, ts)},
+			Result: &conversationv1.AgentGlob_Success{Success: globSuccess(call, result, block, ts)},
 		}})
 	case kindBash:
 		if failed {
@@ -161,7 +161,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_ReportFindings{ReportFindings: &conversationv1.AgentReportFindings{
-			State: &conversationv1.AgentReportFindings_Success{Success: findingsSuccess(call, ts)},
+			State: &conversationv1.AgentReportFindings_Success{Success: findingsSuccess(call, result, ts)},
 		}})
 	case kindWorktree:
 		if failed {
