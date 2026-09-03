@@ -800,7 +800,7 @@ func TestBashSuccessReadsTheExitCodeTheVendorInterpreted(t *testing.T) {
 	result := map[string]any{"stdout": "", "returnCodeInterpretation": "exited with code 7"}
 
 	// Act
-	got := bashSuccess(call, result, 1000)
+	got := bashSuccess(call, result, bashExitCode(result, nil, false), 1000)
 
 	// Assert
 	completed, ok := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
@@ -823,7 +823,7 @@ func TestBashSuccessLeavesTerminationUnsetWhenNoStatusWasStated(t *testing.T) {
 	result := map[string]any{"stdout": "ok"}
 
 	// Act
-	got := bashSuccess(call, result, 1000)
+	got := bashSuccess(call, result, bashExitCode(result, nil, false), 1000)
 
 	// Assert
 	completed := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
@@ -940,5 +940,61 @@ func TestWebFetchSuccessReadsTheArtifactRouteFromTheDescriptorsPresence(t *testi
 	// Assert
 	if !got.GetArtifactRead() {
 		t.Fatal("ArtifactRead = false, want true")
+	}
+}
+
+func TestBashExitCodeReadsTheEndingStatedInTheReturnedText(t *testing.T) {
+	// Arrange: a nonzero exit carries no structured field at all — the vendor
+	// states the ending only in the text it returned to the model.
+	block := map[string]any{"content": "Exit code 7\npartway\nto stderr"}
+
+	// Act
+	got := bashExitCode(nil, block, true)
+
+	// Assert
+	if got == nil || *got != 7 {
+		t.Fatalf("bashExitCode = %v, want 7", got)
+	}
+}
+
+func TestBashExitCodeIgnoresNumbersThatNameNoExit(t *testing.T) {
+	// Arrange: output full of numbers states no ending, and reading the first
+	// one would invent a status the shell never reported.
+	block := map[string]any{"content": []any{map[string]any{"type": "text", "text": "4 files, 12 lines"}}}
+
+	// Act
+	got := bashExitCode(nil, block, true)
+
+	// Assert
+	if got != nil {
+		t.Fatalf("bashExitCode = %d, want nil for text that names no exit", *got)
+	}
+}
+
+func TestBashExitCodeIgnoresTheTextOfAResultTheVendorDidNotMarkAnError(t *testing.T) {
+	// Arrange: a command that succeeded while PRINTING the words is output, not
+	// a verdict, so its text is never mined for a status.
+	block := map[string]any{"content": "Exit code 3"}
+
+	// Act
+	got := bashExitCode(nil, block, false)
+
+	// Assert
+	if got != nil {
+		t.Fatalf("bashExitCode = %d, want nil for a result the vendor did not mark an error", *got)
+	}
+}
+
+func TestBashExitCodeIgnoresAStatusNamedMidLine(t *testing.T) {
+	// Arrange: the vendor states the ending on a line of its own, so a mention
+	// inside a line of output is prose the command printed.
+	block := map[string]any{"content": "make: recipe returned exit code 2 for the stale target\nError: EACCES"}
+
+	// Act
+	got := bashExitCode(nil, block, true)
+
+	// Assert
+	if got != nil {
+		t.Fatalf("bashExitCode = %d, want nil for a status named mid-line", *got)
 	}
 }
