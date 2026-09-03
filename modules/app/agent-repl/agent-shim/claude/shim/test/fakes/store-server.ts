@@ -103,10 +103,13 @@ export interface FakeStore {
    *
    * THE FAKE MUST BE ABLE TO REFUSE. Every typed refusal the store declares is
    * a branch of the shim's reader, and a fake that only ever succeeds leaves
-   * those branches asserted nowhere: `stale_pointer` and `unknown_agent` could
-   * be declared and never observed. `detail` is deliberately the caller's to
-   * choose so a test can pair an arm with CONTRADICTING prose and catch a
-   * consumer that classifies by substring.
+   * those branches asserted nowhere: `stale_pointer` could be declared and
+   * never observed. `detail` is deliberately the caller's to choose so a test
+   * can pair an arm with CONTRADICTING prose and catch a consumer that
+   * classifies by substring.
+   *
+   * `unknown_agent` is NOT settable: the fake refuses it on its own for a book
+   * it holds no rows for. Write a row to make an agent known.
    *
    * `GetLiveWork` declares only `storage_failure`; any other arm is refused
    * here rather than fabricating a response shape the proto forbids.
@@ -170,12 +173,17 @@ export interface FakeStore {
 /** A read verb that can be made to refuse. */
 export type StoreReadVerb = "OpenAgentSession" | "ReadAgentPage" | "GetLiveWork";
 
-/** The typed refusal arms a read can carry, as the protos declare them. */
-export type StoreReadFailureArm =
-  | "invalid_request"
-  | "unknown_agent"
-  | "stale_pointer"
-  | "storage_failure";
+/**
+ * The typed refusal arms a read can be MADE to carry, as the protos declare
+ * them.
+ *
+ * `unknown_agent` is deliberately absent: the fake refuses it INTRINSICALLY,
+ * for any agent it holds no row for, exactly as the real store does (landing
+ * 7). Modeling it as a switch let a test open a book on a store that had never
+ * heard of the agent and get a page back — the very state the production
+ * store cannot be in, and the one the fresh-session `WatchAgent` bug lived in.
+ */
+export type StoreReadFailureArm = "invalid_request" | "stale_pointer" | "storage_failure";
 
 /** The typed refusal arms `WriteBatch` declares. */
 export type StoreWriteFailureArm = "invalid_request" | "storage_failure";
@@ -199,6 +207,8 @@ export interface FakeStoreRead {
 
 /** Start the fake store on `socketPath`. Resolves once it is accepting. */
 export async function startFakeStore(socketPath: string): Promise<FakeStore> {
+  /** Every agent the fake holds an `agent` row for — the store's `agent` table. */
+  const knownAgents = new Set<string>();
   const books = new Map<string, StoredRow[]>();
   const rowsByKey = new Map<string, StoredRow>();
   const watches = new Map<string, WatchSessionState>();
@@ -313,6 +323,41 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     detachedAnnounced.set(workId, runId);
   };
 
+  /**
+   * Record FIRST SIGHT of an agent, exactly where `db.ensureAgent` does.
+   *
+   * A prompt addressed to an agent, any frame the agent itself emitted, and the
+   * `created_agent_id` a subagent start names — nothing else. A session update,
+   * an unserved item and a bash row create no agent row in the real store, so
+   * they create none here either.
+   */
+  const rememberAgent = (agentId: string | undefined): void => {
+    if (agentId === undefined || agentId === "") return;
+    knownAgents.add(agentId);
+  };
+
+  /** Every agent the fake has an `agent` row for, by id. */
+  const registerFromLine = (line: storev1.StorePageLine): void => {
+    const item = line.agentItem?.item;
+    if (item?.case === "agentPrompt") {
+      rememberAgent(item.value.agent?.value);
+      return;
+    }
+    if (item?.case !== "agentFrame") return;
+    const frame = item.value;
+    rememberAgent(frame.agentId?.value);
+    if (frame.result.case !== "update") return;
+    const update = frame.result.value.update;
+    if (update.case !== "activity") return;
+    const activity = update.value.item;
+    if (activity.case !== "subagent") return;
+    const subagent = activity.value.result;
+    if (subagent.case !== "start") return;
+    // `createSpawnedAgent`: the created agent's book is addressable from the
+    // spawn frame on, before a single frame of its own has arrived.
+    rememberAgent(subagent.value.createdAgentId?.value);
+  };
+
   const landEntry = (entry: storev1.StoreEntry): void => {
     const update = entry.entry;
     if (update.case === "sessionUpdate") {
@@ -323,6 +368,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     const info = update.value.agentInfo;
     switch (info.case) {
       case "serveableFrame":
+        registerFromLine(info.value);
         recordLiveness(info.value);
         upsertPageLine(entry.upsertKey, info.value);
         return;
@@ -373,12 +419,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
                           field: "agent",
                         }),
                       }
-                    : refusal.arm === "unknown_agent"
-                      ? {
-                          case: "unknownAgent",
-                          value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
-                        }
-                      : refusal.arm === "stale_pointer"
+                    : refusal.arm === "stale_pointer"
                       ? {
                           case: "stalePointer",
                           value: create(storev1.OpenAgentSessionStalePointerSchema, {}),
@@ -392,6 +433,24 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
           });
         }
         const bookId = request.agent?.value ?? "";
+        if (!knownAgents.has(bookId)) {
+          // THE STORE OWNS THE BOOK'S EXISTENCE (landing 7). An agent row is
+          // created by the first write that names the agent, so a reader that
+          // opens before then is refused — which is exactly the race a fresh
+          // session's `WatchAgent` runs, and the fake must run it too.
+          return create(storev1.OpenAgentSessionResponseSchema, {
+            result: {
+              case: "failure",
+              value: create(storev1.OpenAgentSessionFailureSchema, {
+                detail: `fake store holds no agent row for ${JSON.stringify(bookId)}`,
+                kind: {
+                  case: "unknownAgent",
+                  value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+                },
+              }),
+            },
+          });
+        }
         const all = rowsOf(bookId);
         const floorPointer =
           request.knownThrough === undefined ? -1 : Number(request.knownThrough.value);
@@ -723,12 +782,6 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       if (arm === null) {
         readFailures.delete(verb);
         return;
-      }
-      if (arm === "unknown_agent" && verb !== "OpenAgentSession") {
-        // REFUSED RATHER THAN FABRICATED: only OpenAgentSessionFailure declares
-        // `unknown_agent` (landing 7). Collapsing it into storage_failure on
-        // another verb would test the reader against a store that cannot exist.
-        throw new Error(`fake store: ${verb} declares no unknown_agent arm`);
       }
       if (verb === "GetLiveWork" && arm !== "storage_failure") {
         // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares one arm,
