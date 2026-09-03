@@ -178,10 +178,16 @@ const ROWS: readonly ConformanceRow[] = [
   {
     capture: "compaction-directed",
     prompt: "!compact",
-    golden: ["thinking", "response"],
+    // MODEL CHOICE, in first-appearance order: the capture's first 6 filler
+    // turns answer directly with no `thinking` unit at all, so `response`
+    // (turn 1's) is seen before `thinking` (first produced by turn 7,
+    // "Recap, at length..."). The mock's own single turn always thinks
+    // before it answers.
+    golden: ["response", "thinking"],
     mock: ["thinking", "response"],
+    diverges: "MODEL CHOICE",
     terminalsDiverge:
-      "the capture holds THREE turns (the /compact plus the turns around it) and the mock scenario is one; reproducing a capture's turn COUNT would make the mock a recording of that session rather than a model of the vendor's shape",
+      "the capture holds NINE turns (6 filler turns plus /compact, plus the turns around it) and the mock scenario is one; reproducing a capture's turn COUNT would make the mock a recording of that session rather than a model of the vendor's shape",
   },
   {
     capture: "context-injected-memory",
