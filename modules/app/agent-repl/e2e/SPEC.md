@@ -228,6 +228,24 @@ daemon's stale-shim rollout check does not bounce every session against a
 build-time value the fake shim would otherwise claim by default
 (`FakeShimDefaultBuildSHA`).
 
+**Layout invariant — the staged bundle keeps production's siblings.** The
+shim build deliberately leaves `@anthropic-ai/claude-agent-sdk` EXTERNAL
+(`build.mjs`), so the bundle resolves it at RUNTIME by walking up from its own
+URL — `build-identity.ts`'s `sdkPackageDir()` does that on the `main` path,
+before anything else runs. `bin/build-frontend.sh` satisfies that by writing
+`shim/dist/main.js` beside `shim/node_modules` and `shim/package.json`; the
+staged e2e bundle MUST reproduce the same siblings, or every shim dies in its
+first millisecond with `Cannot find module '@anthropic-ai/claude-agent-sdk'`
+and the whole suite reads as a wall of timeouts rather than one build error.
+`buildShimBundle` therefore stages a `node_modules` symlink (to the repo
+shim's real one, whose presence `requireShimBundle` has already made a loud
+skip) and a copy of `package.json` at BOTH levels the bundle can reach — its
+own directory and the one above it, the latter because `src/main.ts` reads
+its version through a literal `require("../package.json")`. The build then
+self-tests the invariant by stat-ing
+`<outDir>/node_modules/@anthropic-ai/claude-agent-sdk/package.json` and fails
+the build, loudly and by name, if it is not there.
+
 All five binaries are built into one `t.TempDir()`-rooted directory per
 `TestMain`/`m.Run()` invocation and referenced by every test via exported
 accessors, exactly as `harness.DaemonBinary(t)` / `harness.FakeShimBinary(t)`
