@@ -202,6 +202,7 @@ type OpenWorkspaceError struct {
 	//	*OpenWorkspaceError_SessionDeleted
 	//	*OpenWorkspaceError_TranscriptMissing
 	//	*OpenWorkspaceError_SpawnFailed
+	//	*OpenWorkspaceError_VendorStartFailed
 	Cause         isOpenWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -307,6 +308,15 @@ func (x *OpenWorkspaceError) GetSpawnFailed() *OpenWorkspaceSpawnFailed {
 	return nil
 }
 
+func (x *OpenWorkspaceError) GetVendorStartFailed() *OpenWorkspaceVendorStartFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_VendorStartFailed); ok {
+			return x.VendorStartFailed
+		}
+	}
+	return nil
+}
+
 type isOpenWorkspaceError_Cause interface {
 	isOpenWorkspaceError_Cause()
 }
@@ -346,6 +356,16 @@ type OpenWorkspaceError_SpawnFailed struct {
 	SpawnFailed *OpenWorkspaceSpawnFailed `protobuf:"bytes,7,opt,name=spawn_failed,json=spawnFailed,proto3,oneof"`
 }
 
+type OpenWorkspaceError_VendorStartFailed struct {
+	// The shim came up but the VENDOR failed to start the session
+	// (shim.v1 StartSessionFailure.vendor_start_failed relayed by name):
+	// the SDK threw before its first message. Distinct from spawn_failed
+	// (our process) and from transcript_missing (our record). `detail` is
+	// the shim's account, for a human and for logs; never switched on.
+	// (Landing 9, 2026-09-03, user-approved.)
+	VendorStartFailed *OpenWorkspaceVendorStartFailed `protobuf:"bytes,8,opt,name=vendor_start_failed,json=vendorStartFailed,proto3,oneof"`
+}
+
 func (*OpenWorkspaceError_UnknownWorkspace) isOpenWorkspaceError_Cause() {}
 
 func (*OpenWorkspaceError_WorkspaceRefMismatch) isOpenWorkspaceError_Cause() {}
@@ -360,6 +380,52 @@ func (*OpenWorkspaceError_TranscriptMissing) isOpenWorkspaceError_Cause() {}
 
 func (*OpenWorkspaceError_SpawnFailed) isOpenWorkspaceError_Cause() {}
 
+func (*OpenWorkspaceError_VendorStartFailed) isOpenWorkspaceError_Cause() {}
+
+type OpenWorkspaceVendorStartFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Detail        string                 `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceVendorStartFailed) Reset() {
+	*x = OpenWorkspaceVendorStartFailed{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceVendorStartFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceVendorStartFailed) ProtoMessage() {}
+
+func (x *OpenWorkspaceVendorStartFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceVendorStartFailed.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceVendorStartFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *OpenWorkspaceVendorStartFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 type OpenWorkspaceUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -368,7 +434,7 @@ type OpenWorkspaceUnknownWorkspace struct {
 
 func (x *OpenWorkspaceUnknownWorkspace) Reset() {
 	*x = OpenWorkspaceUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +446,7 @@ func (x *OpenWorkspaceUnknownWorkspace) String() string {
 func (*OpenWorkspaceUnknownWorkspace) ProtoMessage() {}
 
 func (x *OpenWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +459,7 @@ func (x *OpenWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{5}
 }
 
 type OpenWorkspaceWorkspaceRefMismatch struct {
@@ -406,7 +472,7 @@ type OpenWorkspaceWorkspaceRefMismatch struct {
 
 func (x *OpenWorkspaceWorkspaceRefMismatch) Reset() {
 	*x = OpenWorkspaceWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +484,7 @@ func (x *OpenWorkspaceWorkspaceRefMismatch) String() string {
 func (*OpenWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *OpenWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +497,7 @@ func (x *OpenWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use OpenWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *OpenWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
@@ -451,7 +517,7 @@ type OpenWorkspaceTransferringAway struct {
 
 func (x *OpenWorkspaceTransferringAway) Reset() {
 	*x = OpenWorkspaceTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +529,7 @@ func (x *OpenWorkspaceTransferringAway) String() string {
 func (*OpenWorkspaceTransferringAway) ProtoMessage() {}
 
 func (x *OpenWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +542,7 @@ func (x *OpenWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *OpenWorkspaceTransferringAway) GetAddress() string {
@@ -494,7 +560,7 @@ type OpenWorkspaceNotYetAdopted struct {
 
 func (x *OpenWorkspaceNotYetAdopted) Reset() {
 	*x = OpenWorkspaceNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +572,7 @@ func (x *OpenWorkspaceNotYetAdopted) String() string {
 func (*OpenWorkspaceNotYetAdopted) ProtoMessage() {}
 
 func (x *OpenWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +585,7 @@ func (x *OpenWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{8}
 }
 
 type OpenWorkspaceSessionDeleted struct {
@@ -530,7 +596,7 @@ type OpenWorkspaceSessionDeleted struct {
 
 func (x *OpenWorkspaceSessionDeleted) Reset() {
 	*x = OpenWorkspaceSessionDeleted{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +608,7 @@ func (x *OpenWorkspaceSessionDeleted) String() string {
 func (*OpenWorkspaceSessionDeleted) ProtoMessage() {}
 
 func (x *OpenWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +621,7 @@ func (x *OpenWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceSessionDeleted.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceSessionDeleted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{9}
 }
 
 type OpenWorkspaceTranscriptMissing struct {
@@ -570,7 +636,7 @@ type OpenWorkspaceTranscriptMissing struct {
 
 func (x *OpenWorkspaceTranscriptMissing) Reset() {
 	*x = OpenWorkspaceTranscriptMissing{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -582,7 +648,7 @@ func (x *OpenWorkspaceTranscriptMissing) String() string {
 func (*OpenWorkspaceTranscriptMissing) ProtoMessage() {}
 
 func (x *OpenWorkspaceTranscriptMissing) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -595,7 +661,7 @@ func (x *OpenWorkspaceTranscriptMissing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceTranscriptMissing.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceTranscriptMissing) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *OpenWorkspaceTranscriptMissing) GetVendorSessionId() string {
@@ -622,7 +688,7 @@ type OpenWorkspaceSpawnFailed struct {
 
 func (x *OpenWorkspaceSpawnFailed) Reset() {
 	*x = OpenWorkspaceSpawnFailed{}
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -634,7 +700,7 @@ func (x *OpenWorkspaceSpawnFailed) String() string {
 func (*OpenWorkspaceSpawnFailed) ProtoMessage() {}
 
 func (x *OpenWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -647,7 +713,7 @@ func (x *OpenWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenWorkspaceSpawnFailed.ProtoReflect.Descriptor instead.
 func (*OpenWorkspaceSpawnFailed) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *OpenWorkspaceSpawnFailed) GetDetail() string {
@@ -668,7 +734,7 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.OpenWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.OpenWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x16\n" +
-	"\x14OpenWorkspaceSuccess\"\x94\x05\n" +
+	"\x14OpenWorkspaceSuccess\"\xf4\x05\n" +
 	"\x12OpenWorkspaceError\x12Z\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.OpenWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.OpenWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
@@ -676,8 +742,11 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.OpenWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
 	"\x0fsession_deleted\x18\x05 \x01(\v2).agentrepl.v1.OpenWorkspaceSessionDeletedH\x00R\x0esessionDeleted\x12]\n" +
 	"\x12transcript_missing\x18\x06 \x01(\v2,.agentrepl.v1.OpenWorkspaceTranscriptMissingH\x00R\x11transcriptMissing\x12K\n" +
-	"\fspawn_failed\x18\a \x01(\v2&.agentrepl.v1.OpenWorkspaceSpawnFailedH\x00R\vspawnFailedB\a\n" +
-	"\x05cause\"\x1f\n" +
+	"\fspawn_failed\x18\a \x01(\v2&.agentrepl.v1.OpenWorkspaceSpawnFailedH\x00R\vspawnFailed\x12^\n" +
+	"\x13vendor_start_failed\x18\b \x01(\v2,.agentrepl.v1.OpenWorkspaceVendorStartFailedH\x00R\x11vendorStartFailedB\a\n" +
+	"\x05cause\"8\n" +
+	"\x1eOpenWorkspaceVendorStartFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail\"\x1f\n" +
 	"\x1dOpenWorkspaceUnknownWorkspace\"F\n" +
 	"!OpenWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
@@ -703,37 +772,39 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_open_workspace_proto_goTypes = []any{
 	(*OpenWorkspaceRequest)(nil),              // 0: agentrepl.v1.OpenWorkspaceRequest
 	(*OpenWorkspaceResponse)(nil),             // 1: agentrepl.v1.OpenWorkspaceResponse
 	(*OpenWorkspaceSuccess)(nil),              // 2: agentrepl.v1.OpenWorkspaceSuccess
 	(*OpenWorkspaceError)(nil),                // 3: agentrepl.v1.OpenWorkspaceError
-	(*OpenWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenWorkspaceUnknownWorkspace
-	(*OpenWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
-	(*OpenWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.OpenWorkspaceTransferringAway
-	(*OpenWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenWorkspaceNotYetAdopted
-	(*OpenWorkspaceSessionDeleted)(nil),       // 8: agentrepl.v1.OpenWorkspaceSessionDeleted
-	(*OpenWorkspaceTranscriptMissing)(nil),    // 9: agentrepl.v1.OpenWorkspaceTranscriptMissing
-	(*OpenWorkspaceSpawnFailed)(nil),          // 10: agentrepl.v1.OpenWorkspaceSpawnFailed
-	(*v1.WorkspaceRef)(nil),                   // 11: workspace.v1.WorkspaceRef
+	(*OpenWorkspaceVendorStartFailed)(nil),    // 4: agentrepl.v1.OpenWorkspaceVendorStartFailed
+	(*OpenWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.OpenWorkspaceUnknownWorkspace
+	(*OpenWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
+	(*OpenWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.OpenWorkspaceTransferringAway
+	(*OpenWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.OpenWorkspaceNotYetAdopted
+	(*OpenWorkspaceSessionDeleted)(nil),       // 9: agentrepl.v1.OpenWorkspaceSessionDeleted
+	(*OpenWorkspaceTranscriptMissing)(nil),    // 10: agentrepl.v1.OpenWorkspaceTranscriptMissing
+	(*OpenWorkspaceSpawnFailed)(nil),          // 11: agentrepl.v1.OpenWorkspaceSpawnFailed
+	(*v1.WorkspaceRef)(nil),                   // 12: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	12, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2,  // 1: agentrepl.v1.OpenWorkspaceResponse.success:type_name -> agentrepl.v1.OpenWorkspaceSuccess
 	3,  // 2: agentrepl.v1.OpenWorkspaceResponse.error:type_name -> agentrepl.v1.OpenWorkspaceError
-	4,  // 3: agentrepl.v1.OpenWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.OpenWorkspaceUnknownWorkspace
-	5,  // 4: agentrepl.v1.OpenWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
-	6,  // 5: agentrepl.v1.OpenWorkspaceError.transferring_away:type_name -> agentrepl.v1.OpenWorkspaceTransferringAway
-	7,  // 6: agentrepl.v1.OpenWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.OpenWorkspaceNotYetAdopted
-	8,  // 7: agentrepl.v1.OpenWorkspaceError.session_deleted:type_name -> agentrepl.v1.OpenWorkspaceSessionDeleted
-	9,  // 8: agentrepl.v1.OpenWorkspaceError.transcript_missing:type_name -> agentrepl.v1.OpenWorkspaceTranscriptMissing
-	10, // 9: agentrepl.v1.OpenWorkspaceError.spawn_failed:type_name -> agentrepl.v1.OpenWorkspaceSpawnFailed
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	5,  // 3: agentrepl.v1.OpenWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.OpenWorkspaceUnknownWorkspace
+	6,  // 4: agentrepl.v1.OpenWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
+	7,  // 5: agentrepl.v1.OpenWorkspaceError.transferring_away:type_name -> agentrepl.v1.OpenWorkspaceTransferringAway
+	8,  // 6: agentrepl.v1.OpenWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.OpenWorkspaceNotYetAdopted
+	9,  // 7: agentrepl.v1.OpenWorkspaceError.session_deleted:type_name -> agentrepl.v1.OpenWorkspaceSessionDeleted
+	10, // 8: agentrepl.v1.OpenWorkspaceError.transcript_missing:type_name -> agentrepl.v1.OpenWorkspaceTranscriptMissing
+	11, // 9: agentrepl.v1.OpenWorkspaceError.spawn_failed:type_name -> agentrepl.v1.OpenWorkspaceSpawnFailed
+	4,  // 10: agentrepl.v1.OpenWorkspaceError.vendor_start_failed:type_name -> agentrepl.v1.OpenWorkspaceVendorStartFailed
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_workspace_proto_init() }
@@ -753,6 +824,7 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 		(*OpenWorkspaceError_SessionDeleted)(nil),
 		(*OpenWorkspaceError_TranscriptMissing)(nil),
 		(*OpenWorkspaceError_SpawnFailed)(nil),
+		(*OpenWorkspaceError_VendorStartFailed)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -760,7 +832,7 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
