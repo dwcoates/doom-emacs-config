@@ -1045,3 +1045,45 @@ func hasEvent(seen []event, name string) bool {
 	}
 	return false
 }
+
+// TestShellStreamEndingEarlyReopensTheWatch covers a watch the shim drops
+// before the shell settles: the shell's terminal frame is what reaps the watch,
+// so a stream ending while the entry is still registered means the daemon lost
+// sight of live work and must open the watch again.
+func TestShellStreamEndingEarlyReopensTheWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	first := h.client.nextBashOpen(t)
+	h.quiet()
+
+	// Act.
+	first.stream.fail(errors.New("stream ended"))
+
+	// Assert.
+	if second := h.client.nextBashOpen(t); second.work.GetValue() != "w-1" {
+		t.Fatalf("re-opened watch = %q, want w-1", second.work.GetValue())
+	}
+}
+
+// TestShellStreamEndingAfterTheTerminalIsNotReopened covers the reaped case: a
+// settled shell's watch was already forgotten, so its stream ending is the
+// teardown and nothing is opened again.
+func TestShellStreamEndingAfterTheTerminalIsNotReopened(t *testing.T) {
+	// Arrange: a shell that has settled.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("w-1", bashWork()))})
+	open := h.client.nextBashOpen(t)
+	entry := h.shellWatchFor("w-1")
+	h.quiet()
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+
+	// Act.
+	open.stream.fail(errors.New("stream ended"))
+	h.quiet()
+
+	// Assert.
+	h.client.noBashOpen(t)
+}

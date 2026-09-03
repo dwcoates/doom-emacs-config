@@ -1,6 +1,7 @@
 package sessionwatcher
 
 import (
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -644,5 +645,85 @@ func TestASyncSubagentIsNotLiveWork(t *testing.T) {
 	// Assert.
 	if live := h.w.LiveWork(); len(live.Agents) != 0 {
 		t.Fatalf("live work = %v, want no agents: a sync subagent is not detached work", live.Agents)
+	}
+}
+
+// TestDetachedAnnouncementPromotesTheSyncWatch covers the promotion: the spawn
+// was already watched as the turn's own progress, so the announcement's only
+// job is to hand that watch the handle the live set reports.
+func TestDetachedAnnouncementPromotesTheSyncWatch(t *testing.T) {
+	// Arrange: the spawn's own watch, opened with no handle.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
+	h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+
+	// Assert.
+	live := h.w.LiveWork()
+	if len(live.Agents) != 1 || live.Agents[0].GetValue() != "sub-1" {
+		t.Fatalf("live work = %v, want the promoted subagent", live.Agents)
+	}
+}
+
+// TestPromotedWatchIsNotOpenedTwice covers the other half of the promotion: the
+// watch that already exists is reused, never replaced by a second stream.
+func TestPromotedWatchIsNotOpenedTwice(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(subagentActivity("spawn-1", "sub-1")))))
+	h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+}
+
+// TestRefusedShellWatchIsNotKept covers the refusal: an entry carrying no
+// stream would answer every repeated announcement "already watched", so it must
+// never persist.
+func TestRefusedShellWatchIsNotKept(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setBashErr(errors.New("not_found"))
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	h.w.mu.Lock()
+	kept := len(h.w.shells)
+	h.w.mu.Unlock()
+	if kept != 0 {
+		t.Fatalf("shell watches = %d, want none: a stream-less entry was kept", kept)
+	}
+}
+
+// TestRepeatedAnnouncementReopensARefusedShellWatch covers the retry: the shim
+// refuses WatchBash until its store holds the handle, and the repeat is what
+// gets the shell watched and drawn.
+func TestRepeatedAnnouncementReopensARefusedShellWatch(t *testing.T) {
+	// Arrange: a first announcement the shim refused.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setBashErr(errors.New("not_found"))
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+	h.client.setBashErr(nil)
+
+	// Act.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	if open := h.client.nextBashOpen(t); open.work.GetValue() != "w-1" {
+		t.Fatalf("re-opened watch = %q, want w-1", open.work.GetValue())
+	}
+	if live := h.w.LiveWork(); len(live.Shells) != 1 {
+		t.Fatalf("live work = %v, want the re-opened shell", live.Shells)
 	}
 }
