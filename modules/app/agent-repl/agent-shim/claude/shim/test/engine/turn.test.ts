@@ -47,6 +47,8 @@ interface Harness {
   submitRejects: Error | undefined;
   /** Every store_unreachable the turn verbs reported to the session. */
   readonly storeFaults: string[];
+  /** What this session's `knowsAgent` answers. */
+  knows: boolean;
 }
 
 async function harness(): Promise<Harness> {
@@ -77,6 +79,7 @@ async function harness(): Promise<Harness> {
     identity,
     submitRejects: undefined,
     storeFaults: [] as string[],
+    knows: true,
   };
   const context: SessionContext = {
     persistence,
@@ -90,7 +93,7 @@ async function harness(): Promise<Harness> {
     watcherOpened: () => () => undefined,
     bashWatcherOpened: () => () => undefined,
     concludeStoppedRuns: () => undefined,
-    knowsAgent: () => true,
+    knowsAgent: () => state.knows,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
     submit: (said, keepalive) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
@@ -667,6 +670,30 @@ describe("WatchAgent", () => {
         }
       })(),
     ).rejects.toThrow(/no such book/);
+  });
+
+  it("hands the record plane the producer's own verdict on the target", async () => {
+    // The store refuses a book it holds no row for, and the main agent's row is
+    // created by its FIRST WRITE — so the record plane needs this verdict to
+    // tell a fresh agent apart from an id nobody ever minted.
+    // Arrange.
+    const h = await harness();
+    h.knows = false;
+
+    // Act. The empty book is refused after the open, which is beside the point
+    // here: what is asserted is the verdict the open was given.
+    await expect(
+      (async () => {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          break;
+        }
+      })(),
+    ).rejects.toThrow();
+
+    // Assert.
+    expect(h.persistence.lastKnownAgent?.()).toBe(false);
   });
 
   it("closes the store's own unknown_agent refusal with Code.NotFound", async () => {
