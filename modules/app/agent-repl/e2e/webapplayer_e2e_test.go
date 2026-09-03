@@ -130,6 +130,16 @@ func TestWebappLayerCards(t *testing.T) {
 	wlDriveArea(t, "cards.layer.test.ts")
 }
 
+// TestWebappLayerSurfaces is section F5: footer and topbar surfaces.
+func TestWebappLayerSurfaces(t *testing.T) {
+	wlDriveArea(t, "surfaces.layer.test.ts")
+}
+
+// TestWebappLayerPanels is section F6: daemon-answered command panels.
+func TestWebappLayerPanels(t *testing.T) {
+	wlDriveArea(t, "panels.layer.test.ts")
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
