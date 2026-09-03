@@ -116,6 +116,13 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 
 // stampTurn puts the turn a row belongs to on it. A separation belongs to no
 // turn and is deliberately left unstamped.
+//
+// A ROW'S TURN IS NEVER UNLEARNED. A family recomposes its row from scratch on
+// every frame, so the value handed here is a FRESH object even for a unit that
+// was already drawn and already stamped; and a store replay re-draws a unit
+// long after its turn closed, with no turn of its own and no turn in flight.
+// Taking the already-published row's turn as the standing answer is what keeps
+// a replay from erasing the stamp the live frame earned.
 func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversationv1.TurnId) {
 	if row.GetTurn() != nil {
 		return
@@ -124,9 +131,27 @@ func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversa
 		row.Turn = turn
 		return
 	}
+	if prior := r.publishedTurn(s, row.GetId().GetValue()); prior != nil {
+		row.Turn = prior
+		return
+	}
 	if s.turnInFlight != nil {
 		row.Turn = &conversationv1.TurnId{Value: string(*s.turnInFlight)}
 	}
+}
+
+// publishedTurn answers the turn already published for a row id, or nil when
+// the row has never been published or was published unstamped.
+func (r *resolver) publishedTurn(s *wsState, id string) *conversationv1.TurnId {
+	if id == "" {
+		return nil
+	}
+	for _, f := range s.feeds {
+		if existing, ok := f.rows[id]; ok {
+			return existing.GetTurn()
+		}
+	}
+	return nil
 }
 
 // OnQuestion draws the agent blocking on a choice.
