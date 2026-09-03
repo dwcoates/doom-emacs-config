@@ -42,7 +42,15 @@ ARG BASE_IMAGE=debian:bookworm-slim
 FROM ${BASE_IMAGE}
 
 # --- pinned identifiers ----------------------------------------------------
-ARG SNAPSHOT_STAMP=20250801T000000Z
+# SNAPSHOT_STAMP MUST BE AT OR AFTER THE BASE IMAGE'S BUILD DATE. The base
+# image already has the point-release versions current on the day it was
+# built; a snapshot older than that offers only OLDER versions of libc6,
+# perl-base and friends, and apt then refuses the install outright
+# ("libc6-dev : Depends: libc6 (= 2.36-9+deb12u10) but 2.36-9+deb12u14 is to
+# be installed ... held broken packages"). Bump this stamp whenever
+# SANDBOX_BASE_IMAGE's digest is bumped; `docker image inspect --format
+# '{{.Created}}'` gives the date it must clear.
+ARG SNAPSHOT_STAMP=20260901T000000Z
 ARG NODE_VERSION=22.14.0
 ARG NODE_SHA256=
 ARG GO_VERSION=1.24.6
@@ -71,10 +79,22 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # the binary between the two packages cannot silently remove it. The harness
 # keeps a runtime `exec.LookPath("script")` check as a backstop for images
 # built before this line existed.
+# APT TALKS TO THE SNAPSHOT OVER PLAIN http ON PURPOSE. `bookworm-slim`
+# carries no `ca-certificates`, so an https:// sources.list here cannot be
+# fetched at all ("The certificate is NOT trusted" / "no installation
+# candidate") — and ca-certificates is itself one of the packages this very
+# step installs, so it is a bootstrap cycle. Plain http breaks the cycle
+# WITHOUT weakening anything that matters: apt verifies the snapshot's
+# `InRelease` signature against `debian-archive-keyring`, which IS in the
+# base image, and every package hash is bound to that signed index. TLS would
+# add transport privacy, not integrity, and this index is public. Everything
+# fetched LATER by curl (the Node and Go tarballs, Doom's clone) goes over
+# https and does need certificates — which is why ca-certificates is
+# installed here, before any of it runs.
 RUN set -eux; \
     printf '%s\n' \
-      "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${SNAPSHOT_STAMP}/ bookworm main" \
-      "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${SNAPSHOT_STAMP}/ bookworm-security main" \
+      "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${SNAPSHOT_STAMP}/ bookworm main" \
+      "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${SNAPSHOT_STAMP}/ bookworm-security main" \
       > /etc/apt/sources.list; \
     rm -f /etc/apt/sources.list.d/debian.sources; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
@@ -87,7 +107,13 @@ RUN set -eux; \
         rsync \
         util-linux \
         xz-utils; \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*; \
+    test -s /etc/ssl/certs/ca-certificates.crt; \
+    command -v script; \
+    command -v curl; \
+    command -v git; \
+    command -v rsync; \
+    command -v emacs
 
 # --- Node (Debian bookworm ships 18; the shim and webapp need >= 20) ------
 RUN set -eux; \
@@ -134,18 +160,34 @@ ENV PATH=/usr/local/go/bin:${PATH} \
 # bound to anything on the host.
 RUN set -eux; \
     useradd --create-home --home-dir /sandbox/home --shell /bin/bash --uid 1000 sandbox; \
-    mkdir -p /sandbox/home /repo-src /work; \
+    mkdir -p /sandbox/home /sandbox/cache /repo-src /work; \
     chown -R sandbox:sandbox /sandbox /work
+# THE PRIMED CACHES LIVE OUTSIDE HOME, at /sandbox/cache. HOME is a tmpfs at
+# run time (that is what keeps a run off the host's ~), and a tmpfs mounted
+# at /sandbox/home COMPLETELY HIDES whatever the image baked underneath it —
+# so an npm or Go cache primed into ~/.npm or ~/go would be gone in every
+# container that used it, and `npm ci --offline` / `go build` with GOPROXY=off
+# would fail with no network to fall back on. Keeping the caches at
+# /sandbox/cache leaves them visible from the image layer, which is read-only
+# under `--read-only`: the Go module cache is complete and Go reads a
+# complete cache read-only, while the entrypoint copies the (much smaller)
+# npm cache into the writable HOME because npm writes to its cache even on
+# an offline install.
+#
+# GOCACHE (the build cache) is the one that MUST be writable, so it stays
+# under HOME on the tmpfs.
 ENV HOME=/sandbox/home \
     XDG_CONFIG_HOME=/sandbox/home/.config \
     XDG_CACHE_HOME=/sandbox/home/.cache \
     XDG_DATA_HOME=/sandbox/home/.local/share \
     DOOMDIR=/sandbox/doom \
     EMACSDIR=/sandbox/emacs.d \
-    GOPATH=/sandbox/home/go \
-    GOMODCACHE=/sandbox/home/go/pkg/mod \
+    SANDBOX_CACHE=/sandbox/cache \
+    GOPATH=/sandbox/cache/go \
+    GOMODCACHE=/sandbox/cache/go/pkg/mod \
     GOCACHE=/sandbox/home/.cache/go-build \
-    NPM_CONFIG_CACHE=/sandbox/home/.npm
+    NPM_CONFIG_CACHE=/sandbox/cache/npm \
+    GIT_CONFIG_GLOBAL=/sandbox/gitconfig
 
 USER sandbox
 WORKDIR /work
@@ -155,11 +197,16 @@ WORKDIR /work
 # The e2e suite never runs real git (see the repo's no-real-git rule), but
 # Doom's own installer and `doom sync` both shell out to git, and git refuses
 # to work without an identity. This one exists only inside the image.
+# `--global` writes to GIT_CONFIG_GLOBAL (/sandbox/gitconfig), NOT to
+# ~/.gitconfig: HOME is a fresh tmpfs in every container, so an identity
+# written into ~ at build time would not exist at run time and git would
+# refuse to work for Doom's own git calls.
 RUN set -eux; \
     git config --global user.name  "agent-repl sandbox"; \
     git config --global user.email "sandbox@invalid"; \
     git config --global init.defaultBranch main; \
-    git config --global advice.detachedHead false
+    git config --global advice.detachedHead false; \
+    test -s /sandbox/gitconfig
 
 # --- the MINIMAL doom profile ----------------------------------------------
 #
@@ -168,13 +215,21 @@ RUN set -eux; \
 COPY --chown=sandbox:sandbox doom/ /sandbox/doom/
 
 # --- Doom itself, pinned to a SHA ------------------------------------------
+#
+# `sources/doom+/modules` is created because doom.el:189 puts it on
+# `doom-module-load-path` unconditionally. A fresh clone does not contain it,
+# and every `doom` invocation then printed "Setting current directory: No
+# such file or directory, .../sources/doom+/modules" onto the output the
+# suite reads. Creating the (empty) directory makes the path Doom already
+# expects actually resolve.
 RUN set -eux; \
     if [ -z "${DOOM_REF}" ]; then \
       echo "sandbox: DOOM_REF is empty; pass a Doom commit SHA (--build-arg DOOM_REF=<sha>)" >&2; \
       exit 1; \
     fi; \
     git clone --filter=blob:none https://github.com/doomemacs/doomemacs "${EMACSDIR}"; \
-    git -C "${EMACSDIR}" checkout "${DOOM_REF}"
+    git -C "${EMACSDIR}" checkout "${DOOM_REF}"; \
+    mkdir -p "${EMACSDIR}/sources/doom+/modules"
 ENV PATH=/sandbox/emacs.d/bin:${PATH}
 
 # --- the module's own packages.el, for the build-time `doom sync` ----------
@@ -186,8 +241,16 @@ ENV PATH=/sandbox/emacs.d/bin:${PATH}
 COPY --chown=sandbox:sandbox module-loader-files/ /sandbox/doom/modules/app/agent-repl/
 
 # --- doom sync at IMAGE BUILD time, so no test ever pays it ----------------
+#
+# FLAGS: this Doom's `install` accepts only `--aot` and the `--[no-]config`,
+# `--[no-]env`, `--[no-]install` pairs — `--no-fonts`/`--no-hooks` do not
+# exist and make it exit 2. `--no-config` keeps it from generating a config
+# over the profile COPYied in above, `--no-env` skips the envvar dump (the
+# image sets its own environment), and `--no-install` leaves package
+# installation to the explicit `doom sync` that follows, which is the step
+# whose result the image is actually baking.
 RUN set -eux; \
-    doom install --no-config --no-env --no-fonts --no-hooks; \
+    doom install --no-config --no-env --no-install; \
     doom sync
 
 # --- prime the npm caches so `npm ci` runs OFFLINE at test time ------------
@@ -222,6 +285,32 @@ RUN set -eux; \
 ENV GOFLAGS=-mod=mod \
     GOPROXY=off \
     npm_config_offline=true
+
+# --- keep the toolchains on PATH in LOGIN shells too ----------------------
+#
+# Debian's /etc/profile overwrites PATH unconditionally, so a login shell
+# (`e2e-sandbox.sh shell`, the image's own default CMD, anything run through
+# `bash -l`) would drop /opt/node/bin, /usr/local/go/bin and Doom's bin and
+# report node/go/doom as missing even though they are installed. Re-adding
+# them from a profile.d drop-in makes the login and non-login environments
+# agree instead of leaving it to every caller to remember `bash -c`.
+#
+# The same step deletes Debian's default ~/.bash_logout, which runs
+# `clear_console -q` on exit. With no tty that command FAILS, and because it
+# is the last thing a login shell runs it becomes the shell's — and so the
+# CONTAINER's — exit status: every `bash -lc <anything>` returned 1 no matter
+# what the command did, which silently turns a passing test run into a
+# failure (and would mask a real one). Removing the file makes a login
+# shell's status the status of the command it was given.
+USER root
+RUN set -eux; \
+    printf '%s\n' \
+      'PATH=/sandbox/emacs.d/bin:/usr/local/go/bin:/opt/node/bin:$PATH' \
+      'export PATH' \
+      > /etc/profile.d/10-agent-repl-sandbox.sh; \
+    chmod 0644 /etc/profile.d/10-agent-repl-sandbox.sh; \
+    rm -f /etc/skel/.bash_logout /sandbox/home/.bash_logout /root/.bash_logout
+USER sandbox
 
 COPY --chown=sandbox:sandbox bin/entrypoint.sh /sandbox/entrypoint.sh
 ENTRYPOINT ["/sandbox/entrypoint.sh"]

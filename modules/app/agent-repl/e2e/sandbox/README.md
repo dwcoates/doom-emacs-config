@@ -60,23 +60,39 @@ network and because it removes the one remaining way a run could reach out.
 
 ```bash
 # from the repo root
-export SANDBOX_DOOM_REF=<doom commit sha>
-export SANDBOX_BASE_IMAGE=debian:bookworm-slim@sha256:<digest>
-export SANDBOX_NODE_SHA256=<sha256 of node-v22.14.0-linux-<arch>.tar.xz>
-export SANDBOX_GO_SHA256=<sha256 of go1.24.6.linux-<arch>.tar.gz>
-
 modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh build
 ```
 
-`build` **refuses to run** unless all four of those are set, because they are
-the identifiers this checkout cannot pin on its own. To build anyway, against
-moving targets, pass `--allow-unpinned`:
+That is the whole command: the four identifiers the Dockerfile cannot resolve
+from a checkout are **recorded in `pins.env`** — the base image digest, the
+per-architecture Node and Go tarball checksums, the Doom commit SHA and the
+snapshot stamp — so no `--allow-unpinned` is needed.
+
+The gate is unchanged. `build` still **refuses to run** if an identifier is
+pinned neither in `pins.env` nor in the environment, and an environment
+variable of the same name always wins over the recorded value, so overriding
+a pin stays deliberate:
 
 ```bash
+# build against a different Doom, leaving every other pin as recorded
+SANDBOX_DOOM_REF=<sha> modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh build
+
+# build against moving targets on purpose (only needed with no pins.env)
 modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh build --allow-unpinned
 ```
 
 `--no-cache` is also accepted.
+
+`SNAPSHOT_STAMP` must be **at or after the base image's build date**: an older
+snapshot offers only older `libc6`/`perl-base` than the base image already
+has, and apt then refuses the install as held broken packages. Bump the stamp
+whenever the base digest is bumped.
+
+Every build ends in a verification step, so a build cannot report success
+without a working image: the image must exist, carry
+`emacs`/`node`/`npm`/`go`/`git`/`rsync`/`script`/`doom` on a **login** shell's
+PATH, and have `doom sync` baked (the profile's `.local`). Any of those
+missing fails the build loudly.
 
 ## Run
 
@@ -284,10 +300,11 @@ Explicitly, so nothing here reads as a tested claim:
   a build picks (the profile falls back to `emacs-startup-hook`); and that
   `apt-get install bsdutils util-linux` resolves at `SNAPSHOT_STAMP` — all
   unexecuted.
-- **Base image digest, tarball checksums and the Doom SHA are not pinned in
-  this checkout** — resolving any of them needs a registry or a download,
-  i.e. a working runtime. They are passed in as build args, and `build`
-  refuses to proceed without them unless `--allow-unpinned` is given.
+- **Base image digest, tarball checksums and the Doom SHA cannot be resolved
+  without a registry or a download** — so they are resolved once from a real
+  build and recorded in `pins.env`, which `build` reads. The gate is
+  unchanged: anything pinned in neither `pins.env` nor the environment is
+  still a refusal to build.
 
 Verified on the authoring machine:
 

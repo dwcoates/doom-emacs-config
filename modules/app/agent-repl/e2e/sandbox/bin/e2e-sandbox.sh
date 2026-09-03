@@ -95,6 +95,43 @@ stage_context() {
   done < <(find "$repo_root/$MODULE_REL" -name go.mod -not -path '*/node_modules/*')
 }
 
+# --- recorded pins ---------------------------------------------------------
+#
+# pins.env holds the four identifiers the Dockerfile cannot resolve from a
+# checkout, so a normal build needs no `--allow-unpinned`. An environment
+# variable of the same name always WINS over the recorded value, which is
+# what keeps an override deliberate; the gate below is untouched, so a pin
+# that is missing from BOTH is still a refusal to build.
+load_pins() {
+  local rt=$1 pins=$sandbox_dir/pins.env
+  [[ -f $pins ]] || { log "no $pins; every identifier must come from the environment"; return 0; }
+
+  local key value
+  # shellcheck disable=SC2034  # $value is read by the eval below
+  while IFS='=' read -r key value; do
+    [[ $key == SANDBOX_* || $key == NODE_SHA256_* || $key == GO_SHA256_* ]] || continue
+    # Already set in the environment: the caller's value wins.
+    [[ -n ${!key:-} ]] && continue
+    eval "$key=\"\$value\""
+    export "${key?}"
+  done < <(sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$pins")
+
+  # The tarball checksums are per architecture, so pick the pair matching the
+  # architecture this build targets.
+  local arch
+  arch=$("$rt" version --format '{{.Server.Arch}}' 2>/dev/null || true)
+  [[ -n $arch ]] || arch=$(uname -m)
+  case $arch in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) die "unsupported build architecture '$arch'; no recorded node/go checksum for it" ;;
+  esac
+  local nkey=NODE_SHA256_$arch gkey=GO_SHA256_$arch
+  [[ -n ${SANDBOX_NODE_SHA256:-} ]] || SANDBOX_NODE_SHA256=${!nkey:-}
+  [[ -n ${SANDBOX_GO_SHA256:-} ]] || SANDBOX_GO_SHA256=${!gkey:-}
+  log "pins: arch=$arch from $pins"
+}
+
 do_build() {
   local allow_unpinned=0 extra=()
   while (( $# )); do
@@ -109,6 +146,8 @@ do_build() {
   local rt
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
   "$rt" info >/dev/null 2>&1 || die "'$rt' is not usable; run 'e2e-sandbox.sh preflight' for details"
+
+  load_pins "$rt"
 
   # The identifiers this checkout cannot pin on its own. See the Dockerfile's
   # pinning comment for why each one needs a registry or a download.
@@ -125,9 +164,14 @@ do_build() {
   fi
   (( ${#unpinned[@]} )) && log "WARNING: building with UNPINNED: ${unpinned[*]}"
 
-  local ctx
-  ctx=$(mktemp -d)
-  trap 'rm -rf "$ctx"' EXIT
+  # NOT `local`: the EXIT trap below runs after this function's frame is
+  # gone, so a function-local would be UNSET by then — and under `set -u`
+  # that made the trap body itself die with "ctx: unbound variable",
+  # replacing the real failure with a shell error. A file-scope name plus a
+  # `:-` guard in the trap makes the cleanup correct on every path.
+  CTX=$(mktemp -d)
+  trap 'rm -rf "${CTX:-}"' EXIT
+  local ctx=$CTX
   stage_context "$ctx"
 
   local args=(build -t "$IMAGE" -f "$ctx/Dockerfile")
@@ -140,11 +184,55 @@ do_build() {
   # DOOM_REF has no default in the Dockerfile: an empty one fails the build
   # loudly rather than silently tracking Doom's master.
   args+=(--build-arg "DOOM_REF=${SANDBOX_DOOM_REF:-}")
-  args+=("${extra[@]}" "$ctx")
+  args+=(${extra[@]+"${extra[@]}"} "$ctx")
 
   log "building $IMAGE with $rt"
-  "$rt" "${args[@]}"
+  # No pipeline, no `|| true`, no subshell: the runtime's own status is this
+  # function's status, and `set -e` propagates it. The explicit `||` exists
+  # only to name the failure; it re-raises the same code.
+  local rc=0
+  "$rt" "${args[@]}" || rc=$?
+  if (( rc != 0 )); then
+    die "$rt build FAILED (exit $rc); no image was produced"
+  fi
+  verify_image "$rt"
   log "built $IMAGE"
+}
+
+# --- post-build verification ----------------------------------------------
+#
+# A build script that reports success without an image is worse than no build
+# script, so success is not the runtime's word for it: the image must exist
+# AND carry every binary the suite depends on, or this fails loudly.
+verify_image() {
+  local rt=$1
+  "$rt" image inspect "$IMAGE" >/dev/null 2>&1 \
+    || die "build reported success but image '$IMAGE' does not exist"
+
+  # Run the probe with the same isolation the suite uses, so a missing binary
+  # is caught under the real conditions and not a friendlier ad-hoc setup.
+  local probe
+  probe=$(cat <<'PROBE'
+set -eu
+fail=0
+for b in emacs node npm go git rsync script doom; do
+  command -v "$b" >/dev/null 2>&1 || { echo "MISSING BINARY: $b" >&2; fail=1; }
+done
+# `doom sync` must have been baked at build time: the profile's .local is
+# what proves it, and without it every Emacs test would pay the sync.
+if [ ! -d "$EMACSDIR/.local" ]; then
+  echo "MISSING: $EMACSDIR/.local (doom sync was not baked into the image)" >&2
+  fail=1
+fi
+exit "$fail"
+PROBE
+)
+  # `-lc`, not `-c`: this deliberately probes the LOGIN environment, which is
+  # what `e2e-sandbox.sh shell` and the image's default CMD get, so a PATH
+  # that only works for non-login shells is caught here.
+  "$rt" run --rm --network none --entrypoint /bin/bash "$IMAGE" -lc "$probe" \
+    || die "image '$IMAGE' is missing required contents (see above)"
+  log "verified: image exists and carries emacs/node/go/script/doom + a baked doom sync"
 }
 
 # --- run -------------------------------------------------------------------
@@ -163,17 +251,32 @@ do_run() {
     --network none
     --user 1000:1000
     --read-only
-    --tmpfs "/tmp:rw,exec,size=2g"
-    --tmpfs "/work:rw,exec,size=8g"
-    --tmpfs "/sandbox/home/.cache:rw,exec,size=4g"
+    # EVERY writable tmpfs carries uid/gid=1000 EXPLICITLY. Docker mounts a
+    # tmpfs root:root 0755, so without this the container's non-root uid
+    # cannot create anything in /work at all and the entrypoint's rsync dies
+    # with "mkdir ... Permission denied" on the first directory. /tmp keeps
+    # the conventional 1777 instead, since anything may write there.
+    --tmpfs "/tmp:rw,exec,size=2g,mode=1777"
+    --tmpfs "/work:rw,exec,size=8g,uid=1000,gid=1000,mode=0755"
     --mount "type=bind,source=$repo_root,target=/repo-src,readonly"
     --env "AGENT_REPL_SANDBOX_SHA=$sha"
-    --workdir "/work/repo/$MODULE_REL"
+    # --workdir IS DELIBERATELY THE TMPFS ROOT, not the module directory.
+    # Docker CREATES a missing workdir itself, as ROOT, before the entrypoint
+    # runs — so naming /work/repo/<module> here pre-created that whole chain
+    # root-owned inside the tmpfs, and the entrypoint's rsync then failed
+    # "mkdir ... Permission denied" on every directory under it. /work is the
+    # tmpfs mountpoint, already owned by the sandbox uid, so nothing is
+    # created; the entrypoint cd's to the module directory before exec.
+    --workdir "/work"
   )
   # The image's own HOME, Doom install and caches must stay writable even
   # under --read-only, so they get their own volumes rather than a host path.
-  args+=(--tmpfs "/sandbox/home:rw,exec,size=4g")
-  args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m")
+  # HOME must be a tmpfs (that is what keeps a run off the host's ~), which
+  # means it HIDES anything the image put under /sandbox/home. The image
+  # therefore keeps its primed caches at /sandbox/cache and its git identity
+  # at /sandbox/gitconfig, neither of which any mount covers.
+  args+=(--tmpfs "/sandbox/home:rw,exec,size=8g,uid=1000,gid=1000,mode=0755")
+  args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m,uid=1000,gid=1000,mode=0755")
 
   if [[ -n ${AGENT_REPL_E2E_ARTIFACTS:-} ]]; then
     mkdir -p "$AGENT_REPL_E2E_ARTIFACTS"
