@@ -45,6 +45,7 @@ import {
   updateAgentDelivered,
   updateAgentRefused,
 } from "../service/failures.js";
+import type { BashRunStanding } from "../store/reader.js";
 import type { PermissionGate } from "./permission-gate.js";
 import type { LiveWorkEntry, LiveWorkTable } from "./detached.js";
 import type { ForegroundUnitTable } from "./foreground.js";
@@ -844,14 +845,24 @@ export class TurnEngine {
     // store refuses a run before its first row lands, and the daemon opens its
     // watch on the announcement, so the refusal is waited out while the shim
     // still holds the run and only then reported.
-    const stillLive = (): boolean => this.session.live.byToolUseId(work.value) !== undefined;
+    // THREE STANDINGS, NOT TWO. A run that has already left the live set was
+    // still ANNOUNCED — and the fold that retires it is the same fold that
+    // writes its rows, so "concluded" routinely means "concluded, rows not yet
+    // committed". Collapsing that into "not live" refused a run the daemon had
+    // just been told to follow.
+    const announcement = (): BashRunStanding =>
+      this.session.live.byToolUseId(work.value) !== undefined
+        ? "live"
+        : this.session.live.retired(work.value)
+          ? "concluded"
+          : "unknown";
     // A REFUSAL CAN SURFACE FROM THE ITERATION, not only from the open: the
     // store's own stream is what refuses, and its first frame is pulled when
     // the tail is read. Both are mapped, or the transport answers a bare
     // `internal error` for a refusal the shim understood perfectly well.
     const watcherEnded = this.session.bashWatcherOpened(work);
     try {
-      const run = await this.session.persistence.openBashRun(work, stillLive);
+      const run = await this.session.persistence.openBashRun(work, announcement);
       for await (const frame of run) {
         yield create(shimv1.WatchBashResponseSchema, { bash: frame });
       }

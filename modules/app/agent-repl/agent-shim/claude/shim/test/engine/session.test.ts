@@ -23,6 +23,7 @@ import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import type { AccountUsageLike, McpServerStatusLike } from "../../src/sdk/types.js";
+import { mainAgentId } from "../../src/convert/ids.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -2487,5 +2488,228 @@ describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () =>
       return result.value.outcome.case === "interrupted";
     });
     expect(wrote).toBe(true);
+  });
+});
+
+/**
+ * A gated call raised INSIDE a subagent (engine/session.ts's `agentFor`).
+ *
+ * The vendor mints `canUseTool`'s `agentID` from the spawning `tool_use_id`,
+ * which is the key the LIVE detached-work table is addressable by -- and not a
+ * key the announced-agent set holds, so before this every permission and
+ * question raised under a subagent landed on the main agent's book with "the
+ * vendor raised an ask under an agent this session never announced".
+ */
+describe("an ask raised under a subagent's vendor agent id", () => {
+  /** Announce a live detached agent task spawned by `toolu_spawn`. */
+  const spawnSubagent = async (h: Harness): Promise<void> => {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_spawn",
+      task_type: "agent",
+      subagent_type: "general-purpose",
+      description: "look something up",
+      uuid: "00000000-0000-4000-8000-00000000000a",
+      session_id: "s",
+    } as never);
+  };
+
+  /** The book the gate's permission frame landed on. */
+  const permissionBook = (h: Harness): string | undefined => {
+    for (const entry of h.persistence.buffered) {
+      if (entry.item.kind !== "frame") continue;
+      const result = entry.item.frame.result;
+      if (result.case !== "update") continue;
+      if (result.value.update.case !== "permission") continue;
+      return entry.agentId.value;
+    }
+    return undefined;
+  };
+
+  it("books the ask under the live subagent", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "toolu_spawn",
+      requestId: "req_1",
+    } as never);
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    expect(permissionBook(h)).toBe("toolu_spawn");
+  });
+
+  it("falls back to the main agent once the subagent has concluded", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a01",
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-00000000000b",
+      session_id: "s",
+    } as never);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "toolu_spawn",
+      requestId: "req_1",
+    } as never);
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    expect(permissionBook(h)).toBe(mainAgentId(sessionId).value);
+  });
+});
+
+/**
+ * Settledness for an item with NO `result` oneof (engine/session.ts's
+ * `noteForegroundUnits`).
+ *
+ * `AgentTaskAct` and its siblings carry an `act` rather than a lifecycle: the
+ * act IS the whole unit. Deriving settledness from a `result` they do not have
+ * left them in flight forever, and `DetachForeground` then answered
+ * `not_detachable` for a unit that had plainly concluded.
+ */
+describe("a foreground unit whose item has no lifecycle", () => {
+  it("is settled the moment its act is recorded", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: "task_act" } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_task",
+                          }),
+                          item: {
+                            case: "taskAct",
+                            value: create(conversationv1.AgentTaskActSchema, {
+                              act: { case: "created", value: create(conversationv1.AgentTaskCreatedSchema, {}) },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000c",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_task" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("alreadyConcluded");
+  });
+});
+
+
+/**
+ * The IDE-diagnostics adjacency join (engine/session.ts's `lastWriteOrEdit`).
+ *
+ * The vendor's `diagnostics` attachment carries no tool id, so
+ * convert/attachments.ts joins it to the change it concerns by the one
+ * remembered write-or-edit unit -- and nothing assigned it, so every
+ * diagnostics record fell to "IDE diagnostics arrived with no preceding write
+ * or edit" and landed as residue.
+ */
+describe("the last write or edit unit the fold context carries", () => {
+  it("names the edit once one has been folded", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: "edit" } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_edit",
+                          }),
+                          item: {
+                            case: "edit",
+                            value: create(conversationv1.AgentEditSchema, {}),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000d",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    // The attachment is a LATER message, which is the whole point of the join.
+    await h.engine.onSdkMessage({
+      type: "user",
+      uuid: "00000000-0000-4000-8000-00000000000e",
+      session_id: "s",
+      message: { role: "user", content: [] },
+    } as never);
+
+    expect(h.fold.contexts.at(-1)?.lastWriteOrEditUnit?.value).toBe("toolu_edit");
   });
 });

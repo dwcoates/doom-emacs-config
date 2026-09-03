@@ -26,6 +26,7 @@
 import type { conversationv1, storev1 } from "../proto.js";
 import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
+import type { BashRunStanding } from "./reader.js";
 
 // ---------------------------------------------------------------------------
 // What one write is
@@ -264,15 +265,16 @@ export interface Persistence {
   /**
    * One detached shell run's lifecycle frames: the announced start, then the tail.
    *
-   * `stillLive` is the CALLER'S belief that the run exists — the live table's
-   * own answer. The store refuses a run it holds no row for, and an eager
-   * watcher routinely beats the first row there, so that refusal is waited out
-   * for as long as this predicate holds and surfaced as `unknown_work` once it
-   * does not.
+   * `announcement` is the CALLER'S standing belief about the run — the live
+   * table's own answer, `live` / `concluded` / `unknown`. The store refuses a
+   * run it holds no row for, and an eager watcher routinely beats the first row
+   * there, so that refusal is waited out while the run is live AND through the
+   * concluded-but-unwritten window that follows, and surfaced as `unknown_work`
+   * only for a handle nothing was ever announced under.
    */
   openBashRun(
     work: conversationv1.DetachedWorkId,
-    stillLive?: () => boolean,
+    announcement?: () => BashRunStanding,
   ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe faults the record plane raises. Returns an unsubscribe. */
   onFault(listener: (fault: conversationv1.SessionFault) => void): () => void;

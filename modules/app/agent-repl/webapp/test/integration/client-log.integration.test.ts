@@ -12,6 +12,10 @@
  * (`clientLogSink`, one call per record, deliberately not through `callUnary`),
  * behind the same throttle — which is why a warn is asserted after its two
  * second window and an error is asserted immediately.
+ *
+ * Most cases install that sink AFTER the boot (`installClientLogSink`), so the
+ * only records on the wire are the ones the case emits. The two cases that are
+ * about the boot's own diagnostics boot with it standing (`clientLog: true`).
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -37,12 +41,26 @@ interface LoggedCall {
 /** The records the daemon has been handed, oldest first. */
 const recorded = (): LoggedCall[] => harness.fake.calls<LoggedCall>("clientLog");
 
-/** Boot with production's log sink installed, and forget the boot's own records. */
+/** Boot quiet, then install production's log sink for the record under test. */
 async function withLogSink(): Promise<void> {
-  harness = await startHarness({ clientLog: true });
-  // The boot logs through the same sink; the records under test are the ones
-  // a case emits after this point.
-  await harness.tick(2_000);
+  // BOOTED QUIET, SINK INSTALLED AFTER. The wiring is main.ts's own either
+  // way (`installClientLogSink` is exactly what `clientLog: true` calls); what
+  // changes is that the boot's own diagnostics never reach the wire.
+  //
+  // Each forwarded record is its own unary round trip to the fake by design
+  // (`ClientLogRecord` carries one record, so there is no batch arm). The boot
+  // emits ~56, which crosses the throttle's `maxBatch` of 50 and so flushes
+  // fifty of them as fifty real socket trips DURING the boot, with the
+  // remainder draining on the first window: measured, a `clientLog: true` boot
+  // costs ~283ms against a quiet one's ~105ms, and every one of those trips is
+  // real I/O that stretches under parallel load. That was ~180ms of each
+  // case's 900ms budget spent on records the case does not assert about, which
+  // is why this group straddled the bound.
+  //
+  // The records under test are the ones a case emits after this point, so the
+  // boot's are not merely cleared, they are never sent.
+  harness = await startHarness();
+  harness.installClientLogSink();
   harness.fake.clearCalls();
 }
 

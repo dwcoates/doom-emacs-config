@@ -601,7 +601,9 @@ describe("headers flush on accept", () => {
     // Arrange: WatchDaemon pushes nothing on open, so only the head can arrive.
     const typed = createClient(AgentRepl, make(fake.baseUrl, fake.socketPath));
     let sawHeader = false;
-    const stream = typed.watchDaemon({}, { onHeader: () => { sawHeader = true; } });
+    let resolveHeaderSeen: () => void;
+    const headerSeen = new Promise<void>((resolve) => { resolveHeaderSeen = resolve; });
+    const stream = typed.watchDaemon({}, { onHeader: () => { sawHeader = true; resolveHeaderSeen(); } });
     const reading = (async () => {
       try {
         for await (const _ of stream) break;
@@ -609,9 +611,9 @@ describe("headers flush on accept", () => {
         // the stream is ended below; the head is what this asserts
       }
     })();
-    // Act
+    // Act: wait on the header itself arriving, not on a fixed delay.
     await fake.awaitStream("watchDaemon");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await headerSeen;
     // Assert
     expect(sawHeader).toBe(true);
     fake.endStream("watchDaemon");
@@ -661,9 +663,18 @@ describe("headers flush on accept", () => {
     // Act: a client ends a watch ONLY by aborting; nothing terminal is sent.
     controller.abort();
     await reading;
-    for (let i = 0; i < 50 && fake.liveStreams("watchDaemon") > 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    // Wait on the fake's own deregistration signal; the 500ms bound is a
+    // failure backstop only, so a real regression fails fast with a clear
+    // message instead of hanging on the suite's default test timeout.
+    await Promise.race([
+      fake.awaitStreamClosed("watchDaemon"),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("watchDaemon stream did not drop within 500ms of the client's abort")),
+          500,
+        ),
+      ),
+    ]);
     // Assert
     expect(fake.liveStreams("watchDaemon")).toBe(0);
   });

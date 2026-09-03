@@ -182,7 +182,18 @@ function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string>
 /** How often a parked turn re-checks its gate when no edge has arrived. */
 const GATE_REDRAIN_INTERVAL_MS = 20;
 
-function awaitTurnGate(text: string): Promise<void> {
+/**
+ * Park a turn on its gate until the gate appears OR the turn is interrupted.
+ *
+ * TWO WAYS OUT, NOT ONE. A parked turn is a live turn: `interrupt()` is exactly
+ * the input a consumer sends to a turn that is taking too long, and a gate that
+ * only ever settled on the file appearing swallowed the kill outright — the
+ * mocked vendor logged "fake turn PARKED on its gate", the shim reported a turn
+ * stopped, and no terminal was ever emitted for it. `awaitInterrupt` is the
+ * same rendezvous the scenarios use, so an interrupt during the park is
+ * observed by the very promise the interrupt resolves.
+ */
+function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promise<void> {
   const path = process.env[TURN_GATE_PATH_ENV] ?? "";
   const gateText = process.env[TURN_GATE_TEXT_ENV] ?? "";
   if (path === "" || gateText === "" || text.trim() !== gateText.trim()) return Promise.resolve();
@@ -192,14 +203,24 @@ function awaitTurnGate(text: string): Promise<void> {
     let settled = false;
     let watcher: FSWatcher | null = null;
     let redrain: NodeJS.Timeout | null = null;
-    const release = (): void => {
-      if (settled || !existsSync(path)) return;
+    const settle = (why: string): void => {
+      if (settled) return;
       settled = true;
       watcher?.close();
       if (redrain !== null) clearInterval(redrain);
-      LOGGER.log({ gate_path: path }, "fake turn RELEASED by its gate");
+      LOGGER.log({ gate_path: path, released_by: why }, "fake turn RELEASED by its gate");
       resolve();
     };
+    const release = (): void => {
+      if (settled || !existsSync(path)) return;
+      settle("gate");
+    };
+    // THE KILL PATH. Resolved by `interrupt()`, whatever the gate does; the
+    // caller then reads `interrupted` and emits the interrupt terminal, which
+    // is the whole point of settling here at all.
+    void awaitInterrupt().then(() => {
+      settle("interrupt");
+    });
     watcher = watch(dirname(path), release);
     // The backstop for an FSEvents notification that never arrives. Unref'd, so
     // it can never by itself hold the process open.
@@ -971,6 +992,14 @@ export function createFakeQuery(
       })),
     });
 
+  /** Resolve when this turn is interrupted, now or later. */
+  const awaitInterrupt = (): Promise<void> =>
+    interrupted
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          releaseInterrupt = resolve;
+        });
+
   const context: ScenarioContext = {
     get turn() {
       return turn;
@@ -1002,12 +1031,7 @@ export function createFakeQuery(
     systemMessage,
     result,
     canUseTool,
-    awaitInterrupt: () =>
-      interrupted
-        ? Promise.resolve()
-        : new Promise<void>((resolve) => {
-            releaseInterrupt = resolve;
-          }),
+    awaitInterrupt,
     awaitBackgrounded: (toolUseId) =>
       new Promise<() => void>((resolve) => {
         backgroundWaiters.set(toolUseId, resolve);
@@ -1055,6 +1079,22 @@ export function createFakeQuery(
     return content.map((block) => ("type" in block && block.type === "text" ? block.text : "")).join("");
   };
 
+  /**
+   * The vendor's interrupt terminal: no assistant content, an error result, and
+   * the abort spelled out in `terminal_reason`.
+   *
+   * ONE SPELLING, TWO PATHS: a turn aborted mid-scenario and a turn killed
+   * while parked on its gate terminate identically, because from the
+   * consumer's side they are the same fact.
+   */
+  const emitInterruptTerminal = (): void => {
+    result({
+      subtype: "error_during_execution",
+      terminalReason: "aborted_streaming",
+      errors: ["Interrupted by user"],
+    });
+  };
+
   const main = async (): Promise<void> => {
     emitInit();
     LOGGER.log(
@@ -1081,8 +1121,15 @@ export function createFakeQuery(
       resultEmitted = false;
       promptId = opts.newUuid();
       const text = promptTextOf(userMessage);
-      await awaitTurnGate(text);
+      await awaitTurnGate(text, awaitInterrupt);
       if (out.isEnded) return;
+      // A TURN KILLED ON ITS GATE STILL TERMINATES. The scenario never ran, so
+      // there is nothing to abort inside it -- but the turn was live and the
+      // consumer is waiting on its terminal like any other.
+      if (interrupted) {
+        emitInterruptTerminal();
+        continue;
+      }
       const scenario = selectScenario(text);
       Object.assign(context, {
         prompt: text,
@@ -1113,13 +1160,7 @@ export function createFakeQuery(
       if (out.isEnded) return;
       if (resultEmitted) continue;
       if (interrupted) {
-        // The vendor's interrupt terminal: no assistant content, an error
-        // result, and the abort spelled out in `terminal_reason`.
-        result({
-          subtype: "error_during_execution",
-          terminalReason: "aborted_streaming",
-          errors: ["Interrupted by user"],
-        });
+        emitInterruptTerminal();
         continue;
       }
       // A scenario that returned without ending its turn is a DEFECT in the

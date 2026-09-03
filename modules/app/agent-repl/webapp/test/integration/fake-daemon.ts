@@ -278,6 +278,13 @@ export interface FakeDaemon {
   endStream(rpc: RpcName, workspace?: string, feed?: FeedKey): void;
   /** Resolve once at least `count` streams of `rpc` are live. */
   awaitStream(rpc: RpcName, count?: number): Promise<void>;
+  /**
+   * Resolve once no live stream of `rpc` (optionally scoped to `workspace`
+   * and/or `feed`) remains — the closing counterpart to `awaitStream`, for a
+   * test that must observe a stream actually drop (e.g. after a client
+   * abort) rather than poll `liveStreams` on a timer.
+   */
+  awaitStreamClosed(rpc: RpcName, workspace?: string, feed?: FeedKey): Promise<void>;
 }
 
 const key = (workspace: string, feed: FeedKey): string => `${workspace} ${feed}`;
@@ -553,6 +560,12 @@ export function createFakeDaemon(): FakeDaemon {
   const observed = new Map<RpcName, number>();
   const callWaiters: Array<{ rpc: RpcName; index: number; resolve: (request: unknown) => void }> = [];
   const streamWaiters: Array<{ rpc: RpcName; count: number; resolve: () => void }> = [];
+  const streamClosedWaiters: Array<{
+    rpc: RpcName;
+    workspace?: string;
+    feed?: FeedKey;
+    resolve: () => void;
+  }> = [];
 
   const footers = new Map<string, FooterView>();
   const topbars = new Map<string, TopbarView>();
@@ -596,6 +609,17 @@ export function createFakeDaemon(): FakeDaemon {
       const waiter = streamWaiters[i];
       if (countStreams(waiter.rpc) >= waiter.count) {
         streamWaiters.splice(i, 1);
+        waiter.resolve();
+      }
+    }
+  };
+
+  /** Wake every `awaitStreamClosed` waiter whose matching streams have hit zero. */
+  const notifyStreamClosedWaiters = (): void => {
+    for (let i = streamClosedWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = streamClosedWaiters[i];
+      if (countStreams(waiter.rpc, waiter.workspace, waiter.feed) === 0) {
+        streamClosedWaiters.splice(i, 1);
         waiter.resolve();
       }
     }
@@ -653,6 +677,7 @@ export function createFakeDaemon(): FakeDaemon {
         yield* channel.iterate(signal) as AsyncGenerator<never>;
       } finally {
         registrations.delete(reg);
+        notifyStreamClosedWaiters();
       }
     };
     return { channel, iterate };
@@ -1238,6 +1263,7 @@ export function createFakeDaemon(): FakeDaemon {
         registrations.delete(reg);
         reg.channel.end();
       }
+      notifyStreamClosedWaiters();
     },
 
     answer(rpc, response) {
@@ -1298,10 +1324,15 @@ export function createFakeDaemon(): FakeDaemon {
         registrations.delete(reg);
         reg.channel.end();
       }
+      notifyStreamClosedWaiters();
     },
     awaitStream(rpc, count = 1) {
       if (countStreams(rpc) >= count) return Promise.resolve();
       return new Promise<void>((resolve) => streamWaiters.push({ rpc, count, resolve }));
+    },
+    awaitStreamClosed(rpc, workspace, feed) {
+      if (countStreams(rpc, workspace, feed) === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => streamClosedWaiters.push({ rpc, workspace, feed, resolve }));
     },
   };
 }
