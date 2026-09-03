@@ -89,6 +89,25 @@ type orchestrator struct {
 	pumping map[wsm.RepoKey]bool
 	// async reports whether Enqueue starts the admission pump itself.
 	async bool
+	// draining reports that the daemon is on its way out: the admission pump
+	// admits NOTHING more, so the bounded shutdown drain cannot be outrun by
+	// a merge that started inside it.
+	draining bool
+	// terminals are the runs that have reached their TERMINAL — the durable
+	// stamps and the teardown they share — and they are the only work the
+	// shutdown drain waits for. A run still in a long phase is NOT here: it is
+	// abandoned to the boot recovery, which is what it was before. The map is
+	// built lazily, so nothing about construction has to know about draining.
+	terminals map[ids.WorkspaceID]*terminal
+	// drainBound overrides TerminalDrainBound. It is a TEST-ONLY seam: a suite
+	// asserting what the bound does when it EXPIRES must not wait the
+	// production bound to see it, and zero means the production value.
+	drainBound time.Duration
+	// onDrainWait, when set, is called once the drain has stopped admitting
+	// and snapshotted the terminal work, immediately before it begins waiting.
+	// It exists so a test releases a held terminal from inside the drain's own
+	// wait rather than guessing when the drain got there.
+	onDrainWait func()
 	// onPark, when set, is signalled the moment a run parks. It exists so a
 	// test synchronizes on the park itself rather than on elapsed time: a
 	// parked merge is a state, and waiting for a state by sleeping is how a

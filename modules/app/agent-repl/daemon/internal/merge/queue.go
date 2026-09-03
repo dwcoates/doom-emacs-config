@@ -403,7 +403,10 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 		return
 	}
 	o.mu.Lock()
-	if o.pumping[repo] {
+	// A DRAINING DAEMON ADMITS NOTHING. The shutdown drain is bounded, and a
+	// merge admitted inside it would be starting its first phase against a
+	// state client that is about to close.
+	if o.draining || o.pumping[repo] {
 		o.mu.Unlock()
 		return
 	}
@@ -447,6 +450,15 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 // than spinning.
 func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, error) {
 	const op = "daemon.merge.admit"
+	// The pump loop re-reads this every iteration: a drain that began while a
+	// burst was mid-flight stops the burst here rather than after it has taken
+	// the next entry's lease.
+	o.mu.Lock()
+	draining := o.draining
+	o.mu.Unlock()
+	if draining {
+		return false, nil
+	}
 	paused, err := o.deps.DB.MergeQueuePaused(ctx, repo)
 	if err != nil {
 		return false, err
