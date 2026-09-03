@@ -1306,6 +1306,21 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"spawnFailed\":{\"detail\":\"exec format error\"}}"))
                    '(:cause (:arm :spawn-failed :value (:detail "exec format error")))))))
 
+(ert-deftest agent-repl-test-wire-verbs-open-error-vendor-start-failed-arm ()
+  "OpenWorkspaceError's `vendor_start_failed' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"vendorStartFailed\":{\"detail\":\"the sdk threw\"}}"))
+                   '(:cause (:arm :vendor-start-failed :value (:detail "the sdk threw")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-vendor-start-failed-empty-detail ()
+  "An omitted `detail' decodes as the empty string, never as a missing key."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"vendorStartFailed\":{}}"))
+                   '(:cause (:arm :vendor-start-failed :value (:detail "")))))))
+
 (ert-deftest agent-repl-test-wire-verbs-open-error-unset-cause-is-a-breach ()
   "OpenWorkspaceError with no arm set says nothing actionable, so it is a
 breach."
@@ -1326,7 +1341,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed" "vendorStartFailed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()
