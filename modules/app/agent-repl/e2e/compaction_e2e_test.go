@@ -172,7 +172,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 	defer footer.Close()
 
 	turn := SubmitPrompt(t, w, ws, prompt)
-	cpAwaitFooterView(t, w, footer, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
+	cpAwaitFooterView(t, w, footer.Stream, "compacting sub-status for "+prompt, func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetThinking().GetCompacting() != nil
 	})
 
@@ -401,7 +401,7 @@ func TestContextBudgetWarning(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, configDir, "context-budget-warning")
 
 	// Assert: the footer's standing activity line carries the warning text.
-	view := cpAwaitFooterView(t, w, footer, "context-budget activity line", func(v *frontendv1.FooterView) bool {
+	view := cpAwaitFooterView(t, w, footer.Stream, "context-budget activity line", func(v *frontendv1.FooterView) bool {
 		return cpContextBudgetText(v) != ""
 	})
 	if got := cpContextBudgetText(view); got == "" {
