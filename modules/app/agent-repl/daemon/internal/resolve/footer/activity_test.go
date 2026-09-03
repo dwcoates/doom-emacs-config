@@ -643,3 +643,35 @@ func TestTheWaitingActivityIsAlwaysPresent(t *testing.T) {
 		t.Fatalf("the waiting activity is REQUIRED and must never be unset")
 	}
 }
+
+// THE THRESHOLD IS A FRACTION AND THE VENDOR'S FIGURE IS A PERCENTAGE. An
+// unremarkable allowance must not be newsworthy, or the rate line would stand
+// permanently and crowd out every lower-ranked line there is.
+func TestAnAllowanceIsNewsworthyOnlyAboveTheThresholdOnceTheScalesAgree(t *testing.T) {
+	tests := []struct {
+		name           string
+		fiveHour       float64
+		wantNewsworthy bool
+	}{
+		{name: "an ordinary session is not news", fiveHour: 41, wantNewsworthy: false},
+		{name: "an allowance past the threshold is", fiveHour: 88, wantNewsworthy: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			budgetWarning(h, "context is filling")
+
+			// Act
+			bothAllowances(h, tc.fiveHour, 10)
+
+			// Assert
+			activity := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity()
+			if got := activity.GetRateLimited() != nil; got != tc.wantNewsworthy {
+				t.Fatalf("rate line stands = %v, want %v (activity = %+v)",
+					got, tc.wantNewsworthy, activity.GetKind())
+			}
+		})
+	}
+}

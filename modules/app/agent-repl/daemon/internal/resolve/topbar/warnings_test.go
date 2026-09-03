@@ -554,3 +554,61 @@ func TestEveryWarningLineIsNonEmpty(t *testing.T) {
 		}
 	}
 }
+
+// thinkingUnit is the reasoning unit an API response opens with — the unit
+// that CARRIES the response's usage, per AgentActivity.usage's rule.
+func thinkingUnit(unit string, u *conversationv1.TokenUsage) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Usage:      u,
+		Item:       &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{}},
+	}
+}
+
+// THE ORDINARY PROSE TURN RECONCILES. Its API response opens with a thinking
+// block, so the usage rides the THINKING unit and the response unit carries
+// none — which the contract spells as "not the carrying unit", never "free".
+// Reconciling by set cardinality across those two key spaces warned about a
+// perfectly healthy session.
+func TestAResponseWhoseUsageRodeItsThinkingUnitReconciles(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act: ONE API response — a thinking block that carries the usage, then the
+	// two prose blocks it yielded, neither of which carries any.
+	h.r.OnActivity(testWS, nil, thinkingUnit("t1", usage(0, 100, 0, 40, 10)))
+	h.r.OnActivity(testWS, nil, responseSettled("r1", nil))
+	h.r.OnActivity(testWS, nil, responseSettled("r2", nil))
+
+	// Assert
+	if got := warnings(t, h); len(got) != 0 {
+		t.Fatalf("warnings = %+v, want none: the response's usage rode its thinking unit", got)
+	}
+}
+
+// A RESPONSE WHOSE OWN API RESPONSE CARRIED NO USAGE STILL WARNS, and a later
+// response reporting its own usage does not account for it: the bill for the
+// first one really is missing, and the warning must not be retracted by
+// somebody else's figure.
+func TestAResponseWithNoUsageOfItsOwnStillWarnsAfterALaterOneReportsIts(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnActivity(testWS, nil, responseSettled("r1", nil))
+
+	// Act: a later, fully accounted API response.
+	h.r.OnActivity(testWS, nil, thinkingUnit("t2", usage(0, 100, 0, 40, 10)))
+	h.r.OnActivity(testWS, nil, responseSettled("r2", nil))
+
+	// Assert
+	got := warnings(t, h)
+	detail := got[0].GetAccounting()
+	if detail == nil {
+		t.Fatalf("warnings = %+v, want the accounting arm", got)
+	}
+	if detail.GetLines()[0].GetText() != "1 response missing usage" {
+		t.Fatalf("evidence = %q, want exactly the unaccounted response counted",
+			detail.GetLines()[0].GetText())
+	}
+}

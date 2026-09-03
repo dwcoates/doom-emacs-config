@@ -202,7 +202,13 @@ func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
 	s.sawActivity = false
 	s.blocked = nil
 	s.interrupted = nil
-	s.compacting = turn.Act == ActCompact
+	// COMPACTING IS OR-ED IN, NEVER ASSIGNED. `SessionUpdate.compacting` is the
+	// vendor's own start signal and it lands BEFORE the turn-open edge it
+	// belongs to, so assigning here would wipe a compaction the vendor had
+	// already announced. The flag is cleared by the end signals — the
+	// ContextCut that ends the compaction, and the turn's terminal — never by
+	// a turn opening.
+	s.compacting = s.compacting || turn.Act == ActCompact
 	s.retrying = nil
 	s.tok.reset()
 	r.cancelMomentary(s)

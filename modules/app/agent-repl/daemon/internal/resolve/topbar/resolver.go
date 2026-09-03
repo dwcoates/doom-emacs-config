@@ -434,6 +434,7 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	}
 	r.mutate(ws, "daemon.topbar.on_activity", "the topbar took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
+			r.observeAPIResponse(s, unit, act.GetUsage() != nil)
 			r.observeUsage(s, unit, act.GetUsage())
 			r.observeResponse(s, unit, act)
 			r.observeUnmodeled(s, act)
@@ -479,8 +480,34 @@ func (r *resolver) observeUsage(s *wsState, unit string, u *conversationv1.Token
 	model.figures = addUsage(model.figures, next)
 }
 
-// observeResponse counts the session's settled responses, which is the
-// accounting reconciliation's denominator.
+// observeAPIResponse files the unit under the API RESPONSE it arrived in.
+//
+// THE WIRE NAMES NO API RESPONSE, so the grouping is read off the one rule the
+// contract states: usage rides EXACTLY ONE unit per API response, the unit for
+// the response's FIRST content block. A unit arriving WITH usage therefore
+// opens a new response; every unit after it, until the next usage-carrying
+// one, belongs to that same response. Units seen before any usage at all sit
+// in response zero, which nothing ever marks as carrying usage.
+//
+// A unit is filed ONCE. Its later frames (progress, settle) restate the same
+// unit and must not re-open a response; a unit that reports its usage on a
+// later frame marks the response it was already filed under.
+func (r *resolver) observeAPIResponse(s *wsState, unit string, carriesUsage bool) {
+	if response, filed := s.unitResponse[unit]; filed {
+		if carriesUsage {
+			s.apiResponses[response] = true
+		}
+		return
+	}
+	if carriesUsage {
+		s.apiResponseSeq = s.nextSeq()
+		s.apiResponses[s.apiResponseSeq] = true
+	}
+	s.unitResponse[unit] = s.apiResponseSeq
+}
+
+// observeResponse counts the session's settled responses, each under the API
+// RESPONSE it arrived in, which is what the accounting reconciles.
 func (r *resolver) observeResponse(s *wsState, unit string, act *conversationv1.AgentActivity) {
 	item, ok := act.GetItem().(*conversationv1.AgentActivity_Response)
 	if !ok {
@@ -488,8 +515,22 @@ func (r *resolver) observeResponse(s *wsState, unit string, act *conversationv1.
 	}
 	switch item.Response.GetResult().(type) {
 	case *conversationv1.AgentResponse_Success, *conversationv1.AgentResponse_Failure:
-		s.responses[unit] = true
+		s.responses[unit] = s.unitResponse[unit]
 	}
+}
+
+// unaccountedResponses counts the settled response units whose API response
+// never carried any usage. A response whose usage rode a DIFFERENT unit — the
+// thinking unit that opened it, say — is fully accounted for and is not one of
+// them.
+func unaccountedResponses(s *wsState) int {
+	missing := 0
+	for _, response := range s.responses {
+		if !s.apiResponses[response] {
+			missing++
+		}
+	}
+	return missing
 }
 
 // observeUnmodeled records one distinct unmodeled tool, with the daemon's
