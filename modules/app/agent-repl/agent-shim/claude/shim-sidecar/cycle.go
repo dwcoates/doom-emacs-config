@@ -47,7 +47,6 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
-	"golang.org/x/sys/unix"
 )
 
 // The recovery ladder: an immediate first attempt, then 250ms doubling to a
@@ -917,11 +916,13 @@ func nextBackoff(d time.Duration) time.Duration {
 }
 
 // bootTimeMillis returns the machine boot time in unix millis, or 0 when it is
-// unavailable (darwin/BSD kern.boottime).
+// unavailable. The kernel interface that answers it is per-platform (see
+// boottime_darwin.go and boottime_linux.go); the "unavailable is 0" contract
+// the boot sweep reads is stated once, here.
 func bootTimeMillis() int64 {
-	tv, err := unix.SysctlTimeval("kern.boottime")
-	if err != nil {
+	ms, err := platformBootTimeMillis()
+	if err != nil || ms < 0 {
 		return 0
 	}
-	return int64(tv.Sec)*1000 + int64(tv.Usec)/1000
+	return ms
 }
