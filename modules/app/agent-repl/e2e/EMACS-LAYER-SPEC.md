@@ -407,6 +407,72 @@ constraint on every future scenario, not a one-time correction:
   satisfies it. The floor is 27 and the ceiling is 28.2; write to that
   window.
 
+### The tty frame needs a real terminal type (VERIFIED in-container)
+
+The Emacs child's `TERM` was `dumb`. That is fatal for a `-nw` frame and
+Emacs says so verbatim before it loads a single line of init:
+
+```
+emacs: Terminal type "dumb" is not powerful enough to run Emacs.
+It lacks the ability to position the cursor.
+```
+
+`dumb` has no `cup` capability, so it can describe a batch Emacs, which
+draws nothing, and never an interactive frame. `TERM=xterm-256color` is the
+replacement, and it was chosen by listing terminfo INSIDE the container
+rather than assumed:
+
+```
+$ ls /lib/terminfo/x
+xterm  xterm-256color  xterm-color  xterm-debian  xterm-mono
+xterm-r5  xterm-r6  xterm-vt220  xterm-xfree86
+$ infocmp -1 xterm-256color | head -1
+#	Reconstructed via infocmp from file: /lib/terminfo/x/xterm-256color
+```
+
+The image's terminfo set is `/lib/terminfo` only (`/usr/share/terminfo` is
+empty) and it carries `Eterm*`, `ansi`, `cons25*`, `cygwin`, `dumb`, `hurd`,
+`linux`, `mach*`, `pcansi`, `rxvt*`, `screen*`, `tmux*`, `vt100`/`vt102`/
+`vt220`/`vt52`, and the `xterm*` family above. `xterm-256color` is picked
+from that set because it is also the terminal a user of this module actually
+runs Emacs in, so the frame the scenarios inspect is the frame a user sees.
+
+### BLOCKED: the image's Emacs 28.2 cannot boot interactive Doom
+
+With the terminal fixed, Emacs starts, allocates a tty frame and reaches
+Doom -- and Doom refuses, in `early-init.el`:
+
+```
+Warning (initialization): An error occurred while loading
+  '<HOME>/.emacs.d/early-init.el':
+: Detected Emacs 28.2, but interactive Doom needs >=29.1
+```
+
+The gate is unconditional, in the pinned Doom's own `lisp/doom.el`:
+
+```elisp
+;; Doom's CLI supports Emacs 27.1+ for the long haul, but lisp/doom-emacs.el and
+;; module libraries require 29.1+.
+(let ((supported (if noninteractive 27 29)))
+  (when (< emacs-major-version supported)
+    (user-error "Detected Emacs %s, but %sinteractive Doom needs >=%d.1" ...)))
+```
+
+`noninteractive` is nil for a `-nw` frame, so the floor is 29, not 27. The
+"floor is 27 and the ceiling is 28.2" window stated above is therefore only
+true for BATCH Emacs; this layer is interactive by construction, and has no
+window at all on 28.2. `early-init.el` aborting means `doom!` never runs,
+no module `config.el` loads, and the readiness stamp is never written, so
+`awaitDoom` fails at `doomBootBound` with the warning buffer on the pty.
+
+The image offers no alternative: `/usr/bin/emacs` and `/usr/bin/emacs-nox`
+are both 28.2 and there is no `emacs29`/`emacs30`. Unblocking is a
+`sandbox/Dockerfile` change owned by the sandbox layer -- an Emacs 29.1+
+build (bookworm-backports, a third-party apt source, or a source build)
+-- or, failing that, a `DOOM_REF` old enough to admit 28, which trades the
+problem for a Doom that no longer matches what users run. Until then the
+bounds below cannot be measured, because no healthy run exists to measure.
+
 ## What this layer does not cover, deliberately
 
 - **The xwidget webapp view.** It needs a real WebKit view; the composer is
@@ -658,17 +724,34 @@ Scenario 20 is implemented first and alone, as
 It skips loudly without the sandbox, with the exact reason `Available()`
 returned.
 
-**Still unverified, and it stays that way until a container runs.** Docker is
-down on the machine this layer was authored on, so nothing below has ever
-been observed: that the image builds at all; that Doom boots from a staged
-`~/.emacs.d` under a scratch `HOME`; that the copy set in `stageEmacsDir` is
+**Partly verified now that a container has run.** Observed for real, via
+`sandbox/bin/e2e-sandbox.sh run --dir e2e go test . -run TestEmacsProofOfLife`:
+the image builds; the dependency stage lands 2244 files; the store starts and
+serves; `script` behaves as `StartPTY` assumes and Emacs takes a tty frame
+(once `TERM` stopped being `dumb`). Still unobserved, and blocked behind the
+Emacs 28.2 gate above: that Doom boots from a staged `~/.emacs.d` under a
+scratch `HOME`; that the copy set in `stageEmacsDir` is
 exactly the set Doom writes to at startup; that `doom-after-init-hook` exists
 in the `DOOM_REF` a build picks; that `script` behaves as `StartPTY` assumes;
 that `assertHostIsolation`'s four probes hold against the run script's actual
 flags; and every one of `HeartbeatBound`, `emacsBootBound`, `doomBootBound`
-and `doomStageBound`, which remain **PROVISIONAL** and must be replaced with
-measured values -- a small multiple of an observed healthy maximum -- before
-the scenario list beyond the proof-of-life test is implemented.
+and `doomStageBound`, which remain **PROVISIONAL**.
+
+### The bounds are still unmeasured, and why
+
+Measurement needs a healthy run, and the Emacs 28.2 gate above means there
+has never been one. What the blocked run does establish:
+
+| Bound | Value today | Status against the real run |
+| --- | --- | --- |
+| `HeartbeatBound` | 2s | Never exercised: no server socket is ever created, because Doom's `after-init` never runs. |
+| `heartbeatInterval` | 250ms | Never exercised, same reason. |
+| `emacsBootBound` | `HandoverChainTimeout` | Never reached: `awaitDoom` fails before `awaitServer` is called. |
+| `doomBootBound` | `2 * emacsBootBound` = 30s | **Exhausted, and correctly so.** The observed failure is a Doom that never initializes at all, not a slow one, so this says nothing about a healthy boot's duration. |
+| `doomStageBound` | 60s | **Comfortable.** Staging plus the store coming up fit inside the 31.18s the whole failing test took, of which 30s was the `doomBootBound` wait -- so the copy set finished in roughly a second, three orders below the bound. Left as-is: it exists to catch a copy that cannot finish, and it is not the tight-bound kind. |
+
+Each `PROVISIONAL` marker stays until an Emacs 29.1+ image produces a
+passing run to measure.
 
 ## Registration
 
