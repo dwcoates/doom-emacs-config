@@ -53,9 +53,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
 }
 
 /** The AgentWebFetch inside an item, or a failed assertion. */
-function fetchOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentWebFetch {
-  expect(item.case).toBe("webFetch");
-  return item.value as conversationv1.AgentWebFetch;
+function fetchOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentWebFetch {
+  expect(item?.case).toBe("webFetch");
+  return item?.value as conversationv1.AgentWebFetch;
 }
 
 describe("webFetchConverter kind and arms", () => {

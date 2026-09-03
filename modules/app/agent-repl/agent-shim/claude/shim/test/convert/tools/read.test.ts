@@ -52,8 +52,8 @@ describe("readConverter.start", () => {
     const item = readConverter.start(pending);
 
     // Assert.
-    expect(item.case).toBe("read");
-    const read = item.value as conversationv1.AgentRead;
+    expect(item?.case).toBe("read");
+    const read = item?.value as conversationv1.AgentRead;
     expect(read.result.case).toBe("start");
     const start = read.result.value as conversationv1.AgentReadStart;
     expect(start.path?.path).toBe("/tmp/a.txt");
@@ -68,7 +68,7 @@ describe("readConverter.start", () => {
     const item = readConverter.start(pending);
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 

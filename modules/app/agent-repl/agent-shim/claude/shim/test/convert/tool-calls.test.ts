@@ -12,6 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
   CALL_REGISTRY_CAPACITY,
+  convertToolUse,
   ENGINE_OWNED_TOOLS,
   EXEMPT_TOOLS,
   UNMODELED_KEY,
@@ -196,5 +197,60 @@ describe("a converter's own contract", () => {
     const beat = create(conversationv1.AgentToolCallProgressSchema, { lastProgressAtMs: 3n });
 
     expect(TOOL_CONVERTERS.get("Read")?.progress?.(beat)?.case).toBe("read");
+  });
+});
+
+describe("a start with no announcement frame", () => {
+  /** The call as `convertToolUse` is handed one. */
+  function taskCreate(): PendingCall {
+    return {
+      toolUseId: "toolu_tc",
+      toolName: "TaskCreate",
+      input: { subject: "s", description: "d" },
+      startedAtMs: 5,
+      agentId: MAIN_AGENT,
+    };
+  }
+
+  it("writes NO entry for a TaskCreate, whose identity does not exist until it returns", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+
+    // Act.
+    const entries = convertToolUse(TOOL_CONVERTERS, foldContext(), registry, taskCreate(), {
+      agentId: MAIN_AGENT,
+      vendorUuid: "uuid-1",
+    });
+
+    // Assert. An entry here sets no item arm, which the store refuses.
+    expect(entries).toEqual([]);
+  });
+
+  it("still REMEMBERS the call, so its terminal can restate what was asked", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+
+    // Act.
+    convertToolUse(TOOL_CONVERTERS, foldContext(), registry, taskCreate(), {
+      agentId: MAIN_AGENT,
+      vendorUuid: "uuid-1",
+    });
+
+    // Assert.
+    expect(registry.peek("toolu_tc")?.toolName).toBe("TaskCreate");
+  });
+
+  it("writes the start entry for a call that DOES announce one", () => {
+    // Arrange.
+    const registry = createCallRegistry();
+
+    // Act.
+    const entries = convertToolUse(TOOL_CONVERTERS, foldContext(), registry, call("toolu_r"), {
+      agentId: MAIN_AGENT,
+      vendorUuid: "uuid-2",
+    });
+
+    // Assert.
+    expect(entries).toHaveLength(1);
   });
 });

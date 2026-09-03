@@ -31,9 +31,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function artifactOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentArtifact {
-  expect(item.case).toBe("artifact");
-  return item.value as conversationv1.AgentArtifact;
+function artifactOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentArtifact {
+  expect(item?.case).toBe("artifact");
+  return item?.value as conversationv1.AgentArtifact;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentArtifactStart {

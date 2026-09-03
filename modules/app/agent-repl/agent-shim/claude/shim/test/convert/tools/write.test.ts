@@ -50,7 +50,7 @@ describe("writeConverter.start", () => {
     const item = writeConverter.start(pending);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentWrite).result
+    const start = (item?.value as conversationv1.AgentWrite).result
       .value as conversationv1.AgentWriteStart;
     expect(start.path?.path).toBe("/tmp/new.go");
     expect(start.startedAt?.atMs).toBe(1_700_000_000_000n);
@@ -61,7 +61,7 @@ describe("writeConverter.start", () => {
     const item = writeConverter.start(call({ content: "x" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 
