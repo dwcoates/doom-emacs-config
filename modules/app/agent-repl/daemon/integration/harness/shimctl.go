@@ -29,6 +29,10 @@ type ShimProfile struct {
 	ExitCode         int            `json:"exit_code,omitempty"`
 	Stderr           string         `json:"stderr,omitempty"`
 	ColdOnResume     *ShimColdFacts `json:"cold_on_resume,omitempty"`
+	// VendorStartFailed answers every StartSession with the shim's
+	// `vendor_start_failed` refusal carrying this detail: the shim process is
+	// healthy and only the vendor failed to start inside it.
+	VendorStartFailed string `json:"vendor_start_failed,omitempty"`
 	// NoTranscriptUntilTurn withholds the transcript until the first turn, the
 	// way the vendor does: a session bounced before its first turn names a
 	// conversation with no transcript at all.
