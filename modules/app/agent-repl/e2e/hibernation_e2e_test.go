@@ -363,6 +363,9 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 func TestRevivalAfterHibernate(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{IdleCutoffMS: hibernationIdleCutoffMS}})
+	// Standing a shim down and reviving it opens a health fault while the
+	// session has no producer; that is what this test provokes.
+	w.ExpectWarnings("daemon.health.open_fault")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	host := w.WatchHost(ws)

@@ -247,6 +247,9 @@ func TestMergeLeaseRefusesSubmit(t *testing.T) {
 	// daemon starts a real conflict-repair turn on it.
 	repo, _ := mqCleanRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
+	// The scripted conflict makes the no-fast-forward merge fail and opens
+	// the merge tab; the refused submit is this test's own subject.
+	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.promptqueue.submit")
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-lease-refuse")
 	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
@@ -389,6 +392,9 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 	// Arrange: park a merge on a scripted conflict.
 	repo, _ := mqCleanRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
+	// The scripted conflict this test parks on: the no-fast-forward failure,
+	// the merge tab it opens, and the conflicts record itself.
+	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.conflicts")
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-parked")
 	repo.ScriptConflict(repo.Dir, mqBranchOf(child), "conflict.txt")
