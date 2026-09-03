@@ -23,31 +23,142 @@ if [[ -w $REPO_SRC ]]; then
   die "$REPO_SRC is WRITABLE; the sandbox must mount the repo read-only (:ro)"
 fi
 
-log "materializing a writable working copy: $REPO_SRC -> $REPO"
-mkdir -p "$REPO"
-# --exclude node_modules: the image's own offline install below is the one
-# that counts, and copying a host-built tree in would defeat it.
+log "materializing a writable working copy: $REPO_SRC/$MODULE_REL -> $REPO/$MODULE_REL"
+
+# STAGING IS AN ALLOWLIST, NOT A DENYLIST.
 #
-# --exclude '.git' has NO trailing slash on purpose, so it matches a .git
-# FILE as well as a .git directory. In a git WORKTREE checkout .git is a file
-# holding an absolute host path ("gitdir: /Users/.../.git/worktrees/..."),
-# which does not exist in the container: copying it in made every git command
-# run from the working copy die with "fatal: not a git repository". The suite
-# gets its build identity from .sandbox-sha below, not from git.
+# The previous revision rsynced the WHOLE checkout. On a developer's live
+# checkout that is 19 GB, 18 of which is `.claude/worktrees` (a hundred-plus
+# stale agent worktrees, each a full checkout). The copy exhausted the host's
+# file-descriptor table outright —
+#   rsync: [sender] send_files failed to open ".../sessioncommand.go":
+#          Too many open files in system (23)
+# — and it walked paths that have nothing to do with any suite (a literal
+# `~/.claude-chesscom` tree inside the repo, `.agents-sandbox`, `.git`).
+#
+# Nothing any suite touches lives outside `modules/app/agent-repl`: there is
+# no repo-root `go.work`, no `.nvmrc`, no shared config. Every `replace`
+# directive in every go.mod resolves within the module, every TypeScript
+# `../../../proto/...` import resolves within it, and the one test that
+# reaches for the checkout root (shim's metaprompt test, seven levels up)
+# only reads `<root>/modules/app/agent-repl/metaprompt.md` back out of it.
+# So the module tree IS the dependency set, and it is staged at its real
+# relative path so those root-relative resolutions still land.
+#
+# The set is enumerated rather than globbed so a MISSING path is a loud
+# refusal instead of a suite that fails later for an unrelated-looking
+# reason, and so an unexpected NEW top-level directory cannot silently join
+# the copy.
+STAGE_ENTRIES=(
+  # Go modules (daemon, e2e, shim-store, shim-sidecar, logging, fakedaemon,
+  # generated protos) and their go.mod/go.sum manifests.
+  daemon
+  e2e
+  agent-shim
+  proto
+  # Elisp sources and suites; also carries lisp/testsupport/fakedaemon.
+  lisp
+  # The three files Doom's module loader resolves by exact path.
+  config.el
+  packages.el
+  doctor.el
+  # The webapp module (TypeScript/Vitest) and its lockfile.
+  webapp
+  # Build and helper scripts the suites shell out to (bin/build-frontend.sh).
+  bin
+  scripts
+  hooks
+  # Data and prompt/skill/doc trees the suites and the running system read.
+  testdata
+  prompts
+  skills
+  projects
+  plans
+  docs
+  images
+  # Read by the shim's committed-metaprompt test and by AGENTS.md assertions.
+  metaprompt.md
+  AGENTS.md
+)
+
+module_src=$REPO_SRC/$MODULE_REL
+missing=()
+for entry in "${STAGE_ENTRIES[@]}"; do
+  [[ -e $module_src/$entry ]] || missing+=("$MODULE_REL/$entry")
+done
+if (( ${#missing[@]} )); then
+  log "refusing to stage: these required paths are absent from $REPO_SRC:"
+  printf '  - %s\n' "${missing[@]}" >&2
+  exit 1
+fi
+
+mkdir -p "$REPO/$MODULE_REL"
+
+# Belt and braces on top of the allowlist: even inside the staged set, none
+# of these may ever be dragged in. `.git` has NO trailing slash on purpose,
+# so it matches a .git FILE too — in a git WORKTREE checkout .git is a file
+# holding an absolute HOST path, which does not exist in the container, and
+# copying it in made every git command from the working copy die with "fatal:
+# not a git repository". The suite gets its build identity from .sandbox-sha
+# below, not from git.
+#
 # --no-owner --no-group --chmod=u+rwX, NOT a plain `-a`: `-a` preserves the
 # HOST's uid/gid and mode bits, and the container runs as an unprivileged uid
 # that owns none of them. That made rsync fail on every directory at once —
 # `chgrp "..." failed: Operation not permitted` followed by `mkdir "..."
 # failed: Permission denied` — leaving a half-copied working tree. Ownership
-# and group of a throwaway working copy carry no meaning inside the sandbox;
-# what matters is that the sandbox uid can read and traverse all of it and
-# write where it needs to, which is exactly what u+rwX grants.
-rsync -rlptD --delete \
+# of a throwaway working copy carries no meaning inside the sandbox; what
+# matters is that the sandbox uid can read and traverse all of it and write
+# where it needs to, which is exactly what u+rwX grants.
+#
+# No --delete: /work is a fresh tmpfs on every run, so there is nothing to
+# delete, and the flag only added a way to remove something unexpectedly.
+stage_excludes=(
+  --exclude '.git'
+  --exclude '.claude/'
+  --exclude '.agents-sandbox/'
+  --exclude 'node_modules/'
+  --exclude 'dist/'
+  --exclude '.worktree'
+  --exclude 'worktrees/'
+  --exclude '.venv/'
+  --exclude '__pycache__/'
+  --exclude '*.test'
+  --exclude '.sandbox-sha'
+)
+
+# A copy taken from a LIVE checkout always races: other processes write the
+# source while rsync reads it, which produced dozens of
+#   file has vanished: "/repo-src/modules/app/agent-repl/..."
+# lines and a nonzero exit. The mount deliberately stays the caller's own
+# checkout (that is what makes the sandbox test the working tree), so the
+# race is TOLERATED EXPLICITLY rather than hidden: rsync's own exit code 24
+# ("some files vanished before they could be transferred") is accepted, the
+# vanished paths are summarized loudly, and EVERY other nonzero code is
+# still fatal.
+stage_log=$(mktemp)
+rc=0
+rsync -rlptD \
   --no-owner --no-group \
   --chmod=u+rwX \
-  --exclude '.git' \
-  --exclude 'node_modules/' \
-  "$REPO_SRC"/ "$REPO"/
+  "${stage_excludes[@]}" \
+  "${STAGE_ENTRIES[@]/#/$module_src/}" \
+  "$REPO/$MODULE_REL"/ >"$stage_log" 2>&1 || rc=$?
+
+vanished=$(grep -c 'file has vanished' "$stage_log" || true)
+if (( rc == 24 )); then
+  log "WARNING: $vanished source file(s) vanished mid-copy (the mount is a LIVE checkout); continuing"
+  grep 'file has vanished' "$stage_log" >&2 || true
+elif (( rc != 0 )); then
+  cat "$stage_log" >&2
+  rm -f "$stage_log"
+  die "staging the working copy FAILED (rsync exit $rc)"
+elif (( vanished > 0 )); then
+  log "WARNING: $vanished source file(s) vanished mid-copy (the mount is a LIVE checkout)"
+fi
+rm -f "$stage_log"
+
+log "staged $(find "$REPO/$MODULE_REL" -type f | wc -l | tr -d ' ') files, $(du -sh "$REPO" | cut -f1) total"
 
 # The suite resolves the shim build identity from git; the working copy has
 # no .git, so hand it the SHA the run script read on the host.
