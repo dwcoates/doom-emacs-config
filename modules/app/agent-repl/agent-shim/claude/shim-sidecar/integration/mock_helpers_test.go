@@ -377,12 +377,20 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	return tree
 }
 
+// awaitSocket waits until the mocked vendor is ACCEPTING, not until its socket
+// file exists.
+//
+// A unix socket's inode is created by bind() and only becomes connectable at
+// listen(), so a stat that succeeds in that window is followed by a dial that
+// is REFUSED. The readiness signal is therefore an accepted connection, which
+// cannot be observed before the listener exists.
 func awaitSocket(ctx context.Context, t *testing.T, socket string, tree *mockTree) {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		if _, err := os.Stat(socket); err == nil {
+		if conn, err := net.Dial("unix", socket); err == nil {
+			_ = conn.Close()
 			return
 		}
 		select {
