@@ -8,6 +8,7 @@ import {
 import {
   OpenWorkspaceErrorSchema,
   OpenWorkspaceResponseSchema,
+  OpenWorkspaceVendorStartFailedSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
   AssignWorkspaceTaskErrorSchema,
@@ -246,6 +247,7 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   transferringAway: { address: "127.0.0.1:7777" },
   transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
   spawnFailed: { detail: "exec format error" },
+  vendorStartFailed: { detail: "the sdk threw before its first message" },
   gitFailed: { detail: "worktree is dirty" },
 };
 
@@ -458,6 +460,26 @@ describe("the per-rpc causes, worded at their own site", () => {
   it("carries the spawn failure's own detail", async () => {
     const refusal = await refuseWith(VERBS[0], "spawnFailed");
     expect(refusal?.textContent).toContain("exec format error");
+  });
+
+  it("names the vendor as what failed to start the session", async () => {
+    const refusal = await refuseWith(VERBS[0], "vendorStartFailed");
+    expect(refusal?.textContent).toContain("the vendor failed to start the session");
+  });
+
+  it("appends the shim's own detail to a vendor start failure", async () => {
+    const refusal = await refuseWith(VERBS[0], "vendorStartFailed");
+    expect(refusal?.textContent).toContain("(the sdk threw before its first message)");
+  });
+
+  it("leaves no empty parenthetical when the vendor start failure has no detail", () => {
+    // Arrange / Act: the arm worded directly, since the sweep's fill is never empty.
+    const text = openWorkspaceRefusal({
+      case: "vendorStartFailed",
+      value: create(OpenWorkspaceVendorStartFailedSchema, { detail: "" }),
+    } as never);
+    // Assert
+    expect(text).toBe("the vendor failed to start the session");
   });
 
   it("carries git's own detail when a nuke fails", async () => {

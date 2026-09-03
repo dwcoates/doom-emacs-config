@@ -597,7 +597,7 @@ type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E
   case: string;
 };
 
-/** OpenWorkspace's own arms: the three ways bringing one back up can fail. */
+/** OpenWorkspace's own arms: the ways bringing one back up can fail. */
 export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string {
   switch (cause.case) {
     case "sessionDeleted":
@@ -609,6 +609,14 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
       return `the transcript for session ${cause.value.vendorSessionId} was not found`;
     case "spawnFailed":
       return `the session could not be started: ${cause.value.detail}`;
+    case "vendorStartFailed":
+      // OUR PROCESS CAME UP AND THE VENDOR DID NOT: distinct from spawnFailed,
+      // and the shim's account is a human's only lead, so it is appended
+      // verbatim — parenthesized, and only when the shim actually said
+      // something, so an empty detail leaves no empty parentheses behind.
+      return cause.value.detail
+        ? `the vendor failed to start the session (${cause.value.detail})`
+        : "the vendor failed to start the session";
     default:
       return unreachableArm("OpenWorkspaceError.cause", cause.case);
   }
