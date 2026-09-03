@@ -433,7 +433,7 @@ func TestCronCreateListDelete(t *testing.T) {
 	// reach — the footer's ⏱ chip, set while the created job stands.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
+	view := harness.AwaitView(t, ctx, footer.Stream, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetCrons() != nil
 	})
 	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got == 0 {

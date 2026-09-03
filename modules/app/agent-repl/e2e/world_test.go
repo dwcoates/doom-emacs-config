@@ -222,6 +222,50 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 }
 
 // ===========================================================================
+// Footer waits (participant-gated).
+// ===========================================================================
+
+// FooterWatch is a footer stream plus the two participant streams whose
+// liveness the footer's connectivity status is drawn from. Its embedded
+// *harness.Stream is the footer stream itself, so a wait reads
+// footer.Stream; Close tears all three down together.
+type FooterWatch struct {
+	*harness.Stream[*frontendv1.FooterView]
+
+	host *harness.Stream[*agentreplv1.WatchHostWorkspaceResponse]
+	web  *harness.Stream[*agentreplv1.WatchWebWorkspaceResponse]
+}
+
+// Close ends the footer stream and the participant pair held for it.
+func (f *FooterWatch) Close() {
+	f.Stream.Close()
+	f.host.Close()
+	f.web.Close()
+}
+
+// WatchFooter opens the workspace's footer stream WITH the two participant
+// streams the footer's connectivity truth is driven by, shadowing the
+// embedded harness.Daemon method of the same name so every footer wait in
+// this suite is participant-gated by construction.
+//
+// The footer resolver only ever learns that a host or web participant is
+// present from server.holdParticipant (daemon/internal/server/streams.go:378),
+// which fires on the open/close edges of WatchHostWorkspace and
+// WatchWebWorkspace and states the pair to footer.SetParticipants. A test
+// that opened only the footer stream held NEITHER hop, so the footer
+// correctly drew its disconnected/severed status forever — the status every
+// one of this suite's footer waits was implicitly waiting past.
+//
+// The participant streams are opened BEFORE the footer stream, so the
+// footer's first view is already drawn against a live pair, and Close tears
+// them down with it: the hold lasts exactly the footer's lifetime.
+func (w *World) WatchFooter(ws *workspacev1.WorkspaceRef) *FooterWatch {
+	host := w.Daemon.WatchHost(ws)
+	web := w.Daemon.WatchWeb(ws)
+	return &FooterWatch{Stream: w.Daemon.WatchFooter(ws), host: host, web: web}
+}
+
+// ===========================================================================
 // Failure artifacts (SPEC.md section B, "Failure artifacts").
 // ===========================================================================
 

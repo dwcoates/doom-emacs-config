@@ -319,7 +319,7 @@ func TestMonitorDeadline(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "monitor-deadline")
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer, "the deadline monitor's footer row", func(v *frontendv1.FooterView) bool {
+	view := harness.AwaitView(t, ctx, footer.Stream, "the deadline monitor's footer row", func(v *frontendv1.FooterView) bool {
 		return len(v.GetExpanded().GetMonitors().GetRows()) > 0
 	})
 
@@ -339,7 +339,7 @@ func TestMonitorPersistent(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "monitor-persistent")
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
-	view := harness.AwaitView(t, ctx, footer, "the persistent monitor's footer row", func(v *frontendv1.FooterView) bool {
+	view := harness.AwaitView(t, ctx, footer.Stream, "the persistent monitor's footer row", func(v *frontendv1.FooterView) bool {
 		return len(v.GetExpanded().GetMonitors().GetRows()) > 0
 	})
 
