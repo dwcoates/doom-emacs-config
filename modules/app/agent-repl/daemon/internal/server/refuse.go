@@ -302,8 +302,13 @@ func (s *server) resolveRefLogging(
 			})
 			return resolved{}, &r, nil
 		}
-		s.log.Error(rpc, "could not read the workspace record",
-			dlog.Context{"workspace": string(id), "cause": err.Error()})
+		if endedOnCancel(err) {
+			s.log.Info(rpc, "the workspace record was not read; the request's context was cancelled",
+				dlog.Context{"stream": rpc, "workspace": string(id), "cause": err.Error()})
+		} else {
+			s.log.Error(rpc, "could not read the workspace record",
+				dlog.Context{"workspace": string(id), "cause": err.Error()})
+		}
 		return resolved{}, nil, fmt.Errorf("%s: workspace %q: %w", rpc, id, err)
 	}
 	if dir := ref.GetDir(); dir != "" && dir != record.Dir {
@@ -325,7 +330,12 @@ func (s *server) resolveRefLogging(
 
 	standing, err := s.deps.Ownership.Standing(ctx, id)
 	if err != nil {
-		log.Error(rpc, "could not determine the serving standing", dlog.Context{"cause": err.Error()})
+		if endedOnCancel(err) {
+			log.Info(rpc, "the serving standing was not determined; the request's context was cancelled",
+				dlog.Context{"stream": rpc, "cause": err.Error()})
+		} else {
+			log.Error(rpc, "could not determine the serving standing", dlog.Context{"cause": err.Error()})
+		}
 		return resolved{}, nil, fmt.Errorf("%s: serving standing %q: %w", rpc, id, err)
 	}
 	switch standing {
@@ -361,6 +371,31 @@ func (s *server) resolveRefLogging(
 func fail(log dlog.Logger, rpc string, err error) *connect.Error {
 	log.Error(rpc, "the rpc failed", dlog.Context{"cause": err.Error()})
 	return connect.NewError(connect.CodeInternal, err)
+}
+
+// endedOnCancel reports whether err is the CLIENT'S OWN request context ending
+// — a cancellation or a deadline — rather than something that broke. Every
+// read a standing stream performs runs under that context, and it is cancelled
+// on the client leaving and on the daemon's orderly exit alike, so the two are
+// the same fact and neither is a fault.
+func endedOnCancel(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// endStream renders a STANDING STREAM's failure. A cancelled request context is
+// the client leaving: the stream ends quietly, recorded once at INFO naming the
+// stream, and the handler returns no error. Every other failure keeps fail's
+// ERROR record and its internal Connect error.
+//
+// It returns `error` rather than *connect.Error precisely so a quiet ending is
+// an untyped nil, never the typed-nil trap a *connect.Error return would carry.
+func endStream(log dlog.Logger, rpc string, err error) error {
+	if endedOnCancel(err) {
+		log.Info(rpc, "the standing stream ended when its client's context was cancelled",
+			dlog.Context{"stream": rpc, "cause": err.Error()})
+		return nil
+	}
+	return fail(log, rpc, err)
 }
 
 // answer renders a handler's finished response. A refusal is already ENCODED

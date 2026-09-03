@@ -67,9 +67,17 @@ type fakeSurfaces struct {
 	dlog.Surfaces
 	clientRecords []dlog.ClientRecord
 	workspaceErr  error
+	// global, when set, is the global sink, so a test can assert on what the
+	// daemon-wide logger recorded rather than discarding it.
+	global dlog.Logger
 }
 
-func (f *fakeSurfaces) Global() dlog.Logger { return fakeLogger{} }
+func (f *fakeSurfaces) Global() dlog.Logger {
+	if f.global != nil {
+		return f.global
+	}
+	return fakeLogger{}
+}
 
 func (f *fakeSurfaces) Workspace(string) (dlog.Logger, error) {
 	if f.workspaceErr != nil {
