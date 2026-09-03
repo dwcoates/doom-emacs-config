@@ -1285,7 +1285,17 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("SetModel(sonnet) = %v, want a success", resp.Msg)
 	}
-	f.shim.ExpectSetSessionModel()
+	// THE DAEMON MUST STATE ITS COLD-THRESHOLD POLICY on the call. A model
+	// switch is a cold cache, and the shim refuses `cold` when the context is
+	// STRICTLY ABOVE the threshold the request states — so an unstated field,
+	// read as zero, refused every switch of a model the daemon itself served,
+	// and the refusal had no `SetModelError` arm to land on. The fake judges
+	// the threshold the same way, which is what makes this a regression test
+	// and not just a wiring one.
+	asked := f.shim.ExpectSetSessionModel()
+	if asked.GetColdThresholdTokens() == 0 {
+		t.Fatalf("SetSessionModel stated cold_threshold_tokens = 0, which refuses every switch; want the daemon's policy")
+	}
 
 	// Assert: no push yet — the unary answer alone must not move the topbar.
 	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "the topbar must not update before the shim pushes model_changed")

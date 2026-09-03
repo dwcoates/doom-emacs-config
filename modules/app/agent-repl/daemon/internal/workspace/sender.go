@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"math"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -25,6 +26,14 @@ import (
 // StartTurn returns is fed through the same history path a watch's own opening
 // page takes, and two budgets for one path would page differently by accident.
 const turnPageSize = 200
+
+// coldThresholdPolicy is the context size, in tokens, above which a MODEL
+// CHANGE is refused as an unasked cold-cache cost rather than paid. It is
+// stated as the largest size the field can carry, so no context is above it:
+// the user picking a served model IS the request to pay, and the daemon's job
+// here is to state a policy rather than to leave the field unset and have the
+// shim read zero (see SetModel).
+const coldThresholdPolicy = math.MaxUint64
 
 // Sender answers the workspace's queue delivery surface, false when no session
 // is up. It is the promptqueue.ClientFunc the queue is wired with.
@@ -119,13 +128,31 @@ func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool) erro
 	return nil
 }
 
-// SetModel switches the session's model. The cold threshold is stated as ZERO
-// and no remediation is named, which is the FIRST ATTEMPT the contract
-// describes: the switch learns what it would cost before anything is paid, and
-// the cold answer comes back as a refusal the caller reacts to.
+// SetModel switches the session's model, stating THE DAEMON'S COLD-THRESHOLD
+// POLICY on the call.
+//
+// The threshold is what the shim measures against, and the shim refuses `cold`
+// when the context is STRICTLY ABOVE it, so a threshold of zero refuses every
+// switch on a conversation that has had one assistant turn — which is every
+// conversation a user would ever change the model of. The daemon used to send
+// the field unset, so the shim read zero, and a model the daemon itself had
+// just served in the topbar's own catalog came back refused. The refusal then
+// had no `SetModelError` arm to land on (ERROR-ARMS.md records the gap) and
+// left the rpc as a transport error, so the topbar's model cell read as an
+// unreachable daemon rather than as the model the user picked.
+//
+// THE PICK IS THE CONSENT. The cold gate exists so a cold context is never
+// paid UNASKED — the resume path pays it with nobody having chosen it. A model
+// change is the opposite case: the user selected an option the daemon served,
+// on a surface whose whole purpose is to change the model, and the contract's
+// remediation menu (pay | clear | compact) has no answering path from this verb
+// to choose between. So the policy this verb states is `coldThresholdPolicy`:
+// no context is above it, the switch is paid, and the shim's own `cold` arm
+// stays relayed if the shim ever raises it for a reason of its own.
 func (s *sender) SetModel(ctx context.Context, model string) error {
 	response, err := s.client.SetSessionModel(ctx, &shimv1.SetSessionModelRequest{
-		Model: &conversationv1.AgentModel{Name: model},
+		Model:               &conversationv1.AgentModel{Name: model},
+		ColdThresholdTokens: coldThresholdPolicy,
 	})
 	if err != nil {
 		return err
@@ -170,9 +197,9 @@ func startTurnArm(failure *shimv1.StartTurnFailure) string {
 func setModelArm(failure *shimv1.SetSessionModelFailure) string {
 	switch {
 	case failure.GetCold() != nil:
-		return "cold"
+		return ArmShimCold
 	case failure.GetModelNotInCatalog() != nil:
-		return "model_not_in_catalog"
+		return ArmShimModelNotInCatalog
 	case failure.GetNoSession() != nil:
 		return ArmShimNoSession
 	case failure.GetVendorRefused() != nil:
