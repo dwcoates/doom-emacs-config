@@ -356,7 +356,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     agentFor: (vendorAgentId) => {
       const main = requireIdentity().agentId;
       if (vendorAgentId === main.value) return main;
-      return announcedAgents.has(vendorAgentId) ? subagentId(vendorAgentId) : undefined;
+      if (announcedAgents.has(vendorAgentId)) return subagentId(vendorAgentId);
+      // THE LIVE REGISTRY IS THE OTHER ANNOUNCEMENT. A vendor `agentID` is
+      // minted from the SPAWNING CALL's `tool_use_id` (convert/ids.ts
+      // subagentId), which is exactly the key the live detached-work table is
+      // addressable by -- so a DETACHED subagent's ask arrived under an id the
+      // announced-agent set had no row for, and every permission or question
+      // raised inside a subagent landed on the main agent's book.
+      //
+      // Only the LIVE set resolves: once the subagent has concluded there is no
+      // book still taking questions, and the ask falls back to the main agent
+      // with the log note, which is the contract for an unaddressable ask.
+      if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
+      return undefined;
     },
     persist: (entries) => deps.persistence.write(entries),
     keepalive: () => open?.keepalive === true,
