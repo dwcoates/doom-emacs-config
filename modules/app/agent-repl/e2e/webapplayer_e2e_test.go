@@ -145,6 +145,11 @@ func TestWebappLayerRefusals(t *testing.T) {
 	wlDriveArea(t, "refusals.layer.test.ts")
 }
 
+// TestWebappLayerRoster is section F9: tray, sidebar and lifecycle banner.
+func TestWebappLayerRoster(t *testing.T) {
+	wlDriveArea(t, "roster.layer.test.ts")
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
