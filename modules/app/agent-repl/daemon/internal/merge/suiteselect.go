@@ -45,6 +45,8 @@ var AllSuites = []string{
 	"shim",
 	"proto",
 	"logging-density",
+	"e2e",
+	"e2e-emacs",
 }
 
 // scriptHarnessSuites are the suites that test the module's own shell scripts.
@@ -97,24 +99,39 @@ var suiteRules = []suiteRule{
 	{Kind: matchExact, Path: moduleRoot + "bin/report-logging-density.sh"},
 	{Kind: matchSubtree, Path: moduleRoot + "bin/", Suites: scriptHarnessSuites},
 
+	// The sandbox image and its runner are the Emacs client layer's
+	// precondition and nothing else's: the containerless cross-system suite
+	// never touches them.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/sandbox/", Suites: []string{"e2e-emacs"}},
+	// Both cross-system suites live in e2e/ and share its harness.
+	{Kind: matchSubtree, Path: moduleRoot + "e2e/", Suites: []string{"e2e", "e2e-emacs"}},
+
 	{Kind: matchSubtree, Path: moduleRoot + "webapp/", Suites: []string{"webapp", "build-frontend-harness"}},
 	// daemon/integration lives inside the daemon module, so the daemon suite
-	// carries the end-to-end tests with it.
-	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon"}},
+	// carries the end-to-end tests with it. The cross-system suites RUN a real
+	// claude-repld, so a daemon change can break them too — blast radius, not
+	// name. `e2e-emacs` rides along because the daemon is what Emacs's own
+	// launcher spawns, which is the seam only that suite covers.
+	{Kind: matchSubtree, Path: moduleRoot + "daemon/", Suites: []string{"daemon", "e2e", "e2e-emacs"}},
 
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{"logging", "logging-density", "daemon", "store", "sidecar"}},
+	// Each of these three runs for real inside the cross-system suites.
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim", "e2e"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar", "e2e"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store", "e2e"}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{"logging", "logging-density", "daemon", "store", "sidecar", "e2e"}},
 
 	// The wire contract every producer and consumer is generated from.
-	{Kind: matchSubtree, Path: moduleRoot + "proto/", Suites: []string{"proto", "daemon", "shim", "webapp"}},
+	{Kind: matchSubtree, Path: moduleRoot + "proto/", Suites: []string{"proto", "daemon", "shim", "webapp", "e2e"}},
 
 	// The module's elisp: every source and suite lives in lisp/, while the three
 	// files Doom's module loader resolves by exact path (config.el, packages.el,
 	// doctor.el) stay directly at the module root.
-	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert"}},
-	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert"}},
+	// `e2e-emacs` joins `ert` here because it is the ONLY suite that drives
+	// this elisp as a client against a real daemon: `ert` mocks Emacs's one
+	// neighbour, so it cannot testify about the launcher's argv or a sentinel
+	// recursion on close.
+	{Kind: matchDirFile, Path: moduleRoot, Suffix: ".el", Suites: []string{"ert", "e2e-emacs"}},
+	{Kind: matchSubtree, Path: moduleRoot + "lisp/", Suites: []string{"ert", "e2e-emacs"}},
 }
 
 // maxReasonPaths bounds how many touched paths the recorded reason names before
