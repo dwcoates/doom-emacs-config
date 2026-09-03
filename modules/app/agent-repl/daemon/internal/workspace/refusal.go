@@ -52,6 +52,11 @@ const (
 	// lock first, and two vendor processes on one conversation is what that
 	// lock exists to prevent. OpenWorkspaceError has no arm for it.
 	ArmConversationOwned = "conversation_owned"
+	// ArmUnknownSession is a StartSession(resume) the shim refused because it
+	// has no transcript for the named conversation. The transcript-aware
+	// source classifier keeps a never-turned session off this path, so the arm
+	// is a genuinely VANISHED transcript, named rather than described.
+	ArmUnknownSession = "unknown_session"
 	// ArmTranscriptMissing is a resume whose vendor transcript file is gone —
 	// refused BEFORE any process spawns.
 	ArmTranscriptMissing = "transcript_missing"
