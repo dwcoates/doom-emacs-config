@@ -161,7 +161,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_ReportFindings{ReportFindings: &conversationv1.AgentReportFindings{
-			State: &conversationv1.AgentReportFindings_Success{Success: findingsSuccess(call, ts)},
+			State: &conversationv1.AgentReportFindings_Success{Success: findingsSuccess(call, result, ts)},
 		}})
 	case kindWorktree:
 		if failed {

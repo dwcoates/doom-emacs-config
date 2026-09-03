@@ -157,7 +157,7 @@ func TestFindingsSuccessIsARealReportWhenItFoundNothing(t *testing.T) {
 	call := openCall{input: map[string]any{}}
 
 	// Act
-	got := findingsSuccess(call, 1000)
+	got := findingsSuccess(call, map[string]any{"findings": []any{}}, 1000)
 
 	// Assert
 	if len(got.GetFindings()) != 0 {
@@ -615,5 +615,85 @@ func TestGlobSuccessReadsTheRenderedListWhenTheVendorTypedNothing(t *testing.T) 
 	}
 	if _, ok := got.GetExtent().(*conversationv1.AgentGlobSuccess_All); !ok {
 		t.Fatalf("Extent = %T, want AgentGlobSuccess_All", got.GetExtent())
+	}
+}
+
+func TestFindingsSuccessCarriesTheVerifyPassVerdict(t *testing.T) {
+	// Arrange: a verify pass that confirmed a finding is the whole point of
+	// the verdict arm — dropping it draws a confirmed defect as unverified.
+	call := openCall{}
+	result := map[string]any{"findings": []any{map[string]any{
+		"file": "a.py", "summary": "boom", "verdict": "CONFIRMED",
+	}}}
+
+	// Act
+	got := findingsSuccess(call, result, 1000)
+
+	// Assert
+	if len(got.GetFindings()) != 1 {
+		t.Fatalf("Findings = %d, want 1", len(got.GetFindings()))
+	}
+	if _, ok := got.GetFindings()[0].GetVerdict().(*conversationv1.AgentFinding_Confirmed); !ok {
+		t.Fatalf("Verdict = %T, want AgentFinding_Confirmed", got.GetFindings()[0].GetVerdict())
+	}
+}
+
+func TestFindingsSuccessLeavesAnUnknownVerdictUnset(t *testing.T) {
+	// Arrange: a word outside the vendor's closed set is not a verdict, and
+	// picking an arm for it would state a conclusion nobody reached.
+	call := openCall{}
+	result := map[string]any{"findings": []any{map[string]any{"file": "a.py", "verdict": "MAYBE"}}}
+
+	// Act
+	got := findingsSuccess(call, result, 1000)
+
+	// Assert
+	if verdict := got.GetFindings()[0].GetVerdict(); verdict != nil {
+		t.Fatalf("Verdict = %T, want unset", verdict)
+	}
+}
+
+func TestFindingsSuccessCarriesAReReportsOutcome(t *testing.T) {
+	// Arrange: outcome is set only on a re-report after fixes were applied.
+	call := openCall{}
+	result := map[string]any{"findings": []any{map[string]any{"file": "a.py", "outcome": "no_change_needed"}}}
+
+	// Act
+	got := findingsSuccess(call, result, 1000)
+
+	// Assert
+	if _, ok := got.GetFindings()[0].GetOutcome().(*conversationv1.AgentFinding_NoChangeNeeded); !ok {
+		t.Fatalf("Outcome = %T, want AgentFinding_NoChangeNeeded", got.GetFindings()[0].GetOutcome())
+	}
+}
+
+func TestFindingsSuccessLeavesTheOutcomeUnsetOnAFirstReport(t *testing.T) {
+	// Arrange: a first report states no outcome, and inventing one would say
+	// a defect was handled when nothing was.
+	call := openCall{}
+	result := map[string]any{"findings": []any{map[string]any{"file": "a.py", "summary": "boom"}}}
+
+	// Act
+	got := findingsSuccess(call, result, 1000)
+
+	// Assert
+	if outcome := got.GetFindings()[0].GetOutcome(); outcome != nil {
+		t.Fatalf("Outcome = %T, want unset", outcome)
+	}
+}
+
+func TestFindingsSuccessFallsBackToTheCallWhenTheToolEchoedNothing(t *testing.T) {
+	// Arrange: a vendor that echoed no findings would otherwise lose the
+	// report entirely, so the call's own input is the fallback.
+	call := openCall{input: map[string]any{"findings": []any{map[string]any{
+		"file": "a.py", "failure_scenario": "divide by zero",
+	}}}}
+
+	// Act
+	got := findingsSuccess(call, nil, 1000)
+
+	// Assert
+	if len(got.GetFindings()) != 1 || got.GetFindings()[0].GetFailureScenario() != "divide by zero" {
+		t.Fatalf("Findings = %+v, want the call's single finding", got.GetFindings())
 	}
 }
