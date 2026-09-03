@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_open_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyKbBAoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAQgcKBWNhdXNlIh8KHU9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU9wZW5Xb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodT3BlbldvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpPcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZCIdChtPcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWQiUwoeT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhYKDnNlYXJjaGVkX3BhdGhzGAIgAygJIioKGE9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChRPcGVuV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVPcGVuV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRPcGVuV29ya3NwYWNlU3VjY2VzcyLoBAoST3BlbldvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEkQKD3Nlc3Npb25fZGVsZXRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5PcGVuV29ya3NwYWNlU2Vzc2lvbkRlbGV0ZWRIABJKChJ0cmFuc2NyaXB0X21pc3NpbmcYBiABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVRyYW5zY3JpcHRNaXNzaW5nSAASPgoMc3Bhd25fZmFpbGVkGAcgASgLMiYuYWdlbnRyZXBsLnYxLk9wZW5Xb3Jrc3BhY2VTcGF3bkZhaWxlZEgAEksKE3ZlbmRvcl9zdGFydF9mYWlsZWQYCCABKAsyLC5hZ2VudHJlcGwudjEuT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkSABCBwoFY2F1c2UiMAoeT3BlbldvcmtzcGFjZVZlbmRvclN0YXJ0RmFpbGVkEg4KBmRldGFpbBgBIAEoCSIfCh1PcGVuV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZSI5CiFPcGVuV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjAKHU9wZW5Xb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHAoaT3BlbldvcmtzcGFjZU5vdFlldEFkb3B0ZWQiHQobT3BlbldvcmtzcGFjZVNlc3Npb25EZWxldGVkIlMKHk9wZW5Xb3Jrc3BhY2VUcmFuc2NyaXB0TWlzc2luZxIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIWCg5zZWFyY2hlZF9wYXRocxgCIAMoCSIqChhPcGVuV29ya3NwYWNlU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceRequest
@@ -146,6 +146,19 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
      */
     value: OpenWorkspaceSpawnFailed;
     case: "spawnFailed";
+  } | {
+    /**
+     * The shim came up but the VENDOR failed to start the session
+     * (shim.v1 StartSessionFailure.vendor_start_failed relayed by name):
+     * the SDK threw before its first message. Distinct from spawn_failed
+     * (our process) and from transcript_missing (our record). `detail` is
+     * the shim's account, for a human and for logs; never switched on.
+     * (Landing 9, 2026-09-03, user-approved.)
+     *
+     * @generated from field: agentrepl.v1.OpenWorkspaceVendorStartFailed vendor_start_failed = 8;
+     */
+    value: OpenWorkspaceVendorStartFailed;
+    case: "vendorStartFailed";
   } | { case: undefined; value?: undefined };
 };
 
@@ -155,6 +168,23 @@ export type OpenWorkspaceError = Message<"agentrepl.v1.OpenWorkspaceError"> & {
  */
 export const OpenWorkspaceErrorSchema: GenMessage<OpenWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenWorkspaceVendorStartFailed
+ */
+export type OpenWorkspaceVendorStartFailed = Message<"agentrepl.v1.OpenWorkspaceVendorStartFailed"> & {
+  /**
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenWorkspaceVendorStartFailed.
+ * Use `create(OpenWorkspaceVendorStartFailedSchema)` to create a new message.
+ */
+export const OpenWorkspaceVendorStartFailedSchema: GenMessage<OpenWorkspaceVendorStartFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceUnknownWorkspace
@@ -167,7 +197,7 @@ export type OpenWorkspaceUnknownWorkspace = Message<"agentrepl.v1.OpenWorkspaceU
  * Use `create(OpenWorkspaceUnknownWorkspaceSchema)` to create a new message.
  */
 export const OpenWorkspaceUnknownWorkspaceSchema: GenMessage<OpenWorkspaceUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 4);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
@@ -186,7 +216,7 @@ export type OpenWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.OpenWorksp
  * Use `create(OpenWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const OpenWorkspaceWorkspaceRefMismatchSchema: GenMessage<OpenWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 5);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTransferringAway
@@ -205,7 +235,7 @@ export type OpenWorkspaceTransferringAway = Message<"agentrepl.v1.OpenWorkspaceT
  * Use `create(OpenWorkspaceTransferringAwaySchema)` to create a new message.
  */
 export const OpenWorkspaceTransferringAwaySchema: GenMessage<OpenWorkspaceTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 6);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceNotYetAdopted
@@ -218,7 +248,7 @@ export type OpenWorkspaceNotYetAdopted = Message<"agentrepl.v1.OpenWorkspaceNotY
  * Use `create(OpenWorkspaceNotYetAdoptedSchema)` to create a new message.
  */
 export const OpenWorkspaceNotYetAdoptedSchema: GenMessage<OpenWorkspaceNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 7);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSessionDeleted
@@ -231,7 +261,7 @@ export type OpenWorkspaceSessionDeleted = Message<"agentrepl.v1.OpenWorkspaceSes
  * Use `create(OpenWorkspaceSessionDeletedSchema)` to create a new message.
  */
 export const OpenWorkspaceSessionDeletedSchema: GenMessage<OpenWorkspaceSessionDeleted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 8);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceTranscriptMissing
@@ -257,7 +287,7 @@ export type OpenWorkspaceTranscriptMissing = Message<"agentrepl.v1.OpenWorkspace
  * Use `create(OpenWorkspaceTranscriptMissingSchema)` to create a new message.
  */
 export const OpenWorkspaceTranscriptMissingSchema: GenMessage<OpenWorkspaceTranscriptMissing> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 9);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
 
 /**
  * @generated from message agentrepl.v1.OpenWorkspaceSpawnFailed
@@ -276,5 +306,5 @@ export type OpenWorkspaceSpawnFailed = Message<"agentrepl.v1.OpenWorkspaceSpawnF
  * Use `create(OpenWorkspaceSpawnFailedSchema)` to create a new message.
  */
 export const OpenWorkspaceSpawnFailedSchema: GenMessage<OpenWorkspaceSpawnFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 10);
+  messageDesc(file_agentrepl_v1_endpoint_open_workspace, 11);
 
