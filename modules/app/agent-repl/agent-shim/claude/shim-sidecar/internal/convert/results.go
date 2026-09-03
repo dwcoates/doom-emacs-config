@@ -13,12 +13,16 @@ import (
 
 // readSuccess states HOW MUCH of the file came back. The set arm IS whether more
 // exists, so a whole read carries no truncation vocabulary at all.
+//
+// THE EXTENT IS A FACT ABOUT BOTH SIDES: the vendor states what came back
+// (`content`, `startLine`, `numLines`, `totalLines`, `truncatedByTokenCap`) and
+// the CALLER states what was asked for (`offset`, `limit`). A caller that asked
+// for a MIDDLE SLICE got a range, never a head — the omitted vocabulary of a
+// head is always a claim about the file's TAIL, and drawing "lines 2-3 of 4" as
+// an omission would tell a reader lines were cut that were never asked for.
 func readSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentReadSuccess {
-	path := str(pick(call.input, "file_path", "path"))
 	file := obj(result["file"])
-	if p := str(file["filePath"]); p != "" {
-		path = p
-	}
+	path := firstNonEmpty(str(file["filePath"]), str(pick(call.input, "file_path", "path")))
 	success := &conversationv1.AgentReadSuccess{
 		Path:      &conversationv1.ReadPath{Path: path},
 		SettledAt: settledAt(ts),
@@ -27,47 +31,99 @@ func readSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 	totalLines := uint32(number(file["totalLines"]))
 	numLines := uint32(number(file["numLines"]))
 	startLine := uint32(number(file["startLine"]))
+	// A vendor that stated no startLine began at line 1: absence is not "past
+	// the top of the file".
+	fromFirstLine := !has(file, "startLine") || startLine <= 1
+	stoppedShort := has(file, "totalLines") && has(file, "numLines") && numLines < totalLines
 
 	switch {
-	case startLine > 1:
+	case boolean(pick(file, "truncatedByTokenCap", "truncatedByTokens")) && fromFirstLine:
+		// The vendor auto-paginated a whole-file read: a head cut at a token
+		// budget, whose last line may be incomplete.
+		success.Extent = readHead(contents, totalLines, true)
+	case has(call.input, "offset"):
 		// The caller asked for a MIDDLE SLICE and that slice came back.
-		success.Extent = &conversationv1.AgentReadSuccess_Range{Range: &conversationv1.AgentReadRange{
-			Contents:   contents,
-			FirstLine:  startLine,
-			LineCount:  numLines,
-			TotalLines: totalLines,
-		}}
-	case totalLines > 0 && numLines > 0 && numLines < totalLines:
-		// The file was long, so only its leading portion came back.
-		head := &conversationv1.AgentReadHead{Contents: contents, TotalLines: totalLines}
-		if boolean(file["truncatedByTokens"]) {
-			head.Cut = &conversationv1.AgentReadHead_TokenCap{TokenCap: &conversationv1.AgentReadCutAtTokenCap{}}
-		} else {
-			head.Cut = &conversationv1.AgentReadHead_LineCap{LineCap: &conversationv1.AgentReadCutAtLineCap{}}
-		}
-		success.Extent = &conversationv1.AgentReadSuccess_Head{Head: head}
+		success.Extent = readRange(contents, startLine, numLines, totalLines)
+	case has(call.input, "limit") && fromFirstLine && stoppedShort:
+		// The read began at line 1 and stopped at a line budget.
+		success.Extent = readHead(contents, totalLines, false)
+	case stoppedShort && !fromFirstLine:
+		// Fewer lines than the file holds, beginning past line 1, with no
+		// offset asked: a range is the only arm that can state where it began.
+		success.Extent = readRange(contents, startLine, numLines, totalLines)
+	case stoppedShort:
+		// NOT A WHOLE FILE whatever the caller asked: calling it whole would
+		// claim there is nothing more to fetch.
+		success.Extent = readHead(contents, totalLines, false)
 	default:
 		success.Extent = &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: contents}}
 	}
 	return success
 }
 
+// readHead states the leading portion of a file, with WHAT CUT IT.
+func readHead(contents string, totalLines uint32, tokenCap bool) *conversationv1.AgentReadSuccess_Head {
+	head := &conversationv1.AgentReadHead{Contents: contents, TotalLines: totalLines}
+	if tokenCap {
+		head.Cut = &conversationv1.AgentReadHead_TokenCap{TokenCap: &conversationv1.AgentReadCutAtTokenCap{}}
+	} else {
+		head.Cut = &conversationv1.AgentReadHead_LineCap{LineCap: &conversationv1.AgentReadCutAtLineCap{}}
+	}
+	return &conversationv1.AgentReadSuccess_Head{Head: head}
+}
+
+// readRange states a middle slice, which CARRIES NO OMISSION: what lies outside
+// it was never asked for.
+func readRange(contents string, firstLine, lineCount, totalLines uint32) *conversationv1.AgentReadSuccess_Range {
+	return &conversationv1.AgentReadSuccess_Range{Range: &conversationv1.AgentReadRange{
+		Contents:   contents,
+		FirstLine:  firstLine,
+		LineCount:  lineCount,
+		TotalLines: totalLines,
+	}}
+}
+
 // writeSuccess states whether the file EXISTED beforehand, so a creation is
 // never drawn as a rewrite of nothing.
+//
+// THE PATCH IS THE CHANGE, NEVER THE WHOLE FILE. The vendor leaves
+// `structuredPatch` EMPTY for a creation, so the producer diffs `originalFile`
+// against `content` itself — an absent original diffs against the empty file,
+// which makes every line an addition, exactly as the proto describes.
 func writeSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentWriteSuccess {
 	path := firstNonEmpty(str(result["filePath"]), str(pick(call.input, "file_path", "path")))
 	success := &conversationv1.AgentWriteSuccess{
 		Path:         &conversationv1.ReadPath{Path: path},
-		Patch:        patchHunks(result["structuredPatch"]),
+		Patch:        writePatch(result),
 		UserModified: boolean(result["userModified"]),
 		SettledAt:    settledAt(ts),
 	}
-	if str(result["type"]) == "create" || str(result["originalFile"]) == "" {
+	switch {
+	case str(result["type"]) == "create":
 		success.Outcome = &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}}
-	} else {
+	case str(result["type"]) == "update":
+		success.Outcome = &conversationv1.AgentWriteSuccess_Updated{Updated: &conversationv1.AgentWriteUpdated{}}
+	case str(result["originalFile"]) == "":
+		// The vendor stated neither word. Nothing existed to rewrite, which is
+		// the only reading of an absent original.
+		success.Outcome = &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}}
+	default:
 		success.Outcome = &conversationv1.AgentWriteSuccess_Updated{Updated: &conversationv1.AgentWriteUpdated{}}
 	}
 	return success
+}
+
+// writePatch prefers the patch the vendor STATED and falls back to diffing the
+// two versions it handed over — which is the whole story for a creation, whose
+// structured patch the vendor leaves empty.
+func writePatch(result map[string]any) []*conversationv1.FilePatchHunk {
+	if stated := patchHunks(result["structuredPatch"]); len(stated) > 0 {
+		return stated
+	}
+	if !has(result, "content") {
+		return nil
+	}
+	return diffHunks(str(result["originalFile"]), str(result["content"]))
 }
 
 func editSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentEditSuccess {
