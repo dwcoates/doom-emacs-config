@@ -167,42 +167,165 @@ func patchHunks(raw any) []*conversationv1.FilePatchHunk {
 // grepSuccess answers in the SHAPE the call asked for. The three modes are
 // genuinely different answers rather than views of one, so each carries only
 // what applies to it. Matching nothing is a success with an empty answer.
-func grepSuccess(call openCall, block map[string]any, ts int64) *conversationv1.AgentGrepSuccess {
+//
+// THE VENDOR'S TYPED OUTPUT IS THE ANSWER, the rendered text only its fallback:
+// the typed output states the TOTALS, and the omitted figure is subtracted from
+// them here, once, so no consumer re-derives it. A search read from text alone
+// knows no total, so it can only claim what it holds.
+func grepSuccess(call openCall, result, block map[string]any, ts int64) *conversationv1.AgentGrepSuccess {
 	success := &conversationv1.AgentGrepSuccess{
 		Query:     grepQuery(call.input),
 		SettledAt: settledAt(ts),
 	}
-	text := flattenResultText(block["content"])
-	switch str(pick(call.input, "output_mode", "outputMode")) {
-	case "files_with_matches":
-		paths := nonEmptyLines(text)
-		files := &conversationv1.AgentGrepFiles{Paths: paths}
-		files.Extent = &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{
-			FilesReturned: uint32(len(paths)),
-		}}
-		success.Matches = &conversationv1.AgentGrepSuccess_Files{Files: files}
-	case "count":
+	// The vendor's own default output mode applies when neither the result nor
+	// the call named one, rather than a guess of our own.
+	mode := firstNonEmpty(str(result["mode"]), str(pick(call.input, "output_mode", "outputMode")), "files_with_matches")
+	switch {
+	case mode == "count" && has(result, "numMatches"):
 		success.Matches = &conversationv1.AgentGrepSuccess_Count{Count: &conversationv1.AgentGrepCount{
-			Matches: uint32(countMatches(text)),
+			Matches: uint32(number(result["numMatches"])),
 		}}
-	default:
-		content := &conversationv1.AgentGrepContent{Content: text}
-		content.Extent = &conversationv1.AgentGrepContent_All{All: &conversationv1.AgentGrepContentAll{
-			LinesReturned: uint32(len(nonEmptyLines(text))),
-		}}
+	case mode == "content" && has(result, "numLines"):
+		numLines := uint32(number(result["numLines"]))
+		content := &conversationv1.AgentGrepContent{Content: str(result["content"])}
+		if omitted := omittedBeyond(result, "totalLines", numLines); omitted != nil {
+			content.Extent = &conversationv1.AgentGrepContent_Partial{Partial: &conversationv1.AgentGrepContentPartial{
+				LinesReturned: numLines,
+				LinesOmitted:  *omitted,
+			}}
+		} else {
+			content.Extent = &conversationv1.AgentGrepContent_All{All: &conversationv1.AgentGrepContentAll{
+				LinesReturned: numLines,
+			}}
+		}
 		success.Matches = &conversationv1.AgentGrepSuccess_Content{Content: content}
+	case mode == "files_with_matches" && has(result, "numFiles"):
+		numFiles := uint32(number(result["numFiles"]))
+		files := &conversationv1.AgentGrepFiles{Paths: stringList(result["filenames"])}
+		if omitted := omittedBeyond(result, "totalFiles", numFiles); omitted != nil {
+			files.Extent = &conversationv1.AgentGrepFiles_Partial{Partial: &conversationv1.AgentGrepFilesPartial{
+				FilesReturned: numFiles,
+				FilesOmitted:  *omitted,
+			}}
+		} else {
+			files.Extent = &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{
+				FilesReturned: numFiles,
+			}}
+		}
+		success.Matches = &conversationv1.AgentGrepSuccess_Files{Files: files}
+	default:
+		setGrepFromText(success, mode, flattenResultText(block["content"]))
 	}
 	return success
 }
 
-func globSuccess(call openCall, block map[string]any, ts int64) *conversationv1.AgentGlobSuccess {
-	paths := nonEmptyLines(flattenResultText(block["content"]))
-	return &conversationv1.AgentGlobSuccess{
+// setGrepFromText reads a search the vendor typed nothing for. It states only
+// what the rendered answer HOLDS: with no total stated, no omission is claimed.
+func setGrepFromText(success *conversationv1.AgentGrepSuccess, mode, text string) {
+	switch mode {
+	case "count":
+		success.Matches = &conversationv1.AgentGrepSuccess_Count{Count: &conversationv1.AgentGrepCount{
+			Matches: uint32(countMatches(text)),
+		}}
+	case "content":
+		lines := nonEmptyLines(text)
+		success.Matches = &conversationv1.AgentGrepSuccess_Content{Content: &conversationv1.AgentGrepContent{
+			Content: text,
+			Extent: &conversationv1.AgentGrepContent_All{All: &conversationv1.AgentGrepContentAll{
+				LinesReturned: uint32(len(lines)),
+			}},
+		}}
+	default:
+		paths := nonEmptyLines(text)
+		success.Matches = &conversationv1.AgentGrepSuccess_Files{Files: &conversationv1.AgentGrepFiles{
+			Paths: paths,
+			Extent: &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{
+				FilesReturned: uint32(len(paths)),
+			}},
+		}}
+	}
+}
+
+// globSuccess states the paths a pattern matched and WHETHER THE LIST STOPPED
+// SHORT. The two omitted arms are kept apart because they are different claims:
+// `totalMatches` is exact, but `countIsComplete == false` means the search
+// capped its own counting, so the figure is a FLOOR — "42 more" and "at least
+// 42 more" must never be drawn as the same thing.
+func globSuccess(call openCall, result, block map[string]any, ts int64) *conversationv1.AgentGlobSuccess {
+	success := &conversationv1.AgentGlobSuccess{
 		Query:     globQuery(call.input),
-		Paths:     paths,
-		Extent:    &conversationv1.AgentGlobSuccess_All{All: &conversationv1.AgentGlobAll{FilesReturned: uint32(len(paths))}},
 		SettledAt: settledAt(ts),
 	}
+	if !has(result, "numFiles") && !has(result, "filenames") {
+		// The vendor typed nothing: the rendered list is all there is, and with
+		// no total stated no omission can be claimed.
+		paths := nonEmptyLines(flattenResultText(block["content"]))
+		success.Paths = paths
+		success.Extent = &conversationv1.AgentGlobSuccess_All{All: &conversationv1.AgentGlobAll{FilesReturned: uint32(len(paths))}}
+		return success
+	}
+	paths := stringList(result["filenames"])
+	numFiles := uint32(len(paths))
+	if has(result, "numFiles") {
+		numFiles = uint32(number(result["numFiles"]))
+	}
+	success.Paths = paths
+	if !boolean(result["truncated"]) {
+		success.Extent = &conversationv1.AgentGlobSuccess_All{All: &conversationv1.AgentGlobAll{FilesReturned: numFiles}}
+		return success
+	}
+	partial := &conversationv1.AgentGlobPartial{FilesReturned: numFiles}
+	switch {
+	case !has(result, "totalMatches"):
+		// A truncated match that stated no total leaves only the honest floor:
+		// trivially true, and never overstating what was left out.
+		partial.Omitted = &conversationv1.AgentGlobPartial_AtLeast{AtLeast: &conversationv1.AgentGlobOmittedAtLeast{}}
+	case boolean(pick(result, "countIsComplete")) || !has(result, "countIsComplete"):
+		partial.Omitted = &conversationv1.AgentGlobPartial_Exact{Exact: &conversationv1.AgentGlobOmittedExact{
+			FilesOmitted: globOmitted(result, numFiles),
+		}}
+	default:
+		partial.Omitted = &conversationv1.AgentGlobPartial_AtLeast{AtLeast: &conversationv1.AgentGlobOmittedAtLeast{
+			FilesOmittedAtLeast: globOmitted(result, numFiles),
+		}}
+	}
+	success.Extent = &conversationv1.AgentGlobSuccess_Partial{Partial: partial}
+	return success
+}
+
+// globOmitted subtracts what came back from the stated total, clamped at zero so
+// a total trailing the returned count never becomes a negative figure.
+func globOmitted(result map[string]any, returned uint32) uint32 {
+	total := uint32(number(result["totalMatches"]))
+	if total <= returned {
+		return 0
+	}
+	return total - returned
+}
+
+// omittedBeyond states how many a stated total leaves out, or nil when the
+// vendor stated no total — an unstated total is not "none omitted".
+func omittedBeyond(result map[string]any, totalKey string, returned uint32) *uint32 {
+	if !has(result, totalKey) {
+		return nil
+	}
+	total := uint32(number(pick(result, totalKey)))
+	if total <= returned {
+		return nil
+	}
+	left := total - returned
+	return &left
+}
+
+// stringList reads a vendor array of paths, dropping anything that is not one.
+func stringList(raw any) []string {
+	var out []string
+	for _, el := range list(raw) {
+		if s, ok := el.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // bashSuccess: a NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call

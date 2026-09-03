@@ -33,7 +33,7 @@ func TestGrepSuccessAnswersACountWhenAskedForOne(t *testing.T) {
 	block := map[string]any{"content": "file1.go:1\nfile2.go:1\n"}
 
 	// Act
-	got := grepSuccess(call, block, 1000)
+	got := grepSuccess(call, nil, block, 1000)
 
 	// Assert
 	count, ok := got.GetMatches().(*conversationv1.AgentGrepSuccess_Count)
@@ -403,5 +403,217 @@ func TestWriteSuccessNamesAnUpdateFromTheVendorsOwnType(t *testing.T) {
 	// Assert
 	if _, ok := got.GetOutcome().(*conversationv1.AgentWriteSuccess_Updated); !ok {
 		t.Fatalf("Outcome = %T, want AgentWriteSuccess_Updated", got.GetOutcome())
+	}
+}
+
+func TestGrepSuccessSubtractsTheOmittedLinesFromTheStatedTotal(t *testing.T) {
+	// Arrange: content mode returned 2 of 7 lines. The proto carries the
+	// OMITTED figure, which is what a reader is shown.
+	call := openCall{input: map[string]any{"output_mode": "content"}}
+	result := map[string]any{"mode": "content", "content": "a\nb", "numLines": float64(2), "totalLines": float64(7)}
+
+	// Act
+	got := grepSuccess(call, result, nil, 1000)
+
+	// Assert
+	content, ok := got.GetMatches().(*conversationv1.AgentGrepSuccess_Content)
+	if !ok {
+		t.Fatalf("Matches = %T, want AgentGrepSuccess_Content", got.GetMatches())
+	}
+	partial, ok := content.Content.GetExtent().(*conversationv1.AgentGrepContent_Partial)
+	if !ok {
+		t.Fatalf("Extent = %T, want AgentGrepContent_Partial", content.Content.GetExtent())
+	}
+	if partial.Partial.GetLinesReturned() != 2 || partial.Partial.GetLinesOmitted() != 5 {
+		t.Fatalf("Partial = %+v, want returned=2 omitted=5", partial.Partial)
+	}
+}
+
+func TestGrepSuccessClaimsNoOmissionWhenTheTotalMatchesWhatCameBack(t *testing.T) {
+	// Arrange: every matching line came back, so the all arm applies.
+	call := openCall{input: map[string]any{"output_mode": "content"}}
+	result := map[string]any{"mode": "content", "content": "a\nb", "numLines": float64(2), "totalLines": float64(2)}
+
+	// Act
+	got := grepSuccess(call, result, nil, 1000)
+
+	// Assert
+	content := got.GetMatches().(*conversationv1.AgentGrepSuccess_Content)
+	if _, ok := content.Content.GetExtent().(*conversationv1.AgentGrepContent_All); !ok {
+		t.Fatalf("Extent = %T, want AgentGrepContent_All", content.Content.GetExtent())
+	}
+}
+
+func TestGrepSuccessReadsTheFilenamesTheVendorTyped(t *testing.T) {
+	// Arrange: files mode states its own filenames array and totals, which are
+	// the answer rather than the rendered text.
+	call := openCall{input: map[string]any{"output_mode": "files_with_matches"}}
+	result := map[string]any{
+		"mode":       "files_with_matches",
+		"filenames":  []any{"a.txt", "b.txt"},
+		"numFiles":   float64(2),
+		"totalFiles": float64(5),
+	}
+
+	// Act
+	got := grepSuccess(call, result, nil, 1000)
+
+	// Assert
+	files := got.GetMatches().(*conversationv1.AgentGrepSuccess_Files)
+	partial, ok := files.Files.GetExtent().(*conversationv1.AgentGrepFiles_Partial)
+	if !ok {
+		t.Fatalf("Extent = %T, want AgentGrepFiles_Partial", files.Files.GetExtent())
+	}
+	if partial.Partial.GetFilesOmitted() != 3 {
+		t.Fatalf("FilesOmitted = %d, want 3", partial.Partial.GetFilesOmitted())
+	}
+	if len(files.Files.GetPaths()) != 2 {
+		t.Fatalf("Paths = %q, want two entries", files.Files.GetPaths())
+	}
+}
+
+func TestGrepSuccessReadsTheVendorsMatchCountRatherThanTheRenderedLines(t *testing.T) {
+	// Arrange: count mode states numMatches, which is the total across files
+	// and not the number of rendered lines.
+	call := openCall{input: map[string]any{"output_mode": "count"}}
+	result := map[string]any{"mode": "count", "numMatches": float64(9)}
+
+	// Act
+	got := grepSuccess(call, result, map[string]any{"content": "a.txt:1\nb.txt:2"}, 1000)
+
+	// Assert
+	count := got.GetMatches().(*conversationv1.AgentGrepSuccess_Count)
+	if count.Count.GetMatches() != 9 {
+		t.Fatalf("Matches = %d, want 9", count.Count.GetMatches())
+	}
+}
+
+func TestGrepSuccessFallsBackToTheVendorsDefaultModeWhenNothingNamedOne(t *testing.T) {
+	// Arrange: neither the result nor the call names a mode, so the vendor's
+	// own default — files_with_matches — applies rather than a guess.
+	call := openCall{}
+	block := map[string]any{"content": "a.txt\nb.txt"}
+
+	// Act
+	got := grepSuccess(call, nil, block, 1000)
+
+	// Assert
+	files, ok := got.GetMatches().(*conversationv1.AgentGrepSuccess_Files)
+	if !ok {
+		t.Fatalf("Matches = %T, want AgentGrepSuccess_Files", got.GetMatches())
+	}
+	if len(files.Files.GetPaths()) != 2 {
+		t.Fatalf("Paths = %q, want two entries", files.Files.GetPaths())
+	}
+}
+
+func TestGlobSuccessStatesTheExactOmittedCountForACompleteCount(t *testing.T) {
+	// Arrange: the list stopped short and the search counted completely, so
+	// the omitted figure is exact.
+	call := openCall{input: map[string]any{"pattern": "**/*.md"}}
+	result := map[string]any{
+		"filenames":       []any{"one.md", "two.md"},
+		"numFiles":        float64(2),
+		"truncated":       true,
+		"totalMatches":    float64(7),
+		"countIsComplete": true,
+	}
+
+	// Act
+	got := globSuccess(call, result, nil, 1000)
+
+	// Assert
+	partial, ok := got.GetExtent().(*conversationv1.AgentGlobSuccess_Partial)
+	if !ok {
+		t.Fatalf("Extent = %T, want AgentGlobSuccess_Partial", got.GetExtent())
+	}
+	exact, ok := partial.Partial.GetOmitted().(*conversationv1.AgentGlobPartial_Exact)
+	if !ok {
+		t.Fatalf("Omitted = %T, want AgentGlobPartial_Exact", partial.Partial.GetOmitted())
+	}
+	if exact.Exact.GetFilesOmitted() != 5 {
+		t.Fatalf("FilesOmitted = %d, want 5", exact.Exact.GetFilesOmitted())
+	}
+}
+
+func TestGlobSuccessStatesAFloorWhenTheSearchCappedItsOwnCounting(t *testing.T) {
+	// Arrange: countIsComplete false makes the figure a FLOOR — "at least 5
+	// more" is a different claim than "5 more".
+	call := openCall{input: map[string]any{"pattern": "**/*.md"}}
+	result := map[string]any{
+		"filenames":       []any{"one.md", "two.md"},
+		"numFiles":        float64(2),
+		"truncated":       true,
+		"totalMatches":    float64(7),
+		"countIsComplete": false,
+	}
+
+	// Act
+	got := globSuccess(call, result, nil, 1000)
+
+	// Assert
+	partial := got.GetExtent().(*conversationv1.AgentGlobSuccess_Partial)
+	atLeast, ok := partial.Partial.GetOmitted().(*conversationv1.AgentGlobPartial_AtLeast)
+	if !ok {
+		t.Fatalf("Omitted = %T, want AgentGlobPartial_AtLeast", partial.Partial.GetOmitted())
+	}
+	if atLeast.AtLeast.GetFilesOmittedAtLeast() != 5 {
+		t.Fatalf("FilesOmittedAtLeast = %d, want 5", atLeast.AtLeast.GetFilesOmittedAtLeast())
+	}
+}
+
+func TestGlobSuccessClaimsOnlyAZeroFloorWhenNoTotalWasStated(t *testing.T) {
+	// Arrange: a truncated list with no total leaves only the honest floor,
+	// which never overstates what was left out.
+	call := openCall{input: map[string]any{"pattern": "**/*.md"}}
+	result := map[string]any{"filenames": []any{"one.md"}, "numFiles": float64(1), "truncated": true}
+
+	// Act
+	got := globSuccess(call, result, nil, 1000)
+
+	// Assert
+	partial := got.GetExtent().(*conversationv1.AgentGlobSuccess_Partial)
+	atLeast, ok := partial.Partial.GetOmitted().(*conversationv1.AgentGlobPartial_AtLeast)
+	if !ok {
+		t.Fatalf("Omitted = %T, want AgentGlobPartial_AtLeast", partial.Partial.GetOmitted())
+	}
+	if atLeast.AtLeast.GetFilesOmittedAtLeast() != 0 {
+		t.Fatalf("FilesOmittedAtLeast = %d, want 0", atLeast.AtLeast.GetFilesOmittedAtLeast())
+	}
+}
+
+func TestGlobSuccessStatesTheAllExtentForAnUntruncatedList(t *testing.T) {
+	// Arrange: the whole match set came back, so no omission may be claimed.
+	call := openCall{input: map[string]any{"pattern": "**/*.md"}}
+	result := map[string]any{"filenames": []any{"one.md", "two.md"}, "numFiles": float64(2)}
+
+	// Act
+	got := globSuccess(call, result, nil, 1000)
+
+	// Assert
+	all, ok := got.GetExtent().(*conversationv1.AgentGlobSuccess_All)
+	if !ok {
+		t.Fatalf("Extent = %T, want AgentGlobSuccess_All", got.GetExtent())
+	}
+	if all.All.GetFilesReturned() != 2 {
+		t.Fatalf("FilesReturned = %d, want 2", all.All.GetFilesReturned())
+	}
+}
+
+func TestGlobSuccessReadsTheRenderedListWhenTheVendorTypedNothing(t *testing.T) {
+	// Arrange: an untyped result leaves only the rendered lines, which state
+	// no total and so can claim no omission.
+	call := openCall{input: map[string]any{"pattern": "**/*.md"}}
+	block := map[string]any{"content": "./one.md\n./deep/two.md"}
+
+	// Act
+	got := globSuccess(call, nil, block, 1000)
+
+	// Assert
+	if len(got.GetPaths()) != 2 {
+		t.Fatalf("Paths = %q, want two entries", got.GetPaths())
+	}
+	if _, ok := got.GetExtent().(*conversationv1.AgentGlobSuccess_All); !ok {
+		t.Fatalf("Extent = %T, want AgentGlobSuccess_All", got.GetExtent())
 	}
 }
