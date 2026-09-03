@@ -792,3 +792,153 @@ func TestWorktreeSuccessLeavesTheExitOutcomeUnsetForAnUnrecognizedAction(t *test
 		t.Fatalf("Outcome = %T, want unset", outcome)
 	}
 }
+
+func TestBashSuccessReadsTheExitCodeTheVendorInterpreted(t *testing.T) {
+	// Arrange: returnCodeInterpretation is the only place a foreground call
+	// carries the shell's status, and it is the command's own verdict.
+	call := openCall{input: map[string]any{"command": "false"}}
+	result := map[string]any{"stdout": "", "returnCodeInterpretation": "exited with code 7"}
+
+	// Act
+	got := bashSuccess(call, result, 1000)
+
+	// Assert
+	completed, ok := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	if !ok {
+		t.Fatalf("Outcome = %T, want AgentBashSuccess_Completed", got.GetOutcome())
+	}
+	exited, ok := completed.Completed.GetTermination().GetHow().(*conversationv1.AgentBashTermination_Exited)
+	if !ok {
+		t.Fatalf("How = %T, want AgentBashTermination_Exited", completed.Completed.GetTermination().GetHow())
+	}
+	if exited.Exited.GetCode() != 7 {
+		t.Fatalf("Code = %d, want 7", exited.Exited.GetCode())
+	}
+}
+
+func TestBashSuccessLeavesTerminationUnsetWhenNoStatusWasStated(t *testing.T) {
+	// Arrange: an ordinary foreground result states no status, and
+	// synthesizing exited(0) would invent a fact nothing reported.
+	call := openCall{input: map[string]any{"command": "true"}}
+	result := map[string]any{"stdout": "ok"}
+
+	// Act
+	got := bashSuccess(call, result, 1000)
+
+	// Assert
+	completed := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	if completed.Completed.GetTermination() != nil {
+		t.Fatalf("Termination = %+v, want unset", completed.Completed.GetTermination())
+	}
+}
+
+func TestWakeupSuccessReadsTheStopsOwnReceipt(t *testing.T) {
+	// Arrange: `stopped` in the output is the receipt, whatever the input said.
+	call := openCall{input: map[string]any{}}
+	result := map[string]any{"stopped": true, "cancelledWakeups": float64(3)}
+
+	// Act
+	got := wakeupSuccess(call, result)
+
+	// Assert
+	stopped, ok := got.GetOutcome().(*conversationv1.AgentScheduleWakeupSuccess_Stopped)
+	if !ok {
+		t.Fatalf("Outcome = %T, want AgentScheduleWakeupSuccess_Stopped", got.GetOutcome())
+	}
+	if stopped.Stopped.GetCancelledWakeups() != 3 {
+		t.Fatalf("CancelledWakeups = %d, want 3", stopped.Stopped.GetCancelledWakeups())
+	}
+}
+
+func TestWakeupSuccessReadsTheScheduledInstantAsEpochMillis(t *testing.T) {
+	// Arrange: the vendor states scheduledFor as epoch millis, which is the
+	// fact the countdown ticks from.
+	call := openCall{input: map[string]any{}}
+	result := map[string]any{"scheduledFor": float64(1735689600000)}
+
+	// Act
+	got := wakeupSuccess(call, result)
+
+	// Assert
+	scheduled := got.GetOutcome().(*conversationv1.AgentScheduleWakeupSuccess_Scheduled)
+	if scheduled.Scheduled.GetWakeAtMs() != 1735689600000 {
+		t.Fatalf("WakeAtMs = %d, want 1735689600000", scheduled.Scheduled.GetWakeAtMs())
+	}
+}
+
+func TestPushSuccessReadsTheVendorsDisabledReason(t *testing.T) {
+	// Arrange: the decline reason rides under disabledReason, which is the
+	// key the vendor writes.
+	result := map[string]any{"pushSent": false, "localSent": false, "disabledReason": "user_present"}
+
+	// Act
+	got := pushSuccess(result, 1000)
+
+	// Assert
+	notSent, ok := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_NotSent)
+	if !ok {
+		t.Fatalf("Outcome = %T, want AgentPushNotificationSuccess_NotSent", got.GetOutcome())
+	}
+	if _, ok := notSent.NotSent.GetReason().(*conversationv1.AgentPushNotificationNotSent_UserPresent); !ok {
+		t.Fatalf("Reason = %T, want AgentPushNotificationNotSent_UserPresent", notSent.NotSent.GetReason())
+	}
+}
+
+func TestPushSuccessLeavesAnUnknownDeclineReasonUnstated(t *testing.T) {
+	// Arrange: a word outside the vendor's set. The delivery fact is still
+	// stated; blaming config_off would name a setting nothing named.
+	result := map[string]any{"pushSent": false, "disabledReason": "moon_phase"}
+
+	// Act
+	got := pushSuccess(result, 1000)
+
+	// Assert
+	notSent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_NotSent)
+	if reason := notSent.NotSent.GetReason(); reason != nil {
+		t.Fatalf("Reason = %T, want unset", reason)
+	}
+}
+
+func TestPushSuccessReadsTheIsoSendInstant(t *testing.T) {
+	// Arrange: sentAt is an ISO string on the wire and an instant here.
+	result := map[string]any{"pushSent": true, "sentAt": "2026-01-01T00:00:00Z"}
+
+	// Act
+	got := pushSuccess(result, 1000)
+
+	// Assert
+	sent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_Sent)
+	if sent.Sent.SentAtMs == nil || *sent.Sent.SentAtMs != 1767225600000 {
+		t.Fatalf("SentAtMs = %v, want 1767225600000", sent.Sent.SentAtMs)
+	}
+}
+
+func TestPushSuccessLeavesTheSendInstantUnsetWhenTheVendorStatedNone(t *testing.T) {
+	// Arrange: resumed sessions replay pre-sentAt outputs verbatim, so the
+	// instant is genuinely absent rather than the settle clock's reading.
+	result := map[string]any{"pushSent": true}
+
+	// Act
+	got := pushSuccess(result, 1000)
+
+	// Assert
+	sent := got.GetOutcome().(*conversationv1.AgentPushNotificationSuccess_Sent)
+	if sent.Sent.SentAtMs != nil {
+		t.Fatalf("SentAtMs = %v, want unset", *sent.Sent.SentAtMs)
+	}
+}
+
+func TestWebFetchSuccessReadsTheArtifactRouteFromTheDescriptorsPresence(t *testing.T) {
+	// Arrange: the vendor states the artifact route by supplying the
+	// descriptor, never by a boolean.
+	call := openCall{input: map[string]any{"url": "https://claude.ai/public/artifacts/x"}}
+	result := map[string]any{"code": float64(200), "artifactRead": map[string]any{"id": "x"}}
+
+	// Act
+	got := webFetchSuccess(call, result)
+
+	// Assert
+	if !got.GetArtifactRead() {
+		t.Fatal("ArtifactRead = false, want true")
+	}
+}

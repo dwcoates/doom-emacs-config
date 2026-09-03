@@ -353,13 +353,46 @@ func bashSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 	// TERMINATION IS UNSET FOR A FOREGROUND COMMAND: no producer states one, and
 	// claiming an exit the vendor did not report would be a fabrication. It is
 	// set for a detached shell, whose spool the shell itself terminates.
-	if code := optionalInt64(result, "exitCode"); code != nil {
+	if code := statedExitCode(result); code != nil {
 		completed.Termination = &conversationv1.AgentBashTermination{
-			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: int32(*code)}},
+			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: *code}},
 		}
 	}
 	success.Outcome = &conversationv1.AgentBashSuccess_Completed{Completed: completed}
 	return success
+}
+
+// statedExitCode reads the exit status a result STATED, if it stated one.
+// `returnCodeInterpretation` ("exited with code 3") is the only place a
+// foreground call carries the shell's status, so reading `exitCode` alone lost
+// the command's own verdict on itself. A result that states neither leaves
+// termination UNSET rather than synthesizing a zero.
+func statedExitCode(result map[string]any) *int32 {
+	if code := optionalInt64(result, "exitCode"); code != nil {
+		v := int32(*code)
+		return &v
+	}
+	return firstSignedInt(str(pick(result, "returnCodeInterpretation", "return_code_interpretation")))
+}
+
+// firstSignedInt reads the first signed decimal in a sentence, or nil when it
+// holds none.
+func firstSignedInt(text string) *int32 {
+	for i := 0; i < len(text); i++ {
+		if text[i] < '0' || text[i] > '9' {
+			continue
+		}
+		end := i
+		for end < len(text) && text[end] >= '0' && text[end] <= '9' {
+			end++
+		}
+		v := int32(atoiSafe(text[i:end]))
+		if i > 0 && text[i-1] == '-' {
+			v = -v
+		}
+		return &v
+	}
+	return nil
 }
 
 // bashOutput keeps stdout and stderr APART rather than interleaving them: a
@@ -411,6 +444,9 @@ func webFetchSuccess(call openCall, result map[string]any) *conversationv1.Agent
 		Result:     str(result["result"]),
 		Bytes:      uint64(number(result["bytes"])),
 		DurationMs: uint64(number(result["durationMs"])),
+		// PRESENCE IS THE FACT: the vendor states the artifact route by
+		// supplying the descriptor, never by a boolean.
+		ArtifactRead: obj(result["artifactRead"]) != nil,
 	}
 }
 
@@ -442,8 +478,11 @@ func webSearchSuccess(call openCall, result map[string]any) *conversationv1.Agen
 	return success
 }
 
+// wakeupSuccess reads the RECEIPT rather than the request: `stopped` in the
+// output is the stop's own receipt, and the vendor's exclusivity rule (a stop
+// makes every other input field ignored) is what makes the arms exclusive.
 func wakeupSuccess(call openCall, result map[string]any) *conversationv1.AgentScheduleWakeupSuccess {
-	if boolean(call.input["stop"]) {
+	if boolean(result["stopped"]) || boolean(call.input["stop"]) {
 		return &conversationv1.AgentScheduleWakeupSuccess{
 			Outcome: &conversationv1.AgentScheduleWakeupSuccess_Stopped{Stopped: &conversationv1.AgentScheduleWakeupStopped{
 				CancelledWakeups: uint32(number(result["cancelledWakeups"])),
@@ -452,11 +491,21 @@ func wakeupSuccess(call openCall, result map[string]any) *conversationv1.AgentSc
 	}
 	return &conversationv1.AgentScheduleWakeupSuccess{
 		Outcome: &conversationv1.AgentScheduleWakeupSuccess_Scheduled{Scheduled: &conversationv1.AgentScheduleWakeupScheduled{
-			WakeAtMs:            parseInstant(str(result["scheduledFor"])),
+			WakeAtMs:            wakeAtMs(result),
 			ClampedDelaySeconds: uint32(number(result["clampedDelaySeconds"])),
 			WasClamped:          boolean(result["wasClamped"]),
 		}},
 	}
+}
+
+// wakeAtMs reads the instant the wakeup fires — THE fact the footer's countdown
+// ticks from. The vendor states `scheduledFor` as epoch millis; an older
+// spelling of it as an RFC3339 string is still read rather than dropped.
+func wakeAtMs(result map[string]any) int64 {
+	if ms := optionalInt64(result, "scheduledFor"); ms != nil {
+		return *ms
+	}
+	return parseInstant(str(result["scheduledFor"]))
 }
 
 func artifactSuccess(call openCall, result map[string]any) *conversationv1.AgentArtifactSuccess {
@@ -645,19 +694,37 @@ func pushSuccess(result map[string]any, ts int64) *conversationv1.AgentPushNotif
 		success.Outcome = &conversationv1.AgentPushNotificationSuccess_Sent{Sent: &conversationv1.AgentPushNotificationSent{
 			PushSent:  boolean(pick(result, "pushSent", "push_sent")),
 			LocalSent: boolean(pick(result, "localSent", "local_sent")),
-			SentAtMs:  optionalInt64(result, "sentAtMs"),
+			SentAtMs:  sentAtMs(result),
 		}}
 		return success
 	}
 	notSent := &conversationv1.AgentPushNotificationNotSent{}
-	switch str(pick(result, "reason", "notSentReason")) {
+	// The vendor's own closed set, under its own key. A word outside it leaves
+	// the DELIVERY fact stated — it was not sent — and only the reason unstated;
+	// defaulting to config_off would blame a setting nothing named.
+	switch str(pick(result, "disabledReason", "disabled_reason", "reason", "notSentReason")) {
 	case "user_present":
 		notSent.Reason = &conversationv1.AgentPushNotificationNotSent_UserPresent{UserPresent: &conversationv1.AgentPushNotificationUserPresent{}}
 	case "no_transport":
 		notSent.Reason = &conversationv1.AgentPushNotificationNotSent_NoTransport{NoTransport: &conversationv1.AgentPushNotificationNoTransport{}}
-	default:
+	case "config_off":
 		notSent.Reason = &conversationv1.AgentPushNotificationNotSent_ConfigOff{ConfigOff: &conversationv1.AgentPushNotificationConfigOff{}}
 	}
 	success.Outcome = &conversationv1.AgentPushNotificationSuccess_NotSent{NotSent: notSent}
 	return success
+}
+
+// sentAtMs reads the vendor's send instant. It is an ISO string on the wire,
+// and genuinely absent sometimes — resumed sessions replay pre-`sentAt` outputs
+// verbatim — so the field stays UNSET rather than falling back to the settle
+// instant, which is a different clock reading a different moment.
+func sentAtMs(result map[string]any) *int64 {
+	if ms := optionalInt64(result, "sentAtMs"); ms != nil {
+		return ms
+	}
+	iso := parseInstant(str(pick(result, "sentAt", "sent_at")))
+	if iso == 0 {
+		return nil
+	}
+	return &iso
 }
