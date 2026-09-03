@@ -772,6 +772,17 @@ docs. File-per-area grouping is given in section E.
     the opening diagnostics, on EVERY new watch, so an adopting daemon
     (crash boot, handover) attaches purely" — assert the exact ONE-per-watch
     cardinality, not merely presence.
+
+    CARVE-OUT (2026-09-03): "every new watch" excludes the watch that opens
+    the session. `reannounceStart` returns `undefined` while `announcedStart`
+    is unset — "UNSET before StartSession, which is the one state with
+    nothing to re-state" (`agent-shim/claude/shim/src/engine/session.ts`:
+    2263-2267) — and the ORIGINAL daemon's watch is the one established AT
+    StartSession. So the original daemon's "took the session facts" count is
+    **0**, and the cold-booted successor's fresh watch is the first with an
+    announced start to re-state, making the cumulative count **1**, not 2.
+    The one-per-watch rule still holds; it simply has no prior announcement
+    to apply to on the opening watch.
 49. **HandoverTransfersAtFreeness** — `daemon.md` §"Rollout / handover" —
     blue-green: new daemon boots joining, workspaces transfer one by one
     ONLY at freeness (no in-flight turn, no live detached work); uses

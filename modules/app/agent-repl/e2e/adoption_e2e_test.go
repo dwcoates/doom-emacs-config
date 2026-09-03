@@ -176,11 +176,16 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
-	// The ORIGINAL daemon's own first (and only) watch on this session took
-	// the shim's re-announced facts up exactly once, and never logged an
-	// "ignored" record (its watcher never reconnected).
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
-		t.Fatalf("the original daemon's watch_session log holds %d %q records, want exactly 1", got, adTookSessionFactsMessage)
+	// THE ORIGINAL DAEMON GETS NO RE-ANNOUNCEMENT. The shim re-announces
+	// only what a prior StartSession already announced — reannounceStart
+	// returns undefined while `announcedStart` is unset
+	// (agent-shim/claude/shim/src/engine/session.ts:2263-2267, "UNSET before
+	// StartSession, which is the one state with nothing to re-state") — and
+	// this daemon's own watch is the one established AT StartSession. So it
+	// takes no re-announced facts at all, and logs no "ignored" record
+	// either (its watcher never reconnected).
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 0 {
+		t.Fatalf("the original daemon's watch_session log holds %d %q records, want 0 (its watch predates any announced start)", got, adTookSessionFactsMessage)
 	}
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
 		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want 0", got)
@@ -194,14 +199,15 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	successor.WatchWorkspaceLogs(repo.Dir)
 	successor.AwaitWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
 
-	// Assert: the exact ONE-per-watch cardinality (SPEC.md #48), not merely
-	// presence. The successor's fresh watcher took the re-announced facts up
-	// exactly once more (a SECOND "took" record across the two daemons'
+	// Assert: the exact cardinality (SPEC.md #48), not merely presence. The
+	// successor's fresh watcher — the first watch this session has seen
+	// since StartSession set `announcedStart` — took the re-announced facts
+	// up exactly once (the ONE "took" record across the two daemons'
 	// combined, cumulative log), and NOTHING was ever logged as an ignored
 	// re-announcement — which would mean the same WATCHER, not just the
 	// process, survived the crash, the wrong shape for a cold boot.
-	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 2 {
-		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 2 (one per fresh watch)", got, adTookSessionFactsMessage)
+	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adTookSessionFactsMessage); got != 1 {
+		t.Fatalf("the cumulative watch_session log holds %d %q records across both daemons, want exactly 1 (only the successor's watch finds an announced start to re-state)", got, adTookSessionFactsMessage)
 	}
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 0 {
 		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want 0 (each daemon's own watcher saw the re-announcement exactly once, as its first watch)", got)
