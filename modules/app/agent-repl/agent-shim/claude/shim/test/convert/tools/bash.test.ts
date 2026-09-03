@@ -368,6 +368,70 @@ describe("bashConverter.settle", () => {
     );
   });
 
+  it("reads the structured `exitCode` when the result carries no interpretation prose", () => {
+    // The precise datum, alone, is enough: it need not be accompanied by
+    // `returnCodeInterpretation` to be trusted.
+    // Arrange.
+    const pending = call({ command: "exit 4" });
+    const result = { stdout: "", stderr: "", interrupted: false, exitCode: 4 };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result, true)));
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 4 }),
+    );
+  });
+
+  it("reads `return_code_interpretation`, the vendor's snake_case spelling, alone", () => {
+    // The disk carries both spellings of the same field; the snake_case one is
+    // read exactly where the camelCase one would be, when it is all that is
+    // there.
+    // Arrange.
+    const pending = call({ command: "exit 5" });
+    const result = {
+      stdout: "",
+      stderr: "",
+      interrupted: false,
+      return_code_interpretation: "exited with code 5",
+    };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result, true)));
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 5 }),
+    );
+  });
+
+  it("PREFERS the structured `exitCode` over `returnCodeInterpretation` when they disagree", () => {
+    // Pinned precedence: `exitCode` is the precise datum, the interpretation
+    // string is prose ABOUT it, so `exitCode` wins whenever a result somehow
+    // carries both. This must never drift back toward reading the prose first.
+    // Arrange.
+    const pending = call({ command: "./run" });
+    const result = {
+      stdout: "",
+      stderr: "",
+      interrupted: false,
+      exitCode: 9,
+      returnCodeInterpretation: "exited with code 3",
+    };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result, true)));
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 9 }),
+    );
+  });
+
   it("still says FAILED when an errored result's TEXT names no exit either", () => {
     // Mining the text must not turn a call that could not be performed into a
     // command that ran: text naming no ending yields no status.
