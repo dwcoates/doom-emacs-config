@@ -163,7 +163,7 @@ func (s *server) WatchFooter(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
@@ -186,7 +186,7 @@ func (s *server) WatchTopbar(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
@@ -209,7 +209,7 @@ func (s *server) WatchDaemonHolds(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
@@ -233,7 +233,7 @@ func (s *server) WatchHostWorkspace(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
@@ -318,7 +318,7 @@ func (s *server) WatchWebWorkspace(
 	}
 	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
-		return fail(s.log, rpc, err)
+		return endStream(s.log, rpc, err)
 	}
 	if r != nil {
 		return refuseStream(s.log, rpc, *r)
