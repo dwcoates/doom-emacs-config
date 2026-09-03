@@ -117,6 +117,12 @@ type Resolver interface {
 	// SessionContextUsage fact the context chip resolves from, reporting false
 	// when the vendor has answered none yet.
 	ContextPanel(ws ids.WorkspaceID) (*frontendv1.ContextPanelView, bool)
+	// McpPanel resolves the /mcp panel from the mcp_server healths the session
+	// has stated, one row per server in first-named order. It ALWAYS answers:
+	// a workspace no server has been stated for has an empty catalog, and an
+	// empty catalog is the daemon saying there is no MCP server here — a fact,
+	// not a missing one.
+	McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView
 }
 
 // Option adjusts the resolver's injectable knobs.
