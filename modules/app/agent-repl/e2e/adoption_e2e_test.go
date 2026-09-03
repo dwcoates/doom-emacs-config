@@ -503,19 +503,8 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 	successor := adDial(addr)
 
-	// Assert: the OLD daemon refuses further intake for the departing
-	// workspace, naming the successor.
-	oldResp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
-	}))
-	if err != nil {
-		t.Fatalf("SubmitPrompt on the old daemon after the announcement = error %v, want a typed transferring_away answer", err)
-	}
-	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
-		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
-	}
-
 	// Assert: the NEW daemon refuses the same workspace before adoption.
+	// This one holds from the announcement onward and so is asserted first.
 	newResp, err := successor.SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
 	}))
@@ -535,6 +524,14 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 
 	// Assert: both watchers see the transfer, naming the successor.
+	//
+	// THE TRANSFER PUSH IS THE BARRIER FOR THE OLD DAEMON'S REFUSAL. The old
+	// daemon only starts answering transferring_away once recordTransfer has
+	// run, and transfer() runs it AFTER awaitFreeForever and Quiesce, one
+	// line before PushTransferred (daemon/internal/rollout/handover.go:129-
+	// 130). Asserting the refusal off the shutdown announcement alone races
+	// that whole sequence; awaiting the push is the event-driven signal that
+	// the record is set.
 	harness.AwaitView(t, w.Ctx(), host, "transferred", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetTransferred() != nil
 	})
@@ -543,6 +540,18 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}).GetTransferred()
 	if webTransfer.GetAddress() != addr {
 		t.Fatalf("WatchWebWorkspace transferred.address = %q, want the announced %q", webTransfer.GetAddress(), addr)
+	}
+
+	// Assert: the OLD daemon refuses further intake for the departing
+	// workspace, naming the successor.
+	oldResp, err := w.Client().SubmitPrompt(w.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+		Workspace: ws, Said: adSaidText("hello"), IdempotencyKey: newIdempotencyKey(t), Origin: e2ePromptOrigin,
+	}))
+	if err != nil {
+		t.Fatalf("SubmitPrompt on the old daemon after the transfer = error %v, want a typed transferring_away answer", err)
+	}
+	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
+		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
 	}
 
 	// Assert: the self-heal is complete — the workspace now answers
