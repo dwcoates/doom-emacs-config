@@ -292,6 +292,14 @@ artifact bubble with its url; NO row for a list act; a sync subagent head; a
 detached subagent drawn through the SAME head; a detached shell; the terminal
 row; compaction, rotation and worktree separations.
 
+**`agent_prompt` IS NOT A ROOT-FEED FAMILY.** It is a SUB-FEED row — "THE
+CONNECTION IS THE PLACEMENT ... a subagent's rows never name a parent, they
+arrive on the bubble's own feed" (`proto/src/frontend/v1/feed.proto:41-45`), and
+the daemon composes the row for whichever feed it resolves
+(`feed.proto:1421-1435`). This map therefore never covers it and its absence
+here is NOT evidence of a gap; what the chain does and does not produce for a
+subagent commission is Finding (3).
+
 ### F3. Sub-feed plumbing (4 tests) — `subfeeds.layer.test.ts`
 
 Expand issues `OpenFeed` on the bubble's own `FeedId` and draws its rows
@@ -350,6 +358,47 @@ stream; both groupings offered resolved with the rendered one among them; the
 page-wide restart banner drawn from the daemon's own drain push, naming the
 cause and repeating the operator's note verbatim.
 
+#### F9 #39, the restart handover — `restart-handover.layer.test.ts`
+
+ITS OWN AREA FILE AND ITS OWN GO TEST (`TestWebappLayerRestartHandover`),
+because it is the one area whose Go side acts WHILE the page is mounted.
+
+THE RENDEZVOUS. The child logs a marker through the daemon's own `ClientLog`
+rpc (`webapp-layer.handover.page-mounted`) once its page is mounted and its
+streams are standing; the Go side awaits that record with `AwaitLogRecord` on
+`harness.ClientLogPath(ws)` and only then lands the commit that fires the
+rollout. Nothing sleeps on either side. The handover itself is the suite's
+existing machinery, reused verbatim from `adoption_e2e_test.go`
+(`adSelfRepoWorld`, `adTriggerSelfMergeRollout`, `adDial`,
+`adAwaitAddrFileChange`) — there is no second way to replace a daemon here.
+
+WHAT THE PAGE ASSERTS: the `transferred{address}` push draws the terminal
+"workspace moved to <address>" notice naming a DIFFERENT origin than the one
+it booted against; the page then goes quiet, and the refusal it draws for a
+further submission is the LOCAL one (`callUnary` refuses before the wire,
+drawn at the composer as its `transport` pseudo-arm with
+`unary.ts`'s own sentence); and the RELOAD Emacs would perform — a fresh page
+at the address this banner named — boots, adopts the workspace on the
+successor itself through `adoptAtBoot`, and draws a resolved footer status and
+its root feed again.
+
+WHAT IT IS NOT HELD TO, and why: the page NEVER REDIALS
+(`webapp/src/lifecycle/lifecycle.ts:12-21`, project lead, final), so the
+adopts on the successor are issued by the Go side, playing the lagging client
+exactly as §C #50 does — concurrently, because every expected participant
+succeeds together. And the `transferring_away` refusal ARM is unreachable from
+the page: it is the same fact arriving as an answer, and the old daemon starts
+answering it one line before it pushes `transferred`
+(`daemon/internal/rollout/handover.go:129-130`), which quiesces the page — so
+reaching the arm from here would mean racing the two. The Go suite pins it.
+
+TWO DAEMON-SIDE FACTS THIS AREA SURFACED, both recorded under Findings: the
+successor RE-ARMS the adopt rendezvous from the stand-down intent manifest
+after the first arming was already satisfied, so a page that reloads and
+adopts needs a host participant to arrive AGAIN; and the recovered page's
+footer correctly reads disconnected, because the host hop this suite holds
+lived on the daemon that went away.
+
 ### Counts
 
 | area | tests |
@@ -363,7 +412,8 @@ cause and repeating the operator's note verbatim.
 | F7 merge bubble tabs | 5 |
 | F8 refusal placement | 5 |
 | F9 tray / sidebar / lifecycle | 5 |
-| **total** | **63** |
+| F9 #39 the restart handover | 1 |
+| **total** | **64** |
 
 ## G. Findings and gaps
 
@@ -384,9 +434,43 @@ found it, and NONE is papered over with a fixture.
    rule still holds over it, which is what §F8's test pins.
    (`refusals.layer.test.ts`)
 
-3. **No scenario draws `agent_prompt`.** `send-message`, `wakeup-schedule` and
-   `cron` all draw a plain response. For the fake-SDK owner; when a scenario
-   lands, §F2 gains one test.
+3. **`agent_prompt` is drawn from nothing this chain produces — and it is NOT
+   the fake's gap.** The family map's "no scenario draws `agent_prompt`" was
+   re-examined (project lead, 2026-09-03) on the theory that it was a
+   MEASUREMENT ARTIFACT: `agent_prompt` is a SUB-FEED row ("THE CONNECTION IS
+   THE PLACEMENT — a subagent's rows never name a parent, they arrive on the
+   bubble's own feed", `proto/src/frontend/v1/feed.proto:41-45`), so a map that
+   scans only the root feed could never see it. THE ASSERTION WAS WRITTEN AND
+   IT FAILS: driving `!subagent`, opening the feed the spawn bubble's own
+   `FeedId` names and waiting on an `agentPrompt` row inside it times out; the
+   sub-feed draws `activity.response`, `activity.simpleToolCall`,
+   `activity.response` and no prompt row at all.
+
+   The cause is in the daemon, and it is not placement:
+
+   - `drawAgentPrompt` composes a `FeedAgentPrompt` ONLY from a
+     `conversation.v1.AgentPrompt` whose recipient is a known sub-feed
+     (`daemon/internal/resolve/feed/prompt.go:21-92`).
+   - A subagent COMMISSION does not arrive that way. It rides
+     `AgentSubagentStart.prompt` (`docs/overhaul/sidecar.md:298-300`, R15 — the
+     file-plane user record IS classified as unserved
+     `vendor_specific{kind "user_prompt"}`, so the served form is the only
+     one), and the feed resolver's `applyPrompt` folds only
+     `subagent_type` and `description` onto the bubble head
+     (`daemon/internal/resolve/feed/subagent.go:106-119`). THE COMMISSION'S
+     BODY IS NEVER DRAWN ANYWHERE.
+
+   So the fake does emit the commission and the placement rule is exactly as
+   stated; what is missing is a daemon path from
+   `AgentSubagentStart.prompt` to a row. For the daemon owner. No test is
+   left behind asserting the current behavior, because pinning "no commission
+   row exists" would pin the gap as correct. When the path lands, §F3 gains
+   two tests (the sync commission and the detached one) and this finding
+   becomes those assertions.
+
+   THE F2 FAMILY MAP IS CORRECTED accordingly: `agent_prompt` is a SUB-FEED
+   row and is NOT expected on the root feed, so its absence there is never
+   again read as a gap.
 
 4. **No scenario or Go area drives `cold_gate`.** No Go e2e test references it
    at all. Same disposition as (3).
@@ -414,15 +498,30 @@ found it, and NONE is papered over with a fixture.
    acquisition IS the prompt hold, and `daemon.drain.fire` is the drain this
    area scheduled.
 
+9. **The successor RE-ARMS the adopt rendezvous after it was already
+   satisfied.** Observed in §F9 #39: the joining daemon arms the rendezvous
+   from a manifest that arrives after boot, both hops adopt and the workspace
+   is adopted — and then `daemon.rollout.join` arms it AGAIN from the
+   stand-down intent manifest, resetting `host_called`/`web_called`. A page
+   that reloads at the successor's address and adopts at boot therefore waits
+   for a host participant a SECOND time, and with no host caller arriving it
+   sits until its own budget runs out and answers `not_yet_adopted`. In
+   production Emacs re-points the webview and re-adopts the host hop, so the
+   pair completes; the layer's Go side plays that half explicitly, and keeps
+   calling for as long as the page runs (a host adopt accepted "at once" a
+   millisecond BEFORE the re-arm satisfies nothing). Whether a satisfied
+   rendezvous should be re-armed at all is the daemon owner's call.
+
+10. **A recovered page's footer correctly reads disconnected.** The host
+    participant this layer holds lives on the daemon that went away, so after
+    a handover nothing holds the host hop on the successor. §F9 #39 asserts
+    that a status was RESOLVED at all, never which one.
+
 ### Still open
 
-- **§F9 #39, the restart handover.** A real daemon restart mid-run (the
-  `transferred` push, `AdoptWebWorkspace` on the successor, the old stream
-  dropped) needs a Go-to-child RENDEZVOUS: the child must be mounted and
-  waiting when the Go side replaces the daemon. The clean shape is the child
-  logging a marker through `ClientLog` (which lands in the daemon's own
-  structured log) and the Go test awaiting that record with `AwaitLogRecord`
-  before restarting — no sleep required. Not built; it is the one scenario in
-  this document with no test.
+- **§F9 #39, the restart handover — BUILT** (2026-09-03), in the shape this
+  section proposed: the child's `ClientLog` marker, awaited with
+  `AwaitLogRecord`, is the rendezvous. See §F9 above for what the page is held
+  to and what it is not.
 - Findings (1) and (2) are production faults; when fixed, each becomes one
   more assertion in the file that found it.
