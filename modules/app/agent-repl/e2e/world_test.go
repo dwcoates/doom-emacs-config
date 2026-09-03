@@ -167,6 +167,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...)
 
 	d := harness.StartDaemon(t, daemonOpts)
+	resolveConfigRoots(t, d)
 
 	sidecar := startSidecar(t, sidecarBin, sidecarOpts{
 		StoreSocket: store.Socket,
@@ -196,6 +197,44 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	})
 
 	return w
+}
+
+// resolveConfigRoots rewrites the daemon's two account roots to their
+// symlink-resolved form, ONCE, before anything reads them.
+//
+// The sidecar records every cursor under the path IT walked, which is the
+// resolved one (on macOS a temp root under /tmp/... is a symlink to
+// /private/tmp/...). Every poll in this file compares those recorded paths
+// against a project directory derived from these fields with a prefix match,
+// so an unresolved root here means the prefix never matches, no cursor is
+// ever seen to advance, and driveScenarioToCompletion times out on a turn
+// that in fact completed and was durably written.
+//
+// Rewriting the fields rather than resolving at each use site is deliberate:
+// the roots are handed to the sidecar (ConfigRoots below) and read by tests
+// through the embedded Daemon, and there is exactly one string only if the
+// single source is resolved.
+func resolveConfigRoots(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	for _, root := range []*string{&d.DefaultConfigDir, &d.MultiRepoConfigDir} {
+		resolved, err := resolvedPath(*root)
+		if err != nil {
+			t.Fatalf("e2e: resolve the daemon's config root %s: %v", *root, err)
+		}
+		*root = resolved
+	}
+}
+
+// resolvedPath answers path with every symlink resolved. A path that does not
+// exist is a LOUD error rather than the path itself: the only caller resolves
+// roots the daemon has already created, so a missing one is a defect, not a
+// case to paper over.
+func resolvedPath(path string) (string, error) {
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return real, nil
 }
 
 // tailStoreLog reads back the store's own log file for the failure message
