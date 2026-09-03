@@ -492,6 +492,53 @@ export async function runControl(query, control) {
 }
 
 /** Materialize a scenario's `cwd_setup` entries under the scratch cwd. */
+/**
+ * ONE QUERY SESSION per scenario, with ONE AbortController PER OPEN.
+ *
+ * A resume is a new vendor process: the previous query is closed and a fresh
+ * one opened against the same vendor session id. The controller must NOT be
+ * shared across those opens. Closing the first query aborts the controller it
+ * was given, so a controller reused for the resumed query hands the SDK an
+ * already-fired signal and the resumed `query()` throws "Operation aborted"
+ * moments after the resume lands — which is exactly what the `cold-resume`
+ * scenario hit. Each `open()` therefore tears the previous query down, aborts
+ * only THAT open's controller, and mints a new one for the new query.
+ */
+export function createQuerySession({ sdk, prompt, options }) {
+  let controller = null;
+  let query = null;
+  let iterator = null;
+
+  const teardown = () => {
+    const deadQuery = query;
+    const deadController = controller;
+    query = null;
+    iterator = null;
+    controller = null;
+    if (deadQuery !== null) {
+      try { deadQuery.close(); } catch { /* already gone */ }
+    }
+    // Abort only the controller that belonged to the query just closed. A
+    // later open's signal is a different object and cannot be reached here.
+    if (deadController !== null) deadController.abort();
+  };
+
+  return {
+    get query() { return query; },
+    get iterator() { return iterator; },
+    get controller() { return controller; },
+    open(extraOptions = {}) {
+      teardown();
+      controller = new AbortController();
+      const merged = { ...options, ...extraOptions, abortController: controller };
+      query = sdk.query({ prompt, options: merged });
+      iterator = query[Symbol.asyncIterator]();
+      return { query, options: merged };
+    },
+    close() { teardown(); },
+  };
+}
+
 export function materializeCwd(cwd, setup) {
   for (const entry of setup ?? []) {
     const target = path.join(cwd, entry.path);
@@ -739,7 +786,6 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   if ("CLAUDE_CONFIG_DIR" in rootEnv) process.env.CLAUDE_CONFIG_DIR = rootEnv.CLAUDE_CONFIG_DIR;
   else delete process.env.CLAUDE_CONFIG_DIR;
 
-  const abort = new AbortController();
   const input = createInputChannel();
   const parked = [];
   // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
@@ -785,7 +831,6 @@ async function runScenario(sdk, scenario, opts, auth, world) {
 
   const options = {
     cwd,
-    abortController: abort,
     canUseTool,
     includePartialMessages: true,
     forwardSubagentText: true,
@@ -818,18 +863,19 @@ async function runScenario(sdk, scenario, opts, auth, world) {
 
   const turns = promptTurnsOf(scenario);
 
-  // The query's iterator, held across turns. NEVER re-derived per turn and
-  // never `return()`ed by a for-await break: see drainToResult.
-  let iterator = null;
+  // ONE session for the scenario. It holds the iterator across turns (NEVER
+  // re-derived per turn and never `return()`ed by a for-await break: see
+  // drainToResult) and mints a FRESH AbortController per open, so the first
+  // query's teardown cannot abort a resumed query.
+  const session = createQuerySession({ sdk, prompt: input, options });
 
   const openQuery = (extraOptions) => {
-    query = sdk.query({ prompt: input, options: { ...options, ...extraOptions } });
-    iterator = query[Symbol.asyncIterator]();
+    const opened = session.open(extraOptions);
+    query = opened.query;
     record("control", {
       kind: "query_started",
       options: {
-        ...options,
-        ...extraOptions,
+        ...opened.options,
         canUseTool: "[function]",
         abortController: "[AbortController]",
         env: "[inherited]",
@@ -860,8 +906,9 @@ async function runScenario(sdk, scenario, opts, auth, world) {
               "session id has been observed yet (no system:init arrived)",
           );
         }
-        try { query?.close(); } catch { /* already gone */ }
         record("control", { kind: "resuming", session_id: vendorSessionId, turn: turnIndex });
+        // `openQuery` closes the previous query and aborts ITS OWN controller
+        // before minting the new one, so the resumed query starts unaborted.
         openQuery({ resume: vendorSessionId });
       }
 
@@ -877,7 +924,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
       // it the loop races ahead and every later turn is submitted into a query
       // that is no longer reading — which is what the recorded t_ms ordering of
       // the multi-turn captures shows.
-      const result = await drainToResult(iterator, async (msg) => {
+      const result = await drainToResult(session.iterator, async (msg) => {
         record("sdk", msg);
         if (msg?.type === "system" && msg?.subtype === "init" && typeof msg.session_id === "string") {
           vendorSessionId = msg.session_id;
@@ -911,8 +958,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
       resolve({ behavior: "deny", message: "capture teardown: pending permission abandoned" });
     }
     try { input.close(); } catch { /* already closed */ }
-    try { query?.close(); } catch { /* already gone */ }
-    abort.abort();
+    session.close();
     if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
   }
