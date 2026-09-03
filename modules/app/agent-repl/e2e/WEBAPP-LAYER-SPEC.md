@@ -44,7 +44,15 @@ assertions.**
    see `fake-daemon.ts`; there is exactly ONE real daemon per Go test, so that
    pressure does not exist here).
 
-4. The Go test runs `npm run test:webapp-layer` with `cmd.Dir` = `webapp/`
+4. **ONE GO TEST PER AREA** (project-lead ruling, 2026-09-03). Each area
+   builds its OWN world and names exactly one vitest file, so its artifacts
+   are preserved on its own failure, a red run names the area, and the areas
+   parallelize; the ~2s world cost per area is acceptable at nine areas. The
+   §F7 merge area needs a different world SHAPE (a repository plus a child
+   workspace plus a test gate), so it has its own bring-up on top of
+   `NewWorld` rather than sharing `wlDriveArea`.
+
+5. The Go test runs `npm run test:webapp-layer` with `cmd.Dir` = `webapp/`
    and these variables added to the child's environment:
 
    | variable | value | read by |
@@ -58,7 +66,7 @@ assertions.**
    The child's stdout/stderr are streamed into the Go test's log, so a vitest
    failure is read in the Go failure output rather than hunted for.
 
-5. The webapp side is a THIRD vitest project
+6. The webapp side is a THIRD vitest project
    (`webapp/vitest.webapp-layer.config.ts`, `test/webapp-layer/**`), not a
    fourth harness: it mounts the app through the SAME
    `webapp/test/integration/harness.ts` mount path the fake-daemon suite
@@ -141,6 +149,20 @@ an inverted process tree, and gives the webapp no way to fail the Go suite.
   (`mountComposer`), so the client mints the idempotency key and sets the
   webapp origin. Fake-SDK scenarios are selected the way the Go suite selects
   them: the prompt text is `!<scenario>` (`fake/registry.ts`).
+- **The HOST participant is the Go driver's to hold.** The footer's
+  connectivity truth is the PAIR of participants (`server.holdParticipant`
+  fires on the open/close edges of `WatchHostWorkspace` and
+  `WatchWebWorkspace`). The real webapp supplies the web hop itself; Emacs is
+  an external system this suite mocks, so the Go driver opens a
+  `WatchHostWorkspace` stream for the child's lifetime. Without it the footer
+  correctly draws `disconnected` forever, a disconnected footer CLOSES the
+  composer gate, and the page's SECOND submission and every one after it is
+  refused by the app itself — the first symptom this layer produced.
+- **The unit project must EXCLUDE this layer.** `vitest.config.ts`'s `exclude`
+  now carries `test/webapp-layer/**` alongside `test/integration/**`. Without
+  it the fast unit run collects the layer's files, they find no daemon, and
+  the loud gate fails `npm test`. A future config edit that drops that entry
+  silently re-collects the layer into the unit run.
 - **Writes**: everything the layer writes lands under the Go test's own
   `t.TempDir()`/state root or vitest's own temp space. The vitest child gets
   no writable path of its own beyond `node_modules` it already has.
@@ -189,171 +211,218 @@ missing prerequisite and the exact command that supplies it.
 
 ## E. Bounds
 
-- The Go test's own budget: `WebappLayerTimeout`, a NAMED constant. It bounds
-  one real world bring-up plus a Node/vitest child process start plus a real
-  turn through the real shim, store and sidecar. **20 s** — the only new bound
-  in this work. MEASURED on the first green run: the child reported 1.41 s
-  wall (transform 406 ms, collect 584 ms, environment 435 ms, tests 233 ms)
-  and the whole Go test 2.73 s. It sits deliberately above ~3x that because
-  the dominant term is a COLD vitest+jsdom start and the 406 ms transform
-  above is a WARM cache — no measurement of the cold case exists to derive a
-  3x from, and a bound sized off the warm one would be a race on a cold
-  checkout. It is a HANG bound, not a synchronization wait: nothing sleeps,
-  the child's exit is awaited on its own channel, and a stuck turn fails
-  inside the child's own 5 s budget long before this fires.
-- The vitest project's own `testTimeout`/`hookTimeout`: **900 ms is NOT
-  widened**, and the existing 300 ms unit / 900 ms integration bounds are not
-  touched. Instead the two things that genuinely cost real time here get
-  per-site budgets with stated reasons, per the same discipline
-  `vitest.integration.config.ts` states: the `beforeAll` that boots the app
-  against the real daemon, and any test that drives a real turn. Both are
-  measured on the first green run (boot plus one real turn: 233 ms of test
-  time), and each carries a one-line reason at its own site — never a raised
-  global. Both reuse the Go suite's own measured 5 s per-rpc/turn budget
-  rather than minting a third number.
-- No `sleep`, no `sit-for`, no fixed interval anywhere: waits are `settle()`
-  (DOM quiescence plus zero in-flight requests) on the webapp side and
-  channel/`cmd.Wait` on the Go side.
+Every bound below is either REUSED from an already-measured constant or set at
+~3x an observed max. Nothing was widened.
 
-## F. Scenario list
+| bound | value | basis |
+|---|---|---|
+| `WebappLayerTimeout` (Go, per area) | 10 s | MEASURED: two full nine-area runs, child durations 1.21-3.16 s (slowest: feed families, 22 real turns in one child); 3x the max. Bounds a HANG only. |
+| `BOOT_BUDGET_MS` (vitest) | 5 s | REUSED: the Go suite's `harness.DefaultTimeout`, minus the shim spawn boot does not pay. |
+| `TURN_BUDGET_MS` (vitest) | 5 s | REUSED: the same measured 5 s, for exactly the shape it was measured on (a real shim spawn plus a turn through a real store). |
+| per-test `TURN_TEST_MS` | 10 s | boot + one turn, at each site that drives a real turn — never a raised global. |
+| vitest `testTimeout`/`hookTimeout` | 900 ms | UNCHANGED from the integration project. Tests that cost real process time carry their own budget at the site. |
+| unit project's 300 ms | untouched | this layer is excluded from it. |
 
-Numbered, prioritized so that what ONLY the webapp can cover comes first.
-Everything below is drawn DOM against a real daemon push; nothing asserts a
-wire frame the Go area tests already assert.
+Two bound corrections worth recording, both of which came from measuring
+rather than guessing:
 
-### F1. Proof of life (1 scenario) — built now
+- `WebappLayerTimeout` was drafted at 60 s and then 20 s on the theory that a
+  COLD Vite transform dominated and could not be measured. The theory was
+  wrong: the transform is ~400 ms on every run, cache or none (clearing
+  `node_modules/.vite` changes nothing — vitest transforms sources per run),
+  so there was no hidden cold-start term. 10 s, from measurement.
+- The §F7 merge area briefly carried a 15 s "merge chain" bound. That was
+  covering a HARNESS FAULT — a missing `AGENT_REPL_TEST_ALL_SCRIPT` made the
+  merge gate exit 127, so the merge never reached a terminal and the bubble
+  sometimes never appeared. With the gate provided, the bubble is drawn
+  19-57 ms after the enqueue and the tab strip 6-8 ms after that, and the
+  area needs no bound of its own at all.
 
-1. A prompt typed into the webapp's own composer and sent reaches the real
-   daemon, the real shim answers it (the fake SDK's default PROSE turn, whose
-   conclusion echoes the prompt this page sent), and both the prompt row and
-   the response row are drawn in the real webapp DOM.
-   BUILT AND GREEN: `webapp/test/webapp-layer/proof-of-life.layer.test.ts`,
-   driven by `TestWebappLayer`.
+No sleeps anywhere: waits are `settle()` (DOM quiescence plus zero in-flight
+requests) on the webapp side and `cmd.Wait` over a channel on the Go side.
 
-### F2. Feed row rendering, one per drawn family (14)
+## F. Scenario list — AS BUILT
 
-Each drives the fake-SDK scenario that produces the family and asserts the
-row's own drawn shape, not just its presence.
+Nine areas, nine Go tests, nine vitest files, **63 vitest tests**, all green
+over two consecutive full runs. Each area's file header is its own spec.
 
-2. `user_prompt` — the composer's own submission drawn back from the daemon's
-   push (no optimistic row before it).
-3. `agent_prompt` — the agent-addressed variant wears its own border class.
-4. `activity` / `FeedResponse` — settled markdown body plus the usage stamp.
-5. `activity` / `FeedSimpleToolCall` — composed input line and each output
-   form the scenario emits (text, code, diff, lines, links).
-6. `activity` / `FeedSkill` — skill heading with its outcome.
-7. `activity` / `FeedHook` — hook row with its outcome.
-8. `activity` / `FeedPlan` — purple response-styled bubble, plan-edit links.
-9. `activity` / `FeedFindings` — findings bubble with jump-to-file links.
-10. `activity` / `FeedArtifact` — artifact bubble in each state the scenario
-    reaches.
-11. `activity` / `FeedSubagent` — live head, then settled head after the
-    subagent concludes.
-12. `detached_*` — the detached wrapper draws the SAME component its sync form
-    draws (placement differs, drawing does not).
-13. `turn_ended` — the terminal row, and the reason it carries.
-14. `separation` — one arm per meta divider the scenarios produce (context
-    cleared, context compacted, worktree entered/left).
-15. `FeedColdGate` — the one card the client formats and ticks itself, drawn
-    from raw facts.
+### The family -> scenario map, established EMPIRICALLY
 
-### F3. Sub-feed plumbing (3)
+Every `!name` this layer submits is a fake-SDK scenario a Go area test already
+drives (project-lead ruling: never mint one). The mapping was not read off
+scenario names — it was measured by driving each candidate through the real
+chain and recording which row arms the real daemon resolved:
 
-16. Expanding a subagent bubble issues `OpenFeed` on the bubble's `FeedId` and
-    draws its rows inside that bubble's container.
-17. Collapsing abandons the token and the sub-feed's rows leave the DOM.
-18. A settled bubble pages with `GetFeedPage` (first/next, no cursor) and the
-    drawn rows extend rather than replace.
+| drawn family | scenario | Go area that drives it |
+|---|---|---|
+| `user_prompt`, `turn_ended` | any | every area |
+| `activity.response` | `md`, prose (no prefix) | turn lifecycle |
+| `activity.simple_tool_call` | `bash`, `edit`, `read`, `web-fetch` | file tools, detached bash, web |
+| `activity.skill` | `skill`, `skill-fail` | skills |
+| `activity.hook` | `hook-blocked`, `hook-failed` | hooks |
+| `activity.plan` | `plan` | remainder |
+| `activity.findings` | `findings` | remainder |
+| `activity.artifact` | `artifact-publish` | remainder |
+| `activity.subagent` | `subagent` | subagents |
+| `detached_subagent` | `subagent-detached` | subagents |
+| `detached_shell` | `bash-detach` | detached bash |
+| `separation` | `compact`, `rotate`, `worktree-keep` | compaction, identity rotation |
+| `permission` | `perm-hold`, `perm-allow-standing-mode` | permissions |
+| `question` | `ask-single`, `ask-multi`, `ask-free`, `ask-unanswered` | questions |
+| `activity.merge` + `merge_tab` | `MergeWorkspace` (no scenario) | merge queue |
 
-### F4. Permission and question cards (4)
+Two contract-conformant NON-drawings are pinned as their own tests, because
+the contract says they must draw nothing: a SUCCEEDED hook (`hook-success`)
+and an artifact LIST act (`artifact-list`).
 
-19. A real permission ask from the shim draws the card with its buttons, and
-    the standing-allow presence marker (never the token) gates the button.
-20. Clicking allow sends `AnswerPermission`; the card's answered state arrives
-    on the feed push and is drawn on the same row.
-21. A question card always draws the free-text escape alongside the offered
-    options.
-22. An expired question draws as expired, never as pending.
+### F1. Proof of life (1 test) — `proof-of-life.layer.test.ts`
 
-### F5. Footer and topbar surfaces (5)
+1. A prompt typed into the webapp's own composer reaches the real daemon, the
+   real shim answers it, and the response row (carrying the echo of what this
+   page sent) is drawn in the real webapp DOM.
 
-23. Footer status/substatus/activity redraw as the real turn moves through
-    them.
-24. The footer's tokens cell and clock reflect the real usage the turn
-    accrued.
-25. An expanded footer panel draws its fully-resolved rows with no extra round
-    trip, and a panel row jumps to its `FeedId`.
-26. The topbar draws the real account label and the connectivity dot; the
-    context chip draws the current context size.
-27. A real unmodeled-tool or session-fault surfacing lands in the topbar
-    warning dropdown.
+### F2. Feed row families (22 tests) — `feed-families.layer.test.ts`
 
-### F6. Command panels (2)
+One test per drawn family, plus one per output form and per non-drawing rule:
+`user_prompt`; response body and terminal state; the tool-call shell's input
+form and output body; the diff form; the read form; the links form; a skill
+card; a skill's outcome state; a blocked hook; a failed hook; NO row for a
+succeeded hook; a plan bubble; a findings bubble with its findings; an
+artifact bubble with its url; NO row for a list act; a sync subagent head; a
+detached subagent drawn through the SAME head; a detached shell; the terminal
+row; compaction, rotation and worktree separations.
 
-28. A slash command the daemon answers programmatically returns a panel arm,
-    the panel is drawn in the composer's area, and NO feed row is drawn for
-    it.
-29. A second command's panel replaces the first (a panel answers one
-    submission, not the conversation).
+### F3. Sub-feed plumbing (4 tests) — `subfeeds.layer.test.ts`
 
-### F7. Merge bubble tabs (3)
+Expand issues `OpenFeed` on the bubble's own `FeedId` and draws its rows
+inside that container; collapse folds it away and KEEPS the address (the
+contract's collapse abandons the TOKEN, not the DOM); re-opening the same
+address answers the same rows; the root feed's rows never leak into the
+bubble's container.
 
-30. A real `MergeWorkspace` draws the merge bubble, and its tab strip carries
-    only the tabs whose work has begun.
-31. A resolved tab (queue / merge / tests) draws the row's own content, with
-    test output as paint-class spans and no ANSI parsing.
-32. An agentic tab (pre-prompt / conflicts / fixes / post-prompt) draws its
-    rows through the subagent sub-feed path, and a PARKED conflicts/fixes tab
-    draws the standing line plus the paused badge.
+### F4. Permission and question cards (9 tests) — `cards.layer.test.ts`
 
-### F8. Refusal wording (3)
+A real permission ask with its buttons and waiting line; the standing-allow
+button only when a standing form was offered; answering from the card, with
+the answered state arriving on the FEED PUSH onto the same row and the
+controls gone; a policy denial drawn as an outcome, not a refusal; a
+question's free-text escape always drawn alongside its options; a
+multi-choice question's own mode; answering through an option; answering
+through the escape; an unanswered ask drawn in its own state.
 
-33. A duplicate submission (same idempotency key) is refused and the refusal
-    is drawn AT THE COMPOSER, with the text kept in the box and no feed row.
-34. A per-method typed error arm from the real daemon renders its refusal at
-    its own call site (the clicked control), with the arm's own wording.
-35. A domain outcome the contract calls a SUCCESS arm (deny,
-    nothing-running, empty result) draws as an outcome and never as a
-    refusal.
+### F5. Footer and topbar surfaces (7 tests) — `surfaces.layer.test.ts`
 
-### F9. Tray, sidebar, lifecycle (4)
+The status strip redrawn between idle and a running turn; the clock and tokens
+cells after a real turn; an expanded panel drawn from the push with no extra
+round trip; the topbar's account and connectivity; the model selector's served
+options; the context chip; an unmodeled tool surfacing in the topbar warnings
+and NOT as a feed row.
 
-36. A real held prompt draws in the daemon-hold tray at the feed's tail, and
-    `UpdateHeldPrompt` (deliver-now / discard) is issued from it.
-37. The sidebar's roster draws from the real global stream, both groupings
-    arriving resolved.
-38. A drain-scheduled `WatchDaemon` push draws the standing page-wide restart
-    banner.
-39. A real daemon restart drives the `transferred` push: the page calls
-    `AdoptWebWorkspace` on the new daemon and drops the old stream, drawing
-    through the handover.
+### F6. Command panels (5 tests) — `panels.layer.test.ts`
 
-### Counts by area
+A recognized slash command answered programmatically draws its panel and mints
+no feed row and no turn; the composer clears; no refusal; a second command
+REPLACES the standing panel; the help panel carries the daemon's rows.
+(No fake-SDK scenario is involved — the daemon's recognition table intercepts
+these, so no scenario was invented.)
 
-| area | scenarios |
+### F7. Merge bubble tabs (5 tests) — `merge-tabs.layer.test.ts`
+
+The merge drawn as ACTIVITY rather than a turn of its own; a tab strip whose
+every tab names itself; the open tab's own resolved content; no raw ANSI
+anywhere (colour arrives as paint classes); and THE PARITY INVARIANT — the
+merge body lives in a sub-feed at the bubble's own `FeedId`, the same address
+a subagent bubble's sub-feed uses, so a merge-specific loader would fail here.
+
+### F8. Refusal wording and placement (5 tests) — `refusals.layer.test.ts`
+
+A second submission of the same text mints a second turn and refuses nothing;
+an empty composer sends nothing and refuses nothing; a control's answer stays
+inside that control and out of the page's failure overlay; an idle footer
+offers no interrupt; a failed turn draws its cause on its terminal row rather
+than as a refusal.
+
+### F9. Tray, sidebar and lifecycle (5 tests) — `roster.layer.test.ts`
+
+A really-held prompt drawn in the tray and NEVER as a feed row; discarding it
+through the card's own `UpdateHeldPrompt`; the roster drawn from the global
+stream; both groupings offered resolved with the rendered one among them; the
+page-wide restart banner drawn from the daemon's own drain push, naming the
+cause and repeating the operator's note verbatim.
+
+### Counts
+
+| area | tests |
 |---|---|
 | F1 proof of life | 1 |
-| F2 feed row families | 14 |
-| F3 sub-feed plumbing | 3 |
-| F4 permission / question | 4 |
-| F5 footer / topbar | 5 |
-| F6 command panels | 2 |
-| F7 merge bubble tabs | 3 |
-| F8 refusal wording | 3 |
-| F9 tray / sidebar / lifecycle | 4 |
-| **total** | **39** |
+| F2 feed row families | 22 |
+| F3 sub-feed plumbing | 4 |
+| F4 permission / question | 9 |
+| F5 footer / topbar | 7 |
+| F6 command panels | 5 |
+| F7 merge bubble tabs | 5 |
+| F8 refusal placement | 5 |
+| F9 tray / sidebar / lifecycle | 5 |
+| **total** | **63** |
 
-## G. Open items
+## G. Findings and gaps
 
-1. Which fake-SDK scenario produces each F2 family is resolved against
-   `agent-shim/claude/shim/src/fake/scenarios/*.ts` and
-   `e2e/SPEC.md` section D's 69-golden mapping when those scenarios are
-   written — the Go area files already name most of them, and the webapp
-   layer reuses the same names rather than minting new fixtures.
-2. F7's merge scenarios depend on the merge-queue area's scripted fake-git
-   fixtures; the webapp layer drives `MergeWorkspace` and asserts drawing
-   only, never a git fact.
-3. Whether the layer runs as ONE Go test with many vitest files inside it
-   (one world, one child) or one Go test per area (one world each) is a
-   cost question to settle after the first measurement. Proof of life is
-   built as one Go test with one vitest file.
+Findings this layer surfaced. Each is recorded in place, in the test file that
+found it, and NONE is papered over with a fixture.
+
+1. **The response usage stamp is never populated.** The contract says the
+   usage stamp "rides every state" of a `FeedResponse`, and the renderer draws
+   one whenever `FeedResponse.usage` is set. Against this real chain it is
+   never set — `md`, `usage-full` and `prose-streamed` all draw a response with
+   no `.usage-stamp` anywhere on the page. Production/contract gap, for the
+   daemon owner. (`feed-families.layer.test.ts`)
+
+2. **`SetModel` on a SERVED option fails at the transport.** Picking an option
+   the daemon itself served comes back as a transport refusal ("the daemon
+   could not be reached", drawn in `.topbar-model`) rather than the echoed
+   `AgentModel` token the contract promises. Production fault. The placement
+   rule still holds over it, which is what §F8's test pins.
+   (`refusals.layer.test.ts`)
+
+3. **No scenario draws `agent_prompt`.** `send-message`, `wakeup-schedule` and
+   `cron` all draw a plain response. For the fake-SDK owner; when a scenario
+   lands, §F2 gains one test.
+
+4. **No scenario or Go area drives `cold_gate`.** No Go e2e test references it
+   at all. Same disposition as (3).
+
+5. **The duplicate-key refusal is unreachable from the page.** The app reuses
+   an idempotency key only to retry a FAILED send, so provoking the daemon's
+   duplicate arm needs a fault injected between page and daemon, which this
+   layer has no seam for. Covered directly by the fake-daemon integration
+   suite. (`refusals.layer.test.ts`)
+
+6. **`nothing_running` is unreachable from the page.** An idle footer draws no
+   interrupt control at all, so the page can never issue the call that would
+   answer it. Covered by the fake-daemon integration suite; the layer pins the
+   reason instead. (`refusals.layer.test.ts`)
+
+7. **Two clocks, and they are not the same.** The page's ticker starts at
+   `HARNESS_EPOCH_MS`; the daemon runs on the wall clock. A wire timestamp the
+   page MINTS must be on the daemon's clock (a page-clock instant is decades in
+   the daemon's past and fires a scheduled drain immediately), and the
+   consequence is that such a banner's COUNTDOWN reads absurdly on the page.
+   Assert the cause and the note, never the countdown. (`roster.layer.test.ts`)
+
+8. **§F9's two declared daemon faults are its own subjects**, declared through
+   `ExpectWarnings` so a NEW fault cannot hide behind them: the refused lease
+   acquisition IS the prompt hold, and `daemon.drain.fire` is the drain this
+   area scheduled.
+
+### Still open
+
+- **§F9 #39, the restart handover.** A real daemon restart mid-run (the
+  `transferred` push, `AdoptWebWorkspace` on the successor, the old stream
+  dropped) needs a Go-to-child RENDEZVOUS: the child must be mounted and
+  waiting when the Go side replaces the daemon. The clean shape is the child
+  logging a marker through `ClientLog` (which lands in the daemon's own
+  structured log) and the Go test awaiting that record with `AwaitLogRecord`
+  before restarting — no sleep required. Not built; it is the one scenario in
+  this document with no test.
+- Findings (1) and (2) are production faults; when fixed, each becomes one
+  more assertion in the file that found it.

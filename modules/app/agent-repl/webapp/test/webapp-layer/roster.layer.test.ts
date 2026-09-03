@@ -20,7 +20,7 @@
  */
 import { afterAll, beforeAll, expect, it } from "vitest";
 
-import { HARNESS_EPOCH_MS, type MountedApp } from "../integration/harness";
+import type { MountedApp } from "../integration/harness";
 import {
   BOOT_BUDGET_MS,
   TURN_TEST_MS,
@@ -163,12 +163,20 @@ it(
         value: {
           // Far enough out that nothing in this run is drained; the banner is
           // about the SCHEDULE existing, not about it firing.
-          // ON THE PAGE'S OWN CLOCK, not the wall clock. Every wire timestamp
-          // this page reads is interpreted against its ticker, which the
-          // harness starts at HARNESS_EPOCH_MS — a wall-clock instant here
-          // makes the banner say "expected back in 496795h", which is a
-          // harness artifact and not something to assert around.
-          atMs: BigInt(HARNESS_EPOCH_MS + 60 * 60 * 1000),
+          // ON THE DAEMON'S CLOCK, deliberately.
+          //
+          // Two clocks are in play and they are not the same: the page's
+          // ticker starts at HARNESS_EPOCH_MS (ten seconds past the epoch) so
+          // the fixtures' timestamps read sensibly, while the daemon runs on
+          // the real wall clock. An instant on the PAGE's clock is decades in
+          // the DAEMON's past, so it fires the drain immediately — observed as
+          // a real `daemon.drain.fire` warning and a draining daemon, not as a
+          // scheduled one. The schedule therefore has to be real-clock, and
+          // the consequence is that the banner's COUNTDOWN reads absurdly
+          // ("expected back in 496795h") on the page's clock — a harness
+          // artifact, which is exactly why the assertions below read the
+          // banner's cause and its note rather than its countdown.
+          atMs: BigInt(Date.now() + 60 * 60 * 1000),
           // The reason is typed, never a bare string, and the banner names it.
           reason: { kind: { case: "operator", value: { note: "the webapp layer's drain banner" } } },
         },
@@ -184,13 +192,11 @@ it(
     );
     const banner = app.$('[data-component="drain-banner"] [data-restarting]');
     expect(banner).not.toBeNull();
+    expect(banner?.getAttribute("data-shutdown-cause")).toBe("scheduledDrain");
     // The operator's own note travelled the whole way — app -> daemon ->
     // WatchDaemon push -> banner — and is drawn verbatim, which is the fact
     // that proves this banner came from the daemon rather than from a client
-    // heuristic. (The `data-shutdown-cause` attribute is deliberately not
-    // asserted: it is set on the restarting arm the daemon picks, and which
-    // arm a FUTURE-dated schedule takes is the daemon's business, not the
-    // page's.)
+    // heuristic.
     expect(textOf(banner)).toContain("the webapp layer's drain banner");
   },
   TURN_TEST_MS,
