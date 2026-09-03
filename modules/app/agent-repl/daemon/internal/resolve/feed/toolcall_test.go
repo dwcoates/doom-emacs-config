@@ -599,11 +599,12 @@ func TestATimedOutShellSaysSoAboveItsLastLines(t *testing.T) {
 		}},
 	}))
 
-	// Assert: an interrupted call did not complete, and its last lines are
-	// usually the reason it was cut.
+	// Assert: THE PROTO ALWAYS WINS — AgentBashInterrupted nests inside
+	// AgentBashSuccess, so the badge reads succeeded and the text says how the
+	// call was cut, above its last lines.
 	returned := h.card().GetReturned()
-	if returned.GetFailed() == nil {
-		t.Fatalf("verdict = %T, want failed for an interrupted call", returned.GetVerdict())
+	if returned.GetSucceeded() == nil {
+		t.Fatalf("verdict = %T, want succeeded for an interrupted call", returned.GetVerdict())
 	}
 	text := returned.GetText().GetText()
 	if !contains(text, "timed out after 2m 0s") || !contains(text, "still going") {
@@ -629,6 +630,57 @@ func TestAUserInterruptedShellNamesThePerson(t *testing.T) {
 	// Assert.
 	if got := h.card().GetReturned().GetText().GetText(); got != "interrupted by the user" {
 		t.Fatalf("output = %q", got)
+	}
+}
+
+// A user interrupt is a SUCCESS arm in conversation.v1, so its verdict is
+// succeeded — the edge this test pins apart from its text.
+func TestAUserInterruptedShellStillReturnedSucceeded(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "sleep 999"},
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: &conversationv1.AgentBashOutput{},
+				Cause: &conversationv1.AgentBashInterrupted_ByUser{
+					ByUser: &conversationv1.AgentBashInterruptedByUser{},
+				},
+			}},
+		}},
+	}))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetSucceeded() == nil {
+		t.Fatalf("verdict = %T, want succeeded for a user-interrupted call", returned.GetVerdict())
+	}
+}
+
+// THE CALL ITSELF BREAKING is what still draws `failed`: AgentBash_Failure,
+// the arm that is not nested inside a success.
+func TestAFailedShellCallReturnedFailed(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{
+			Error: &conversationv1.AgentToolFailure{
+				Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
+					Block: &conversationv1.ToolResultContentBlock_Text{
+						Text: &conversationv1.TextBlock{Text: "the shell would not spawn"},
+					},
+				}}},
+			},
+		}},
+	}))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetFailed() == nil {
+		t.Fatalf("verdict = %T, want failed for a broken Bash call", returned.GetVerdict())
+	}
+	if got := returned.GetText().GetText(); got != "the shell would not spawn" {
+		t.Fatalf("output = %q, want the failure's own account", got)
 	}
 }
 

@@ -588,8 +588,11 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 
 // bashOutcomeText renders a settled shell's output and says whether the badge
 // reads ok. A COMPLETED command succeeded as a CALL whatever its exit code —
-// the code is the command's verdict on itself. An INTERRUPTED one did not
-// complete, and its last lines are usually the reason it was cut.
+// the code is the command's verdict on itself. So did an INTERRUPTED one: THE
+// PROTO ALWAYS WINS, and conversation.v1 nests AgentBashInterrupted inside
+// AgentBashSuccess, so an interrupt is a SUCCESS arm carrying the interrupted
+// marker. The badge reads succeeded and the text says how it was cut; only
+// AgentBash_Failure — the call itself breaking — draws `failed`.
 func bashOutcomeText(success *conversationv1.AgentBashSuccess) (bool, string) {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentBashSuccess_Completed:
@@ -604,9 +607,9 @@ func bashOutcomeText(success *conversationv1.AgentBashSuccess) (bool, string) {
 		}
 		body := bashOutputText(outcome.Interrupted.GetOutput())
 		if body == "" {
-			return false, lead
+			return true, lead
 		}
-		return false, lead + "\n" + body
+		return true, lead + "\n" + body
 	}
 	return true, ""
 }

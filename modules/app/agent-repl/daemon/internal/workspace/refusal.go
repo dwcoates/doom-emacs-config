@@ -56,8 +56,8 @@ const (
 	// VENDOR failed to start inside an already-running shim: the shim process
 	// itself is up and serving, so this is neither `spawn_failed` nor
 	// `shim_start_failed`, both of which name the SHIM PROCESS failing.
-	// OpenWorkspaceError has no arm for it, so the shim's verdict is relayed
-	// by name rather than collapsed into an untyped Connect internal.
+	// LANDING 9 landed OpenWorkspaceError.vendor_start_failed{detail}, so the
+	// shim's own account is relayed on that TYPED arm.
 	ArmVendorStartFailed = "vendor_start_failed"
 	// ArmUnknownSession is a StartSession(resume) the shim refused because it
 	// has no transcript for the named conversation. The transcript-aware
