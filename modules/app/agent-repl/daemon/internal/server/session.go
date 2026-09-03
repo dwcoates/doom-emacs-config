@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/workspace"
 )
 
 // The session-shape verbs (model, permission mode) and the daemon-hold tray's
@@ -30,7 +31,13 @@ func (s *server) SetModel(
 		return answer(resp, cerr)
 	}
 	if err := s.deps.Verbs.SetModel(ctx, subject.Record.ID, req.Msg.GetModel().GetName()); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+		// The shim spells the catalog refusal `model_not_in_catalog` and
+		// `SetModelError` spells the SAME condition `not_in_catalog`, so the
+		// shim's arm is RENAMED onto the rpc's rather than left to answer as
+		// an unlanded arm: a refused model must come back as a refused model,
+		// never as a daemon the client could not reach.
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err,
+			map[string]string{workspace.ArmShimModelNotInCatalog: workspace.ArmNotInCatalog}))
 	}
 	resp.Result = &agentreplv1.SetModelResponse_Success{Success: &agentreplv1.SetModelSuccess{}}
 	return connect.NewResponse(resp), nil
