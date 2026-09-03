@@ -394,21 +394,50 @@ func TestContextInjectedSkills(t *testing.T) {
 // ===========================================================================
 // #75 CronCreateListDelete — golden "cron-create-list-delete", registered
 // scenario name "cron" (automation.ts CRON). Three tool_use/tool_result
-// pairs in one turn (CronCreate, CronList, CronDelete); each renders as its
-// own FeedSimpleToolCall row since cron has no dedicated bubble.
+// pairs in one turn (CronCreate, CronList, CronDelete).
+//
+// CRON DRAWS NO TOOL CARD. feed.proto's FeedTurnActivity oneof has no cron
+// arm, and the daemon's own resolver says so in its default arm
+// (daemon/internal/resolve/feed/sink.go: "Every other kind that draws
+// nowhere (thinking, task acts, monitors, wakeups, cron, notifications,
+// injected context, sends) answers the same way" — errNotARow).
+// docs/overhaul/webapp.md:282 states the same from the client's side: "NOT
+// in the feed: ... crons (footer only)". The contracted surface is the
+// FOOTER's ⏱ chip (footer.proto FooterChipCrons, "Set iff at least one"),
+// which the daemon's footer resolver maintains from the very AgentCron
+// facts this scenario produces (internal/resolve/footer/chips.go
+// applyCron). So this asserts the turn's own conclusion plus that chip —
+// never a tool card.
 // ===========================================================================
 
 func TestCronCreateListDelete(t *testing.T) {
-	// Arrange
+	// Arrange. The footer is watched BEFORE the turn is driven: the
+	// scenario CREATES and then DELETES the job inside one turn, so the
+	// non-empty job set the chip is set from exists only in the middle of
+	// the turn. A stream opened afterwards could legitimately never carry
+	// it.
 	w, ws := rmNewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "cron")
 
-	// Assert: all three acts settled successfully.
-	for _, toolName := range []string{"CronCreate", "CronList", "CronDelete"} {
-		row := rmAwaitFeedRow(t, w, ws, "the "+toolName+" settled tool card", rmToolCallSettled(turn, toolName))
-		rmRequireSucceeded(t, row, toolName)
+	// Assert: the turn concluded (this golden's own terminal).
+	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	if ended.GetConcluded() == nil {
+		t.Fatalf("the cron turn ended = %v, want a concluded outcome", ended)
+	}
+
+	// Assert: the cron acts reached the ONE surface they are contracted to
+	// reach — the footer's ⏱ chip, set while the created job stands.
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	view := harness.AwaitView(t, ctx, footer, "the footer's crons chip while the created job stands", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetCrons() != nil
+	})
+	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got == 0 {
+		t.Fatalf("the footer's crons chip is set with count %d, want a positive job count", got)
 	}
 }
 
@@ -502,9 +531,16 @@ func TestPushNotificationSent(t *testing.T) {
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "push-sent")
 
-	// Assert
-	row := rmAwaitFeedRow(t, w, ws, "the push-notification settled tool card", rmToolCallSettled(turn, "PushNotification"))
-	rmRequireSucceeded(t, row, "PushNotification")
+	// Assert: the turn concluded. A push notification draws NO feed row —
+	// feed.proto's FeedTurnActivity oneof has no notification arm, and the
+	// daemon's resolver names notifications in the default arm that answers
+	// errNotARow (daemon/internal/resolve/feed/sink.go). The daemon-visible
+	// fact this golden pins is that the scenario reaches the daemon and its
+	// turn settles the documented way.
+	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	if ended.GetConcluded() == nil {
+		t.Fatalf("the push-sent turn ended = %v, want a concluded outcome", ended)
+	}
 }
 
 // ===========================================================================
@@ -514,13 +550,11 @@ func TestPushNotificationSent(t *testing.T) {
 // per AgentPushNotificationNotSent disabled-reason arm) — driven as
 // sub-tests of this one golden, per automation.ts's own file doc comment
 // ("every arm is a separate rendering ... a mock that only ever sent one
-// would leave two of them unreachable"). The generic FeedSimpleToolCall
-// shell this tool renders through carries no typed disabled-reason field of
-// its own (that distinction lives in AgentPushNotificationNotSent, which
-// this suite's frontend surface does not expose per-reason), so each
-// sub-test asserts only that its own named scenario reaches the daemon and
-// settles successfully — proving the arm is reachable end to end, which is
-// this golden's own point.
+// would leave two of them unreachable"). A notification reaches NO frontend
+// surface at all (see the sent arm above), let alone a per-reason one, so
+// each sub-test asserts only that its own named scenario reaches the daemon
+// and its turn settles the documented way — proving the arm is reachable end
+// to end, which is this golden's own point.
 // ===========================================================================
 
 func TestPushNotificationNotSent(t *testing.T) {
@@ -533,9 +567,14 @@ func TestPushNotificationNotSent(t *testing.T) {
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
 
-			// Assert
-			row := rmAwaitFeedRow(t, w, ws, "the "+scenario+" settled tool card", rmToolCallSettled(turn, "PushNotification"))
-			rmRequireSucceeded(t, row, "PushNotification")
+			// Assert: the turn concluded. As in the sent arm above, a push
+			// notification draws no feed row at all, so the reachability
+			// this sub-test exists to prove is stated at the turn's own
+			// terminal.
+			ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+			if ended.GetConcluded() == nil {
+				t.Fatalf("the %s turn ended = %v, want a concluded outcome", scenario, ended)
+			}
 		})
 	}
 }
@@ -589,15 +628,22 @@ func TestScheduleWakeupScheduleAndStop(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
+	// A wakeup draws NO feed row: feed.proto's FeedTurnActivity oneof has no
+	// wakeup arm, and "wakeups" is named outright in the daemon resolver's
+	// draws-nothing default arm (daemon/internal/resolve/feed/sink.go). Both
+	// arms are therefore pinned at the turn's own terminal.
+
 	// Act + Assert: schedule.
 	scheduleTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "wakeup-schedule")
-	row := rmAwaitFeedRow(t, w, ws, "the ScheduleWakeup (schedule) settled tool card", rmToolCallSettled(scheduleTurn, "ScheduleWakeup"))
-	rmRequireSucceeded(t, row, "ScheduleWakeup")
+	if ended := AwaitTurnEnded(t, w, ws, scheduleTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the wakeup-schedule turn ended = %v, want a concluded outcome", ended)
+	}
 
 	// Act + Assert: stop.
 	stopTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "wakeup-stop")
-	row = rmAwaitFeedRow(t, w, ws, "the ScheduleWakeup (stop) settled tool card", rmToolCallSettled(stopTurn, "ScheduleWakeup"))
-	rmRequireSucceeded(t, row, "ScheduleWakeup")
+	if ended := AwaitTurnEnded(t, w, ws, stopTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the wakeup-stop turn ended = %v, want a concluded outcome", ended)
+	}
 }
 
 // ===========================================================================
@@ -606,28 +652,31 @@ func TestScheduleWakeupScheduleAndStop(t *testing.T) {
 // (tasks.ts SEND_MESSAGE_QUEUED "send-message", SEND_MESSAGE_RESUMED
 // "send-message-resumed") — driven as one combined test. The corpus-noted
 // discriminator between the two deliveries is `resumedAgentId`, present only
-// on the resumed arm; that structured field does not ride the generic
-// FeedSimpleToolCall shell, so this test asserts both settle successfully
-// and, for the resumed arm, that the tool's composed text output actually
-// mentions "resumed" (the vendor's own wording, per tasks.ts) rather than
-// asserting the raw field this frontend surface does not expose.
+// on the resumed arm; a send reaches no frontend surface of the sender's at
+// all (see the body), so neither that field nor any composed output is
+// observable here and this test pins each delivery at its own turn terminal.
 // ===========================================================================
 
 func TestSendMessageQueuedAndResumed(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
+	// A send draws NO feed row on the SENDER's feed: feed.proto's
+	// FeedTurnActivity oneof has no send arm, and "sends" is named in the
+	// daemon resolver's draws-nothing default arm
+	// (daemon/internal/resolve/feed/sink.go). Both deliveries are therefore
+	// pinned at the turn's own terminal.
+
 	// Act + Assert: queued (to a live agent).
 	queuedTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message")
-	row := rmAwaitFeedRow(t, w, ws, "the SendMessage (queued) settled tool card", rmToolCallSettled(queuedTurn, "SendMessage"))
-	rmRequireSucceeded(t, row, "SendMessage")
+	if ended := AwaitTurnEnded(t, w, ws, queuedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the send-message (queued) turn ended = %v, want a concluded outcome", ended)
+	}
 
 	// Act + Assert: resumed (idle agent, resumed from transcript).
 	resumedTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message-resumed")
-	row = rmAwaitFeedRow(t, w, ws, "the SendMessage (resumed) settled tool card", rmToolCallSettled(resumedTurn, "SendMessage"))
-	returned := rmRequireSucceeded(t, row, "SendMessage")
-	if text := returned.GetText().GetText(); text == "" {
-		t.Fatal("SendMessage (resumed) tool call carries no text output, want the vendor's resumed-from-transcript wording")
+	if ended := AwaitTurnEnded(t, w, ws, resumedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the send-message-resumed turn ended = %v, want a concluded outcome", ended)
 	}
 }
 
