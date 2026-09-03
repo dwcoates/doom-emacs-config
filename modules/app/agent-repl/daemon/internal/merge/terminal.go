@@ -10,6 +10,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
@@ -105,7 +106,34 @@ func (r *run) abort(ctx context.Context, summary string) {
 	r.teardown(ctx, outcome{failed: summary})
 }
 
-// teardown releases everything a run held, in the one order that is safe, and
+// stop ends a run whose git THIS DAEMON stopped — the context was cancelled or
+// its deadline passed, at shutdown or because the operation was called off. It
+// is not a verdict and not a fault, so it records once at INFO and publishes
+// NO failure: an abort record here claimed the merge failed when nothing had.
+//
+// It takes abort's teardown unchanged, because everything the run holds (the
+// lease, the occupancy, the queue entry, the displaced turn) must still be
+// given back whichever way the run ended.
+func (r *run) stop(ctx context.Context, err error) {
+	r.enterTerminal(terminalOwedFailed)
+	defer r.leaveTerminal()
+	r.o.log(ctx, r.ws).Info("daemon.merge.stop", "a merge stopped when its git was cancelled", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": err.Error()})
+	r.teardown(ctx, outcome{failed: err.Error()})
+}
+
+// stopped classifies a run-ending error: a git the daemon itself cancelled
+// takes stop, and everything else takes abort. It answers whether the run
+// ended, so a caller reads as one branch.
+func (r *run) stopped(ctx context.Context, err error) bool {
+	if !gitclient.IsCancelled(err) {
+		return false
+	}
+	r.stop(ctx, err)
+	return true
+}
+
+// teardown releases everything a run held// teardown releases everything a run held, in the one order that is safe, and
 // fires the self-reload last.
 func (r *run) teardown(ctx context.Context, out outcome) {
 	const op = "daemon.merge.teardown"

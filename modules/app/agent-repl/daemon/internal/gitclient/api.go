@@ -118,6 +118,49 @@ func (e *Error) Error() string {
 		strings.Join(e.Args, " "), e.Dir, e.ExitCode, strings.TrimSpace(e.Stderr))
 }
 
+// Cancelled is a git invocation THE DAEMON ITSELF ended: its context was
+// cancelled or its deadline passed, and the process was killed as a result. It
+// is deliberately NOT an *Error, because there is no honest exit status to
+// report — git did not decide anything, we stopped it — and a shutdown that
+// logged "git exited nonzero, exit -1" was false evidence about git.
+//
+// It unwraps to context.Canceled or context.DeadlineExceeded, so every caller
+// that already asks errors.Is(err, context.Canceled) recognizes it unchanged.
+type Cancelled struct {
+	// Args is the argument vector, after the environment hygiene.
+	Args []string
+	// Dir is the -C directory.
+	Dir string
+	// Cause is the context's own error: context.Canceled or
+	// context.DeadlineExceeded.
+	Cause error
+}
+
+// Error names the subcommand we stopped and why, never an exit status.
+func (c *Cancelled) Error() string {
+	return fmt.Sprintf("git %s (in %s) was cancelled: %v",
+		strings.Join(c.Args, " "), c.Dir, c.Cause)
+}
+
+// Unwrap exposes the context error, which is what callers classify on.
+func (c *Cancelled) Unwrap() error { return c.Cause }
+
+// Subcommand is the git subcommand that was stopped, for the log record.
+func (c *Cancelled) Subcommand() string {
+	if len(c.Args) == 0 {
+		return ""
+	}
+	return c.Args[0]
+}
+
+// IsCancelled reports whether err is a git invocation this daemon stopped
+// rather than one that failed. It is the one classification callers need, so
+// none of them has to know the concrete type.
+func IsCancelled(err error) bool {
+	var cancelled *Cancelled
+	return errors.As(err, &cancelled)
+}
+
 // New builds the git client. It holds no state beyond its log surfaces: every
 // method's truth is the repository on disk, read fresh each time.
 func New(log dlog.Surfaces) (Git, error) {
