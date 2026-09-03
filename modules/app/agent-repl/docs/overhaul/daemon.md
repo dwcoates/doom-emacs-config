@@ -1393,3 +1393,11 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   budget", "the run broke while executing", "the run ended: <stop_reason>",
   "a Stop hook ended the run"), message = the vendor's wording when recorded.
   The workspace resolves PURPLE per failure.proto for the four vendor arms.
+
+## Landing 9 relay (2026-09-03, project lead; user-approved)
+
+- OpenWorkspaceError.vendor_start_failed{detail}: replace the unlanded-arm
+  relay in workspace/sessions.go with the typed arm; delete the ERROR-ARMS
+  row. Also RULED (proto wins): an interrupted Bash run draws
+  FeedToolCallReturned verdict `succeeded` + interrupted text, not `failed`
+  (resolve/feed/toolcall.go ~588-611); update the tests that pinned `failed`.

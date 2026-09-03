@@ -519,3 +519,8 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   verbs, never feed rows — the webapp is the sole feed renderer. The earlier
   relay text here was a mis-copy of the webapp item (project lead's error,
   caught by the implementer).
+
+## Landing 9 relay (2026-09-03, project lead)
+
+- OpenWorkspaceError.vendor_start_failed{detail}: decode the arm (allowed-key
+  and pinned-arm lists), echo the detail in the host's open-failure message.
