@@ -277,3 +277,4 @@ describe("the terminals a capture's turns end on", () => {
     expect(terminalArms(foldScenario(scenario))).toEqual([...expected]);
   });
 });
+

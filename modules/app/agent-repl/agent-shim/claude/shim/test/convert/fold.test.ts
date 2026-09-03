@@ -1202,3 +1202,49 @@ describe("the fold's attachment arm", () => {
     ).not.toThrow();
   });
 });
+
+describe("a skill's declared allowances, from the acknowledgement to the settled unit", () => {
+  /** The skill DOCUMENT, as the vendor injects it: `isMeta`, joined by `sourceToolUseID`. */
+  function skillDocument(toolUseId: string): SdkMessage {
+    return {
+      type: "user",
+      uuid: `uuid-doc-${toolUseId}`,
+      session_id: "session-1",
+      parent_tool_use_id: null,
+      isMeta: true,
+      sourceToolUseID: toolUseId,
+      message: { role: "user", content: [{ type: "text", text: "# the skill" }] },
+    } as unknown as SdkMessage;
+  }
+
+  /** The invocation, its acknowledgement, then its document. */
+  function foldSkill(structured: unknown) {
+    const fold = createFold();
+    fold.onSdkMessage(
+      assistant("msg-skill", [
+        { type: "tool_use", id: "toolu_s", name: "Skill", input: { skill: "debug-logs" } },
+      ]),
+      foldContext(),
+    );
+    fold.onSdkMessage(toolResult("toolu_s", structured), foldContext());
+    const output = fold.onSdkMessage(skillDocument("toolu_s"), foldContext());
+    const use = activityOf(output.entries[0])?.item.value as conversationv1.AgentSkillUse;
+    return use.result.value as conversationv1.AgentSkillUseSuccess;
+  }
+
+  it("carries the allowances the acknowledgement declared onto the frame the document settles", () => {
+    // Arrange, Act: the shape the skill-invocation capture states.
+    const success = foldSkill({ success: true, commandName: "debug-logs", allowedTools: ["Read", "Glob"] });
+
+    // Assert.
+    expect(success.allowedTools?.toolNames).toEqual(["Read", "Glob"]);
+  });
+
+  it("leaves the allowances UNSET when the acknowledgement declared none", () => {
+    // Arrange, Act.
+    const success = foldSkill({ success: true, commandName: "debug-logs" });
+
+    // Assert.
+    expect(success.allowedTools).toBeUndefined();
+  });
+});

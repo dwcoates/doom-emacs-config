@@ -32,6 +32,17 @@ func ingestGreenPath(t *testing.T) []logRecord {
 		g.AppendLine(line)
 	}
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+	// The cursor reaching the store is NOT the signal that the log holds every
+	// record of the ingest: the batch is written, and the commit and pickup
+	// records are logged after the write returns. So the LOG's own terminal
+	// record is awaited before it is read, or the read races the flush and the
+	// tail of the site-class table looks unreachable.
+	for _, operation := range []string{"tailer-commit", "tail-pickup"} {
+		operation := operation
+		awaitLog(ctx, t, opts.LogPath, operation+" for the ingested batch", func(r logRecord) bool {
+			return r.Operation == operation
+		})
+	}
 	return readLog(t, opts.LogPath)
 }
 

@@ -743,15 +743,36 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	return f, selfRepo, source
 }
 
-// promptAwaitMergeLease blocks until the workspace's merge actually holds its
-// lease, which is what a submission is refused against. Enqueuing is not
-// holding: admission is the queue pump's own step.
+// promptAwaitMergeLease blocks until the workspace's merge holds its lease and
+// has come to REST holding it, which is what a submission is refused against.
+//
+// WHY NOT THE MERGING ARM. `FooterStatus.merging` is the arm for every merge
+// substatus, ENQUEUING included -- and enqueuing is published by the
+// MergeWorkspace request itself, before the queue pump has admitted anything
+// and before any lease exists. Waiting on the arm therefore returned at
+// enqueuing, so every assertion past it raced a merge that was still running:
+// a daemon torn down mid-`rev-parse --git-common-dir` recorded the killed git
+// as `daemon.gitclient.common_dir: git exited nonzero`, aborted the merge, and
+// the unconditional warning sweep failed the test on records it never
+// declared.
+//
+// WHY THE CONFLICTS SUBSTATUS IS THE REST STATE. The fixture scripts a
+// conflict, so the run opens its conflicts tab and then WAITS for the brief's
+// turn to conclude -- and only the fake shim can conclude it. The lease is
+// held, the run is running rather than parked (a PARKED merge accepts
+// submissions, since the conversational resume is its only way forward), and
+// no further git runs and no further record are owed while it waits. That is
+// the one state where both questions these tests ask have a settled answer.
 func promptAwaitMergeLease(t *testing.T, f *fixture) {
 	t.Helper()
 	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "the footer's merging status", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging() != nil
+	awaitFooter(t, f, footer, "the merge at rest in its conflicts phase, lease held", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerging().GetConflicts() != nil
 	})
+	// The declared records are the evidence of the conflict the fixture
+	// scripts. They are declared HERE because reaching the conflicts phase is
+	// what makes them certain rather than a matter of timing.
+	f.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 }
 
 func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
@@ -780,6 +801,41 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 	// maps promptqueue.ErrMerging to it), so the server's own refusal path
 	// answers it at DEBUG, not WARN -- only the queue's own warning fires.
 	f.d.ExpectWarnings("daemon.promptqueue.submit")
+}
+
+// TestSubmitPromptOnceTheMergeParksIsAccepted pins the contrast that makes the
+// conflicts phase -- and not parking -- the rest state promptAwaitMergeLease
+// waits for. A PARKED merge still holds its lease, yet its submissions are
+// ACCEPTED: the conversational resume is the parked run's only way forward, so
+// refusing the composer would strand it. A wait that stopped at parked would
+// therefore have quietly inverted the refusal these tests assert.
+func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
+	// Arrange: the scripted conflict's brief is concluded, so the run leaves
+	// the conflicts phase and parks awaiting the user's guidance.
+	f, _, _ := promptMergeFixture(t)
+	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	promptAwaitMergeLease(t, f)
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.ExpectStartTurn()
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("merge-conflict-brief")))
+	awaitFooter(t, f, footer, "the merge parked on its conflict", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
+	})
+
+	// Act
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
+		Workspace:      f.ws,
+		Said:           said("resolve it this way"),
+		IdempotencyKey: "k-parked",
+		Origin:         origin,
+	})
+
+	// Assert
+	if resp.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt while the merge is parked = %v, want the submission accepted", resp)
+	}
 }
 
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {

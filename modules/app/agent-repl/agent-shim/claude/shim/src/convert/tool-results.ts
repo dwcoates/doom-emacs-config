@@ -205,9 +205,9 @@ function skillDocumentEntry(
   const item = skillDocumentSettle(
     call,
     markdown,
-    // The document record states no tool allowances of its own; the skill's
-    // declared set is not on this record, so it stays unset.
-    undefined,
+    // The document record states no tool allowances of its own: the declared
+    // set rode the acknowledgement, which was retained onto the call.
+    call.retainedAllowedTools,
     context.nowMs(),
   );
   if (item === undefined) {

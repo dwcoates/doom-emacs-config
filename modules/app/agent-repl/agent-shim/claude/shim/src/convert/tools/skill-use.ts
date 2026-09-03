@@ -21,7 +21,7 @@ import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { settledAt, startedAt } from "../entries.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
-import { failureOf, str } from "./support.js";
+import { arr, asRecord, failureOf, str } from "./support.js";
 
 const LOGGER = bindLog({ component: "shim-convert-skill", operation: "shim.convert.skill" });
 
@@ -131,5 +131,26 @@ export const skillUseConverter: ToolConverter = {
 
   progress(beat) {
     return skillItem({ case: "progress", value: beat });
+  },
+
+  /**
+   * The ALLOWANCES ride the acknowledgement and nothing else.
+   *
+   * The acknowledgement settles nothing, and the document record that does
+   * settle the unit states no allowances of its own, so the declared set is
+   * read here and carried on the re-remembered call. A non-array `allowedTools`
+   * is not a declared set, so it stays UNSET rather than being read as empty.
+   */
+  retain(call, outcome) {
+    const declared = arr(asRecord(outcome.structured), "allowedTools");
+    if (declared === undefined) return call;
+    const toolNames = declared.filter((name): name is string => typeof name === "string");
+    if (toolNames.length !== declared.length) {
+      LOGGER.log(
+        { level: "warn", tool_use_id: call.toolUseId, declared: declared.length, read: toolNames.length },
+        "a skill's acknowledgement declared allowances that are not tool names; only the named ones are carried",
+      );
+    }
+    return { ...call, retainedAllowedTools: toolNames };
   },
 };
