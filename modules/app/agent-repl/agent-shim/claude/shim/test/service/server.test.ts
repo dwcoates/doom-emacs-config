@@ -451,6 +451,44 @@ describe("flushing a stream's head", () => {
     expect(res.flushed).toBe(1);
   });
 
+  it("DECLINES the client's Connect response accept list, so nothing is negotiated behind the head", () => {
+    // The adapter answers this list with `Connect-Content-Encoding` when the
+    // handler runs -- after this head has gone out, where no announcement can
+    // reach the client. Rewriting it to `identity` is the same fact the server
+    // already enforces with `compressMinBytes`, stated where the adapter reads
+    // it.
+    const headers = {
+      "content-type": "application/connect+proto",
+      "connect-accept-encoding": "gzip,br",
+    };
+
+    flushStreamHead({ headers }, response());
+
+    expect(headers["connect-accept-encoding"]).toBe("identity");
+  });
+
+  it("declines the gRPC spelling of the same list", () => {
+    const headers = {
+      "content-type": "application/grpc+proto",
+      "grpc-accept-encoding": "gzip",
+    };
+
+    flushStreamHead({ headers }, response());
+
+    expect(headers["grpc-accept-encoding"]).toBe("identity");
+  });
+
+  it("leaves a REQUEST's own encoding alone, so a compressed request is still understood", () => {
+    const headers = {
+      "content-type": "application/connect+proto",
+      "connect-content-encoding": "gzip",
+    };
+
+    flushStreamHead({ headers }, response());
+
+    expect(headers["connect-content-encoding"]).toBe("gzip");
+  });
+
   it("ABSORBS the adapter's later writeHead, which would otherwise throw", () => {
     const res = response();
     flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);

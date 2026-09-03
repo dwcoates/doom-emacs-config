@@ -30,7 +30,7 @@ import { RecordingPersistence, ScriptedQuery } from "./fakes.js";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
+import type { SdkTaskNotificationMessage, SdkTaskStartedMessage } from "../../src/sdk/types.js";
 
 const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
 
@@ -1032,15 +1032,13 @@ describe("DetachForeground on a live foreground unit", () => {
 });
 
 /**
- * watchBash's own `stillLive` predicate -- the shim's answer to "does this run
- * still exist", used to turn a store refusal into a race worth waiting out
- * (store/reader.ts's awaitFirstRow). RecordingPersistence.openBashRun ignored
- * both its arguments before this suite, so the predicate turn.ts builds and
- * passes in was created but never CALLED by any test; it now records the
- * predicate it was handed so it can be invoked directly.
+ * watchBash's own standing predicate -- the shim's answer to "where does this
+ * run stand", used to turn a store refusal into a race worth waiting out
+ * (store/reader.ts's awaitFirstRow). RecordingPersistence records the predicate
+ * it was handed so it can be invoked directly.
  */
-describe("WatchBash's stillLive predicate", () => {
-  it("is true while the live table still holds the work", async () => {
+describe("WatchBash's announcement predicate", () => {
+  it("says live while the live table still holds the work", async () => {
     const h = await harness();
     h.live.onTaskStarted({
       type: "system",
@@ -1062,10 +1060,45 @@ describe("WatchBash's stillLive predicate", () => {
       break;
     }
 
-    expect(h.persistence.lastStillLive?.()).toBe(true);
+    expect(h.persistence.lastAnnouncement?.()).toBe("live");
   });
 
-  it("is false for a handle the live table never held", async () => {
+  it("says concluded for a handle the live table retired", async () => {
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b02",
+      tool_use_id: "t",
+      description: "",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    } as SdkTaskStartedMessage);
+    h.live.onTaskNotification({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "b02",
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-000000000001",
+      session_id: "s",
+    } as SdkTaskNotificationMessage);
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    for await (const response of h.turns.watchBash(
+      create(shimv1.WatchBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "t" }),
+      }),
+    )) {
+      void response;
+      break;
+    }
+
+    expect(h.persistence.lastAnnouncement?.()).toBe("concluded");
+  });
+
+  it("says unknown for a handle the live table never held", async () => {
     const h = await harness();
     h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
 
@@ -1078,6 +1111,6 @@ describe("WatchBash's stillLive predicate", () => {
       break;
     }
 
-    expect(h.persistence.lastStillLive?.()).toBe(false);
+    expect(h.persistence.lastAnnouncement?.()).toBe("unknown");
   });
 });
