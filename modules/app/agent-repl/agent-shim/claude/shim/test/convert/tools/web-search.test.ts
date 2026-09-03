@@ -52,9 +52,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function searchOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentWebSearch {
-  expect(item.case).toBe("webSearch");
-  return item.value as conversationv1.AgentWebSearch;
+function searchOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentWebSearch {
+  expect(item?.case).toBe("webSearch");
+  return item?.value as conversationv1.AgentWebSearch;
 }
 
 function successOf(

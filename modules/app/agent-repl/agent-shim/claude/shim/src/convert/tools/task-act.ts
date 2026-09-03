@@ -126,7 +126,7 @@ export const taskActConverter: ToolConverter = {
         { tool_use_id: call.toolUseId },
         "a task create has no tracker identity until it returns; no frame is produced at announcement",
       );
-      return { case: undefined };
+      return undefined;
     }
     const id = str(call.input, "taskId");
     if (id === undefined || id === "") {
@@ -134,7 +134,7 @@ export const taskActConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId, tool: call.toolName },
         "a task update names no task; no frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return taskItem(
       taskId(id),

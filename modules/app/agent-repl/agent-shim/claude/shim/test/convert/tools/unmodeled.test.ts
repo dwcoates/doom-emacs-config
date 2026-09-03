@@ -31,7 +31,7 @@ function outcome(
 }
 
 function startOf(item: ReturnType<typeof unmodeledConverter.start>): conversationv1.AgentUnmodeledStart {
-  return (item.value as conversationv1.AgentUnmodeled).result
+  return (item?.value as conversationv1.AgentUnmodeled).result
     .value as conversationv1.AgentUnmodeledStart;
 }
 

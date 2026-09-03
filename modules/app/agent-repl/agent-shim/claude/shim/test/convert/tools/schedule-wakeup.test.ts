@@ -46,10 +46,10 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
 }
 
 function wakeupOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentScheduleWakeup {
-  expect(item.case).toBe("scheduleWakeup");
-  return item.value as conversationv1.AgentScheduleWakeup;
+  expect(item?.case).toBe("scheduleWakeup");
+  return item?.value as conversationv1.AgentScheduleWakeup;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentScheduleWakeupStart {

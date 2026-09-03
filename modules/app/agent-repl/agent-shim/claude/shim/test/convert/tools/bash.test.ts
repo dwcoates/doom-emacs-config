@@ -55,7 +55,7 @@ describe("bashConverter.start", () => {
     const item = bashConverter.start(pending);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentBash).result
+    const start = (item?.value as conversationv1.AgentBash).result
       .value as conversationv1.AgentBashStart;
     expect(start.command?.line).toBe("pwd; ls | head");
     expect(start.startedAt?.atMs).toBe(1_700_000_000_000n);
@@ -66,7 +66,7 @@ describe("bashConverter.start", () => {
     const item = bashConverter.start(call({ command: "ls" }));
 
     // Assert.
-    const start = (item.value as conversationv1.AgentBash).result
+    const start = (item?.value as conversationv1.AgentBash).result
       .value as conversationv1.AgentBashStart;
     expect(start.command?.description).toBeUndefined();
   });
@@ -76,7 +76,7 @@ describe("bashConverter.start", () => {
     const item = bashConverter.start(call({ command: "ls" }));
 
     // Assert.
-    const start = (item.value as conversationv1.AgentBash).result
+    const start = (item?.value as conversationv1.AgentBash).result
       .value as conversationv1.AgentBashStart;
     expect(start.command?.sandbox.case).toBe("sandboxed");
   });
@@ -86,7 +86,7 @@ describe("bashConverter.start", () => {
     const item = bashConverter.start(call({ command: "ls", dangerouslyDisableSandbox: true }));
 
     // Assert.
-    const start = (item.value as conversationv1.AgentBash).result
+    const start = (item?.value as conversationv1.AgentBash).result
       .value as conversationv1.AgentBashStart;
     expect(start.command?.sandbox.case).toBe("sandboxDisabled");
   });
@@ -96,7 +96,7 @@ describe("bashConverter.start", () => {
     const item = bashConverter.start(call({ description: "does nothing" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 

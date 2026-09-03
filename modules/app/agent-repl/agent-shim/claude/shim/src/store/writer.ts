@@ -315,20 +315,38 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     }
   };
 
-  /** Send one batch once. Resolves with the store's own refusal detail, or null. */
-  const attempt = async (entries: readonly PersistEntry[]): Promise<string | null> => {
+  /**
+   * Send one batch once.
+   *
+   * Resolves with the store's own refusal, or null when the batch is durable.
+   * `terminal` says the refusal is about the BATCH rather than about the store:
+   * an `invalid_request` names a malformed row, and replaying it just re-sends
+   * the same malformed row while every later batch waits behind it in the one
+   * ordered drain. It is surfaced ONCE and dropped, so the queue keeps moving.
+   */
+  const attempt = async (
+    entries: readonly PersistEntry[],
+  ): Promise<{ readonly detail: string; readonly terminal: boolean } | null> => {
     let response: storev1.WriteBatchResponse;
     try {
       response = await options.client.writeBatch(toWriteBatchRequest(requireProducer(), entries));
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      return {
+        detail: error instanceof Error ? error.message : String(error),
+        terminal: false,
+      };
     }
     const result = response.result;
     if (result.case === "success") return null;
-    if (result.case === "failure") return result.value.detail;
+    if (result.case === "failure") {
+      return {
+        detail: result.value.detail,
+        terminal: result.value.kind.case === "invalidRequest",
+      };
+    }
     // AN UNSET ONEOF IS ILLEGAL, immediately and loudly: a response that says
     // neither durable nor failed cannot be acted on either way.
-    return "store answered a WriteBatch with no result arm set";
+    return { detail: "store answered a WriteBatch with no result arm set", terminal: false };
   };
 
   /** Announce a batch that will never be written, naming every row it lost. */
@@ -365,14 +383,21 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         );
         return true;
       }
-      openDegraded(failure);
+      openDegraded(failure.detail);
+      // A REFUSED BATCH IS NOT A DEGRADED STORE: the store read this batch and
+      // said it is malformed, so no schedule can make it acceptable. Surface it
+      // once and drop it rather than blocking every later batch behind it.
+      if (failure.terminal) {
+        dropLoudly(batch, failure.detail);
+        return false;
+      }
       if (batch.attempts >= retry.maxAttempts) {
-        dropLoudly(batch, failure);
+        dropLoudly(batch, failure.detail);
         return false;
       }
       const backoff = retry.backoffMs[Math.min(batch.attempts - 1, retry.backoffMs.length - 1)] ?? 0;
       LOGGER.log(
-        { level: "warn", attempt: batch.attempts, backoff_ms: backoff, detail: failure },
+        { level: "warn", attempt: batch.attempts, backoff_ms: backoff, detail: failure.detail },
         "the store refused a batch; replaying it from the retry buffer",
       );
       await sleep(backoff);
