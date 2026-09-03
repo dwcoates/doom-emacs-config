@@ -245,41 +245,69 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 	}
 }
 
-func TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn(t *testing.T) {
+func TestResumingAMissingVendorTranscriptComesUpFresh(t *testing.T) {
 	// Arrange: a session with a conversation to resume, killed and REAPED, and
-	// then its transcript removed from under both account roots. A vanished
-	// transcript yields no death evidence, so the guard refuses the resume
-	// before any process spawns rather than letting the redial ladder loop
-	// forever on an unchangeable fact.
+	// then its transcript removed from under both account roots. The recorded
+	// conversation cannot be resumed — but the workspace must keep a LIVE
+	// session, so it comes up fresh with the abandoned id as the record.
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the missing transcript the test stages, the shim death the test drives, the shim link the test severs.
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the missing transcript the test stages, the abandoned conversation the classifier records, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.account.find_transcript", "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
 		"daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.kill",
-		"daemon.workspace.open")
+		"daemon.workspace.open", "daemon.workspace.bring_up")
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
 	}
 	f.shim.AwaitGone()
 	f.d.RemoveTranscripts(f.repo.Dir)
-	spawnsBefore := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn")
 
 	// Act
 	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 
-	// Assert: the landed transcript_missing arm, and nothing spawned to be
-	// refused BY.
+	// Assert: a live session, opened FRESH.
 	if err != nil {
-		t.Fatalf("OpenWorkspace on a missing transcript = transport error %v, want the transcript_missing arm", err)
+		t.Fatalf("OpenWorkspace on a missing transcript = transport error %v, want a fresh session", err)
 	}
-	if resp.Msg.GetError().GetTranscriptMissing() == nil {
-		t.Fatalf("OpenWorkspace on a missing transcript = %v, want OpenWorkspaceError.transcript_missing", resp.Msg)
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenWorkspace on a missing transcript = %v, want a success", resp.Msg)
 	}
-	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawnsBefore {
-		t.Fatalf("shim spawn records = %d after the refusal, want the %d before it: the guard refuses BEFORE the spawn", got, spawnsBefore)
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, req)
+	if req.GetFresh() == nil {
+		t.Fatalf("StartSession = %v, want the fresh source for an unresumable conversation", req)
 	}
+}
+
+func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
+	// Arrange: as above. The fresh start is loud — the abandoned vendor
+	// session id is the workspace's own record of what was left behind.
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the missing transcript the test stages, the abandoned conversation the classifier records, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.account.find_transcript", "daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.watch_session", "daemon.shimclient.exit",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial", "daemon.workspace.kill",
+		"daemon.workspace.open", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.RemoveTranscripts(f.repo.Dir)
+
+	// Act
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a fresh session", err)
+	}
+
+	// Assert.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the abandoned conversation stated loudly", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.workspace.bring_up" &&
+			r.Message == "the recorded conversation has no transcript on disk; the session comes up FRESH"
+	})
 }
 
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
@@ -1085,6 +1113,45 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 
 	// Assert: the prompt is delivered once the revived session is ready.
 	shim.ExpectStartTurn()
+}
+
+// TestABounceOfANeverTurnedSessionComesUpFresh is the e2e run-2 repro as an
+// assertion: a session that pre-minted a vendor session id and never took a
+// turn has NO transcript, so the staleness bounce's resume named a
+// conversation the shim rightly refuses as `unknown_session`, no client was
+// installed, and every later prompt answered `no_session` forever.
+func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
+	// Arrange: the deployed stamp disagrees with what the fake reports, so the
+	// mount bounces the shim — and the fake withholds the transcript until the
+	// first turn, exactly as the vendor does.
+	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_DEPLOY_STAMP=deployed-sha"}})
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{NoTranscriptUntilTurn: true})
+	// The sweep covers every test; the declared records are evidence of the bounce's stand-down, the abandoned conversation the classifier records, and the shim death the bounce drives.
+	f.d.ExpectWarnings("daemon.account.find_transcript", "daemon.health.open_fault",
+		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.reopen",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.shimclient.redial",
+		"daemon.workspace.bring_up", "daemon.workspace.kill")
+
+	// Act
+	if _, err := f.openRaw(); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the completed build-staleness bounce", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.relaunch" && r.Message == "relaunched the workspace's shim"
+	})
+
+	// Assert: the bounce came up FRESH rather than failing its resume, and the
+	// workspace takes prompts afterwards.
+	for _, r := range f.d.RunLog() {
+		if r.Message == "the resume failed; the workspace carries its own error" {
+			t.Fatalf("the bounce recorded a relaunch_resume_failed fault: %+v", r)
+		}
+	}
+	resp := f.submit("after the bounce", "k-bounce-fresh", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if resp.GetError() != nil {
+		t.Fatalf("SubmitPrompt after the bounce = %v, want an accepted prompt rather than no_session", resp)
+	}
 }
 
 func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
