@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // --- the environment contract, as a pure function -----------------------
@@ -461,4 +462,199 @@ func containsEntry(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// --- cancellation is not a failure --------------------------------------
+
+// TestInvokeClassifiesEveryOutcome is the classification table. A git THE
+// DAEMON stopped, a git that decided against us, and a git that never ran are
+// three different facts, and the log record must say which.
+func TestInvokeClassifiesEveryOutcome(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange builds the context and installs the fake, returning the
+		// context the call runs under.
+		arrange func(t *testing.T) context.Context
+		// wantCancelled is whether the error must be a *Cancelled.
+		wantCancelled bool
+		// wantExitCode is the *Error's exit code, when a failure is wanted.
+		wantExitCode int
+		// wantLevel is the level the one record about the outcome must carry.
+		wantLevel string
+	}{
+		{
+			name: "a cancelled context is a cancellation",
+			arrange: func(t *testing.T) context.Context {
+				newFakeGit(t, ok("main\n"))
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantCancelled: true,
+			wantLevel:     "info",
+		},
+		{
+			name: "an exceeded deadline is a cancellation",
+			arrange: func(t *testing.T) context.Context {
+				newFakeGit(t, ok("main\n"))
+				// A deadline already in the past: the context is done before
+				// the spawn, with no wait on the clock at all.
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			wantCancelled: true,
+			wantLevel:     "info",
+		},
+		{
+			name: "a nonzero exit is a failure carrying its code",
+			arrange: func(t *testing.T) context.Context {
+				newFakeGit(t, fails(3, "fatal: not a git repository\n"))
+				return context.Background()
+			},
+			wantExitCode: 3,
+			wantLevel:    "error",
+		},
+		{
+			name: "a git that never ran is a failure",
+			arrange: func(t *testing.T) context.Context {
+				newFakeGit(t, ok("main\n"))
+				// No git on PATH at all: the spawn itself fails, so there is
+				// no exit status and -1 marks its absence.
+				t.Setenv("PATH", t.TempDir())
+				return context.Background()
+			},
+			wantExitCode: -1,
+			wantLevel:    "error",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			git, surfaces := newTestClient(t)
+			ctx := test.arrange(t)
+
+			// Act.
+			_, err := git.CurrentBranch(ctx, "/repo")
+
+			// Assert.
+			if err == nil {
+				t.Fatal("CurrentBranch succeeded; every case here must report an error")
+			}
+			if got := IsCancelled(err); got != test.wantCancelled {
+				t.Fatalf("IsCancelled(%v) = %t, want %t", err, got, test.wantCancelled)
+			}
+			if !test.wantCancelled {
+				var failure *Error
+				if !errors.As(err, &failure) {
+					t.Fatalf("error %v is not a *gitclient.Error", err)
+				}
+				if failure.ExitCode != test.wantExitCode {
+					t.Fatalf("ExitCode = %d, want %d", failure.ExitCode, test.wantExitCode)
+				}
+			}
+			if _, found := recordFor(surfaces.records(), test.wantLevel, "daemon.gitclient.current_branch"); !found {
+				t.Fatalf("no %s record about the outcome; records = %v", test.wantLevel, surfaces.records())
+			}
+		})
+	}
+}
+
+// TestACancelledContextLogsNoError is the defect itself: at shutdown every
+// git still in flight was recorded as "git exited nonzero" with exit -1, which
+// blamed git for a decision the daemon made.
+func TestACancelledContextLogsNoError(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("main\n"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	if _, err := git.CurrentBranch(ctx, "/repo"); err == nil {
+		t.Fatal("CurrentBranch succeeded under a cancelled context")
+	}
+
+	// Assert.
+	for _, record := range surfaces.records() {
+		if record.Level == "error" {
+			t.Fatalf("a cancelled git was recorded at ERROR: %+v", record)
+		}
+	}
+}
+
+// TestACancellationNamesItsSubcommand keeps the record diagnosable: the log
+// must say WHICH git was stopped.
+func TestACancellationNamesItsSubcommand(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, ok("main\n"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	if _, err := git.CurrentBranch(ctx, "/repo"); err == nil {
+		t.Fatal("CurrentBranch succeeded under a cancelled context")
+	}
+
+	// Assert.
+	record, found := recordFor(surfaces.records(), "info", "daemon.gitclient.current_branch")
+	if !found {
+		t.Fatalf("no info record; records = %v", surfaces.records())
+	}
+	if got := record.Context["subcommand"]; got != "rev-parse" {
+		t.Fatalf("the record names subcommand %v, want rev-parse", got)
+	}
+}
+
+// TestACancellationUnwrapsToTheContextError is what lets every caller that
+// already asks errors.Is(err, context.Canceled) classify a stopped git without
+// knowing this package's types.
+func TestACancellationUnwrapsToTheContextError(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, ok("main\n"))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	_, err := git.CurrentBranch(ctx, "/repo")
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error %v does not unwrap to context.Canceled", err)
+	}
+}
+
+// TestAGitKilledMidFlightIsACancellation covers the case the pre-ended
+// contexts cannot: a git that really was RUNNING and really was killed, whose
+// wait reports a signalled death with an ExitCode of -1.
+func TestAGitKilledMidFlightIsACancellation(t *testing.T) {
+	// Arrange: a fake git that hangs on the pipe until it is killed.
+	git, surfaces := newTestClient(t)
+	fifo := newFifo(t)
+	newFakeGit(t, blocks(fifo))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the call runs while the test meets the child at the pipe, then
+	// cancels it. The rendezvous is the kernel's, not the clock's.
+	done := make(chan error, 1)
+	go func() {
+		_, err := git.CurrentBranch(ctx, "/repo")
+		done <- err
+	}()
+	awaitOpen(t, fifo)
+	cancel()
+	err := <-done
+
+	// Assert.
+	if !IsCancelled(err) {
+		t.Fatalf("a killed git reported %v, want a cancellation", err)
+	}
+	for _, record := range surfaces.records() {
+		if record.Level == "error" {
+			t.Fatalf("a killed git was recorded at ERROR: %+v", record)
+		}
+	}
 }
