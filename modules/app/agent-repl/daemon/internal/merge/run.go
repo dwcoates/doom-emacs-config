@@ -205,7 +205,11 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	}
 	same, err := o.deps.Git.SameRepo(ctx, job.Layout.TargetDir, o.deps.SelfRepoDir)
 	if err != nil {
-		r.abort(ctx, fmt.Sprintf("could not identify the target repository: %v", err))
+		// A git WE cancelled is not a repository we could not identify: at
+		// shutdown that abort recorded a merge failure that never happened.
+		if !r.stopped(ctx, err) {
+			r.abort(ctx, fmt.Sprintf("could not identify the target repository: %v", err))
+		}
 		return err
 	}
 	r.emacsRepo = same
@@ -288,7 +292,11 @@ func (r *run) execute(ctx context.Context) error {
 	r.closeTab(ctx, TabQueue, r.queueRound, "succeeded")
 	outcome, err := r.method(ctx)
 	if err != nil {
-		r.abort(ctx, err.Error())
+		// Every phase's git reaches this one point, so classifying here covers
+		// them all: a cancelled git stops the run, any other error aborts it.
+		if !r.stopped(ctx, err) {
+			r.abort(ctx, err.Error())
+		}
 		return err
 	}
 	if outcome.parked {

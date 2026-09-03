@@ -8,6 +8,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
 )
 
@@ -211,4 +213,86 @@ func TestNoAdmissionPauseIsCalledWhenTheSeamIsUnwired(t *testing.T) {
 	if err := h.admit(context.Background()); err != nil {
 		t.Fatalf("the merge failed: %v", err)
 	}
+}
+
+// --- a git the daemon stopped is not a merge failure --------------------
+
+// TestACancelledGitAtShutdownRecordsNoAbort is the caller half of the
+// classification: at an orderly exit every in-flight git is cancelled, and
+// aborting the run there wrote a merge FAILURE into the log and the bubble for
+// something that never failed.
+func TestACancelledGitAtShutdownRecordsNoAbort(t *testing.T) {
+	// Arrange: the repository identification is the first git a run performs,
+	// and here it reports the cancellation a shutdown causes.
+	h := newHarness(t)
+	h.git.sameRepoErr = &gitclient.Cancelled{
+		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, Cause: context.Canceled,
+	}
+	enqueue(t, h)
+
+	// Act. The pump's own policy decides whether one run's error rides up out
+	// of admit; what this test is about is what the run RECORDED.
+	_ = h.admit(context.Background())
+
+	// Assert: nothing claims a failure.
+	if _, found := recordAt(h, "error", "daemon.merge.abort"); found {
+		t.Fatalf("a cancelled git was recorded as a merge abort; records = %v", h.logs.Records())
+	}
+	for _, record := range h.logs.Records() {
+		if record.Level == "error" {
+			t.Fatalf("a cancelled git produced an ERROR record: %+v", record)
+		}
+	}
+}
+
+// TestACancelledGitAtShutdownIsRecordedOnce keeps the cancellation diagnosable
+// rather than silent: it is not an abort, but it IS in the log.
+func TestACancelledGitAtShutdownIsRecordedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.git.sameRepoErr = &gitclient.Cancelled{
+		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, Cause: context.Canceled,
+	}
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if _, found := recordAt(h, "info", "daemon.merge.stop"); !found {
+		t.Fatalf("the cancellation was not recorded at all; records = %v", h.logs.Records())
+	}
+}
+
+// TestARealGitFailureStillAborts is the guard on the other side: the
+// classification must not have weakened what a genuine failure does.
+func TestARealGitFailureStillAborts(t *testing.T) {
+	// Arrange: a git that really failed, with an exit status of its own.
+	h := newHarness(t)
+	h.git.sameRepoErr = &gitclient.Error{
+		Args: []string{"rev-parse", "--git-common-dir"}, Dir: h.targetD, ExitCode: 128,
+		Stderr: "fatal: not a git repository\n",
+	}
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if _, found := recordAt(h, "error", "daemon.merge.abort"); !found {
+		t.Fatalf("a real git failure did not abort the run; records = %v", h.logs.Records())
+	}
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want %q", facts.State, StateFailed)
+	}
+}
+
+// recordAt finds the first captured record with that level and operation.
+func recordAt(h *harness, level, operation string) (dlog.Record, bool) {
+	for _, record := range h.logs.Records() {
+		if record.Level == level && record.Operation == operation {
+			return record, true
+		}
+	}
+	return dlog.Record{}, false
 }

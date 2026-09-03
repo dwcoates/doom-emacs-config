@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"claude-repld/internal/dlog"
@@ -90,6 +91,13 @@ type gitFixture struct {
 	// the one case a pure script cannot: a git that took the worktree away and
 	// then reported a failure anyway.
 	RemovePath string `json:"remove_path"`
+	// BlockOnFifo, when set, is a named pipe the fake opens for reading and
+	// then reads from, which never returns. It models a git STILL RUNNING when
+	// the daemon's context ends — the case the cancellation classification is
+	// about — and the pipe is the rendezvous rather than a sleep: the test's
+	// open-for-write returns exactly when the child has opened its end, so the
+	// test knows the process is live before it cancels.
+	BlockOnFifo string `json:"block_on_fifo"`
 }
 
 // ok is a fixture that succeeds with that stdout.
@@ -100,6 +108,35 @@ func ok(stdout string, match ...string) gitFixture {
 // fails is a fixture that exits nonzero with that stderr.
 func fails(exit int, stderr string, match ...string) gitFixture {
 	return gitFixture{Match: match, Stderr: stderr, Exit: exit}
+}
+
+// blocks is a fixture that hangs on that named pipe until the process is
+// killed, which is how a test gets a git that is still running when the
+// context ends.
+func blocks(fifo string, match ...string) gitFixture {
+	return gitFixture{Match: match, BlockOnFifo: fifo}
+}
+
+// newFifo makes a named pipe for the blocks fixture and returns its path.
+func newFifo(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "block")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Fatalf("making the rendezvous pipe: %v", err)
+	}
+	return path
+}
+
+// awaitOpen returns once the fake git has opened the pipe's read end, which is
+// the proof the child process is live. It is a kernel rendezvous, not a wait
+// on the clock: opening a fifo for writing blocks until a reader arrives.
+func awaitOpen(t *testing.T, fifo string) {
+	t.Helper()
+	writer, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("meeting the fake git at the pipe: %v", err)
+	}
+	t.Cleanup(func() { writer.Close() })
 }
 
 // fakeGit is the harness handle a test asserts against.
@@ -304,6 +341,20 @@ func fakeGitMain() {
 		}
 		if !hasPrefix(subject, fixture.Match) {
 			continue
+		}
+		if fixture.BlockOnFifo != "" {
+			pipe, err := os.OpenFile(fixture.BlockOnFifo, os.O_RDONLY, 0)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fake git: opening %s: %v\n", fixture.BlockOnFifo, err)
+				os.Exit(120)
+			}
+			// The write end is never written to, so this read blocks until the
+			// process is killed. That is the whole point.
+			var one [1]byte
+			if _, err := pipe.Read(one[:]); err != nil {
+				fmt.Fprintf(os.Stderr, "fake git: reading %s: %v\n", fixture.BlockOnFifo, err)
+				os.Exit(120)
+			}
 		}
 		if fixture.RemovePath != "" {
 			if err := os.RemoveAll(fixture.RemovePath); err != nil {

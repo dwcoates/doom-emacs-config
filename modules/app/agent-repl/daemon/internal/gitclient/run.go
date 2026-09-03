@@ -106,6 +106,12 @@ func (in invocation) fail() *Error {
 	}
 }
 
+// cancelled shapes the invocation as the leaf's cancellation, which is a
+// different fact from a failure and carries no exit status.
+func (in invocation) cancelled(cause error) *Cancelled {
+	return &Cancelled{Args: in.args, Dir: in.dir, Cause: cause}
+}
+
 // logContext is the structured context every record about this invocation
 // carries.
 func (in invocation) logContext() dlog.Context {
@@ -139,6 +145,15 @@ func (c *client) invoke(ctx context.Context, dir string, args ...string) (invoca
 	switch {
 	case err == nil:
 		return in, nil
+	case ctx.Err() != nil:
+		// WE KILLED IT. exec.CommandContext signals the process when the
+		// context ends, and the wait then reports a signalled death whose
+		// ExitCode() is -1. Reporting that as "git exited nonzero, exit -1"
+		// blamed git for a decision the daemon made, which at shutdown put a
+		// false failure in the log for every git still in flight. The
+		// cancellation is the fact; there is no exit status to carry.
+		in.exitCode = -1
+		return in, in.cancelled(ctx.Err())
 	case errors.As(err, new(*exec.ExitError)):
 		in.exitCode = cmd.ProcessState.ExitCode()
 		return in, nil
@@ -175,6 +190,21 @@ func (c *client) run(ctx context.Context, operation, dir string, args ...string)
 func (c *client) runRaw(ctx context.Context, operation, dir string, args ...string) (invocation, error) {
 	in, err := c.invoke(ctx, dir, args...)
 	if err != nil {
+		var cancelled *Cancelled
+		if errors.As(err, &cancelled) {
+			// At most INFO: a cancelled git is the daemon exiting or an
+			// operation being called off, not a fault. The error is still
+			// returned unchanged, so nothing is swallowed.
+			c.log.Global().Info(operation, "git was cancelled before it finished", dlog.Context{
+				"dir":        in.dir,
+				"args":       in.args,
+				"subcommand": cancelled.Subcommand(),
+				"stdout":     in.stdout,
+				"stderr":     in.stderr,
+				"cause":      cancelled.Cause.Error(),
+			})
+			return in, err
+		}
 		c.log.Global().Error(operation, "git could not be run", in.logContext())
 		return in, err
 	}
