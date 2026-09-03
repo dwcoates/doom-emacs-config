@@ -539,7 +539,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		ShimNode:    requireNode(t),
 		ShimMain:    requireShimBundle(t),
 		StoreSocket: w.Store.Socket,
-		ExtraEnv:    []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir, "SHIM_BUILD_SHA=" + shimBuildSHA},
+		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
 	})
 	d2.ExpectWarnings(mqExpectedBounceWarnings...)
 	// Re-point World at the new process: every w.Client()/w.WatchFeed/... call
@@ -587,7 +587,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 		ShimNode:    requireNode(t),
 		ShimMain:    requireShimBundle(t),
 		StoreSocket: w.Store.Socket,
-		ExtraEnv:    []string{"AGENT_REPL_LOCK_DIR=" + w.LockDir, "SHIM_BUILD_SHA=" + shimBuildSHA},
+		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + w.LockDir}, buildIdentityEnv()...),
 	})
 	d3.ExpectWarnings(mqExpectedBounceWarnings...)
 	w.Daemon = d3
