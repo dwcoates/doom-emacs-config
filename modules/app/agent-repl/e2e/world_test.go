@@ -160,11 +160,25 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// sidecar that already went away.
 	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"))
 
+	// ONE spool root for the whole world. The fake SDK inside every shim
+	// this daemon spawns writes its task spools here (via
+	// AGENT_REPL_FAKE_SPOOL_ROOT, src/fake/index.ts), and the sidecar globs
+	// exactly this tree (--spool-root). Two roots would mean the sidecar
+	// never sees a spool the fake wrote; worse, the fake's own default is
+	// the REAL vendor location /tmp/claude-<uid>, so leaving it unset does
+	// not merely break the pairing, it writes into the developer's live
+	// vendor spool directory.
+	spoolRoot := t.TempDir()
+
 	daemonOpts := opts.DaemonOpts
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
-	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...)
+	// Appended LAST so this suite's own invariant wins over any ExtraEnv a
+	// caller supplied: the shim's env is scanned front-to-back and the last
+	// assignment of a name is the effective one.
+	daemonOpts.ExtraEnv = append(append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...),
+		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot)
 
 	d := harness.StartDaemon(t, daemonOpts)
 	resolveConfigRoots(t, d)
@@ -172,9 +186,11 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	sidecar := startSidecar(t, sidecarBin, sidecarOpts{
 		StoreSocket: store.Socket,
 		ConfigRoots: []string{d.DefaultConfigDir, d.MultiRepoConfigDir},
-		SpoolRoot:   t.TempDir(),
+		SpoolRoot:   spoolRoot,
 		LogPath:     filepath.Join(t.TempDir(), "sidecar.log"),
 	})
+
+	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
 	w := &World{Daemon: d, Store: store, Sidecar: sidecar}
 
@@ -440,9 +456,40 @@ func (s *Store) Cursors(t *testing.T, ctx context.Context) []*storev1.CursorStat
 type Sidecar struct {
 	t       *testing.T
 	LogPath string
-	cmd     *exec.Cmd
-	done    chan error
-	stopped bool
+	// SpoolRoot is the tree this sidecar was told to glob. Kept on the
+	// struct purely so NewWorld's self-check can compare it against what the
+	// daemon hands its shims, rather than trusting the two call sites to
+	// keep quoting the same variable.
+	SpoolRoot string
+	cmd       *exec.Cmd
+	done      chan error
+	stopped   bool
+}
+
+// assertOneSpoolRoot fails the world's construction unless the spool root
+// shimEnv (the daemon's ExtraEnv, which reaches every shim it spawns)
+// exports is EXACTLY the tree the sidecar
+// globs. This is a self-check of the harness, not of any subject: getting it
+// wrong makes every spool-dependent test fail in the same mystifying way (a
+// turn that completed but whose task output the sidecar never files), and
+// makes an unset value silently target the developer's real
+// /tmp/claude-<uid>.
+func assertOneSpoolRoot(t *testing.T, shimEnv []string, s *Sidecar) {
+	t.Helper()
+	const key = "AGENT_REPL_FAKE_SPOOL_ROOT="
+	var exported string
+	found := false
+	for _, kv := range shimEnv {
+		if strings.HasPrefix(kv, key) {
+			exported, found = strings.TrimPrefix(kv, key), true
+		}
+	}
+	if !found {
+		t.Fatalf("e2e: the daemon exports no %s to its shims, so the fake would spool into the real vendor location", strings.TrimSuffix(key, "="))
+	}
+	if exported != s.SpoolRoot {
+		t.Fatalf("e2e: the shims spool into %s but the sidecar globs %s; they must be one tree", exported, s.SpoolRoot)
+	}
 }
 
 type sidecarOpts struct {
@@ -483,7 +530,7 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: start sidecar: %v", err)
 	}
-	s := &Sidecar{t: t, LogPath: opts.LogPath, cmd: cmd, done: make(chan error, 1)}
+	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, done: make(chan error, 1)}
 	go func() { s.done <- cmd.Wait() }()
 	t.Cleanup(s.Stop)
 	return s
