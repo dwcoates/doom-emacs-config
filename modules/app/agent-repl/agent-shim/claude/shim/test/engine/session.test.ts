@@ -2580,3 +2580,70 @@ describe("an ask raised under a subagent's vendor agent id", () => {
     expect(permissionBook(h)).toBe(mainAgentId(sessionId).value);
   });
 });
+
+/**
+ * Settledness for an item with NO `result` oneof (engine/session.ts's
+ * `noteForegroundUnits`).
+ *
+ * `AgentTaskAct` and its siblings carry an `act` rather than a lifecycle: the
+ * act IS the whole unit. Deriving settledness from a `result` they do not have
+ * left them in flight forever, and `DetachForeground` then answered
+ * `not_detachable` for a unit that had plainly concluded.
+ */
+describe("a foreground unit whose item has no lifecycle", () => {
+  it("is settled the moment its act is recorded", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: "task_act" } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_task",
+                          }),
+                          item: {
+                            case: "taskAct",
+                            value: create(conversationv1.AgentTaskActSchema, {
+                              act: { case: "created", value: create(conversationv1.AgentTaskCreatedSchema, {}) },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000c",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_task" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("alreadyConcluded");
+  });
+});

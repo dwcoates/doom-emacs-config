@@ -1138,8 +1138,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         const created = item.value.result.value.createdAgentId?.value ?? "";
         if (created !== "") announcedAgents.add(created);
       }
+      // NOT EVERY ITEM HAS A LIFECYCLE. `AgentTaskAct`, `AgentPlanMode`,
+      // `AgentWorktree`, `AgentCron`, `AgentContextInjected`,
+      // `AgentReportFindings` and `AgentPushNotification` carry no `result`
+      // oneof at all: the act IS the whole unit, and there is no "start" of it
+      // to be waiting on. Reading settledness off a `result` those items do not
+      // have left every one of them in flight forever, so `DetachForeground`
+      // answered `not_detachable` for a unit that had plainly concluded.
       const inner = item.value as { result?: { case?: string } } | undefined;
-      const settled = inner?.result?.case !== undefined && inner.result.case !== "start";
+      const settled =
+        inner === undefined || !("result" in inner)
+          ? true
+          : inner.result?.case !== undefined && inner.result.case !== "start";
       foreground.note(activity.activityId?.value ?? "", item.case ?? "", settled);
     }
   }
