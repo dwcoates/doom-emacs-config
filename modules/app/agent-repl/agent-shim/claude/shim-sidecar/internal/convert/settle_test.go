@@ -508,3 +508,73 @@ func TestImageBlockPrefersAUrlSourceOverAPath(t *testing.T) {
 		t.Fatalf("Url = %q, want https://example.com/a.png", url.Url.GetUrl())
 	}
 }
+
+// TestBashResultRoutingIgnoresIsErrorWhenAnExitWasStated pins the dispatch: the
+// exit code is the command's own verdict on itself, so its PRESENCE — not the
+// vendor's `is_error` flag, which the vendor sets for the model whenever a
+// command failed — is what says the command ran.
+func TestBashResultRoutingIgnoresIsErrorWhenAnExitWasStated(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		toolUseResult string
+		isError       bool
+		wantSuccess   bool
+		wantCode      int32
+	}{
+		{
+			// The captured golden shape: a nonzero exit arrives as an is_error
+			// result whose toolUseResult is a bare string, so the stated ending
+			// survives only in the returned text.
+			name:          "nonzero exit is the success arm",
+			content:       `"Exit code 7\npartway\nto stderr"`,
+			toolUseResult: `"Error: Exit code 7\npartway\nto stderr"`,
+			isError:       true,
+			wantSuccess:   true,
+			wantCode:      7,
+		},
+		{
+			name:          "zero exit is the success arm",
+			content:       `[{"type":"text","text":"ok"}]`,
+			toolUseResult: `{"stdout":"ok","stderr":"","interrupted":false,"exitCode":0}`,
+			isError:       false,
+			wantSuccess:   true,
+			wantCode:      0,
+		},
+		{
+			// No exit anywhere: the call could not be PERFORMED.
+			name:          "an error with no stated exit is the failure arm",
+			content:       `"Error: EACCES: permission denied"`,
+			toolUseResult: `"Error: EACCES: permission denied"`,
+			isError:       true,
+			wantSuccess:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_b", "Bash", `{"command":"./run"}`))
+			result := toolResultLineWithError("u1", "toolu_b", ts2, tt.content, tt.toolUseResult, tt.isError)
+
+			// Act.
+			entries := convertLines(t, c, call, result)
+
+			// Assert.
+			bash := activityOf(entries[len(entries)-1]).GetBash()
+			if !tt.wantSuccess {
+				if bash.GetFailure() == nil {
+					t.Fatalf("arm = %T, want the failure arm for a call that could not be performed", bash.GetResult())
+				}
+				return
+			}
+			success := bash.GetSuccess()
+			if success == nil {
+				t.Fatalf("arm = %T, want the success arm for a command that ran", bash.GetResult())
+			}
+			if got := success.GetCompleted().GetTermination().GetExited().GetCode(); got != tt.wantCode {
+				t.Fatalf("exit code = %d, want %d", got, tt.wantCode)
+			}
+		})
+	}
+}
