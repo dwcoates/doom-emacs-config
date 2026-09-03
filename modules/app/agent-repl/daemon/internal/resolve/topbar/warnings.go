@@ -44,14 +44,19 @@ func (r *resolver) warningStrip(s *wsState) *frontendv1.TopbarWarningStrip {
 // It RETRACTS on its own: once every settled response's usage has been
 // observed and nothing contradicts, there is nothing to warn about.
 func (r *resolver) accountingWarning(s *wsState) (warning, bool) {
+	// THE RECONCILIATION IS PER API RESPONSE, NEVER PER UNIT. Usage rides
+	// exactly one unit per API response, so comparing the settled-response set
+	// against the usage-carrying set compares two different key spaces: an
+	// ordinary prose turn, whose usage rode the thinking unit that opened the
+	// response, would warn that its one response is missing usage.
 	var lines []string
+	missing := unaccountedResponses(s)
 	switch {
 	case len(s.contradictions) > 0:
 		lines = append([]string(nil), s.contradictions...)
 		sort.Strings(lines)
-	case len(s.responses) > len(s.counted):
-		lines = []string{fmt.Sprintf("%s missing usage",
-			plural(len(s.responses)-len(s.counted), "response"))}
+	case missing > 0:
+		lines = []string{fmt.Sprintf("%s missing usage", plural(missing, "response"))}
 	default:
 		return warning{}, false
 	}
