@@ -389,6 +389,8 @@ type fakeWatcher struct {
 	inFlight   *ids.TurnID
 	mainAgents []string
 	opened     []*conversationv1.AgentPrompt
+	opening    []ids.TurnID
+	openFailed []ids.TurnID
 }
 
 func (w *fakeWatcher) TurnInFlight() *ids.TurnID {
@@ -401,6 +403,18 @@ func (w *fakeWatcher) SetMainAgent(agent *conversationv1.AgentId) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.mainAgents = append(w.mainAgents, agent.GetValue())
+}
+
+func (w *fakeWatcher) OnTurnOpening(_ ids.WorkspaceID, turn ids.TurnID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.opening = append(w.opening, turn)
+}
+
+func (w *fakeWatcher) OnTurnOpenFailed(_ ids.WorkspaceID, turn ids.TurnID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.openFailed = append(w.openFailed, turn)
 }
 
 func (w *fakeWatcher) OnTurnOpened(_ ids.WorkspaceID, prompt *conversationv1.AgentPrompt, _ *conversationv1.HistoryPage) {

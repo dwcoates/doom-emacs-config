@@ -364,6 +364,44 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 	}
 }
 
+// OnTurnOpening records the turn a caller is about to hand to the shim. See
+// the interface for why the record has to go down BEFORE StartTurn.
+func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws != w.ws {
+		w.log.Error("daemon.sessionwatcher.turn_opening_foreign", "a turn was opened on another workspace's watcher", dlog.Context{
+			"handed_workspace_id": string(ws), "turn_id": string(turn),
+		})
+		return
+	}
+	if turn == "" {
+		w.log.Error("daemon.sessionwatcher.turn_opening_unidentified", "an opening turn named no id", nil)
+		return
+	}
+	opening := turn
+	w.turn = &opening
+	w.log.Debug("daemon.sessionwatcher.turn_opening", "a turn is going to the shim", dlog.Context{
+		"turn_id": string(turn),
+	})
+}
+
+// OnTurnOpenFailed retires a turn the shim refused. It clears the record only
+// when that turn is still the one in flight: a terminal that already ended it
+// wins, and so does a later turn.
+func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws != w.ws || w.turn == nil || *w.turn != turn {
+		return
+	}
+	w.turn = nil
+	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
+		"turn_id": string(turn),
+	})
+	w.signalFreenessLocked()
+}
+
 // OnTurnOpened is the prompt queue handing over an accepted turn.
 func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
 	w.mu.Lock()
@@ -381,6 +419,16 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	w.adoptMainAgentLocked(prompt.GetAgent(), "start_turn")
 	if turnID := prompt.GetId().GetValue(); turnID != "" {
 		turn := ids.TurnID(turnID)
+		if _, ended := w.closedTurns[turn]; ended {
+			// THE TURN IS ALREADY OVER. Its terminal beat StartTurn's response
+			// back — the very race OnTurnOpening exists for — and re-recording
+			// it here would stand a dead turn back up in flight, with no edge
+			// left to take it down again.
+			w.log.Debug("daemon.sessionwatcher.turn_opened_already_ended",
+				"the accepted turn had already ended before its acceptance was processed",
+				dlog.Context{"turn_id": turnID})
+			return
+		}
 		w.turn = &turn
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
 		// stream frame states that a turn was accepted.

@@ -139,8 +139,17 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	q.deps.Footer.SetTurn(ws, started)
 	q.deps.Sidebar.SetTurn(ws, started)
 
+	// The watcher learns the cut's turn before the shim does, for the reason
+	// deliverToSession states: a terminal can beat StartTurn's response back.
+	watcher, watching := q.deps.Watcher(ws)
+	if watching {
+		watcher.OnTurnOpening(ws, turn)
+	}
 	success, err := sender.StartTurn(ctx, turn, said, origin)
 	if err != nil {
+		if watching {
+			watcher.OnTurnOpenFailed(ws, turn)
+		}
 		q.deps.Footer.SetTurn(ws, nil)
 		q.deps.Sidebar.SetTurn(ws, nil)
 		q.clearUninterruptible(ws)
@@ -152,7 +161,7 @@ func (q *queue) runContextCut(ctx context.Context, ws ids.WorkspaceID, act Act, 
 	// NO mirrored user-prompt row: a recognized command earns no user message,
 	// and the cut's visible outcome is the separation row the feed resolver
 	// draws at EXECUTION time.
-	if watcher, ok := q.deps.Watcher(ws); ok {
+	if watching {
 		if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
 			watcher.SetMainAgent(agent)
 		}
