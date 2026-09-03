@@ -140,9 +140,13 @@ const hibernationIdleCutoffMS = 50
 // FAKE shim's control-socket recorder and does not exist for the real shim
 // this suite spawns), it is produced regardless of which shim is real.
 const (
-	hibernateSweepOp         = "daemon.drain.sweep"
-	hibernateTurnInFlightMsg = "a turn is in flight; deferring the hibernation"
-	hibernateSucceededMsg    = "hibernated an idle session"
+	hibernateSweepOp = "daemon.drain.sweep"
+	// The SWEEP's own freeness pre-check, which runs BEFORE any Hibernate
+	// directive is sent (daemon/internal/drain/sweep.go:64-66). A session
+	// with live work never reaches the shim at all, so this — not the
+	// shim's own refusal — is the record a turn-in-flight deferral leaves.
+	hibernateNotFreeMsg   = "the idle session is not free; deferring its hibernation"
+	hibernateSucceededMsg = "hibernated an idle session"
 )
 
 // awaitHibernateSweepRecord polls a workspace's own daemon log sink until a
@@ -211,12 +215,15 @@ func distinctTurnIDs(rows []*frontendv1.FeedRow) map[string]bool {
 // TestHibernateOnIdleCutoff — SPEC.md #44. Contract: docs/overhaul/daemon.md
 // ("Hibernation is daemon POLICY (idle-cutoff sweep + implicit revive on
 // prompt)... before standing a shim down for hibernation the daemon calls
-// the shim's Hibernate directive") and PROTO-CHANGES.md's
-// HibernateError.kind.turn_in_flight arm. Exercises, for real:
+// the shim's Hibernate directive"). Exercises, for real:
 //
-//  1. turn_in_flight: a turn parked on the documented turn gate holds real
-//     work open across the compressed idle cutoff; the sweep must see the
-//     shim's real refusal and defer rather than forcing a stand-down.
+//  1. A turn parked on the documented turn gate holds real work open across
+//     the compressed idle cutoff, and the sweep defers rather than forcing a
+//     stand-down. The deferral is the SWEEP'S OWN freeness pre-check
+//     (daemon/internal/drain/sweep.go:64-66), which short-circuits before
+//     any Hibernate directive is sent — so HibernateError.turn_in_flight,
+//     the shim-side refusal, is never reached from this path (recorded as an
+//     open item in SPEC.md §G).
 //  2. The plain success path once that turn closes and the session goes
 //     idle again: the sweep's Hibernate/KillSession round trip succeeds, and
 //     the host view settles on the documented park shape (live, shim
@@ -249,7 +256,7 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 	// stand-down out from under live work.
 	awaitHibernateSweepRecord(t, w, ws.GetDir(),
 		"the sweep deferring hibernation for the in-flight gated turn",
-		hibernateTurnInFlightMsg)
+		hibernateNotFreeMsg)
 
 	// Act: release the gate; the turn ends the ORDINARY way (the gate never
 	// changes what the turn is — src/fake/index.ts's own doc comment).
@@ -356,6 +363,9 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 func TestRevivalAfterHibernate(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{IdleCutoffMS: hibernationIdleCutoffMS}})
+	// Standing a shim down and reviving it opens a health fault while the
+	// session has no producer; that is what this test provokes.
+	w.ExpectWarnings("daemon.health.open_fault")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	host := w.WatchHost(ws)

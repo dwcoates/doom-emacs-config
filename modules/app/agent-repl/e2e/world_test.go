@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -160,21 +161,42 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// sidecar that already went away.
 	store := startStore(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"))
 
+	// ONE spool root for the whole world. The fake SDK inside every shim
+	// this daemon spawns writes its task spools here (via
+	// AGENT_REPL_FAKE_SPOOL_ROOT, src/fake/index.ts), and the sidecar globs
+	// exactly this tree (--spool-root). Two roots would mean the sidecar
+	// never sees a spool the fake wrote; worse, the fake's own default is
+	// the REAL vendor location /tmp/claude-<uid>, so leaving it unset does
+	// not merely break the pairing, it writes into the developer's live
+	// vendor spool directory.
+	spoolRoot := t.TempDir()
+
 	daemonOpts := opts.DaemonOpts
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
-	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...)
+	// Appended LAST so this suite's own invariant wins over any ExtraEnv a
+	// caller supplied: the shim's env is scanned front-to-back and the last
+	// assignment of a name is the effective one.
+	daemonOpts.ExtraEnv = append(append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...),
+		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot)
 
 	d := harness.StartDaemon(t, daemonOpts)
+	// Registered immediately after the daemon starts, so t.Cleanup's LIFO
+	// unwind runs it AFTER harness.StartDaemon's own stop cleanup (registered
+	// later, therefore run earlier): the daemon and its shims have already
+	// exited and flushed their final records by the time the logs are read.
+	preserveLogsOnFailure(t, d)
 	resolveConfigRoots(t, d)
 
 	sidecar := startSidecar(t, sidecarBin, sidecarOpts{
 		StoreSocket: store.Socket,
 		ConfigRoots: []string{d.DefaultConfigDir, d.MultiRepoConfigDir},
-		SpoolRoot:   t.TempDir(),
+		SpoolRoot:   spoolRoot,
 		LogPath:     filepath.Join(t.TempDir(), "sidecar.log"),
 	})
+
+	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
 	w := &World{Daemon: d, Store: store, Sidecar: sidecar}
 
@@ -197,6 +219,97 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	})
 
 	return w
+}
+
+// ===========================================================================
+// Failure artifacts (SPEC.md section B, "Failure artifacts").
+// ===========================================================================
+
+// ArtifactsEnv names the directory a failing test copies its structured logs
+// into. Unset (the default) means the logs are emitted as bounded tails into
+// the test's own t.Log output instead — never nothing.
+const ArtifactsEnv = "AGENT_REPL_E2E_ARTIFACTS"
+
+// artifactTailBytes bounds how much of one log a failing test prints when no
+// artifacts directory is configured. Sized to hold the whole of an ordinary
+// single-turn run log (the largest observed sink in this suite is a few tens
+// of kilobytes) while refusing to dump an unbounded file into a CI transcript.
+const artifactTailBytes = 64 << 10
+
+// preserveLogsOnFailure keeps the daemon's and every shim's structured logs
+// alive past the world's teardown, but only when the test FAILED.
+//
+// Every real sink file — the restart-scoped run log and each per-workspace
+// daemon/shim/webapp sink — is created under the state root's logs directory
+// (daemon internal/dlog/sink.go createTarget; the paths inside a workspace's
+// .claude/emacs/ are symlinks INTO that directory). The state root is a
+// per-test temp dir the testing package deletes on the way out, so a failure
+// today leaves nothing to read and the next diagnosis has to re-run the test
+// with instrumentation bolted on. Collecting the one directory therefore
+// collects everything, with no per-test bookkeeping of which workspaces were
+// registered.
+func preserveLogsOnFailure(t *testing.T, d *harness.Daemon) {
+	t.Helper()
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		logsDir := filepath.Join(d.StateDir, "logs")
+		entries, err := os.ReadDir(logsDir)
+		if err != nil {
+			t.Logf("e2e artifacts: no logs to preserve from %s: %v", logsDir, err)
+			return
+		}
+		dest := ""
+		if root := os.Getenv(ArtifactsEnv); root != "" {
+			dest = filepath.Join(root, artifactDirName(t.Name()))
+			if err := os.MkdirAll(dest, 0o755); err != nil {
+				t.Logf("e2e artifacts: cannot create %s (%v); falling back to log tails", dest, err)
+				dest = ""
+			}
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".log" {
+				continue
+			}
+			src := filepath.Join(logsDir, entry.Name())
+			body, err := os.ReadFile(src)
+			if err != nil {
+				t.Logf("e2e artifacts: read %s: %v", src, err)
+				continue
+			}
+			if dest != "" {
+				if err := os.WriteFile(filepath.Join(dest, entry.Name()), body, 0o644); err != nil {
+					t.Logf("e2e artifacts: write %s: %v", filepath.Join(dest, entry.Name()), err)
+				}
+				continue
+			}
+			t.Logf("e2e artifacts: %s (last %d bytes of %d):\n%s", entry.Name(), min(len(body), artifactTailBytes), len(body), tailBytes(body, artifactTailBytes))
+		}
+		if dest != "" {
+			t.Logf("e2e artifacts: structured logs preserved under %s", dest)
+		}
+	})
+}
+
+// tailBytes answers the last limit bytes of body, cut forward to the next
+// newline so the tail never opens mid-record and read as a broken JSONL line.
+func tailBytes(body []byte, limit int) string {
+	if len(body) <= limit {
+		return string(body)
+	}
+	tail := body[len(body)-limit:]
+	if i := bytes.IndexByte(tail, '\n'); i >= 0 {
+		tail = tail[i+1:]
+	}
+	return string(tail)
+}
+
+// artifactDirName turns a Go test name into one path segment: subtests are
+// separated by '/', which would otherwise silently nest (or, for a name with
+// no subtest, collide with a sibling's directory).
+func artifactDirName(name string) string {
+	return strings.NewReplacer("/", "_", string(filepath.Separator), "_").Replace(name)
 }
 
 // resolveConfigRoots rewrites the daemon's two account roots to their
@@ -440,9 +553,40 @@ func (s *Store) Cursors(t *testing.T, ctx context.Context) []*storev1.CursorStat
 type Sidecar struct {
 	t       *testing.T
 	LogPath string
-	cmd     *exec.Cmd
-	done    chan error
-	stopped bool
+	// SpoolRoot is the tree this sidecar was told to glob. Kept on the
+	// struct purely so NewWorld's self-check can compare it against what the
+	// daemon hands its shims, rather than trusting the two call sites to
+	// keep quoting the same variable.
+	SpoolRoot string
+	cmd       *exec.Cmd
+	done      chan error
+	stopped   bool
+}
+
+// assertOneSpoolRoot fails the world's construction unless the spool root
+// shimEnv (the daemon's ExtraEnv, which reaches every shim it spawns)
+// exports is EXACTLY the tree the sidecar
+// globs. This is a self-check of the harness, not of any subject: getting it
+// wrong makes every spool-dependent test fail in the same mystifying way (a
+// turn that completed but whose task output the sidecar never files), and
+// makes an unset value silently target the developer's real
+// /tmp/claude-<uid>.
+func assertOneSpoolRoot(t *testing.T, shimEnv []string, s *Sidecar) {
+	t.Helper()
+	const key = "AGENT_REPL_FAKE_SPOOL_ROOT="
+	var exported string
+	found := false
+	for _, kv := range shimEnv {
+		if strings.HasPrefix(kv, key) {
+			exported, found = strings.TrimPrefix(kv, key), true
+		}
+	}
+	if !found {
+		t.Fatalf("e2e: the daemon exports no %s to its shims, so the fake would spool into the real vendor location", strings.TrimSuffix(key, "="))
+	}
+	if exported != s.SpoolRoot {
+		t.Fatalf("e2e: the shims spool into %s but the sidecar globs %s; they must be one tree", exported, s.SpoolRoot)
+	}
 }
 
 type sidecarOpts struct {
@@ -483,7 +627,7 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: start sidecar: %v", err)
 	}
-	s := &Sidecar{t: t, LogPath: opts.LogPath, cmd: cmd, done: make(chan error, 1)}
+	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, done: make(chan error, 1)}
 	go func() { s.done <- cmd.Wait() }()
 	t.Cleanup(s.Stop)
 	return s
