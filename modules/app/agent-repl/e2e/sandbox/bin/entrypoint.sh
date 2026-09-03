@@ -27,8 +27,25 @@ log "materializing a writable working copy: $REPO_SRC -> $REPO"
 mkdir -p "$REPO"
 # --exclude node_modules: the image's own offline install below is the one
 # that counts, and copying a host-built tree in would defeat it.
-rsync -a --delete \
-  --exclude '.git/' \
+#
+# --exclude '.git' has NO trailing slash on purpose, so it matches a .git
+# FILE as well as a .git directory. In a git WORKTREE checkout .git is a file
+# holding an absolute host path ("gitdir: /Users/.../.git/worktrees/..."),
+# which does not exist in the container: copying it in made every git command
+# run from the working copy die with "fatal: not a git repository". The suite
+# gets its build identity from .sandbox-sha below, not from git.
+# --no-owner --no-group --chmod=u+rwX, NOT a plain `-a`: `-a` preserves the
+# HOST's uid/gid and mode bits, and the container runs as an unprivileged uid
+# that owns none of them. That made rsync fail on every directory at once —
+# `chgrp "..." failed: Operation not permitted` followed by `mkdir "..."
+# failed: Permission denied` — leaving a half-copied working tree. Ownership
+# and group of a throwaway working copy carry no meaning inside the sandbox;
+# what matters is that the sandbox uid can read and traverse all of it and
+# write where it needs to, which is exactly what u+rwX grants.
+rsync -rlptD --delete \
+  --no-owner --no-group \
+  --chmod=u+rwX \
+  --exclude '.git' \
   --exclude 'node_modules/' \
   "$REPO_SRC"/ "$REPO"/
 
@@ -47,8 +64,22 @@ mkdir -p "$(dirname "$mod_dir")"
 ln -s "$REPO/$MODULE_REL" "$mod_dir"
 log "doom module :app agent-repl -> $REPO/$MODULE_REL"
 
+# HOME is a fresh tmpfs, so re-create the parts of it the image could not
+# bake: XDG dirs, and a WRITABLE copy of the primed npm cache. The Go module
+# cache stays where the image put it (/sandbox/cache/go/pkg/mod, read-only) —
+# a complete module cache is read-only-safe — but npm writes to its cache
+# even on an offline install, so that one is copied in.
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$GOCACHE"
+[[ -s ${GIT_CONFIG_GLOBAL:-} ]] || die "no git identity at ${GIT_CONFIG_GLOBAL:-<unset>}; the image did not bake one"
+
 # Node dependencies, offline, from the cache baked into the image.
 if [[ ${SANDBOX_SKIP_NPM:-0} != 1 ]]; then
+  primed=${SANDBOX_CACHE:?SANDBOX_CACHE unset}/npm
+  [[ -d $primed ]] || die "no primed npm cache at $primed"
+  log "copying the primed npm cache into the writable HOME"
+  mkdir -p "$HOME/.npm"
+  cp -a "$primed/." "$HOME/.npm/"
+  export NPM_CONFIG_CACHE="$HOME/.npm" npm_config_cache="$HOME/.npm"
   for rel in "$MODULE_REL/agent-shim/claude/shim" "$MODULE_REL/webapp"; do
     dir=$REPO/$rel
     [[ -f $dir/package-lock.json ]] || { log "no lockfile in $rel; skipping"; continue; }
