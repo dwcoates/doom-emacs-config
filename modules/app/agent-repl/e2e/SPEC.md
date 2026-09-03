@@ -455,6 +455,41 @@ They are merged into this branch; writers must know which one applies here.
   document marked it NOT USABLE; that applied only under the withdrawn
   real-git ruling.)
 
+### Two harness invariants, self-checked before any test runs
+
+Both are silent when broken — neither fails as itself, both fail as a whole
+suite of timeouts — so each is checked or resolved ONCE, up front, in one
+place.
+
+- **One build identity, in both roles.** The daemon stamps every shim spawn
+  with `SHIM_BUILD_SHA` and compares what the shim reports against its
+  DEPLOYED build (`AGENT_REPL_DEPLOY_STAMP`, else `daemon/bin/.built-sha`).
+  Those are two independently written real git shas, and the shim's own
+  identity is whatever the checkout's `agent-shim/claude/shim/dist/.built-sha`
+  says whenever that file exists — so the harness's fixed
+  `e2e-fixed-build-sha` is only a fallback, never the answer. `main_test.go`
+  therefore resolves the identity the daemon's own way
+  (`resolveBuildIdentity`), pins the checkout the daemon resolves it from
+  (`AGENT_REPL_CHECKOUT`), and hands the SAME string back as both
+  `SHIM_BUILD_SHA` and `AGENT_REPL_DEPLOY_STAMP` through `buildIdentityEnv()`
+  — the one place any daemon in this suite gets its build-identity
+  environment. `checkBuildIdentityAgrees` fails the run, naming both values,
+  before `m.Run()`. Disagreement looks like: `daemon.rollout.staleness`, a
+  stale-shim bounce on every OpenWorkspace, a resume that fails with "no
+  transcript exists for vendor session", and every prompt answered
+  `no_session`.
+- **One string per config root.** The sidecar records cursors under the path
+  it walked, which is symlink-resolved (`/tmp/... -> /private/tmp/...` on
+  macOS), while every cursor poll here prefix-matches a project directory
+  derived from the daemon's account roots. `NewWorld` resolves
+  `DefaultConfigDir` and `MultiRepoConfigDir` (`resolveConfigRoots`) before
+  the roots are handed to the sidecar or read by any test, so the recorded
+  path and the polled prefix are the same string. Unresolved, no cursor is
+  ever seen to advance and `driveScenarioToCompletion` times out on turns
+  that in fact completed and were durably written.
+
+Both helpers are unit-tested in `harness_selftest_test.go`.
+
 ### Grep gate
 
 A `TestMain`-time check (before `m.Run()`) that fails the whole run if any
