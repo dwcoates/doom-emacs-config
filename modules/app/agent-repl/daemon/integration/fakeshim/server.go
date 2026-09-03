@@ -294,6 +294,20 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 		}), nil
 	}
 
+	if r := req.Msg.GetResume(); r != nil && !s.hasTranscript(r.GetVendorSessionId()) {
+		// THE REAL SHIM'S OWN REFUSAL. A resume names a conversation the
+		// vendor can only continue from its transcript, so a missing file is
+		// `unknown_session` and never a started session.
+		return connect.NewResponse(&shimv1.StartSessionResponse{
+			Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+				Detail: "no transcript exists for the named conversation",
+				Cause: &shimv1.StartSessionFailure_UnknownSession{
+					UnknownSession: &shimv1.StartSessionUnknownSession{},
+				},
+			}},
+		}), nil
+	}
+
 	vendorID := s.profile.VendorSessionID
 	if r := req.Msg.GetResume(); r != nil {
 		vendorID = r.GetVendorSessionId()
@@ -352,7 +366,9 @@ func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
 	s.started = resp.GetSuccess().GetSession()
 	hook := s.onSessionStarted
 	s.mu.Unlock()
-	s.writeTranscript(id)
+	if !s.profile.NoTranscriptUntilTurn {
+		s.writeTranscript(id)
+	}
 	if first && hook != nil {
 		hook(id)
 	}
@@ -367,25 +383,45 @@ var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
 // resume guard refuses a resume whose transcript is gone, so a fake that starts
 // sessions without laying one down makes every re-open unresumable.
 func (s *server) writeTranscript(vendorSessionID string) {
-	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
-	if configDir == "" {
+	path := transcriptPath(vendorSessionID)
+	if path == "" {
 		return
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}
-	dir := filepath.Join(configDir, "projects", nonAlphanumeric.ReplaceAllString(cwd, "-"))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return
-	}
-	path := filepath.Join(dir, vendorSessionID+".jsonl")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return
 	}
 	defer f.Close()
 	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
+}
+
+// transcriptPath renders where the vendor CLI files one conversation, empty
+// when no account root is routed at all.
+func transcriptPath(vendorSessionID string) string {
+	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if configDir == "" {
+		return ""
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(configDir, "projects", nonAlphanumeric.ReplaceAllString(cwd, "-"), vendorSessionID+".jsonl")
+}
+
+// hasTranscript reports whether the named conversation has a transcript on
+// disk. A shim with NO routed account root can state nothing about the file, so
+// it does not refuse on its absence.
+func (s *server) hasTranscript(vendorSessionID string) bool {
+	path := transcriptPath(vendorSessionID)
+	if path == "" {
+		return true
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // liveWork decodes the profile's already-running items. A profile that cannot
@@ -550,6 +586,14 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 func (s *server) StartTurn(ctx context.Context, req *connect.Request[shimv1.StartTurnRequest]) (*connect.Response[shimv1.StartTurnResponse], error) {
 	if err := s.enter(ctx, RPCStartTurn, req.Msg); err != nil {
 		return nil, err
+	}
+	// THE FIRST TURN IS WHAT LAYS THE TRANSCRIPT DOWN under
+	// NoTranscriptUntilTurn, exactly as the vendor does.
+	s.mu.Lock()
+	id := s.vendorID
+	s.mu.Unlock()
+	if s.profile.NoTranscriptUntilTurn && id != "" {
+		s.writeTranscript(id)
 	}
 	if resp, done, err := scripted[shimv1.StartTurnResponse, *shimv1.StartTurnResponse](s, RPCStartTurn); done {
 		return resp, err

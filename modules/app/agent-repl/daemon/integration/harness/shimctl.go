@@ -29,7 +29,11 @@ type ShimProfile struct {
 	ExitCode         int            `json:"exit_code,omitempty"`
 	Stderr           string         `json:"stderr,omitempty"`
 	ColdOnResume     *ShimColdFacts `json:"cold_on_resume,omitempty"`
-	VendorSessionID  string         `json:"vendor_session_id,omitempty"`
+	// NoTranscriptUntilTurn withholds the transcript until the first turn, the
+	// way the vendor does: a session bounced before its first turn names a
+	// conversation with no transcript at all.
+	NoTranscriptUntilTurn bool   `json:"no_transcript_until_turn,omitempty"`
+	VendorSessionID       string `json:"vendor_session_id,omitempty"`
 	// LiveWork is what the fake's SessionStarted states is already running,
 	// each element one binary-encoded conversation.v1 AgentDetachedWork.
 	LiveWork [][]byte `json:"live_work,omitempty"`
