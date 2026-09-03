@@ -5,6 +5,30 @@
   "prompt": null,
   "prompts": [
     {
+      "text": "In three sentences, explain what a hash table is.",
+      "resume": false
+    },
+    {
+      "text": "In three sentences, explain what a binary search tree is.",
+      "resume": false
+    },
+    {
+      "text": "In three sentences, explain what a linked list is.",
+      "resume": false
+    },
+    {
+      "text": "In three sentences, explain what a queue data structure is.",
+      "resume": false
+    },
+    {
+      "text": "In three sentences, explain what a stack data structure is.",
+      "resume": false
+    },
+    {
+      "text": "In three sentences, explain what a graph data structure is.",
+      "resume": false
+    },
+    {
       "text": "Recap, at length, every topic covered in this conversation so far.",
       "resume": false
     },
@@ -19,17 +43,17 @@
   ],
   "world": "conversation-history",
   "cwd_init": null,
-  "vendor_session_id": "82344fd4-8020-46ac-bf04-26541cef6fea",
+  "vendor_session_id": "2fa32dc3-07c5-4ab6-8f22-4d4db6837072",
   "manual": null,
   "expect": [
     "system:compact_boundary with DiskCompactMetadata",
     "system:local_command_output",
     "the rewritten transcript's per-line field union (the undocumented shape the compaction experiment must observe)"
   ],
-  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-ybyfcK-cwd",
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-fJyhbV-cwd",
   "api_key_source": "none",
   "auth_mode": "config_root",
-  "captured_at": "2026-09-02T00:32:32.952Z",
+  "captured_at": "2026-09-03T19:00:45.518Z",
   "controls": [],
   "unparsed_lines": [],
   "errors": []
