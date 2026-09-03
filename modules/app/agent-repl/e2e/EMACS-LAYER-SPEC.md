@@ -56,45 +56,134 @@ Rejected: **`emacs -batch`**. Three independent reasons, each decisive:
 Rejected: **a GUI frame under Xvfb.** It buys only the xwidget WebKit view,
 which this layer does not cover, at the cost of an X server in the sandbox.
 
-Chosen: **a real tty frame in a pty, with `server-start`, driven through
-`emacsclient --eval`.**
+Chosen: **a real tty frame in a pty, booting the image's REAL DOOM, with
+`server-start`, driven through `emacsclient --eval`.**
 
-- The sandbox runs `emacs -nw -Q --init-directory <scratch>/emacs.d
-  -l <scratch>/bootstrap.el` attached to a pty. A tty frame is a *real*
-  frame: `window-list`, `split-window`, `tab-bar-mode`/`tab-bar-tabs`,
-  `mode-line-format` and `selected-window` all behave as they do for a user.
-- `--init-directory` points inside the sandbox scratch, so the host's
-  `~/.emacs.d`, `~/.config/doom` and `~/.claude` are never read or written.
-- The bootstrap `load`s the module's real sources in `config.el`'s own order
-  and then calls `(server-start)`. It drives PRODUCTION elisp; the only elisp
-  this layer adds is the bootstrap plus one readback wrapper (below).
+- The sandbox runs `emacs -nw` attached to a pty, with `HOME` pointed at the
+  per-test scratch. A tty frame is a *real* frame: `window-list`,
+  `split-window`, `tab-bar-mode`/`tab-bar-tabs`, `mode-line-format` and
+  `selected-window` all behave as they do for a user.
+- **No `-Q`, no `-l`, and no `--init-directory`.** The image's Doom profile
+  is the init path, so the module is reached through `doom!` exactly as a
+  user reaches it.
 - Every interaction is
   `emacsclient --socket-name <sock> --eval <form>`, run through the
-  sandbox's `Exec`. The Go side never types keys into the pty.
+  sandbox's `Exec`. The Go side never types keys into the pty *except* by
+  `execute-kbd-macro` inside a form (see the keybinding section below).
 
-### Keybindings are NOT asserted here
+### It boots real Doom, and that changed three things (REVISED)
 
-`map!` needs Doom, and loading Doom into the sandbox would make this layer a
-Doom test rather than a module test. The key-to-command mapping stays covered
-by the module's own `lisp/test-keybindings.el` ERT suite, which is where it
-belongs. **This layer drives the COMMAND each binding names**, which is the
-user-facing entry point; asserting that `SPC j x` reaches
-`agent-repl-kill-workspace` is a different, already-covered claim.
+The first revision of this document booted `emacs -nw -Q -l bootstrap.el`
+and `load`ed `config.el` by hand, and flagged the Doom boot as a follow-up.
+**The follow-up is taken; the `-Q` boot is withdrawn, not deferred.** The
+image already bakes `doom install` + `doom sync` against a profile that
+enables `:app agent-repl` and `:config (default +bindings)`, so booting it is
+strictly more faithful — real `map!` bindings, the real `set-popup-rule!`
+that `config.el` skips when `set-popup-rule!` is unbound (the notes-popup
+rule scenario 34's family depends on), real module load order, real Doom
+popup and workspace machinery.
 
-**But the shipped image makes this reversible, and that is worth recording.**
-`sandbox/doom/init.el` enables `:app agent-repl` and
-`:config (default +bindings)`, and the image bakes `doom install` + `doom
-sync`. So a real Doom session — with a real `map!` and therefore real leader
-bindings — IS available in the sandbox; this layer simply does not use it,
-booting `emacs -nw -Q -l bootstrap.el` and loading `config.el` directly.
+**There is no `-Q` fallback, and no scenario needs one.** The only thing `-Q`
+buys is a bare Emacs with no Doom, and bare-Emacs coverage of this module is
+the module's own ERT suites (`lisp/test-*.el`), which run in batch and are
+where the key-to-command mapping and every unit-level claim already live. A
+scenario in THIS layer that wanted `-Q` would be asserting something about a
+configuration no user runs.
 
-Driving the module through the image's Doom profile instead would be strictly
-more faithful: real keybindings, and the real `set-popup-rule!` that
-`config.el` skips when `set-popup-rule!` is unbound (which is exactly the
-notes-popup rule scenario 34's family depends on). It is not done here
-because it needs a hook the sandbox's own `doom/config.el` would have to
-carry, and that file is the sandbox agent's. Raised as a follow-up rather
-than taken.
+Three mechanisms make the Doom boot work, and two of them live in
+`sandbox/doom/`, which this layer reads but does not own:
+
+1. **How Emacs finds Doom: `HOME`, not a flag.** Emacs 28.2 has no
+   `--init-directory` (Emacs 29), so `HOME` is the only way to aim an Emacs
+   at an init tree. `HOME` is the per-test scratch root and `~/.emacs.d`
+   under it is *staged* from the image's `EMACSDIR`: Doom's sources are
+   symlinked (they are only ever loaded), and its `.local` tree is copied in
+   minus `straight/`, which is symlinked for size. That is necessary because
+   the container runs `--read-only` and `/sandbox/emacs.d` is not one of its
+   tmpfs mounts, so Doom's local tree cannot be written in place — anything
+   Doom writes at startup has to land in the test's own scratch. Which paths
+   Doom actually writes at startup is **UNVERIFIED**; a boot that hits a
+   read-only path fails loudly with the pty output.
+
+2. **When the settings take effect: before any module `config.el`.**
+   `config.el` decides *at load time* whether to register cold start
+   (`(if (and agent-repl-frontend-auto-start (not noninteractive)) ...)`), so
+   the layer's settings — daemon binary, no-op build script, state root, the
+   two account roots, and `agent-repl-frontend-auto-start` nil — must be in
+   effect before that form runs, or Emacs spawns a daemon against the host's
+   own defaults before a test can say otherwise. `sandbox/doom/init.el`
+   therefore loads the file named by `AGENT_REPL_E2E_SETTINGS` right after
+   its `doom!` form. Setting the values with `setq` ahead of the `defcustom`s
+   in `lisp/daemon.el` holds: `custom-declare-variable` leaves an
+   already-bound variable's value alone.
+
+3. **How a test knows Doom finished: one readiness stamp.**
+   `sandbox/doom/config.el` adds `agent-repl-e2e--boot` to Doom's own
+   after-init edge (`doom-after-init-hook` when bound, `emacs-startup-hook`
+   otherwise, because `DOOM_REF` is a build argument and the profile must not
+   assume which exists). It enables `tab-bar-mode`, calls `server-start`, and
+   writes `AGENT_REPL_E2E_READY` **last** — so the stamp's appearance means
+   "Doom is up AND emacsclient will answer". The stamp is JSON and carries
+   the facts the Go side then *asserts* rather than assumes: `doom`,
+   `map_bang`, `popup_rule`, `agent_repl`, plus `emacs_version` and the pid.
+   A profile that silently degraded fails the boot instead of making every
+   keybinding and popup assertion below it vacuous. A boot that fails writes
+   the SAME file with `"ok": false` and the elisp error, so the Go side
+   reports the elisp error rather than timing out on a socket that is never
+   coming.
+
+The same file also carries the readback helper (`agent-repl-e2e--eval`), so
+the file-based readback is unchanged from the `-Q` revision: a form in, JSON
+out, nothing surviving shell quoting.
+
+### Keybindings ARE asserted here (REVISED)
+
+The first revision excluded them, because `map!` compiles to a no-op without
+Doom (`keybindings.el`'s `eval-when-compile (unless (fboundp 'map!) ...)`).
+With the Doom boot, `map!` expands for real and the leader map from
+`:config (default +bindings)` is live, so **the bindings are in scope and
+scenarios may assert them.**
+
+Two affordances, and which one a scenario uses is decided by whether the
+command prompts:
+
+| affordance | what it does | use it when |
+|---|---|---|
+| `BindingFor(keys)` / `BindingForIn(buffer, keys)` / `LeaderBinding(keys)` | resolves a key sequence to the command it names, **without running it** | the command would prompt (`completing-read`, `y-or-n-p`), or the claim IS the mapping |
+| `Keys(keys)` / `KeysIn(buffer, keys)` / `Leader(keys)` | presses the sequence through `execute-kbd-macro`: real keymap lookup, real command | the command runs to completion without prompting |
+
+Every press enters evil NORMAL state first, because the leader is `SPC` there
+and a composer buffer left in insert state would send a literal space — a
+wrong pass rather than a failure. A sequence that *does* prompt blocks the
+command loop and is reported as a **wedge**, which is correct: from the
+outside a prompt nobody can answer is a hang.
+
+**Which scenarios should assert a binding rather than a command.** The rule
+is that a binding assertion belongs where the KEY is the user's entry point
+and the module owns the key, not where the command is merely convenient to
+reach:
+
+- **Area A (cold start)** — none. Cold start has no keystroke.
+- **Area B (workspace lifecycle)** — the workspace verbs are the module's own
+  leader bindings and are the strongest case in the list: `SPC TAB C-n`
+  (create), `SPC j x` (kill), the close and restart verbs. Assert with
+  `LeaderBinding` where the verb prompts for a target and with `Leader`
+  where it takes the target as an argument.
+- **Area C (panel and window lifecycle)** — the panel open/close bindings,
+  pressed with `Leader`; these are exactly the ones a `map!` regression
+  would break silently, because the command keeps working.
+- **Area D (composer)** — `RET` in the composer buffer, via
+  `KeysIn(<input buffer>, "RET")` rather than by calling `agent-repl-send`.
+  The composer's own map is the subject, and the proof-of-life test's step 4
+  is the natural place to switch first.
+- **Areas E, F, G, H, I** — command-driven as before. Their subjects are
+  paint, routing, restart and refusal text; the key that reached them is not
+  the claim.
+
+The module's `lisp/test-keybindings.el` ERT suite keeps its coverage
+unchanged. It asserts the mapping in isolation; this layer asserts that the
+key, in a real Doom session, reaches the real command with real state behind
+it.
 
 ### Commands are invoked as commands, not as internals
 
@@ -141,10 +230,13 @@ DECISION is data (`agent-repl--color-by-name`, `agent-repl-status-color-table`,
 `agent-repl-status-blink-schedule`) and is what gets asserted. Rasterization
 is not this layer's claim.
 
-Readback goes through one generated-at-bootstrap helper that wraps a form in
-`condition-case` and prints `(:ok <form>)` or `(:error "<message>")`, so an
-elisp error becomes a Go failure naming the elisp error rather than an
-unparseable `emacsclient` exit status.
+Readback goes through one helper — `agent-repl-e2e--eval`, defined in
+`sandbox/doom/config.el` — that reads a form from a file, wraps its
+evaluation in `condition-case`, and writes `{"ok": true, "value": ...}` or
+`{"ok": false, "error": "<message>"}` to a second file. Files rather than
+`--eval` output on both sides, so nothing has to survive shell quoting or
+elisp print escaping, and an elisp error becomes a Go failure naming the
+elisp error rather than an unparseable `emacsclient` exit status.
 
 ## The heartbeat
 
@@ -234,7 +326,15 @@ test.
 ## The sandbox dependency (AMENDED once `sandbox/` landed)
 
 Tests write nothing outside the sandbox and never touch the host's Emacs,
-`~/.claude`, `~/.emacs.d`, or `~/.config`. `modules/app/agent-repl/e2e/sandbox/`
+`~/.claude`, `~/.emacs.d`, or `~/.config`, and **the layer asserts that from
+the inside rather than trusting the flags it was launched with.**
+`assertHostIsolation` runs once, before anything starts, and fails the test
+unless: `HOME` is under `/sandbox/`; `/tmp` and `HOME` are each a **tmpfs**
+mount of their own, read from `/proc/self/mountinfo` rather than inferred;
+`/repo-src` is a mount point; and a write probe into `/repo-src` **fails**.
+The run script's `docker run` flags are what establish all four, but a test
+invoked some other way could satisfy `insideSandbox()` and still reach the
+host, and this layer starts a real Emacs that spawns a real daemon. `modules/app/agent-repl/e2e/sandbox/`
 has since landed (`cfaea2bdb`), and **its model is inside-out from what the
 first revision of this document assumed.** This section is rewritten to what
 shipped; the interface the earlier revision proposed (a Go `sandbox` package
@@ -258,8 +358,14 @@ starts is an ordinary local child. That removes both capabilities the project
 lead flagged as missing, rather than needing them added:
 
 - **A PTY-capable exec is not needed from the script.** The layer allocates
-  its own pty in-container via `script -q -c CMD /dev/null` (util-linux,
-  Debian-essential, so present in the base image). Relying on the script's
+  its own pty in-container via `script -q -c CMD /dev/null`. `script` is a
+  **guarantee of the image**, not an inference: the Dockerfile installs
+  `bsdutils` (which carries `script` on bookworm) and `util-linux` by name in
+  its apt list, so they are pinned to `SNAPSHOT_STAMP` like everything else
+  and a reshuffle of the binary between the two packages cannot silently
+  remove it. `requireSandbox` keeps an `exec.LookPath("script")` check as a
+  backstop for an image built before that line existed. Relying on the
+  script's
   `-t` would not work anyway: `do_run` passes `-t` only when its own stdout
   is a terminal, and under `go test` it is not.
 - **A writable swept Scratch is not needed from the script.** `/tmp` is
@@ -285,14 +391,21 @@ verbatim -- never a silent pass, and never a fallback to an unsandboxed run."
 
 ### Emacs in the image is 28.2, not 30
 
-The image installs Debian **bookworm**'s `emacs-nox`, which is Emacs 28.2.
-This corrects a "Emacs 30-era" expectation and cost one design change:
-`--init-directory` landed in **Emacs 29** and is gone from this layer. It was
-redundant regardless -- `-Q` reads no init file, no site file and no package
-directory, so there is nothing for it to point at, and host `~/.emacs.d`
-isolation comes from `-Q` plus the container's own `HOME` rather than from
-that flag. `HasEmacs()` requires **27 or later**, for `tab-bar-tabs`, and
-28.2 satisfies it.
+The image installs Debian **bookworm**'s `emacs-nox`, which is **Emacs
+28.2**. This corrects an "Emacs 30-era" expectation, and it is a standing
+constraint on every future scenario, not a one-time correction:
+
+- **`--init-directory` is unavailable.** It landed in **Emacs 29**. That is
+  why this layer aims Emacs at its Doom tree through `HOME` plus a staged
+  `~/.emacs.d`, which every Emacs supports, rather than through the flag.
+- **No scenario may assume Emacs 29+ anything** — not the flag, not
+  `setopt`, not 29's `treesit`, not 30's `completion-preview-mode`, not
+  `use-package` being built in. A scenario that needs one of those is
+  asserting something the image cannot run, and the bar to raise the image's
+  Emacs is a Dockerfile change with its own justification.
+- `HasEmacs()` requires **27 or later**, for `tab-bar-tabs`, and 28.2
+  satisfies it. The floor is 27 and the ceiling is 28.2; write to that
+  window.
 
 ## What this layer does not cover, deliberately
 
@@ -414,8 +527,12 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 ### D. Composer and prompt submission (6)
 
 20. **SubmitFromComposerYieldsAResponseRow** -- insert text into the input
-    buffer, `agent-repl-send` -- the response is visible in Emacs's own
-    state. **THE PROOF-OF-LIFE SCENARIO** (see below).
+    buffer, then **press RET** -- the response is visible in Emacs's own
+    state. **THE PROOF-OF-LIFE SCENARIO** (see below). RET, not
+    `agent-repl-send`: the composer's RET is
+    `map! :map agent-repl-input-mode-map :ni "RET"` in `input.el`, which the
+    old `-Q` boot expanded to nothing, so pressing it is strictly more than
+    the command call was.
 21. **MetapromptIsComposedBeforeSubmission** --
     `agent-repl-send-with-metaprompt` -- the prompt the daemon received
     carries the sentinel-marked metaprompt span. Composition before
@@ -523,19 +640,35 @@ Scenario 20 is implemented first and alone, as
 
 1. Sandbox up, store and sidecar started by Go, binaries built by the
    existing helpers.
-2. Emacs up with a tty frame; heartbeat armed.
+2. Emacs up with a tty frame, booted through the image's Doom profile;
+   `assertHostIsolation` has already passed, the readiness stamp has been
+   read and its `doom` / `map_bang` / `popup_rule` / `agent_repl` facts
+   asserted, and the heartbeat is armed.
 3. Emacs spawns the daemon via `agent-repl-frontend-daemon-ensure`; the
    layer waits on `agent-repl-link--primary` becoming non-nil.
 4. `agent-repl-add-project-workspace` on a scripted fake-git worktree.
 5. `agent-repl-frontend-open-panel`; wait on the panel buffers appearing in
    `window-list`.
-6. Insert a prompt into the input buffer; `agent-repl-send`.
+6. Insert a prompt into the input buffer; assert composer RET resolves to
+   `agent-repl-send`, then PRESS RET.
 7. Wait on Emacs's own state showing the response row, and cross-check the
    daemon's feed frame from the Go client so a green test cannot mean "Emacs
    drew something the daemon never sent".
 
 It skips loudly without the sandbox, with the exact reason `Available()`
 returned.
+
+**Still unverified, and it stays that way until a container runs.** Docker is
+down on the machine this layer was authored on, so nothing below has ever
+been observed: that the image builds at all; that Doom boots from a staged
+`~/.emacs.d` under a scratch `HOME`; that the copy set in `stageEmacsDir` is
+exactly the set Doom writes to at startup; that `doom-after-init-hook` exists
+in the `DOOM_REF` a build picks; that `script` behaves as `StartPTY` assumes;
+that `assertHostIsolation`'s four probes hold against the run script's actual
+flags; and every one of `HeartbeatBound`, `emacsBootBound`, `doomBootBound`
+and `doomStageBound`, which remain **PROVISIONAL** and must be replaced with
+measured values -- a small multiple of an observed healthy maximum -- before
+the scenario list beyond the proof-of-life test is implemented.
 
 ## Registration
 

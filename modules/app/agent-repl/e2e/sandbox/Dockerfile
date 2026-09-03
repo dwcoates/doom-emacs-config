@@ -59,6 +59,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # the module loads at LOAD time needs either — `frontend.el` only ever calls
 # `(require 'xwidget)` from inside a function body, so a batch/headless load
 # of the module never reaches it.
+#
+# `bsdutils` and `util-linux` are named EXPLICITLY for `script(1)`, which is
+# how the Emacs client layer allocates the pty its Emacs needs for a real tty
+# frame (`e2e/emacs_sandbox_test.go`, StartPTY). Both are Debian
+# `required`/`important` packages, so they are already present in
+# `bookworm-slim` — naming them makes `script` a GUARANTEE of this image
+# rather than an inference from the base image's package set, and pins them
+# to SNAPSHOT_STAMP like everything else here. `script` lives in `bsdutils`
+# on bookworm; `util-linux` is listed alongside it so a future reshuffle of
+# the binary between the two packages cannot silently remove it. The harness
+# keeps a runtime `exec.LookPath("script")` check as a backstop for images
+# built before this line existed.
 RUN set -eux; \
     printf '%s\n' \
       "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${SNAPSHOT_STAMP}/ bookworm main" \
@@ -67,11 +79,13 @@ RUN set -eux; \
     rm -f /etc/apt/sources.list.d/debian.sources; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
     apt-get install -y --no-install-recommends \
+        bsdutils \
         ca-certificates \
         curl \
         emacs-nox \
         git \
         rsync \
+        util-linux \
         xz-utils; \
     rm -rf /var/lib/apt/lists/*
 

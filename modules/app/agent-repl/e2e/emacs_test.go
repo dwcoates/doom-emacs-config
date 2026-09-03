@@ -28,6 +28,26 @@ import (
 // through `emacsclient --eval`. Batch mode is not an option: `config.el`
 // gates cold start on `(not noninteractive)`, so a batch Emacs never spawns
 // the daemon at all.
+//
+// AND IT BOOTS THE IMAGE'S REAL DOOM, not `emacs -Q`. The sandbox image
+// bakes `doom install` + `doom sync` against a profile that enables
+// `:app agent-repl` and `:config (default +bindings)`, so booting it is
+// strictly more faithful than loading `config.el` by hand: real `map!`
+// bindings, the real `set-popup-rule!` the notes popup needs (`config.el`
+// skips that rule when `set-popup-rule!` is unbound), real module load
+// order, and the module reached through `doom!` exactly as a user reaches
+// it. There is NO `-Q` fallback, and none is wanted: the only thing `-Q`
+// buys is a bare Emacs, and bare-Emacs coverage is the module's own ERT
+// suites under `lisp/test-*.el`, which run in batch.
+//
+// The Doom side of the seam is two files this layer does not own:
+//   * `sandbox/doom/init.el` loads AGENT_REPL_E2E_SETTINGS after its
+//     `doom!` form, which is BEFORE any module `config.el` -- necessary,
+//     because `config.el` decides at load time whether to register cold
+//     start, and this layer needs cold start off so `EnsureDaemon` is the
+//     spawn a scenario can observe from its first instant.
+//   * `sandbox/doom/config.el` defines the readback helper and, on Doom's
+//     own after-init edge, starts the server and writes a readiness stamp.
 
 // HeartbeatBound is how long one `emacsclient --eval '(emacs-pid)'` probe
 // may take before the running test fails.
@@ -55,6 +75,26 @@ const heartbeatInterval = 250 * time.Millisecond
 // startup events, the same shape HandoverChainTimeout documents.
 const emacsBootBound = HandoverChainTimeout
 
+// doomBootBound is how long Emacs may take to finish Doom's own
+// initialization and publish the readiness stamp.
+//
+// PROVISIONAL, like the two above, and for one extra reason: nobody has ever
+// timed a Doom boot in this image, because no container has ever run. It is
+// TWICE emacsBootBound because a Doom boot is emacsBootBound's work plus
+// Doom's core, its enabled modules and their `config.el`s -- strictly more
+// than loading the module alone, and the only honest thing to say about the
+// difference until it is measured is that it is a small multiple.
+const doomBootBound = 2 * emacsBootBound
+
+// doomStageBound bounds each `cp -a` that stages one entry of Doom's
+// `.local` tree into the test's scratch.
+//
+// PROVISIONAL. The tree's size is unmeasured (see stageEmacsDir), and the
+// copy is a tmpfs-to-tmpfs one within one container, so this is generous by
+// design: the failure it exists to catch is a copy that cannot finish at
+// all, not a slow one.
+const doomStageBound = 60 * time.Second
+
 // Emacs is one sandboxed Emacs process, its server socket, and its
 // heartbeat.
 type Emacs struct {
@@ -66,6 +106,15 @@ type Emacs struct {
 	Root string
 	// ServerSocket is the `server-name` emacsclient dials.
 	ServerSocket string
+	// EmacsDir is the per-test `~/.emacs.d` this Emacs boots Doom from. It
+	// is staged from the image's own EMACSDIR: see stageEmacsDir.
+	EmacsDir string
+	// ReadyStamp is the file Doom's after-init hook writes. Its appearance
+	// is the ONE edge that means "Doom finished initializing".
+	ReadyStamp string
+	// Doom is what that stamp said, so a scenario can assert it really is a
+	// Doom boot with `map!` expanded rather than assume it.
+	Doom DoomReady
 	// StateDir is what travels to the daemon in AGENT_REPL_STATE_DIR. ONE
 	// state root is the cross-system contract, so the daemon Emacs spawns
 	// and the Go client that cross-checks frames read the same tree.
@@ -89,6 +138,21 @@ type Emacs struct {
 	wedgeCause atomic.Pointer[string]
 
 	stopHeartbeat context.CancelFunc
+}
+
+// DoomReady is the readiness stamp `sandbox/doom/config.el` writes once Doom
+// has finished initializing and the server socket answers.
+type DoomReady struct {
+	OK           bool   `json:"ok"`
+	Error        string `json:"error"`
+	PID          int    `json:"pid"`
+	EmacsVersion string `json:"emacs_version"`
+	Doom         bool   `json:"doom"`
+	DoomVersion  string `json:"doom_version"`
+	MapBang      bool   `json:"map_bang"`
+	PopupRule    bool   `json:"popup_rule"`
+	AgentRepl    bool   `json:"agent_repl"`
+	ServerName   string `json:"server_name"`
 }
 
 // EmacsOpts configures one Emacs.
@@ -118,6 +182,8 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		box:                box,
 		Root:               root,
 		ServerSocket:       filepath.Join(root, "server"),
+		EmacsDir:           filepath.Join(root, ".emacs.d"),
+		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
 		StateDir:           filepath.Join(root, "state"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
@@ -125,10 +191,20 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		wedged:             make(chan struct{}),
 	}
 
-	e.writeBootstrap(opts)
+	e.writeSettings(opts)
+	e.stageEmacsDir()
 
+	// HOME is the per-test scratch root, and `~/.emacs.d` under it is the
+	// staged Doom. Emacs 28 has no `--init-directory` (that landed in 29),
+	// so HOME is the ONLY way to point an Emacs at a different init tree --
+	// which is also why the staging exists rather than a flag.
 	env := append([]string{
 		"HOME=" + root,
+		"EMACSDIR=" + e.EmacsDir,
+		"AGENT_REPL_E2E_EMACS=1",
+		"AGENT_REPL_E2E_SERVER=" + e.ServerSocket,
+		"AGENT_REPL_E2E_READY=" + e.ReadyStamp,
+		"AGENT_REPL_E2E_SETTINGS=" + e.settingsPath(),
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
@@ -138,14 +214,11 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		env = append(env, "AGENT_REPL_STORE_SOCKET="+opts.StoreSocket)
 	}
 
-	// `-Q` reads no init file, no site file and no package directory, so the
-	// module's sources are the only elisp loaded and there is nothing for an
-	// --init-directory to point at. That also keeps this off Emacs 29+: the
-	// image is Debian bookworm's emacs-nox, which is 28.2.
-	argv := append(envPrefix(env),
-		"emacs", "-nw", "-Q",
-		"-l", e.bootstrapPath(),
-	)
+	// No `-Q` and no `-l`: the image's Doom profile is the init path, and
+	// `sandbox/doom/init.el` picks the settings file up itself. `-nw` is a
+	// tty frame, which is what makes `window-list`, `tab-bar-tabs` and
+	// `mode-line-format` behave as they do for a user.
+	argv := append(envPrefix(env), "emacs", "-nw")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -159,17 +232,21 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// up and then wedges during load is still reaped.
 	t.Cleanup(e.stop)
 
+	e.awaitDoom()
 	e.awaitServer()
 	e.armHeartbeat()
 	return e
 }
 
-// bootstrapPath is the elisp this layer loads into Emacs. It is the ONLY
-// elisp the layer adds: it loads the module's real sources in `config.el`'s
-// own order and then starts the server.
-func (e *Emacs) bootstrapPath() string { return filepath.Join(e.Root, "bootstrap.el") }
+// settingsPath is the ONE elisp file this layer writes. It is not a
+// bootstrap any more: it loads no sources and starts nothing, because Doom
+// does both. It only sets the launcher's own defcustoms at the sandbox and
+// turns cold start off, and `sandbox/doom/init.el` loads it before any
+// module's `config.el` -- which is the only moment at which those settings
+// can still be in effect when `config.el` reads them.
+func (e *Emacs) settingsPath() string { return filepath.Join(e.Root, "e2e-settings.el") }
 
-func (e *Emacs) writeBootstrap(opts EmacsOpts) {
+func (e *Emacs) writeSettings(opts EmacsOpts) {
 	e.t.Helper()
 
 	for _, dir := range []string{
@@ -193,84 +270,179 @@ func (e *Emacs) writeBootstrap(opts EmacsOpts) {
 		e.t.Fatalf("write the no-op build script: %v", err)
 	}
 
-	moduleRoot := repo.repoDir
-
-	// The readback helper. It reads a form from a file and writes the result
-	// as JSON to another file, so nothing has to survive shell quoting or
-	// elisp print escaping, and an elisp error becomes a NAMED Go failure
-	// rather than an opaque emacsclient exit status.
-	src := fmt.Sprintf(`;;; bootstrap.el --- e2e emacs client layer -*- lexical-binding: t; -*-
+	// `setq` AHEAD of the `defcustom`s in `lisp/daemon.el` is deliberate and
+	// it holds: `custom-declare-variable` leaves an already-bound variable's
+	// value alone, so these survive the module's own declaration. Doing it
+	// the other way round -- waiting until the module is loaded -- is too
+	// late, because `config.el` has by then already decided whether to
+	// register cold start.
+	src := fmt.Sprintf(`;;; e2e-settings.el --- e2e emacs client layer -*- lexical-binding: t; -*-
 ;;; Commentary:
-;; Written by the Go e2e harness.  It loads the module's REAL sources and
-;; starts the server; it adds no behavior of its own beyond one readback
-;; helper.  See e2e/EMACS-LAYER-SPEC.md.
+;; Written by the Go e2e harness and loaded by sandbox/doom/init.el BEFORE
+;; any Doom module's config.el.  It adds no behavior: it only points the
+;; module's own defcustoms at this test's sandbox paths.  See
+;; e2e/EMACS-LAYER-SPEC.md.
 ;;; Code:
 
-(require 'json)
-(require 'server)
-
-(setq server-name %q)
-(setq inhibit-startup-screen t)
-
-;; Point the launcher's own defcustoms at the sandbox.  The launcher still
-;; composes argv and environment; this only tells it where things are.
-(defvar agent-repl-e2e--daemon-binary %q)
-(defvar agent-repl-e2e--build-script %q)
-(defvar agent-repl-e2e--module-root %q)
-
-(add-to-list 'load-path agent-repl-e2e--module-root)
-
-(defun agent-repl-e2e--eval (in out)
-  "Evaluate the form in file IN and write a JSON result to file OUT.
-Returns t.  The result is an object with an \"ok\" boolean plus either a
-\"value\" or an \"error\", so an elisp failure reaches the Go side as
-itself rather than as a timeout somewhere downstream."
-  (let ((payload
-         (condition-case err
-             (let ((value (eval (car (read-from-string
-                                      (with-temp-buffer
-                                        (insert-file-contents in)
-                                        (buffer-string))))
-                                t)))
-               (list (cons "ok" t) (cons "value" value)))
-           (error (list (cons "ok" :json-false)
-                        (cons "error" (error-message-string err)))))))
-    (with-temp-file out
-      (insert (json-encode payload))))
-  t)
-
-;; Cold start is NOT armed here: this layer drives
+;; Cold start is NOT armed: this layer drives
 ;; agent-repl-frontend-daemon-ensure explicitly, so the spawn happens at a
-;; moment a scenario can observe from its first instant.
+;; moment a scenario can observe from its first instant.  This must be set
+;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
-(load (expand-file-name "config.el" agent-repl-e2e--module-root) nil t)
-
-(setq agent-repl-daemon-command (list agent-repl-e2e--daemon-binary)
-      agent-repl-daemon-build-script agent-repl-e2e--build-script
+(setq agent-repl-daemon-command (list %q)
+      agent-repl-daemon-build-script %q
       agent-repl-daemon-default-config-dir %q
       agent-repl-daemon-multi-repo-config-dir %q
       agent-repl-daemon-multi-repo-root %q)
 
-;; A real frame with a tab-bar: this layer asserts window and tab state, and
-;; both need the modes actually on.
-(tab-bar-mode 1)
-
-(server-start)
-(provide 'agent-repl-e2e-bootstrap)
-;;; bootstrap.el ends here
+(provide 'agent-repl-e2e-settings)
+;;; e2e-settings.el ends here
 `,
-		e.ServerSocket,
 		opts.DaemonBinary,
 		buildScript,
-		moduleRoot,
 		e.DefaultConfigDir,
 		e.MultiRepoConfigDir,
 		e.MultiRepoRoot,
 	)
 
-	if err := os.WriteFile(e.bootstrapPath(), []byte(src), 0o644); err != nil {
-		e.t.Fatalf("write bootstrap.el: %v", err)
+	if err := os.WriteFile(e.settingsPath(), []byte(src), 0o644); err != nil {
+		e.t.Fatalf("write e2e-settings.el: %v", err)
+	}
+}
+
+// imageEmacsDir is the image's own Doom install -- `doom install` + `doom
+// sync` ran against it at BUILD time, so no test pays for either.
+const imageEmacsDir = "/sandbox/emacs.d"
+
+// doomReadOnlySubdir is the one entry of the image's `.local` tree that is
+// staged as a SYMLINK rather than copied: `straight/` holds every package
+// checkout and build, it is large, and nothing writes to it outside a `doom
+// sync`, which a test never runs.
+const doomReadOnlySubdir = "straight"
+
+// stageEmacsDir builds this test's `~/.emacs.d` out of the image's.
+//
+// Two constraints collide here, and the staging is what resolves them:
+//   - Emacs 28.2 has no `--init-directory`, so HOME is the only way to aim
+//     an Emacs at an init tree, and HOME must be per-test.
+//   - the container runs `--read-only`, and `/sandbox/emacs.d` is NOT one of
+//     its tmpfs mounts, so Doom's own local tree cannot be written in place.
+//
+// So Doom's sources are symlinked (read-only is fine; they are only loaded)
+// and its `.local` tree is copied into the scratch, minus `straight/`, which
+// is symlinked for size. Anything Doom writes at startup then lands in the
+// test's own scratch and dies with it.
+//
+// UNVERIFIED: no container has ever run this. Docker is down on the machine
+// this was authored on, so which paths Doom actually writes at startup --
+// and therefore whether the copy set is exactly right -- is a claim about
+// Doom's layout, not an observation. A boot that fails on a read-only path
+// fails LOUDLY with the pty output, which is what awaitDoom is for.
+func (e *Emacs) stageEmacsDir() {
+	e.t.Helper()
+
+	src := os.Getenv("EMACSDIR")
+	if src == "" {
+		src = imageEmacsDir
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		e.t.Fatalf("read the image's Doom install at %s: %v", src, err)
+	}
+	if err := os.MkdirAll(e.EmacsDir, 0o755); err != nil {
+		e.t.Fatalf("prepare %s: %v", e.EmacsDir, err)
+	}
+
+	for _, entry := range entries {
+		from := filepath.Join(src, entry.Name())
+		to := filepath.Join(e.EmacsDir, entry.Name())
+		if entry.Name() != ".local" {
+			if err := os.Symlink(from, to); err != nil {
+				e.t.Fatalf("stage %s: %v", to, err)
+			}
+			continue
+		}
+		if err := os.MkdirAll(to, 0o755); err != nil {
+			e.t.Fatalf("prepare %s: %v", to, err)
+		}
+		local, err := os.ReadDir(from)
+		if err != nil {
+			e.t.Fatalf("read the image's Doom local tree at %s: %v", from, err)
+		}
+		for _, l := range local {
+			lFrom := filepath.Join(from, l.Name())
+			lTo := filepath.Join(to, l.Name())
+			if l.Name() == doomReadOnlySubdir {
+				if err := os.Symlink(lFrom, lTo); err != nil {
+					e.t.Fatalf("stage %s: %v", lTo, err)
+				}
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), doomStageBound)
+			out, err := e.box.Exec(ctx, "cp", "-a", lFrom, lTo)
+			cancel()
+			if err != nil {
+				e.t.Fatalf("stage %s into the scratch: %v\n%s", lFrom, err, out)
+			}
+		}
+	}
+}
+
+// awaitDoom waits for the readiness stamp `sandbox/doom/config.el` writes.
+//
+// The stamp is the layer's Doom-initialized edge, and it is written AFTER
+// `server-start`, so its appearance means both that Doom finished and that
+// emacsclient will answer. A boot that fails writes the same file with
+// `"ok": false` and the elisp error, which is reported as itself rather than
+// as a socket that never appears.
+func (e *Emacs) awaitDoom() {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), doomBootBound)
+	defer cancel()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if e.proc.Exited() {
+			e.t.Fatalf("emacs exited before Doom finished initializing; pty output:\n%s", e.proc.Output())
+		}
+		body, err := os.ReadFile(e.ReadyStamp)
+		if err == nil {
+			var ready DoomReady
+			if jsonErr := json.Unmarshal(body, &ready); jsonErr != nil {
+				e.t.Fatalf("decode the Doom readiness stamp %q: %v", string(body), jsonErr)
+			}
+			if !ready.OK {
+				e.t.Fatalf("Doom failed to initialize: %s; pty output:\n%s", ready.Error, e.proc.Output())
+			}
+			// The whole reason for booting Doom rather than `-Q` is that
+			// these are real. A stamp that says otherwise means the profile
+			// silently degraded, and every keybinding and popup assertion
+			// below it would be vacuous.
+			if !ready.Doom {
+				e.t.Fatalf("Doom is not loaded in the e2e Emacs; the stamp reports %+v", ready)
+			}
+			if !ready.MapBang {
+				e.t.Fatalf("`map!' is unbound in the e2e Emacs, so no keybinding is real; the stamp reports %+v", ready)
+			}
+			if !ready.PopupRule {
+				e.t.Fatalf("`set-popup-rule!' is unbound, so config.el skipped the notes popup rule; the stamp reports %+v", ready)
+			}
+			if !ready.AgentRepl {
+				e.t.Fatalf("`:app agent-repl' did not load; the stamp reports %+v", ready)
+			}
+			e.Doom = ready
+			return
+		}
+		if !os.IsNotExist(err) {
+			e.t.Fatalf("read the Doom readiness stamp: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s); pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.proc.Output())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -280,8 +452,11 @@ func envPrefix(env []string) []string {
 	return append([]string{"env"}, env...)
 }
 
-// awaitServer waits for the server socket to answer, which is the first
-// moment the module's sources are fully loaded.
+// awaitServer waits for the server socket to answer.
+//
+// It runs AFTER awaitDoom, and is not redundant with it: the stamp says the
+// server was started, and this says emacsclient can actually reach it, which
+// is the transport every readback below rides.
 func (e *Emacs) awaitServer() {
 	e.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), emacsBootBound)
@@ -609,6 +784,94 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 func (e *Emacs) AwaitTrue(what, form string) {
 	e.t.Helper()
 	e.AwaitEval(what, form, func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+}
+
+// ---------------------------------------------------------------------------
+// KEY SEQUENCES
+// ---------------------------------------------------------------------------
+//
+// These exist because the layer boots real Doom: `map!` expands for real, so
+// `keybindings.el`'s leader forms are live bindings and not compiled to a
+// no-op. Under `-Q` there was nothing to press.
+//
+// TWO affordances, and the difference between them matters:
+//
+//   * Lookup (`BindingFor`) resolves a key sequence to the command it names,
+//     WITHOUT running it. This is what a scenario uses when the command it
+//     reaches would prompt -- `completing-read`, `y-or-n-p` -- because a
+//     prompt inside `execute-kbd-macro` would block the command loop and
+//     surface as a wedge rather than as an assertion.
+//   * Press (`Keys`, `KeysIn`, `Leader`) actually runs the sequence through
+//     `execute-kbd-macro`, which is the real keymap lookup plus the real
+//     command, exactly as a user's keystroke does.
+//
+// The leader is `SPC` in evil NORMAL state, so every press enters normal
+// state first: a composer buffer left in insert state would otherwise send
+// a literal space, which is a wrong pass rather than a failure.
+
+// evilNormalForm puts the current buffer into evil normal state when evil is
+// loaded. `(evil +everywhere)` is in the sandbox profile, so it is; the
+// guard is there so a profile change degrades to a plain Emacs press rather
+// than to an unbound-function error.
+const evilNormalForm = `(when (fboundp 'evil-normal-state) (evil-normal-state))`
+
+// BindingFor returns the command a key sequence resolves to, as a string,
+// without running it. An unbound sequence returns "nil", which is what elisp
+// prints for it.
+func (e *Emacs) BindingFor(keys string) string {
+	e.t.Helper()
+	return e.EvalString(fmt.Sprintf(`(progn %s (format "%%s" (key-binding (kbd %s) t)))`,
+		evilNormalForm, elispString(keys)))
+}
+
+// BindingForIn is BindingFor resolved inside one buffer, which is how a
+// binding defined on a mode map (the composer's, the roster's) is looked up.
+func (e *Emacs) BindingForIn(buffer, keys string) string {
+	e.t.Helper()
+	return e.EvalString(fmt.Sprintf(`(with-current-buffer %s %s (format "%%s" (key-binding (kbd %s) t)))`,
+		elispString(buffer), evilNormalForm, elispString(keys)))
+}
+
+// Keys presses one key sequence in the SELECTED window, through the real
+// keymaps.
+//
+// A sequence that prompts will hang the command loop and be reported as a
+// wedge; use BindingFor for those, or stub the prompt for the duration of
+// the press the same way a scenario stubs it for a command.
+func (e *Emacs) Keys(keys string) {
+	e.t.Helper()
+	e.Eval(fmt.Sprintf(`(progn %s (execute-kbd-macro (kbd %s)) t)`, evilNormalForm, elispString(keys)))
+}
+
+// KeysIn presses one key sequence in a named buffer, selecting its window
+// first when it has one: `map!` bindings on a mode map only resolve in a
+// buffer of that mode, and a command that acts on the selected window needs
+// that window actually selected.
+func (e *Emacs) KeysIn(buffer, keys string) {
+	e.t.Helper()
+	e.Eval(fmt.Sprintf(`(let ((buf (get-buffer %s)))
+             (unless buf (error "no buffer named %%s" %s))
+             (let ((win (get-buffer-window buf)))
+               (if win (select-window win) (switch-to-buffer buf)))
+             (with-current-buffer buf
+               %s
+               (execute-kbd-macro (kbd %s))
+               t))`,
+		elispString(buffer), elispString(buffer), evilNormalForm, elispString(keys)))
+}
+
+// Leader presses a leader sequence, i.e. the same one the module's own
+// `map! :leader` forms and the module AGENTS.md write as `SPC TAB C-n`.
+func (e *Emacs) Leader(keys string) {
+	e.t.Helper()
+	e.Keys("SPC " + keys)
+}
+
+// LeaderBinding resolves a leader sequence to its command without running
+// it, for the leader bindings whose commands prompt.
+func (e *Emacs) LeaderBinding(keys string) string {
+	e.t.Helper()
+	return e.BindingFor("SPC " + keys)
 }
 
 // EnsureDaemon has EMACS spawn the daemon, through the module's own
