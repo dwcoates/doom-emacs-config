@@ -160,18 +160,34 @@ ENV PATH=/usr/local/go/bin:${PATH} \
 # bound to anything on the host.
 RUN set -eux; \
     useradd --create-home --home-dir /sandbox/home --shell /bin/bash --uid 1000 sandbox; \
-    mkdir -p /sandbox/home /repo-src /work; \
+    mkdir -p /sandbox/home /sandbox/cache /repo-src /work; \
     chown -R sandbox:sandbox /sandbox /work
+# THE PRIMED CACHES LIVE OUTSIDE HOME, at /sandbox/cache. HOME is a tmpfs at
+# run time (that is what keeps a run off the host's ~), and a tmpfs mounted
+# at /sandbox/home COMPLETELY HIDES whatever the image baked underneath it —
+# so an npm or Go cache primed into ~/.npm or ~/go would be gone in every
+# container that used it, and `npm ci --offline` / `go build` with GOPROXY=off
+# would fail with no network to fall back on. Keeping the caches at
+# /sandbox/cache leaves them visible from the image layer, which is read-only
+# under `--read-only`: the Go module cache is complete and Go reads a
+# complete cache read-only, while the entrypoint copies the (much smaller)
+# npm cache into the writable HOME because npm writes to its cache even on
+# an offline install.
+#
+# GOCACHE (the build cache) is the one that MUST be writable, so it stays
+# under HOME on the tmpfs.
 ENV HOME=/sandbox/home \
     XDG_CONFIG_HOME=/sandbox/home/.config \
     XDG_CACHE_HOME=/sandbox/home/.cache \
     XDG_DATA_HOME=/sandbox/home/.local/share \
     DOOMDIR=/sandbox/doom \
     EMACSDIR=/sandbox/emacs.d \
-    GOPATH=/sandbox/home/go \
-    GOMODCACHE=/sandbox/home/go/pkg/mod \
+    SANDBOX_CACHE=/sandbox/cache \
+    GOPATH=/sandbox/cache/go \
+    GOMODCACHE=/sandbox/cache/go/pkg/mod \
     GOCACHE=/sandbox/home/.cache/go-build \
-    NPM_CONFIG_CACHE=/sandbox/home/.npm
+    NPM_CONFIG_CACHE=/sandbox/cache/npm \
+    GIT_CONFIG_GLOBAL=/sandbox/gitconfig
 
 USER sandbox
 WORKDIR /work
@@ -181,11 +197,16 @@ WORKDIR /work
 # The e2e suite never runs real git (see the repo's no-real-git rule), but
 # Doom's own installer and `doom sync` both shell out to git, and git refuses
 # to work without an identity. This one exists only inside the image.
+# `--global` writes to GIT_CONFIG_GLOBAL (/sandbox/gitconfig), NOT to
+# ~/.gitconfig: HOME is a fresh tmpfs in every container, so an identity
+# written into ~ at build time would not exist at run time and git would
+# refuse to work for Doom's own git calls.
 RUN set -eux; \
     git config --global user.name  "agent-repl sandbox"; \
     git config --global user.email "sandbox@invalid"; \
     git config --global init.defaultBranch main; \
-    git config --global advice.detachedHead false
+    git config --global advice.detachedHead false; \
+    test -s /sandbox/gitconfig
 
 # --- the MINIMAL doom profile ----------------------------------------------
 #
