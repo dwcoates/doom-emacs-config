@@ -242,6 +242,10 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 			turnGateTextEnv + "=" + gateText,
 		},
 	}})
+	// Standing the shim down at the idle cutoff leaves the session with no
+	// producer, which opens a health fault; that park is this test's
+	// subject.
+	w.ExpectWarnings("daemon.health.open_fault")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	host := w.WatchHost(ws)

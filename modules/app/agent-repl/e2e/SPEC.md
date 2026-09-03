@@ -347,6 +347,14 @@ flushed) collects that one directory, and only when `t.Failed()`:
 - unset (the default) → each sink's last 64 KiB, cut forward to a record
   boundary, goes into `t.Log` output. Bounded, but never nothing.
 
+The store's and the sidecar's own log files are routed into that same
+`logs/` directory by `NewWorld` (which mints the state root itself, before the
+store starts, and passes it to `harness.StartDaemon` as `Opts.StateDir`).
+They previously landed in anonymous `t.TempDir()`s, so a failing run
+preserved the daemon and shim sinks but not the store or sidecar log — the
+two processes whose misbehavior a store-outage or spool failure most needs.
+One directory now holds everything, and the single sweep collects it.
+
 A passing test writes no artifacts and logs nothing.
 
 ### Store stop/restart control (ruling 2 — real degraded-state outages)
