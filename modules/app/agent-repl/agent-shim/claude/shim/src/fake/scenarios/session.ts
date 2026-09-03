@@ -506,10 +506,12 @@ const COMPACT = scenario({
         trigger: "manual",
         pre_tokens: 435_029,
         post_tokens: 8_639,
+        cumulative_dropped_tokens: 705_119,
         duration_ms: 194_511,
         preserved_segment: { head_uuid: head, anchor_uuid: head, tail_uuid: head },
-        preserved_messages: { anchor_uuid: head, uuids: [head] },
+        preserved_messages: { anchor_uuid: head, uuids: [head], all_uuids: [head] },
       },
+      logical_parent_uuid: head,
     });
     ctx.files.transcript.append({
       type: "system",
@@ -522,7 +524,6 @@ const COMPACT = scenario({
         trigger: "manual",
         preTokens: 435_029,
         durationMs: 194_511,
-        preCompactDiscoveredTools: ["Monitor", "TaskList", "TaskStop"],
         preservedSegment: { headUuid: head, anchorUuid: head, tailUuid: head },
         preservedMessages: { anchorUuid: head, uuids: [head], allUuids: [head] },
         postTokens: 8_639,
@@ -553,9 +554,12 @@ const COMPACT_AUTO = scenario({
         trigger: "auto",
         pre_tokens: 190_000,
         post_tokens: 12_000,
+        cumulative_dropped_tokens: 178_000,
         duration_ms: 42_000,
         preserved_segment: { head_uuid: head, anchor_uuid: head, tail_uuid: head },
+        preserved_messages: { anchor_uuid: head, uuids: [head], all_uuids: [head] },
       },
+      logical_parent_uuid: head,
     });
     ctx.files.transcript.append({
       type: "system",
@@ -569,6 +573,7 @@ const COMPACT_AUTO = scenario({
         preTokens: 190_000,
         durationMs: 42_000,
         preservedSegment: { headUuid: head, anchorUuid: head, tailUuid: head },
+        preservedMessages: { anchorUuid: head, uuids: [head], allUuids: [head] },
         postTokens: 12_000,
         cumulativeDroppedTokens: 178_000,
       },
