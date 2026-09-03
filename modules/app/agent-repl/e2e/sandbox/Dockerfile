@@ -194,13 +194,21 @@ RUN set -eux; \
 COPY --chown=sandbox:sandbox doom/ /sandbox/doom/
 
 # --- Doom itself, pinned to a SHA ------------------------------------------
+#
+# `sources/doom+/modules` is created because doom.el:189 puts it on
+# `doom-module-load-path` unconditionally. A fresh clone does not contain it,
+# and every `doom` invocation then printed "Setting current directory: No
+# such file or directory, .../sources/doom+/modules" onto the output the
+# suite reads. Creating the (empty) directory makes the path Doom already
+# expects actually resolve.
 RUN set -eux; \
     if [ -z "${DOOM_REF}" ]; then \
       echo "sandbox: DOOM_REF is empty; pass a Doom commit SHA (--build-arg DOOM_REF=<sha>)" >&2; \
       exit 1; \
     fi; \
     git clone --filter=blob:none https://github.com/doomemacs/doomemacs "${EMACSDIR}"; \
-    git -C "${EMACSDIR}" checkout "${DOOM_REF}"
+    git -C "${EMACSDIR}" checkout "${DOOM_REF}"; \
+    mkdir -p "${EMACSDIR}/sources/doom+/modules"
 ENV PATH=/sandbox/emacs.d/bin:${PATH}
 
 # --- the module's own packages.el, for the build-time `doom sync` ----------
