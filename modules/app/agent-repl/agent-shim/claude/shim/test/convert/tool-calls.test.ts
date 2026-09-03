@@ -12,6 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
   CALL_REGISTRY_CAPACITY,
+  convertToolResult,
   convertToolUse,
   ENGINE_OWNED_TOOLS,
   EXEMPT_TOOLS,
@@ -191,6 +192,25 @@ describe("a converter's own contract", () => {
     });
 
     expect(item).toBeUndefined();
+  });
+
+  it("re-remembers a DECLINED call with what only that result carried", () => {
+    // Arrange: a skill's acknowledgement declares the allowances and settles nothing.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_s", "Skill"));
+
+    // Act.
+    convertToolResult(
+      TOOL_CONVERTERS,
+      foldContext(),
+      registry,
+      "toolu_s",
+      { ...outcome(), structured: { success: true, allowedTools: ["Bash(run.sh:*)"] } },
+      { vendorUuid: "u_1" },
+    );
+
+    // Assert.
+    expect(registry.peek("toolu_s")?.retainedAllowedTools).toEqual(["Bash(run.sh:*)"]);
   });
 
   it("answers a progress arm on a kind that declares one", () => {
