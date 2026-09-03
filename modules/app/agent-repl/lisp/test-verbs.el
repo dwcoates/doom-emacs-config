@@ -338,6 +338,24 @@ daemon starts sending it, with no table to update here."
     (agent-repl-verb-kill "ws-one")
     (should (agent-repl-test-verbs--messaged-p "/tmp/real"))))
 
+(ert-deftest agent-repl-verbs-open-vendor-start-failure-names-the-arm ()
+  "An open refused because the VENDOR would not start names that arm."
+  (agent-repl-test-verbs--with
+      '((:open . (:response (:arm :error
+                            :value (:cause (:arm :vendor-start-failed
+                                            :value (:detail "the sdk threw")))))))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "open refused: vendor-start-failed"))))
+
+(ert-deftest agent-repl-verbs-open-vendor-start-failure-echoes-the-detail ()
+  "The shim's own account is the user's only lead, so it is drawn too."
+  (agent-repl-test-verbs--with
+      '((:open . (:response (:arm :error
+                            :value (:cause (:arm :vendor-start-failed
+                                            :value (:detail "the sdk threw")))))))
+    (agent-repl-verb-open (agent-repl-test-verbs--ref "closed-id" "/tmp/closed"))
+    (should (agent-repl-test-verbs--messaged-p "the sdk threw"))))
+
 (ert-deftest agent-repl-verbs-empty-arm-draws-no-empty-fields ()
   "An empty arm is its own whole assertion and renders no trailing payload."
   (agent-repl-test-verbs--with
