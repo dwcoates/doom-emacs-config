@@ -63,6 +63,26 @@ describe("both dialects over one socket", () => {
     expect(sessionUpdate(opening).update.case).toBe("diagnostics");
     watch.close();
   });
+
+  test("a healthy stream accept reports NO response-encoding loss", async () => {
+    // The early head goes out before the adapter negotiates a response
+    // encoding, so the adapter's `Connect-Content-Encoding: gzip` -- its answer
+    // to the client's accept list -- could never reach the client, and the
+    // guard fired on EVERY healthy WatchSession and WatchAgent accept. An error
+    // on the happy path is an error that teaches a reader to ignore errors.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const watch = openStream((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+    await watch.next();
+    watch.close();
+
+    expect(
+      shim.log.records().filter((record) => record.message.includes("response encoding")),
+    ).toEqual([]);
+  });
 });
 
 describe("validation refuses before the engine", () => {

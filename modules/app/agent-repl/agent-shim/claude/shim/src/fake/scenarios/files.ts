@@ -252,7 +252,25 @@ const IDE_DIAGNOSTICS = scenario({
       oldString: "export const three = 3;",
       newString: "export const three = missing;",
       originalFile: null,
-      structuredPatch: [],
+      // REAL HUNKS, grounded in testdata/captures/ide-diagnostics-after-edit:
+      // the vendor states the changed line with one line of context either
+      // side, context lines carrying a leading space. An empty patch is a
+      // shape the vendor never sends, and it made this scenario the one edit
+      // whose diff a consumer could not draw.
+      structuredPatch: [
+        {
+          oldStart: 2,
+          oldLines: 3,
+          newStart: 2,
+          newLines: 3,
+          lines: [
+            " export const two = 2;",
+            "-export const three = 3;",
+            "+export const three = missing;",
+            " export const four = 4;",
+          ],
+        },
+      ],
       userModified: false,
       replaceAll: false,
     });

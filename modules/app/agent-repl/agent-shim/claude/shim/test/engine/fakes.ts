@@ -31,6 +31,7 @@ import type {
 import { PersistenceError } from "../../src/store/persistence.js";
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
+import type { BashRunStanding } from "../../src/store/reader.js";
 
 /** A query whose message stream a suite pushes into, one message at a time. */
 export class ScriptedQuery implements QueryLike {
@@ -265,13 +266,13 @@ export class RecordingPersistence implements Persistence {
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
     return Promise.resolve(this.live);
   }
-  /** The `stillLive` predicate the caller passed on its last openBashRun, if any. */
-  lastStillLive: (() => boolean) | undefined;
+  /** The standing predicate the caller passed on its last openBashRun, if any. */
+  lastAnnouncement: (() => BashRunStanding) | undefined;
   openBashRun(
     _work?: conversationv1.DetachedWorkId,
-    stillLive?: () => boolean,
+    announcement?: () => BashRunStanding,
   ): Promise<AsyncIterable<conversationv1.AgentBash>> {
-    this.lastStillLive = stillLive;
+    this.lastAnnouncement = announcement;
     const frames = this.bashFrames;
     return Promise.resolve({
       async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {
