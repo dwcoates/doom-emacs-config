@@ -168,6 +168,56 @@ describe("monitors", () => {
   });
 });
 
+describe("what a Monitor call itself states", () => {
+  /** The input of the one `Monitor` call a prompt makes. */
+  const monitorInput = async (prompt: string): Promise<Record<string, unknown>> => {
+    const driven = await driveScenario([prompt]);
+    const call = toolUses(driven).find((block) => (block as { name?: string }).name === "Monitor");
+    return (call as unknown as { input: Record<string, unknown> }).input;
+  };
+
+  it("states the deadline monitor's description ON THE CALL, which is where the shim reads it", async () => {
+    // Arrange + Act
+    const input = await monitorInput("!monitor-deadline");
+
+    // Assert
+    expect(input.description).toBe("build log");
+  });
+
+  it("spells the deadline as `timeout_ms`, as MonitorInput declares it", async () => {
+    // Arrange + Act
+    const input = await monitorInput("!monitor-deadline");
+
+    // Assert
+    expect(input.timeout_ms).toBe(600_000);
+  });
+
+  it("states the persistent monitor's description on the call too", async () => {
+    // Arrange + Act
+    const input = await monitorInput("!monitor-persistent");
+
+    // Assert
+    expect(input.description).toBe("echo watch");
+  });
+
+  it("carries `timeout_ms` on the persistent call even though persistence ignores it", async () => {
+    // MonitorInput declares it REQUIRED; a call omitting it is a shape the
+    // vendor's own schema rejects.
+    const input = await monitorInput("!monitor-persistent");
+
+    // Assert
+    expect(input.timeout_ms).toBe(0);
+  });
+
+  it("names the persistent watch's source as a `ws` url, the only declared socket field", async () => {
+    // Arrange + Act
+    const input = await monitorInput("!monitor-persistent");
+
+    // Assert
+    expect((input.ws as { url?: string }).url).toBe("ws://127.0.0.1:8787/echo");
+  });
+});
+
 describe("scheduled wakeups", () => {
   it("reports a scheduled wakeup with its unclamped delay", async () => {
     // Arrange + Act
