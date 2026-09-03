@@ -125,6 +125,11 @@ func TestWebappLayerSubfeeds(t *testing.T) {
 	wlDriveArea(t, "subfeeds.layer.test.ts")
 }
 
+// TestWebappLayerCards is section F4: permission and question cards.
+func TestWebappLayerCards(t *testing.T) {
+	wlDriveArea(t, "cards.layer.test.ts")
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
