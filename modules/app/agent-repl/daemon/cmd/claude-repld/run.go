@@ -252,6 +252,17 @@ func run(ctx context.Context, opts options, h hooks) error {
 		defer built.CloseWatchers()
 	}
 
+	// THE MERGE DRAIN RUNS FIRST OF ALL THE TEARDOWNS. Deferred after the
+	// watchers and after `defer db.Close()`, so it runs BEFORE both: a merge
+	// that has reached its terminal is still writing merged_at, closed and its
+	// lease release, and closing the state client under those writes lost them
+	// to failed transactions and left the lease held. The wait is BOUNDED
+	// (merge.TerminalDrainBound) and takes its own context, because the
+	// process's signal context is already cancelled by the time it runs.
+	if built.DrainMerges != nil {
+		defer built.DrainMerges(context.Background())
+	}
+
 	srv, err := h.Server(built.Server)
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the server: %w", err)

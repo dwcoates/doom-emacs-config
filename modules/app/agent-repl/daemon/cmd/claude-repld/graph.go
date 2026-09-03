@@ -108,6 +108,12 @@ type graph struct {
 	// read that client, and a turn end still being handled when the store
 	// closes under it is a refused read on a path that owes no error.
 	CloseWatchers func()
+	// DrainMerges is the BOUNDED wait for merge runs that have reached their
+	// terminal. `run` calls it BEFORE the watchers close and before the state
+	// client does: a SIGTERM landing mid-terminal used to close the store
+	// under the landing's own stamps, losing merged_at, closed and the lease
+	// release to failed transactions. See merge.TerminalDrainBound.
+	DrainMerges func(ctx context.Context)
 }
 
 // backgroundLoop is one long-running loop the daemon runs for its whole
@@ -473,6 +479,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
 		},
 		PauseAfterCapture: capturePause(p.Surfaces.Global()),
+		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),
 		ParkedRoute:       guidanceRoute(fleet, mergeRef),
 		Rollout:           rolloutController,
 		Log:               p.Surfaces,
@@ -625,6 +632,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "command_file_ingress", Run: ingress.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
+		DrainMerges:   mergeOrchestrator.Drain,
 	}, nil
 }
 
@@ -941,6 +949,40 @@ func capturePause(log dlog.Logger) merge.AdmissionPause {
 		}
 		log.Info(op, "holding the merge run after the displaced capture", fields)
 		<-ctx.Done()
+	}
+}
+
+// MergeTerminalPauseEnv names the rendezvous file the TEST-ONLY terminal pause
+// writes and then holds a merge run on, inside its terminal and before its
+// first durable stamp. It is what lets a suite stop the daemon exactly in the
+// window the shutdown drain covers. UNSET IN PRODUCTION: with no rendezvous
+// named, the orchestrator gets a nil pause and the code below is never
+// reached.
+const MergeTerminalPauseEnv = "AGENT_REPL_MERGE_PAUSE_IN_TERMINAL"
+
+// terminalPause builds the test-only terminal pause, or nil when the knob
+// names no rendezvous. It holds on the SERVING lifetime rather than on the
+// run's own context — the run's context is the pump's, which nothing cancels —
+// so the held terminal resumes the instant the daemon starts its orderly exit,
+// which is the whole point: the stamps then race the store's close, and the
+// drain is what decides the outcome. A rendezvous file that cannot be written
+// is an ERROR and the run is NOT held, because a pause whose signal never
+// reached the test would hang the suite with nothing said about why.
+func terminalPause(serving context.Context, log dlog.Logger) merge.AdmissionPause {
+	const op = "daemon.merge.terminal_pause"
+	path := os.Getenv(MergeTerminalPauseEnv)
+	if path == "" {
+		return nil
+	}
+	return func(_ context.Context, ws ids.WorkspaceID) {
+		fields := dlog.Context{"workspace": string(ws), "rendezvous": path}
+		if err := os.WriteFile(path, []byte(string(ws)), 0o644); err != nil {
+			log.Error(op, "the merge terminal rendezvous file could not be written; the run is not held",
+				dlog.Context{"workspace": string(ws), "rendezvous": path, "error": err.Error()})
+			return
+		}
+		log.Info(op, "holding the merge run inside its terminal", fields)
+		<-serving.Done()
 	}
 }
 

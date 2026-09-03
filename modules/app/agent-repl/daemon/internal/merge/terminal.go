@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -33,8 +34,21 @@ import (
 // finish lands a completed run on its terminal and tears it down.
 func (r *run) finish(ctx context.Context, out outcome) error {
 	const op = "daemon.merge.finish"
+	// THE TERMINAL IS REGISTERED BEFORE THE FIRST DURABLE WRITE. The shutdown
+	// drain waits for exactly what is registered here, which is why the
+	// registration precedes the stamps rather than following them: a SIGTERM
+	// landing between the two would close the state client under writes that
+	// nothing was waiting for, which is the defect this exists for.
+	r.enterTerminal(terminalOwed(out))
+	defer r.leaveTerminal()
 	log := r.o.log(ctx, r.ws)
 	endedMS := r.o.nowMS()
+	// THE TEST SEAM, NIL IN PRODUCTION. See Deps.PauseInTerminal: it holds a
+	// run inside its terminal, with the terminal already registered and no
+	// stamp yet written, which is the window a shutdown has to land in.
+	if r.o.deps.PauseInTerminal != nil {
+		r.o.deps.PauseInTerminal(ctx, r.ws)
+	}
 
 	if out.failed != "" {
 		r.head(&frontendv1.FeedMergeError{
@@ -74,6 +88,8 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 // abort ends a run that could not continue. It is the FAILED end reached by an
 // error rather than by a verdict, and it takes the same teardown.
 func (r *run) abort(ctx context.Context, summary string) {
+	r.enterTerminal(terminalOwedFailed)
+	defer r.leaveTerminal()
 	r.o.log(ctx, r.ws).Error("daemon.merge.abort", "a merge could not continue", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary})
 	if r.lease.ID != "" {
@@ -145,6 +161,176 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	}
 	r.selfReload(ctx, out)
 	r.o.kick(r.repo)
+}
+
+// TerminalDrainBound is how long the orderly exit gives the merge runs that
+// have already reached their TERMINAL to finish their durable stamps and their
+// teardown before the state client closes under them.
+//
+// THE BOUND IS A LARGE MULTIPLE OF THE WORK IT COVERS. Everything it waits for
+// is local: two SQLite writes (merged_at, closed), the roster republish, the
+// lease release, the queue entry's removal and the synchronous republishes
+// they trigger — tens of milliseconds on a healthy machine, and a worktree
+// removal on top of that for a landing. Two seconds is that with more than an
+// order of magnitude of headroom, and it is deliberately the same order as
+// shutdownGrace so the whole orderly exit stays a predictable few seconds
+// rather than an unbounded wait on work a boot recovery can redo anyway.
+const TerminalDrainBound = 2 * time.Second
+
+// terminal is one run's registered terminal work: the stamps and the teardown
+// that follow the published terminal row. It exists so the shutdown drain can
+// wait for THAT, and only that, without knowing anything about the phases.
+type terminal struct {
+	// ws is the merge's workspace, kept on the mark so the drain's WARN can
+	// name it without re-reading a registration it is in the middle of.
+	ws ids.WorkspaceID
+	// done closes when the run's terminal work is over, teardown included.
+	done chan struct{}
+	// owed names the durable work the terminal still owes, for the WARN the
+	// drain writes when its bound expires: a reader of that record has to know
+	// what the boot recovery is going to find unstamped.
+	owed string
+	// lease is the merge's ledger identity, which is what the recovery's own
+	// records are keyed by.
+	lease ids.LeaseID
+}
+
+// The durable work each kind of terminal owes, spelled where the drain's WARN
+// is read rather than at the two call sites.
+const (
+	terminalOwedLanded = "merged_at, closed, the roster republish and the teardown"
+	terminalOwedFailed = "the teardown: the lease release and the queue entry's removal"
+)
+
+// terminalOwed names what one outcome's terminal owes.
+func terminalOwed(out outcome) string {
+	if out.failed != "" {
+		return terminalOwedFailed
+	}
+	return terminalOwedLanded
+}
+
+// enterTerminal registers this run's terminal work with the orchestrator, so
+// the shutdown drain knows to wait for it.
+func (r *run) enterTerminal(owed string) {
+	o := r.o
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.terminals == nil {
+		o.terminals = map[ids.WorkspaceID]*terminal{}
+	}
+	o.terminals[r.ws] = &terminal{ws: r.ws, done: make(chan struct{}), owed: owed, lease: r.lease.ID}
+}
+
+// leaveTerminal retires the registration and releases whatever is waiting on
+// it. It runs even when the terminal path failed: a drain must never outlive
+// the work it waits for.
+func (r *run) leaveTerminal() {
+	o := r.o
+	o.mu.Lock()
+	mark := o.terminals[r.ws]
+	delete(o.terminals, r.ws)
+	o.mu.Unlock()
+	if mark != nil {
+		close(mark.done)
+	}
+}
+
+// Drain stops admitting merges and waits, WITHIN A BOUND, for every run that
+// has already reached its terminal to finish its durable stamps and teardown.
+//
+// It is the daemon's orderly exit calling, with the state client still open. A
+// merge still in a LONG PHASE — its tests, its agent turn — is NOT waited for:
+// it is abandoned to the boot recovery exactly as it was before, but recorded
+// at INFO with the phase it was left in, rather than discovered later through
+// writes that failed against a closed store.
+func (o *orchestrator) Drain(ctx context.Context) {
+	const op = "daemon.merge.drain"
+	log := o.deps.Log.Global()
+
+	o.mu.Lock()
+	o.draining = true
+	waits := make([]*terminal, 0, len(o.terminals))
+	for _, mark := range o.terminals {
+		waits = append(waits, mark)
+	}
+	type midPhase struct {
+		ws    ids.WorkspaceID
+		lease ids.LeaseID
+		phase string
+	}
+	mid := make([]midPhase, 0, len(o.runsByWorkspace))
+	for ws, r := range o.runsByWorkspace {
+		if _, terminal := o.terminals[ws]; terminal {
+			continue
+		}
+		mid = append(mid, midPhase{ws: ws, lease: r.lease.ID, phase: r.activeTab()})
+	}
+	o.mu.Unlock()
+
+	// A MID-PHASE MERGE IS ANNOUNCED, NOT WAITED FOR. Its phase is the whole
+	// point of the record: what the boot recovery will find, and where.
+	for _, m := range mid {
+		log.Info(op, "a merge was left mid-phase by the daemon's exit; the boot recovery owns it",
+			dlog.Context{"workspace": string(m.ws), "lease": string(m.lease), "phase": m.phase})
+	}
+	if len(waits) == 0 {
+		log.Debug(op, "the merge drain had no terminal work to wait for",
+			dlog.Context{"mid_phase": len(mid)})
+		return
+	}
+	// THE TEST SEAM, NIL IN PRODUCTION. See orchestrator.onDrainWait: it is
+	// called with the admission already stopped and the terminal work already
+	// snapshotted, immediately before the wait begins.
+	if o.onDrainWait != nil {
+		o.onDrainWait()
+	}
+	bound := o.terminalDrainBound()
+	expired := time.NewTimer(bound)
+	defer expired.Stop()
+	for _, mark := range waits {
+		select {
+		case <-mark.done:
+		case <-expired.C:
+			o.warnUndrained(op, waits, bound, "the drain's bound expired")
+			return
+		case <-ctx.Done():
+			o.warnUndrained(op, waits, bound, "the drain was cancelled")
+			return
+		}
+	}
+	log.Debug(op, "the merge drain finished every terminal it was holding",
+		dlog.Context{"terminals": len(waits), "mid_phase": len(mid), "bound": bound.String()})
+}
+
+// warnUndrained names EVERY merge whose terminal work the drain gave up on and
+// what each of them left unstamped, so the work the next boot's recovery has
+// to redo is visible before that boot rather than after it.
+func (o *orchestrator) warnUndrained(op string, waits []*terminal, bound time.Duration, why string) {
+	for _, mark := range waits {
+		select {
+		case <-mark.done:
+			continue
+		default:
+		}
+		o.deps.Log.Global().Warn(op, "a merge's terminal did not finish before the daemon exited; the boot recovery owns what it left",
+			dlog.Context{
+				"workspace": string(mark.ws),
+				"lease":     string(mark.lease),
+				"unstamped": mark.owed,
+				"bound":     bound.String(),
+				"why":       why,
+			})
+	}
+}
+
+// terminalDrainBound answers the bound in force: the test override when one is
+// set, else the production TerminalDrainBound.
+func (o *orchestrator) terminalDrainBound() time.Duration {
+	if o.drainBound > 0 {
+		return o.drainBound
+	}
+	return TerminalDrainBound
 }
 
 // terminalCause names why a queue entry was dropped, which the queue's own log
