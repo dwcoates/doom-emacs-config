@@ -16,6 +16,13 @@
  * The failure arm is for a call that could not be performed. A command that ran
  * and failed ran, and what it printed is the answer the caller wanted.
  *
+ * The vendor marks such a result an error FOR THE MODEL, and a nonzero exit
+ * often carries no typed output at all — the whole result is the bare string
+ * "Error: Exit code 7\n…". So the ending is read from the structured field when
+ * there is one and from the returned TEXT when there is not, which is the same
+ * rule the file plane applies to the same capture. Only a result that states an
+ * ending NOWHERE is a failure.
+ *
  * # `termination` is UNSET here, deliberately
  *
  * `AgentBashCompleted.termination` is documented as SET FOR A DETACHED SHELL
@@ -27,8 +34,8 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { startedAt } from "../entries.js";
-import type { PendingCall, ToolConverter } from "../tool-calls.js";
-import { asRecord, bool, failureOf, settle, str, strOr, uint } from "./support.js";
+import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
+import { asRecord, bool, failureOf, resultText, settle, str, strOr, uint } from "./support.js";
 
 const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.bash" });
 
@@ -135,14 +142,56 @@ function bashOutput(
 function exitedCode(record: Record<string, unknown> | undefined): number | undefined {
   const interpretation = str(record, "returnCodeInterpretation");
   if (interpretation === undefined) return undefined;
-  const match = /(-?\d+)/.exec(interpretation);
-  if (match === null) return undefined;
-  return Number(match[1]);
+  return firstSignedInt(interpretation);
+}
+
+/** The first signed decimal in a sentence, or `undefined` when it holds none. */
+function firstSignedInt(text: string): number | undefined {
+  const match = /(-?\d+)/.exec(text);
+  return match === null ? undefined : Number(match[1]);
+}
+
+/**
+ * The ending the vendor spelled in the text it returned to the model.
+ *
+ * A nonzero exit arrives with NO typed output at all — the result is the bare
+ * string "Error: Exit code 7\npartway\nto stderr" — so the command's own
+ * verdict on itself survives only here. The statement is a LINE OF ITS OWN, so
+ * the marker is read only where it OPENS a line: a passing command that merely
+ * printed "make: recipe returned exit code 3" said nothing about its ending,
+ * and reading that as an exit would invent a status the shell never reported.
+ */
+function statedExitFromText(text: string): number | undefined {
+  const markers = ["error: exit code", "exited with code", "exit code"];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim().toLowerCase();
+    for (const marker of markers) {
+      if (trimmed.startsWith(marker)) return firstSignedInt(trimmed.slice(marker.length));
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The exit status the result STATED, wherever it stated one.
+ *
+ * The structured field is PREFERRED: a result that carries one has told us the
+ * status outright. The returned text is read only as a fallback, and only for a
+ * result the vendor marked an error — a command that succeeded states its
+ * ending in the structured fields, so mining a passing command's OUTPUT for a
+ * status could only misread what it printed.
+ */
+function statedExit(outcome: ToolOutcome): number | undefined {
+  const structured = exitedCode(asRecord(outcome.structured));
+  if (structured !== undefined) return structured;
+  if (!outcome.isError) return undefined;
+  return statedExitFromText(resultText(outcome.content));
 }
 
 function bashOutcome(
   record: Record<string, unknown>,
   output: conversationv1.AgentBashOutput,
+  exited: number | undefined,
 ): conversationv1.AgentBashSuccess["outcome"] {
   if (bool(record, "interrupted") === true) {
     const timeoutMs = uint(record, "timedOutAfterMs");
@@ -165,7 +214,6 @@ function bashOutcome(
       }),
     };
   }
-  const exited = exitedCode(record);
   return {
     case: "completed",
     value: create(conversationv1.AgentBashCompletedSchema, {
@@ -224,7 +272,7 @@ export const bashConverter: ToolConverter = {
     // `returnCodeInterpretation`. Reading `isError` alone drew every non-zero
     // exit as `AgentBashFailure`, which tells the user the shell broke when the
     // shell did exactly what it was asked.
-    const exited = exitedCode(asRecord(outcome.structured));
+    const exited = statedExit(outcome);
     if (outcome.isError && exited === undefined) {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a shell call could not be performed");
       return {
@@ -237,7 +285,11 @@ export const bashConverter: ToolConverter = {
         }),
       };
     }
-    const record = asRecord(outcome.structured);
+    const typed = asRecord(outcome.structured);
+    // A STATED EXIT IS ENOUGH TO SETTLE. The golden nonzero-exit result carries
+    // no typed output whatsoever, and refusing a terminal for it would leave the
+    // unit open forever over a command that plainly ran and ended.
+    const record = typed ?? (exited === undefined ? undefined : {});
     if (record === undefined) {
       LOGGER.log(
         { level: "warn", tool_use_id: call.toolUseId },
@@ -276,7 +328,7 @@ export const bashConverter: ToolConverter = {
           case: "success",
           value: create(conversationv1.AgentBashSuccessSchema, {
             command: bashCommand(call, line),
-            outcome: bashOutcome(record, output),
+            outcome: bashOutcome(record, output, exited),
             settledAt: settle(outcome),
           }),
         },

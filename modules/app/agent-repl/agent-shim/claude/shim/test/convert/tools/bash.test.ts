@@ -37,6 +37,22 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
   return { content: undefined, isError, structured, settledAtMs: 1_700_000_001_000 };
 }
 
+/** A result whose only account of what happened is the text shown to the model. */
+function outcomeSaying(text: string, isError: boolean, structured: unknown = text): ToolOutcome {
+  return {
+    content: create(conversationv1.ToolResultContentSchema, {
+      blocks: [
+        create(conversationv1.ToolResultContentBlockSchema, {
+          block: { case: "text", value: create(conversationv1.TextBlockSchema, { text }) },
+        }),
+      ],
+    }),
+    isError,
+    structured,
+    settledAtMs: 1_700_000_001_000,
+  };
+}
+
 function successOf(item: ReturnType<typeof bashConverter.settle>): conversationv1.AgentBashSuccess {
   return (item?.value as conversationv1.AgentBash).result.value as conversationv1.AgentBashSuccess;
 }
@@ -302,6 +318,98 @@ describe("bashConverter.settle", () => {
 
     // Assert.
     expect((item?.value as conversationv1.AgentBash).result.case).toBe("success");
+  });
+
+  it("reads the exit the GOLDEN states in its text, which carries no typed output", () => {
+    // The captured bash-nonzero-exit shape: the vendor marks the result an
+    // error and its whole account is the bare string it returned, so the
+    // command's own verdict on itself survives only there. The file plane mines
+    // it, and the two planes must agree on the same capture.
+    // Arrange.
+    const pending = call({ command: "bash fail.sh" });
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(
+        pending,
+        outcomeSaying("Exit code 7\npartway\nto stderr", true, "Error: Exit code 7\npartway\nto stderr"),
+      ),
+    );
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(success.outcome.case).toBe("completed");
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 7 }),
+    );
+  });
+
+  it("PREFERS the structured status over the one the returned text names", () => {
+    // A result that states its ending outright has told us the status; the text
+    // is a fallback for results that carry no typed output at all.
+    // Arrange.
+    const pending = call({ command: "./run" });
+    const structured = {
+      stdout: "",
+      stderr: "",
+      interrupted: false,
+      returnCodeInterpretation: "exited with code 3",
+    };
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcomeSaying("Exit code 7", true, structured)),
+    );
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 3 }),
+    );
+  });
+
+  it("still says FAILED when an errored result's TEXT names no exit either", () => {
+    // Mining the text must not turn a call that could not be performed into a
+    // command that ran: text naming no ending yields no status.
+    // Arrange, Act.
+    const item = bashConverter.settle(
+      call({ command: "nope" }),
+      outcomeSaying("Error: EACCES: permission denied", true),
+    );
+
+    // Assert.
+    expect((item?.value as conversationv1.AgentBash).result.case).toBe("failure");
+  });
+
+  it("reads NO exit from a marker the vendor did not put at the start of a line", () => {
+    // The statement is a line of its own, so words inside a line of output are
+    // prose the command printed, not a verdict on how it ended.
+    // Arrange, Act.
+    const item = bashConverter.settle(
+      call({ command: "make" }),
+      outcomeSaying("make: recipe returned exit code 2 for the stale target\nError: EACCES", true),
+    );
+
+    // Assert.
+    expect((item?.value as conversationv1.AgentBash).result.case).toBe("failure");
+  });
+
+  it("never mines the OUTPUT of a command the vendor did not mark an error", () => {
+    // A passing command that printed the words said nothing about its ending,
+    // and reading them would invent a status the shell never reported.
+    // Arrange.
+    const pending = call({ command: "cat notes.txt" });
+    const structured = { stdout: "we saw exit code 3 last week\n", stderr: "", interrupted: false };
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcomeSaying("we saw exit code 3 last week", false, structured)),
+    );
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(success.outcome.case).toBe("completed");
+    expect(completed.termination).toBeUndefined();
   });
 
   it("carries the failure arm when the CALL could not be performed at all", () => {

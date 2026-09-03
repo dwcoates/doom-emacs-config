@@ -86,6 +86,25 @@ export function obj(
 }
 
 // ---------------------------------------------------------------------------
+// Reading the text a result returned to the model
+// ---------------------------------------------------------------------------
+
+/**
+ * The text a tool result returned, flattened out of the two shapes it takes.
+ *
+ * Converters read the TYPED output first and this second: a fact the vendor
+ * states in a structured field is never mined out of prose. But some results
+ * carry no typed output at all — a nonzero Bash exit arrives as a bare string —
+ * and then the returned text is the vendor's ONLY statement of what happened.
+ */
+export function resultText(content: conversationv1.ToolResultContent | undefined): string {
+  if (content === undefined) return "";
+  return content.blocks
+    .map((block) => (block.block.case === "text" ? block.block.value.text : ""))
+    .join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // The shared failure shape
 // ---------------------------------------------------------------------------
 
