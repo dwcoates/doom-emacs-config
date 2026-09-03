@@ -117,6 +117,7 @@ type fakeClient struct {
 
 	mu           sync.Mutex
 	agentErr     error
+	bashErr      error
 	sessionCount int
 	// reaped is the decoded exit Reaped answers, nil when nothing was reaped.
 	reaped *shimclient.ExitInfo
@@ -160,7 +161,21 @@ func (c *fakeClient) WatchAgent(_ context.Context, req *shimv1.WatchAgentRequest
 	return stream, nil
 }
 
+// setBashErr arranges the refusal WatchBash answers with. The shim really does
+// refuse a handle its store holds no rows for yet.
+func (c *fakeClient) setBashErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bashErr = err
+}
+
 func (c *fakeClient) WatchBash(_ context.Context, work *conversationv1.DetachedWorkId) (shimclient.Stream[*conversationv1.AgentBash], error) {
+	c.mu.Lock()
+	err := c.bashErr
+	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	stream := newFakeStream[*conversationv1.AgentBash]()
 	c.bashOpens <- bashOpen{work: work, stream: stream}
 	return stream, nil
