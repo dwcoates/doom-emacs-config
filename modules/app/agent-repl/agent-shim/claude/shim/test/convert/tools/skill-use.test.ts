@@ -159,6 +159,54 @@ describe("skillDocumentSettle", () => {
   });
 });
 
+describe("skillUseConverter.retain", () => {
+  it("carries the allowances the acknowledgement declared onto the re-remembered call", () => {
+    // Arrange.
+    const pending = call({ skill: "s" });
+
+    // Act.
+    const retained = skillUseConverter.retain!(
+      pending,
+      outcome({ success: true, commandName: "s", allowedTools: ["Bash(x:*)", "Read(/tmp/y)"] }),
+    );
+
+    // Assert.
+    expect(retained.retainedAllowedTools).toEqual(["Bash(x:*)", "Read(/tmp/y)"]);
+  });
+
+  it("carries a declared-but-EMPTY allowance set, which is not the same as none", () => {
+    // Arrange, Act.
+    const retained = skillUseConverter.retain!(call({ skill: "s" }), outcome({ allowedTools: [] }));
+
+    // Assert.
+    expect(retained.retainedAllowedTools).toEqual([]);
+  });
+
+  it("leaves the allowances UNSET when the acknowledgement declared none", () => {
+    // Arrange, Act.
+    const retained = skillUseConverter.retain!(call({ skill: "s" }), outcome({ success: true }));
+
+    // Assert.
+    expect(retained.retainedAllowedTools).toBeUndefined();
+  });
+
+  it("reads no declared set from a NON-ARRAY allowedTools", () => {
+    // Arrange, Act.
+    const retained = skillUseConverter.retain!(call({ skill: "s" }), outcome({ allowedTools: "Bash" }));
+
+    // Assert.
+    expect(retained.retainedAllowedTools).toBeUndefined();
+  });
+
+  it("keeps only the allowances that are tool NAMES", () => {
+    // Arrange, Act.
+    const retained = skillUseConverter.retain!(call({ skill: "s" }), outcome({ allowedTools: ["Bash", 7] }));
+
+    // Assert.
+    expect(retained.retainedAllowedTools).toEqual(["Bash"]);
+  });
+});
+
 describe("skillUseConverter.progress", () => {
   it("relays the vendor's liveness beat as the unit's progress arm", () => {
     // Arrange, Act.
