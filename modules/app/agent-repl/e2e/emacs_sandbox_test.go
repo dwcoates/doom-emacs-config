@@ -105,8 +105,107 @@ func requireSandbox(t *testing.T) sandbox {
 	if !ok {
 		t.Skipf("emacs client layer needs Emacs 27 or later in the sandbox image; found %q", version)
 	}
+	// `script` is INSTALLED BY NAME in the image now (bsdutils + util-linux
+	// in the Dockerfile's apt list), so this is a backstop rather than the
+	// guarantee: an image built before that change, or a base image that
+	// drops it, must skip loudly instead of failing obscurely inside
+	// StartPTY.
 	if _, err := exec.LookPath("script"); err != nil {
-		t.Skipf("emacs client layer needs 'script' for a pty (Debian-essential, expected in the image): %v", err)
+		t.Skipf("emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it): %v", err)
+	}
+	assertHostIsolation(t)
+	return s
+}
+
+// containerHomePrefix is where the image puts its container-local HOME. It
+// exists only inside the image and no mount ever covers it, which is what
+// keeps the host's own HOME out of reach.
+const containerHomePrefix = "/sandbox/"
+
+// assertHostIsolation fails the test unless the four isolation properties
+// the sandbox README claims are TRUE OF THIS PROCESS.
+//
+// The properties are enforced by the run script's `docker run` flags, which
+// means a test invoked some other way -- a hand-rolled `docker run`, a
+// future runner, a changed flag -- could satisfy `insideSandbox()` and still
+// be able to write to the host. This layer starts a real Emacs that spawns a
+// real daemon, so "probably isolated" is not good enough: it is checked from
+// the inside, once, before anything starts.
+func assertHostIsolation(t *testing.T) {
+	t.Helper()
+
+	// 1. HOME is the image's, not a host path.
+	home := os.Getenv("HOME")
+	if !strings.HasPrefix(home, containerHomePrefix) {
+		t.Fatalf("sandbox isolation: HOME=%q is not under %s; the container-local HOME is not in effect",
+			home, containerHomePrefix)
+	}
+
+	mounts, err := mountFilesystems()
+	if err != nil {
+		t.Fatalf("sandbox isolation: read the mount table: %v", err)
+	}
+
+	// 2. HOME and /tmp are container tmpfs, so everything this layer writes
+	//    lives in the runtime's memory and dies with the container. /tmp is
+	//    where Scratch() puts every file the Emacs layer creates.
+	for _, dir := range []string{"/tmp", home} {
+		fstype, ok := mounts[dir]
+		if !ok {
+			t.Fatalf("sandbox isolation: %s is not a mount point of its own; expected a container tmpfs", dir)
+		}
+		if fstype != "tmpfs" {
+			t.Fatalf("sandbox isolation: %s is a %q mount, not tmpfs", dir, fstype)
+		}
+	}
+
+	// 3. The repo mount is READ-ONLY. The entrypoint checks this too; it is
+	//    re-checked here because the check that matters is the one in the
+	//    process that is about to write.
+	if _, ok := mounts[sandboxReadOnlyMount]; !ok {
+		t.Fatalf("sandbox isolation: %s is not a mount point; the repo is not bind-mounted", sandboxReadOnlyMount)
+	}
+	probe := filepath.Join(sandboxReadOnlyMount, ".e2e-write-probe")
+	if err := os.WriteFile(probe, []byte("x"), 0o644); err == nil {
+		_ = os.Remove(probe)
+		t.Fatalf("sandbox isolation: %s is WRITABLE; the repo must be mounted read-only", sandboxReadOnlyMount)
+	}
+}
+
+// mountFilesystems maps each mount point to its filesystem type, read from
+// the kernel's own view rather than inferred from the flags a runner passed.
+func mountFilesystems() (map[string]string, error) {
+	body, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(body), "\n") {
+		// mountinfo: ... 4:mount-point ... - fstype source [super-options]
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		sep := -1
+		for i, f := range fields {
+			if f == "-" {
+				sep = i
+				break
+			}
+		}
+		if sep < 0 || sep+1 >= len(fields) {
+			continue
+		}
+		out[unescapeMountPath(fields[4])] = fields[sep+1]
+	}
+	return out, nil
+}
+
+// unescapeMountPath undoes mountinfo's octal escaping of space, tab,
+// newline and backslash.
+func unescapeMountPath(s string) string {
+	for from, to := range map[string]string{`\040`: " ", `\011`: "\t", `\012`: "\n", `\134`: `\`} {
+		s = strings.ReplaceAll(s, from, to)
 	}
 	return s
 }
@@ -173,11 +272,12 @@ func insideSandbox() bool {
 
 // HasEmacs asks the Emacs in the image for its own version.
 //
-// The requirement is 27 or later, for `tab-bar-tabs`. It is NOT 29: an
-// earlier revision of this layer passed `--init-directory`, which landed in
-// Emacs 29, while the image is Debian BOOKWORM's `emacs-nox` -- Emacs 28.2.
-// The flag was redundant anyway, because `-Q` reads no init file at all, so
-// it is gone and 28.2 satisfies the real requirement.
+// The requirement is 27 or later, for `tab-bar-tabs`. It is NOT 29, and it
+// must never become 29: the image is Debian BOOKWORM's `emacs-nox`, which is
+// Emacs 28.2. An earlier revision of this layer passed `--init-directory`,
+// which landed in Emacs 29 and does not exist here; the layer now aims Emacs
+// at its Doom tree through HOME instead, which every version supports. Any
+// future scenario is bound by the same 28.2 ceiling.
 func (s *localSandbox) HasEmacs() (bool, string) {
 	if !insideSandbox() {
 		return false, "not inside the sandbox"
