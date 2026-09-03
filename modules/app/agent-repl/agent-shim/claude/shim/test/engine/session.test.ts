@@ -2647,3 +2647,69 @@ describe("a foreground unit whose item has no lifecycle", () => {
     ).toBe("alreadyConcluded");
   });
 });
+
+
+/**
+ * The IDE-diagnostics adjacency join (engine/session.ts's `lastWriteOrEdit`).
+ *
+ * The vendor's `diagnostics` attachment carries no tool id, so
+ * convert/attachments.ts joins it to the change it concerns by the one
+ * remembered write-or-edit unit -- and nothing assigned it, so every
+ * diagnostics record fell to "IDE diagnostics arrived with no preceding write
+ * or edit" and landed as residue.
+ */
+describe("the last write or edit unit the fold context carries", () => {
+  it("names the edit once one has been folded", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: "edit" } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_edit",
+                          }),
+                          item: {
+                            case: "edit",
+                            value: create(conversationv1.AgentEditSchema, {}),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000d",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    // The attachment is a LATER message, which is the whole point of the join.
+    await h.engine.onSdkMessage({
+      type: "user",
+      uuid: "00000000-0000-4000-8000-00000000000e",
+      session_id: "s",
+      message: { role: "user", content: [] },
+    } as never);
+
+    expect(h.fold.contexts.at(-1)?.lastWriteOrEditUnit?.value).toBe("toolu_edit");
+  });
+});
