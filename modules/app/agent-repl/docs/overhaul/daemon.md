@@ -987,10 +987,23 @@ its own file only when >1 endpoint needs it.
   all; anything else resumes or refuses loudly — a conversation is never
   silently replaced (abandonment is irreversible; every alternative is
   recoverable). Mechanism the implementer's; the rule is binding.
-- RESUME GUARDS (ruled 2026-08-29): a resume whose vendor transcript
-  file is MISSING is refused with a typed arm BEFORE any process spawns
-  (a vanished file yields no death evidence, so the redial ladder would
-  otherwise loop forever on an unchangeable fact); after resume the shim
+- RESUME GUARDS (ruled 2026-08-29; AMENDED 2026-09-03): the guard is now
+  ONE TRANSCRIPT-AWARE SOURCE CLASSIFIER used by BOTH bring-up paths —
+  the cold start and the rollout's relaunch resume. No record or an
+  empty vendor id is FRESH; a deleted session refuses; a vendor id whose
+  transcript is FOUND resumes; a vendor id whose transcript is MISSING
+  comes up FRESH, opening a `conversation_abandoned` fault once with the
+  abandoned vendor session id as evidence. The AMENDMENT retires the
+  old blanket refusal: a session that pre-minted a vendor id and never
+  took a turn writes no transcript, so refusing it cost the workspace
+  its session entirely (the shim answered `unknown_session`, no client
+  was installed and every prompt then answered `no_session` forever).
+  The trade-off is stated: a truly VANISHED transcript now also comes up
+  fresh, with the fault as the record of what was abandoned rather than
+  a refusal. A resume that still reaches the shim without a transcript
+  gets the NAMED `unknown_session` arm, and a hard resume failure keeps
+  its ruling — the workspace's own error, remediated as it comes up,
+  with NO retry machinery; after resume the shim
   VERIFIES the query landed on the exact conversation asked for —
   identity mismatch is an error (/clear discharges the commitment).
 - Workspace verb triad: Close = view-level, requires quiet (live work or
