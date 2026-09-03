@@ -1203,6 +1203,18 @@ for bugs.
 
 ## G. Open items for the project lead
 
+- **`HibernateError.kind.turn_in_flight` is effectively dead.** (Raised
+  2026-09-03 by the e2e triage.) The idle sweep short-circuits on its OWN
+  freeness pre-check — `if !c.deps.Freeness.Free(ws.ID) { ... "the idle
+  session is not free; deferring its hibernation" ... continue }`
+  (`daemon/internal/drain/sweep.go:64-66`) — BEFORE it ever calls
+  `hibernate`, so a session with a turn in flight never receives a Hibernate
+  directive and the shim never gets the chance to refuse with
+  `turn_in_flight`. No path in the daemon reaches that arm today.
+  `TestHibernateOnIdleCutoff` therefore asserts the pre-check's own record.
+  Either the daemon should stop pre-checking and let the shim arbitrate (the
+  structural answer: one arbiter, not two), or the arm should be retired.
+
 - **The e2e harness must launch the daemon with EXACTLY the argv the Emacs
   launcher builds.** (Raised 2026-09-02 by the elisp daemon-argv landing; NOT
   implemented here.) The launcher now appends `--default-config-dir` and
