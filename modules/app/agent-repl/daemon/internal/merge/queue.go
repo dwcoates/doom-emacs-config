@@ -415,16 +415,29 @@ func (o *orchestrator) kick(repo wsm.RepoKey) {
 			o.pumping[repo] = false
 			o.mu.Unlock()
 		}()
+		// admitted counts what this burst ran, and the burst's own terminal
+		// record carries it. THE RECORD IS THE END OF THE WHOLE MERGE, not of
+		// its terminal row: the terminal is published partway through `finish`,
+		// and the landing's durable stamps, the lease release, the queue
+		// entry's removal and every synchronous republish they trigger all
+		// follow it INSIDE pumpOnce, with this pump the last thing holding
+		// them. Nothing else names that moment, so an observer that must not
+		// disturb a merge in flight has nowhere else to wait; a burst that
+		// admitted nothing is distinguishable by the count.
+		admitted := 0
 		for {
 			ran, err := o.pumpOnce(context.Background(), repo)
 			if err != nil {
 				o.deps.Log.Global().Error("daemon.merge.pump", "the admission pump stopped on an error",
-					dlog.Context{"repo": string(repo), "error": err.Error()})
+					dlog.Context{"repo": string(repo), "admitted": admitted, "error": err.Error()})
 				return
 			}
 			if !ran {
+				o.deps.Log.Global().Debug("daemon.merge.pump", "the admission pump went idle",
+					dlog.Context{"repo": string(repo), "admitted": admitted})
 				return
 			}
+			admitted++
 		}
 	}()
 }
