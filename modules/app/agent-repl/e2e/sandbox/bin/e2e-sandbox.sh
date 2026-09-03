@@ -250,17 +250,32 @@ do_run() {
     --network none
     --user 1000:1000
     --read-only
-    --tmpfs "/tmp:rw,exec,size=2g"
-    --tmpfs "/work:rw,exec,size=8g"
-    --tmpfs "/sandbox/home/.cache:rw,exec,size=4g"
+    # EVERY writable tmpfs carries uid/gid=1000 EXPLICITLY. Docker mounts a
+    # tmpfs root:root 0755, so without this the container's non-root uid
+    # cannot create anything in /work at all and the entrypoint's rsync dies
+    # with "mkdir ... Permission denied" on the first directory. /tmp keeps
+    # the conventional 1777 instead, since anything may write there.
+    --tmpfs "/tmp:rw,exec,size=2g,mode=1777"
+    --tmpfs "/work:rw,exec,size=8g,uid=1000,gid=1000,mode=0755"
     --mount "type=bind,source=$repo_root,target=/repo-src,readonly"
     --env "AGENT_REPL_SANDBOX_SHA=$sha"
-    --workdir "/work/repo/$MODULE_REL"
+    # --workdir IS DELIBERATELY THE TMPFS ROOT, not the module directory.
+    # Docker CREATES a missing workdir itself, as ROOT, before the entrypoint
+    # runs — so naming /work/repo/<module> here pre-created that whole chain
+    # root-owned inside the tmpfs, and the entrypoint's rsync then failed
+    # "mkdir ... Permission denied" on every directory under it. /work is the
+    # tmpfs mountpoint, already owned by the sandbox uid, so nothing is
+    # created; the entrypoint cd's to the module directory before exec.
+    --workdir "/work"
   )
   # The image's own HOME, Doom install and caches must stay writable even
   # under --read-only, so they get their own volumes rather than a host path.
-  args+=(--tmpfs "/sandbox/home:rw,exec,size=4g")
-  args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m")
+  # HOME must be a tmpfs (that is what keeps a run off the host's ~), which
+  # means it HIDES anything the image put under /sandbox/home. The image
+  # therefore keeps its primed caches at /sandbox/cache and its git identity
+  # at /sandbox/gitconfig, neither of which any mount covers.
+  args+=(--tmpfs "/sandbox/home:rw,exec,size=8g,uid=1000,gid=1000,mode=0755")
+  args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m,uid=1000,gid=1000,mode=0755")
 
   if [[ -n ${AGENT_REPL_E2E_ARTIFACTS:-} ]]; then
     mkdir -p "$AGENT_REPL_E2E_ARTIFACTS"
