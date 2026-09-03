@@ -33,6 +33,7 @@ import {
   assertCaptureAuthorized,
   createInputChannel,
   controlMatches,
+  createQuerySession,
   createWorld,
   drainToResult,
   cwdSlug,
@@ -1044,5 +1045,189 @@ describe("the corpus's declared error terminals", () => {
       "PermissionResult deny",
       "no activity frames for the denied call",
     ]);
+  });
+});
+
+/**
+ * A fake SDK that mimics the ONE property of the real one that caused the
+ * `cold-resume` failure: `query()` refuses if the AbortController it is handed
+ * has already fired, and `close()` on a query aborts the controller that query
+ * was opened with. No vendor call is involved.
+ */
+function fakeAbortAwareSdk() {
+  const opens = [];
+  return {
+    opens,
+    query({ prompt, options }) {
+      if (options.abortController.signal.aborted) throw new Error("Operation aborted");
+      const opened = {
+        prompt,
+        options,
+        signal: options.abortController.signal,
+        closed: false,
+      };
+      opened.close = () => {
+        opened.closed = true;
+        options.abortController.abort();
+      };
+      opens.push(opened);
+      return Object.assign(opened, {
+        [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true }) }),
+      });
+    },
+  };
+}
+
+describe("createQuerySession", () => {
+  it("gives the first open its own live controller", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    expect(session.controller.signal.aborted).toBe(false);
+  });
+
+  it("reopens for a resume without throwing the aborted error", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    expect(() => session.open({ resume: "s-1" })).not.toThrow();
+  });
+
+  it("hands the resumed open an unaborted signal", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[1].signal.aborted).toBe(false);
+  });
+
+  it("gives the resumed open a signal distinct from the first turn's", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[1].signal).not.toBe(sdk.opens[0].signal);
+  });
+
+  it("leaves the resumed signal unaborted when the first turn's controller fires", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    const firstController = sdk.opens[0].options.abortController;
+    session.open({ resume: "s-1" });
+    firstController.abort();
+    expect(sdk.opens[1].signal.aborted).toBe(false);
+  });
+
+  it("closes the previous query before reopening", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[0].closed).toBe(true);
+  });
+
+  it("aborts the first turn's controller when that query is torn down", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[0].signal.aborted).toBe(true);
+  });
+
+  it("threads the resume id into the reopened query's options", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[1].options.resume).toBe("s-1");
+  });
+
+  it("carries the base options into every open", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[1].options.cwd).toBe("/w");
+  });
+
+  it("does not carry the previous open's extra options forward", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({ resume: "s-1" });
+    session.open({});
+    expect(sdk.opens[1].options.resume).toBeUndefined();
+  });
+
+  it("keeps the same prompt channel across a resume", () => {
+    const sdk = fakeAbortAwareSdk();
+    const prompt = { channel: true };
+    const session = createQuerySession({ sdk, prompt, options: { cwd: "/w" } });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(sdk.opens[1].prompt).toBe(prompt);
+  });
+
+  it("exposes the reopened query's own iterator", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    const first = session.iterator;
+    session.open({ resume: "s-1" });
+    expect(session.iterator).not.toBe(first);
+  });
+
+  it("aborts the live controller on close", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    const controller = session.controller;
+    session.close();
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("closes the live query on close", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.close();
+    expect(sdk.opens[0].closed).toBe(true);
+  });
+
+  it("is idempotent on a second close", () => {
+    const sdk = fakeAbortAwareSdk();
+    const session = createQuerySession({ sdk, prompt: "p", options: { cwd: "/w" } });
+    session.open({});
+    session.close();
+    expect(() => session.close()).not.toThrow();
+  });
+
+  it("survives a query whose close throws", () => {
+    const sdk = {
+      query: () => ({
+        close: () => { throw new Error("already gone"); },
+        [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true }) }),
+      }),
+    };
+    const session = createQuerySession({ sdk, prompt: "p", options: {} });
+    session.open({});
+    expect(() => session.close()).not.toThrow();
+  });
+
+  it("still opens the resumed query when the previous close throws", () => {
+    let opened = 0;
+    const sdk = {
+      query: () => {
+        opened += 1;
+        return {
+          close: () => { throw new Error("already gone"); },
+          [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true }) }),
+        };
+      },
+    };
+    const session = createQuerySession({ sdk, prompt: "p", options: {} });
+    session.open({});
+    session.open({ resume: "s-1" });
+    expect(opened).toBe(2);
   });
 });
