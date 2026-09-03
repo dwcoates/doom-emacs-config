@@ -867,3 +867,41 @@ func TestADetachedShellsFailureSettlesTheBubble(t *testing.T) {
 		t.Fatalf("settled = %+v, want the bubble concluded", settled)
 	}
 }
+
+// TestAReannouncedStartDoesNotUnsettleASettledBubble covers the re-announcement
+// a settled spawn's start rides in on: SessionStarted.live_work and the work's
+// own stream both replay it, and taking it as live would leave a finished
+// bubble spinning with nothing left to settle it.
+func TestAReannouncedStartDoesNotUnsettleASettledBubble(t *testing.T) {
+	// Arrange: a spawn that has already settled.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Act: the same start again.
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert.
+	bubble := bubbleOf(h.bubbleRow("spawn-1", created))
+	if bubble.GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled", bubble.GetState())
+	}
+}
+
+// TestAFreshStartIsLive covers the ordinary start: nothing has settled it, so
+// the bubble opens live.
+func TestAFreshStartIsLive(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+
+	// Act.
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert.
+	bubble := bubbleOf(h.bubbleRow("spawn-1", created))
+	if bubble.GetLive() == nil {
+		t.Fatalf("state = %T, want live", bubble.GetState())
+	}
+}
