@@ -319,6 +319,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const announcedAgents = new Set<string>();
   /**
+   * The last write or edit unit this session folded.
+   *
+   * THE IDE-DIAGNOSTICS JOIN. The vendor's `diagnostics` attachment carries no
+   * tool id at all, so `convert/attachments.ts` joins it to the change it
+   * concerns by ADJACENCY -- and nothing ever assigned this, so every
+   * diagnostics record fell to "IDE diagnostics arrived with no preceding write
+   * or edit" and landed as residue instead of on the edit it belonged to.
+   *
+   * ONE remembered value, per the fold context's contract, and it is remembered
+   * where every other cross-message observation is: from the entries the fold
+   * produced.
+   */
+  let lastWriteOrEdit: conversationv1.AgentActivityId | undefined;
+  /**
    * Cuts produced BEFORE the session had an identity to key them to.
    *
    * The cold gate's `compact` remediation runs inside `StartSession`, before
@@ -392,6 +406,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...(open === undefined ? {} : { turnId: open.id }),
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
+      ...(lastWriteOrEdit === undefined ? {} : { lastWriteOrEditUnit: lastWriteOrEdit }),
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
       deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
       reportFault: (_kind, detail) => {
@@ -1145,6 +1160,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // to be waiting on. Reading settledness off a `result` those items do not
       // have left every one of them in flight forever, so `DetachForeground`
       // answered `not_detachable` for a unit that had plainly concluded.
+      // THE ADJACENCY the IDE-diagnostics join is made on. Remembered from the
+      // fold's own frames, so the id is the one the diagnostics report has to
+      // name -- the unit a consumer was shown.
+      if (item.case === "write" || item.case === "edit") {
+        const activityId = activity.activityId;
+        if (activityId !== undefined && activityId.value !== "") lastWriteOrEdit = activityId;
+      }
       const inner = item.value as { result?: { case?: string } } | undefined;
       const settled =
         inner === undefined || !("result" in inner)
