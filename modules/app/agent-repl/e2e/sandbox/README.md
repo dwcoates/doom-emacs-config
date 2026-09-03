@@ -102,11 +102,12 @@ S=modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh
 # what the sandbox needs, and what is missing
 $S preflight
 
-# one e2e test
-$S run go test ./e2e/ -run TestTurnLifecycle -v
+# one e2e test — `e2e` is its OWN Go module (e2e/go.mod), so `--dir e2e`
+# cd's the container there before running the command
+$S run --dir e2e go test . -run TestTurnLifecycle -v
 
 # the whole cross-system suite
-$S run go test ./e2e/...
+$S run --dir e2e go test ./...
 
 # one Emacs suite
 $S run emacs -batch -Q -l ert -l lisp/test-status.el -f ert-run-tests-batch-and-exit
@@ -114,13 +115,21 @@ $S run emacs -batch -Q -l ert -l lisp/test-status.el -f ert-run-tests-batch-and-
 # the module loaded through the sandbox's Doom profile
 $S run doom sync
 
+# a unit suite of another submodule with its own go.mod, e.g. the daemon
+$S run --dir daemon go test ./...
+
 # poke around
 $S shell
 ```
 
 The working directory inside the container is
 `/work/repo/modules/app/agent-repl`, so every command above is written
-relative to the module, exactly as `AGENTS.md` documents it.
+relative to the module, exactly as `AGENTS.md` documents it — `--dir <path>`
+(module-relative) cd's the container into a submodule first, which is
+required for `e2e` (and any other submodule carrying its own `go.mod`, such
+as `daemon`) since a bare `go test` run from the module root has no `go.mod`
+to find there and fails with "go.mod file not found in the current directory
+or any parent directory".
 
 Logs stream straight through: stdout stays stdout, stderr stays stderr, and
 nothing is captured or buffered, so a failing test's output is the caller's

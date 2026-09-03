@@ -88,10 +88,28 @@ if [[ ${SANDBOX_SKIP_NPM:-0} != 1 ]]; then
   done
 fi
 
+# Optional `--dir <relpath>`, consumed before the command: <relpath> is
+# resolved relative to the MODULE root, not the repo root, because every
+# command this sandbox documents is written relative to the module (per
+# AGENTS.md). This exists because the e2e suite is its OWN Go module
+# (e2e/go.mod) with no go.mod at the module root, so a bare `go test` run
+# from the module root dies with "go.mod file not found in the current
+# directory or any parent directory" — `--dir e2e` is how a caller reaches
+# it. Any other submodule with its own go.mod (e.g. `daemon`) works the same
+# way. Omitted, the command runs from the module root as before.
+run_rel=$MODULE_REL
+if [[ ${1:-} == --dir ]]; then
+  shift
+  [[ $# -gt 0 ]] || die "--dir requires an argument"
+  run_rel=$MODULE_REL/$1
+  shift
+fi
+[[ -d $REPO/$run_rel ]] || die "--dir target does not exist: $REPO/$run_rel"
+
 if [[ $# -eq 0 ]]; then
-  die "no command given; e.g. e2e-sandbox.sh go test ./..."
+  die "no command given; e.g. e2e-sandbox.sh run go test ./... (or: run --dir e2e go test . -run X)"
 fi
 
-log "exec: $*"
-cd "$REPO/$MODULE_REL"
+log "exec: $* (in $run_rel)"
+cd "$REPO/$run_rel"
 exec "$@"
