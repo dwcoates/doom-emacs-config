@@ -126,6 +126,43 @@ export function rows(app: MountedApp, kind: string, unit?: string): HTMLElement[
 }
 
 /**
+ * Drive one real turn to completion and answer the newest row of a family.
+ *
+ * THE TURN COUNT IS READ OFF THE DOM, never held in a module counter: a
+ * counter that a failed test left one ahead makes every LATER test in the
+ * file fail for a reason that is not its own, which is how one broken
+ * assertion became "21 failed" the first time this layer ran.
+ */
+export async function driveTurn(
+  app: MountedApp,
+  scenario: string,
+  kind: string,
+  unit?: string,
+): Promise<HTMLElement> {
+  // BOTH COUNTS ARE SNAPSHOTTED FIRST. The page accumulates rows across a
+  // file's tests, so "a row of this family exists" is already true from an
+  // earlier turn: only a row MORE than were standing is this turn's, and
+  // waiting on the count is what stops a test asserting on its predecessor's
+  // row when its own scenario drew none.
+  const beforeFamily = rows(app, kind, unit).length;
+  const beforeTurns = rows(app, "turnEnded").length;
+  const what = `${kind}${unit === undefined ? "" : "." + unit}`;
+  await submit(app, `!${scenario}`);
+  await awaitDrawn(
+    app,
+    `a NEW ${what} row for !${scenario} (${beforeFamily} stood before it)`,
+    () => rows(app, kind, unit).length > beforeFamily,
+  );
+  await awaitDrawn(app, `the turn for !${scenario} to end`, () =>
+    rows(app, "turnEnded").length > beforeTurns,
+  );
+  const drawn = rows(app, kind, unit);
+  const last = drawn[drawn.length - 1];
+  expect(last, `!${scenario} drew no ${what} row`).toBeDefined();
+  return last as HTMLElement;
+}
+
+/**
  * Submit `!scenario` and wait until at least one row of the named kind is
  * drawn, answering those rows.
  *

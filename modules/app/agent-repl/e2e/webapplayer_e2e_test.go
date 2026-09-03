@@ -120,6 +120,11 @@ func TestWebappLayerFeedFamilies(t *testing.T) {
 	wlDriveArea(t, "feed-families.layer.test.ts")
 }
 
+// TestWebappLayerSubfeeds is section F3: sub-feed open/collapse lifecycle.
+func TestWebappLayerSubfeeds(t *testing.T) {
+	wlDriveArea(t, "subfeeds.layer.test.ts")
+}
+
 // wlDriveArea builds one world and drives one of the layer's vitest files
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string) {
