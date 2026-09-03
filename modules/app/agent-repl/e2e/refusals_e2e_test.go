@@ -369,14 +369,27 @@ const rfPollInterval = 20 * time.Millisecond
 // shared "did the refusal become observable" check (see that test's OPEN
 // QUESTION paragraph for why it accepts either shape rather than pinning
 // one).
+//
+// "Either shape" means either shape OF THE VENDOR REFUSAL. It does NOT mean
+// any failure at all: the bring-up arms — OpenWorkspaceError.spawn_failed,
+// and SessionFault.shim_start_failed / .shim_died — say the shim PROCESS
+// never came up, which is a broken harness (a mis-staged bundle, missing
+// vendor deps), not the refusal this lever provokes. Accepting them would
+// let this test pass green on a world where the shim never ran at all, so
+// they fail the test by name instead.
 func rfAwaitUnhealthyOrOpenFailure(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
 	if err != nil {
 		t.Fatalf("OpenWorkspace = error %v, want a typed OpenWorkspaceResponse", err)
 	}
-	if resp.Msg.GetError() != nil {
-		t.Logf("OpenWorkspace observed the refusal synchronously: %v", resp.Msg.GetError())
+	if oerr := resp.Msg.GetError(); oerr != nil {
+		if oerr.GetSpawnFailed() != nil {
+			t.Fatalf("OpenWorkspace = spawn_failed (%v), want a VENDOR start refusal: the shim PROCESS "+
+				"never came up, so this test never reached the arm it exists to cover — the harness or "+
+				"the shim's own bring-up is broken, not the vendor", oerr)
+		}
+		t.Logf("OpenWorkspace observed the refusal synchronously: %v", oerr)
 		return
 	}
 	if resp.Msg.GetSuccess() == nil {
@@ -389,9 +402,19 @@ func rfAwaitUnhealthyOrOpenFailure(t *testing.T, w *World, ws *workspacev1.Works
 	defer ticker.Stop()
 	for {
 		hresp, herr := w.Client().SessionHealth(ctx, connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: ws}))
-		if herr == nil && len(hresp.Msg.GetSuccess().GetUnhealthy().GetFaults()) > 0 {
-			t.Logf("SessionHealth observed the refusal asynchronously: %v", hresp.Msg.GetSuccess().GetUnhealthy())
-			return
+		if herr == nil {
+			if faults := hresp.Msg.GetSuccess().GetUnhealthy().GetFaults(); len(faults) > 0 {
+				for _, f := range faults {
+					if f.GetShimStartFailed() != nil || f.GetShimDied() != nil {
+						t.Fatalf("SessionHealth reported a BRING-UP fault (%v), want a VENDOR start refusal: "+
+							"the shim process failed to start or died, so this test never reached the arm it "+
+							"exists to cover — the harness or the shim's own bring-up is broken, not the vendor",
+							f)
+					}
+				}
+				t.Logf("SessionHealth observed the refusal asynchronously: %v", hresp.Msg.GetSuccess().GetUnhealthy())
+				return
+			}
 		}
 		select {
 		case <-ctx.Done():
