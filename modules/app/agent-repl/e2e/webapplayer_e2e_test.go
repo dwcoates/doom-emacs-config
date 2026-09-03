@@ -219,6 +219,185 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	w.RequireNoUnexpectedExit(t)
 }
 
+// wlPageMountedOperation is the operation the vitest child logs through the
+// daemon's own ClientLog rpc once its page is mounted and its streams are
+// standing. IT IS THE RENDEZVOUS: this Go side may not replace the daemon
+// before that record exists, or the `transferred` push would have no
+// subscriber to reach.
+//
+// Matched VERBATIM against MOUNTED_MARKER in
+// `webapp/test/webapp-layer/restart-handover.layer.test.ts`; the two constants
+// are documented on each other and move together.
+const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
+
+// TestWebappLayerRestartHandover is section F9 #39: THE RESTART HANDOVER, the
+// one area whose Go side acts WHILE the page is mounted.
+//
+// THE SHAPE, and why it is this shape:
+//
+//   - The child is STARTED, not awaited: the page must be standing when the
+//     daemon under it is replaced. It is awaited at the end, so a red page is
+//     still this test's failure.
+//   - The rendezvous is the child's own ClientLog marker, awaited with
+//     AwaitLogRecord on the workspace's `webapp` sink (the sink ClientLog
+//     persists a webview's records to, harness.ClientLogPath). No sleep, and
+//     no assumption about how long a vitest boot takes.
+//   - The handover itself is the SUITE'S EXISTING MACHINERY, reused verbatim
+//     from adoption_e2e_test.go: adSelfRepoWorld (a fake-git SelfRepo with a
+//     passing merge gate), adTriggerSelfMergeRollout (a real landed commit
+//     firing the real blue-green self-rollout), adDial (reaching the
+//     successor at the address the announcement carried). There is no second
+//     way to replace a daemon in this package.
+//   - THE ADOPTS ARE ISSUED FROM HERE, not from the page, and that is the
+//     contract: "THE WEBAPP DOES NOT REDIAL (project lead, final) ...
+//     re-pointing the webview is Emacs's job" (webapp/src/lifecycle/
+//     lifecycle.ts:12-21). Emacs is the external system this suite mocks, so
+//     this test plays the lagging client for BOTH hops exactly as
+//     TestRefusalOrderingDuringHandover does — concurrently, because "EVERY
+//     EXPECTED PARTICIPANT SUCCEEDS TOGETHER" (daemon/internal/rollout/
+//     adopt.go:222-251). The page's own web participant is its standing
+//     WatchWebWorkspace, which is what then receives `transferred`.
+//   - The page's recovery is its OWN fresh boot at the successor's address —
+//     the reload Emacs performs — so the successor's AdoptWebWorkspace on the
+//     recovered page is issued by the real app.
+//
+// THE DECLARED WARNING is this test's own subject, as in the adoption area:
+// the standing unlanded-arm refusal record is the evidence of the refusal a
+// handover deliberately provokes.
+func TestWebappLayerRestartHandover(t *testing.T) {
+	npm := wlRequireNPM(t)
+	webappDir := wlRequireWebappDeps(t)
+
+	// The handover world, verbatim from the adoption area: its daemon's own
+	// checkout is a fake-git repository with a passing merge gate, and its ONE
+	// context carries the whole chain on HandoverChainTimeout.
+	selfRepo, w := adSelfRepoWorld(t)
+	w.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
+
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE (see wlDriveArea): the
+	// footer's connectivity truth is the PAIR of participants, and this hop is
+	// also the host half of the adoption rendezvous below.
+	host := w.WatchHost(ws)
+	defer host.Close()
+	harness.AwaitNext(t, w.Ctx(), host, "the fresh host push")
+
+	daemonStream := w.WatchDaemonStream()
+	defer daemonStream.Close()
+
+	child, err := wlStartVitest(t, npm, webappDir, "restart-handover.layer.test.ts",
+		wlChildEnv(t, w, ws))
+	if err != nil {
+		t.Fatalf("e2e/webapp-layer: starting the handover child: %v", err)
+	}
+	defer child.Kill()
+
+	// Arrange: the rendezvous. The page is mounted and its streams stand.
+	w.Daemon.AwaitLogRecord(harness.ClientLogPath(ws),
+		"the page's own mounted marker, logged through ClientLog",
+		func(r harness.LogRecord) bool { return r.Operation == wlPageMountedOperation })
+
+	// Act: a real landed commit on the daemon's own checkout fires the real
+	// self-merge rollout.
+	adTriggerSelfMergeRollout(t, w, selfRepo, adSelfMergeTriggerPath)
+	announced := harness.AwaitView(t, w.Ctx(), daemonStream, "shutdown_announced",
+		func(r *agentreplv1.WatchDaemonResponse) bool { return r.GetShutdownAnnounced() != nil },
+	).GetShutdownAnnounced()
+	addr := announced.GetAddress()
+	if addr == "" {
+		t.Fatal("shutdown_announced.address is unset, want the successor's address for a handover")
+	}
+	successor := adDial(addr)
+
+	// Act: complete the rendezvous on the successor, CONCURRENTLY — one after
+	// the other blocks the first inside the rendezvous until its own context
+	// expires (adopt.go:222-251).
+	adopts := make(chan error, 2)
+	go func() {
+		_, err := successor.AdoptHostWorkspace(w.Ctx(),
+			connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	go func() {
+		_, err := successor.AdoptWebWorkspace(w.Ctx(),
+			connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-adopts; err != nil {
+			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
+		}
+	}
+
+	// Act: KEEP THE HOST HOP ARRIVING, because the page is about to reload.
+	//
+	// A fresh page adopts at boot (lifecycle.ts:23-28), so the recovered page
+	// issues its OWN AdoptWebWorkspace against the successor — and the
+	// successor RE-ARMS the rendezvous from the stand-down intent manifest
+	// after the first arming was already satisfied (observed here:
+	// `daemon.rollout.join` "armed the adopt rendezvous from the intent
+	// manifest" resets host_called/web_called), so that second web caller
+	// waits for a host participant all over again. In production the host is
+	// Emacs, which re-points the webview AND re-adopts the host hop; this
+	// suite mocks Emacs, so the host half of that reload is issued here. The
+	// loop keeps a host caller arriving until one is accepted, so whenever the
+	// recovered page's web adopt lands there is a partner in the rendezvous.
+	// IT KEEPS CALLING FOR AS LONG AS THE PAGE IS RUNNING, rather than
+	// stopping at its first success: a host adopt that returns "the workspace
+	// is already adopted; the call succeeds at once" satisfies nothing for a
+	// rendezvous that is re-armed a millisecond later, which is exactly the
+	// order observed (host accepted at once, the manifest re-armed after it,
+	// then the page's web adopt waiting alone until it gave up).
+	stopReadopting := make(chan struct{})
+	readopted := make(chan int, 1)
+	go func() {
+		accepted := 0
+		for {
+			if _, err := successor.AdoptHostWorkspace(w.Ctx(),
+				connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws})); err == nil {
+				accepted++
+			}
+			select {
+			case <-time.After(pollInterval):
+			case <-stopReadopting:
+				readopted <- accepted
+				return
+			case <-w.Ctx().Done():
+				readopted <- accepted
+				return
+			}
+		}
+	}()
+
+	// Assert (the Go half): the transfer really happened and names the
+	// successor — the barrier the page's own `transferred` push rides on.
+	harness.AwaitView(t, w.Ctx(), host, "transferred",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool { return r.GetTransferred() != nil })
+	if code := w.AwaitExit(); code != 0 {
+		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the handover", code)
+	}
+	adAwaitAddrFileChange(t, w.Daemon, addr)
+
+	// Assert (the page's half): every assertion in
+	// restart-handover.layer.test.ts — the moved notice naming this same
+	// successor, the quiesced page's local refusal, and the fresh page's own
+	// boot and adoption at the new address.
+	waitErr := child.Wait()
+	close(stopReadopting)
+	accepted := <-readopted
+	if waitErr != nil {
+		t.Fatalf("e2e/webapp-layer: restart-handover.layer.test.ts failed: %v", waitErr)
+	}
+
+	// And the host half of that reload really was accepted: a page recovering
+	// beside a host hop that never re-adopted would be a different scenario.
+	if accepted == 0 {
+		t.Fatal("no AdoptHostWorkspace call on the successor was ever accepted, so the page's own recovery adopt had no partner in the rendezvous")
+	}
+}
+
 // wlRepositoryRef registers a repository's main worktree and reads the
 // daemon-minted RepositoryRef back off the roster stream.
 func wlRepositoryRef(t *testing.T, w *World, repo *harness.Repo) *workspacev1.RepositoryRef {
@@ -345,6 +524,31 @@ func wlChildEnv(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
 // rather than leaking a vitest that outlives the test.
 func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) error {
 	t.Helper()
+	child, err := wlStartVitest(t, npm, webappDir, vitestFile, env)
+	if err != nil {
+		return err
+	}
+	return child.Wait()
+}
+
+// wlChild is a vitest child still running, for the ONE area whose Go side must
+// act WHILE the page is mounted (§F9 #39, the restart handover). Every other
+// area starts the child and immediately waits, which is wlRunVitest.
+type wlChild struct {
+	t        *testing.T
+	cmd      *exec.Cmd
+	done     chan error
+	tailOnly struct {
+		sync.Mutex
+		lines []string
+	}
+}
+
+// wlStartVitest starts the layer's vitest project as a child of this test and
+// answers the running child, its output already being mirrored into the test
+// log.
+func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) (*wlChild, error) {
+	t.Helper()
 
 	// The file filter is positional after `--`: one area's world drives one
 	// area's file, never the whole layer.
@@ -354,21 +558,20 @@ func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) 
 	cmd.Env = env
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("vitest stdout pipe: %w", err)
+		return nil, fmt.Errorf("vitest stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("vitest stderr pipe: %w", err)
+		return nil, fmt.Errorf("vitest stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting `npm run test:webapp-layer` in %s: %w", webappDir, err)
+		return nil, fmt.Errorf("starting `npm run test:webapp-layer` in %s: %w", webappDir, err)
 	}
 
+	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
+	tail := &child.tailOnly
+
 	var mirrored sync.WaitGroup
-	var tail struct {
-		sync.Mutex
-		lines []string
-	}
 	mirror := func(name string, r io.Reader) {
 		defer mirrored.Done()
 		scanner := bufio.NewScanner(r)
@@ -388,14 +591,24 @@ func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) 
 	go mirror("out", stdout)
 	go mirror("err", stderr)
 
-	done := make(chan error, 1)
 	go func() {
 		mirrored.Wait()
-		done <- cmd.Wait()
+		child.done <- cmd.Wait()
 	}()
 
+	return child, nil
+}
+
+// Wait awaits the child's exit and answers its failure (if any).
+//
+// The exit is awaited on its own channel with a select against
+// WebappLayerTimeout — never a sleep, and a timeout kills the child rather
+// than leaking a vitest that outlives the test.
+func (c *wlChild) Wait() error {
+	c.t.Helper()
+	tail := &c.tailOnly
 	select {
-	case waitErr := <-done:
+	case waitErr := <-c.done:
 		if waitErr == nil {
 			return nil
 		}
@@ -406,13 +619,22 @@ func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) 
 		// The child is killed, not abandoned: a leaked vitest holds this
 		// daemon's streams open and the world's teardown would then observe
 		// state the test never caused.
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
 		}
 		tail.Lock()
 		defer tail.Unlock()
 		return fmt.Errorf("vitest did not exit within %s; last output:\n%s",
 			WebappLayerTimeout, strings.Join(tail.lines, "\n"))
+	}
+}
+
+// Kill stops a still-running child, for the Go side failing before the page's
+// own assertions could conclude. A killed child's output is already in the
+// test log.
+func (c *wlChild) Kill() {
+	if c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
 	}
 }
 
