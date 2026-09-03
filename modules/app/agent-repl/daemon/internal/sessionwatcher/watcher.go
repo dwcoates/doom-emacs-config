@@ -49,7 +49,16 @@ type shellWatch struct {
 	stream shimclient.Stream[*conversationv1.AgentBash]
 	// done marks a watch REAPED at its terminal, as on agentWatch.
 	done bool
+	// reopens counts how many times this shell's stream ended before the
+	// shell settled and was opened again. It is BOUNDED: a shim that ends the
+	// stream the instant it is opened must sever rather than spin.
+	reopens int
 }
+
+// shellReopenLimit is how many times one detached shell's watch is re-opened
+// after its stream ends early before the failure is treated as the link being
+// severed.
+const shellReopenLimit = 3
 
 // watcher is one live workspace's watch fleet: every shim watch the session
 // owns, the daemon-to-shim hop of connectivity truth, and the routing of every
@@ -738,19 +747,24 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 	go w.runAgent(gen, a, stream)
 }
 
-// openShellStreamLocked opens (or re-opens) one detached shell's watch.
-func (w *watcher) openShellStreamLocked(s *shellWatch) {
+// openShellStreamLocked opens (or re-opens) one detached shell's watch,
+// reporting whether a stream is now open. A false answer has ALREADY been
+// surfaced as a severed link; the answer exists so the caller can decide
+// whether an entry with no stream is worth keeping.
+func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
 	gen := w.gen
 	stream, err := w.client.WatchBash(w.ctx, s.work)
 	if err != nil {
+		s.stream = nil
 		w.severedLocked("watch_bash", "WatchBash could not be opened", err)
-		return
+		return false
 	}
 	s.stream = stream
 	w.log.Debug("daemon.sessionwatcher.watch_bash", "shell watch opened", dlog.Context{
 		"work_id": s.work.GetValue(),
 	})
 	go w.runShell(gen, s, stream)
+	return true
 }
 
 // watchKey is a watch's key in the known_through map.
@@ -864,7 +878,7 @@ func (w *watcher) runShell(gen uint64, s *shellWatch, stream shimclient.Stream[*
 	for {
 		bash, err := stream.Recv()
 		if err != nil {
-			w.streamEnded(gen, "shell", "watch_bash", s.work.GetValue(), func() bool { return s.done }, err)
+			w.shellStreamEnded(gen, s, err)
 			return
 		}
 		w.mu.Lock()
@@ -929,4 +943,51 @@ func (w *watcher) streamEnded(gen uint64, kind, operation, key string, reaped fu
 		return
 	}
 	w.severedLocked(operation, kind+" stream ended while the session was live", err)
+}
+
+// shellStreamEnded handles one detached shell's stream ending. A shell whose
+// watch is STILL REGISTERED has not settled -- its own terminal frame is what
+// reaps the watch -- so the stream ending early means the shim dropped a watch
+// the daemon still needs, and the watch is opened again rather than left dark
+// until the link happens to be redialed. The re-open is bounded, and a
+// re-open that cannot be made severs exactly as before.
+func (w *watcher) shellStreamEnded(gen uint64, s *shellWatch, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	key := s.work.GetValue()
+	if w.stale(gen) || s.done {
+		w.log.Debug("daemon.sessionwatcher.stream_closed", "a torn-down stream ended", dlog.Context{
+			"stream": "shell", "key": key,
+		})
+		return
+	}
+	if w.sessionEnded {
+		w.log.Debug("daemon.sessionwatcher.stream_closed", "a stream ended with its session", dlog.Context{
+			"stream": "shell", "key": key,
+		})
+		return
+	}
+	if w.shells[key] != s {
+		w.log.Debug("daemon.sessionwatcher.stream_closed", "a replaced shell watch's stream ended", dlog.Context{
+			"stream": "shell", "key": key,
+		})
+		return
+	}
+	s.stream = nil
+	if s.reopens >= shellReopenLimit {
+		w.severedLocked("watch_bash", "a detached shell's stream kept ending before the shell settled", err)
+		return
+	}
+	s.reopens++
+	ctx := dlog.Context{"work_id": key, "reopens": s.reopens}
+	if err != nil {
+		ctx["error"] = err.Error()
+	}
+	w.log.Warn("daemon.sessionwatcher.watch_bash",
+		"a detached shell's stream ended before the shell settled; re-opening it", ctx)
+	if !w.openShellStreamLocked(s) {
+		delete(w.shells, key)
+		w.publishLiveWorkLocked()
+	}
 }

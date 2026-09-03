@@ -464,7 +464,20 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 			})
 			return
 		}
-		if _, ok := w.agents[agent.GetValue()]; ok {
+		if entry, ok := w.agents[agent.GetValue()]; ok {
+			// THE SYNC WATCH BECOMES THE DETACHED ONE. A spawn watched as the
+			// turn's own progress carries NO handle, and the handle is what
+			// the live set reports -- so returning here without promoting the
+			// entry leaves the live set stating no agents, and an interrupt
+			// addressed at all of them answering that nothing is running.
+			if entry.work == nil {
+				entry.work = handle
+				w.log.Debug("daemon.sessionwatcher.detached_work_promoted", "a watched subagent became detached work", dlog.Context{
+					"agent_id": agent.GetValue(), "work_id": handle.GetValue(),
+				})
+				w.publishLiveWorkLocked()
+				return
+			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the subagent is already watched", dlog.Context{
 				"agent_id": agent.GetValue(),
 			})
@@ -480,7 +493,22 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 			w.log.Error("daemon.sessionwatcher.detached_shell_unaddressable", "a detached shell named no handle to watch", nil)
 			return
 		}
-		if _, ok := w.shells[handle.GetValue()]; ok {
+		if entry, ok := w.shells[handle.GetValue()]; ok {
+			// A REPEAT IS ALSO A RETRY. The shim refuses WatchBash while its
+			// store holds no rows for the handle yet, so an entry can be
+			// carrying no stream; the repeated announcement is the occasion
+			// to open one, and answering it "already watched" would leave the
+			// shell dark for the rest of the session.
+			if entry.stream == nil {
+				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached shell's watch", dlog.Context{
+					"work_id": handle.GetValue(),
+				})
+				if !w.openShellStreamLocked(entry) {
+					delete(w.shells, handle.GetValue())
+					w.publishLiveWorkLocked()
+				}
+				return
+			}
 			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the shell is already watched", dlog.Context{
 				"work_id": handle.GetValue(),
 			})
@@ -488,7 +516,14 @@ func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, wor
 		}
 		entry := &shellWatch{work: handle}
 		w.shells[handle.GetValue()] = entry
-		w.openShellStreamLocked(entry)
+		if !w.openShellStreamLocked(entry) {
+			// A NIL-STREAM ENTRY NEVER PERSISTS: while one sits in the map
+			// every repeated announcement is answered "already watched", so
+			// the refusal would be permanent. Forgetting it makes the next
+			// announcement open the watch afresh.
+			delete(w.shells, handle.GetValue())
+			return
+		}
 		w.publishLiveWorkLocked()
 
 	case kindMonitor:
