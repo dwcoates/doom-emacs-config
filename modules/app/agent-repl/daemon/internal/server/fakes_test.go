@@ -164,10 +164,18 @@ type fakeVerbs struct {
 	selectErr error
 	closeErr  error
 
+	setModel    string
+	setModelErr error
+
 	answerPermissionErr  error
 	answerQuestionErr    error
 	setPermissionModeErr error
 	assignTaskErr        error
+}
+
+func (f *fakeVerbs) SetModel(_ context.Context, _ ids.WorkspaceID, model string) error {
+	f.setModel = model
+	return f.setModelErr
 }
 
 func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {

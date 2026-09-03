@@ -47,6 +47,17 @@ const (
 	// ArmShimQueryRefusedToEnd is a session kill the vendor query would not
 	// honor.
 	ArmShimQueryRefusedToEnd = "query_refused_to_end"
+	// ArmShimModelNotInCatalog is SetSessionModelFailure.model_not_in_catalog:
+	// the shim's own catalog does not carry the model. The daemon's own
+	// `SetModelError` spells the SAME condition `not_in_catalog`, so the rpc
+	// handler RENAMES this arm onto that one rather than let the shim's
+	// spelling answer as an unlanded arm.
+	ArmShimModelNotInCatalog = "model_not_in_catalog"
+	// ArmShimCold is SetSessionModelFailure.cold: the switch would discard a
+	// warm cache above the threshold the daemon stated. `SetModelError` has NO
+	// arm for it (ERROR-ARMS.md holds the row), so it answers as an unlanded
+	// arm; the daemon's own policy keeps it from arising (see sender.SetModel).
+	ArmShimCold = "cold"
 	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
 	// illegal on the wire and is surfaced rather than guessed at.
 	ArmShimUnspecified = "unspecified"
