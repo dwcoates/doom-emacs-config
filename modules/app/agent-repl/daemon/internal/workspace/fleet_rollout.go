@@ -537,14 +537,24 @@ func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, said *con
 		return "", fmt.Errorf("workspace: route guidance on %q: the workspace has no live session", ws)
 	}
 	turn := wsm.NewTurnID()
+	// The watcher learns the turn before the shim does: a terminal on the
+	// agent stream can beat StartTurn's response back, and one routed with no
+	// turn in flight ends nothing.
+	watcher, live := f.Watcher(ws)
+	if live {
+		watcher.OnTurnOpening(ws, turn)
+	}
 	success, err := sender.StartTurn(ctx, turn, said, origin)
 	if err != nil {
+		if live {
+			watcher.OnTurnOpenFailed(ws, turn)
+		}
 		return "", fmt.Errorf("workspace: route guidance on %q: %w", ws, err)
 	}
 	// The watcher is handed the accepted turn the same way the queue hands one
 	// over: it names the main agent and feeds the opening page through the
 	// history path, which is what makes the turn's end attributable.
-	if watcher, live := f.Watcher(ws); live {
+	if live {
 		watcher.SetMainAgent(success.GetPrompt().GetAgent())
 		watcher.OnTurnOpened(ws, success.GetPrompt(), success.GetPage())
 	}

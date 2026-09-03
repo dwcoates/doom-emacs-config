@@ -45,8 +45,14 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// workspace whose turn is running.
 	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
 
+	// THE WATCHER LEARNS THE TURN BEFORE THE SHIM DOES. The shim can put the
+	// turn's frames — its terminal included — on the agent stream before this
+	// call returns; a terminal routed while no turn stands in flight is
+	// attributable to nothing, and every AwaitTurnEnd on that turn hangs.
+	watcher.OnTurnOpening(sub.WS, sub.Turn)
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
+		watcher.OnTurnOpenFailed(sub.WS, sub.Turn)
 		q.deps.Sidebar.SetTurn(sub.WS, nil)
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)

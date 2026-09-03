@@ -262,6 +262,13 @@ type Watcher interface {
 	TurnInFlight() *ids.TurnID
 	// SetMainAgent names the session's main agent from an accepted turn.
 	SetMainAgent(agent *conversationv1.AgentId)
+	// OnTurnOpening records a turn BEFORE StartTurn is dispatched, so a
+	// terminal that arrives on the agent stream ahead of StartTurn's response
+	// is still attributable to it.
+	OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID)
+	// OnTurnOpenFailed retires a turn recorded by OnTurnOpening that the shim
+	// then refused.
+	OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnTurnOpened hands an accepted turn over: the prompt as delivered and
 	// the opening page StartTurnSuccess carried.
 	OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage)
