@@ -2,9 +2,13 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/wsm"
 )
 
 // TestRouteGuidanceRefusesAnUnspecifiedOrigin covers the origin the contract
@@ -183,5 +187,104 @@ func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatal("HostSessionFacts reports a session this daemon does not operate")
+	}
+}
+
+// TestResumeComesUpFreshWhenTheRecordedTranscriptIsMissing is the bounce of a
+// session that pre-minted a vendor id and never took a turn: naming that id
+// earned `unknown_session` from the shim, no client was installed, and every
+// later prompt answered `no_session` forever.
+func TestResumeComesUpFreshWhenTheRecordedTranscriptIsMissing(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-never-turned"}
+	f.accounts.transcriptErr = errors.New("no such file")
+
+	// Act.
+	resumed, err := f.fleet.Resume(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume = %v, want a fresh session rather than a failure", err)
+	}
+	if resumed.Cold != nil {
+		t.Fatalf("Resume = %+v, want no cold gate", resumed)
+	}
+	if got := f.client.requests[0].GetFresh(); got == nil {
+		t.Fatalf("StartSession source = %+v, want the fresh arm", f.client.requests[0].GetSource())
+	}
+	if _, live := f.fleet.Client(ws.ID); !live {
+		t.Fatal("the workspace has no installed client; every prompt would answer no_session")
+	}
+}
+
+// TestResumeKeepsTheVendorIdWhenTheTranscriptIsFound is the classifier's other
+// arm: a real conversation still really resumes.
+func TestResumeKeepsTheVendorIdWhenTheTranscriptIsFound(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+
+	// Act.
+	if _, err := f.fleet.Resume(context.Background(), ws.ID, f.client); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// Assert.
+	if got := f.client.requests[0].GetResume().GetVendorSessionId(); got != "vendor-1" {
+		t.Fatalf("resumed vendor session id = %q, want the recorded conversation", got)
+	}
+	if got := f.db.sessions[ws.ID].VendorSessionID; got != "vendor-1" {
+		t.Fatalf("recorded vendor session id = %q, want it unchanged by the resume", got)
+	}
+}
+
+// TestResumePropagatesTheUnknownSessionArm covers a GENUINELY vanished
+// transcript reaching the shim: the arm is named, never a generic sentence.
+func TestResumePropagatesTheUnknownSessionArm(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_UnknownSession{UnknownSession: &shimv1.StartSessionUnknownSession{}},
+			Detail: "no transcript exists",
+		}},
+	}
+
+	// Act.
+	_, err := f.fleet.Resume(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownSession)
+}
+
+// TestResumeDoesNotRetryAHardVendorStartFailure is the RULING GUARD: a hard
+// resume failure that is not unknown_session has no retry machinery, and the
+// relaunch engine's fault is the remediation record.
+func TestResumeDoesNotRetryAHardVendorStartFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Detail: "the vendor binary is missing",
+		}},
+	}
+
+	// Act.
+	_, err := f.fleet.Resume(context.Background(), ws.ID, f.client)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Resume() = nil error, want the vendor-start failure surfaced")
+	}
+	if len(f.client.requests) != 1 {
+		t.Fatalf("StartSession calls = %d, want exactly one; there is no retry machinery", len(f.client.requests))
 	}
 }

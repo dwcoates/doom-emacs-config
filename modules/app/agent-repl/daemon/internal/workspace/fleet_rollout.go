@@ -413,12 +413,15 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	if err != nil {
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: read the session record: %w", ws, err)
 	}
-	src, err := decideSource(session, exists)
+	// THE SAME TRANSCRIPT-AWARE CLASSIFIER THE COLD BRING-UP USES. A bounce
+	// of a session that pre-minted a vendor id but never took a turn has no
+	// transcript to resume, and naming it anyway earned `unknown_session` from
+	// the shim with no client installed and every later prompt answered
+	// `no_session`. It comes up FRESH instead, on the prelaunched shim, with
+	// the abandoned id recorded as a fault.
+	src, err := f.classifySource(ctx, log, ws, record.Dir, session, exists)
 	if err != nil {
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: %w", ws, err)
-	}
-	if src.Fresh {
-		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: the workspace has no conversation to resume", ws)
 	}
 
 	started, err := f.startSession(ctx, log, ws, c, src, session)
@@ -449,8 +452,8 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		return rollout.Resumed{}, err
 	}
 	f.publishHost(ws)
-	log.Info(opFleetRollout, "resumed the conversation on the new shim", dlog.Context{
-		"vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
+	log.Info(opFleetRollout, "the session is up on the new shim", dlog.Context{
+		"fresh": src.Fresh, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})
 	return rollout.Resumed{}, nil
 }
