@@ -242,6 +242,12 @@ type LifecycleSink interface {
 	// carry an exit code and cannot tell a process that died from a stream
 	// that broke.
 	OnLinkFault(ws ids.WorkspaceID, fault LinkFault)
+	// OnWatchOpenRefused reports a watch open the shim refused for a handle
+	// NOTHING announced. A refusal on a handle the daemon legitimately
+	// expects is retried and never reaches here: only an unexpected one is
+	// evidence, and it is evidence of a daemon/shim disagreement about what
+	// exists rather than of a broken link.
+	OnWatchOpenRefused(ws ids.WorkspaceID, refusal WatchOpenRefusal)
 	// OnLinkChanged reports the shim link's attachment. The VIEWS take the
 	// link on their own sinks; this arm exists because the HOST view's
 	// `shim_attached` is composed by the server, which cannot see the edge.
@@ -264,6 +270,21 @@ const (
 	// LinkFaultDead is a shim process that is gone. Redial stops here.
 	LinkFaultDead LinkFaultKind = "dead"
 )
+
+// WatchOpenRefusal is a watch OPEN the shim REFUSED before any frame: a
+// not_found or failed_precondition answer to the Watch call itself. It is not
+// a lost link -- the transport is serving, the shim simply has no such handle
+// yet -- so it travels on its own arm and never as a LinkFault.
+type WatchOpenRefusal struct {
+	// Operation is the rpc whose open was refused ("watch_agent",
+	// "watch_bash").
+	Operation string
+	// Handle is what the open addressed: an AgentId.value, a
+	// DetachedWorkId.value, or empty for the main agent's unset target.
+	Handle string
+	// Detail is the sentence the fault record carries.
+	Detail string
+}
 
 // LinkFault is one lost link, with whatever evidence the loss carried.
 type LinkFault struct {

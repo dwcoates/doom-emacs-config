@@ -62,6 +62,11 @@ const (
 	// untyped detail line — because the workspace has a LIVE session and the
 	// fault is the record of what was abandoned, not a failure to serve.
 	KindConversationAbandoned = "conversation_abandoned"
+	// KindWatchOpenRefused is a shim watch OPEN refused for a handle NOTHING
+	// announced: the daemon and the shim disagree about what exists. It is
+	// NOT a severed link — the shim answered — and it has no typed arm, so it
+	// is reported as an untyped detail line carrying the refused handle.
+	KindWatchOpenRefused = "watch_open_refused"
 	// KindStateUnreadable is the liveness self-check's own fault when the
 	// state client will not answer. It likewise has no typed arm.
 	KindStateUnreadable = "daemon_state_unreadable"
