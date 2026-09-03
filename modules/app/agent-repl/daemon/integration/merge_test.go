@@ -1698,10 +1698,6 @@ func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
 func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
-	// The sweep covers every test; the declared records are evidence of a state read the test corrupts, the state read the test corrupts, the state row the test corrupts.
-	d.ExpectWarnings("daemon.merge.finish", "daemon.merge.teardown", "daemon.promptqueue.submit",
-		"daemon.workspace.register", "daemon.wsm.list_workspaces", "daemon.wsm.release_lease",
-		"daemon.wsm.remove_merge_queue_entry", "daemon.wsm.workspace")
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
@@ -1718,6 +1714,22 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
+	// THE TERMINAL ROW IS NOT THE END OF THE MERGE. It is published partway
+	// through `finish`, ahead of the landing's durable stamps and the whole of
+	// the teardown, all of which run on the admission pump's goroutine and all
+	// of which write to the state database. Stopping the daemon there yanks the
+	// store out from under work still in flight, which is a shutdown artifact
+	// of the test's own making -- not a fault the daemon owes a warning for.
+	// The pump's idle record is the merge's real end: it is written after the
+	// teardown returned, and `admitted` distinguishes the burst that ran this
+	// merge from a boot-time pump that admitted nothing.
+	idle := d.AwaitLogRecord(d.RunLogPath(), "the admission pump's idle record", func(r harness.LogRecord) bool {
+		admitted, ok := r.Context["admitted"].(float64)
+		return r.Operation == "daemon.merge.pump" && ok && admitted >= 1
+	})
+	if got := idle.Context["admitted"]; got != float64(1) {
+		t.Fatalf("the admission pump's idle record reports admitted = %v, want 1", got)
+	}
 	d.Stop()
 
 	// Assert: the ledger's merge_tab_intervals table carries one succeeded
