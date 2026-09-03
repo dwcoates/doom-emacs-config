@@ -209,6 +209,9 @@ func dbAwaitTopbarWarning(t *testing.T, ctx context.Context, stream *harness.Str
 
 func TestBashDetachedStartAndComplete(t *testing.T) {
 	w := NewWorld(t, WorldOpts{})
+	// Detached work outliving its turn opens a health fault; that is the
+	// shape this test provokes.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := dbWorkspace(t, w)
 
 	// Opened BEFORE the prompt: a detached_shell row is an UPSERT (subagent.go's
@@ -260,6 +263,9 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 
 func TestBashDetachExplicitPoll(t *testing.T) {
 	w := NewWorld(t, WorldOpts{})
+	// Detached work outliving its turn opens a health fault; that is the
+	// shape this test provokes.
+	w.ExpectWarnings("daemon.health.open_fault")
 	ws := dbWorkspace(t, w)
 
 	initial, feedStream := dbOpenRootFeed(t, w, ws)
