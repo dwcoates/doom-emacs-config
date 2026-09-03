@@ -1556,13 +1556,17 @@ func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
-	// Arrange: a landed commit touching ONLY the daemon module, whose blast
-	// radius (internal/merge/suiteselect.go's own rule table) is exactly the
-	// "daemon" suite.
+	// Arrange: a landed commit touching ONLY the sandbox image under e2e/,
+	// whose blast radius (internal/merge/suiteselect.go's own rule table) is
+	// exactly the single "e2e-emacs" suite. daemon/ paths no longer make a
+	// single-suite example: the rule table now widens a daemon change to
+	// {daemon, e2e, e2e-emacs} (the cross-system suites run a real
+	// claude-repld too), so a daemon-only test needs a genuinely narrow path
+	// to stay a one-suite demonstration.
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
-	script.SetStdout("daemon: passed in 1s\n")
-	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/internal/merge/blastradius.go", "touched\n")
+	script.SetStdout("e2e-emacs: passed in 1s\n")
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/e2e/sandbox/blastradius.txt", "touched\n")
 
 	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
 	// merged workspace's worktree down, and the feed resolves its log sink by
@@ -1586,14 +1590,17 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 		t.Fatalf("test-all.sh invocations = %d, want exactly 1", len(invocations))
 	}
 	argv := invocations[0].Argv
-	if !sameOrder(argv, []string{"--suites", "daemon"}) {
-		t.Fatalf("test-all.sh argv = %v, want it to end with [--suites daemon] (the daemon-only blast radius)", argv)
+	if !sameOrder(argv, []string{"--suites", "e2e-emacs"}) {
+		t.Fatalf("test-all.sh argv = %v, want it to end with [--suites e2e-emacs] (the sandbox-only blast radius)", argv)
 	}
 }
 
 func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
-	// Arrange: the same daemon-only blast radius, with a green ANSI escape in
-	// the scripted suite's own output.
+	// Arrange: a daemon change, with a green ANSI escape in the scripted
+	// run's own output. Which suites the change's blast radius selects is
+	// incidental to what this test asserts (ANSI parsing, not suite
+	// selection) — internal/merge/suiteselect.go's rule table widening a
+	// daemon path to more than one suite must not break it.
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
 	script.SetStdout("\x1b[32mall green\x1b[0m\ndaemon: passed in 1s\n")
@@ -1614,26 +1621,30 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
-	// Assert: the settled tests tab carries the "daemon" suite's output as
-	// DAEMON-PARSED paint spans — the client never sees the raw escape.
+	// Assert: the settled tests tab carries the scripted run's output as
+	// DAEMON-PARSED paint spans — the client never sees the raw escape. This
+	// searches every selected suite's output rather than assuming a single
+	// suite named "daemon": how many suites the blast radius selects is not
+	// this test's concern, only that the ANSI escape was parsed into a span
+	// wherever it landed, and that no raw escape reached the wire on any of
+	// them.
 	testsRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled tests tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetTests().GetSettled() != nil
 	})
 	suites := testsRow.GetMergeTab().GetTests().GetSuites()
-	if len(suites) != 1 || suites[0].GetName() != "daemon" {
-		t.Fatalf("tests tab suites = %v, want exactly one suite named %q", suites, "daemon")
-	}
 	var found bool
-	for _, span := range suites[0].GetOutput() {
-		if span.GetPaintClass() == "ansi-fg-green" && strings.Contains(span.GetText(), "all green") {
-			found = true
-		}
-		if strings.ContainsAny(span.GetText(), "\x1b") {
-			t.Fatalf("a raw ANSI escape reached the wire: span = %+v, want the daemon to have parsed it", span)
+	for _, suite := range suites {
+		for _, span := range suite.GetOutput() {
+			if span.GetPaintClass() == "ansi-fg-green" && strings.Contains(span.GetText(), "all green") {
+				found = true
+			}
+			if strings.ContainsAny(span.GetText(), "\x1b") {
+				t.Fatalf("a raw ANSI escape reached the wire: span = %+v, want the daemon to have parsed it", span)
+			}
 		}
 	}
 	if !found {
-		t.Fatalf("tests tab suite %q output = %v, want a span {text: contains %q, paint_class: ansi-fg-green}", "daemon", suites[0].GetOutput(), "all green")
+		t.Fatalf("tests tab suites = %v, want some suite's output to carry a span {text: contains %q, paint_class: ansi-fg-green}", suites, "all green")
 	}
 }
 
