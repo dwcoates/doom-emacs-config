@@ -168,6 +168,12 @@ type wsState struct {
 	// perModel is each model's share of the spend, by model name.
 	perModel map[string]*modelTotals
 
+	// mcpServers are the MCP server healths the session has stated, in the
+	// order the servers were FIRST named. A later update for a server already
+	// named replaces its health in place, so the /mcp panel's row order is
+	// stable across health churn rather than reordering under the reader.
+	mcpServers []*conversationv1.SessionMcpServer
+
 	// contradictions are the reconciliation problems observed this session.
 	contradictions []string
 
