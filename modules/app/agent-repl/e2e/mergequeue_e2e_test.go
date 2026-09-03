@@ -406,7 +406,8 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 	// scenario), and — since nothing in this suite's harness surface can
 	// clear a scripted conflict — the run PARKS rather than landing.
 	footer := w.WatchFooter(child)
-	fv := harness.AwaitView(t, w.Ctx(), footer, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
+	defer footer.Close()
+	fv := harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer's parked substatus", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetMerging().GetParked() != nil
 	})
 	if fv.GetStrip().GetStatus().GetMerging().GetParked().GetLine() == "" {
