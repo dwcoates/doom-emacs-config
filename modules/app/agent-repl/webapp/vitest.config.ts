@@ -15,8 +15,11 @@ export default defineConfig({
     setupFiles: ["./test/setup.ts"],
     // The integration suite has its own config (vitest.integration.config.ts):
     // it boots the app against a real loopback Connect server, so it must not
-    // ride along in the fast unit run.
-    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**"],
+    // ride along in the fast unit run. The webapp e2e layer
+    // (vitest.webapp-layer.config.ts) is excluded for a stronger reason: it
+    // needs the REAL daemon the Go e2e world spawns, and refuses to run
+    // without it, so riding along here would fail every unit run.
+    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**", "test/webapp-layer/**"],
     // TIGHT ON PURPOSE. Everything here is mocked/fake-timered — no real I/O,
     // no daemon — so a healthy run's slowest test is under 100ms (measured:
     // 88.9ms). Vitest's own defaults (5000ms/10000ms) would let a genuinely
