@@ -17,12 +17,12 @@ import (
 // The panel source the prompt handler takes.
 //
 // A recognized panel command is answered by the DAEMON, from facts the prompt
-// handler does not own. TWO of the six panels have a producer: the topbar
-// resolver assembles the context tree, which `/context` draws, and it also
-// holds the session facts `/status` splices. `/todos` and `/mcp` have no
-// resolver at all this wave, and the `/agents` and `/help` views are ruled
-// UNPRODUCED — they answer as `command_refused` before recognition ever
-// reaches a panel.
+// handler does not own. THREE of the six panels have a producer: the topbar
+// resolver assembles the context tree, which `/context` draws, it holds the
+// session facts `/status` splices, and it retains the per-server mcp_server
+// healths `/mcp` lists. `/todos` has no resolver at all this wave, and the
+// `/agents` and `/help` views are ruled UNPRODUCED — they answer as
+// `command_refused` before recognition ever reaches a panel.
 //
 // This builder lives in `server` rather than in `boot` because the panel source
 // is the surface's own view seam; it is a FUNCTION rather than a method because
@@ -42,6 +42,8 @@ func Panels(resolver topbar.Resolver, version VersionFunc, log dlog.Logger) prom
 			return contextPanel(resolver, ws, log)
 		case conversationv1.SessionCommand_SESSION_COMMAND_STATUS:
 			return statusPanel(resolver, version, ws, log)
+		case conversationv1.SessionCommand_SESSION_COMMAND_MCP:
+			return mcpPanel(resolver, ws, log)
 		default:
 			log.Error("daemon.server.panels", "a recognized panel command has no producer",
 				dlog.Context{"workspace": string(ws), "command": command.String()})
@@ -62,6 +64,20 @@ func contextPanel(resolver topbar.Resolver, ws ids.WorkspaceID, log dlog.Logger)
 		dlog.Context{"workspace": string(ws)})
 	return &agentreplv1.SubmitPromptCommandPanel{
 		Panel: &agentreplv1.SubmitPromptCommandPanel_Context{Context: panel},
+	}, nil
+}
+
+// mcpPanel draws one row per MCP server the session has stated a health for.
+//
+// Unlike /context this NEVER fails for want of a fact: a workspace whose
+// session has named no server has an empty catalog, and an empty catalog is
+// the honest panel rather than a missing one.
+func mcpPanel(resolver topbar.Resolver, ws ids.WorkspaceID, log dlog.Logger) (*agentreplv1.SubmitPromptCommandPanel, error) {
+	panel := resolver.McpPanel(ws)
+	log.Debug("daemon.server.panels", "answered the mcp panel",
+		dlog.Context{"workspace": string(ws), "rows": len(panel.GetRows())})
+	return &agentreplv1.SubmitPromptCommandPanel{
+		Panel: &agentreplv1.SubmitPromptCommandPanel_Mcp{Mcp: panel},
 	}, nil
 }
 
