@@ -697,3 +697,98 @@ func TestFindingsSuccessFallsBackToTheCallWhenTheToolEchoedNothing(t *testing.T)
 		t.Fatalf("Findings = %+v, want the call's single finding", got.GetFindings())
 	}
 }
+
+func TestWorktreeSuccessReadsTheVendorsWorktreePathOnEntering(t *testing.T) {
+	// Arrange: the vendor spells the tree's path worktreePath. Reading "path"
+	// leaves the divider that names the tree blank.
+	call := openCall{name: "EnterWorktree"}
+	result := map[string]any{"worktreePath": "/w/feature", "worktreeBranch": "feature", "message": "entered"}
+
+	// Act
+	got := worktreeSuccess(call, result, 1000)
+
+	// Assert
+	entered, ok := got.GetAct().(*conversationv1.AgentWorktreeSuccess_Entered)
+	if !ok {
+		t.Fatalf("Act = %T, want AgentWorktreeSuccess_Entered", got.GetAct())
+	}
+	if entered.Entered.GetPath() != "/w/feature" || entered.Entered.GetBranch() != "feature" {
+		t.Fatalf("Entered = %+v, want path=/w/feature branch=feature", entered.Entered)
+	}
+}
+
+func TestWorktreeSuccessReadsTheVendorsWorktreePathOnExiting(t *testing.T) {
+	// Arrange: the exited arm names the same key, and a frame without it says
+	// the session moved somewhere unnamed.
+	call := openCall{name: "ExitWorktree"}
+	result := map[string]any{
+		"worktreePath": "/w/scratch",
+		"originalCwd":  "/w",
+		"action":       "keep",
+	}
+
+	// Act
+	got := worktreeSuccess(call, result, 1000)
+
+	// Assert
+	exited := got.GetAct().(*conversationv1.AgentWorktreeSuccess_Exited)
+	if exited.Exited.GetPath() != "/w/scratch" {
+		t.Fatalf("Path = %q, want /w/scratch", exited.Exited.GetPath())
+	}
+}
+
+func TestWorktreeSuccessReadsARemovalFromTheVendorsActionWord(t *testing.T) {
+	// Arrange: the vendor states action "remove"; no boolean says so.
+	call := openCall{name: "ExitWorktree"}
+	result := map[string]any{
+		"worktreePath":     "/w/scratch",
+		"action":           "remove",
+		"discardedFiles":   float64(2),
+		"discardedCommits": float64(1),
+	}
+
+	// Act
+	got := worktreeSuccess(call, result, 1000)
+
+	// Assert
+	exited := got.GetAct().(*conversationv1.AgentWorktreeSuccess_Exited)
+	removed, ok := exited.Exited.GetOutcome().(*conversationv1.AgentWorktreeExited_Removed)
+	if !ok {
+		t.Fatalf("Outcome = %T, want AgentWorktreeExited_Removed", exited.Exited.GetOutcome())
+	}
+	if removed.Removed.GetDiscardedFiles() != 2 || removed.Removed.GetDiscardedCommits() != 1 {
+		t.Fatalf("Removed = %+v, want files=2 commits=1", removed.Removed)
+	}
+}
+
+func TestWorktreeSuccessLeavesTheDiscardedFiguresUnsetWhenNoneWereStated(t *testing.T) {
+	// Arrange: a removal that stated no figures. "No figure" is not "none".
+	call := openCall{name: "ExitWorktree"}
+	result := map[string]any{"worktreePath": "/w/scratch", "action": "remove"}
+
+	// Act
+	got := worktreeSuccess(call, result, 1000)
+
+	// Assert
+	exited := got.GetAct().(*conversationv1.AgentWorktreeSuccess_Exited)
+	removed := exited.Exited.GetOutcome().(*conversationv1.AgentWorktreeExited_Removed)
+	if removed.Removed.DiscardedFiles != nil || removed.Removed.DiscardedCommits != nil {
+		t.Fatalf("Removed = %+v, want both figures unset", removed.Removed)
+	}
+}
+
+func TestWorktreeSuccessLeavesTheExitOutcomeUnsetForAnUnrecognizedAction(t *testing.T) {
+	// Arrange: an action outside the vendor's set. Defaulting to kept would
+	// claim a tree survived that may have been deleted.
+	call := openCall{name: "ExitWorktree"}
+	result := map[string]any{"worktreePath": "/w/scratch", "action": "archive"}
+
+	// Act
+	got := worktreeSuccess(call, result, 1000)
+
+	// Assert
+	exited := got.GetAct().(*conversationv1.AgentWorktreeSuccess_Exited)
+	if outcome := exited.Exited.GetOutcome(); outcome != nil {
+		t.Fatalf("Outcome = %T, want unset", outcome)
+	}
+}
