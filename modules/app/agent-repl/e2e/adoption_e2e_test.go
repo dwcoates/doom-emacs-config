@@ -530,11 +530,28 @@ func TestRefusalOrderingDuringHandover(t *testing.T) {
 	}
 
 	// Act: the lagging client self-heals by completing the rendezvous.
-	if _, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("AdoptHostWorkspace = error %v, want a success", err)
-	}
-	if _, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("AdoptWebWorkspace = error %v, want a success", err)
+	//
+	// THE TWO ADOPTS MUST BE CONCURRENT. "EVERY EXPECTED PARTICIPANT
+	// SUCCEEDS TOGETHER. The callers arrive concurrently and the one that
+	// arrives first has not failed: it waits for the one that completes the
+	// rendezvous" (daemon/internal/rollout/adopt.go:222-251). Issuing them
+	// one after the other blocks the host call inside the rendezvous until
+	// its own context expires — the web call is never made, and the caller
+	// gets ErrNotYetAdopted — so this test issued them concurrently and
+	// joins both.
+	adopts := make(chan error, 2)
+	go func() {
+		_, err := successor.AdoptHostWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptHostWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	go func() {
+		_, err := successor.AdoptWebWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: ws}))
+		adopts <- err
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-adopts; err != nil {
+			t.Fatalf("adopting the workspace on the successor = error %v, want a success (both adopts succeed together)", err)
+		}
 	}
 
 	// Assert: both watchers see the transfer, naming the successor.
