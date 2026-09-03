@@ -63,13 +63,19 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			Result: &conversationv1.AgentGlob_Success{Success: globSuccess(call, result, block, ts)},
 		}})
 	case kindBash:
-		if failed {
+		// A NONZERO EXIT IS THE COMMAND'S VERDICT ON ITSELF, NOT A FAILED CALL.
+		// The vendor marks such a result an error for the model, so `is_error`
+		// alone drew every failing test run as a broken shell. A result that
+		// states an exit ran; only one that states none — a tool error, a killed
+		// call — could not be performed.
+		exit := bashExitCode(result, block, failed)
+		if failed && exit == nil {
 			return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
 				Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{Error: failure}},
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
-			Result: &conversationv1.AgentBash_Success{Success: bashSuccess(call, result, ts)},
+			Result: &conversationv1.AgentBash_Success{Success: bashSuccess(call, result, exit, ts)},
 		}})
 	case kindSubagent:
 		return c.subagentSettled(call, result, failed, failure, ts, at)
