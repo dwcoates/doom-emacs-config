@@ -513,8 +513,13 @@ func TestPermissionModeChangedMidSession(t *testing.T) {
 
 	// Assert: the topbar's mode picker updates to acceptEdits without a
 	// client-initiated SetPermissionMode call.
-	updated := harness.AwaitView(t, w.Ctx(), topbar, "the mode picker to reflect the vendor-offered acceptEdits mode", func(v *frontendv1.TopbarView) bool {
-		return v.GetPermissionModePicker().GetCurrent().GetMode() == "acceptEdits"
+	// THE DAEMON'S OWN VOCABULARY IS SNAKE_CASE. The picker's mode string is
+	// composed by daemon/internal/resolve/topbar/resolver.go:558-559
+	// (permissionModeName: AgentPermissionMode_AcceptEdits -> "accept_edits"),
+	// not the vendor's camelCase `acceptEdits`, so the old expectation could
+	// never match.
+	updated := harness.AwaitView(t, w.Ctx(), topbar, "the mode picker to reflect the vendor-offered accept_edits mode", func(v *frontendv1.TopbarView) bool {
+		return v.GetPermissionModePicker().GetCurrent().GetMode() == "accept_edits"
 	})
 	if got := updated.GetPermissionModePicker().GetCurrent().GetMode(); got == beforeMode {
 		t.Fatalf("permission mode did not change from %q", beforeMode)
