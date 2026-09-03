@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -331,5 +332,89 @@ func TestSetArmRefusesANestedArmTheMessageDoesNotCarry(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatalf("setResponseError with an unknown nested arm = true, want a refusal")
+	}
+}
+
+// TestEndStreamIsQuietOnACancelledClient pins the standing-stream ending: a
+// cancelled or expired request context is the CLIENT LEAVING and must record
+// no ERROR and return no error, while every other failure keeps fail's ERROR
+// record and its internal Connect error.
+func TestEndStreamIsQuietOnACancelledClient(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantQuiet bool
+	}{
+		{name: "cancelled", err: context.Canceled, wantQuiet: true},
+		{name: "wrapped cancelled", err: fmt.Errorf("read: %w", context.Canceled), wantQuiet: true},
+		{name: "deadline exceeded", err: context.DeadlineExceeded, wantQuiet: true},
+		{name: "a genuine read failure", err: errors.New("the disk went away"), wantQuiet: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			err := endStream(log, "WatchFooter", tc.err)
+
+			// Assert.
+			if tc.wantQuiet {
+				if err != nil {
+					t.Fatalf("endStream returned %v, want no error", err)
+				}
+				if got := log.at("ERROR"); len(got) != 0 {
+					t.Fatalf("recorded %v at ERROR, want none", got)
+				}
+				info := log.at("INFO")
+				if len(info) != 1 || info[0].Context["stream"] != "WatchFooter" {
+					t.Fatalf("INFO records = %v, want exactly one naming the stream", info)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("endStream swallowed a genuine failure")
+			}
+			if got := log.at("ERROR"); len(got) != 1 {
+				t.Fatalf("ERROR records = %v, want exactly one", got)
+			}
+		})
+	}
+}
+
+// TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled pins the ending on
+// every verb family that opens a standing stream: one cancelled resolve, no
+// ERROR record, no error returned.
+func TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled(t *testing.T) {
+	tests := []string{
+		"WatchFooter",
+		"WatchTopbar",
+		"WatchDaemonHolds",
+		"WatchHostWorkspace",
+		"WatchWebWorkspace",
+		"WatchFeed",
+		"WatchLoginTerminal",
+	}
+	for _, rpc := range tests {
+		t.Run(rpc, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			err := endStream(log, rpc, fmt.Errorf("%s: workspace %q: %w",
+				rpc, "ws-1", context.Canceled))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("%s returned %v, want no error", rpc, err)
+			}
+			if got := log.at("ERROR"); len(got) != 0 {
+				t.Fatalf("%s recorded %v at ERROR, want none", rpc, got)
+			}
+			info := log.at("INFO")
+			if len(info) != 1 || info[0].Context["stream"] != rpc {
+				t.Fatalf("%s INFO records = %v, want exactly one naming the stream", rpc, info)
+			}
+		})
 	}
 }
