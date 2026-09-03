@@ -50,7 +50,7 @@ describe("editConverter.start", () => {
     const item = editConverter.start(pending);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentEdit).result
+    const start = (item?.value as conversationv1.AgentEdit).result
       .value as conversationv1.AgentEditStart;
     expect(start.path?.path).toBe("/tmp/a.ts");
     expect(start.startedAt?.atMs).toBe(1_700_000_000_000n);
@@ -61,7 +61,7 @@ describe("editConverter.start", () => {
     const item = editConverter.start(call({ old_string: "a", new_string: "b" }));
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item?.case).toBeUndefined();
   });
 });
 

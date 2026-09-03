@@ -31,9 +31,9 @@ function outcomeWith(structured: unknown, isError = false): ToolOutcome {
   };
 }
 
-function cronOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentCron {
-  expect(item.case).toBe("cron");
-  return item.value as conversationv1.AgentCron;
+function cronOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentCron {
+  expect(item?.case).toBe("cron");
+  return item?.value as conversationv1.AgentCron;
 }
 
 function startOf(call: PendingCall): conversationv1.AgentCronStart {

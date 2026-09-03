@@ -117,7 +117,7 @@ export const writeConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "a write was announced with no file path; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "write",

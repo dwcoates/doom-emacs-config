@@ -26,9 +26,9 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
   return { content: undefined, isError, structured, settledAtMs: 9_000 };
 }
 
-function successOf(item: conversationv1.AgentActivity["item"]): conversationv1.AgentSubagentSuccess {
-  expect(item.case).toBe("subagent");
-  const result = (item.value as conversationv1.AgentSubagent).result;
+function successOf(item: conversationv1.AgentActivity["item"] | undefined): conversationv1.AgentSubagentSuccess {
+  expect(item?.case).toBe("subagent");
+  const result = (item?.value as conversationv1.AgentSubagent).result;
   expect(result.case).toBe("success");
   return result.value as conversationv1.AgentSubagentSuccess;
 }
@@ -42,8 +42,8 @@ describe("subagentConverter.start", () => {
     const item = subagentConverter.start(pending);
 
     // Assert.
-    expect(item.case).toBe("subagent");
-    const result = (item.value as conversationv1.AgentSubagent).result;
+    expect(item?.case).toBe("subagent");
+    const result = (item?.value as conversationv1.AgentSubagent).result;
     expect(result.case).toBe("start");
     expect((result.value as conversationv1.AgentSubagentStart).createdAgentId?.value).toBe(
       "toolu_spawn",
@@ -60,7 +60,7 @@ describe("subagentConverter.start", () => {
     const item = subagentConverter.start(pending);
 
     // Assert.
-    const result = (item.value as conversationv1.AgentSubagent).result;
+    const result = (item?.value as conversationv1.AgentSubagent).result;
     const start = result.value as conversationv1.AgentSubagentStart;
     expect(start.prompt).toEqual(subagentPrompt(pending));
     expect(start.startedAt).toBeDefined();
@@ -76,7 +76,7 @@ describe("subagentStartFrom", () => {
     const item = subagentStartFrom(call(toolInput("agent")), created);
 
     // Assert.
-    const start = (item.value as conversationv1.AgentSubagent).result
+    const start = (item?.value as conversationv1.AgentSubagent).result
       .value as conversationv1.AgentSubagentStart;
     expect(start.createdAgentId?.value).toBe("a36ef865012a4672a");
   });
@@ -89,7 +89,7 @@ describe("subagentStartFrom", () => {
     );
 
     // Assert.
-    const start = (item.value as conversationv1.AgentSubagent).result
+    const start = (item?.value as conversationv1.AgentSubagent).result
       .value as conversationv1.AgentSubagentStart;
     expect(start.spawnDepth).toBeUndefined();
   });
@@ -102,7 +102,7 @@ describe("subagentStartFrom", () => {
     );
 
     // Assert.
-    const start = (item.value as conversationv1.AgentSubagent).result
+    const start = (item?.value as conversationv1.AgentSubagent).result
       .value as conversationv1.AgentSubagentStart;
     expect(start.workingDir).toBeUndefined();
   });
@@ -115,7 +115,7 @@ describe("subagentStartFrom", () => {
     );
 
     // Assert.
-    const start = (item.value as conversationv1.AgentSubagent).result
+    const start = (item?.value as conversationv1.AgentSubagent).result
       .value as conversationv1.AgentSubagentStart;
     expect(start.startedAt?.atMs).toBe(1_000n);
   });
@@ -437,7 +437,7 @@ describe("subagentConverter.settle", () => {
     const item = subagentConverter.settle(call({ prompt: "p" }), outcome(undefined, true))!;
 
     // Assert.
-    expect((item.value as conversationv1.AgentSubagent).result.case).toBe("failure");
+    expect((item?.value as conversationv1.AgentSubagent).result.case).toBe("failure");
   });
 
   it("leaves the failure cause unset, because no vendor field states a user stop", () => {
@@ -445,7 +445,7 @@ describe("subagentConverter.settle", () => {
     const item = subagentConverter.settle(call({ prompt: "p" }), outcome(undefined, true))!;
 
     // Assert.
-    const failure = (item.value as conversationv1.AgentSubagent).result
+    const failure = (item?.value as conversationv1.AgentSubagent).result
       .value as conversationv1.AgentSubagentFailure;
     expect(failure.cause.case).toBeUndefined();
   });

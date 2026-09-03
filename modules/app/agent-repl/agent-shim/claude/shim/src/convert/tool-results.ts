@@ -202,6 +202,21 @@ function skillDocumentEntry(
     );
     return [];
   }
+  const item = skillDocumentSettle(
+    call,
+    markdown,
+    // The document record states no tool allowances of its own; the skill's
+    // declared set is not on this record, so it stays unset.
+    undefined,
+    context.nowMs(),
+  );
+  if (item === undefined) {
+    LOGGER.log(
+      { level: "error", tool_use_id: sourceToolUseId },
+      "a skill document names no skill; the settle frame is skipped rather than written with no arm",
+    );
+    return [];
+  }
   registry.take(sourceToolUseId);
   LOGGER.logVerbose({ tool_use_id: sourceToolUseId }, "settling a skill unit on its document");
   return [
@@ -212,17 +227,7 @@ function skillDocumentEntry(
         vendorUuid: message.uuid ?? `skill_document:${call.toolUseId}`,
         discriminator: "activity.skill_use.success",
       },
-      agentActivity(
-        toolCallActivityId(call.toolUseId),
-        skillDocumentSettle(
-          call,
-          markdown,
-          // The document record states no tool allowances of its own; the
-          // skill's declared set is not on this record, so it stays unset.
-          undefined,
-          context.nowMs(),
-        ),
-      ),
+      agentActivity(toolCallActivityId(call.toolUseId), item),
     ),
   ];
 }
