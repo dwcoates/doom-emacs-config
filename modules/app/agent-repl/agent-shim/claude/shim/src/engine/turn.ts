@@ -119,11 +119,16 @@ export interface SessionContext {
    * Whether this shim has ever ANNOUNCED the named agent.
    *
    * The main agent, anything the live table holds or watched retire, and the
-   * subagents the record named at reconciliation. It is the shim's side of the
-   * unknown-target refusal: the STORE cannot refuse a book it has no rows for
-   * (`OpenAgentSessionFailure` has no `unknown_agent` arm), so a book that
-   * comes back EMPTY is either a real agent nothing has been written for yet or
-   * an id nobody ever minted, and only the producer can tell those apart.
+   * subagents the record named at reconciliation. IT IS THE PRODUCER'S SIDE OF
+   * THE UNKNOWN-TARGET QUESTION, and since landing 7 it answers in two places:
+   *   - The store DOES refuse a book it holds no rows for
+   *     (`OpenAgentSessionFailure.unknown_agent`), and the main agent's row is
+   *     created only by its first write — so this predicate is what says
+   *     whether that refusal names a fresh agent whose first row is still
+   *     coming (wait it out, serve an empty page) or an id nobody minted
+   *     (refuse).
+   *   - A store that serves an EMPTY book instead of refusing leaves the same
+   *     ambiguity, and this answers it there too.
    */
   knowsAgent(agent: conversationv1.AgentId): boolean;
   /**
@@ -720,6 +725,15 @@ export class TurnEngine {
    *
    * An unknown target closes the stream at the transport: a stream's response
    * type is the frame it carries, so it has no arm to say "refused".
+   *
+   * A FRESH AGENT IS NOT AN UNKNOWN ONE. The endpoint contract has the daemon
+   * open the main agent's watch before any turn, and the store's row for that
+   * agent is created by its FIRST WRITE — so the open races the write and loses
+   * on every fresh bring-up. There the producer is the arbiter: `knowsAgent`
+   * rides down as the record plane's licence to wait that race out, serving the
+   * empty opening page the contract promises and standing the tail on the first
+   * row. An id this shim never announced still gets the store's refusal, and
+   * every other refusal (an unreachable store) is untouched.
    */
   async *watchAgent(request: shimv1.WatchAgentRequest): AsyncIterable<shimv1.WatchAgentResponse> {
     const identity = this.session.identity();
@@ -731,17 +745,18 @@ export class TurnEngine {
         target,
         request.pageSize,
         request.knownThrough,
+        () => this.session.knowsAgent(target),
       );
     } catch (err) {
       throw err instanceof PersistenceError
         ? notFound(`WatchAgent(${target.value}): ${err.message}`)
         : err;
     }
-    // THE STORE ANSWERS FIRST, and a book with rows is known BY DEFINITION —
-    // something wrote them under this id. Only an EMPTY book is ambiguous, and
-    // there the producer decides: an id this shim never announced names no
-    // agent, and standing a tail on it would leave a consumer watching forever
-    // for frames that can never come.
+    // A STORE THAT REFUSES NOTHING still leaves the empty book ambiguous: it is
+    // either an agent nothing has been written for yet or an id nobody ever
+    // minted, and only the producer can tell those apart. An id this shim never
+    // announced names no agent, and standing a tail on it would leave a
+    // consumer watching forever for frames that can never come.
     //
     // A stream has no arm to say "refused" — its response type is the frame it
     // carries — so the refusal closes the stream at the transport.
@@ -787,7 +802,16 @@ export class TurnEngine {
           await this.session.persistence.readAgentPage(target, request.pageSize, after),
         );
       }
-      const opened = await this.session.persistence.openAgentPage(target, request.pageSize);
+      // THE SAME PRODUCER VERDICT `WatchAgent` GIVES. An agent this shim
+      // announced whose first row has not landed has an EMPTY past, not an
+      // unknown one — a keep-alive-only session writes nothing to any book, and
+      // refusing there told a consumer its own agent did not exist.
+      const opened = await this.session.persistence.openAgentPage(
+        target,
+        request.pageSize,
+        undefined,
+        () => this.session.knowsAgent(target),
+      );
       // ReadHistory is one page and no tail; the reading session opened to get
       // the page is closed at once rather than leaked for a tail nobody reads.
       opened.close();

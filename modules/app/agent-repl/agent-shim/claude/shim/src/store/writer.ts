@@ -354,6 +354,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       batch.attempts += 1;
       const failure = await attempt(batch.entries);
       if (failure === null) {
+        // WOKEN ONLY ONCE THE ROWS ARE DURABLE: a `WatchAgent` that opened
+        // before this book existed is blocked on the store holding a row, so
+        // waking it on the enqueue would send it back into the same refusal.
+        reader.noteAgentRows(new Set(batch.entries.map((entry) => entry.agentId.value)));
         closeDegraded();
         LOGGER.logVerbose(
           { entries: batch.entries.length, attempts: batch.attempts },
@@ -498,8 +502,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       agent: conversationv1.AgentId,
       pageSize: number,
       knownThrough?: conversationv1.HistoryPointer,
+      known?: () => boolean,
     ): Promise<AgentPageSession> {
-      return reader.openAgentPage(agent, pageSize, knownThrough);
+      return reader.openAgentPage(agent, pageSize, knownThrough, known);
     },
 
     readAgentPage(
