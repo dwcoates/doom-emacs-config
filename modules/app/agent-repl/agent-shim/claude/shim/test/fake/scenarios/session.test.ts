@@ -398,6 +398,78 @@ describe("compaction", () => {
       { result: "failed", hasError: true },
     );
   });
+
+  // GROUNDED (compaction-directed, 2026-09-03 re-capture): the real
+  // `compact_boundary`/`compactMetadata` record has no
+  // `preCompactDiscoveredTools` field anywhere, on either plane. That field
+  // was the fake's own invention and must never reappear.
+  it.each(["!compact", "!compact-auto"] as const)("never invents preCompactDiscoveredTools (%s)", async (prompt) => {
+    // Arrange + Act
+    const driven = await driveScenario([prompt]);
+    const record = recordsOfType(driven.transcript(), "system").find(
+      (l) => l.subtype === "compact_boundary",
+    );
+
+    // Assert
+    expect((record?.compactMetadata as Record<string, unknown> | undefined)?.preCompactDiscoveredTools).toBe(
+      undefined,
+    );
+  });
+
+  // GROUNDED: the real capture's compactMetadata carries `allUuids` alongside
+  // `uuids`, and `cumulativeDroppedTokens` alongside `postTokens` — both on
+  // the wire event's snake_case `compact_metadata` and the written
+  // camelCase `compactMetadata`.
+  it.each(["!compact", "!compact-auto"] as const)(
+    "carries allUuids and cumulativeDroppedTokens on the written record (%s)",
+    async (prompt) => {
+      // Arrange + Act
+      const driven = await driveScenario([prompt]);
+      const record = recordsOfType(driven.transcript(), "system").find(
+        (l) => l.subtype === "compact_boundary",
+      );
+      const metadata = record?.compactMetadata as Record<string, unknown> | undefined;
+
+      // Assert
+      expect({
+        hasAllUuids: Array.isArray(metadata?.preservedMessages && (metadata!.preservedMessages as Record<string, unknown>).allUuids),
+        cumulativeDroppedTokens: typeof metadata?.cumulativeDroppedTokens === "number",
+      }).toEqual({ hasAllUuids: true, cumulativeDroppedTokens: true });
+    },
+  );
+
+  it.each(["!compact", "!compact-auto"] as const)(
+    "carries all_uuids and cumulative_dropped_tokens on the wire event, plus a logical_parent_uuid (%s)",
+    async (prompt) => {
+      // Arrange + Act
+      const driven = await driveScenario([prompt]);
+      const boundary = ofType(driven, "system", "compact_boundary")[0];
+      const metadata = boundary?.compact_metadata as Record<string, unknown> | undefined;
+
+      // Assert
+      expect({
+        hasAllUuids: Array.isArray(
+          metadata?.preserved_messages && (metadata!.preserved_messages as Record<string, unknown>).all_uuids,
+        ),
+        cumulativeDroppedTokens: typeof metadata?.cumulative_dropped_tokens === "number",
+        logicalParentUuid: typeof boundary?.logical_parent_uuid === "string",
+      }).toEqual({ hasAllUuids: true, cumulativeDroppedTokens: true, logicalParentUuid: true });
+    },
+  );
+
+  // GROUNDED (compaction-directed): the real run never produces a
+  // `local_command_output` record anywhere — not just around the boundary.
+  it.each(["!compact", "!compact-auto", "!compact-failed"] as const)(
+    "never emits a local_command_output record (%s)",
+    async (prompt) => {
+      // Arrange + Act
+      const driven = await driveScenario([prompt]);
+
+      // Assert
+      expect(ofType(driven, "system", "local_command_output")).toHaveLength(0);
+      expect(recordsOfType(driven.transcript(), "local_command_output")).toHaveLength(0);
+    },
+  );
 });
 
 describe("vendor bookkeeping attachments", () => {
