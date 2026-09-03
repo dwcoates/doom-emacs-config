@@ -2235,3 +2235,41 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed", rec.Context)
 	}
 }
+
+// TestTheResponseBubbleStampsItsApiResponsesUsage proves the cost corner
+// reaches the frontend frame for the vendor's OBSERVED response shape, where
+// the `[thinking, text]` response states its usage on the THINKING unit — the
+// unit for its first content block — and the prose unit states none.
+func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-usage-stamp", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the response's first content block carries the whole bill.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-usage-thinking"),
+		Usage: &conversationv1.TokenUsage{
+			InputHits:    &conversationv1.TokenCacheHits{Read: 900_000},
+			InputMisses:  &conversationv1.TokenCacheMisses{Written: 18_000, Unwritten: 240},
+			OutputTokens: 5_000,
+		},
+		Item: &conversationv1.AgentActivity_Thinking{Thinking: &conversationv1.AgentThinking{
+			Result: &conversationv1.AgentThinking_Success{Success: &conversationv1.AgentThinkingSuccess{}},
+		}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-usage-prose"),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "an answer"}},
+		}}},
+	}))
+
+	// Assert: the drawn bubble carries the API response's expensive sum.
+	row := awaitRow(t, f, tail, "the stamped response bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetUsage() != nil
+	})
+	if got := row.GetActivity().GetResponse().GetUsage().GetText(); got != "18.2k" {
+		t.Fatalf("the response's usage stamp = %q, want the cache-miss sum %q", got, "18.2k")
+	}
+}
