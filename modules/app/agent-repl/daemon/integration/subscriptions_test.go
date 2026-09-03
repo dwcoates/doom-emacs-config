@@ -9,6 +9,7 @@ package integration
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -579,4 +580,60 @@ func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T
 			assertTransportClosed(t, f.d, rpc.name, workspace.ArmWorkspaceRefMismatch)
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The orderly exit's QUIETNESS: a cancelled watch is the client leaving.
+// ---------------------------------------------------------------------------
+
+// TestAnOrderlyExitWithStandingWatchesRecordsNoServingErrors pins that SIGTERM
+// under standing streams is not a fault. The exit cancels every standing
+// request context, and a publish or a resolve still in flight then reads
+// through a cancelled context — which used to be recorded as
+// "daemon.wsm.workspace: refused the read" and
+// "daemon.server.publish_host_workspace: could not resolve the workspace's log
+// sink" at ERROR on EVERY shutdown. The stream ends quietly instead, and this
+// test needs no ExpectWarnings declaration to pass.
+func TestAnOrderlyExitWithStandingWatchesRecordsNoServingErrors(t *testing.T) {
+	// Arrange: an opened workspace already holds a standing host watch and a
+	// standing web watch; a footer watch is the second family under audit.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "the footer's opening view", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip() != nil
+	})
+
+	// Act: the orderly exit, with both watches still standing.
+	f.d.Stop()
+	f.d.AwaitExit()
+
+	// Assert: nothing the serving surface or the state store recorded on the
+	// way out is an error.
+	for _, record := range shutdownErrorRecords(t, f.d) {
+		if strings.HasPrefix(record.Operation, "daemon.server.") ||
+			strings.HasPrefix(record.Operation, "daemon.wsm.") {
+			t.Errorf("an orderly exit under standing watches recorded an error: %s: %s %v",
+				record.Operation, record.Message, record.Context)
+		}
+	}
+}
+
+// shutdownErrorRecords is every ERROR record in every sink under the state
+// root's logs directory, which is where both the run log and the
+// per-workspace sink land.
+func shutdownErrorRecords(t *testing.T, d *harness.Daemon) []harness.LogRecord {
+	t.Helper()
+	sinks, err := filepath.Glob(filepath.Join(d.StateDir, "logs", "*.log"))
+	if err != nil {
+		t.Fatalf("globbing the daemon's log sinks: %v", err)
+	}
+	var out []harness.LogRecord
+	for _, sink := range sinks {
+		for _, record := range harness.ReadLog(t, sink) {
+			if record.Level == "error" || record.Level == "fatal" {
+				out = append(out, record)
+			}
+		}
+	}
+	return out
 }
