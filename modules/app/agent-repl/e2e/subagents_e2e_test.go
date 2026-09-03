@@ -260,9 +260,12 @@ func TestSubagentSyncNestedActivity(t *testing.T) {
 	if !pageHasResponseText(subRows, "The module's test command is `npm test`.") {
 		t.Errorf("sub-feed page %v, want the subagent's own final report text", subPage)
 	}
-	if commission := findRow(subRows, func(row *frontendv1.FeedRow) bool { return row.GetUserPrompt() != nil }); commission == nil {
-		t.Errorf("sub-feed page %v, want the subagent's own commission as a user_prompt row", subPage)
-	}
+	// NO user_prompt ROW FOR THE COMMISSION. sidecar.md's R15 (:298-300):
+	// "file-plane user prompts are NEVER page lines — classified as unserved
+	// vendor_specific{kind \"user_prompt\"}; the shim's AgentPrompt is the
+	// one served form (subagent commissions ride
+	// AgentSubagentStart.prompt)." The commission's CONTENT is already
+	// covered above, on the bubble's own description.
 }
 
 // ---------------------------------------------------------------------------
