@@ -6,7 +6,6 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
-	"claude-repld/internal/figures"
 )
 
 // THE PROSE FOLD. The shim forwards each fragment as the vendor emits it and
@@ -21,12 +20,13 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	fold := s.prose(unit)
 	log := r.logger(s.id)
 
-	// The usage stamp is the EXPENSIVE sum and nothing else: both cache-miss
-	// buckets together, because both were processed fresh. A stamp read off
-	// any single counter would understate the bill.
-	if usage := act.GetUsage(); usage != nil {
-		misses := usage.GetInputMisses()
-		fold.usage = figures.Tokens(misses.GetWritten() + misses.GetUnwritten())
+	// THE STAMP IS THE API RESPONSE'S FIGURES, not this unit's: usage rides
+	// exactly one unit per API response and it is usually a sibling (the
+	// thinking block's). Filing is idempotent, so drawing this bubble from a
+	// direct call files what the sink would have filed.
+	s.fileAPIResponse(unit, act.GetUsage())
+	if stamp := s.apiResponseStamp(unit); stamp != "" {
+		fold.usage = stamp
 	}
 
 	bubble := &frontendv1.FeedResponse{}

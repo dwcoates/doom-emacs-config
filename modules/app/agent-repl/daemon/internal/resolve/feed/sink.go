@@ -47,6 +47,11 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		return
 	}
 
+	// EVERY activity is filed under its API response before anything is drawn:
+	// the unit stating a response's usage is frequently not the unit that
+	// draws the stamp.
+	s.fileAPIResponse(unit, act.GetUsage())
+
 	var (
 		row *frontendv1.FeedRow
 		err error
