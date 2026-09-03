@@ -250,6 +250,22 @@ RULED, no proto: context_budget_warning gets no feed row (footer only). Ctrl-b
 detach of foreground work has no daemon verb; out of scope for the overhaul,
 recorded as a follow-up; the two e2e tests stay skipped pointing here.
 
+## Landing 9 — overhaul/integration (2026-09-03; USER-APPROVED)
+
+- agentrepl.v1 OpenWorkspaceError.vendor_start_failed (tag 8) =
+  OpenWorkspaceVendorStartFailed{detail} — the shim's
+  StartSessionFailure.vendor_start_failed relayed by name. Previously the
+  daemon relayed it through the unlanded-arm convention (failed_precondition
+  "intended arm ..."), which the rebuilt e2e suite exposed as untyped.
+
+USER RULING 2026-09-03 (no proto): "the proto always wins" — where the
+daemon's drawing disagrees with the proto's framing, the proto governs.
+First application: an INTERRUPTED Bash run is a SUCCESS arm carrying the
+interrupted marker (conversation.v1 AgentBashInterrupted sits inside
+AgentBashSuccess), so FeedToolCallReturned's verdict is `succeeded` with the
+interrupted text, not `failed`. The daemon's deliberate `failed` drawing
+(resolve/feed/toolcall.go) is a defect.
+
 ## Cross-system ruling, no proto (2026-09-02)
 
 - KERNEL LOCKS: the shim takes the WORKSPACE lock inside StartSession (beside
