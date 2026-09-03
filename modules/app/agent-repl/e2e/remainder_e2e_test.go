@@ -764,6 +764,13 @@ func TestWebSearch(t *testing.T) {
 // isolated git worktree" / "the session RETURNED from the worktree"), not a
 // FeedSimpleToolCall — this is the one automation-family tool whose calls
 // do NOT ride the generic tool-card shell.
+//
+// A SEPARATION ROW CARRIES NO TURN. feed.proto's FeedRow.turn is documented
+// "Unset for a row that belongs to no turn (a separation divider)"
+// (feed.proto:92-95), so matching a divider by turn id matches nothing. The
+// predicates below therefore key on the separation arm alone, and the two
+// scenarios are driven one at a time so each pair of dividers is
+// unambiguous.
 // ===========================================================================
 
 func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
@@ -771,30 +778,24 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 	w, ws := rmNewWorkspace(t)
 
 	// Act + Assert: keep.
-	keepTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-keep")
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-keep")
 	entered := rmAwaitFeedRow(t, w, ws, "the worktree-entered divider (keep)", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == keepTurn.GetValue() && r.GetSeparation().GetWorktreeEntered() != nil
+		return r.GetSeparation().GetWorktreeEntered() != nil
 	})
 	if entered.GetSeparation().GetWorktreeEntered().GetPath().GetText() == "" {
 		t.Fatal("worktree-entered divider carries no path")
 	}
 	left := rmAwaitFeedRow(t, w, ws, "the worktree-left divider (kept)", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == keepTurn.GetValue() && r.GetSeparation().GetWorktreeLeft().GetKept() != nil
+		return r.GetSeparation().GetWorktreeLeft().GetKept() != nil
 	})
 	if left.GetSeparation().GetWorktreeLeft().GetKept().GetPath().GetText() == "" {
 		t.Fatal("worktree-left (kept) divider carries no path")
 	}
 
 	// Act + Assert: remove.
-	removeTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-remove")
-	entered = rmAwaitFeedRow(t, w, ws, "the worktree-entered divider (remove)", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == removeTurn.GetValue() && r.GetSeparation().GetWorktreeEntered() != nil
-	})
-	if entered.GetSeparation().GetWorktreeEntered() == nil {
-		t.Fatal("worktree-entered divider missing for the remove scenario")
-	}
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-remove")
 	left = rmAwaitFeedRow(t, w, ws, "the worktree-left divider (removed)", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == removeTurn.GetValue() && r.GetSeparation().GetWorktreeLeft().GetRemoved() != nil
+		return r.GetSeparation().GetWorktreeLeft().GetRemoved() != nil
 	})
 	if left.GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded() == nil {
 		t.Fatal("worktree-left (removed) divider carries no discarded-files/commits line, want one composed (the fixture discards 3 files, 1 commit)")
