@@ -160,6 +160,23 @@ export interface Harness {
   disposeMounts(): Promise<void>;
   /** Dispose every mount, stop every daemon, restore real timers. */
   stop(): Promise<void>;
+  /**
+   * Install production's log sink NOW, on a harness booted without it.
+   *
+   * The wiring is main.ts's own, identical to what `clientLog: true` installs;
+   * only the moment differs. A case that asserts about a record IT emits wants
+   * production's sink but not the boot's own diagnostics, each of which is its
+   * own unary round trip to the fake. The boot emits ~56, so it crosses the
+   * throttle's 50-record `maxBatch` and fires fifty real socket trips before
+   * the test body even starts — ~180ms of that body's 900ms budget, measured,
+   * spent on records it does not assert about, which under full parallel load
+   * it did not always finish draining. Booting quiet and installing after
+   * moves that cost out of the assertion entirely.
+   *
+   * `clientLog: true` still exists for the cases that ARE about the boot's own
+   * diagnostics: those need the sink standing before the first mount draws.
+   */
+  installClientLogSink(): void;
 
   // --- queries, keyed on the DOM hooks contract (preamble §5) -------------
   $(selector: string): HTMLElement | null;
@@ -275,6 +292,11 @@ export interface HarnessOptions {
    * logging would then read its own diagnostics back out of the daemon's call
    * log. The console function is a no-op so the suite's output stays clean;
    * the forwarding half is the app's own.
+   *
+   * Reach for this ONLY when the case is about the boot's own diagnostics: the
+   * boot emits fifty-odd records and each is its own unary round trip, so a
+   * case that only wants the sink for a record IT emits should boot quiet and
+   * call `installClientLogSink()` instead.
    */
   clientLog?: boolean;
 }
@@ -337,7 +359,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   // MAIN.TS'S OWN SINK, in main.ts's own order: the identity is bound and the
   // forwarding logger installed BEFORE the first component draws, so a record
   // emitted during boot travels the same path a record emitted later does.
-  if (options.clientLog === true) {
+  const installClientLogSink = (): void => {
     bindLogContext({
       connection_id: "harness-connection",
       workspace_id: ctx.workspace.id,
@@ -348,7 +370,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         await client.clientLog({ workspace: ctx.workspace, record });
       }, () => {}),
     );
-  }
+  };
+  if (options.clientLog === true) installClientLogSink();
 
   const panels: SubmitPromptCommandPanel[] = [];
   const gate = createComposerGate();
@@ -491,6 +514,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     panels,
 
     settle,
+    installClientLogSink,
     async tick(ms) {
       await vi.advanceTimersByTimeAsync(ms);
       await settle();
