@@ -107,6 +107,7 @@ load_pins() {
   [[ -f $pins ]] || { log "no $pins; every identifier must come from the environment"; return 0; }
 
   local key value
+  # shellcheck disable=SC2034  # $value is read by the eval below
   while IFS='=' read -r key value; do
     [[ $key == SANDBOX_* || $key == NODE_SHA256_* || $key == GO_SHA256_* ]] || continue
     # Already set in the environment: the caller's value wins.
