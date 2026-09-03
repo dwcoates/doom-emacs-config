@@ -57,6 +57,7 @@ import {
   type PersistenceRetryPolicy,
 } from "./persistence.js";
 import { createReader } from "./reader.js";
+import type { BashRunStanding } from "./reader.js";
 import { createReconciler } from "./reconcile.js";
 
 const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
@@ -546,9 +547,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     openBashRun(
       work: conversationv1.DetachedWorkId,
-      stillLive?: () => boolean,
+      announcement?: () => BashRunStanding,
     ): Promise<AsyncIterable<conversationv1.AgentBash>> {
-      return reader.openBashRun(work, stillLive);
+      return reader.openBashRun(work, announcement);
     },
 
     onFault(listener: (fault: conversationv1.SessionFault) => void): () => void {

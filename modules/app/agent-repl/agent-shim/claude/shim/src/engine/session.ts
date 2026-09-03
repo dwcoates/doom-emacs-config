@@ -319,6 +319,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const announcedAgents = new Set<string>();
   /**
+   * The last write or edit unit this session folded.
+   *
+   * THE IDE-DIAGNOSTICS JOIN. The vendor's `diagnostics` attachment carries no
+   * tool id at all, so `convert/attachments.ts` joins it to the change it
+   * concerns by ADJACENCY -- and nothing ever assigned this, so every
+   * diagnostics record fell to "IDE diagnostics arrived with no preceding write
+   * or edit" and landed as residue instead of on the edit it belonged to.
+   *
+   * ONE remembered value, per the fold context's contract, and it is remembered
+   * where every other cross-message observation is: from the entries the fold
+   * produced.
+   */
+  let lastWriteOrEdit: conversationv1.AgentActivityId | undefined;
+  /**
    * Cuts produced BEFORE the session had an identity to key them to.
    *
    * The cold gate's `compact` remediation runs inside `StartSession`, before
@@ -356,7 +370,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     agentFor: (vendorAgentId) => {
       const main = requireIdentity().agentId;
       if (vendorAgentId === main.value) return main;
-      return announcedAgents.has(vendorAgentId) ? subagentId(vendorAgentId) : undefined;
+      if (announcedAgents.has(vendorAgentId)) return subagentId(vendorAgentId);
+      // THE LIVE REGISTRY IS THE OTHER ANNOUNCEMENT. A vendor `agentID` is
+      // minted from the SPAWNING CALL's `tool_use_id` (convert/ids.ts
+      // subagentId), which is exactly the key the live detached-work table is
+      // addressable by -- so a DETACHED subagent's ask arrived under an id the
+      // announced-agent set had no row for, and every permission or question
+      // raised inside a subagent landed on the main agent's book.
+      //
+      // Only the LIVE set resolves: once the subagent has concluded there is no
+      // book still taking questions, and the ask falls back to the main agent
+      // with the log note, which is the contract for an unaddressable ask.
+      if (live.byToolUseId(vendorAgentId) !== undefined) return subagentId(vendorAgentId);
+      return undefined;
     },
     persist: (entries) => deps.persistence.write(entries),
     keepalive: () => open?.keepalive === true,
@@ -380,6 +406,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...(open === undefined ? {} : { turnId: open.id }),
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
+      ...(lastWriteOrEdit === undefined ? {} : { lastWriteOrEditUnit: lastWriteOrEdit }),
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
       deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
       reportFault: (_kind, detail) => {
@@ -1126,8 +1153,25 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         const created = item.value.result.value.createdAgentId?.value ?? "";
         if (created !== "") announcedAgents.add(created);
       }
+      // NOT EVERY ITEM HAS A LIFECYCLE. `AgentTaskAct`, `AgentPlanMode`,
+      // `AgentWorktree`, `AgentCron`, `AgentContextInjected`,
+      // `AgentReportFindings` and `AgentPushNotification` carry no `result`
+      // oneof at all: the act IS the whole unit, and there is no "start" of it
+      // to be waiting on. Reading settledness off a `result` those items do not
+      // have left every one of them in flight forever, so `DetachForeground`
+      // answered `not_detachable` for a unit that had plainly concluded.
+      // THE ADJACENCY the IDE-diagnostics join is made on. Remembered from the
+      // fold's own frames, so the id is the one the diagnostics report has to
+      // name -- the unit a consumer was shown.
+      if (item.case === "write" || item.case === "edit") {
+        const activityId = activity.activityId;
+        if (activityId !== undefined && activityId.value !== "") lastWriteOrEdit = activityId;
+      }
       const inner = item.value as { result?: { case?: string } } | undefined;
-      const settled = inner?.result?.case !== undefined && inner.result.case !== "start";
+      const settled =
+        inner === undefined || !("result" in inner)
+          ? true
+          : inner.result?.case !== undefined && inner.result.case !== "start";
       foreground.note(activity.activityId?.value ?? "", item.case ?? "", settled);
     }
   }
