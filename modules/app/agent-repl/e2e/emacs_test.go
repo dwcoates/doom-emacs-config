@@ -208,7 +208,17 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		"AGENT_REPL_STATE_DIR=" + e.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"MULTI_REPO_ROOT=" + e.MultiRepoRoot,
-		"TERM=dumb",
+		// A tty frame needs a terminal that can position the cursor, and
+		// `dumb` by definition cannot: it has no `cup` capability, so Emacs
+		// refuses to start on it outright ("Terminal type \"dumb\" is not
+		// powerful enough to run Emacs. It lacks the ability to position the
+		// cursor.") and exits before Doom loads. `dumb` is the right answer
+		// for a batch Emacs, which draws nothing; it is never an answer for
+		// `-nw`. xterm-256color is chosen because the image provably carries
+		// its terminfo entry at /lib/terminfo/x/xterm-256color, and because
+		// it is the terminal a user of this module actually runs Emacs on, so
+		// the frame the scenarios inspect is the frame a user would see.
+		"TERM=xterm-256color",
 	}, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
 		env = append(env, "AGENT_REPL_STORE_SOCKET="+opts.StoreSocket)
