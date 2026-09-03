@@ -42,6 +42,33 @@ export const BOOT_BUDGET_MS = 5_000;
 /** A test's own timeout when it drives one real turn end to end. */
 export const TURN_TEST_MS = TURN_BUDGET_MS + BOOT_BUDGET_MS;
 
+/**
+ * How long the page is given to observe a whole DAEMON HANDOVER (§F9 #39).
+ *
+ * ITS OWN CONSTANT, because the chain it bounds is not a turn: a merge
+ * landing, the rollout trigger, the incumbent re-execing itself, a SECOND real
+ * claude-repld's full boot, the adoption rendezvous, and only then the
+ * `transferred` push this end waits on. That is structurally two real process
+ * lifecycles, so a turn's 5s would bound the wrong thing.
+ *
+ * REUSED RATHER THAN MINTED: 15s is `harness.HandoverChainTimeout`
+ * (`daemon/integration/harness/daemon.go:47-57` — 3x DefaultTimeout, sized off
+ * that measured chain), the bound the GO side of this very scenario runs on.
+ * The page waits on the tail of that chain, so it inherits the driver's budget
+ * rather than inventing a third number; a page bound tighter than the driver's
+ * would fail the run for the driver still being mid-handover.
+ *
+ * It bounds a HANG: `awaitDrawn` returns on the first round the push has been
+ * applied, and nothing in it sleeps.
+ */
+export const HANDOVER_BUDGET_MS = 15_000;
+
+/**
+ * The handover test's own timeout: this page's boot, the handover, and the
+ * fresh page's boot at the successor's address.
+ */
+export const HANDOVER_TEST_MS = BOOT_BUDGET_MS + HANDOVER_BUDGET_MS + BOOT_BUDGET_MS;
+
 /** Mount the real app, with the dev composer, against the real daemon. */
 export async function bootLayer(): Promise<MountedApp> {
   return startAgainstRealDaemon({ composer: true });
