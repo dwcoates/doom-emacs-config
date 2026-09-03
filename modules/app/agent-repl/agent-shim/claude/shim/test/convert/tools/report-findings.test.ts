@@ -40,14 +40,14 @@ function outcome(structured: unknown, isError = false): ToolOutcome {
 }
 
 function armOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentReportFindings["state"] {
-  expect(item.case).toBe("reportFindings");
-  return (item.value as conversationv1.AgentReportFindings).state;
+  expect(item?.case).toBe("reportFindings");
+  return (item?.value as conversationv1.AgentReportFindings).state;
 }
 
 function successOf(
-  item: conversationv1.AgentActivity["item"],
+  item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.AgentReportFindingsSuccess {
   const arm = armOf(item);
   expect(arm.case).toBe("success");

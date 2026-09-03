@@ -201,7 +201,7 @@ export const bashConverter: ToolConverter = {
         { level: "error", tool_use_id: call.toolUseId },
         "a command was announced with no command line; no start frame is produced",
       );
-      return { case: undefined };
+      return undefined;
     }
     return {
       case: "bash",

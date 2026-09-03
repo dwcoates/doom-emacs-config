@@ -86,9 +86,12 @@ function hookEvent(literal: string): conversationv1.AgentHookEvent {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
     .toUpperCase();
-  const key = `AGENT_HOOK_EVENT_${screaming}` as keyof typeof conversationv1.AgentHookEvent;
+  // protobuf-es STRIPS the enum's own prefix from its generated member names:
+  // `AGENT_HOOK_EVENT_PRE_TOOL_USE` is generated as `PRE_TOOL_USE`. Spelling the
+  // prefix here made EVERY lookup miss, so every hook event resolved UNSPECIFIED.
+  const key = screaming as keyof typeof conversationv1.AgentHookEvent;
   const value = conversationv1.AgentHookEvent[key];
-  if (typeof value !== "number") {
+  if (typeof value !== "number" || value === conversationv1.AgentHookEvent.UNSPECIFIED) {
     LOGGER.log(
       { level: "warn", hook_event: literal },
       "the vendor named a hook event this contract does not spell",
@@ -171,9 +174,15 @@ export function convertHookResponse(
     };
   } else if (message.outcome === "error") {
     // A HOOK THAT BLOCKED is the refusal the user must understand, and it is
-    // told apart from a hook that merely failed by whether it produced blocking
-    // text for the model to read.
-    const blockingText = message.output !== "" ? message.output : message.stderr;
+    // told apart from a hook that merely failed by whether it produced BLOCKING
+    // TEXT — the vendor's `output`, which is what the gated call is answered
+    // with and what the model reads.
+    //
+    // STDERR IS NOT THAT SIGNAL. A hook that gates nothing still writes stderr
+    // when it fails — a `SessionStart` hook with no interpreter on PATH is the
+    // grounded case — and reading stderr as blocking text drew every such
+    // failure as a refusal of a call that was never gated.
+    const blockingText = message.output;
     if (blockingText !== "") {
       LOGGER.log(
         { level: "warn", hook_id: message.hook_id, hook: message.hook_name },
