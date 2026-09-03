@@ -2,7 +2,7 @@
 # Build and run the agent-repl cross-system e2e sandbox.
 #
 #   e2e-sandbox.sh build [--allow-unpinned] [--no-cache]
-#   e2e-sandbox.sh run   [--] <command> [args...]
+#   e2e-sandbox.sh run   [--] [--dir <module-relative-path>] <command> [args...]
 #   e2e-sandbox.sh shell
 #   e2e-sandbox.sh preflight
 #
