@@ -634,6 +634,10 @@ func TestStartSurfacesANonColdStartFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Start() = nil error, want the vendor-start failure surfaced")
 	}
+	r := asRefusal(t, err, ArmVendorStartFailed)
+	if r.Fields["detail"] != "the vendor binary is missing" {
+		t.Fatalf("vendor_start_failed detail field = %v, want the shim's own account", r.Fields["detail"])
+	}
 }
 
 func TestStartIsIdempotentForALiveSession(t *testing.T) {

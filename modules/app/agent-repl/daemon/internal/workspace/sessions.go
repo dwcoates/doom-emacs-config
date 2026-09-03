@@ -725,10 +725,13 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			// THE VENDOR FAILED TO START INSIDE A HEALTHY SHIM. The shim
 			// process is up and serving — only its StartSession answer is a
 			// refusal — so neither `spawn_failed` nor `shim_start_failed`,
-			// which both name the SHIM PROCESS, describes it. The refusal is
-			// the shim's own verdict, relayed by name.
-			return nil, refuse(log, "OpenWorkspace", ArmVendorStartFailed,
-				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false)
+			// which both name the SHIM PROCESS, describes it. LANDING 9 gave
+			// it its own arm: OpenWorkspaceError.vendor_start_failed carries
+			// the shim's OWN account in `detail`, so the verdict is relayed
+			// typed rather than through the unlanded-arm convention.
+			return nil, refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
+				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
+				map[string]any{"detail": failure.GetDetail()})
 		}
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
 		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())
