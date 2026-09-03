@@ -142,7 +142,7 @@ artifacts (`world_test.go`'s `ArtifactsEnv`) land on the host.
 |---|---|---|---|
 | `/repo-src` | the repo root on the host | **read-only** bind | the source under test |
 | `/work` | tmpfs | rw | holds `/work/repo`, the writable working copy |
-| `/work/repo` | `rsync` of `/repo-src` (minus `.git/`, `node_modules/`) | rw | builds and `npm ci` need to write; the read-only source cannot be written |
+| `/work/repo` | `rsync` of an ALLOWLIST of `/repo-src/modules/app/agent-repl` (see `STAGE_ENTRIES` in `bin/entrypoint.sh`) | rw | builds and `npm ci` need to write; the read-only source cannot be written. Nothing outside the module is copied — no repo-root `go.work`, `.nvmrc` or shared config exists, and a whole-checkout copy dragged in `.claude/worktrees` (18 GB of stale agent worktrees) until the host ran out of file descriptors. Staged at the module's real relative path, so the checkout-root-relative resolutions in the Go `replace` directives and the TypeScript `../../../proto/...` imports still land. A missing entry is a loud refusal, not a late confusing failure. Because the mount is a LIVE checkout, rsync's exit 24 (source files vanished mid-copy) is tolerated with a loud per-path summary; every other nonzero exit is fatal. |
 | `/sandbox/home` | tmpfs | rw | `HOME`: `~/.claude`, `~/.emacs.d` caches, git config, npm/Go caches |
 | `/sandbox/doom/modules` | tmpfs | rw | the entrypoint symlinks `:app agent-repl` here at the mounted source |
 | `/tmp` | tmpfs (exec) | rw | UDS paths, per-run temp dirs |
