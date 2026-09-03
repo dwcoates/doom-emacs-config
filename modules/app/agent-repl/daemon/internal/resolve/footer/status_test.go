@@ -826,3 +826,45 @@ func TestAllowanceArmsCoverTheProtoOneof(t *testing.T) {
 		t.Fatalf("allowanceArms = %v, want the FooterAllowance.status arms %v", got, arms)
 	}
 }
+
+// THE VENDOR ANNOUNCES A COMPACTION BEFORE THE TURN THAT RUNS IT. The
+// compacting signal and the turn-open edge arrive within a millisecond of each
+// other and the signal wins the race, so a turn opening must not wipe it.
+func TestCompactingAnnouncedBeforeTheTurnOpensSurvivesTheTurnOpen(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	})
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() == nil {
+		t.Fatalf("want thinking · compacting: the turn-open edge must not wipe the vendor's announcement")
+	}
+}
+
+// The context cut is the compaction's ONLY end signal.
+func TestTheContextCutClearsCompacting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Compacting{Compacting: &conversationv1.SessionCompacting{}},
+	})
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Act
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
+	})
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActPrompt})
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetThinking().GetCompacting() != nil {
+		t.Fatalf("want no compacting sub-status once the cut ended the compaction")
+	}
+}
