@@ -557,33 +557,49 @@ func setFindingOutcome(finding *conversationv1.AgentFinding, outcome string) {
 	}
 }
 
+// worktreeSuccess states WHERE THE SESSION MOVED. The tree's path is the whole
+// subject of both arms — the divider names it — and the vendor spells it
+// `worktreePath`, never `path`, so reading the wrong key leaves the divider
+// blank. What became of the tree comes from the vendor's own `action`, not from
+// a boolean it does not emit.
 func worktreeSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentWorktreeSuccess {
 	success := &conversationv1.AgentWorktreeSuccess{SettledAt: settledAt(ts)}
+	path := str(pick(result, "worktreePath", "worktree_path", "path"))
+	branch := optionalString(pick(result, "worktreeBranch", "worktree_branch", "branch"))
 	if call.name == "ExitWorktree" {
 		exited := &conversationv1.AgentWorktreeExited{
 			OriginalCwd:     str(pick(result, "originalCwd", "original_cwd")),
-			Path:            str(result["path"]),
-			Branch:          optionalString(result["branch"]),
+			Path:            path,
+			Branch:          branch,
 			TmuxSessionName: optionalString(pick(result, "tmuxSessionName", "tmux_session_name")),
 			Message:         str(result["message"]),
 		}
-		if boolean(pick(result, "removed", "wasRemoved")) {
-			exited.Outcome = &conversationv1.AgentWorktreeExited_Removed{Removed: &conversationv1.AgentWorktreeRemoved{
-				DiscardedFiles:   optionalUint32(result, "discardedFiles"),
-				DiscardedCommits: optionalUint32(result, "discardedCommits"),
-			}}
-		} else {
-			exited.Outcome = &conversationv1.AgentWorktreeExited_Kept{Kept: &conversationv1.AgentWorktreeKept{}}
-		}
+		setWorktreeExitOutcome(exited, result)
 		success.Act = &conversationv1.AgentWorktreeSuccess_Exited{Exited: exited}
 		return success
 	}
 	success.Act = &conversationv1.AgentWorktreeSuccess_Entered{Entered: &conversationv1.AgentWorktreeEntered{
-		Path:    str(result["path"]),
-		Branch:  optionalString(result["branch"]),
+		Path:    path,
+		Branch:  branch,
 		Message: str(result["message"]),
 	}}
 	return success
+}
+
+// setWorktreeExitOutcome reads what became of the tree from the vendor's action
+// word. The discarded figures stay UNSET when it stated none — "no figure" is
+// not "none were discarded" — and the outcome itself stays UNSET for an action
+// this contract has no arm for rather than claiming the tree was kept.
+func setWorktreeExitOutcome(exited *conversationv1.AgentWorktreeExited, result map[string]any) {
+	switch {
+	case str(result["action"]) == "remove" || boolean(pick(result, "removed", "wasRemoved")):
+		exited.Outcome = &conversationv1.AgentWorktreeExited_Removed{Removed: &conversationv1.AgentWorktreeRemoved{
+			DiscardedFiles:   optionalUint32(result, "discardedFiles"),
+			DiscardedCommits: optionalUint32(result, "discardedCommits"),
+		}}
+	case str(result["action"]) == "keep":
+		exited.Outcome = &conversationv1.AgentWorktreeExited_Kept{Kept: &conversationv1.AgentWorktreeKept{}}
+	}
 }
 
 func cronSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentCronSuccess {
