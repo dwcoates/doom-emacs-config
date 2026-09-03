@@ -8,6 +8,8 @@ package convert
 // as a fact.
 
 import (
+	"strings"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -331,7 +333,7 @@ func stringList(raw any) []string {
 // bashSuccess: a NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call
 // that could not be performed; a command that ran and failed ran, and what it
 // printed is the answer the caller wanted.
-func bashSuccess(call openCall, result map[string]any, ts int64) *conversationv1.AgentBashSuccess {
+func bashSuccess(call openCall, result map[string]any, exit *int32, ts int64) *conversationv1.AgentBashSuccess {
 	success := &conversationv1.AgentBashSuccess{
 		Command:   bashCommand(call.input),
 		SettledAt: settledAt(ts),
@@ -353,9 +355,9 @@ func bashSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 	// TERMINATION IS UNSET FOR A FOREGROUND COMMAND: no producer states one, and
 	// claiming an exit the vendor did not report would be a fabrication. It is
 	// set for a detached shell, whose spool the shell itself terminates.
-	if code := statedExitCode(result); code != nil {
+	if exit != nil {
 		completed.Termination = &conversationv1.AgentBashTermination{
-			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: *code}},
+			How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: *exit}},
 		}
 	}
 	success.Outcome = &conversationv1.AgentBashSuccess_Completed{Completed: completed}
@@ -373,6 +375,62 @@ func statedExitCode(result map[string]any) *int32 {
 		return &v
 	}
 	return firstSignedInt(str(pick(result, "returnCodeInterpretation", "return_code_interpretation")))
+}
+
+// bashExitCode reads the exit status a Bash result stated ANYWHERE it states
+// one. THE EXIT CODE IS THE COMMAND'S OWN VERDICT ON ITSELF, and its presence —
+// not the vendor's `is_error` flag — is what says the command ran. A nonzero
+// exit arrives as an is_error result whose `toolUseResult` is a bare string
+// ("Error: Exit code 7"), so the structured fields carry nothing and the stated
+// ending survives only in the text returned to the model. That text is read
+// ONLY for a result the vendor marked an error: a command that succeeded states
+// its ending in the structured fields, and mining its OUTPUT for a status would
+// let a passing command that merely printed the words "exit code 3" be drawn as
+// having exited 3.
+func bashExitCode(result map[string]any, block map[string]any, failed bool) *int32 {
+	if code := statedExitCode(result); code != nil {
+		return code
+	}
+	if !failed {
+		return nil
+	}
+	return statedExitFromText(resultText(block["content"]))
+}
+
+// statedExitFromText reads the vendor's prose spelling of a shell status
+// ("Exit code 7", "exited with code 3"). The statement is a LINE OF ITS OWN in
+// the returned text, so a mention of those words mid-line is output, not a
+// verdict, and text that names no exit yields nil rather than the first number
+// it happens to contain.
+func statedExitFromText(text string) *int32 {
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.ToLower(strings.TrimSpace(line))
+		for _, marker := range []string{"error: exit code", "exited with code", "exit code"} {
+			if strings.HasPrefix(trimmed, marker) {
+				return firstSignedInt(trimmed[len(marker):])
+			}
+		}
+	}
+	return nil
+}
+
+// resultText flattens a result block's content down to the text the tool
+// returned, in the two shapes the vendor uses for it.
+func resultText(raw any) string {
+	switch value := raw.(type) {
+	case string:
+		return value
+	case []any:
+		var parts []string
+		for _, el := range value {
+			if block := obj(el); block != nil && str(block["type"]) == "text" {
+				parts = append(parts, str(block["text"]))
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
 }
 
 // firstSignedInt reads the first signed decimal in a sentence, or nil when it

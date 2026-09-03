@@ -136,13 +136,23 @@ func toolCall(id, name, input string) string {
 
 // toolResultLine builds the user record the vendor files a tool result under.
 func toolResultLine(uuid, callID, timestamp, content, toolUseResult string) string {
+	return toolResultLineWithError(uuid, callID, timestamp, content, toolUseResult, false)
+}
+
+// toolResultLineWithError builds a result the vendor MARKED AN ERROR FOR THE
+// MODEL, which is a different fact from the call having failed.
+func toolResultLineWithError(uuid, callID, timestamp, content, toolUseResult string, isError bool) string {
+	errorField := ""
+	if isError {
+		errorField = `,"is_error":true`
+	}
 	line := `{"type":"user","uuid":"` + uuid + `","isSidechain":false,"timestamp":"` + timestamp +
 		`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"` + callID +
-		`","content":` + content + `}]}}`
+		`","content":` + content + errorField + `}]}}`
 	if toolUseResult == "" {
 		return line
 	}
-	// Splice the toolUseResult object in beside the message.
+	// Splice the toolUseResult in beside the message.
 	return line[:len(line)-1] + `,"toolUseResult":` + toolUseResult + `}`
 }
 
