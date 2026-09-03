@@ -91,6 +91,18 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 	const op = "daemon.server.publish_host_workspace"
 	log, err := s.workspaceLog(ctx, "WatchHostWorkspace", ws)
 	if err != nil {
+		// A CANCELLED CONTEXT IS THE CLIENT LEAVING. This publish runs under
+		// the host watch's own context on the composing path, and that context
+		// is cancelled the moment the client goes away or the daemon exits in
+		// an orderly way. The view is simply not published; there is nobody
+		// left to publish it to, and it is not a fault.
+		if endedOnCancel(err) {
+			s.log.Info(op, "the host view was not published; the stream's context was cancelled",
+				dlog.Context{
+					"stream": "WatchHostWorkspace", "workspace": string(ws), "cause": err.Error(),
+				})
+			return
+		}
 		s.log.Error(op, "could not resolve the workspace's log sink", dlog.Context{
 			"workspace": string(ws), "cause": err.Error(),
 		})
@@ -117,11 +129,21 @@ func (s *server) composeHostWorkspace(
 
 	record, err := s.deps.DB.Workspace(ctx, ws)
 	if err != nil {
+		if endedOnCancel(err) {
+			log.Info(op, "the host view was not composed; the stream's context was cancelled",
+				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
+			return nil, false
+		}
 		log.Error(op, "could not read the workspace record", dlog.Context{"cause": err.Error()})
 		return nil, false
 	}
 	session, hasSession, err := s.deps.DB.Session(ctx, ws)
 	if err != nil {
+		if endedOnCancel(err) {
+			log.Info(op, "the host view was not composed; the stream's context was cancelled",
+				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
+			return nil, false
+		}
 		log.Error(op, "could not read the session record", dlog.Context{"cause": err.Error()})
 		return nil, false
 	}
@@ -292,6 +314,11 @@ func (s *server) setHostComposer(
 	const op = "daemon.server.compose_host_workspace"
 	lease, held, err := s.deps.DB.Lease(ctx, ws)
 	if err != nil {
+		if endedOnCancel(err) {
+			log.Info(op, "the occupancy lease was not read; the stream's context was cancelled",
+				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
+			return false
+		}
 		log.Error(op, "could not read the occupancy lease", dlog.Context{"cause": err.Error()})
 		return false
 	}
@@ -339,6 +366,11 @@ func (s *server) hostFaults(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	scope := ws
 	open, err := s.deps.Health.OpenFaults(ctx, wsm.FaultScope{Workspace: &scope})
 	if err != nil {
+		if endedOnCancel(err) {
+			log.Info(op, "the open faults were not read; the stream's context was cancelled",
+				dlog.Context{"stream": "WatchHostWorkspace", "cause": err.Error()})
+			return nil
+		}
 		log.Error(op, "could not read the workspace's open faults", dlog.Context{"cause": err.Error()})
 		return nil
 	}

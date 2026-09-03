@@ -39,13 +39,6 @@ func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrite
 		// can import.
 		ExtraEnv: []string{"AGENT_REPL_MERGE_PAUSE_IN_TERMINAL=" + rendezvous},
 	})
-	// DECLARED: the terminal's own host publish reaches a STANDING
-	// WatchHostWorkspace stream whose request context SIGTERM has just
-	// cancelled, and that handler resolves the workspace on it. Both records
-	// are that one cancellation, on the serving surface rather than on the
-	// merge's durable path, and the assertion below is what holds the merge
-	// and the store to zero.
-	d.ExpectWarnings("daemon.wsm.workspace", "daemon.server.publish_host_workspace")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {

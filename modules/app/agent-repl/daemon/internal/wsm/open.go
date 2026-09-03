@@ -293,10 +293,21 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 // recording it at ERROR would put an error line on an ordinary refusal path
 // and drown the reads that really did break. The error is returned unchanged
 // either way — only the level the record carries differs.
+//
+// A CANCELLED CALLER IS NOT A BROKEN READ either. Every read here runs under
+// its caller's context, and a standing stream's context is cancelled the
+// moment the client leaves or the daemon exits in an orderly way, so recording
+// that at ERROR would put an error line on every shutdown. It is recorded at
+// INFO instead; the error is still returned unchanged.
 func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn func(context.Context) error) error {
 	if err := fn(ctx); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			s.log.Debug(op, "the read found no such record", withError(fields, err))
+			return err
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.log.Info(op, "the read ended when its caller's context was cancelled",
+				withError(fields, err))
 			return err
 		}
 		s.log.Error(op, "refused the read", withError(fields, err))

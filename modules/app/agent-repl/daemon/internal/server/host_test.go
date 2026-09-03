@@ -680,3 +680,96 @@ func TestAHibernatedSessionStaysLiveWithTheShimUnattached(t *testing.T) {
 		t.Fatalf("shim_attached = true, want false while the session is parked")
 	}
 }
+
+// ---- the cancelled publish -----------------------------------------------
+
+// TestPublishHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled pins the
+// publish's cancellation arm. The host publish runs under the host watch's own
+// context, and an orderly exit cancels it while a publish is still in flight;
+// the view is simply not published, and no ERROR is recorded. Any other resolve
+// failure still records ERROR.
+func TestPublishHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.T) {
+	tests := []struct {
+		name      string
+		resolve   error
+		wantQuiet bool
+	}{
+		{name: "cancelled", resolve: context.Canceled, wantQuiet: true},
+		{name: "deadline exceeded", resolve: context.DeadlineExceeded, wantQuiet: true},
+		{name: "a genuine sink failure", resolve: errors.New("the sink is gone"), wantQuiet: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(d *Deps) {
+				d.Log = &fakeSurfaces{global: log, workspaceErr: tc.resolve}
+			})
+
+			// Act.
+			h.Server.(*server).PublishHostWorkspace(context.Background(), testWorkspaceID)
+
+			// Assert.
+			errs := log.at("ERROR")
+			if tc.wantQuiet {
+				if len(errs) != 0 {
+					t.Fatalf("recorded %v at ERROR, want none", errs)
+				}
+				info := log.at("INFO")
+				if len(info) != 1 || info[0].Context["stream"] != "WatchHostWorkspace" {
+					t.Fatalf("INFO records = %v, want exactly one naming the stream", info)
+				}
+				return
+			}
+			if len(errs) != 1 {
+				t.Fatalf("ERROR records = %v, want exactly one", errs)
+			}
+		})
+	}
+}
+
+// TestComposeHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled pins the same
+// distinction one layer down, where the composer's own reads run: a cancelled
+// read withholds the view without an ERROR, a broken one still records it.
+func TestComposeHostWorkspaceIsQuietWhenTheStreamsContextIsCancelled(t *testing.T) {
+	tests := []struct {
+		name      string
+		read      error
+		wantQuiet bool
+	}{
+		{name: "cancelled", read: context.Canceled, wantQuiet: true},
+		{name: "deadline exceeded", read: context.DeadlineExceeded, wantQuiet: true},
+		{name: "a genuine read failure", read: errors.New("the database is gone"), wantQuiet: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.DB.sessionErr = tc.read
+			log := &recordingLogger{}
+
+			// Act.
+			_, ok := h.Server.(*server).composeHostWorkspace(
+				context.Background(), log, testWorkspaceID)
+
+			// Assert.
+			if ok {
+				t.Fatal("the host view was composed from a failed read")
+			}
+			errs := log.at("ERROR")
+			if tc.wantQuiet {
+				if len(errs) != 0 {
+					t.Fatalf("recorded %v at ERROR, want none", errs)
+				}
+				info := log.at("INFO")
+				if len(info) != 1 || info[0].Context["stream"] != "WatchHostWorkspace" {
+					t.Fatalf("INFO records = %v, want exactly one naming the stream", info)
+				}
+				return
+			}
+			if len(errs) != 1 {
+				t.Fatalf("ERROR records = %v, want exactly one", errs)
+			}
+		})
+	}
+}

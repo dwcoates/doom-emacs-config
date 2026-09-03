@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -400,5 +401,79 @@ func TestAReadThatBreaksIsStillAnError(t *testing.T) {
 	// Assert
 	if !loggedOperation(log, "daemon.wsm.workspace", "error") {
 		t.Fatalf("a broken read was not recorded at error: %v", log.Records())
+	}
+}
+
+// TestReadRecordsACancelledCallerWithoutAnError pins the read helper's
+// cancellation arm: a read whose CALLER went away is the client leaving, not a
+// broken read, and it must not put an ERROR line on every orderly exit. A read
+// that failed for any other reason still records ERROR.
+func TestReadRecordsACancelledCallerWithoutAnError(t *testing.T) {
+	tests := []struct {
+		name      string
+		ctx       func(t *testing.T) context.Context
+		wantLevel string
+		wantMsg   string
+	}{
+		{
+			name: "cancelled caller",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantLevel: "info",
+			wantMsg:   "the read ended when its caller's context was cancelled",
+		},
+		{
+			name: "deadline exceeded",
+			ctx: func(t *testing.T) context.Context {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				t.Cleanup(cancel)
+				return ctx
+			},
+			wantLevel: "info",
+			wantMsg:   "the read ended when its caller's context was cancelled",
+		},
+		{
+			name:      "a genuine read failure",
+			ctx:       func(t *testing.T) context.Context { return context.Background() },
+			wantLevel: "error",
+			wantMsg:   "refused the read",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act. A cancelled context makes the driver refuse the query; the
+			// background case is refused by the broken statement instead.
+			ctx := tc.ctx(t)
+			err := s.read(ctx, "daemon.wsm.test_read", dlog.Context{"workspace": string(ws.ID)},
+				func(ctx context.Context) error {
+					return s.db().QueryRowContext(ctx, "SELECT no_such_column FROM workspaces").Scan(new(int))
+				})
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("the read reported success; want a failure")
+			}
+			var found bool
+			for _, rec := range log.Records() {
+				if rec.Operation != "daemon.wsm.test_read" {
+					continue
+				}
+				if rec.Level != tc.wantLevel || rec.Message != tc.wantMsg {
+					t.Fatalf("recorded %s %q, want %s %q",
+						rec.Level, rec.Message, tc.wantLevel, tc.wantMsg)
+				}
+				found = true
+			}
+			if !found {
+				t.Fatalf("no record for the read: %v", log.Records())
+			}
+		})
 	}
 }
