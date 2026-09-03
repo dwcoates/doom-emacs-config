@@ -24,7 +24,7 @@ func TestEveryActivityKindThatDrawsNothingDrawsNothing(t *testing.T) {
 		{name: "cron acts are footer-only", item: &conversationv1.AgentCron{}},
 		{name: "a push notification fans out elsewhere", item: &conversationv1.AgentPushNotification{}},
 		{name: "injected context is not a row", item: &conversationv1.AgentContextInjected{}},
-		{name: "a message to another agent is not a row", item: &conversationv1.AgentSendMessage{}},
+		{name: "a send with no result arm is not a row", item: &conversationv1.AgentSendMessage{}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

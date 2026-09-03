@@ -975,6 +975,43 @@ func TestSkillCardComposesFromExactlyTheStartAndSuccessFrames(t *testing.T) {
 }
 
 // ==========================================================================
+// The outgoing send: a SendMessage is an agent-addressed prompt, so the
+// SENDER's feed draws it with the agent_prompt component.
+// ==========================================================================
+
+func TestASendMessageDrawsAnAgentPromptOnTheSendersFeed(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-send", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("send-1"),
+		Item: &conversationv1.AgentActivity_SendMessage{SendMessage: &conversationv1.AgentSendMessage{Result: &conversationv1.AgentSendMessage_Start{
+			Start: &conversationv1.AgentSendMessageStart{
+				AddressedTo: "ac8caa658f5487d6d",
+				Summary:     &conversationv1.AgentSendMessageSummary{Text: "Report even/odd status for each number"},
+				Body:        &conversationv1.AgentSendMessageBody{Text: "the whole relayed message, never drawn"},
+				StartedAt:   startedAt(1),
+			},
+		}}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the outgoing send's agent prompt", func(r *frontendv1.FeedRow) bool {
+		return r.GetAgentPrompt() != nil
+	})
+	if addr := row.GetAgentPrompt().GetAddress().GetText(); addr != "→ ac8caa658f5487d6d" {
+		t.Fatalf("the send's address line = %q, want the composed recipient address", addr)
+	}
+	blocks := row.GetAgentPrompt().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != "Report even/odd status for each number" {
+		t.Fatalf("the send's body = %v, want the caller's summary alone", blocks)
+	}
+}
+
+// ==========================================================================
 // Plan mode.
 // ==========================================================================
 

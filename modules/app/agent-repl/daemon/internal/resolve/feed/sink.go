@@ -89,11 +89,15 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		row, err = r.drawFindings(s, at, act, item.ReportFindings)
 	case *conversationv1.AgentActivity_Worktree:
 		row, err = r.drawWorktree(s, at, act, item.Worktree)
+	case *conversationv1.AgentActivity_SendMessage:
+		// A send IS an agent-addressed prompt, drawn on the SENDER's feed with
+		// the same component the recipient's delivered prompt is drawn with.
+		row, err = r.drawSendMessage(s, at, act, item.SendMessage)
 	default:
 		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
 		// the topbar's warning dropdown. Every other kind that draws nowhere
 		// (thinking, task acts, monitors, wakeups, cron, notifications,
-		// injected context, sends) answers the same way.
+		// injected context) answers the same way.
 		err = errNotARow
 	}
 
