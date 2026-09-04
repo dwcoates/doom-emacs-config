@@ -56,10 +56,23 @@
        ;; The module IS elisp; the ERT suites run under it.
        emacs-lisp
 
-       :app
-       ;; The subject under test. At run time the entrypoint points this
-       ;; directory at the read-only repo mount.
-       agent-repl
+       ;; `:app agent-repl' is DELIBERATELY ABSENT, exactly as it is in the
+       ;; host profile's own init.el, and for the host's reason: Doom loads
+       ;; `:config default' LAST of all modules, and its `+bindings' rebuilds
+       ;; the leader's prefix maps wholesale (`SPC o' and `SPC TAB' become
+       ;; fresh `:prefix-map' keymaps, `SPC w' becomes `evil-window-map').
+       ;; A module loaded in the `:app' phase therefore has every one of its
+       ;; `map! :leader' forms discarded before the frame is ever up.
+       ;;
+       ;; The module is loaded at the END of this profile's `config.el'
+       ;; instead -- $DOOMDIR/config.el runs after every module's config.el,
+       ;; so `keybindings.el' lands last and wins, which is precisely the
+       ;; arrangement the user runs. The entrypoint still points
+       ;; $DOOMDIR/modules/app/agent-repl at the read-only repo mount; only
+       ;; WHEN it is loaded changes.
+       ;;
+       ;; `modules/app/agent-repl/packages.el' declares no packages, so its
+       ;; absence from the `doom!' block costs `doom sync' nothing.
 
        :config
        ;; `+bindings' defines the leader map that `keybindings.el' hangs

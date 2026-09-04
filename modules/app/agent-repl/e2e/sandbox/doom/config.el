@@ -145,3 +145,19 @@ effect."
             ;; Last, so the module's own cold-start registration on
             ;; `emacs-startup-hook' has already run when the stamp lands.
             90))
+
+;; ---------------------------------------------------------------------------
+;; The subject under test
+;; ---------------------------------------------------------------------------
+;;
+;; Loaded HERE rather than through `:app agent-repl' in init.el, mirroring the
+;; host profile exactly (see the comment where init.el's `:app' section used
+;; to be). $DOOMDIR/config.el is the last thing Doom loads, after every
+;; module's own config.el including `:config default +bindings', so the
+;; module's `map! :leader' forms are the ones that survive.
+;;
+;; `doom-after-modules-config-hook' is NOT an option: it has already fired by
+;; the time this file runs, so an `add-hook' here would be dead code on a cold
+;; boot -- the same trap documented in the host's config.el.
+(unless (featurep 'agent-repl)
+  (load! "modules/app/agent-repl/config"))
