@@ -125,10 +125,15 @@ it(
 );
 
 it(
-  "draws a web-fetch tool call's links as link rows",
+  "draws a web-search tool call's results as link rows",
   async () => {
-    // Arrange / Act
-    const row = await family("web-fetch", "activity", "simpleToolCall");
+    // Arrange / Act — WEB SEARCH, NOT WEB FETCH. The links form is
+    // WebSearch's alone: daemon/internal/resolve/feed/toolcall.go builds a
+    // FeedToolCallLinksOutput only from AgentWebSearchSuccess's results
+    // (linksForm), while AgentWebFetchSuccess is a fetched PAGE and draws
+    // the generic text form. A `!web-fetch` row therefore has no link rows
+    // to find, and asserting them there tested nothing this chain produces.
+    const row = await family("web-search", "activity", "simpleToolCall");
     // Assert — the LINKS output form, not a text blob. src/feed/cards/
     // tool-call.ts's drawFeedToolCallLinksOutput gives the list
     // `.tool-links` and each result its own `.tool-link-row`, so those
