@@ -169,6 +169,27 @@ describe("API errors", () => {
     });
   });
 
+  it("states the vendor's error class on the failed assistant message", async () => {
+    // Arrange + Act. The result record carries the status alone, so this is the
+    // only stream carrier of a class no status can name.
+    const driven = await driveScenario(["!api-oauth-org"]);
+    const failed = ofType(driven, "assistant").find((m) => m.error !== undefined);
+
+    // Assert
+    expect(failed?.error).toBe("oauth_org_not_allowed");
+  });
+
+  it("keeps that class off the transcript, which has its own api_error line", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!api-oauth-org"]);
+    const recorded = recordsOfType(driven.transcript(), "assistant").filter(
+      (l) => l.error !== undefined,
+    );
+
+    // Assert
+    expect(recorded).toEqual([]);
+  });
+
   it("ends every api-error turn with an api_error terminal reason", async () => {
     // Arrange + Act
     const reasons: unknown[] = [];
