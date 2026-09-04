@@ -5609,3 +5609,13 @@ body.draining #composer-input::placeholder {
   font-size: 0.85em;
   opacity: 0.75;
 }
+
+/* ---- cold gate attention (src/topbar/model.ts) ---- */
+[data-attention="coldGate"] {
+  outline: 2px solid var(--warn, #d08a3a);
+  outline-offset: 2px;
+}
+.footer-notice {
+  padding: 2px 8px;
+  font-size: 0.85em;
+}
