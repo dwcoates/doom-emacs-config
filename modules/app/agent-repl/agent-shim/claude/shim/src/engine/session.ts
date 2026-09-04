@@ -2540,7 +2540,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     abort?.abort();
     active?.close();
     query = undefined;
-    await loop?.catch(() => undefined);
+    // BOUNDED, BECAUSE A CLOSED QUERY IS NOT A PROMISE THAT SETTLES. `close()`
+    // is the vendor's own end-of-stream signal, but nothing in the SDK's
+    // declared surface guarantees the iterator this loop is parked in ever
+    // completes after one -- and a compaction that already closed a query on
+    // this conversation is exactly the shape that leaves one parked forever.
+    // The stand-down cannot be the thing that never finishes, so the wait is
+    // given the same budget a tail's conclusion gets and the overrun is stated
+    // at error level rather than swallowed.
+    const ending = loop;
+    loop = undefined;
+    if (ending !== undefined) {
+      await withBudget(
+        ending.catch(() => undefined),
+        watcherConclusionBudgetMs,
+        "the vendor message loop did not end within its budget after the query was closed; standing down without it",
+      );
+    }
     // A23: the stand-down is only clean if the record actually landed. The
     // lost-row count decides the exit code, and a nonzero one is stated here
     // as well as in the writer's own drop records, so the reason a stand-down
@@ -2676,7 +2692,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function bookHead(
     agent: conversationv1.AgentId,
   ): Promise<conversationv1.HistoryPointer | undefined> {
-    const opened = await deps.persistence.openAgentPage(agent, 1);
+    // BOUNDED FOR THE SAME REASON THE CONCLUSION IS. This runs inside the
+    // teardown, and the store call carries no deadline of its own: a store that
+    // never answers would leave KillSession hanging with the tail unconcluded.
+    // Rejecting hands the caller's own catch the honest outcome -- the head
+    // could not be read -- instead of stalling the stand-down.
+    const opened = await deadline(
+      deps.persistence.openAgentPage(agent, 1),
+      watcherConclusionBudgetMs,
+      `the store did not answer for ${agent.value}'s book within ${watcherConclusionBudgetMs}ms`,
+    );
     opened.close();
     return opened.page.entries[0]?.at;
   }
@@ -2691,6 +2716,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** The conclusion budget this session actually bounds its tails on. */
   const watcherConclusionBudgetMs =
     deps.watcherConclusionBudgetMs ?? WATCHER_CONCLUSION_BUDGET_MS;
+
+  /**
+   * Await `work`, REJECTING when `budgetMs` elapses first.
+   *
+   * The sibling of {@link withBudget}, for the awaits whose caller already has
+   * an error path worth taking: this one surfaces the overrun as a failure the
+   * caller handles, where `withBudget` merely gives up on work nobody is
+   * waiting on an answer from.
+   */
+  async function deadline<T>(work: Promise<T>, budgetMs: number, complaint: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(complaint)), budgetMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([work, expiry]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 
   async function withBudget(work: Promise<void>, budgetMs: number, complaint: string): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
