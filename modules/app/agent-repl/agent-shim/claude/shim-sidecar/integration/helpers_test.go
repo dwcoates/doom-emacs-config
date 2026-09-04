@@ -1664,7 +1664,18 @@ func (f *fakeStore) awaitEntry(ctx context.Context, t *testing.T, what string, m
 // read path that dies partway through a replay is precisely what these subjects
 // exist to catch, and returning the rows it managed to send first would let it
 // pass every assertion that only looked at those.
-func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) ([]*conversationv1.AgentBash, bool) {
+//
+// WHAT ENDS THE SNAPSHOT IS A COUNT THE CALLER READ OFF THE WIRE, not the
+// budget. The producer's rows are already durable by the time these subjects
+// read a run back — every one of them waited for the cursor covering the writes
+// first — so the store replays them from one snapshot taken at stream open,
+// back to back. wantRows is what the caller counted in the batches the producer
+// sent, so reaching it means the replay is complete AND that the read verb
+// agrees with the wire about how many rows there are. A run with FEWER rows
+// than the wire carried, or an unfinished run whose caller wants whatever is
+// there (wantRows 0), still ends on snapshotBudget, which is a failure bound
+// again rather than an unconditional cost paid on every healthy call.
+func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string, wantRows int) ([]*conversationv1.AgentBash, bool) {
 	t.Helper()
 	snapshot, cancel := context.WithTimeout(ctx, snapshotBudget)
 	defer cancel()
@@ -1674,7 +1685,17 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 	if err != nil {
 		return nil, false
 	}
-	defer stream.Close()
+	defer func() {
+		// THE STREAM IS ENDED BY CANCELLING ITS CONTEXT, NEVER BY CLOSING IT
+		// FIRST. A server-streaming Close waits for the server to finish the
+		// call, and this server finishes only when the run terminates or the
+		// deadline expires — so a caller that already had every row it came for
+		// still paid the WHOLE snapshotBudget on the way out, on every healthy
+		// call. Defers run last-registered-first, so this one has to do both in
+		// the right order rather than leave it to two separate defers.
+		cancel()
+		_ = stream.Close()
+	}()
 	var out []*conversationv1.AgentBash
 	for stream.Receive() {
 		row := stream.Msg().GetRow()
@@ -1683,6 +1704,9 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 		}
 		out = append(out, row.GetFrame())
 		if isTerminalFrame(row.GetFrame()) {
+			return out, true
+		}
+		if wantRows > 0 && len(out) >= wantRows {
 			return out, true
 		}
 	}
