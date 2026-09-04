@@ -82,14 +82,26 @@ it, and AN EXPLICIT FLAG ALWAYS BEATS THE ENV.
 | `--stale-agent-silence` | `AGENT_REPL_STALE_AGENT_SILENCE` | `60m` |
 | `--stale-workflow-silence` | `AGENT_REPL_STALE_WORKFLOW_SILENCE` | `60m` |
 | `--unowned-spool-window` | `AGENT_REPL_UNOWNED_SPOOL_WINDOW` | `60s` |
+| `--recover-backoff-min` | `AGENT_REPL_RECOVER_BACKOFF_MIN` | `250ms` |
+| `--recover-backoff-max` | `AGENT_REPL_RECOVER_BACKOFF_MAX` | `10s` |
 
-The five windows take GO DURATION SYNTAX (`250ms`, `1m30s`). UNSET KEEPS THE
-PACKAGE DEFAULT — zero is the only meaning "unset" has, and `internal/stale`
-and `held.go` fill their own defaults, so there is one place that knows each.
-A MALFORMED OR NEGATIVE VALUE IS A BOOTSTRAP ERROR: the process states it once
-on stderr and exits non-zero rather than starting on a window the operator did
-not choose. They exist so the integration suite can exercise a policy that is
-otherwise measured in half-hours; nothing in production passes them.
+The seven windows take GO DURATION SYNTAX (`250ms`, `1m30s`). UNSET KEEPS THE
+PACKAGE DEFAULT — zero is the only meaning "unset" has, and `internal/stale`,
+`held.go` and `cycle.go` fill their own defaults, so there is one place that
+knows each. A MALFORMED OR NEGATIVE VALUE IS A BOOTSTRAP ERROR: the process
+states it once on stderr and exits non-zero rather than starting on a window
+the operator did not choose. They exist so the integration suite can exercise a
+policy that is otherwise measured in half-hours; nothing in production passes
+them.
+
+The last two are the STORE-RECOVERY LADDER's floor and ceiling (`cycle.go`,
+`recoverBackoffMin` / `recoverBackoffMax`). They were the only windows in this
+process with no override, which is why the outage subjects — which run a REAL
+sidecar, so the injected clock the cycle's unit tests advance does not reach it
+— used to wait out real rungs of production's ladder. A CEILING BELOW THE
+EFFECTIVE FLOOR IS REFUSED, not clamped: it describes a ladder that cannot
+climb, and the check is against the effective pair, so a floor above the
+DEFAULT ceiling is refused as well.
 
 ## The cursor-first production cycle, and the store-unreachable invariant
 
@@ -569,6 +581,20 @@ From this directory:
 go build ./... && go vet ./... && go test -race ./...
 ```
 
+THE TWO SUITES, AND WHY THE INVOCATION MATTERS. `./...` is the union of the
+unit packages and `integration/`, run once each — it is not a third suite. The
+integration package carries no build tag on purpose (a tag would take it out of
+`go vet ./...` and out of `make coverage`, which runs `go test -coverpkg=./...
+./...`), so naming it separately is naming it AGAIN:
+
+```bash
+go test ./internal/... .            # the unit suites alone (~0.3s)
+go test ./integration/              # the integration suite alone (~12s)
+go test ./...                       # both, once each — NOT unit + a rerun
+```
+
+Run the union, or run the halves; never both in one pass.
+
 - Table-driven tests, AAA (Arrange/Act/Assert), ONE edge case per test
   function, one `_test.go` per source file.
 - NEVER `time.Sleep` for synchronization. The cycle is driven in tests by
@@ -592,16 +618,28 @@ go build ./... && go vet ./... && go test -race ./...
 ### Test wait bounds
 
 Every harness timeout is a small multiple (~3x) of the healthy max observed on
-a clean `go test -race -count=1 -v ./...` run, never a round number picked by
-feel. Re-derive them the same way after a change materially alters a suite's
+a clean `go test -count=1 -json ./integration/` run, never a round number picked
+by feel. Re-derive them the same way after a change materially alters a suite's
 real timing (a heavier scenario, a new outage ladder) rather than nudging a
 number that started failing.
 
+A BOUND IS A FAILURE BOUND, NOT A COST. If a green run PAYS a bound, it is not
+a bound — it is a sleep with a justification attached, and the fix is a signal
+to end on, not a smaller number. Two of the rows below were exactly that and
+are now signals.
+
+Measured on `go test ./integration/ -count=1 -json`, green, at the package's own
+parallelism: suite wall **11.8s**, slowest whole subject **2.82s**, slowest
+subtest **0.87s**.
+
 | Bound | Where | Old | New | Basis |
 | --- | --- | --- | --- | --- |
-| `waitBudget` | `integration/helpers_test.go` | 60s | 50s | `integration` package healthy max ~16.6s (`TestMockScenarios/!subagent`, a real vendor+sidecar+store scenario); nearly every other scenario finishes in well under a second |
-| `snapshotBudget` | `integration/helpers_test.go` | 2s | 1s | a single RPC against an already-running store (no process boot in this wait), so it does not need `waitBudget`'s headroom |
-| `standDownGrace` | `integration/mock_helpers_test.go` | 10s | 3s | the mocked vendor writes every file synchronously and exits promptly on SIGTERM in every observed run; the extra margin over `shim-store`'s comparable 2s shutdown bound accounts for this being a real node process rather than a compiled binary |
+| `waitBudget` | `integration/helpers_test.go` | 50s | **10s** | ~3x the slowest whole subject (2.82s, `TestMockKeepAliveTurnsNeverReachAPage`; 0.92s alone). A subject's own wall time bounds every wait inside it. The old 50s cited a ~16.6s max for `TestMockScenarios/!subagent`, which measures **0.33s** — the number was ~50x its own premise. Costs nothing on green. |
+| `snapshotBudget` | `integration/helpers_test.go` | 1s | 1s, **no longer paid** | Unchanged as a number and no longer reached: `watchBashRun` ends on the row count its caller read off the wire, and cancels its context BEFORE closing the stream (closing first waits for the server, which is how the whole budget used to be paid on the way out of a healthy call). Three subjects paid 1s each on every green run; they now pay ~0. |
+| `standDownGrace` | `integration/mock_helpers_test.go` | 3s | 3s | Unchanged. The mocked vendor writes every file synchronously and exits promptly on SIGTERM; "did not leave within" has never appeared in a green run. Costs nothing on green. |
+| `growthSilence` | `integration/lost_policy_test.go` | (was `shortSilence`, 150ms) | **750ms** | ~5x the worst observed iteration (~150ms under this package's parallelism; ~10ms quiet) of the one subject that must KEEP a file alive across a silence window. INHERENT: the policy under test IS a silence window. Every other short-window subject keeps `shortSilence` (150ms). |
+| `RecoverBackoffMin`/`Max` (suite) | `integration/helpers_test.go` | (no override existed) | **5ms / 20ms** | The same ladder shape — first rung, doubling, ceiling held forever — at a scale the suite observes rather than sits through. Production's 250ms/10s is untouched; see `--recover-backoff-min` / `--recover-backoff-max`. |
+| `UnownedSpoolWindow` (suite) | `integration/helpers_test.go` | 200ms | 200ms | Unchanged, and now used by the spool-ownership subject too, which rode its own 2s. Its "held is not tailed" assertion is an ORDERING on the write stream, so no window length can make it race. |
 
 Per-site exception, deliberately NOT tightened by this pass:
 
@@ -610,13 +648,42 @@ Per-site exception, deliberately NOT tightened by this pass:
   correctness margin.
 - `rpcTimeout` (`cycle.go`, 30s), `dialTimeout`
   (`internal/storeclient/client.go`, 5s), `UnownedSpoolWindow` (`held.go`,
-  60s default), `DefaultPollInterval`/`DefaultRescanInterval` (`main.go`), and
-  `DefaultGrace` (`internal/stale/stale.go`, 30s) are production runtime
+  60s default), `DefaultPollInterval`/`DefaultRescanInterval` (`main.go`),
+  `DefaultGrace` (`internal/stale/stale.go`, 30s) and `recoverBackoffMin` /
+  `recoverBackoffMax` (`cycle.go`, 250ms / 10s) are production runtime
   defaults, not test-only harness bounds, and are out of scope: they govern
   the cycle's real behavior, and tests exercise them through the injected
   clock (`sidecar.now`/`sidecar.jitter`/`sidecar.bootTimeMs`) or explicit
   per-test overrides (`--poll-interval`, `--rescan-interval`,
-  `--unowned-spool-window`), never by waiting them out.
+  `--unowned-spool-window`, `--recover-backoff-min`, `--recover-backoff-max`),
+  never by waiting them out.
+
+### Parallelism, and the interlock that replaced the long timers
+
+Every subject in `integration/` declares `t.Parallel()`. They were always safe
+to: each owns its own `t.TempDir()` trees, its own randomly-named sockets, and
+its own sidecar and store processes, and the only package-level state is
+`sync.Once`-guarded build output written before `m.Run`.
+
+- **The mocked-vendor drives are bounded structurally**, not by `-parallel`.
+  One scenario is FOUR real processes, and the table has 133 rows.
+  `takeMockDriveSlot` (in `generateMock`, so no call site can escape it) caps
+  concurrent drives at `GOMAXPROCS/2`, floored at 2 and capped at 8. `-parallel`
+  only decides how much of the rest of the package overlaps with them.
+- **A subject that must act between two things the sidecar does back to back
+  stops the sidecar, it does not out-run it.** `writeGate`
+  (`integration/helpers_test.go`, on both the fake store and the recording
+  proxy) withholds the ANSWER to one chosen batch. A batch is written
+  synchronously inside the cycle and the cursor advances only on a durable
+  success, so a store that has not answered is a cycle that has not moved on.
+  That is what the hold subjects use instead of a 500ms (or 5s) poll interval.
+  Release the gate inside the subject: a process frozen in a withheld write does
+  not see SIGTERM until `rpcTimeout` expires, so `sidecarProc.Kill` exists for
+  the subject that must end one there.
+- **Never wait on a count where you mean a set.** `awaitBookLines(…, 4)` is
+  satisfied by any four lines; `awaitBookUnits(…, ids…)` waits for the units the
+  assertions actually read. The same rule cost four captured-transcript subjects
+  their determinism the moment they ran concurrently.
 
 ## Conversion rules
 
