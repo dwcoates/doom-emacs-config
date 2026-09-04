@@ -118,7 +118,7 @@ func newEmacsWorkspaceFixture(t *testing.T, box sandbox) *emacsWorkspaceFixture 
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repo.Dir) + `)`)
 
 	raw := e.AwaitEvalFor(emacsVerbBound, "the workspace to appear in Emacs's registry",
-		`(let (names) (maphash (lambda (k _v) (push k names)) agent-repl--workspaces) names)`,
+		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 1 })
 	name := decodeStrings(raw)[0]
 

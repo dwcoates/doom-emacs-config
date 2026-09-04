@@ -190,8 +190,12 @@ func TestEmacsProofOfLife(t *testing.T) {
 	//    (SPC TAB C-n). The DAEMON mints the identity; Emacs echoes it.
 	e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
 
+	// Only entries carrying :project-dir are workspaces: persp-mode's own
+	// perspectives ("none", Doom's "main") acquire stub entries the moment a
+	// hook records anything about them, and the module filters those out of
+	// every workspace render (workspace.el, agent-repl--ws-put-1).
 	name := e.AwaitEval("the workspace to appear in Emacs's registry",
-		`(let (names) (maphash (lambda (k _v) (push k names)) agent-repl--workspaces) names)`,
+		`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 1 })
 	wsName := decodeStrings(name)[0]
 
