@@ -1,4 +1,6 @@
-# Owner-pending items — 2026-09-05
+# Owner-pending items
+
+UPDATE 2026-09-04: item 1 done by the owner (dirs deleted, verified absent); item 2 ruled "remediate yourself" (agent dispatched); lost-arm cause ruled "carry it" (proto landing 11); items 3-6 accepted as decided. — 2026-09-05
 
 Items that need a decision or an action from the owner. Everything else is under
 the project lead's delegation and is tracked in RESUME-2026-09-03.md.
