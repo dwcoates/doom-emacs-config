@@ -485,9 +485,12 @@ only ever disagree with the pushed one."
     (should-not (fboundp sym))))
 
 (ert-deftest agent-repl-test-commands-defines-no-tab-ordering ()
-  "Client-authored tab ordering and hiding are gone: tabs follow the roster."
-  (dolist (sym '(agent-repl-workspace-push-to-back
-                 agent-repl-workspace-pull-to-front
+  "Client-authored tab ordering and hiding are gone: tabs follow the roster.
+`agent-repl-workspace-push-to-back' is deliberately NOT in this list any
+more: the deprio close (`SPC o C') calls it, so it is live production
+API.  It lives in panels.el beside its caller and shuffles the ROSTER's
+order, which is why commands.el still defines no tab ordering of its own."
+  (dolist (sym '(agent-repl-workspace-pull-to-front
                  agent-repl-workspace-switch-to-0
                  agent-repl-workspace-switch-to-final))
     (should-not (fboundp sym))))

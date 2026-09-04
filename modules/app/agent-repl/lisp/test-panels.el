@@ -3353,3 +3353,126 @@ available now."
         (agent-repl-simple)
         ;; Assert
         (should (and (equal input "test-ws") (null opened)))))))
+
+;;;; ---- Tests: workspace-push-to-back (the deprio shuffle) ----
+;;
+;; The bug these close: `SPC o C' called `agent-repl-workspace-push-to-back'
+;; and nothing defined it — the shuffle existed only as a `cl-letf' stub in
+;; this file, so every keypress signaled a void function.
+
+(ert-deftest agent-repl-test-panels-push-to-back-is-a-command ()
+  "push-to-back is interactively invokable."
+  ;; Arrange / Act / Assert
+  (should (commandp 'agent-repl-workspace-push-to-back)))
+
+(ert-deftest agent-repl-test-panels-push-to-back-moves-ws-last ()
+  "push-to-back puts the current workspace in the LAST roster tab slot."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b" "c")))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch) #'ignore))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (equal agent-repl-roster--tab-order '("b" "c" "a")))))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-syncs-the-names-cache ()
+  "push-to-back hands persp-mode the SAME order it wrote to the roster."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
+          (cached 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-update-names-cache)
+                 (lambda (names) (setq cached names)))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch) #'ignore))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (equal cached '("b" "c" "a")))))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-switches-to-the-vacated-slot ()
+  "Without KEEP-FOCUS, focus lands on whoever now holds the vacated slot."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
+          (switched 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (equal switched "b"))))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-keep-focus-stays-put ()
+  "With KEEP-FOCUS the moved workspace keeps focus — no switch at all."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
+          (switch-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (cl-incf switch-calls))))
+        ;; Act
+        (agent-repl-workspace-push-to-back t)
+        ;; Assert
+        (should (= 0 switch-calls))))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-last-slot-is-idempotent ()
+  "A workspace already last stays last and keeps focus where it is."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b" "c"))
+          (switched 'unset))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "c"))
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (equal agent-repl-roster--tab-order '("a" "b" "c")))))))
+
+(ert-deftest agent-repl-test-panels-push-to-back-without-a-tab-is-a-no-op ()
+  "A workspace holding no tab has no slot to vacate: the order is untouched."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl-roster--tab-order '("a" "b"))
+          (cache-calls 0))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "tabless"))
+                ((symbol-function 'agent-repl--ws-update-names-cache)
+                 (lambda (_names) (cl-incf cache-calls)))
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch) #'ignore))
+        ;; Act
+        (agent-repl-workspace-push-to-back)
+        ;; Assert
+        (should (= 0 cache-calls))))))
+
+(ert-deftest agent-repl-test-panels-on-close-really-pushes-to-back ()
+  "The deprio close reaches the REAL shuffle, not a stub: `SPC o C' end to end.
+No `cl-letf' over push-to-back here — that stub is exactly what hid the
+void function from this suite."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (agent-repl--ws-put "a" :frontend 'vterm)
+    (let ((agent-repl-roster--tab-order '("a" "b")))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "a"))
+                ((symbol-function 'agent-repl--hide-panels) #'ignore)
+                ((symbol-function 'agent-repl--ws-update-names-cache) #'ignore)
+                ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+                ((symbol-function 'agent-repl--ws-switch) #'ignore))
+        ;; Act
+        (agent-repl--on-close)
+        ;; Assert
+        (should (equal agent-repl-roster--tab-order '("b" "a")))))))
