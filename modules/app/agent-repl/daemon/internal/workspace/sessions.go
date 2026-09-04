@@ -733,8 +733,21 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
 				map[string]any{"detail": failure.GetDetail()})
 		}
+		if failure.GetAlreadyStarted() != nil {
+			// THE SHIM ALREADY SERVES A SESSION. One shim serves exactly one,
+			// so this is a StartSession the daemon should never have sent: the
+			// bring-up dialed a shim that is already live. It is a NAMED state
+			// with its own remediation (attach, do not start), and an untyped
+			// `internal` on a contract path hides it from every client.
+			return nil, refuse(log, "OpenWorkspace", ArmAlreadyStarted,
+				fmt.Sprintf("the shim serving workspace %q already started its session: %s", ws, failure.GetDetail()), false)
+		}
+		// THE CAUSE ONEOF IS UNSET — illegal on the wire. It is surfaced under
+		// its own arm rather than guessed at or collapsed into an untyped
+		// error, exactly as SetSessionModelFailure's unset cause is.
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
-		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())
+		return nil, refuse(log, "OpenWorkspace", ArmStartSessionUnspecified,
+			fmt.Sprintf("the shim refused to start workspace %q's session with no cause set: %s", ws, failure.GetDetail()), false)
 	}
 	return response.GetSuccess().GetSession(), nil
 }
