@@ -68,7 +68,33 @@ import (
 // child's exit is awaited on its own channel, and the child's own per-site
 // budgets (BOOT_BUDGET_MS and TURN_BUDGET_MS in test/webapp-layer/drive.ts)
 // fail a stuck assertion long before this fires.
-const WebappLayerTimeout = 300 * time.Second
+//
+// THE CONSTANT SAID 300s UNTIL 2026-09-04, WHICH THE COMMENT ABOVE AND
+// WEBAPP-LAYER-SPEC.md §E BOTH CONTRADICTED — reported as PERF-SPEC.md §H
+// finding 2 and fixed here to the value both of them state and the
+// measurement above supports. 300s is not a hang bound: it is thirty times
+// the slowest observed child, so a genuinely wedged area would have held its
+// world, its slot and its four processes for five minutes before saying so.
+//
+// AN AREA WHOSE CHILD IS STRUCTURALLY LONGER THAN A FUNCTIONAL ONE DOES NOT
+// RELAX THIS CONSTANT; it passes its own bound to wlChild.WaitFor. The perf
+// area is the first such caller (WebappLayerPerfTimeout).
+const WebappLayerTimeout = 10 * time.Second
+
+// WebappLayerHandoverTimeout bounds the RESTART-HANDOVER area's child, which
+// is structurally longer than a functional area's by two whole process
+// lifecycles: a merge landing, the rollout trigger, the incumbent re-execing
+// itself, a second real claude-repld's full boot, the adoption rendezvous, and
+// only then the `transferred` push the page waits on.
+//
+// The child's own budget for that is HANDOVER_TEST_MS in
+// `webapp/test/webapp-layer/drive.ts` — BOOT + HANDOVER + BOOT = 25s, where
+// the handover term is `harness.HandoverChainTimeout` inherited verbatim from
+// the Go driver. This bound must outlive the child's own, or the Go side would
+// kill a page that was still inside a budget the Go side gave it; 60s is ~2.4x
+// that 25s, the same "a bound outlives the thing it bounds" rule
+// wlDriveArea's participant hold is written under.
+const WebappLayerHandoverTimeout = 60 * time.Second
 
 // TestWebappLayerParticipantHoldOutlivesTheWaitBound pins the bound the host
 // participant hold runs on.
@@ -90,13 +116,19 @@ func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
 		floor time.Duration
 	}{
 		{
-			name:  "the child's bound outlives the harness's wait bound",
+			name:  "a functional area's bound outlives the harness's wait bound",
 			bound: WebappLayerTimeout,
 			floor: harness.DefaultTimeout,
 		},
 		{
-			name:  "the child's bound outlives the handover chain it may drive",
-			bound: WebappLayerTimeout,
+			// ONE BOUND PER AREA, since 2026-09-04: WebappLayerTimeout used to
+			// carry 300s so that the handover area fitted under it too, which
+			// made every OTHER area's hang bound thirty times its slowest
+			// observed child (PERF-SPEC.md §H finding 2). The areas whose child
+			// is structurally longer now pass their own bound to
+			// wlChild.WaitFor, and each such bound is pinned here.
+			name:  "the handover area's bound outlives the handover chain it drives",
+			bound: WebappLayerHandoverTimeout,
 			floor: harness.HandoverChainTimeout,
 		},
 	}
@@ -441,7 +473,7 @@ func TestWebappLayerRestartHandover(t *testing.T) {
 	// restart-handover.layer.test.ts — the moved notice naming this same
 	// successor, the quiesced page's local refusal, and the fresh page's own
 	// boot and adoption at the new address.
-	waitErr := child.Wait()
+	waitErr := child.WaitFor(WebappLayerHandoverTimeout)
 	close(stopReadopting)
 	accepted := <-readopted
 	if waitErr != nil {
@@ -718,6 +750,15 @@ func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string
 // than leaking a vitest that outlives the test.
 func (c *wlChild) Wait() error {
 	c.t.Helper()
+	return c.WaitFor(WebappLayerTimeout)
+}
+
+// WaitFor is Wait on a caller-supplied bound, for an area whose child is
+// structurally longer than a functional one. The bound is the caller's because
+// only the caller knows what its child does; WebappLayerTimeout is sized for a
+// functional area and says so.
+func (c *wlChild) WaitFor(bound time.Duration) error {
+	c.t.Helper()
 	tail := &c.tailOnly
 	select {
 	case waitErr := <-c.done:
@@ -727,7 +768,7 @@ func (c *wlChild) Wait() error {
 		tail.Lock()
 		defer tail.Unlock()
 		return fmt.Errorf("vitest exited %v; last output:\n%s", waitErr, strings.Join(tail.lines, "\n"))
-	case <-time.After(WebappLayerTimeout):
+	case <-time.After(bound):
 		// The child is killed, not abandoned: a leaked vitest holds this
 		// daemon's streams open and the world's teardown would then observe
 		// state the test never caused.
@@ -737,7 +778,7 @@ func (c *wlChild) Wait() error {
 		tail.Lock()
 		defer tail.Unlock()
 		return fmt.Errorf("vitest did not exit within %s; last output:\n%s",
-			WebappLayerTimeout, strings.Join(tail.lines, "\n"))
+			bound, strings.Join(tail.lines, "\n"))
 	}
 }
 
