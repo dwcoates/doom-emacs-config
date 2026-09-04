@@ -490,3 +490,30 @@ func TestAScriptedFailureIsConsumedOnce(t *testing.T) {
 		t.Fatalf("the second status = %+v, want the scripted failure spent", got)
 	}
 }
+
+func TestRunAnswersGitVersionOutsideAnyRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "subcommand", args: []string{"version"}},
+		{name: "flag", args: []string{"--version"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s := NewState()
+
+			// Act.
+			got := Run(s, t.TempDir(), tt.args)
+
+			// Assert.
+			if got.Exit != 0 {
+				t.Fatalf("exit %d, stderr %q; want 0", got.Exit, got.Stderr)
+			}
+			if got.Stdout != "git version 2.39.5\n" {
+				t.Fatalf("stdout %q; want real git's shape", got.Stdout)
+			}
+		})
+	}
+}
