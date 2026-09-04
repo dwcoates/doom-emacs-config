@@ -17,6 +17,7 @@ import (
 )
 
 func TestRosterDeliversTheLatestViewToALateSubscriber(t *testing.T) {
+	t.Parallel()
 	// Arrange: register before anyone is watching.
 	f := newRegistered(t, harness.Opts{})
 
@@ -31,6 +32,7 @@ func TestRosterDeliversTheLatestViewToALateSubscriber(t *testing.T) {
 }
 
 func TestTwoRosterSubscribersReceiveIdenticalSequences(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	one := f.d.WatchRoster()
@@ -51,6 +53,7 @@ func TestTwoRosterSubscribersReceiveIdenticalSequences(t *testing.T) {
 }
 
 func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	roster := d.WatchRoster()
@@ -72,6 +75,7 @@ func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 }
 
 func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -110,6 +114,7 @@ func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 }
 
 func TestRosterOrdersRowsByPriority(t *testing.T) {
+	t.Parallel()
 	// Arrange: four workspaces in one repository, plus one left unprioritized.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -158,6 +163,7 @@ func TestRosterOrdersRowsByPriority(t *testing.T) {
 }
 
 func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -180,6 +186,7 @@ func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
 }
 
 func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -202,6 +209,7 @@ func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
 }
 
 func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -248,6 +256,7 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 // lands cleanly end to end, so no daemon.merge.enqueue WARN is ever produced
 // on this path — that expectation was phantom and is dropped.
 func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
@@ -286,6 +295,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 }
 
 func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -317,6 +327,7 @@ func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
 }
 
 func TestMarkingATaskDoneChecksItsSection(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "finish it")
@@ -342,6 +353,7 @@ func TestMarkingATaskDoneChecksItsSection(t *testing.T) {
 }
 
 func TestUnassigningReturnsTheRowToTheRepositoryGrouping(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "temporary")
@@ -372,6 +384,7 @@ func TestUnassigningReturnsTheRowToTheRepositoryGrouping(t *testing.T) {
 // The specific arm decides over the generic header: an arm minted for this
 // condition is not an arm with no producer.
 func TestCreateTaskRefusesABlankTitle(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// blank_title is a LANDED CreateTaskError arm (see the comment above), so
@@ -399,6 +412,7 @@ func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 // this test is the roster suite's own coverage of the ORTHOGONAL closed.closed
 // receding flag on that same row.
 func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -430,6 +444,7 @@ func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
 // row's own status arm, RosterRowStatus.start_failed
 // (frontend/v1/sidebar.proto's RosterRowStatusStartFailed), landed as arm 16.
 func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, the shim death the test drives.
@@ -461,6 +476,7 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 // against RosterTaskSectionHeader.label (frontend/v1/sidebar.proto), the
 // section header field the header's title text is drawn from.
 func TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "old title")
@@ -489,6 +505,7 @@ func TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader(t *testing.T) {
 // TestUpdateTaskSetOpenUnchecksADoneTask covers UpdateTaskSetOpen reversing a
 // prior UpdateTaskSetDone.
 func TestUpdateTaskSetOpenUnchecksADoneTask(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "flip me")
@@ -523,6 +540,7 @@ func TestUpdateTaskSetOpenUnchecksADoneTask(t *testing.T) {
 // TestUpdateTaskSetDoneTwiceAnswersNoChange covers UpdateTaskError.no_change:
 // "the change asked for is what the task already holds".
 func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "done twice")
@@ -560,6 +578,7 @@ func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
 // produced any activity for it (internal/resolve/sidebar/status.go's
 // sessionArm, `s.turn != nil && !s.sawActivity`).
 func TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -591,6 +610,7 @@ func TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn(t *testing.T) {
 // (prompt_test.go's TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow
 // drives the same submission; this test asserts the roster's own arm for it).
 func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -620,6 +640,7 @@ func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
 // driven by a /compact submission (ActCompact), the sibling cause of the
 // clearing test above.
 func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -653,6 +674,7 @@ func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 // drives the identical frame for the footer's own (transient) arm; the
 // roster's arm persists, so no dwell-wait is needed here.
 func TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -680,6 +702,7 @@ func TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop(t *testing.T) 
 // push (footer_topbar_test.go's TestTopbarDegradedWindowIsDrawnOpenThenClosed
 // drives the topbar's own reading of the identical push).
 func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -717,6 +740,7 @@ func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
 // TestRowIsVendorBlockedWhenTheQueryDied is the same fact at the unit level;
 // this is its integration-level, real-cause counterpart).
 func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the died query the test feeds.
@@ -751,6 +775,7 @@ func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
 // the harness's repo.ScriptFailure, landed this round for exactly this kind
 // of real, non-conflict git failure.
 func TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails(t *testing.T) {
+	t.Parallel()
 	// Arrange: a clean self-repo merge (mergeCleanRepo, merge_test.go) whose
 	// LandedRange git call (`rev-list`, internal/gitclient/gitclient.go) is
 	// scripted to fail after the no-ff merge itself lands cleanly.
@@ -780,6 +805,7 @@ func bogusTask() *agentreplv1.TaskRef { return &agentreplv1.TaskRef{Id: "no-such
 // TestUpdateTaskWithABogusTaskRefAnswersUnknownTask covers
 // UpdateTaskError.unknown_task: "no task by that id".
 func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -801,6 +827,7 @@ func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 // TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask covers
 // AssignWorkspaceTaskError.unknown_task: "no task by that id".
 func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -823,6 +850,7 @@ func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 // UpdateTask's own landed arm for "the new title is blank once trimmed" — the
 // same arm CreateTask carries, minted separately for UpdateTaskSetTitle.
 func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "has a title")
@@ -847,6 +875,7 @@ func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
 // SPEC.md's "Tasks are daemon-owned rows in WSM", so a restart on the same
 // state root must reload them rather than starting the task view over empty.
 func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "outlives the daemon")

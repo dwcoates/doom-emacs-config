@@ -39,6 +39,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace registered directly, never created, so it carries
 	// no creation job.
 	f := newRegistered(t, harness.Opts{})
@@ -97,6 +98,7 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 }
 
 func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterAndRoster(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
@@ -138,6 +140,7 @@ func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterA
 // ---------------------------------------------------------------------------
 
 func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, _, repo, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
@@ -187,6 +190,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 }
 
 func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
@@ -231,6 +235,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
@@ -265,6 +270,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheDequeueHeldOffer(t *testing.T) {
 }
 
 func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
@@ -302,6 +308,7 @@ func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 }
 
 func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
@@ -362,6 +369,7 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
@@ -414,6 +422,7 @@ func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 }
 
 func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
+	t.Parallel()
 	// Arrange: the user's own answer to the interrupt offer, DISTINCT from an
 	// operator's evict, though the proto cannot tell the two apart (see the
 	// section comment above).
@@ -481,6 +490,7 @@ func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 // FeedMergeError has one `abandoned` arm for every end, so the cause lives in
 // FeedMergeAbandoned.summary and nowhere else.
 func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
@@ -523,6 +533,7 @@ func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testin
 // ---------------------------------------------------------------------------
 
 func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -584,6 +595,7 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 }
 
 func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *testing.T) {
+	t.Parallel()
 	// Arrange: park a merge on a scripted conflict.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -640,6 +652,7 @@ func mergeCleanRepo(t *testing.T) (f *fixture, d *harness.Daemon, repo *harness.
 }
 
 func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
@@ -675,6 +688,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 }
 
 func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, repo, script := mergeCleanRepo(t)
 	// The sweep covers every test; the declared records are evidence of the failing test gate the test stages, the fixes escalation the test stages.
@@ -719,6 +733,7 @@ func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *tes
 }
 
 func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
 	// The sweep covers every test; the declared records are evidence of the failing test gate the test stages.
@@ -747,6 +762,7 @@ func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTerminalPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
@@ -838,6 +854,7 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 }
 
 func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
@@ -887,6 +904,7 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 // ---------------------------------------------------------------------------
 
 func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeploy(t *testing.T) {
+	t.Parallel()
 	// Arrange: a self-repo daemon, a top-level PARENT workspace (this
 	// daemon's own checkout), and a CHILD nested under it whose merge lands
 	// into the PARENT's worktree -- a sibling of the self checkout, same
@@ -955,6 +973,7 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 }
 
 func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon whose self repo is a DISTINCT repository from the
 	// one-shot's own -- the other-repo method entirely (emacsRepo=false),
 	// the opposite half of the split from the sibling-worktree test above.
@@ -1003,6 +1022,7 @@ func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTheNonEmacsRepoMethodNeverDrawsTheEmacsOnlyTabs(t *testing.T) {
+	t.Parallel()
 	// Arrange: a repo that is NOT the daemon's self repo.
 	selfRepo := harness.NewRepo(t) // distinct identity; never used as a target.
 	repo := harness.NewRepo(t)
@@ -1043,6 +1063,7 @@ func TestTheNonEmacsRepoMethodNeverDrawsTheEmacsOnlyTabs(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *testing.T) {
+	t.Parallel()
 	// Arrange: park a merge on a scripted conflict, then crash the daemon.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -1091,6 +1112,7 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 // ---------------------------------------------------------------------------
 
 func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange: remove the conflict brief the conflicts step reads.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -1139,6 +1161,7 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *testing.T) {
+	t.Parallel()
 	// Arrange: a configured before-merge prompt.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -1200,6 +1223,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 }
 
 func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing.T) {
+	t.Parallel()
 	// Arrange: a clean landing with a configured after-merge prompt that fails.
 	repo := harness.NewRepo(t)
 	script := harness.NewTestAllScript(t, repo.Dir)
@@ -1309,6 +1333,7 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 // AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE, holds a run in exactly the window a
 // crash has to land in.
 func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act: displace a turn, crash inside the capture window, and
 	// bring a fresh daemon up on the same state root.
 	f, _, resubmit := displacedTurnAcrossABounce(t)
@@ -1332,6 +1357,7 @@ func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testin
 // exactly-once edge across TWO bounces: the claim that put the turn back is
 // durable, so the boot after it finds nothing owed and submits nothing.
 func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
+	t.Parallel()
 	// Arrange: the turn already recovered by the first bounce.
 	f, d2, _ := displacedTurnAcrossABounce(t)
 	afterFirstBounce := f.shim.Count(harness.RPCStartTurn)
@@ -1419,6 +1445,7 @@ func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv
 // ---------------------------------------------------------------------------
 
 func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act: park a merge on a scripted conflict, exactly as the
 	// spliced-brief test does.
 	repo := harness.NewRepo(t)
@@ -1452,6 +1479,7 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 }
 
 func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(t *testing.T) {
+	t.Parallel()
 	// Arrange: park a merge on a scripted conflict.
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
@@ -1520,6 +1548,7 @@ func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(
 // ---------------------------------------------------------------------------
 
 func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t *testing.T) {
+	t.Parallel()
 	// Arrange: two independent repositories, each with a blocked queue, on
 	// ONE daemon.
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -1552,6 +1581,7 @@ func TestUpdateMergeQueuePauseWithNoRepositoryPausesEveryRepositoryWithAQueue(t 
 }
 
 func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon that has never heard of this repository ref at all.
 	d := harness.StartDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
@@ -1577,6 +1607,7 @@ func TestUpdateMergeQueueOnAnUnknownRepositoryIsRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
+	t.Parallel()
 	// Arrange: a landed commit touching ONLY the sandbox image under e2e/,
 	// whose blast radius (internal/merge/suiteselect.go's own rule table) is
 	// exactly the single "e2e-emacs" suite. daemon/ paths no longer make a
@@ -1617,6 +1648,7 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 }
 
 func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon change, with a green ANSI escape in the scripted
 	// run's own output. Which suites the change's blast radius selects is
 	// incidental to what this test asserts (ANSI parsing, not suite
@@ -1674,6 +1706,7 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
@@ -1728,6 +1761,7 @@ func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)

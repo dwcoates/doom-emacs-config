@@ -22,6 +22,7 @@ import (
 )
 
 func TestBootWritesAndRemovesTheAddressFile(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -42,6 +43,7 @@ func TestBootWritesAndRemovesTheAddressFile(t *testing.T) {
 }
 
 func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	incumbent := newDaemon(t, harness.Opts{})
 	// The run log is a symlink each runtime relinks onto its own file, so this
@@ -75,6 +77,7 @@ func TestSecondDaemonOnTheSameStateRootRefusesToBoot(t *testing.T) {
 }
 
 func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	incumbent := newDaemon(t, harness.Opts{})
 	before, err := os.ReadFile(incumbent.AddrFile())
@@ -113,6 +116,7 @@ func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
 }
 
 func TestBootRefusesAnUnwritableStateRoot(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	root := filepath.Join(t.TempDir(), "readonly")
 	if err := os.MkdirAll(root, 0o500); err != nil {
@@ -134,6 +138,7 @@ func TestBootRefusesAnUnwritableStateRoot(t *testing.T) {
 }
 
 func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
+	t.Parallel()
 	// Arrange: a pre-existing legacy database the rebuild must abandon in place.
 	root := t.TempDir()
 	legacy := filepath.Join(root, "state.db")
@@ -158,6 +163,7 @@ func TestBootOpensTheWorkspaceStateFresh(t *testing.T) {
 }
 
 func TestPprofServesOnAnExplicitLoopbackAddress(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{Pprof: "127.0.0.1:0"})
 	record := d.AwaitRunLogOperation("daemon.pprof.enabled")
@@ -181,6 +187,7 @@ func TestPprofServesOnAnExplicitLoopbackAddress(t *testing.T) {
 }
 
 func TestPprofRefusesARoutableBind(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	d := harness.StartDaemon(t, harness.Opts{Pprof: "0.0.0.0:6060", ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the routable pprof bind the test refuses.
@@ -197,6 +204,7 @@ func TestPprofRefusesARoutableBind(t *testing.T) {
 }
 
 func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	d.AwaitRunLogOperation("daemon.pprof.disabled")
@@ -238,6 +246,7 @@ func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 // and a per-workspace verb — dialed with the JSON codec instead of the
 // default binary one.
 func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{JSONCodec: true})
 	repo := harness.NewRepo(t)
@@ -268,6 +277,7 @@ func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
 // through the workspace-scoped surfaces.Workspace(dir) logger
 // (internal/shimclient/supervisor.go), never through the global one.
 func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
@@ -315,6 +325,7 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 // It also pins the ordering the eviction imposes: the close record is written
 // through that same sink, so it must land BEFORE the eviction releases it.
 func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	link := harness.WorkspaceLogPath(f.repo.Dir, "daemon")
@@ -339,6 +350,7 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 // log's restart-scoped rotation (internal/dlog/runlog.go: openRunLog rotates
 // the previous run's file to daemon.run.log.1 before opening a fresh one).
 func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) {
+	t.Parallel()
 	// Arrange: first boot; capture its own records and pid before stopping it.
 	d1 := newDaemon(t, harness.Opts{})
 	d1.AwaitRunLogOperation("daemon.pprof.disabled")
@@ -383,6 +395,7 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 // wsm.LayoutVersion is refused rather than migrated, at operation
 // daemon.wsm.open.
 func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
+	t.Parallel()
 	// Arrange: a fresh boot stamps the layout row, then is stopped so the
 	// row can be corrupted (the daemon holds the sole writing handle while
 	// it runs).
@@ -425,6 +438,7 @@ func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
 // bool therefore refuses the WHOLE boot, at wsm's own daemon.wsm.tasks
 // operation as well as the top-level daemon.cmd.serve wrapper.
 func TestBootRefusesACorruptTaskRow(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// The run log is a symlink each runtime relinks onto its own file, so this
@@ -474,6 +488,7 @@ func TestBootRefusesACorruptTaskRow(t *testing.T) {
 // the whole boot rather than adopting the shim with the row silently
 // dropped.
 func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace has a `sessions` row (PutSession on the
 	// shim's successful bring-up). Killing only the daemon (never the shim,
 	// which SysProcAttr.Setpgid puts in its own process group) leaves the
@@ -524,6 +539,7 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 // The remediation belongs in internal/merge/recover.go, which is outside this
 // file's boundary; the test states the contract, not the defect.
 func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange: register a workspace, then seed its merge geometry and an
 	// ADMITTED queue entry directly (raw SQL, daemon stopped): the boot's
 	// merge recovery reads both without going through the ordinary merge rpc
@@ -580,6 +596,7 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 // daemon actually boots against the long root while the harness's own
 // pre-flight check saw only the short default.
 func TestBootRefusesAStateRootTooLongForShimSockets(t *testing.T) {
+	t.Parallel()
 	// Arrange: a root comfortably past the 103-byte unix-socket path limit
 	// once "/sock/<21-char-name>" is appended.
 	long, err := os.MkdirTemp("/tmp", "ar-long-")
@@ -608,6 +625,7 @@ func TestBootRefusesAStateRootTooLongForShimSockets(t *testing.T) {
 // write (internal/daemonaddr/claim.go: os.CreateTemp(dir, "."+base+".*"))
 // leaves no ".daemon.addr.<random>" sibling behind once the rename lands.
 func TestBootLeavesNoDaemonAddrTempSibling(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	d := newDaemon(t, harness.Opts{})
 
@@ -627,6 +645,7 @@ func TestBootLeavesNoDaemonAddrTempSibling(t *testing.T) {
 // exactly as the loopback host:port form does
 // (TestPprofServesOnAnExplicitLoopbackAddress).
 func TestPprofServesOverAUnixSocket(t *testing.T) {
+	t.Parallel()
 	// Arrange: a short root, independent of the state root's own socket
 	// budget, so the profiling socket's own path stays under the unix-socket
 	// limit.
@@ -676,6 +695,7 @@ func TestPprofServesOverAUnixSocket(t *testing.T) {
 // it serves, and the reason has to be in its stderr rather than only implied
 // by a client's boot timeout.
 func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		omit string
@@ -686,6 +706,7 @@ func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			// Arrange / Act
 			d := harness.StartDaemon(t, harness.Opts{OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
 			// The graph refusal is the point of the test, not a stray warning.

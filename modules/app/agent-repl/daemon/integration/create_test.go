@@ -21,6 +21,7 @@ import (
 // ---- Standard create ----
 
 func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheInitialPromptWithWorkspaceCreatedOrigin(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -74,6 +75,7 @@ func TestCreateWorkspaceStandardDerivesTheSlugCreatesTheBranchAndSubmitsTheIniti
 }
 
 func TestCreateWorkspaceHonorsAnExplicitBaseRef(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -106,6 +108,7 @@ func TestCreateWorkspaceHonorsAnExplicitBaseRef(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithABadBaseRefIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the bad base ref the test stages.
@@ -133,6 +136,7 @@ func TestCreateWorkspaceWithABadBaseRefIsRefused(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -159,6 +163,7 @@ func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 }
 
 func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange: a parent, top-level workspace.
 	//
 	// The daemon's own checkout IS this repository and a test-all script
@@ -240,6 +245,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 }
 
 func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) {
+	t.Parallel()
 	// Arrange: a parent with a minted vendor session and a fake transcript on
 	// disk under its config root's project dir, exactly what a real vendor
 	// session would have left behind.
@@ -305,6 +311,7 @@ func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) 
 // ---- One-shot create ----
 
 func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -337,6 +344,7 @@ func TestCreateWorkspaceOneShotDecoratesThePromptFromPrompts(t *testing.T) {
 }
 
 func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -372,6 +380,7 @@ func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
 }
 
 func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -402,6 +411,7 @@ func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
 }
 
 func TestCreateWorkspaceOneShotOpenPrPostPromptSplicesTheSelfCertifiedAndMergeQueueFlags(t *testing.T) {
+	t.Parallel()
 	// Arrange: both request-carried flags asked for.
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -440,6 +450,7 @@ func TestCreateWorkspaceOneShotOpenPrPostPromptSplicesTheSelfCertifiedAndMergeQu
 }
 
 func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -489,6 +500,7 @@ func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
 }
 
 func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *testing.T) {
+	t.Parallel()
 	// Arrange: the followup brief the finish hook reads at conclusion is
 	// removed from this daemon's OWN prompts directory (a per-test copy, so
 	// deleting from it touches nothing else).
@@ -540,6 +552,7 @@ func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *te
 // ---- Merge actions ----
 
 func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -579,6 +592,7 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 // ---- NukeWorkspace: kill-before-destroy ordering, and a git failure ----
 
 func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened, LIVE workspace, its fake shim HUNG so KillSession's
 	// arrival is observable before it is ever answered.
 	//
@@ -635,6 +649,7 @@ func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
 }
 
 func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered (no live session) workspace whose worktree
 	// removal is scripted to fail.
 	d := newDaemon(t, harness.Opts{})
@@ -673,6 +688,7 @@ func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *test
 // ---- CloseWorkspace: blocked by live detached work with no turn open ----
 
 func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *testing.T) {
+	t.Parallel()
 	// Arrange: detached work announced with NO turn EVER opened -- distinct
 	// from a turn-in-flight refusal (internal/workspace/open.go's
 	// closeBlocker: `running.Turn != nil` is checked FIRST and answers
