@@ -939,6 +939,12 @@ func (e *Emacs) AwaitEval(what, form string, pred func(json.RawMessage) bool) js
 // reason, never an ad hoc duration written at the call site.
 func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(json.RawMessage) bool) json.RawMessage {
 	e.t.Helper()
+	// Every satisfied wait is RECORDED as a measured phase, for the same
+	// reason `reportPhases` logs the boot phases on a passing run: a bound
+	// in this layer must be a stated multiple of an OBSERVED healthy
+	// maximum, and the only run that produces that observation is a run
+	// that passed.
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
@@ -963,6 +969,7 @@ func (e *Emacs) AwaitEvalFor(bound time.Duration, what, form string, pred func(j
 			lastErr = nil
 			lastValue = res.Value
 			if pred(res.Value) {
+				e.record("await "+what, time.Since(started))
 				return res.Value
 			}
 		}
