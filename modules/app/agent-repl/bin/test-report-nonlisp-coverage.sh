@@ -41,6 +41,10 @@ make_tree() {
             >"$tree/modules/app/agent-repl/$component/package.json"
     done
 
+    mkdir -p "$tree/modules/app/agent-repl/e2e"
+    printf 'coverage:\n\t@true\n' \
+        >"$tree/modules/app/agent-repl/e2e/Makefile"
+
     mkdir -p "$tree/modules/app/agent-repl/proto"
     printf 'validate:\n\t@true\n' \
         >"$tree/modules/app/agent-repl/proto/Makefile"
@@ -304,6 +308,64 @@ test_typescript_packages_validate_all_declared_dependencies() {
     pass "TypeScript packages validate every declared dependency"
 }
 
+test_e2e_runs_only_when_named() {
+    local tree="$TMP/e2e-opt-in"
+    make_tree "$tree"
+    make_stubs "$tree/stubs"
+    run_report "$tree"
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        ! grep -q '|make -C .*e2e coverage' "$tree/stub.log"; then
+        pass "the e2e suite stays out of the default sweep"
+    else
+        fail "the e2e suite stays out of the default sweep"
+    fi
+}
+
+test_e2e_dispatches_to_the_e2e_makefile() {
+    local tree="$TMP/e2e-named"
+    make_tree "$tree"
+    make_stubs "$tree/stubs"
+    run_report "$tree" e2e
+
+    if [ "$RUN_RC" -eq 0 ] &&
+        grep -q '|make -C .*e2e coverage' "$tree/stub.log" &&
+        ! grep -q '|go test ' "$tree/stub.log"; then
+        pass "the named e2e component runs the e2e coverage target"
+    else
+        fail "the named e2e component runs the e2e coverage target"
+    fi
+}
+
+test_e2e_failure_is_loud() {
+    local tree="$TMP/e2e-failure"
+    make_tree "$tree"
+    make_stubs "$tree/stubs"
+    MAKE_STUB_FAIL=1 run_report "$tree" e2e
+
+    if [ "$RUN_RC" -ne 0 ] &&
+        grep -q "e2e coverage suite failed" "$tree/stderr"; then
+        pass "e2e coverage failure aborts explicitly"
+    else
+        fail "e2e coverage failure aborts explicitly"
+    fi
+}
+
+test_missing_e2e_makefile_is_loud() {
+    local tree="$TMP/e2e-makefile-missing"
+    make_tree "$tree"
+    make_stubs "$tree/stubs"
+    rm "$tree/modules/app/agent-repl/e2e/Makefile"
+    run_report "$tree" e2e
+
+    if [ "$RUN_RC" -ne 0 ] &&
+        grep -q "e2e Makefile is missing" "$tree/stderr"; then
+        pass "missing e2e Makefile aborts explicitly"
+    else
+        fail "missing e2e Makefile aborts explicitly"
+    fi
+}
+
 test_proto_validation_failure_is_loud() {
     local tree="$TMP/proto-validation-failure"
     make_tree "$tree"
@@ -350,6 +412,10 @@ test_missing_typescript_package_is_loud
 test_typescript_packages_validate_all_declared_dependencies
 test_proto_validation_failure_is_loud
 test_missing_proto_makefile_is_loud
+test_e2e_runs_only_when_named
+test_e2e_dispatches_to_the_e2e_makefile
+test_e2e_failure_is_loud
+test_missing_e2e_makefile_is_loud
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

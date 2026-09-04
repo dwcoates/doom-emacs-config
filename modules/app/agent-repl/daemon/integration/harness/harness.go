@@ -107,12 +107,28 @@ func MainAt(m *testing.M, module string) int {
 	// first on the daemon's PATH: nothing in a test ever reaches the real
 	// binary.
 	gitBinary = filepath.Join(dir, "git")
-	for _, b := range []struct{ out, pkg string }{
-		{daemonBinary, "./cmd/claude-repld"},
-		{fakeshimBinary, "./integration/fakeshim"},
-		{gitBinary, "./integration/fakegit/git"},
+	for _, b := range []struct {
+		out, pkg string
+		covered  bool
+	}{
+		// ONLY THE DAEMON IS INSTRUMENTED. The two fakes are harness
+		// scaffolding, not a system under test, and both inherit the
+		// daemon's environment when they run — an instrumented fake would
+		// write its counters into the daemon's own GOCOVERDIR and appear in
+		// the daemon's profile as covered "production" code.
+		{daemonBinary, "./cmd/claude-repld", true},
+		{fakeshimBinary, "./integration/fakeshim", false},
+		{gitBinary, "./integration/fakegit/git", false},
 	} {
-		cmd := exec.Command("go", "build", "-o", b.out, b.pkg)
+		// An instrumented build when coverage is on; the plain build
+		// otherwise. `-cover` changes only what the binary WRITES, never
+		// what it does.
+		buildArgs := []string{"build"}
+		if b.covered {
+			buildArgs = append(buildArgs, CoverageBuildArgs(CoverageRoot())...)
+		}
+		buildArgs = append(buildArgs, "-o", b.out, b.pkg)
+		cmd := exec.Command("go", buildArgs...)
 		cmd.Dir = module
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stderr
