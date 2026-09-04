@@ -59,7 +59,11 @@ import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
 import { createFold } from "./convert/fold.js";
 import { createStoreClient } from "./store/client.js";
-import { createPersistence } from "./store/persistence.js";
+import {
+  createPersistence,
+  DEFAULT_RETRY_POLICY,
+  type PersistenceRetryPolicy,
+} from "./store/persistence.js";
 import { createRealQuery } from "./sdk/real-query.js";
 import { createFakeQuery } from "./fake/index.js";
 import { randomUUID } from "node:crypto";
@@ -191,38 +195,171 @@ export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
 export const FAKE_KEEPALIVE_INTERVAL_ENV = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS";
 
 /**
- * Resolve the keep-alive interval for this process.
+ * Resolve one `--fake`-only millisecond override.
  *
- * Answers `undefined` for "use the module constant". An override outside
- * `--fake`, or one that is not a positive whole number of milliseconds, is
- * IGNORED AND REPORTED rather than silently applied or silently dropped.
+ * The three overrides in this file differ only in which variable they read and
+ * what they are called in the log, so the reading, the refusal and the
+ * validation live here ONCE rather than drifting across three near-identical
+ * copies.
+ *
+ * Answers `undefined` for "use the module constant" in every rejecting case.
+ * An override outside `--fake`, or one that is not a positive whole number of
+ * milliseconds, is IGNORED AND REPORTED rather than silently applied or
+ * silently dropped.
  */
-export function resolveKeepaliveIntervalMs(
+function resolveFakeMsOverride(
   env: NodeJS.ProcessEnv,
   fake: boolean,
+  variable: string,
+  outcomePrefix: string,
+  subject: string,
 ): number | undefined {
-  const raw = env[FAKE_KEEPALIVE_INTERVAL_ENV];
+  const raw = env[variable];
   if (raw === undefined || raw === "") return undefined;
   if (!fake) {
     logMainLifecycle(
-      { level: "warn", env: FAKE_KEEPALIVE_INTERVAL_ENV, value: raw, outcome: "keepalive_override_refused" },
-      "the keep-alive interval override is honored only under --fake; ignoring it for this real session",
+      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
+      `the ${subject} override is honored only under --fake; ignoring it for this real session`,
     );
     return undefined;
   }
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     logMainLifecycle(
-      { level: "warn", env: FAKE_KEEPALIVE_INTERVAL_ENV, value: raw, outcome: "keepalive_override_invalid" },
-      "the keep-alive interval override is not a positive whole number of milliseconds; ignoring it",
+      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
+      `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
     );
     return undefined;
   }
   logMainLifecycle(
-    { level: "info", env: FAKE_KEEPALIVE_INTERVAL_ENV, interval_ms: parsed, outcome: "keepalive_override_applied" },
-    "a fake session took its keep-alive interval from the environment",
+    { level: "info", env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
+    `a fake session took its ${subject} from the environment`,
   );
   return parsed;
+}
+
+/**
+ * Resolve the keep-alive interval for this process.
+ *
+ * Answers `undefined` for "use the module constant".
+ */
+export function resolveKeepaliveIntervalMs(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_KEEPALIVE_INTERVAL_ENV,
+    "keepalive_override",
+    "keep-alive interval",
+  );
+}
+
+/**
+ * The WATCHER CONCLUSION budget override, honored ONLY under `--fake`.
+ *
+ * The budget bounds how long a kill's teardown waits for one already-concluded
+ * tail to actually end, and it is only ever SPENT by a consumer that stopped
+ * pulling — which is exactly the shape of the forced-kill scenarios, and why
+ * they were the two slowest tests in the suite. What they assert is that the
+ * tail's terminal reaches the consumer BEFORE the process goes, which is an
+ * ordering, not a duration.
+ *
+ * Refused for a real session: a production shim told to give up on a tail
+ * immediately would cut streams exactly where a terminal was owed.
+ */
+export const FAKE_WATCHER_CONCLUSION_BUDGET_ENV = "AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS";
+
+/**
+ * Resolve the watcher-conclusion budget for this process.
+ *
+ * Answers `undefined` for "use the engine's own module constant".
+ */
+export function resolveWatcherConclusionBudgetMs(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
+    "watcher_conclusion_budget_override",
+    "watcher-conclusion budget",
+  );
+}
+
+/**
+ * The store retry BACKOFF SCHEDULE override, honored ONLY under `--fake`.
+ *
+ * Only the delays are overridable, and deliberately so. The contractual facts
+ * about a store outage are the ones the outage scenarios assert: how many
+ * attempts a batch gets, that the buffer is bounded, that exhaustion drops
+ * LOUDLY and names the lost keys, and that order survives. None of those is a
+ * function of how long the process idles between attempts, so `bufferCapacity`
+ * and `maxAttempts` stay fixed at {@link DEFAULT_RETRY_POLICY} and cannot be
+ * reached from the environment at all — an override able to shorten the
+ * attempt count would weaken exactly the assertions this exists to keep.
+ *
+ * Refused for a real session: a production shim told to retry with no backoff
+ * would hammer a store that is merely restarting.
+ */
+export const FAKE_STORE_BACKOFF_ENV = "AGENT_REPL_FAKE_STORE_BACKOFF_MS";
+
+/**
+ * Resolve the store retry policy for this process.
+ *
+ * Answers {@link DEFAULT_RETRY_POLICY} unless a `--fake` session supplied a
+ * backoff schedule, given as a comma-separated list of non-negative whole
+ * milliseconds. This one does NOT go through {@link resolveFakeMsOverride}: it
+ * is list-valued, and zero is a legitimate delay here where it is a rejection
+ * for every scalar budget.
+ */
+export function resolveRetryPolicy(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): PersistenceRetryPolicy {
+  const raw = env[FAKE_STORE_BACKOFF_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_RETRY_POLICY;
+  if (!fake) {
+    logMainLifecycle(
+      {
+        level: "warn",
+        env: FAKE_STORE_BACKOFF_ENV,
+        value: raw,
+        outcome: "store_backoff_override_refused",
+      },
+      "the store backoff override is honored only under --fake; ignoring it for this real session",
+    );
+    return DEFAULT_RETRY_POLICY;
+  }
+  const parts = raw.split(",").map((part) => part.trim());
+  const parsed = parts.map(Number);
+  // An empty slot is checked SEPARATELY because `Number("")` is 0, so a
+  // malformed "1,,2" would otherwise be read silently as a valid "1,0,2".
+  if (parts.some((part) => part === "") || parsed.some((ms) => !Number.isInteger(ms) || ms < 0)) {
+    logMainLifecycle(
+      {
+        level: "warn",
+        env: FAKE_STORE_BACKOFF_ENV,
+        value: raw,
+        outcome: "store_backoff_override_invalid",
+      },
+      "the store backoff override is not a comma-separated list of non-negative whole milliseconds; ignoring it",
+    );
+    return DEFAULT_RETRY_POLICY;
+  }
+  logMainLifecycle(
+    {
+      level: "info",
+      env: FAKE_STORE_BACKOFF_ENV,
+      backoff_ms: parsed,
+      outcome: "store_backoff_override_applied",
+    },
+    "a fake session took its store retry backoff from the environment",
+  );
+  // The attempt count and buffer depth are NOT overridable; only the waiting is.
+  return { ...DEFAULT_RETRY_POLICY, backoffMs: parsed };
 }
 
 /** Everything the process reads from its environment, resolved and checked. */
@@ -330,6 +467,35 @@ export function versionLine(): string {
  * kept alive by one wedged consumer.
  */
 export const EXIT_QUIET_BUDGET_MS = 5_000;
+
+/**
+ * The quiet-drain budget override, honored ONLY under `--fake`.
+ *
+ * A LAST RESORT bound like the watcher budget above, and overridable for the
+ * same reason: what a kill scenario asserts is that the exit WAITS for the wire
+ * and then ends anyway, not the particular number of milliseconds it waits for.
+ *
+ * Refused for a real session: a production shim told to exit instantly would
+ * destroy the socket out from under a response still on it.
+ */
+export const FAKE_EXIT_QUIET_BUDGET_ENV = "AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS";
+
+/**
+ * Resolve the quiet-drain budget for this process.
+ *
+ * Answers {@link EXIT_QUIET_BUDGET_MS} unless a `--fake` session overrode it.
+ */
+export function resolveExitQuietBudgetMs(env: NodeJS.ProcessEnv, fake: boolean): number {
+  return (
+    resolveFakeMsOverride(
+      env,
+      fake,
+      FAKE_EXIT_QUIET_BUDGET_ENV,
+      "exit_quiet_budget_override",
+      "quiet-drain budget",
+    ) ?? EXIT_QUIET_BUDGET_MS
+  );
+}
 
 /** What a signal handler set needs to reach. */
 export interface SignalTargets {
@@ -545,6 +711,9 @@ export async function main(): Promise<void> {
   // conversation".
 
   const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
+  const exitQuietBudgetMs = resolveExitQuietBudgetMs(process.env, args.fake);
+  const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
+  const retry = resolveRetryPolicy(process.env, args.fake);
 
   // THE SESSION ENGINE, with the real record plane behind it.
   //
@@ -570,6 +739,7 @@ export async function main(): Promise<void> {
     persistence: createPersistence({
       client: createStoreClient(environment.storeSocket),
       nowMs: () => Date.now(),
+      retry,
     }),
     fold: createFold(),
     createQuery: queryFactory(args.fake, environment, cwd),
@@ -577,6 +747,7 @@ export async function main(): Promise<void> {
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
     nowMs: () => Date.now(),
     ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
+    ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),
   });
 
   const server = await serve(args.listen, shimRoutes(engine));
@@ -591,7 +762,7 @@ export async function main(): Promise<void> {
     ending = true;
     void (async (): Promise<void> => {
       try {
-        await server.quiet(EXIT_QUIET_BUDGET_MS);
+        await server.quiet(exitQuietBudgetMs);
         await server.close();
         logMainLifecycle(
           {

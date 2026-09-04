@@ -36,20 +36,24 @@ export default defineConfig({
     // process-global; threads are fine, but the per-test budget has to cover a
     // real spawn.
     //
-    // Tight on purpose: the observed healthy max across 302 tests is ~5.14s
-    // (test/integration/session.test.ts, a forced KillSession draining a
-    // detached stream) and ~4.25s (test/integration/record.test.ts, a write
-    // that rides the real DEFAULT_RETRY_POLICY backoff schedule — 50+200+
-    // 800+3000ms — through a real store outage). 16s is ~3x that observed
-    // max, with no per-site exception needed: both of those legitimately-slow
-    // scenarios already fit inside it with margin. A test hitting this
-    // timeout is hung, not merely slow — raise it only with a new measured
-    // reason, never to paper over a hang. Hooks here are only
-    // `afterEach(cleanupShims)` (SIGKILL + temp-dir removal), which is far
-    // cheaper than any test body, so it shares the test budget rather than
-    // getting its own inflated one.
-    testTimeout: 16_000,
-    hookTimeout: 16_000,
+    // Tight on purpose. The three production windows these tests used to RIDE
+    // are now `--fake`-only overrides the harness scales (see
+    // `test/integration-support/harness.ts`), so the observed healthy max
+    // across 310 tests fell from ~5.14s to ~645ms on a quiet machine
+    // (test/integration/session.test.ts, a forced kill spending the whole
+    // scaled watcher-conclusion budget).
+    //
+    // The budget is sized from the CONTENDED max, ~1.55s, and not from that
+    // quiet-machine 645ms: this suite always runs its seven files in parallel,
+    // each spawning a real node process, so contention is its normal condition
+    // rather than an anomaly to size below and flake on. 5s is ~3x that
+    // contended max. A test hitting this timeout is hung, not merely slow —
+    // raise it only with a new measured reason, never to paper over a hang.
+    //
+    // Hooks share the test budget: the only one is `afterEach(cleanupShims)`
+    // (SIGKILL + temp-dir removal), far cheaper than any test body.
+    testTimeout: 5_000,
+    hookTimeout: 5_000,
     teardownTimeout: 10_000,
   },
 });

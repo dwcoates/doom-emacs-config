@@ -158,6 +158,15 @@ interface EngineDeps {
    */
   readonly keepaliveIntervalMs?: number;
   /**
+   * The teardown's per-tail conclusion budget, when something overrode the
+   * module constant.
+   *
+   * `main.ts` fills this ONLY for a `--fake` process; a real session always
+   * bounds on {@link WATCHER_CONCLUSION_BUDGET_MS}. It is a LAST RESORT bound
+   * either way — the ordering it protects is unchanged by its size.
+   */
+  readonly watcherConclusionBudgetMs?: number;
+  /**
    * End the process, once the session has been stood down.
    *
    * `KillSession` is a PROCESS-LEVEL verb: the session it ends is the only one
@@ -2602,7 +2611,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       open.map((entry) =>
         withBudget(
           entry.ended,
-          WATCHER_CONCLUSION_BUDGET_MS,
+          watcherConclusionBudgetMs,
           `the WatchBash stream on ${entry.work.value} did not end within its conclusion budget`,
         ),
       ),
@@ -2639,7 +2648,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }
         await withBudget(
           entry.ended,
-          WATCHER_CONCLUSION_BUDGET_MS,
+          watcherConclusionBudgetMs,
           `the WatchAgent tail on ${entry.agent.value} did not end within its conclusion budget`,
         );
       }),
@@ -2663,6 +2672,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * microseconds. It exists only so a consumer that stopped pulling its stream
    * cannot keep a killed shim alive forever.
    */
+  /** The conclusion budget this session actually bounds its tails on. */
+  const watcherConclusionBudgetMs =
+    deps.watcherConclusionBudgetMs ?? WATCHER_CONCLUSION_BUDGET_MS;
+
   async function withBudget(work: Promise<void>, budgetMs: number, complaint: string): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expiry = new Promise<"expired">((resolve) => {
