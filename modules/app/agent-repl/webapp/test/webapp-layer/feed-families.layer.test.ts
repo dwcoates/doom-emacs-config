@@ -13,12 +13,11 @@
  * chain (recorded in `e2e/WEBAPP-LAYER-SPEC.md` §F2), never guessed from a
  * name.
  *
- * TWO FAMILIES ARE ABSENT AND SAID SO, rather than covered with an invented
- * fixture: `agent_prompt` and `cold_gate`. No fake-SDK scenario any Go area
- * test drives produces either row — `send-message`, `wakeup-schedule` and
- * `cron` all draw a plain response, and no Go e2e test references the cold
- * gate at all. Both are reported to the fake-SDK owner; when a scenario
- * lands, each becomes one more `it` here.
+ * ONE FAMILY IS ABSENT AND SAID SO, rather than covered with an invented
+ * fixture: `cold_gate`. No Go e2e test references the cold gate at all; it is
+ * reported to the fake-SDK owner, and when a scenario lands it becomes one
+ * more `it` here. `agent_prompt` IS covered, since landing 10 gave the row a
+ * delivery outcome and `!send-message-resumed` drives it.
  *
  * ONE PAGE, ONE WORKSPACE, MANY TURNS. The page is mounted once for the file
  * (the Go driver hands this child exactly one world), so rows accumulate as
@@ -384,6 +383,22 @@ it(
     // Assert — a worktree episode draws BOTH dividers (entered and left).
     expect(rows(app, "separation").length).toBeGreaterThanOrEqual(before + 2);
     expect(app.$$(".sep-worktree").length).toBeGreaterThan(0);
+  },
+  TURN_TEST_MS,
+);
+
+// §F2 — agent_prompt, and landing 10's delivery outcome on the SENDER's row.
+it(
+  "names the resumption on the sender's agent-prompt row when the send woke the recipient",
+  async () => {
+    // Arrange / Act — `!send-message-resumed` sends to an IDLE agent, which the
+    // vendor resumes to receive it.
+    const row = await family("send-message-resumed", "agentPrompt");
+
+    // Assert — the delivery arm is stated, and it is the resumption.
+    expect(row.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe(
+      "resumedRecipient",
+    );
   },
   TURN_TEST_MS,
 );
