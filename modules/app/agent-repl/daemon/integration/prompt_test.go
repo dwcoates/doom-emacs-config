@@ -564,6 +564,16 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	if !strings.Contains(stderr, `"level":"error"`) {
 		t.Fatalf("stderr = %q, want an ERROR-level record for the failed restore", stderr)
 	}
+	// THE FAILED BOOT TEARS DOWN IN THE ORDERLY EXIT'S ORDER. This boot
+	// ADOPTED the surviving shim before the restore step failed it, so a
+	// watcher's frame pump is live when run() returns. The watcher close is
+	// armed BEFORE the boot sequence runs (cmd/claude-repld/run.go) precisely
+	// so it still happens on this path; armed after it, the state client
+	// closed under those in-flight frames and the next resolver lookup read a
+	// closed database.
+	if strings.Contains(stderr, "sql: database is closed") {
+		t.Fatalf("the failed boot closed the state client under a live watcher's frames\nstderr:\n%s", stderr)
+	}
 }
 
 // ---------------------------------------------------------------------------
