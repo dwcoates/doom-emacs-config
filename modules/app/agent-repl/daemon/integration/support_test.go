@@ -435,20 +435,6 @@ func connectCode(err error) connect.Code {
 	return connect.CodeUnknown
 }
 
-// namesIntendedArm reports whether a refusal names the exact unlanded error
-// arm the contract will grow, in the contracted
-// `intended arm: <Rpc>Error.<arm>: <reason>` spelling.
-func namesIntendedArm(err error, arm string) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, intendedArm) && strings.Contains(msg, arm)
-}
-
-// intendedArm is the refusal prefix a not-yet-landed error arm answers with.
-const intendedArm = "intended arm: "
-
 // containsField reports whether a validation refusal names a field.
 func containsField(err error, field string) bool {
 	return err != nil && strings.Contains(err.Error(), field)
