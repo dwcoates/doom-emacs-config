@@ -151,9 +151,15 @@ function round3(v: number): number {
  */
 export class ApplyProbe {
   private frameStamp: number | undefined;
-  private waiter:
-    | { origin: number | "frame"; predicate: () => boolean; settle: (ms: number) => void }
-    | undefined;
+  // SEVERAL WAITERS AT ONCE, because one turn carries several of the intervals
+  // this area measures: rows 1b and 3a are two different hops over the same
+  // twenty turns, and both must be armed before the send that starts them.
+  // Each waiter closes on its own first satisfying frame, independently.
+  private waiters: Array<{
+    origin: number | "frame";
+    predicate: () => boolean;
+    settle: (ms: number) => void;
+  }> = [];
 
   private constructor(private readonly restore: () => void) {}
 
@@ -183,16 +189,18 @@ export class ApplyProbe {
   private onFrame(): void {
     const stamp = realNow();
     this.frameStamp = stamp;
-    const waiter = this.waiter;
-    if (waiter === undefined) return;
+    if (this.waiters.length === 0) return;
+    const armed = [...this.waiters];
     // The terminal stamp: one microtask after this frame's SYNCHRONOUS apply,
     // which is `consume`'s return (§A5).
     microtask(() => {
-      if (this.waiter !== waiter) return;
-      if (!waiter.predicate()) return;
-      this.waiter = undefined;
-      const origin = waiter.origin === "frame" ? stamp : waiter.origin;
-      waiter.settle(realNow() - origin);
+      const closed = realNow();
+      for (const waiter of armed) {
+        if (!this.waiters.includes(waiter)) continue;
+        if (!waiter.predicate()) continue;
+        this.waiters = this.waiters.filter((w) => w !== waiter);
+        waiter.settle(closed - (waiter.origin === "frame" ? stamp : waiter.origin));
+      }
     });
   }
 
@@ -217,17 +225,14 @@ export class ApplyProbe {
   }
 
   private arm(origin: number | "frame", predicate: () => boolean): Promise<number> {
-    if (this.waiter !== undefined) {
-      throw new Error("the apply probe already has a waiter armed; one at a time");
-    }
     return new Promise<number>((settle) => {
-      this.waiter = { origin, predicate, settle };
+      this.waiters.push({ origin, predicate, settle });
     });
   }
 
-  /** Discard an armed waiter, so a failed sample cannot close a later one. */
+  /** Discard every armed waiter, so a failed sample cannot close a later one. */
   disarm(): void {
-    this.waiter = undefined;
+    this.waiters = [];
   }
 
   /** The most recent frame's arrival stamp, for a diagnostic. */

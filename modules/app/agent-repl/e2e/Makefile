@@ -47,7 +47,12 @@ perf-only:
 # REWRITE the committed baselines from this run's measurement. Deliberate, by
 # name, and never reachable from a failing run: a baseline a red run can
 # rewrite is not a baseline (PERF-SPEC.md section D3).
+#
+# -count=3, and the recorded number is the HIGH-WATER p50/p95 across the three:
+# run-to-run spread is real and unequal between rows (measured over three runs,
+# one row's p95 varied 6% and another's 75%), so a baseline from a single
+# repetition would put the 20% regression check inside the noise.
 perf-baseline:
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=write \
-		go test ./... -tags perf -run 'TestPerf' -count=1 \
+		go test ./... -tags perf -run 'TestPerf' -count=3 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v

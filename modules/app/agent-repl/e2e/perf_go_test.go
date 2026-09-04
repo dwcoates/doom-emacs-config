@@ -67,6 +67,7 @@ func TestPerfSubmitPromptAck(t *testing.T) {
 	repoFixture := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
 	perfCalibrate(t, w)
+	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("submit-prompt-ack")
 
 	// Act.
@@ -109,6 +110,7 @@ func TestPerfSubmitPromptToRosterArm(t *testing.T) {
 	repoFixture := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
 	perfCalibrate(t, w)
+	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("submit-prompt-roster-arm")
 
 	roster := w.WatchRoster()
@@ -197,10 +199,20 @@ func TestPerfSelectWorkspaceAck(t *testing.T) {
 // connectivity change, which is precisely the term a client's own detection
 // budget sits on top of.
 //
-// THE TERMINAL IS "THE ARM CHANGED", not a named arm. FooterStatus has eleven
-// arms and which one a participant loss resolves to is the resolver's
-// business; asserting a particular one here would pin a resolver decision this
-// row is not about, and §C's own warning about momentary arms applies.
+// THE TRANSITION IS idle -> disconnected/severed, and it is named rather than
+// left as "the arm changed", because the resolver's own code settles which arm
+// a lost participant produces: `resolve/footer/status.go:95` resolves
+// `!s.hostStream || !s.webStream` to Disconnected/Severed, citing daemon.md
+// invariant 11 — "the workspace is not connected, and the footer says so
+// rather than drawing a status nobody is receiving".
+//
+// THE SHIM LINK MUST HAVE BEEN SEEN FIRST, and this is not incidental: the
+// same file's `disconnected()` returns nil while `!s.linkSeen`, so a workspace
+// that never ran a turn draws `idle` no matter how many participants leave.
+// Measured before that was understood, every sample here waited out its own
+// bound against a footer that was correct and never going to move. One warm-up
+// turn establishes the link, and the samples then measure the publish path
+// they are about.
 func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 	perfRequire(t)
 
@@ -209,6 +221,7 @@ func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 	repoFixture := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repoFixture.Dir)
 	perfCalibrate(t, w)
+	perfWarmSession(t, w, ws)
 	rec := NewPerfRecorder("footer-flip-participant-loss")
 
 	// The host participant is held for the whole run; the WEB one is the edge
@@ -224,23 +237,16 @@ func TestPerfFooterFlipOnParticipantLoss(t *testing.T) {
 	for i := 0; i < PerfSamples; i++ {
 		web := w.Daemon.WatchWeb(ws)
 		web.Drain()
-		// Settle on the footer the pair produces, so the flip below is this
-		// sample's own and not the previous one still arriving.
-		before := harness.AwaitView(t, w.Ctx(), footer, "the footer with both participants held",
-			func(v *frontendv1.FooterView) bool { return perfFooterArm(v) != "" })
-		wantChangeFrom := perfFooterArm(before)
+		// Settle on the footer the held pair produces, so the flip below is
+		// this sample's own and not the previous one still arriving.
+		harness.AwaitView(t, w.Ctx(), footer, "the footer to report a connected pair",
+			func(v *frontendv1.FooterView) bool { return perfFooterArm(v) != "disconnected" })
 
 		start := time.Now()
 		web.Close()
-		got := harness.AwaitView(t, w.Ctx(), footer, "the footer arm to leave "+wantChangeFrom,
-			func(v *frontendv1.FooterView) bool {
-				arm := perfFooterArm(v)
-				return arm != "" && arm != wantChangeFrom
-			})
+		harness.AwaitView(t, w.Ctx(), footer, "the footer to report the lost participant",
+			func(v *frontendv1.FooterView) bool { return perfFooterArm(v) == "disconnected" })
 		rec.Record(time.Since(start))
-		if i == 0 {
-			t.Logf("perf footer-flip: the arm went %q -> %q", wantChangeFrom, perfFooterArm(got))
-		}
 	}
 
 	// Assert.
@@ -297,6 +303,19 @@ func TestPerfRosterSubscribeReplay(t *testing.T) {
 // ===========================================================================
 // Shared shapes.
 // ===========================================================================
+
+// perfWarmSession drives ONE turn to completion before any sample is taken.
+//
+// IT IS ARRANGEMENT, NOT A DISCARDED SAMPLE (§D1 forbids discarding one). The
+// first prompt a workspace ever receives pays for the shim session's own
+// start — a real node process spawn — and that cost belongs to cold start
+// (§C row 17a, phase 2), not to the hop these rows measure. Measured without
+// it, every prompt row's max was ~355 ms on sample 1 and under 12 ms on the
+// other nineteen: one cost, in the wrong row.
+func perfWarmSession(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+	t.Helper()
+	AwaitTurnEnded(t, w, ws, SubmitPrompt(t, w, ws, "perf warm-up"))
+}
 
 // perfSubmit submits one prompt and answers its turn, WITHOUT the helper
 // SubmitPrompt's t.Helper bookkeeping in the timed window. It is the same

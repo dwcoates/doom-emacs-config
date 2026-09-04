@@ -65,7 +65,18 @@ const recorders: PerfRecorder[] = [];
 beforeAll(async () => {
   app = await bootLayer();
   probe = ApplyProbe.install(app);
-}, BOOT_BUDGET_MS);
+
+  // ONE WARM-UP TURN, AS ARRANGEMENT — never a discarded sample (§D1 forbids
+  // discarding one). The first prompt a workspace ever receives pays for the
+  // real shim session's own start, a node process spawn, and that cost belongs
+  // to cold start (§C row 17a) and not to any row here. Measured without it,
+  // perf-prompt-bubble's max was ~370ms on sample 1 and under 10ms on the
+  // other nineteen: one cost, filed under the wrong row.
+  const send = typeInto("perf warm-up");
+  await app.settle();
+  send.click();
+  await awaitTurnEnded(0);
+}, BOOT_BUDGET_MS + TURN_BUDGET_MS);
 
 afterAll(async () => {
   // THE NUMBERS SHIP BEFORE THE PAGE STOPS. A record sent after `stop()` has
@@ -119,30 +130,36 @@ it(
     const response = recorder("perf-response-bubble");
 
     for (let i = 0; i < PERF_SAMPLES; i += 1) {
-      // Arrange.
+      // Arrange. BOTH counts are read, and BOTH probes armed, BEFORE the send:
+      // the response row can arrive in the same task as the prompt bubble, and
+      // a count read after the prompt sample would already include it — the
+      // response waiter would then be waiting for a SECOND response row this
+      // turn never produces.
       const endedBefore = rows(app, "turnEnded").length;
       const promptsBefore = rows(app, "userPrompt").length;
+      const responsesBefore = responseRows().length;
       const send = typeInto(`perf prompt bubble ${i}`);
       await app.settle();
 
-      // Act + Assert (row 1b): the origin is the click, and the terminal is
-      // the frame after which the page's OWN prompt bubble is drawn. §C row 1
-      // establishes that this bubble is NOT optimistic — `composer.ts:send1`
-      // only remembers the TurnId — so this really is a server round trip.
-      const armedPrompt = probe.armFrom(realNow(), () => rows(app, "userPrompt").length > promptsBefore);
-      send.click();
-      prompt.record(await awaitSample(app, probe, "the prompt bubble", armedPrompt, SAMPLE_BUDGET_MS));
-
-      // Act + Assert (row 3a): the origin is THE FRAME'S OWN ARRIVAL. §C row
-      // 3a restates "visible" as the first response element entering the DOM,
-      // because `smooth.ts` paces the character reveal at 200 cps on a 0.3 s
-      // constant by design — a type-out, not a latency.
-      const responsesBefore = app.$$('[data-feed-row][data-row-kind="activity"][data-unit="response"]').length;
-      const armedResponse = probe.armFromFrame(
-        () =>
-          app.$$('[data-feed-row][data-row-kind="activity"][data-unit="response"]').length >
-          responsesBefore,
+      // Row 1b: the origin is the click, and the terminal is the frame after
+      // which the page's OWN prompt bubble is drawn. §C row 1 establishes that
+      // this bubble is NOT optimistic — `composer.ts:send1` only remembers the
+      // TurnId — so this really is a server round trip.
+      const armedPrompt = probe.armFrom(
+        realNow(),
+        () => rows(app, "userPrompt").length > promptsBefore,
       );
+      // Row 3a: the origin is THE FRAME'S OWN ARRIVAL. §C row 3a restates
+      // "visible" as the first response element entering the DOM, because
+      // `smooth.ts` paces the character reveal at 200 cps on a 0.3 s constant
+      // by design — a type-out, not a latency.
+      const armedResponse = probe.armFromFrame(() => responseRows().length > responsesBefore);
+
+      // Act.
+      send.click();
+
+      // Assert.
+      prompt.record(await awaitSample(app, probe, "the prompt bubble", armedPrompt, SAMPLE_BUDGET_MS));
       response.record(
         await awaitSample(app, probe, "the response bubble", armedResponse, SAMPLE_BUDGET_MS),
       );
@@ -177,12 +194,15 @@ it(
       // The footer's own interrupt, as a user reaches it.
       const interrupt = app.$(".footer-clock [data-interrupt]");
       if (!interrupt) throw new Error("the footer drew no interrupt control while a turn was running");
-      await app.clickElement(interrupt);
-      const confirm = app.$("[data-interrupt-confirm]");
-      if (!confirm) throw new Error("the interrupt control drew no confirmation");
 
-      // Act + Assert: the origin is the CONFIRM click, which is the one that
-      // calls `Interrupt` (`footer/stop.ts` -> `rpc/unary.ts:callUnary`).
+      // Act + Assert: the origin is THE INTERRUPT CLICK, which is the one that
+      // calls `Interrupt` (`footer/stop.ts:interruptControl`'s own listener ->
+      // `rpc/unary.ts:callUnary`). The control grows a SECOND, confirming
+      // button only when the daemon refuses with `confirmRequired` — live
+      // agents the stop would also end (`footer/stop.ts:drawConfirm`) — which
+      // `!hold` has none of. A confirm appearing here would mean this sample
+      // measured a refusal round trip rather than the interrupt, so it is
+      // reported as a fault rather than clicked through.
       //
       // THE ARM IS CAUGHT ON ITS FRAME, NEVER BY SETTLING TO IT. §C row 5 is
       // explicit: the footer's momentary arms are retired by
@@ -192,8 +212,13 @@ it(
       // the frame that carries it.
       const armBefore = footerArm();
       const armed = probe.armFrom(realNow(), () => footerArm() !== armBefore);
-      confirm.click();
+      interrupt.click();
       rec.record(await awaitSample(app, probe, "the footer arm to flip", armed, SAMPLE_BUDGET_MS));
+      if (app.$("[data-interrupt-confirm]")) {
+        throw new Error(
+          "the interrupt was refused with confirmRequired, so this sample timed a refusal and not the stop",
+        );
+      }
 
       await awaitTurnEnded(endedBefore);
     }
@@ -295,6 +320,11 @@ it(
 // ---------------------------------------------------------------------------
 // Shared readbacks, all on the DOM hooks contract.
 // ---------------------------------------------------------------------------
+
+/** Every drawn response activity row. */
+function responseRows(): HTMLElement[] {
+  return app.$$('[data-feed-row][data-row-kind="activity"][data-unit="response"]');
+}
 
 /** The footer's status arm, or "" when the footer drew no status. */
 function footerArm(): string {

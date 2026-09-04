@@ -44,9 +44,11 @@ import (
 // budget (SAMPLE_BUDGET_MS in perf.layer.test.ts) fails a stuck sample long
 // before this fires.
 //
-// MEASURED, then set at ~3x the observed max — see PERF-SPEC.md §D, "the
-// measured perf phase".
-const WebappLayerPerfTimeout = 240 * time.Second
+// MEASURED, then set at ~3x the observed max, the same way every other bound
+// in this suite was derived: the perf child ran 15.5s (its four assertions
+// 2.1s / 3.5s / 8.4s / 1.5s) with the Go test around it at 18.5s, on a 16-core
+// host at load average 10.6. 3x that 15.5s is ~47s, so 60s.
+const WebappLayerPerfTimeout = 60 * time.Second
 
 // wlPerfSamplesOperation is the operation the perf child logs its finished
 // percentiles under, through the daemon's own ClientLog rpc.

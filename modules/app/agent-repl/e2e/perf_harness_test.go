@@ -170,7 +170,7 @@ func (r *PerfRecorder) Assert(t *testing.T, p50Budget, p95Budget time.Duration) 
 			verdict = perfVerdictFail
 			t.Errorf("perf %s: p95 = %s, want at most the budget %s", r.name, r.P95(), p95Budget)
 		}
-		if !r.assertBaseline(t) {
+		if !perfBaselineStep(t, r.name, verdict, len(r.samples), r.P50(), r.P95()) {
 			verdict = perfVerdictFail
 		}
 	}
@@ -220,11 +220,27 @@ func perfBaselinePath(name string) string {
 	return filepath.Join(PerfBaselineDir, name+".json")
 }
 
-// assertBaseline holds the recorder to its committed baseline, and answers
-// whether it held.
-func (r *PerfRecorder) assertBaseline(t *testing.T) bool {
+// perfBaselineStep is the baseline half of an assertion: it RECORDS on a
+// baseline run and ENFORCES on every other run.
+//
+// A RED REPETITION RECORDS NOTHING. §D3's rule is that "a baseline a red run
+// can rewrite is not a baseline", and an earlier draft broke it: the write
+// happened unconditionally, so a `make perf-baseline` taken while sibling
+// suites saturated the box recorded the numbers of a run whose budgets it had
+// just failed. The verdict so far is therefore the gate, and a skipped
+// repetition says so rather than passing quietly.
+func perfBaselineStep(t *testing.T, name string, verdict perfVerdict, n int, p50, p95 time.Duration) bool {
 	t.Helper()
-	return perfAssertBaseline(t, r.name, len(r.samples), r.P50(), r.P95())
+	if !perfWritingBaselines() {
+		return perfAssertBaseline(t, name, n, p50, p95)
+	}
+	if verdict != perfVerdictPass {
+		t.Logf("perf %s: this repetition FAILED its budget, so it is NOT recorded as a baseline (n=%d p50=%s p95=%s)",
+			name, n, p50, p95)
+		return true
+	}
+	perfWriteBaseline(t, name, n, p50, p95)
+	return true
 }
 
 // perfAssertBaseline holds one measurement to its committed baseline, and
@@ -238,10 +254,6 @@ func (r *PerfRecorder) assertBaseline(t *testing.T) bool {
 // same baseline by exactly the same code.
 func perfAssertBaseline(t *testing.T, name string, n int, p50, p95 time.Duration) bool {
 	t.Helper()
-	if perfWritingBaselines() {
-		perfWriteBaseline(t, name, n, p50, p95)
-		return true
-	}
 	body, err := os.ReadFile(perfBaselinePath(name))
 	if err != nil {
 		t.Logf("perf %s: no committed baseline at %s (%v); the regression check is NOT enforced for this assertion — run `make -C e2e perf-baseline` to record one",
@@ -275,10 +287,38 @@ func perfAssertBaseline(t *testing.T, name string, n int, p50, p95 time.Duration
 	return ok
 }
 
+// perfBaselineHighWater keeps the largest p50/p95 this process has seen per
+// assertion, so a `-count=N` baseline run records the OBSERVED MAXIMUM rather
+// than whichever repetition happened to write last.
+var (
+	perfBaselineHighWaterMu sync.Mutex
+	perfBaselineHighWater   = map[string][2]time.Duration{}
+)
+
 // perfWriteBaseline records one measurement as an assertion's baseline.
 // Reached ONLY from `make -C e2e perf-baseline`.
+//
+// THE RECORDED NUMBER IS THE HIGH-WATER MARK ACROSS THE RUN'S REPETITIONS, and
+// the target runs `-count=3` for exactly that reason. Run-to-run spread is
+// real and unequal between rows — measured over three runs, submit-prompt-ack's
+// p95 varied 6% while select-workspace-ack's varied 75% — so a baseline taken
+// from one repetition would put the >20% regression check inside the noise for
+// the noisy rows and fail them at random. A baseline at the observed healthy
+// maximum is this suite's own convention for every other bound it carries.
 func perfWriteBaseline(t *testing.T, name string, n int, p50, p95 time.Duration) {
 	t.Helper()
+	perfBaselineHighWaterMu.Lock()
+	if seen, ok := perfBaselineHighWater[name]; ok {
+		if seen[0] > p50 {
+			p50 = seen[0]
+		}
+		if seen[1] > p95 {
+			p95 = seen[1]
+		}
+	}
+	perfBaselineHighWater[name] = [2]time.Duration{p50, p95}
+	perfBaselineHighWaterMu.Unlock()
+
 	base := perfBaseline{
 		Assertion: name,
 		N:         n,
@@ -287,6 +327,7 @@ func perfWriteBaseline(t *testing.T, name string, n int, p50, p95 time.Duration)
 		Cores:     runtime.NumCPU(),
 		Tip:       perfTip(),
 		Measured:  time.Now().Format("2006-01-02"),
+		Note:      "the high-water p50/p95 across the baseline run's repetitions",
 	}
 	body, err := json.MarshalIndent(base, "", "  ")
 	if err != nil {
@@ -353,7 +394,7 @@ func (s PerfShipped) Assert(t *testing.T, p50Budget, p95Budget time.Duration) {
 			verdict = perfVerdictFail
 			t.Errorf("perf %s: p95 = %s, want at most the budget %s", s.Name, s.P95, p95Budget)
 		}
-		if !perfAssertBaseline(t, s.Name, s.N, s.P50, s.P95) {
+		if !perfBaselineStep(t, s.Name, verdict, s.N, s.P50, s.P95) {
 			verdict = perfVerdictFail
 		}
 	}
@@ -407,19 +448,36 @@ const PerfCalibrationCPUIterations = 20_000_000
 
 // PerfCalibrationFactor is how far above its recorded baseline either probe
 // may run before the phase DECLINES.
-const PerfCalibrationFactor = 2.5
+//
+// 1.5, NOT THE 2.5 AN EARLIER DRAFT CARRIED, and the reason is a measurement
+// this guard's own bring-up produced: THE CPU PROBE IS BARELY SENSITIVE TO
+// LOAD ON A 16-CORE HOST. Sampled 25 times at load average 3.9 it ran
+// 42.0-43.0 ms, and inside a perf run at load average 10.6 it ran 42.0 ms —
+// a single-threaded loop does not slow down while free cores remain, so on
+// this box the probe only moves once the load average passes the core count.
+// A 2.5x gate on a probe with that little travel is a gate that never closes.
+const PerfCalibrationFactor = 1.5
 
 // The calibration baselines, MEASURED ON THIS BOX and recorded in
 // PERF-SPEC.md §D2. They are constants rather than a baseline file because
 // they gate the baseline machinery itself: a guard that reads the artifact it
 // exists to protect has nothing to fall back on when that artifact is absent.
 const (
-	// PerfCalibrationLoopbackBaseline is the p50 of one DaemonHealth round
-	// trip on an unloaded host.
-	PerfCalibrationLoopbackBaseline = 700 * time.Microsecond
-	// PerfCalibrationCPUBaseline is the fixed CPU probe's duration on an
-	// unloaded host.
-	PerfCalibrationCPUBaseline = 12 * time.Millisecond
+	// PerfCalibrationLoopbackBaseline is the mean of one DaemonHealth round
+	// trip, MEASURED: 213, 216, 222, 225 and 228 µs across five runs at load
+	// averages 4.3-10.6, on a 16-core host. Set at 230µs — a round-up of the
+	// observed max — so the gate closes at 345µs.
+	//
+	// THIS IS THE PROBE THAT ACTUALLY DISCRIMINATES: unlike the CPU loop it
+	// crosses a socket and schedules two processes, so it degrades as soon as
+	// the box has more runnable work than it can dispatch promptly.
+	PerfCalibrationLoopbackBaseline = 230 * time.Microsecond
+	// PerfCalibrationCPUBaseline is the fixed CPU probe's duration, MEASURED:
+	// 42.0 ms as the minimum of 25 samples at load average 3.9, on the same
+	// host. An earlier draft guessed 12 ms and DECLINED every run — the guess
+	// was wrong by 3.5x, which is exactly why a threshold in this suite is a
+	// measurement and never an estimate.
+	PerfCalibrationCPUBaseline = 42 * time.Millisecond
 )
 
 type perfCalibration struct {
@@ -430,34 +488,51 @@ type perfCalibration struct {
 }
 
 var (
-	perfCalibrationOnce  sync.Once
+	perfCalibrationMu    sync.Mutex
 	perfCalibrationState perfCalibration
 )
 
-// perfCalibrate runs the guard ONCE per perf phase, on the first world that
-// asks for it, and caches the verdict for every later assertion.
+// perfCalibrate runs the guard for the phase, on the caller's world.
+//
+// ONE VERDICT FOR THE PHASE (§D2), BUT SAMPLED AT EVERY ASSERTION. The CPU
+// probe is fixed work and runs once; the loopback probe is re-taken before
+// each assertion and the phase's verdict is the WORST reading seen so far,
+// sticky once DECLINED. §D2 says the guard runs once per phase, and this still
+// produces exactly one verdict — but a single reading taken at the start of a
+// phase cannot see load that arrives during it, and load arriving during it is
+// the observed failure mode on this box (PERF-SPEC.md §H, the guard's own
+// sensitivity finding). Re-probing costs ~22ms per assertion.
 //
 // It runs on the CALLER'S world rather than building one of its own: the probe
 // is meant to measure the box these assertions actually run on, and a
 // dedicated world would both cost a bring-up and measure a different moment.
 func perfCalibrate(t *testing.T, w *World) {
 	t.Helper()
-	perfCalibrationOnce.Do(func() {
-		perfCalibrationState = perfRunCalibration(t, w)
-		if perfCalibrationState.Declined {
-			t.Logf("PERF DECLINED: %s", perfCalibrationSummary())
-		} else {
-			t.Logf("perf calibration: %s", perfCalibrationSummary())
-		}
-	})
+	loopback := perfLoopbackProbe(t, w)
+	cpu := perfCalibrationCPUOnce()
+
+	perfCalibrationMu.Lock()
+	defer perfCalibrationMu.Unlock()
+	if loopback > perfCalibrationState.Loopback {
+		perfCalibrationState.Loopback = loopback
+	}
+	perfCalibrationState.CPU = cpu
+	declined, reason := perfCalibrationVerdict(perfCalibrationState.Loopback, cpu)
+	if declined && !perfCalibrationState.Declined {
+		perfCalibrationState.Declined = true
+		perfCalibrationState.Reason = reason
+		t.Logf("PERF DECLINED: %s", perfCalibrationSummaryLocked())
+		return
+	}
+	t.Logf("perf calibration: %s", perfCalibrationSummaryLocked())
 }
 
-func perfRunCalibration(t *testing.T, w *World) perfCalibration {
+// perfLoopbackProbe times PerfCalibrationLoopbackProbes sequential DaemonHealth
+// calls and answers the per-call mean. DaemonHealth has no refusal site,
+// allocates nothing interesting, and rides the same transport as every measured
+// hop.
+func perfLoopbackProbe(t *testing.T, w *World) time.Duration {
 	t.Helper()
-	// The loopback probe: 100 sequential DaemonHealth calls, timed as one
-	// block and reported as the per-call mean. DaemonHealth has no refusal
-	// site, allocates nothing interesting, and rides the same transport as
-	// every measured hop.
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	start := time.Now()
@@ -466,11 +541,15 @@ func perfRunCalibration(t *testing.T, w *World) perfCalibration {
 			t.Fatalf("perf calibration: DaemonHealth probe %d: %v", i, err)
 		}
 	}
-	loopback := time.Since(start) / PerfCalibrationLoopbackProbes
+	return time.Since(start) / PerfCalibrationLoopbackProbes
+}
 
-	cpu := perfCPUProbe()
+// perfCalibrationCPUOnce times the fixed CPU loop once per process.
+var perfCalibrationCPUOnce = sync.OnceValue(perfCPUProbe)
 
-	cal := perfCalibration{Loopback: loopback, CPU: cpu}
+// perfCalibrationVerdict answers whether these probe readings decline the
+// phase, and why.
+func perfCalibrationVerdict(loopback, cpu time.Duration) (bool, string) {
 	var reasons []string
 	if ratio := float64(loopback) / float64(PerfCalibrationLoopbackBaseline); ratio > PerfCalibrationFactor {
 		reasons = append(reasons, fmt.Sprintf("loopback %s is %.1fx its baseline %s (limit %.1fx)",
@@ -480,11 +559,7 @@ func perfRunCalibration(t *testing.T, w *World) perfCalibration {
 		reasons = append(reasons, fmt.Sprintf("cpu %s is %.1fx its baseline %s (limit %.1fx)",
 			cpu, ratio, PerfCalibrationCPUBaseline, PerfCalibrationFactor))
 	}
-	if len(reasons) > 0 {
-		cal.Declined = true
-		cal.Reason = strings.Join(reasons, "; ")
-	}
-	return cal
+	return len(reasons) > 0, strings.Join(reasons, "; ")
 }
 
 // perfCPUProbe times a deterministic, allocation-free integer loop.
@@ -507,9 +582,21 @@ func perfCPUProbe() time.Duration {
 // elimination. Read by nothing; that is the point.
 var perfCPUProbeSink uint64
 
-func perfDeclined() bool { return perfCalibrationState.Declined }
+func perfDeclined() bool {
+	perfCalibrationMu.Lock()
+	defer perfCalibrationMu.Unlock()
+	return perfCalibrationState.Declined
+}
 
 func perfCalibrationSummary() string {
+	perfCalibrationMu.Lock()
+	defer perfCalibrationMu.Unlock()
+	return perfCalibrationSummaryLocked()
+}
+
+// perfCalibrationSummaryLocked is perfCalibrationSummary with the lock already
+// held by the caller.
+func perfCalibrationSummaryLocked() string {
 	c := perfCalibrationState
 	s := fmt.Sprintf("loopback p/call %s (baseline %s), cpu probe %s (baseline %s), factor %.1f, cores %d",
 		c.Loopback, PerfCalibrationLoopbackBaseline, c.CPU, PerfCalibrationCPUBaseline,
