@@ -271,7 +271,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
-	footerResolver, err := footer.New(colors, p.Surfaces)
+	// Zero leaves the resolver's own DefaultMomentaryDwell in force; the flag
+	// and its environment knob are what let a caller compress a window whose
+	// whole purpose is to be long enough for a person to read.
+	footerOpts := []footer.Option{}
+	if p.Opts.footerMomentaryDwell > 0 {
+		footerOpts = append(footerOpts, footer.WithMomentaryDwell(p.Opts.footerMomentaryDwell))
+	}
+	footerResolver, err := footer.New(colors, p.Surfaces, footerOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}

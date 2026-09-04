@@ -80,6 +80,13 @@ type options struct {
 	// reachable at all: below it a re-opened tail's pinned start is still in
 	// the log, above it the token is expired and the client must re-open.
 	feedTailRetention int
+	// footerMomentaryDwell is how long a MOMENTARY footer status
+	// (`interrupted`, `loading`) stands before the daemon's own successor push
+	// retires it. It is a real product window — the reader has to be able to
+	// see the status — and therefore a real wait for anything that observes
+	// its retirement, which is why it is overridable at all. Zero leaves
+	// footer.DefaultMomentaryDwell in force.
+	footerMomentaryDwell time.Duration
 	// selfRepo overrides the daemon's own checkout identity. It is a TEST
 	// HOOK: the merge orchestrator keys its two methods on whether a target is
 	// the same repository as this, and a test needs to say so explicitly.
@@ -131,6 +138,7 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
 	fs.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
 	fs.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
+	fs.DurationVar(&opts.footerMomentaryDwell, "footer-momentary-dwell", 0, "how long a momentary footer status stands before its successor push retires it (0 uses the built-in default)")
 	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
 	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
 	if err := fs.Parse(args); err != nil {
@@ -142,7 +150,40 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.feedTailRetention = retention
+	dwell, err := resolveFooterMomentaryDwell(opts.footerMomentaryDwell, os.Getenv(envFooterMomentaryDwell))
+	if err != nil {
+		return options{}, err
+	}
+	opts.footerMomentaryDwell = dwell
 	return opts, nil
+}
+
+// envFooterMomentaryDwell is the footer dwell's test knob. It BEATS the flag,
+// exactly as the feed tail retention's does: a test that sets it must not also
+// have to know how the daemon was launched.
+const envFooterMomentaryDwell = "AGENT_REPL_FOOTER_MOMENTARY_DWELL"
+
+// resolveFooterMomentaryDwell applies the dwell's precedence: the environment
+// beats the flag, and zero means the footer resolver's own default.
+//
+// A MALFORMED OR NON-POSITIVE VALUE IS A REFUSAL, never a fall-through: a knob
+// that silently did nothing would make the suite it was set for lie about how
+// long the daemon actually held the status.
+func resolveFooterMomentaryDwell(flagValue time.Duration, envValue string) (time.Duration, error) {
+	if envValue != "" {
+		d, err := time.ParseDuration(envValue)
+		if err != nil {
+			return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", envFooterMomentaryDwell, envValue, err)
+		}
+		if d <= 0 {
+			return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", envFooterMomentaryDwell, envValue)
+		}
+		return d, nil
+	}
+	if flagValue < 0 {
+		return 0, fmt.Errorf("claude-repld: -footer-momentary-dwell=%s is not a positive duration", flagValue)
+	}
+	return flagValue, nil
 }
 
 // envFeedTailRetention is the feed tail retention's test knob. It BEATS the
