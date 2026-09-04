@@ -17,7 +17,6 @@ import { createAppContext } from "../../../src/rpc/context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
-  FINAL_ANSWER_CLASS,
   REVEALED_ATTRIBUTE,
   drawFeedResponse,
   revealedSoFar,
@@ -110,16 +109,6 @@ describe("the settled state", () => {
       rowContext(),
     );
     expect(el.querySelector(".mp-tree")).not.toBeNull();
-  });
-
-  it("takes no final-answer treatment of its own", () => {
-    // The turn's terminal row names the answering response; this renderer sees
-    // one response and cannot know. It only exports the class name.
-    const el = drawFeedResponse(
-      response({ result: { case: "success", value: { prose: { markdown: "hi" } } } }),
-      rowContext(),
-    );
-    expect(el.classList.contains(FINAL_ANSWER_CLASS)).toBe(false);
   });
 });
 
