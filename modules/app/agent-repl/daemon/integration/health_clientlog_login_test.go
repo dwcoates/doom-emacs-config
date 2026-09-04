@@ -24,6 +24,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestDaemonHealthOnAFreshDaemonIsHealthy(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -40,6 +41,7 @@ func TestDaemonHealthOnAFreshDaemonIsHealthy(t *testing.T) {
 }
 
 func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
+	t.Parallel()
 	// Arrange: the prompts directory the daemon booted with is taken away, the
 	// one fault a test can open without breaking the daemon's own boot.
 	d := newDaemon(t, harness.Opts{})
@@ -91,6 +93,7 @@ func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
 // symmetric half of "open" a fault record must have to be a record of a
 // CONDITION rather than a one-way trip.
 func TestRestoringThePromptsDirClosesTheFault(t *testing.T) {
+	t.Parallel()
 	// Arrange: open the fault exactly as the sibling test above does.
 	d := newDaemon(t, harness.Opts{})
 	d.ExpectWarnings("daemon.workspace.request_command_support",
@@ -137,6 +140,7 @@ func TestRestoringThePromptsDirClosesTheFault(t *testing.T) {
 // of closure being real: once a fault is closed, a fresh runtime reading the
 // same faults table must not resurrect it merely because it once stood.
 func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
+	t.Parallel()
 	// Arrange: open then close the prompts-dir fault, on a state root a
 	// restart will reuse.
 	d := newDaemon(t, harness.Opts{})
@@ -189,6 +193,7 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSessionHealthForALiveSessionIsHealthy(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -205,6 +210,7 @@ func TestSessionHealthForALiveSessionIsHealthy(t *testing.T) {
 }
 
 func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// A shim-reported fault IS a fault: the health reporter opens it and
@@ -249,6 +255,7 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 // closes the standing shim-reported fault and SessionHealth reads healthy
 // again without a restart.
 func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session")
@@ -289,6 +296,7 @@ func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T)
 // exits mid-session, rather than merely losing its link, is the shim_died
 // arm and carries the exit code.
 func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -332,6 +340,7 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 // a live shim whose stream was severed (never exited) is the link_severed
 // arm, distinct from shim_died.
 func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
@@ -361,6 +370,7 @@ func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
 }
 
 func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is a LANDED SessionHealthError arm
@@ -389,6 +399,7 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	context, err := structpb.NewStruct(map[string]any{"pane": "composer"})
@@ -432,6 +443,7 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 // discipline: the record's level arm, not any fixed level, is what the sink
 // persists.
 func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -462,6 +474,7 @@ func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
 
 // TestClientLogAtErrorLandsAtErrorInTheWebappSink is the error half.
 func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -494,6 +507,7 @@ func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
 // validation half: the level oneof is not optional, and an unset one is a
 // Connect InvalidArgument naming the field, never an arm.
 func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -523,6 +537,7 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 // workspace can only answer through server.UnlandedArm's transport error —
 // there is no in-band shape to settle onto.
 func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	d.ExpectWarnings("daemon.refusal.unlanded_arm")
@@ -550,6 +565,7 @@ func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 // the workspace's webapp sink: the daemon's run log is the DAEMON's own
 // account of itself, and a client's diagnostic sentence is not that.
 func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -581,6 +597,7 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestOpenLoginSpawnsThePtyAndReplaysItsScrollback(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -600,6 +617,7 @@ func TestOpenLoginSpawnsThePtyAndReplaysItsScrollback(t *testing.T) {
 }
 
 func TestSendLoginInputIsEchoedBackOnTheStream(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
@@ -621,6 +639,7 @@ func TestSendLoginInputIsEchoedBackOnTheStream(t *testing.T) {
 }
 
 func TestSendLoginInputResizeIsAccepted(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
@@ -643,6 +662,7 @@ func TestSendLoginInputResizeIsAccepted(t *testing.T) {
 }
 
 func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// no_login_open is answered through s.refuse (internal/server/login.go),
@@ -668,6 +688,7 @@ func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
 }
 
 func TestCloseLoginEndsTheStreamWithClosed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	if _, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws})); err != nil {
@@ -688,6 +709,7 @@ func TestCloseLoginEndsTheStreamWithClosed(t *testing.T) {
 }
 
 func TestASecondOpenLoginJoinsTheSamePty(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	first, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
@@ -726,6 +748,7 @@ func awaitLoginMarkerOn(t *testing.T, d *harness.Daemon, s *harness.Stream[*agen
 }
 
 func TestOpenLoginFromTwoWorkspacesOutsideTheMultiRepoRootSharesOnePty(t *testing.T) {
+	t.Parallel()
 	// Arrange: two DIFFERENT workspaces whose repositories are both OUTSIDE
 	// $MULTI_REPO_ROOT, so both route to the same default account root
 	// (internal/login/manager.go keys its session map by CONFIG DIR, not by
@@ -759,6 +782,7 @@ func TestOpenLoginFromTwoWorkspacesOutsideTheMultiRepoRootSharesOnePty(t *testin
 }
 
 func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.T) {
+	t.Parallel()
 	// Arrange: one workspace's repository lives directly UNDER
 	// $MULTI_REPO_ROOT, the other outside it, so the two route to DIFFERENT
 	// account roots (the same routing the existing account tests exercise in
@@ -801,6 +825,7 @@ func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.
 }
 
 func TestCloseLoginWithNothingOpenAnswersSuccess(t *testing.T) {
+	t.Parallel()
 	// Arrange: no OpenLogin has ever run on this workspace.
 	f := newRegistered(t, harness.Opts{})
 
@@ -819,6 +844,7 @@ func TestCloseLoginWithNothingOpenAnswersSuccess(t *testing.T) {
 }
 
 func TestOpenLoginWhoseVendorBinaryFailsToSpawnAnswersSpawnFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange: AGENT_REPL_CLAUDE_BIN names a path that does not exist, so
 	// pty.Start's exec genuinely fails -- distinct from the vendor guard's
 	// refusal, which fires only for the DEFAULT binary "claude"
@@ -848,6 +874,7 @@ func TestOpenLoginWhoseVendorBinaryFailsToSpawnAnswersSpawnFailed(t *testing.T) 
 }
 
 func TestOpenLoginUnderNoFakeIsRefusedNamingTheLoginSite(t *testing.T) {
+	t.Parallel()
 	// Arrange: NoFake withholds AGENT_REPL_CLAUDE_BIN, so the login manager
 	// falls back to the default vendor binary "claude"
 	// (internal/login/manager.go's DefaultVendorBin) and its guard check
@@ -878,6 +905,7 @@ func TestOpenLoginUnderNoFakeIsRefusedNamingTheLoginSite(t *testing.T) {
 }
 
 func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassificationError(t *testing.T) {
+	t.Parallel()
 	// Arrange: NoFake means the classifier reaches its real vendor-backed
 	// implementation (internal/classifier/vendor.go), guarded by
 	// envc.VendorGuard, which refuses the "classifier" site while
@@ -927,6 +955,7 @@ func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassification
 // ---------------------------------------------------------------------------
 
 func TestOpenInEditorRelaysThePushOntoTheHostStream(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	host := f.d.WatchHost(f.ws)
@@ -951,6 +980,7 @@ func TestOpenInEditorRelaysThePushOntoTheHostStream(t *testing.T) {
 }
 
 func TestOpenInEditorOnAnUnknownWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is a landed OpenInEditorError arm, answered in band at
@@ -977,6 +1007,7 @@ func TestOpenInEditorOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 // check OpenInEditor's own doc comment describes: a path that resolves
 // outside the workspace's worktree must never be relayed to the editor.
 func TestOpenInEditorWithAPathEscapingTheWorkspaceIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 
@@ -999,6 +1030,7 @@ func TestOpenInEditorWithAPathEscapingTheWorkspaceIsRefused(t *testing.T) {
 // top (or a directory)" half of HostOpenInEditor.line: a directory path is
 // relayed with no line at all, never a synthesized one.
 func TestOpenInEditorOnADirectoryRelaysWithNoLine(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	host := f.d.WatchHost(f.ws)
@@ -1025,6 +1057,7 @@ func TestOpenInEditorOnADirectoryRelaysWithNoLine(t *testing.T) {
 }
 
 func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	const url = "https://example.invalid/report"
@@ -1051,6 +1084,7 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 // OpenExternalError's invalid_url arm (endpoint_open_external.proto: "the url
 // does not parse").
 func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// internal/workspace/links.go's OpenExternal refuses an unparseable url
@@ -1079,6 +1113,7 @@ func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
 // TestOpenExternalWithAFailingLauncherAnswersLaunchFailed exercises
 // OpenExternalError's launch_failed{detail} arm.
 func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.d.Browser.SetExitCode(1)
@@ -1111,6 +1146,7 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 // has no external browser: cmd/claude-repld/graph.go then leaves the Browser
 // dependency nil and internal/workspace/links.go refuses.
 func TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{ExtraArgs: []string{"--no-browser"}})
 	// The graph says so out loud at boot: a daemon that cannot open a link is
