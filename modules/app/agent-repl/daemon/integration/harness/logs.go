@@ -450,28 +450,6 @@ func (d *Daemon) CumulativeWorkspaceLogOperationCount(workspaceDir, operation st
 	return seen
 }
 
-// AwaitCumulativeWorkspaceLogOperationCount waits until a workspace's daemon
-// sink holds at least `n` records under `operation` across every runtime that
-// wrote it — the cross-restart counterpart of
-// AwaitWorkspaceLogOperationCount, for a test that crashes a daemon and cold
-// boots its successor.
-func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
-	d.t.Helper()
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-	for {
-		seen := d.CumulativeWorkspaceLogOperationCount(workspaceDir, operation)
-		if seen >= n {
-			return
-		}
-		select {
-		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, d.ctx.Err())
-		}
-	}
-}
-
 // OpTurnOpened is the record the session watcher writes once a turn is OPEN on
 // it — the point after which that turn's terminal frame will be attributed.
 const OpTurnOpened = "daemon.sessionwatcher.turn_opened"
