@@ -54,8 +54,11 @@
 (defcustom agent-repl-interactive-model "opus"
   "Model alias Emacs asks for when it creates an interactive workspace.
 Travels as CreateWorkspace's model field; nil asks for no particular
-model and lets the daemon pick.  Does NOT affect the headless prompt
-summariser, which has its own model variable."
+model and lets the daemon pick.  It is the INITIAL INPUT of verbs.el's
+model picker (`agent-repl-verbs--read-model'), so this setting is what
+a bare RET sends and the picker still takes any override.  Does NOT
+affect the headless prompt summariser, which has its own model
+variable."
   :type '(choice (const :tag "Let the daemon choose" nil)
                  (string :tag "Model alias"))
   :group 'agent-repl)
