@@ -236,6 +236,20 @@ adopt call goes to the SUCCESSOR, and its absence is a contract breach
 worth an ERROR rather than an improvised reconnect."
   agent-repl-link--successor)
 
+(defun agent-repl-link-successor-pending-p ()
+  "Return non-nil while a successor dial stands but is NOT accepted yet.
+
+`agent-repl-link-successor' answers nil throughout that window, and the
+two nils mean opposite things: a PENDING successor is a daemon whose
+address the announcement already named and whose `WatchDaemon' is on its
+way up, while no pending successor at all is the contract breach the
+announcement order forbids.  host.el needs the distinction because the
+outgoing daemon pushes `transferred' as soon as a workspace falls free —
+which is routinely BEFORE this Emacs has read the announcement, let alone
+been accepted by the successor — so a transfer that lands in this window
+has to WAIT for the acceptance rather than be reported as a breach."
+  (and agent-repl-link--pending-successor t))
+
 (defun agent-repl-link-up-p ()
   "Return non-nil when a live primary connection stands."
   (and agent-repl-link--primary

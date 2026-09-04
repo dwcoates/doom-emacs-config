@@ -602,18 +602,38 @@ and accepted it there — a per-workspace release cannot introduce a
 daemon the link has never heard of.
 
 `transferred' is a PUSH, never a terminal frame, so the old stream stays
-standing until the adopt lands and the shared walk cancels it.  With no
-recorded successor there is nothing to adopt ONTO and no address to
-recover one from, which is a breach of the announcement order rather than
-a state to wait in: it is logged ERROR and the workspace keeps the old
+standing until the adopt lands and the shared walk cancels it.
+
+A SUCCESSOR THAT IS ONLY PENDING IS NOT A BREACH, AND WAS THE DEFECT.
+The outgoing daemon announces the stand-down and then transfers every
+FREE workspace immediately — measured at ~1 ms later, which is before
+this Emacs has even read the announcement off its own `WatchDaemon'
+stream, let alone dialed the successor and been ACCEPTED by it.  So the
+`transferred' push routinely arrives while `agent-repl-link-successor'
+still answers nil because the dial is in flight, and treating that nil as
+the missing-successor breach dropped the notice on the floor: no adopt
+was ever sent, the outgoing daemon sat out its whole adoption window and
+recorded the workspace\='s own fault, and the successor was promoted only
+by the old stream dying underneath it.  The window is WAITED IN instead,
+on daemon-link\='s own acceptance seam — the same one the
+`not_yet_adopted' refusal already uses — so the adopt goes out the
+instant the successor proves it is listening.
+
+With NEITHER a standing nor a pending successor there is nothing to adopt
+ONTO and no address to recover one from, which is the real breach of the
+announcement order: it is logged ERROR and the workspace keeps the old
 stream."
   (let ((new (agent-repl-link-successor)))
-    (if new
-        (progn
-          (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
-                            ws (agent-repl-connect-connection-address new))
-          (agent-repl-host--adopt-onto ws new))
-      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws))))
+    (cond
+     (new
+      (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
+                        ws (agent-repl-connect-connection-address new))
+      (agent-repl-host--adopt-onto ws new))
+     ((agent-repl-link-successor-pending-p)
+      (agent-repl--info ws "elisp.host.transferred-awaiting-successor ws=%s" ws)
+      (agent-repl-host--adopt-on-acceptance ws))
+     (t
+      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws)))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
