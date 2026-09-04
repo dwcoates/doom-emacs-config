@@ -602,6 +602,7 @@ func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -696,6 +697,7 @@ func (s *Store) StartSameDB(t *testing.T) {
 		"AGENT_REPL_STORE_SOCKET="+s.Socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-store")...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -805,6 +807,7 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
