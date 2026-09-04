@@ -314,6 +314,30 @@ orchestration chain. Cross-cutting conventions are in
 - R15: file-plane user prompts are NEVER page lines — classified as unserved
   vendor_specific{kind "user_prompt"}; the shim's AgentPrompt is the one
   served form (subagent commissions ride AgentSubagentStart.prompt).
+- HOOK ROWS: PLANE OWNERSHIP (ruling 2026-09-04). File-plane hook attachments
+  are NEVER page lines either, on the same R15 precedent: the SHIM's
+  `activity:<hook_id>` row is the one served hook row, and this reader
+  classifies `hook_success` / `hook_blocking_error` /
+  `hook_non_blocking_error` / `hook_cancelled` as unserved
+  vendor_specific{kind "attachment/<type>"}, keyed by the attachment RECORD's
+  own uuid (`residue:<uuid>`).
+  - THE REASON IS DISJOINT IDENTITY. The vendor gives the two planes no
+    shared identity material for one firing: the stream's `hook_started` /
+    `hook_response` pair carries a `hook_id` and never a `tool_use_id`, the
+    transcript attachment carries a `toolUseID` and never a `hook_id`, and
+    the two records' uuids differ. No upsert key can span them, so one
+    failing hook drew TWO feed rows nothing downstream could reconcile — the
+    file plane's the poorer, with no turn, no hook name and no event, since
+    this plane writes no start frame.
+  - THE RECORD UUID IS THE KEY, and it also fixes a second defect: the old
+    `hook:<hookName>:<toolUseID>` identity COLLAPSED distinct firings that
+    gate one call (testdata/captures/hook-blocked carries four
+    PreToolUse:Bash firings under a single toolUseID, so three were erased).
+  - `AgentHookStart.gated_call` stays UNSET on the stream (daemon.md ~1306);
+    it is never invented from this plane's `toolUseID`.
+  - THE COST, stated rather than hidden: a transcript-only session — one this
+    sidecar read with no shim ever having watched it — shows its hooks as
+    unserved items, not as live rows.
 - R10: session attribution is the agent-keyed spine; self-diagnostics are
   logs only; no open-task snapshot — re-derive; always read
   WriteBatchResponse. Restart correctness: on boot each tailer resumes from
