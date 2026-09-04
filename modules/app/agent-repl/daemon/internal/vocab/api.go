@@ -117,19 +117,10 @@ func LoadRenderColors(vocabDir string) (RenderColors, error) {
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return RenderColors{}, fmt.Errorf("vocab: parsing %s: %w", path, err)
 	}
-	c := RenderColors{
-		Colors:             parsed.Colors,
-		Precedence:         parsed.Precedence,
-		RosterStatus:       parsed.RosterStatus,
-		MergeGlyphs:        parsed.MergeGlyphs,
-		FeedMergeHeadGlyph: parsed.FeedMergeHeadGlyph,
-		FooterStatus:       parsed.FooterStatus,
-		FooterAllowance:    parsed.FooterAllowance,
-		TopbarConnectivity: parsed.TopbarConnectivity,
-		TopbarTones:        parsed.TopbarTones,
-		SurfaceOverrides:   parsed.SurfaceOverrides,
-		FailureSides:       parsed.FailureSides,
-	}
+	// renderColorsJSON carries exactly RenderColors' fields in exactly its
+	// order, differing only in the json tags, so the conversion is total: a
+	// field added to one and not the other stops compiling here.
+	c := RenderColors(parsed)
 	if err := c.validate(); err != nil {
 		return RenderColors{}, fmt.Errorf("vocab: %s: %w", path, err)
 	}
