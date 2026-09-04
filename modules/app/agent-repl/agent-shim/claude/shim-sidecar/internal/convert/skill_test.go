@@ -75,3 +75,59 @@ func TestSkillAllowancesRideTheAcknowledgement(t *testing.T) {
 		})
 	}
 }
+
+// TestASkillThatDidNotResolveSettlesAsAFailure covers the arm a vendor-stated
+// error lands on. No document ever arrives for a skill that did not resolve, so
+// the error result IS the unit's terminal — and a plane that emitted only the
+// START would leave the unit drawn as running forever, overwriting the other
+// plane's failed card on every replay.
+func TestASkillThatDidNotResolveSettlesAsAFailure(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_skill", "Skill", `{"skill":"absent-skill"}`))
+	failed := toolResultLineWithError("u1", "toolu_skill", ts2,
+		`[{"type":"text","text":"Error: no such skill: absent-skill"}]`,
+		`{"commandName":"absent-skill","success":false}`, true)
+
+	// Act.
+	entries := convertLines(t, c, call, failed)
+
+	// Assert.
+	var settled *conversationv1.AgentSkillUseFailure
+	for _, e := range entries {
+		if f := activityOf(e).GetSkillUse().GetFailure(); f != nil {
+			settled = f
+		}
+	}
+	if settled == nil {
+		t.Fatalf("no failed skill unit was produced")
+	}
+}
+
+// TestAFailedSkillCarriesTheProducersAccount covers what the failure arm says:
+// the producer's own error text, so the card can draw the reason verbatim
+// instead of a fabricated one.
+func TestAFailedSkillCarriesTheProducersAccount(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_skill", "Skill", `{"skill":"absent-skill"}`))
+	failed := toolResultLineWithError("u1", "toolu_skill", ts2,
+		`[{"type":"text","text":"Error: no such skill: absent-skill"}]`,
+		`{"commandName":"absent-skill","success":false}`, true)
+
+	// Act.
+	entries := convertLines(t, c, call, failed)
+
+	// Assert.
+	var text string
+	for _, e := range entries {
+		if f := activityOf(e).GetSkillUse().GetFailure(); f != nil {
+			for _, b := range f.GetError().GetContent().GetBlocks() {
+				text += b.GetText().GetText()
+			}
+		}
+	}
+	if want := "Error: no such skill: absent-skill"; text != want {
+		t.Fatalf("failure content = %q, want %q", text, want)
+	}
+}
