@@ -31,6 +31,10 @@
 
 ;;; Code:
 
+;; `magit-section' objects are EIEIO instances; `eieio-oref' reads their
+;; slots.
+(require 'eieio)
+
 (require 'cl-lib)
 (require 'subr-x)
 
