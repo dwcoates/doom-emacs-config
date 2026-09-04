@@ -433,10 +433,11 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		{
 			// The ROSTER reads it too: an open degraded window is what the
 			// row's `degraded` arm is made of, and the dot and the topbar must
-			// not disagree about one push.
-			name:   "diagnostics is the topbar's, the roster's and the health reporter's",
+			// not disagree about one push. The HEALTH REPORTER IS FIRST; see
+			// TestRouteDiagnosticsRecordsTheHealthFactBeforePublishingTheView.
+			name:   "diagnostics is the health reporter's, the topbar's and the roster's",
 			update: diagnosticsUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "lifecycle.OnSessionDiagnostics"},
+			want:   []string{"lifecycle.OnSessionDiagnostics", "topbar.OnSessionUpdate", "sidebar.OnSessionUpdate"},
 		},
 		{
 			name:   "context usage is the topbar's",
@@ -498,6 +499,45 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			assertNames(t, got, tt.want)
 		})
 	}
+}
+
+// TestRouteDiagnosticsRecordsTheHealthFactBeforePublishingTheView pins the ONE
+// ordering the diagnostics arm depends on: the health reporter is told before
+// the topbar draws the warning strip.
+//
+// SessionHealth answers from the reporter's recorded faults, while the topbar's
+// warning strip is drawn from the push itself. With the view published first, a
+// client that saw the warning and immediately asked SessionHealth was answered
+// "healthy" — observed at -parallel 16 as a 2.1ms window between a topbar
+// republish and the matching `daemon.health.open_fault`, which cost
+// TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush a run.
+func TestRouteDiagnosticsRecordsTheHealthFactBeforePublishingTheView(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(diagnosticsUpdate()) })
+
+	// Assert.
+	routed := names(got)
+	health, topbar := positionOf(routed, "lifecycle.OnSessionDiagnostics"), positionOf(routed, "topbar.OnSessionUpdate")
+	if health < 0 || topbar < 0 {
+		t.Fatalf("routed to %v, want both the health reporter and the topbar", routed)
+	}
+	if health > topbar {
+		t.Fatalf("routed to %v, want the health reporter told before the topbar publishes the warning", routed)
+	}
+}
+
+// positionOf is the position of a routed sink call, or -1.
+func positionOf(routed []string, name string) int {
+	for i, got := range routed {
+		if got == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // TestRouteQueryDied covers the session's death: every view reflects it, and

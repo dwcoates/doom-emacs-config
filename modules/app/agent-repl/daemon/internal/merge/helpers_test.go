@@ -591,6 +591,10 @@ func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
 }
 func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
 
+// Drain: this fake runs nothing in the background, so its work is always
+// already done.
+func (q *fakeQueue) Drain(time.Duration) bool { return true }
+
 // origins reports the origins the merge submitted under, in order. The origin
 // is the merge's whole attribution, so it is what the phase tests assert.
 func (q *fakeQueue) origins() []conversationv1.PromptOrigin {

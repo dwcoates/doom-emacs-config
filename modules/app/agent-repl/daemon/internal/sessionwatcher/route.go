@@ -20,9 +20,22 @@ import (
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_Diagnostics:
-		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar, the roster and the health reporter", dlog.Context{
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the health reporter, the topbar and the roster", dlog.Context{
 			"arm": sessionArm(update),
 		})
+		// THE RECORD IS WRITTEN BEFORE THE VIEW IS DRAWN, and that order is
+		// the whole point of this arm. The topbar's warning strip and the
+		// roster's degraded dot are drawn from the push itself, while
+		// SessionHealth answers from the health reporter's recorded faults —
+		// so a client that saw the warning and then asked SessionHealth was
+		// told "healthy" for as long as the fault took to land, and a client
+		// that saw the warning retracted could still be told "unhealthy".
+		// MEASURED: a topbar republish at 17:36:05.586423 and the matching
+		// `daemon.health.open_fault` at 17:36:05.588491, a 2.1ms window that
+		// an integration run at -parallel 16 lost a test to. Recording first
+		// closes it in BOTH directions: the published view is never ahead of
+		// the health the daemon will answer with.
+		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
 		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
 		// THE ROSTER READS THE SAME PUSH. An open degraded window is what the
 		// row's `degraded` arm is made of, and without this route that arm has
@@ -30,7 +43,6 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		// topbar is drawing as degraded, and the two surfaces would disagree
 		// about one fact.
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
-		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
 
 	case *conversationv1.SessionUpdate_ContextUsage,
 		*conversationv1.SessionUpdate_FastMode,
