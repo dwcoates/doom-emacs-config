@@ -209,6 +209,7 @@ func assertNoResponseTextEver(t *testing.T, stream *harness.Stream[*frontendv1.F
 // call, its own response) is reachable ONLY via that bubble's own sub-feed
 // — never inlined as a second top-level row on the root feed.
 func TestSubagentSyncNestedActivity(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -311,6 +312,7 @@ func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
 // sync arm's; the wrapper carries the placement fact, never a second
 // drawing").
 func TestSubagentDetached(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -370,6 +372,7 @@ func TestSubagentDetached(t *testing.T) {
 // ever completes the agent (SPEC.md §C #29: "asserts the router keeps it
 // out of the top-level feed while the unit is still live").
 func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -441,6 +444,7 @@ func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
 // it. If a future capture or doc grounds a specific wire consequence, this
 // test should gain that assertion; it is not invented here.
 func TestNestedSubagentHistoricalUsage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)

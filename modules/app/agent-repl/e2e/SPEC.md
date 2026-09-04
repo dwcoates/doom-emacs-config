@@ -296,6 +296,105 @@ multi-repo tests in this suite).
 daemon, sidecar, store, and (inherited) shim — with no exception. This is
 already how `daemon/integration` behaves; nothing new.
 
+### Running the suite — parallelism, and every bound it rests on
+
+**The invocation, from `modules/app/agent-repl/e2e`:**
+
+```
+go test -count=1 -timeout 45m -parallel 8 ./...
+```
+
+`-parallel 8` is not decoration. **Every test in this package declares
+`t.Parallel()`**, so without a bound `go test` would use `GOMAXPROCS` and
+stand that many full worlds — a daemon, a store, a sidecar and a node shim
+each — at once.
+
+#### Why parallel is safe here
+
+Isolation was already structural before the declaration was added; nothing
+had to be made safe for it:
+
+| Shared thing | Why concurrent worlds do not collide |
+|---|---|
+| daemon address | an ephemeral loopback port the daemon picks and publishes into its own state root's `daemon.addr` |
+| store socket | `shortSocketPath` — a random 4-byte suffix directly under `$TMPDIR` |
+| shim sockets | under the world's own short state root (`shortStateRoot`, `os.MkdirTemp`) |
+| state root, config roots, lock dir, prompts, webapp dist | per-daemon, minted by `harness.StartDaemon` under its own `t.TempDir()` |
+| spool root | one `t.TempDir()` per world, handed to the shims AND the sidecar (`assertOneSpoolRoot`) |
+| fake git state | a per-daemon state file, named to each daemon through `fakegit.EnvStateFile` |
+| built binaries | `sync.Once` per binary, one shared temp bin dir per `go test` process; `Once` blocks the racers rather than duplicating the build |
+| stray-reaping exemptions | a package-level map keyed by pid, mutex-guarded, entries removed at each owner's cleanup |
+| process environment | nothing in this package calls `t.Setenv`, `os.Setenv` or `os.Chdir`; every lever travels through `Opts.ExtraEnv` into one daemon's own environment |
+
+The Emacs-layer files are the one part of the suite that does not declare
+`t.Parallel()`; they are owned separately and skip on a host with no sandbox
+image.
+
+#### Why 8, and not more
+
+Measured on a 16-core host, back to back on the same tree:
+
+| Setting | Wall | Verdicts |
+|---|---|---|
+| `-parallel 1` | 65.6s | 118 pass / 2 known fail / 47 skip |
+| `-parallel 8` | 15.4s | identical |
+
+Per-test wall time inflates with concurrency, because a world is four real
+processes and every wait in this suite is bounded against an ordinary,
+lightly-loaded machine (`DefaultTimeout`'s own sizing note). Past 8 that
+inflation starts costing correctness rather than buying time: at
+`-parallel 12` a run went 20.7s → 38.4s **and** lost a test to a bound. 8 is
+the widest setting measured green.
+
+#### The webapp layer gets a second, tighter bound
+
+`-parallel` counts worlds, and a webapp-layer area is not a world: it is a
+world PLUS a whole vitest child (its own node process, an esbuild transform
+of the app's sources, a jsdom document), and there are ten areas. One number
+cannot size two loads that far apart, so `wlMaxConcurrentAreas` (currently
+**3**, `webapplayer_e2e_test.go`) caps how many areas run at once,
+independently of `-parallel`.
+
+- Left uncapped at `-parallel 8`, the feed-families area went 7.4s → 29.1s
+  and four unrelated Go tests failed on bounds sized for an unloaded box.
+- The slot is taken BEFORE the area builds its world and released at test
+  cleanup. A world's context starts ticking at `harness.StartDaemon`, so an
+  area that built its world and then queued would burn its own budget, and
+  its four processes, while waiting in line.
+- 3 was measured against 2 and 4: 2 → 31.2s, 3 → 20.7s (both at
+  `-parallel 8`, on a box under other load), and 4 at `-parallel 12` lost a
+  test. 3 is the fastest setting measured green.
+
+#### Bounds this suite touched, and their measured basis
+
+No wait bound was widened, and none was tightened below what was measured.
+
+| Bound | Value | Basis |
+|---|---|---|
+| `wlMaxConcurrentAreas` | 3 | the measurement above: 2 → 31.2s, 3 → 20.7s, 4 → a lost test |
+| `-parallel` | 8 | 1 → 65.6s, 8 → 15.4s, both green; 12 → 38.4s and a lost test |
+
+The wall figures above were taken on a workstation shared with other running
+suites, so they are noisy in absolute terms (the same serial run measured
+65.6s idle and 157s under heavy neighbour load). Every comparison quoted here
+is between settings measured back to back under the same conditions.
+
+Every other bound (`DefaultTimeout`, `HandoverChainTimeout`,
+`AdoptionChainTimeout`, `StoreOutageWindow`, `unownedSpoolWindow`,
+`WebappLayerTimeout`, `coldGateChainTimeout`, `reapGrace`) is unchanged from
+the sizing its own doc comment records.
+
+#### Stability is proved, never assumed
+
+A parallel run that is green once has proved nothing. The pass set must be
+IDENTICAL across `go test -count=3 -parallel 8`; a test that moves between
+runs is a defect to root-cause at its source, never a run to repeat. One such
+defect was found and fixed this way: the refused-vendor-start area's health
+fault lands asynchronously behind the rpc that causes it, so whether the
+cleanup sweep saw it depended on machine load — the fix is that the area
+states the fault its own arrangement causes (`refusals_e2e_test.go`'s
+`rfVendorStartFaultWarnings`), not that the run is retried.
+
 ### Loud skips
 
 Exactly the deleted `daemon/e2e`'s three: no `node` on `PATH` → skip; no

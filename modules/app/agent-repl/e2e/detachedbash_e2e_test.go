@@ -192,6 +192,7 @@ func dbAwaitSimpleToolCall(
 // ===========================================================================
 
 func TestBashDetachedStartAndComplete(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
@@ -255,6 +256,7 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 // ===========================================================================
 
 func TestBashDetachExplicitPoll(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	// Detached work outliving its turn opens a health fault; that is the
 	// shape this test provokes.
@@ -338,6 +340,7 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 // ===========================================================================
 
 func TestCtrlBDetachOfForegroundWork(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 
@@ -391,6 +394,7 @@ func TestCtrlBDetachOfForegroundWork(t *testing.T) {
 // ===========================================================================
 
 func TestCtrlBDetachOfForegroundSubagent(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 
@@ -426,6 +430,7 @@ func TestCtrlBDetachOfForegroundSubagent(t *testing.T) {
 // ===========================================================================
 
 func TestBashForegroundCompleted(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 
@@ -469,6 +474,7 @@ func TestBashForegroundCompleted(t *testing.T) {
 // ===========================================================================
 
 func TestBashNonzeroExit(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 
@@ -513,6 +519,7 @@ func TestBashNonzeroExit(t *testing.T) {
 // ===========================================================================
 
 func TestBashImageOutput(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 
@@ -551,6 +558,7 @@ func TestBashImageOutput(t *testing.T) {
 // ===========================================================================
 
 func TestBashPartialOutputWithSpill(t *testing.T) {
+	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
 

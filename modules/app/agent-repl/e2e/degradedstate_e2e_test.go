@@ -118,6 +118,7 @@ func findClosedDegradedWindow(v *frontendv1.TopbarView, open *frontendv1.TopbarD
 // Store.Stop, is stated by the daemon as an OPEN degraded window on the
 // topbar's warning strip.
 func TestDegradedDuringRealStoreOutage(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace with a live session, whose store link is
 	// healthy at session start (GetLiveWork, shim.md, succeeds before the
 	// outage begins).
@@ -168,6 +169,7 @@ func TestDegradedDuringRealStoreOutage(t *testing.T) {
 // once the store is back and the shim reconnects ("the degraded fact
 // clears", SPEC.md).
 func TestRecoveryAfterStoreRestart(t *testing.T) {
+	t.Parallel()
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
 	w := NewWorld(t, WorldOpts{})

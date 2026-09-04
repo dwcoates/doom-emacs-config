@@ -232,6 +232,7 @@ func distinctTurnIDs(rows []*frontendv1.FeedRow) map[string]bool {
 // compaction_failed and no_session are NOT exercised — see this file's
 // header comment for why neither is reachable without fabrication.
 func TestHibernateOnIdleCutoff(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	gatePath := filepath.Join(t.TempDir(), "turn-gate")
 	const gateText = "hibernation e2e turn gate: TestHibernateOnIdleCutoff"
@@ -300,6 +301,7 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 // test assert the daemon's own feed carries no trace of it, and that the
 // wire has no PromptOrigin arm a keep-alive could even be attributed to.
 func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
 		ExtraEnv: []string{fmt.Sprintf("%s=%d", fakeKeepaliveIntervalEnv, fakeKeepaliveIntervalMS)},
@@ -365,6 +367,7 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 // with nothing from the idle interval's real keep-alive activity leaking
 // onto it.
 func TestRevivalAfterHibernate(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{IdleCutoffMS: hibernationIdleCutoffMS}})
 	// Standing a shim down and reviving it opens a health fault while the

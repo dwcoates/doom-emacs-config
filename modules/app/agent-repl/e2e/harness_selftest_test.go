@@ -10,6 +10,7 @@ import (
 // not fail visibly, but as a whole suite of timeouts and no_session prompts.
 
 func TestResolvedPathResolvesASymlinkedDirectory(t *testing.T) {
+	t.Parallel()
 	// Arrange: a directory reached through a symlink, exactly the shape a
 	// macOS temp root has (/tmp -> /private/tmp).
 	real := filepath.Join(t.TempDir(), "real")
@@ -38,6 +39,7 @@ func TestResolvedPathResolvesASymlinkedDirectory(t *testing.T) {
 }
 
 func TestResolvedPathLeavesAnUnsymlinkedDirectoryUnchanged(t *testing.T) {
+	t.Parallel()
 	// Arrange: an already-resolved directory.
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -57,6 +59,7 @@ func TestResolvedPathLeavesAnUnsymlinkedDirectoryUnchanged(t *testing.T) {
 }
 
 func TestResolvedPathFailsLoudlyOnAMissingDirectory(t *testing.T) {
+	t.Parallel()
 	// Arrange: a path nothing created.
 	missing := filepath.Join(t.TempDir(), "absent")
 
@@ -70,6 +73,7 @@ func TestResolvedPathFailsLoudlyOnAMissingDirectory(t *testing.T) {
 }
 
 func TestResolveBuildIdentityPrefersTheShimBuildStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange: a checkout whose shim bundle carries a build stamp, which is
 	// what the daemon exports in preference to SHIM_BUILD_SHA.
 	root := t.TempDir()
@@ -88,6 +92,7 @@ func TestResolveBuildIdentityPrefersTheShimBuildStamp(t *testing.T) {
 }
 
 func TestResolveBuildIdentityFallsBackToTheFixedShaWithoutAStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange: a checkout that has never built the shim.
 	root := t.TempDir()
 
@@ -104,6 +109,7 @@ func TestResolveBuildIdentityFallsBackToTheFixedShaWithoutAStamp(t *testing.T) {
 }
 
 func TestResolveBuildIdentityRejectsAnEmptyStamp(t *testing.T) {
+	t.Parallel()
 	// Arrange: an empty stamp, which the daemon itself refuses to boot on.
 	root := t.TempDir()
 	writeShimStamp(t, root, "   \n")
@@ -118,6 +124,7 @@ func TestResolveBuildIdentityRejectsAnEmptyStamp(t *testing.T) {
 }
 
 func TestBuildIdentityEnvNamesOneShaInBothRoles(t *testing.T) {
+	t.Parallel()
 	// Arrange: the identity runSuite resolved for this run.
 	env := buildIdentityEnv()
 
@@ -135,6 +142,7 @@ func TestBuildIdentityEnvNamesOneShaInBothRoles(t *testing.T) {
 }
 
 func TestBuildIdentityEnvPinsTheCheckout(t *testing.T) {
+	t.Parallel()
 	// Arrange/Act.
 	got := valueOf(buildIdentityEnv(), checkoutEnv)
 
@@ -145,6 +153,7 @@ func TestBuildIdentityEnvPinsTheCheckout(t *testing.T) {
 }
 
 func TestCheckBuildIdentityAgreesPassesForTheResolvedRun(t *testing.T) {
+	t.Parallel()
 	// Arrange/Act/Assert: the invariant runSuite already enforced holds.
 	if err := checkBuildIdentityAgrees(); err != nil {
 		t.Fatalf("checkBuildIdentityAgrees = %v", err)

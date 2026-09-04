@@ -79,6 +79,7 @@ import (
 // place and end the turn `success.interrupted` — not a fabricated
 // AgentInterrupted the test invents by racing a sleep.
 func TestInterruptAfterTextDelta(t *testing.T) {
+	t.Parallel()
 	// Arrange: a world with a scripted-fake-git workspace (a later user
 	// ruling reversed real git: only claude-repld, the shim, shim-store, and
 	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt
@@ -151,6 +152,7 @@ func TestInterruptAfterTextDelta(t *testing.T) {
 // rpc: the vendor itself reports the timeout and auto-backgrounds, so the
 // turn concludes ordinarily while the Bash unit lives on as detached work.
 func TestBashInterruptedByTimeout(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)

@@ -201,6 +201,7 @@ type scShapeAUserRecord struct {
 // so that distinction is not independently observable at this wire and this
 // test does not attempt to assert it.
 func TestVendorAnsweredSlashCommand(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -232,6 +233,7 @@ func TestVendorAnsweredSlashCommand(t *testing.T) {
 // file the real shim wrote, never asserted by inspecting store internals or
 // hand-authoring a fixture.
 func TestSlashShapeBViaSlash(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -278,6 +280,7 @@ func TestSlashShapeBViaSlash(t *testing.T) {
 // stream assertion) and the ordinary conclusion text the turn still ends
 // with.
 func TestSlashShapeANamed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -322,6 +325,7 @@ func TestSlashShapeANamed(t *testing.T) {
 // only, with NO `<command-name>` element anywhere in it — the negative
 // #61 exists to prove alongside.
 func TestSlashShapeAUnnamed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)

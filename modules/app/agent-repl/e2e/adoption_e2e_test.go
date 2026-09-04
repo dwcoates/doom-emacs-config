@@ -88,6 +88,7 @@ import (
 // ===========================================================================
 
 func TestColdBootReadsReplayFromStore(t *testing.T) {
+	t.Parallel()
 	// Arrange: drive a real "!prose-streamed" turn to completion so the
 	// store durably holds REAL rows (driveScenarioToCompletion blocks on the
 	// sidecar's own cursor advance) before any bounce is simulated — the
@@ -169,6 +170,7 @@ func adCountLogMessage(t *testing.T, workspaceDir, op, substr string) int {
 }
 
 func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	w.ExpectWarnings("daemon.rollout.reconcile")
@@ -439,6 +441,7 @@ func adAwaitAddrFileChange(t *testing.T, d *harness.Daemon, want string) {
 const adSelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
 
 func TestHandoverTransfersAtFreeness(t *testing.T) {
+	t.Parallel()
 	// Arrange: a HEADLESS workspace — registered, never opened, so it has
 	// ZERO rendezvous participants and, per daemon.md ("headless workspaces
 	// transfer with zero rendezvous"), transfers the instant the handover
@@ -487,6 +490,7 @@ func TestHandoverTransfersAtFreeness(t *testing.T) {
 }
 
 func TestRefusalOrderingDuringHandover(t *testing.T) {
+	t.Parallel()
 	// Arrange: an ordinary, idle (free) workspace whose host+web streams are
 	// BOTH open at the moment of announcement, so it is an EXPECTED
 	// rendezvous participant and does not transfer until AdoptHostWorkspace/

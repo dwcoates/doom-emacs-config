@@ -126,6 +126,7 @@ func submitCommand(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, command
 // this scenario carries never cross the footer's separate newsworthiness
 // threshold and so are not asserted as a drawn status line.
 func TestAccountUsage(t *testing.T) {
+	t.Parallel()
 	// Arrange: one world, one (fake-git) repository registered as a
 	// workspace.
 	w := NewWorld(t, WorldOpts{})
@@ -164,6 +165,7 @@ func TestAccountUsage(t *testing.T) {
 // state, never from a pull of its own — is read after each of two turns to
 // prove the second reading moved without the test ever calling a pull verb.
 func TestContextUsage(t *testing.T) {
+	t.Parallel()
 	// Arrange: one world, one (fake-git) repository registered as a
 	// workspace.
 	w := NewWorld(t, WorldOpts{})

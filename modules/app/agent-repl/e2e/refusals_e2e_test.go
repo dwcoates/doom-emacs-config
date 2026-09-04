@@ -155,6 +155,7 @@ func rfSubmitBubblePrompt(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, 
 // ===========================================================================
 
 func TestBubbleRefusedNotDeliverable(t *testing.T) {
+	t.Parallel()
 	// Arrange: drive a synchronous subagent to completion, then find its
 	// settled bubble row.
 	w := NewWorld(t, WorldOpts{})
@@ -200,6 +201,7 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 // ===========================================================================
 
 func TestBubbleRefusedAgentBusy(t *testing.T) {
+	t.Parallel()
 	// Arrange: drive the never-settling detached subagent, then find its
 	// still-live bubble row.
 	w := NewWorld(t, WorldOpts{})
@@ -268,6 +270,7 @@ func TestBubbleRefusedAgentBusy(t *testing.T) {
 // ===========================================================================
 
 func TestUnknownAgentOnUpdateAgent(t *testing.T) {
+	t.Parallel()
 	// Arrange: raise a permission ask under a detached subagent, then stop
 	// that subagent out from under its own still-open ask.
 	w := NewWorld(t, WorldOpts{})
@@ -376,9 +379,31 @@ func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 	}
 }
 
+// rfVendorStartFaultWarnings are the daemon warning records a REFUSED vendor
+// start legitimately produces, and they are these two tests' own subject: the
+// arrangement asks the fake SDK to refuse StartSession, the daemon relays the
+// typed vendor_start_failed arm, and it opens a health fault over the session
+// it could not bring up. Declared for the same reason the cold-gate area
+// declares `daemon.health.open_fault` (coldgate_e2e_test.go's
+// coldGateWarnings): a bring-up the test deliberately breaks is a fault the
+// daemon is RIGHT to record.
+//
+// It is declared rather than left to chance because the record lands
+// ASYNCHRONOUSLY, a moment behind the rpc that caused it. Whether the sweep at
+// test cleanup sees it therefore depends on how much the test does afterwards
+// and how loaded the machine is — observed directly: the one-shot test, which
+// runs on for another turn after the refusal, failed the sweep under a
+// saturated parallel run while its every-start sibling, which ends
+// immediately, did not. An undeclared fault whose observation is a race is a
+// flake, and the cure is to state the fault the arrangement causes, not to
+// hope the sweep runs first.
+var rfVendorStartFaultWarnings = []string{"daemon.health.open_fault"}
+
 func TestStartSessionVendorStartFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange: a world whose every StartSession is refused by the vendor.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start"}}})
+	w.ExpectWarnings(rfVendorStartFaultWarnings...)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
@@ -388,8 +413,10 @@ func TestStartSessionVendorStartFailed(t *testing.T) {
 }
 
 func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
+	t.Parallel()
 	// Arrange: a world whose FIRST StartSession only is refused.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start-once"}}})
+	w.ExpectWarnings(rfVendorStartFaultWarnings...)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
@@ -450,6 +477,7 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 // ===========================================================================
 
 func TestKillTurnNotTheOpenTurn(t *testing.T) {
+	t.Parallel()
 	t.Skip("e2e: KillTurnFailure.not_the_open_turn is driven by an internal " +
 		"daemon/shim race with no client-observable trigger and no documented " +
 		"scenario or env lever (see this test's own header comment); flagged " +

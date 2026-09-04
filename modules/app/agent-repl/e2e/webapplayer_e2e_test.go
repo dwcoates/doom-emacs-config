@@ -83,6 +83,7 @@ const WebappLayerTimeout = 300 * time.Second
 // A hold is bounded by the thing it is held FOR, so this asserts the two
 // bounds are the ones the arrangement needs and not each other.
 func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		bound time.Duration
@@ -162,36 +163,43 @@ func wlRequireWebappDeps(t *testing.T) string {
 
 // TestWebappLayer is section F1: proof of life.
 func TestWebappLayer(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "proof-of-life.layer.test.ts")
 }
 
 // TestWebappLayerFeedFamilies is section F2: one drawn row family per test.
 func TestWebappLayerFeedFamilies(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "feed-families.layer.test.ts")
 }
 
 // TestWebappLayerSubfeeds is section F3: sub-feed open/collapse lifecycle.
 func TestWebappLayerSubfeeds(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "subfeeds.layer.test.ts")
 }
 
 // TestWebappLayerCards is section F4: permission and question cards.
 func TestWebappLayerCards(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "cards.layer.test.ts")
 }
 
 // TestWebappLayerSurfaces is section F5: footer and topbar surfaces.
 func TestWebappLayerSurfaces(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "surfaces.layer.test.ts")
 }
 
 // TestWebappLayerPanels is section F6: daemon-answered command panels.
 func TestWebappLayerPanels(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "panels.layer.test.ts")
 }
 
 // TestWebappLayerRefusals is section F8: refusal wording and placement.
 func TestWebappLayerRefusals(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "refusals.layer.test.ts")
 }
 
@@ -209,6 +217,7 @@ func TestWebappLayerRefusals(t *testing.T) {
 // Declaring them is what keeps the area honest: an undeclared warning fails
 // the run, so a NEW fault here cannot hide behind these two.
 func TestWebappLayerRoster(t *testing.T) {
+	t.Parallel()
 	wlDriveArea(t, "roster.layer.test.ts", "daemon.wsm.acquire_lease", "daemon.drain.fire")
 }
 
@@ -220,6 +229,8 @@ func TestWebappLayerRoster(t *testing.T) {
 // The scripted fake git (harness.NewRepo plus a test-all script) is the only
 // git involved — no real repository, exactly as SPEC.md section B requires.
 func TestWebappLayerMergeTabs(t *testing.T) {
+	t.Parallel()
+	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
@@ -309,6 +320,8 @@ const wlPageMountedOperation = "webapp-layer.handover.page-mounted"
 // the standing unlanded-arm refusal record is the evidence of the refusal a
 // handover deliberately provokes.
 func TestWebappLayerRestartHandover(t *testing.T) {
+	t.Parallel()
+	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
@@ -495,6 +508,7 @@ func wlCreateChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, n
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string, expectWarnings ...string) {
 	t.Helper()
+	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
 
@@ -600,6 +614,46 @@ type wlChild struct {
 		sync.Mutex
 		lines []string
 	}
+}
+
+// wlAreaSlots CAPS HOW MANY WEBAPP-LAYER AREAS RUN AT ONCE, across the whole
+// parallel suite.
+//
+// Every test in this package runs with t.Parallel(), so `-parallel N` bounds
+// how many WORLDS stand at once — and a world is cheap next to a webapp-layer
+// area. A world is three small Go processes plus a node shim; an area is that
+// PLUS a whole vitest run (its own node process, an esbuild transform of the
+// app's sources, and a jsdom document), and there are ten areas. Left uncapped,
+// ten of those land together and the box saturates: measured at `-parallel 8`
+// with no cap, the feed-families area went from 7.4s to 29.1s and four
+// unrelated Go tests failed on bounds sized for an unloaded machine.
+//
+// The cap is a SEPARATE, TIGHTER bound than `-parallel` because the two things
+// being bounded have wildly different weights; one number cannot size both.
+//
+// IT IS TAKEN BEFORE THE WORLD IS BUILT, not around the vitest child alone.
+// A world's own context starts ticking at harness.StartDaemon — a queued area
+// that had already built its world would sit there burning its budget and its
+// four processes while it waited for a slot, which is both the load the cap
+// exists to prevent and a bound expiring for a reason the test is not about.
+// The slot therefore covers the whole area, and is released at test cleanup,
+// after the world's own teardown has run.
+//
+// Sized at 2 from measurement on a 16-core host: one area alone runs in
+// 2.9-7.4s (its vitest child is 1.2-3.2s of that — WebappLayerTimeout's own
+// note), two together stay inside that spread, and the Go areas' own
+// DefaultTimeout waits keep their measured headroom.
+const wlMaxConcurrentAreas = 3
+
+var wlAreaSlots = make(chan struct{}, wlMaxConcurrentAreas)
+
+// wlHoldAreaSlot blocks until this area may run, and gives the slot back at
+// test cleanup. Registered before anything else the area builds, so a queued
+// area holds nothing but its place in line.
+func wlHoldAreaSlot(t *testing.T) {
+	t.Helper()
+	wlAreaSlots <- struct{}{}
+	t.Cleanup(func() { <-wlAreaSlots })
 }
 
 // wlStartVitest starts the layer's vitest project as a child of this test and

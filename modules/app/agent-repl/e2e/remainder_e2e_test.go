@@ -288,6 +288,7 @@ func rmFindContextInjected(page *storev1.AgentSessionPage) *conversationv1.Agent
 // ===========================================================================
 
 func TestArtifactPublishAndList(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -333,6 +334,7 @@ func TestArtifactPublishAndList(t *testing.T) {
 // ===========================================================================
 
 func TestContextInjectedMemory(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -368,6 +370,7 @@ func TestContextInjectedMemory(t *testing.T) {
 // ===========================================================================
 
 func TestContextInjectedSkills(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -411,6 +414,7 @@ func TestContextInjectedSkills(t *testing.T) {
 // ===========================================================================
 
 func TestCronCreateListDelete(t *testing.T) {
+	t.Parallel()
 	// Arrange. The footer is watched BEFORE the turn is driven: the
 	// scenario CREATES and then DELETES the job inside one turn, so the
 	// non-empty job set the chip is set from exists only in the middle of
@@ -466,6 +470,7 @@ func TestCronCreateListDelete(t *testing.T) {
 // ===========================================================================
 
 func TestDiagnostics(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -500,6 +505,7 @@ func TestDiagnostics(t *testing.T) {
 // ===========================================================================
 
 func TestPlanModeEnterExit(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -525,6 +531,7 @@ func TestPlanModeEnterExit(t *testing.T) {
 // ===========================================================================
 
 func TestPushNotificationSent(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -558,6 +565,7 @@ func TestPushNotificationSent(t *testing.T) {
 // ===========================================================================
 
 func TestPushNotificationNotSent(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -588,6 +596,7 @@ func TestPushNotificationNotSent(t *testing.T) {
 // ===========================================================================
 
 func TestReportFindings(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -625,6 +634,7 @@ func TestReportFindings(t *testing.T) {
 // ===========================================================================
 
 func TestScheduleWakeupScheduleAndStop(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -658,6 +668,7 @@ func TestScheduleWakeupScheduleAndStop(t *testing.T) {
 // ===========================================================================
 
 func TestSendMessageQueuedAndResumed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -707,6 +718,7 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 // ===========================================================================
 
 func TestTaskActsCreateChangeReject(t *testing.T) {
+	t.Parallel()
 	// Arrange. The footer is watched before the first turn is driven, so
 	// every checklist state each turn publishes is queued in order.
 	w, ws := rmNewWorkspace(t)
@@ -769,6 +781,7 @@ func rmAwaitFooter(t *testing.T, w *World, footer *FooterWatch, what string, pre
 // ===========================================================================
 
 func TestWebFetch(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -795,6 +808,7 @@ func TestWebFetch(t *testing.T) {
 // ===========================================================================
 
 func TestWebSearch(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
@@ -828,6 +842,7 @@ func TestWebSearch(t *testing.T) {
 // ===========================================================================
 
 func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 

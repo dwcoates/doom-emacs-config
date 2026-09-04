@@ -17,6 +17,7 @@ import (
 // The subject is exercised without a process: exit() is the seam a real
 // cmd.Wait feeds, so a table can drive the orderings a live run cannot.
 func TestProcessExitAnswersEveryObserver(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		probe func(t *testing.T, p *processExit)
@@ -71,6 +72,7 @@ func TestProcessExitAnswersEveryObserver(t *testing.T) {
 // budget rather than block. This is what keeps a wedged child from hanging
 // the suite.
 func TestProcessExitAwaitWithinBoundsARunningProcess(t *testing.T) {
+	t.Parallel()
 	// Arrange: an exit that never arrives.
 	p := &processExit{done: make(chan struct{})}
 	budget := 20 * time.Millisecond
@@ -97,6 +99,7 @@ func TestProcessExitAwaitWithinBoundsARunningProcess(t *testing.T) {
 // /bin/sh exiting immediately — so no external service, git, or vendor is
 // involved.
 func TestProcessExitReportsARealChildsExit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		args    []string
