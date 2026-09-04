@@ -145,8 +145,8 @@ func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversa
 		row.Turn = prior
 		return
 	}
-	if s.turnInFlight != nil {
-		row.Turn = &conversationv1.TurnId{Value: string(*s.turnInFlight)}
+	if s.turnStamp != nil {
+		row.Turn = &conversationv1.TurnId{Value: string(*s.turnStamp)}
 	}
 }
 
@@ -247,6 +247,7 @@ func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
 	s := r.state(ws)
 	running := turn
 	s.turnInFlight = &running
+	s.turnStamp = &running
 	r.logger(ws).Debug("daemon.feed.turn_opened",
 		"the feed took the turn the daemon opened", dlog.Context{"turn": string(turn)})
 }
