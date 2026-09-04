@@ -1039,6 +1039,10 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	// by design. The successor appends to the SAME run log, so this daemon's
 	// own log assertion reads the record too.
 	d.ExpectWarnings("daemon.rollout.reconcile")
+	// THE CONFLICT IS THE ARRANGEMENT, and the merge says so on the child
+	// workspace's own sink. Those two records are the parked merge this test
+	// then crashes the daemon across.
+	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -1066,6 +1070,9 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	// session to account for, which the rollout reconciler states as a fault
 	// by design.
 	d2.ExpectWarnings("daemon.rollout.reconcile")
+	// The recovered merge re-reaches the SAME scripted conflict, on this
+	// daemon's own pid; the records are the recovery working, not a fault.
+	d2.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts")
 	d2.AwaitRunLogOperation("daemon.merge.recover")
 
 	// Assert: the workspace's merge status is a resolved merge arm, never an
@@ -1895,7 +1902,6 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	if ws.GetId() == "" {
 		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
 	}
-	d.WatchWorkspaceLogs(ws.GetDir())
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()

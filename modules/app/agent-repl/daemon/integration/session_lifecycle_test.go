@@ -694,6 +694,9 @@ func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
 	// vendor transcript filed under the default root.
 	f := newOpened(t, harness.Opts{})
+	// The arrangement KILLS the session before the reboot, and that trail is
+	// evidence of the kill it asked for.
+	expectSessionKillRecords(f.d)
 	f.shim.ExpectStartSession()
 	vendorID := f.shim.Info().VendorSessionID
 	if vendorID == "" {
@@ -1638,6 +1641,8 @@ func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
 	d.ExpectWarnings("daemon.health.open_fault")
+	// KillWorkspace ends a live session on purpose; that trail is the ACT here.
+	expectSessionKillRecords(d)
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, "kill-keep-data")
 	ws := harness.Register(t, d, dir)
@@ -1841,6 +1846,8 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
 	f.d.ExpectWarnings("daemon.workspace.open")
+	// The arrangement KILLS the session to get a whole session-terminal row.
+	expectSessionKillRecords(f.d)
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
