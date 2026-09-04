@@ -121,6 +121,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -868,5 +869,79 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 	})
 	if left.GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded() == nil {
 		t.Fatal("worktree-left (removed) divider carries no discarded-files/commits line, want one composed (the fixture discards 3 files, 1 commit)")
+	}
+}
+
+// ===========================================================================
+// Coverage extension — `!send-message-refused`: an undeliverable send.
+// ===========================================================================
+
+// TestSendMessageRefused drives "!send-message-refused" (tasks.ts's
+// SEND_MESSAGE_REFUSED): a `SendMessage` addressed to an agent the user
+// stopped, answered `success: false` with the vendor's refusal prose. The
+// scenario's declared arm is conversation/v1's AgentSendMessageFailure.
+//
+// # WHAT THE FRONTEND CONTRACT SAYS ABOUT A REFUSED SEND — AND THE GAP
+//
+// A send is NOT drawn as a tool card. feed.proto's FeedTurnActivity oneof has
+// no send arm; a send is drawn with FeedAgentPrompt instead, "ONE component,
+// both ends: on the SENDER's feed it is the outgoing send, on the
+// recipient's the delivered prompt; only the address line differs", and
+// daemon/internal/resolve/feed/sendmessage.go's drawSendMessage is the
+// composer for the sender's end. Its failure arm draws the row against what
+// the START said, with this comment: "A send that could not be delivered
+// still HAPPENED, and its row is what explains the attempt."
+//
+// So FeedAgentPrompt carries NO delivery-outcome field at all — no failed
+// treatment, no refusal reason — and the refused send is drawn exactly as an
+// accepted one is. GAP RECORDED: the frontend surface cannot today
+// distinguish a refused send from a delivered one, so the strongest available
+// assertion is that the attempt is drawn AND SURVIVES the refusal (a resolver
+// that dropped the row on the failure arm, or that invented a recipient
+// identity the refusal never resolved, would fail here), plus the turn's own
+// terminal.
+//
+// This also corrects, for this one scenario, the claim in
+// TestSendMessageQueuedAndResumed's comment above that "a send draws NO feed
+// row on the SENDER's feed": sink.go routes AgentActivity_SendMessage to
+// drawSendMessage, which returns a row on every arm but the unset one.
+func TestSendMessageRefused(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message-refused")
+
+	// Assert: the attempt is drawn on the SENDER's feed as an agent_prompt,
+	// addressed with the outgoing "→ " prefix drawSendMessage composes and
+	// naming the recipient EXACTLY AS THE CALLER WROTE IT — the refusal
+	// resolved no identity, and sendRecipientLabel must not invent one.
+	const recipient = "a85a6434719755df1"
+	row := rmAwaitFeedRow(t, w, ws, "the refused send's own agent_prompt row", func(r *frontendv1.FeedRow) bool {
+		p := r.GetAgentPrompt()
+		return p != nil && strings.HasPrefix(p.GetAddress().GetText(), "→ ")
+	})
+	prompt := row.GetAgentPrompt()
+	if got, want := prompt.GetAddress().GetText(), "→ "+recipient; got != want {
+		t.Errorf("refused send address = %q, want %q — the addressed string verbatim, never a synthesized "+
+			"identity and never the \"an agent the send did not name\" fallback", got, want)
+	}
+
+	// Assert: the body is the caller's SUMMARY, never the message itself —
+	// AgentSendMessage's contract forbids drawing the body, and a refusal is
+	// no license to start.
+	var bodies []string
+	for _, block := range prompt.GetBody().GetBlocks() {
+		bodies = append(bodies, block.GetText().GetText())
+	}
+	if len(bodies) != 1 || bodies[0] != "continue" {
+		t.Errorf("refused send body blocks = %q, want exactly the caller's summary [%q]", bodies, "continue")
+	}
+
+	// Assert: the refusal is the VENDOR's, not the turn's — a tool that
+	// answered `success: false` still lets the agent conclude.
+	if ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("the send-message-refused turn ended = %v, want a concluded outcome", ended)
 	}
 }
