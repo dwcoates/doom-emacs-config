@@ -194,6 +194,12 @@ type fakeStand struct {
 	hibernateErr map[ids.WorkspaceID]error
 	// killErr fails the stand-down.
 	killErr map[ids.WorkspaceID]error
+	// wedge, when set, is the shim that ACCEPTS a call and never answers: both
+	// verbs block on their own context until the caller's bound ends it. It is
+	// the shape the idle-sweep hang was found in.
+	wedge bool
+	// wedgeKill wedges only the stand-down.
+	wedgeKill bool
 
 	hibernated []ids.WorkspaceID
 	killed     []killCall
@@ -216,10 +222,14 @@ func newFakeStand() *fakeStand {
 	}
 }
 
-func (s *fakeStand) Hibernate(_ context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error) {
+func (s *fakeStand) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hibernated = append(s.hibernated, ws)
+	if s.wedge {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if err := s.hibernateErr[ws]; err != nil {
 		return nil, err
 	}
@@ -231,14 +241,26 @@ func (s *fakeStand) Hibernate(_ context.Context, ws ids.WorkspaceID) (*shimv1.Hi
 	}, nil
 }
 
-func (s *fakeStand) KillSession(_ context.Context, ws ids.WorkspaceID, force bool) error {
+func (s *fakeStand) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	call := killCall{WS: ws, Force: force}
 	s.killed = append(s.killed, call)
 	err := s.killErr[ws]
 	s.kills <- call
+	if s.wedge || s.wedgeKill {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return err
+}
+
+// wedgeKillOnly leaves the directive answering and wedges only the
+// stand-down, which is the half the idle-sweep hang was observed in.
+func (s *fakeStand) wedgeKillOnly() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wedgeKill = true
 }
 
 func (s *fakeStand) Killed() []killCall {
