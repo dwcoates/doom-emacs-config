@@ -705,14 +705,40 @@ func (d *Daemon) Kill() {
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
+	// A REAPED PROCESS IS NEVER SIGNALED. cmd.Wait has returned, so the kernel
+	// has freed the pid and the group id that shares it: -pid names no group
+	// of ours any more, and signaling it can only reach whatever process the
+	// pid was recycled into. This is the ordinary state of every test that
+	// waits for its daemon to leave on its own (a refused second daemon, a
+	// joining daemon) before the cleanup kill runs.
+	if d.reaped() {
+		return
+	}
 	// ESRCH is the benign race: the group left on its own between the caller's
-	// decision and this signal. Every other error is a real fault.
+	// decision and this signal. EPERM is the same race after a recycle — the
+	// pid now belongs to someone else — and is accepted ONLY once the reap
+	// confirms our own process is in fact gone. Every other error is a real
+	// fault.
 	if err := syscall.Kill(-d.cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		d.t.Errorf("harness: SIGKILL process group %d: %v", d.cmd.Process.Pid, err)
+		if !errors.Is(err, syscall.EPERM) {
+			d.t.Errorf("harness: SIGKILL process group %d: %v", d.cmd.Process.Pid, err)
+		} else if !d.awaitReapWithin(reapGrace) {
+			d.t.Errorf("harness: SIGKILL process group %d: %v, and it was still unreaped %s later",
+				d.cmd.Process.Pid, err, reapGrace)
+		}
+		return
 	}
 	if !d.awaitReapWithin(reapGrace) {
 		d.t.Errorf("harness: the daemon was still unreaped %s after SIGKILL", reapGrace)
 	}
+}
+
+// reaped reports whether cmd.Wait has already returned for this process, which
+// is what frees its pid — and with it its process group id — for reuse.
+func (d *Daemon) reaped() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.exited
 }
 
 // awaitReapWithin drives the process's one cmd.Wait to completion on a
