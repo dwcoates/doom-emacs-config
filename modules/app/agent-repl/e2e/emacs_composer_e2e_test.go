@@ -94,7 +94,7 @@ func addProjectWorkspace(t *testing.T, e *Emacs, dir string) string {
 
 // workspaceNamesForm reads Emacs's own workspace registry as DATA, per the
 // spec's readback table ("workspace registry <- agent-repl--workspaces").
-const workspaceNamesForm = `(let (names) (maphash (lambda (k _v) (push k names)) agent-repl--workspaces) names)`
+const workspaceNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`
 
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
