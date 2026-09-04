@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"strconv"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -66,14 +67,14 @@ func daemonPID(e *Emacs) int {
 // would assert the builder against itself.
 func procFields(t *testing.T, pid int, file string) []string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join("/proc", itoa(pid), file))
+	body, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), file))
 	if err != nil {
 		t.Fatalf("read /proc/%d/%s for the daemon Emacs spawned: %v", pid, file, err)
 	}
 	return strings.FieldsFunc(string(body), func(r rune) bool { return r == 0 })
 }
 
-func itoa(n int) string {
+func strconv.Itoa(n int) string {
 	if n == 0 {
 		return "0"
 	}
