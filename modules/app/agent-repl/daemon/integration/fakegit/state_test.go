@@ -177,3 +177,16 @@ func TestLoadLockedReadsThroughTheSameLockWritesTake(t *testing.T) {
 		t.Fatalf("LoadLocked carried %d repos, want the one that was written", len(got.Repos))
 	}
 }
+
+func TestMintSHAScramblesTheSequenceIntoTheLeadingDigits(t *testing.T) {
+	// Arrange.
+	s := NewState()
+
+	// Act.
+	first, second := s.MintSHA(), s.MintSHA()
+
+	// Assert.
+	if first[:7] == second[:7] {
+		t.Fatalf("minted %q and %q, want shas that differ inside real git's seven-character abbreviation", first, second)
+	}
+}

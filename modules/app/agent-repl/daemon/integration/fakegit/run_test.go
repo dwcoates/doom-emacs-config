@@ -885,3 +885,316 @@ func TestRunSkipsGitGlobalOptionsBeforeTheSubcommand(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateIndexRefreshIsSilentOnACleanTree(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"update-index", "--refresh"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "" {
+		t.Fatalf("`update-index --refresh` = %+v, want real git's silent success", got)
+	}
+}
+
+func TestUpdateIndexRefreshNamesAnUnsettledPathOnADirtyTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	got := Run(s, dir, []string{"update-index", "--refresh"})
+
+	// Assert.
+	if got.Exit != 1 || got.Stdout != "dirty.txt: needs update\n" {
+		t.Fatalf("`update-index --refresh` = %+v, want the unsettled path and exit 1", got)
+	}
+}
+
+func TestConfigListSeparatesRecordsWithNulUnderTheZFlag(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"config", "--list", "-z"})
+
+	// Assert.
+	if !strings.Contains(got.Stdout, "core.bare\nfalse\x00") {
+		t.Fatalf("`config --list -z` = %q, want key-newline-value records terminated by NUL", got.Stdout)
+	}
+}
+
+func TestConfigListSeparatesRecordsWithEqualsWithoutTheZFlag(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"config", "--list"})
+
+	// Assert.
+	if !strings.Contains(got.Stdout, "core.bare=false\n") {
+		t.Fatalf("`config --list` = %q, want key=value lines", got.Stdout)
+	}
+}
+
+func TestConfigListCarriesTheDefaultBranchLowercased(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"config", "--list"})
+
+	// Assert.
+	if !strings.Contains(got.Stdout, "init.defaultbranch=main\n") {
+		t.Fatalf("`config --list` = %q, want the default branch under real git's lowercased key", got.Stdout)
+	}
+}
+
+func TestLogNoWalkPrintsOnlyTheNamedCommit(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	head := s.AddCommit(repo, "main", "add b.txt", []string{repo.BranchHeads["main"]}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--no-walk", "--format=%h %s", "HEAD^{commit}", "--"})
+
+	// Assert.
+	if got.Stdout != s.Abbrev(head.SHA)+" add b.txt\n" {
+		t.Fatalf("`log --no-walk` = %q, want only the named commit", got.Stdout)
+	}
+}
+
+func TestLogWalksTheHistoryNewestFirst(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	s.AddCommit(repo, "main", "add b.txt", []string{repo.BranchHeads["main"]}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--format=%s", "HEAD"})
+
+	// Assert.
+	if got.Stdout != "add b.txt\nadd README.md\n" {
+		t.Fatalf("`log` = %q, want the history newest first", got.Stdout)
+	}
+}
+
+func TestLogHonorsTheMaxCountCap(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	s.AddCommit(repo, "main", "add b.txt", []string{repo.BranchHeads["main"]}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--format=%s", "-n1", "HEAD"})
+
+	// Assert.
+	if got.Stdout != "add b.txt\n" {
+		t.Fatalf("`log -n1` = %q, want one commit", got.Stdout)
+	}
+}
+
+func TestLogDecoratesTheCheckedOutBranchTip(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--format=%D", "--decorate=full", "HEAD"})
+
+	// Assert.
+	if got.Stdout != "HEAD -> refs/heads/main\n" {
+		t.Fatalf("`log --format=%%D` = %q, want real git's decoration for the checked-out tip", got.Stdout)
+	}
+}
+
+func TestLogExpandsGitsLiteralByteEscape(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--format=%x0c%s", "HEAD"})
+
+	// Assert.
+	if got.Stdout != "\x0cadd README.md\n" {
+		t.Fatalf("`log --format=%%x0c` = %q, want the literal byte", got.Stdout)
+	}
+}
+
+func TestLogRefusesAnUnknownRevision(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"log", "--format=%s", "nope"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "unknown revision") {
+		t.Fatalf("`log nope` = %+v, want real git's unknown-revision refusal", got)
+	}
+}
+
+func TestRevParseRefusesAnUpstreamTheFixtureHasNoRemoteFor(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "--verify", "--abbrev-ref", "main@{upstream}"})
+
+	// Assert.
+	if got.Exit != 128 || !strings.Contains(got.Stderr, "no upstream configured for branch 'main'") {
+		t.Fatalf("`rev-parse main@{upstream}` = %+v, want real git's refusal", got)
+	}
+}
+
+func TestRevParseAbbreviatesUnderTheShortFlag(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "--short", "HEAD"})
+
+	// Assert.
+	if got.Stdout != s.Abbrev(repo.BranchHeads["main"])+"\n" {
+		t.Fatalf("`rev-parse --short HEAD` = %q, want the abbreviated head", got.Stdout)
+	}
+}
+
+func TestRevParseWalksAFirstParentAncestryStep(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	root := repo.BranchHeads["main"]
+	s.AddCommit(repo, "main", "add b.txt", []string{root}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "HEAD~1"})
+
+	// Assert.
+	if got.Stdout != root+"\n" {
+		t.Fatalf("`rev-parse HEAD~1` = %q, want the parent", got.Stdout)
+	}
+}
+
+func TestRevParseRefusesAnAncestryStepPastTheRootCommit(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "--verify", "HEAD~10"})
+
+	// Assert.
+	if got.Exit != 128 || got.Stderr != "fatal: Needed a single revision\n" {
+		t.Fatalf("`rev-parse HEAD~10` = %+v, want real git's refusal", got)
+	}
+}
+
+func TestMergeBaseAcceptsAnAncestor(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	s.AddCommit(repo, "main", "add b.txt", []string{repo.BranchHeads["main"]}, []string{"b.txt"})
+
+	// Act.
+	got := Run(s, dir, []string{"merge-base", "--is-ancestor", "HEAD~1", "main"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "" {
+		t.Fatalf("`merge-base --is-ancestor` = %+v, want real git's silent success", got)
+	}
+}
+
+func TestMergeBaseRejectsANonAncestor(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	side := s.AddCommit(repo, "", "side", nil, nil)
+	repo.AddBranch("side", side.SHA)
+
+	// Act.
+	got := Run(s, dir, []string{"merge-base", "--is-ancestor", "side", "main"})
+
+	// Assert.
+	if got.Exit != 1 {
+		t.Fatalf("`merge-base --is-ancestor` = %+v, want exit 1", got)
+	}
+}
+
+func TestDescribeAlwaysFallsBackToTheAbbreviatedHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"describe", "--tags", "--dirty", "--always"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != s.Abbrev(repo.BranchHeads["main"])+"\n" {
+		t.Fatalf("`describe --always` = %+v, want the abbreviated head", got)
+	}
+}
+
+func TestDescribeContainsNamesTheCommitItCannotDescribe(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"describe", "--contains", "HEAD"})
+
+	// Assert.
+	want := "fatal: cannot describe '" + repo.BranchHeads["main"] + "'\n"
+	if got.Exit != 128 || got.Stderr != want {
+		t.Fatalf("`describe --contains HEAD` = %+v, want %q", got, want)
+	}
+}
+
+func TestDiffOfACleanWorktreeIsEmpty(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"diff", "--ita-visible-in-index", "--no-ext-diff", "--no-prefix", "--"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "" {
+		t.Fatalf("worktree `diff` = %+v, want no output for a clean tree", got)
+	}
+}
+
+func TestDiffOfADirtyWorktreeIsAUnifiedDiff(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	got := Run(s, dir, []string{"diff", "--ita-visible-in-index", "--no-ext-diff", "--no-prefix", "--"})
+
+	// Assert.
+	if !strings.HasPrefix(got.Stdout, "diff --git dirty.txt dirty.txt\n") {
+		t.Fatalf("worktree `diff` = %q, want real git's unified diff header", got.Stdout)
+	}
+}
+
+func TestDiffCachedIsEmptyForAScriptedDirtyTree(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	got := Run(s, dir, []string{"diff", "--cached", "--no-ext-diff", "--no-prefix", "--"})
+
+	// Assert.
+	if got.Stdout != "" {
+		t.Fatalf("`diff --cached` = %q, want nothing staged", got.Stdout)
+	}
+}
+
+func TestAbbrevGrowsPastAnAmbiguousPrefix(t *testing.T) {
+	// Arrange.
+	s := NewState()
+	s.Commits["aaaaaaaa1"] = &Commit{SHA: "aaaaaaaa1"}
+	s.Commits["aaaaaaaa2"] = &Commit{SHA: "aaaaaaaa2"}
+
+	// Act.
+	got := s.Abbrev("aaaaaaaa1")
+
+	// Assert.
+	if got != "aaaaaaaa1" {
+		t.Fatalf("Abbrev = %q, want a prefix grown until it is unique", got)
+	}
+}
