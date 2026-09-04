@@ -258,3 +258,38 @@ func TestAsShimRefusalRejectsATransportFailure(t *testing.T) {
 		t.Fatal("AsShimRefusal(transport failure) reported a shim refusal")
 	}
 }
+
+// TestGoneFromTheSweep pins which refusals a fan-wide sweep reads as "this item
+// is no longer there to stop". It is deliberately WIDER than Benign: an
+// addressed stop reports a stale row to the caller by name, but a sweep has no
+// addressed row to report on.
+func TestGoneFromTheSweep(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		want bool
+	}{
+		{name: "nothing running", arm: ArmShimNothingRunning, want: true},
+		{name: "already ended", arm: ArmShimAlreadyEnded, want: true},
+		{name: "no turn open", arm: ArmShimNoTurnOpen, want: true},
+		{name: "an agent the shim forgot", arm: ArmShimUnknownAgent, want: true},
+		{name: "a shell the shim forgot", arm: ArmShimUnknownWork, want: true},
+		{name: "no session", arm: ArmShimNoSession, want: false},
+		{name: "not deliverable", arm: ArmShimNotDeliverable, want: false},
+		{name: "agent busy", arm: ArmShimAgentBusy, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			refusal := &ShimRefusal{Verb: "UpdateAgent", Arm: tc.arm}
+
+			// Act.
+			got := refusal.GoneFromTheSweep()
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("GoneFromTheSweep(%q) = %v, want %v", tc.arm, got, tc.want)
+			}
+		})
+	}
+}
