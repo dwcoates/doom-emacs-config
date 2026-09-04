@@ -28,9 +28,35 @@ type EmacsWorld struct {
 	Git *harness.GitWorld
 }
 
+// EmacsWorldOption tunes one EmacsWorld. There is exactly one option, and
+// it exists for exactly one reason: the DAEMON in this layer is spawned by
+// Emacs, so anything the Go layer states through `harness.Opts` can only be
+// stated here as environment the EMACS process carries and its daemon child
+// inherits.
+type EmacsWorldOption func(*emacsWorldConfig)
+
+// emacsWorldConfig is the accumulated options.
+type emacsWorldConfig struct {
+	extraEnv []string
+}
+
+// WithEmacsEnv threads one `KEY=VALUE` into the Emacs process's environment,
+// and therefore into the daemon Emacs spawns. It is how a scenario states a
+// daemon fact that has no other route in this layer — the daemon's own
+// checkout (`AGENT_REPL_SELF_REPO_DIR`) and its merge gate
+// (`AGENT_REPL_TEST_ALL_SCRIPT`) being the pair scenario 40 needs.
+func WithEmacsEnv(key, value string) EmacsWorldOption {
+	return func(c *emacsWorldConfig) { c.extraEnv = append(c.extraEnv, key+"="+value) }
+}
+
 // NewEmacsWorld assembles the world and brings Emacs up, but not the daemon.
-func NewEmacsWorld(t *testing.T, box sandbox) *EmacsWorld {
+func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *EmacsWorld {
 	t.Helper()
+
+	var cfg emacsWorldConfig
+	for _, option := range options {
+		option(&cfg)
+	}
 
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
@@ -83,6 +109,8 @@ func NewEmacsWorld(t *testing.T, box sandbox) *EmacsWorld {
 		"AGENT_REPL_SHIM_NODE=" + node,
 		"AGENT_REPL_SHIM_MAIN=" + shimMain,
 	}, buildIdentityEnv()...)
+	// LAST, so a scenario's own statement is the one the process carries.
+	extraEnv = append(extraEnv, cfg.extraEnv...)
 
 	e := StartEmacs(t, box, EmacsOpts{
 		DaemonBinary: daemonBin,
