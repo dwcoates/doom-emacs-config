@@ -43,6 +43,7 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/identity"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
@@ -109,6 +110,10 @@ type sidecar struct {
 	watchers map[string]*watched // by resolved path
 	owners   *ownerIndex
 	held     *heldSpools
+	// identity resolves a transcript's vendor session id to the conversation's
+	// ORIGINAL id — the shim-minted main AgentId — through the identity files
+	// the shim writes. It is refreshed on the rescan interval, beside discovery.
+	identity *identity.Index
 
 	// settling holds the files whose converter READ a run's own terminal in the
 	// batch currently in flight. The tracker is only told once that batch is
@@ -204,6 +209,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		bootTimeMs: bootTimeMillis,
 	}
 	s.backoffMin, s.backoffMax = resolveBackoff(options.RecoverBackoffMin, options.RecoverBackoffMax)
+	s.identity = identity.New(options.StateDir, log.With(logging.Context{Component: "identity"}))
 	s.owners = newOwnerIndex(log.With(logging.Context{Component: "owner"}))
 	s.held = newHeldSpools(options.UnownedSpoolWindow, log.With(logging.Context{Component: "held"}))
 	s.suspendedSince = s.now()
@@ -455,6 +461,11 @@ func (s *sidecar) reportResumed() {
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
+	// THE IDENTITY RECORDS ARE RE-READ BEFORE ANYTHING IS DISCOVERED OR
+	// RE-KEYED, so a rotation that happened since the last pass is already
+	// known when the transcript it produced is first seen.
+	s.identity.Refresh()
+	s.rekeyRotations()
 	s.refreshSpawnFacts()
 	for _, target := range s.disc.Scan() {
 		if _, ok := s.watchers[target.Path]; ok {
@@ -591,7 +602,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		Path:              target.Path,
 		Kind:              target.Kind,
 		AgentID:           s.bookFor(target),
-		MainAgentID:       s.owners.mainAgentFor(target),
+		MainAgentID:       s.mainAgentFor(target),
 		SpawnBackgrounded: s.owners.backgroundedFor(target),
 		MetaPath:          target.MetaPath,
 		ConfigRoots:       s.disc.ConfigRoots(),
@@ -624,6 +635,96 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 			bound.With(logging.Context{Operation: "cancel-terminal"}).LogVerbose(
 				"the stopped task's spool is now being read; its terminal is minted once the spool's first batch is durable and can state the output")
 		}
+	}
+}
+
+// mainAgentFor answers which BOOK a watched file's records belong to, resolving
+// the vendor session id the file plane sees through the shim's identity files.
+//
+// A `/clear` ROTATES THE VENDOR SESSION ID AND NOTHING ELSE. The conversation's
+// AgentId is minted once and never moves (R9), so the rotated transcript — a
+// new file under a new id — is still the SAME book. The vendor's files carry no
+// lineage at all, so the answer comes from the link file the shim leaves at
+// `<state>/shim/<workspace>/vendor-id/<new-id>.json`; without it the reader
+// books the rotated records under the new id, the store refuses the batch
+// ("would move the row from book A to book B"), and the file's cursor never
+// advances again.
+//
+// THE RESOLUTION IS STATED ONCE PER TRANSCRIPT, at watch time, because it is
+// the fact that decides where everything that file ever produces lands.
+func (s *sidecar) mainAgentFor(target discover.Target) string {
+	observed := s.owners.mainAgentFor(target)
+	if observed == "" {
+		return ""
+	}
+	resolved := s.identity.Resolve(observed)
+	if resolved.Rotated(observed) {
+		s.log.With(logging.Context{
+			Operation: "identity-resolve", Path: target.Path,
+			VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
+		}).Log(
+			"this transcript's vendor session id is a ROTATED one: the shim's link file (workspace %s) names %s as the conversation's original id, so its records are booked there and not under the id the file is named by",
+			resolved.WorkspaceKey, resolved.Original)
+		return resolved.Original
+	}
+	s.log.With(logging.Context{
+		Operation: "identity-resolve", Path: target.Path,
+		VendorSessionID: observed, BookAgentID: observed, AgentID: observed,
+	}).LogVerbose("this transcript's book is its own vendor session id (source=%s)", resolved.Source)
+	return observed
+}
+
+// rekeyRotations re-resolves every watched file's book, and moves it when the
+// shim's answer has changed since the file was first watched.
+//
+// DISCOVERY ORDER IS NOT CAUSAL ORDER, exactly as it is not for refreshSpawnFacts
+// beside it: the rotated transcript can be discovered in the window before its
+// link file is visible to this process, and the book was frozen at watch time.
+// Re-reading it every rescan is what makes a mid-tail rotation land in the right
+// book without a restart.
+//
+// IT UNPARKS A FILE THE STORE REFUSED. A park is otherwise permanent and that is
+// right — a batch the store can never accept is a producer defect and re-reading
+// it is a tight identical loop. A book move is the ONE refusal that stops being
+// true: the bytes were refused for naming the wrong book, the cursor did not
+// advance, and the identical bytes now convert under the book the store already
+// holds those rows in. Re-reading them is therefore progress rather than a
+// replay, and the same rows are superseded rather than duplicated because a
+// record's write and upsert identities are digested from its file position,
+// which has not moved.
+func (s *sidecar) rekeyRotations() {
+	for path, w := range s.watchers {
+		if w.ctx == nil {
+			continue
+		}
+		observed := s.owners.mainAgentFor(w.target)
+		if observed == "" {
+			continue
+		}
+		resolved := s.identity.Resolve(observed)
+		if resolved.Original == "" || resolved.Original == w.ctx.MainAgentID {
+			continue
+		}
+		previous := w.ctx.MainAgentID
+		w.ctx.MainAgentID = resolved.Original
+		if !s.parked[path] {
+			s.log.With(logging.Context{
+				Operation: "identity-rekey", Path: path, Level: "warn",
+				VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
+			}).Log(
+				"the shim's identity files now name %s as this transcript's original vendor session id; its records move from book %s to that one, and nothing already written is duplicated because their write ids are digested from file positions that did not move",
+				resolved.Original, previous)
+			continue
+		}
+		delete(s.parked, path)
+		s.log.With(logging.Context{
+			Operation: "identity-remap", Path: path, Level: "warn",
+			VendorSessionID: observed, BookAgentID: resolved.Original, AgentID: resolved.Original,
+			RefusalKind: string(storeclient.RefusalInvalidRequest), RefusalSite: storeclient.WriteBatchSite,
+			Field: "entries.upsert_key",
+		}).Log(
+			"the refusal that parked this file was a BOOK MOVE, and the shim's link file has since named %s as the conversation's original vendor session id: the file is un-parked and re-read from the cursor the store still holds, so the same bytes are now written to the book they belong to instead of to %s",
+			resolved.Original, previous)
 	}
 }
 
