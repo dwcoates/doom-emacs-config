@@ -43,6 +43,13 @@ type fakeStore struct {
 	writeKindless     bool
 	writes            []*storev1.EntryBatch
 	writeCalls        int
+
+	// writeWedged makes WriteBatch hang until the CALL's context is cancelled,
+	// which is what a store that accepted the connection and then stopped
+	// answering looks like from here. entered is closed on the first such call
+	// so a subject can wait for the wedge instead of sleeping toward it.
+	writeWedged bool
+	entered     chan struct{}
 }
 
 func (f *fakeStore) GetSidecarCursors(_ context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
@@ -61,9 +68,17 @@ func (f *fakeStore) GetSidecarCursors(_ context.Context, _ *connect.Request[stor
 	}), nil
 }
 
-func (f *fakeStore) WriteBatch(_ context.Context, request *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
+func (f *fakeStore) WriteBatch(ctx context.Context, request *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
 	f.writeCalls++
 	f.writes = append(f.writes, request.Msg.GetBatch())
+	if f.writeWedged {
+		if f.entered != nil {
+			close(f.entered)
+			f.entered = nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if f.writeFail != "" {
 		failure := &storev1.WriteBatchFailure{Detail: f.writeFail}
 		switch {
