@@ -1945,11 +1945,12 @@ func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
 // Fleet.sessions map PRESENCE, never a real health check, so the map entry
 // (and the gate beside it) survives the process's death.
 //
-// EXPECTED RED: Fleet.Shim(ws) reports live=true regardless (map presence,
-// not health), so AnswerColdGate proceeds to shim.StartSession over the now-
-// dead control connection and fails with a raw transport error rather than
-// composing the typed no_session refusal. That is the production gap this
-// test exposes; see the report.
+// THE GAP THIS TEST EXPOSED IS CLOSED (2026-09-04). It used to be red: the
+// verb read liveness from Fleet.sessions map PRESENCE, never a health check,
+// so AnswerColdGate drove StartSession over the now-dead control connection and
+// answered a raw transport error instead of the typed refusal. The re-open now
+// goes through Fleet.ResumeCold, which reads the client's REAPED state exactly
+// as Fleet.Shim does and composes no_session before touching the link.
 func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
 	t.Parallel()
 	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never

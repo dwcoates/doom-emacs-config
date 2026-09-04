@@ -1305,3 +1305,177 @@ func TestStartRefusesAnUnsetStartFailureCauseUnderItsOwnArm(t *testing.T) {
 	}
 	asRefusal(t, err, ArmStartSessionUnspecified)
 }
+
+// ---------------------------------------------------------------------------
+// ResumeCold: the remediated re-open an answered cold gate spends.
+//
+// The gap these pin is what left TestColdGate red end to end: AnswerColdGate
+// called the shim directly, so the shim re-opened the session perfectly well
+// and the DAEMON installed no watcher, recorded no facts and never republished
+// the host view — and the very next SubmitPrompt was refused `no_session`.
+// ---------------------------------------------------------------------------
+
+// parkedGate arranges a workspace parked behind a standing cold gate and leaves
+// the shim ready to answer the remediated resume with a started session.
+func parkedGate(t *testing.T, f *fleetFixture, ws wsm.Workspace) {
+	t.Helper()
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1"}
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+	f.client.response = startedResponse("vendor-2")
+}
+
+// payRemediation is the simplest answered choice: the read is paid for.
+func payRemediation() *conversationv1.SessionColdRemediation {
+	return &conversationv1.SessionColdRemediation{
+		Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+	}
+}
+
+func TestResumeColdCarriesTheRemediationOnTheResume(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 2 {
+		t.Fatalf("StartSession calls = %d, want the refused bring-up and the remediated re-open", len(f.client.requests))
+	}
+	resume := f.client.requests[1].GetResume()
+	if resume.GetVendorSessionId() != "vendor-1" || resume.GetColdRemediation().GetPay() == nil {
+		t.Fatalf("re-open resume = %v, want vendor-1 carrying the pay remediation", resume)
+	}
+}
+
+func TestResumeColdInstallsTheSessionWatcher(t *testing.T) {
+	// Arrange: a parked session has no watcher, which is what refuses the next
+	// prompt `no_session`.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	if _, serving := f.fleet.Health(ws.ID); serving {
+		t.Fatal("the parked session already reports serving, so this test could not tell the watcher apart")
+	}
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	exists, serving := f.fleet.Health(ws.ID)
+	if !exists || !serving {
+		t.Fatalf("Health() = (%v, %v), want the re-opened session watched and serving", exists, serving)
+	}
+}
+
+func TestResumeColdRecordsTheReopenedSessionFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	recorded := f.db.sessions[ws.ID]
+	if recorded.VendorSessionID != "vendor-2" || recorded.Model != "opus" {
+		t.Fatalf("recorded session = %+v, want the conversation and model the re-open reported", recorded)
+	}
+}
+
+func TestResumeColdKeepsTheParkedHostIdentity(t *testing.T) {
+	// Arrange: the remediated resume is the SAME session, so it must not mint a
+	// second host identity for a conversation that never ended.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.sessions[ws.ID].HostSessionID; got != "host-1" {
+		t.Fatalf("host session id = %q, want the parked session's own %q", got, "host-1")
+	}
+}
+
+func TestResumeColdRefusesAWorkspaceWithNoLiveSession(t *testing.T) {
+	// Arrange: no bring-up ever ran, so nothing is parked.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdRefusesAReapedClient(t *testing.T) {
+	// Arrange: the map entry outlives the process, and re-opening over a dead
+	// connection answers a raw transport error where the contract spells
+	// no_session.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.reaped = true
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdRefusesWhenTheShimRefusesTheRemediatedResumeAsColdAgain(t *testing.T) {
+	// Arrange: the shim states the cost a second time, so the session is parked
+	// once more rather than up.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.response = coldResponse()
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdSurfacesAShimRefusal(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.startErr = errors.New("the link is gone")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeCold() = nil error, want the failed re-open surfaced")
+	}
+}
