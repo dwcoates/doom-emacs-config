@@ -39,7 +39,7 @@ structurally invisible to a Connect-dialing test:
   that stops answering, which is why this layer's heartbeat is a first-class
   mechanism and not a nicety.
 
-## How Emacs is started: a real tty frame, driven by emacsclient
+## How Emacs is started: a GUI frame on Xvfb, driven by emacsclient (REVISED)
 
 Rejected: **`emacs -batch`**. Three independent reasons, each decisive:
 
@@ -53,23 +53,59 @@ Rejected: **`emacs -batch`**. Three independent reasons, each decisive:
   (`eval-when-compile (unless (fboundp 'map!) ...)`), so a `-Q` Emacs has no
   leader bindings regardless of mode.
 
-Rejected: **a GUI frame under Xvfb.** It buys only the xwidget WebKit view,
-which this layer does not cover, at the cost of an X server in the sandbox.
+Withdrawn: **a tty frame.** The first revision rejected a GUI frame under
+Xvfb on the grounds that "it buys only the xwidget WebKit view, which this
+layer does not cover". Both halves turned out to be wrong. The panel **is**
+the WebKit view — `agent-repl-frontend-open-panel` mounts an
+`xwidget-webkit` webview — so a tty frame does not cover a *reduced* panel,
+it covers **none**: on one, `make-xwidget` signals
 
-Chosen: **a real tty frame in a pty, booting the image's REAL DOOM, with
-`server-start`, driven through `emacsclient --eval`.**
+```
+make-xwidget: GTK has not been initialized
+```
 
-- The sandbox runs `emacs -nw` attached to a pty, with `HOME` pointed at the
-  per-test scratch. A tty frame is a *real* frame: `window-list`,
+and the proof-of-life test stops at step 3. The cost, meanwhile, is not an X
+server in the sandbox: the image already carries `Xvfb` and `xauth`, and
+starting one measures **21-121ms**.
+
+Chosen: **a GUI frame on a per-test Xvfb, booting the image's REAL DOOM,
+with `server-start`, driven through `emacsclient --eval`.**
+
+- The sandbox starts `Xvfb -displayfd 1 -screen 0 1280x1024x24 -nolisten
+  tcp` per test, then plain `emacs` — no `-nw` — with `DISPLAY` and
+  `GDK_BACKEND=x11` in its environment. GDK_BACKEND is pinned because the
+  image's Emacs is a `--with-pgtk` build: pure GTK prefers Wayland, and
+  there is no compositor here.
+- **The pty stays.** Emacs is still started under `script(1)`, which is
+  what keeps its stdin a terminal and what collects everything it writes
+  outside the frame — GTK diagnostics, an early elisp backtrace, the reason
+  a boot died — into the one buffer the failure artifacts carry.
+- **`-displayfd` is the synchronization primitive, and nothing sleeps.**
+  Xvfb writes the display number it settled on to that descriptor *only
+  once it is listening*, so one read is both "which display" and "it is
+  up". It also means the **server** picks the free number, not the test, so
+  two worlds in one container cannot collide the way a hard-coded `:99`
+  would. The stdout carrying that number and the stderr carrying the log
+  are routed to two separate files — which is why the sandbox seam grew
+  `StartProcess` alongside `StartPTY`.
+- A GUI frame is a real frame in every way the tty frame was: `window-list`,
   `split-window`, `tab-bar-mode`/`tab-bar-tabs`, `mode-line-format` and
-  `selected-window` all behave as they do for a user.
+  `selected-window` all behave as they do for a user, and it is additionally
+  the only frame on which the product's own panel can exist.
 - **No `-Q`, no `-l`, and no `--init-directory`.** The image's Doom profile
   is the init path, so the module is reached through `doom!` exactly as a
   user reaches it.
 - Every interaction is
   `emacsclient --socket-name <sock> --eval <form>`, run through the
   sandbox's `Exec`. The Go side never types keys into the pty *except* by
-  `execute-kbd-macro` inside a form (see the keybinding section below).
+  `execute-kbd-macro` inside a form (see the keybinding section below) —
+  that was true of the tty boot and is unchanged by the GUI one, which is
+  why the keybinding affordances needed no revision at all.
+- The Xvfb is killed with the test, an Xvfb that died *before* cleanup is a
+  loud error rather than a silence, and its log is preserved in the failure
+  artifacts on every failure — unconditionally, not only when a scenario
+  asked, because a frame that never appears is explained there and nowhere
+  else.
 
 ### It boots real Doom, and that changed three things (REVISED)
 
@@ -138,6 +174,13 @@ the file-based readback is unchanged from the `-Q` revision: a form in, JSON
 out, nothing surviving shell quoting.
 
 ### Keybindings ARE asserted here (REVISED)
+
+**The GUI frame changed nothing in this section, by construction.** Presses
+have never travelled through the pty: `Keys`, `KeysIn` and `Leader` send an
+`execute-kbd-macro` form over the *server socket*, so the keymap lookup and
+the command run inside Emacs's own command loop regardless of what kind of
+frame it has. Swapping `emacs -nw` for `emacs` moved the frame and left the
+transport alone.
 
 The first revision excluded them, because `map!` compiles to a no-op without
 Doom (`keybindings.el`'s `eval-when-compile (unless (fboundp 'map!) ...)`).
@@ -752,25 +795,68 @@ flags, and every one of `HeartbeatBound`, `emacsBootBound`, `doomBootBound`
 and `doomStageBound`, which remain **PROVISIONAL** because no suite has yet
 been run to completion in the sandbox.
 
-### The bounds are still unmeasured, and why
+### The bounds, measured
 
-Measurement needs a healthy suite run, and there has not been one yet: the
-Emacs 28.2 gate is lifted and `doom-boot-probe.sh` shows a healthy BOOT, but
-no scenario has run end to end since. The table below is therefore what the
-old, blocked run established, kept until a passing run replaces it.
+**Every `PROVISIONAL` marker is withdrawn.** The numbers below come from ten
+healthy boots of this layer inside the sandbox — two `-count=5` runs of
+`TestEmacsProofOfLife` — and a third `-count=5` that held the bounds derived
+from them.
 
-| Bound | Value today | Status against the real run |
-| --- | --- | --- |
-| `HeartbeatBound` | 2s | Never exercised: no server socket is ever created, because Doom's `after-init` never runs. |
-| `heartbeatInterval` | 250ms | Never exercised, same reason. |
-| `emacsBootBound` | `HandoverChainTimeout` | Never reached: `awaitDoom` fails before `awaitServer` is called. |
-| `doomBootBound` | `2 * emacsBootBound` = 30s | **Exhausted, and correctly so.** The observed failure is a Doom that never initializes at all, not a slow one, so this says nothing about a healthy boot's duration. |
-| `doomStageBound` | 60s | **Comfortable.** Staging plus the store coming up fit inside the 31.18s the whole failing test took, of which 30s was the `doomBootBound` wait -- so the copy set finished in roughly a second, three orders below the bound. Left as-is: it exists to catch a copy that cannot finish, and it is not the tight-bound kind. |
+The harness measures itself. `Emacs.record` times each boot phase and
+`reportPhases` logs every one on **every** run, passing or failing, so
+`go test -v` always prints the numbers a future revision must re-derive its
+bounds from. A bound here cannot quietly drift back into a guess.
 
-Each `PROVISIONAL` marker stays until a passing suite run produces numbers
-to measure against. The image is no longer what stands in the way — it is
-Emacs 30.2 with a Doom that boots — so the next step is a scenario run, not
-another Dockerfile change.
+| Bound | Observed healthy max | Value | Multiple | Why that multiple |
+| --- | --- | --- | --- | --- |
+| `HeartbeatBound` | 414ms | 1.25s | ~3x | The probe rides the same socket every scenario uses, so it queues behind whatever Emacs is doing: the maximum is set by the longest command a scenario runs, not by emacsclient's round trip. |
+| `heartbeatInterval` | — | 250ms | — | Already *below* the observed probe latency, so the detector samples as fast as the command loop can answer. A shorter interval buys only queued probes. |
+| `emacsBootBound` | 49ms | 500ms | ~10x | Larger than 3x deliberately: three times a number this small is not a bound, it is a race with the scheduler. |
+| `daemonLinkBound` | 265ms | 1s | ~4x | **New.** `EnsureDaemon` was sharing `emacsBootBound` — one name over two unrelated events, so neither could be measured against its own phase. They differ by a factor of five. |
+| `doomBootBound` | 1.162s | 3.5s | ~3x | Narrow spread (0.98s-1.16s). No longer a multiple of `emacsBootBound`: it exceeds it twentyfold, and tying them together would let a change in one silently move the other. |
+| `doomStageBound` | 7ms | 5s | — | Down from 60s. There is no slow-copy regime to bound at all: staging the whole tree takes single-digit milliseconds, so this exists only to catch a copy that cannot finish, and it fails inside the test rather than at the suite's timeout. |
+| `xvfbReadyBound` | 121ms | 1s | ~8x | **New.** The 121ms is always the FIRST Xvfb in a fresh container, which pays once for creating `/tmp/.X11-unix`; the steady state is 21-62ms, and the multiple is taken against the slow first start. |
+
+### What the proof-of-life test reaches today, and what blocks it
+
+Steps 1-4 are **observed passing**, repeatedly:
+
+- Emacs boots the image's real Doom on the Xvfb frame and the stamp's
+  `doom` / `map_bang` / `popup_rule` / `agent_repl` facts hold.
+- Emacs spawns the daemon through its own launcher and holds a link.
+- `agent-repl-add-project-workspace` registers the scripted fake-git
+  worktree, with a daemon-minted ref.
+- The panel opens and **the webview is really there**: the live WKWebView
+  read out of the workspace's own webview buffer answers with the daemon's
+  own origin, e.g.
+  `http://127.0.0.1:43945/?workspace=<id>&dir=<repo>`, serving the REAL
+  webapp built from source. That is the step `make-xwidget: GTK has not
+  been initialized` used to refuse.
+- Composer `RET` resolves to `agent-repl-send` through the real Doom `map!`,
+  is pressed, and the daemon answers `SubmitPrompt` with a turn id.
+
+Step 5 — the roster row settling on a settled arm — is **blocked by a
+production constraint, not by this layer**. The shim's session lock is
+`open(2)`'s `O_EXLOCK` (`agent-shim/claude/shim/src/locks.ts`), which is
+macOS/BSD only; on Linux the shim refuses to start a session at all:
+
+```
+REFUSED StartSession: another shim holds this conversation's session lock
+shim-session-lock: linux has no O_EXLOCK, so the shim cannot claim
+  <session> exclusively; refusing to start rather than risk two shims
+  writing one transcript
+```
+
+The daemon surfaces that as `OpenWorkspaceError.conversation_owned` and the
+row stays at `:none`. The refusal is deliberate and correct in itself — a
+silent no-op would hand the daemon a false "free" — but it means **no real
+shim can start a session inside the Linux sandbox**, which is where this
+whole suite runs. Every e2e scenario that needs a turn is behind it. The
+Go-side integration suites do not see it because their fake shim takes no
+lock.
+
+That is a production matter and is left to its owner; the harness side of
+the proof-of-life test is finished and waiting on it.
 
 ## Registration
 

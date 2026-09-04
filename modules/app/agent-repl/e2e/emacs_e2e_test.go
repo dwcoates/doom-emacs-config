@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"claude-repld/integration/harness"
 )
@@ -63,6 +66,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	shimMain := requireShimBundle(t)
 	sidecarBin := requireSidecarBinary(t)
 	daemonBin := harness.DaemonBinary(t)
+	webappDist := requireWebappDist(t)
 
 	// START ORDER: store, then sidecar, then Emacs (which spawns the daemon,
 	// which spawns the shim per session). Cleanups register in that order,
@@ -103,20 +107,56 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		t.Fatalf("e2e: install the fake git: %v", err)
 	}
 
+	// The kernel-lock run directory, redirected and CREATED. The daemon only
+	// PROBES this directory -- the shim is what creates it, and the shim
+	// cannot run until the probe says the lock is free -- so a run directory
+	// that does not exist makes every submission fail with "the workspace
+	// lock probe could not tell". `daemon/integration/harness/daemon.go`
+	// states the same two facts for the daemons IT starts; this layer's
+	// daemon is started by EMACS, so the statement has to be made here, at
+	// the Emacs process the daemon inherits its environment from.
+	lockDir := filepath.Join(box.Scratch(), "locks")
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatalf("e2e: mkdir %s: %v", lockDir, err)
+	}
+
 	extraEnv := append([]string{
 		"PATH=" + fakeBin + ":" + os.Getenv("PATH"),
+		"AGENT_REPL_LOCK_DIR=" + lockDir,
 		"FAKEGIT_STATE=" + git.StateFile,
+		// FAKE MODE, the counterpart of the vendor prohibition StartEmacs
+		// sets. `AGENT_REPL_FORBID_VENDOR_CALLS=1` alone makes the daemon
+		// REFUSE to spawn a shim ("vendor calls are forbidden: shim-spawn"),
+		// because a shim that is not declared fake is a vendor call. The Go
+		// worlds say the same thing with `--fake` on the daemon's argv
+		// (daemon/integration/harness/daemon.go); here EMACS composes that
+		// argv through its own launcher, so the statement has to travel as
+		// environment -- which `envc.Load` reads for exactly this purpose.
+		// It reaches the real TypeScript shim as `--fake` all the same, so
+		// the shim is real and only the SDK behind it is not.
+		"AGENT_REPL_FAKE=1",
 		"AGENT_REPL_FAKE_SPOOL_ROOT=" + spoolRoot,
-		"AGENT_REPL_SHIM_NODE=" + node,
-		"AGENT_REPL_SHIM_MAIN=" + shimMain,
 	}, buildIdentityEnv()...)
 	// LAST, so a scenario's own statement is the one the process carries.
 	extraEnv = append(extraEnv, cfg.extraEnv...)
 
 	e := StartEmacs(t, box, EmacsOpts{
 		DaemonBinary: daemonBin,
-		StoreSocket:  store.Socket,
-		ExtraEnv:     extraEnv,
+		// THE THREE ARTIFACTS THE DAEMON TAKES ON ITS ARGV. Each was
+		// previously stated as an environment variable that NOTHING READ
+		// (`AGENT_REPL_SHIM_NODE`, `AGENT_REPL_SHIM_MAIN`), so the daemon
+		// fell back to its checkout defaults and spawned a shim bundle that
+		// does not exist -- "Cannot find module .../shim/dist/main.js".
+		// `daemon/integration/harness/daemon.go` states the same three as
+		// flags; this layer states them the same way, on the command the
+		// launcher then appends its own account-root flags to.
+		DaemonArgs: []string{
+			"--node", node,
+			"--shim-main", shimMain,
+			"--webapp-dist", webappDist,
+		},
+		StoreSocket: store.Socket,
+		ExtraEnv:    extraEnv,
 	})
 
 	// The sidecar watches the SAME two account roots the launcher was given.
@@ -149,6 +189,57 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir,
 		filepath.Join(os.TempDir(), fmt.Sprintf("doom-agent-repl-%d", os.Getuid())))
 	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
+}
+
+// webappDistOnce builds the webapp at most once per test binary.
+var (
+	webappDistOnce sync.Once
+	webappDistPath string
+	webappDistErr  error
+)
+
+// requireWebappDist builds the REAL webapp from source and answers the dist
+// directory the daemon serves.
+//
+// The Go layers hand the daemon a STUB dist (harness.NewFakeWebappDist) and
+// that is right for them: no Connect client ever loads the page. This layer
+// does. The panel is an `xwidget-webkit` webview pointed at the daemon's own
+// origin, so the bytes it renders are the bytes this build produces -- a stub
+// would mean every present and future webview assertion inspected a
+// placeholder while reporting on the product.
+//
+// The build is the module's OWN `npm run build` (typecheck plus `vite
+// build`), never a second spelling of it. Its pre-script is skipped
+// deliberately: `prebuild` is `ensure-deps`, which reaches for `npm ci` when
+// it is unhappy, and the sandbox runs with `--network none`. The dependency
+// gate below is what that script would have been for, made explicit.
+func requireWebappDist(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(repo.repoDir, "webapp")
+	if _, err := os.Stat(filepath.Join(dir, "node_modules")); err != nil {
+		t.Skipf("e2e: webapp deps not installed (%s/node_modules missing): run `npm ci` in %s", dir, dir)
+	}
+	webappDistOnce.Do(func() {
+		started := time.Now()
+		cmd := exec.Command("npm", "run", "build", "--ignore-scripts")
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			webappDistErr = fmt.Errorf("build the webapp in %s: %w\n%s", dir, err, out)
+			return
+		}
+		dist := filepath.Join(dir, "dist")
+		entry := filepath.Join(dist, "index.html")
+		if _, err := os.Stat(entry); err != nil {
+			webappDistErr = fmt.Errorf("the webapp build produced no entry point at %s: %w", entry, err)
+			return
+		}
+		webappDistPath = dist
+		t.Logf("e2e: built the webapp dist in %s (%s)", time.Since(started).Round(time.Millisecond), dist)
+	})
+	if webappDistErr != nil {
+		t.Fatalf("e2e: %v", webappDistErr)
+	}
+	return webappDistPath
 }
 
 // resolveOrFail resolves a directory's symlinks, per the config-root
@@ -216,6 +307,21 @@ func TestEmacsProofOfLife(t *testing.T) {
 			return false
 		})
 
+	//    AND THE WEBVIEW REALLY EXISTS. A panel buffer proves the window
+	//    lifecycle; it does not prove the thing this layer needed a GUI frame
+	//    for. This reads the LIVE WKWebView out of the workspace's own
+	//    webview buffer, through the module's own accessor, and asks it for
+	//    its URI -- so a pass means a WebKit view was created AND navigated,
+	//    which is exactly what `make-xwidget: GTK has not been initialized`
+	//    refused to do on a tty frame.
+	uri := e.EvalString(`(let* ((buf (get-buffer (agent-repl--frontend-webview-buffer-name ` + elispString(wsName) + `)))
+                 (xw (and buf (agent-repl--frontend-webview-live-widget buf))))
+             (and xw (xwidget-webkit-uri xw)))`)
+	if strings.TrimSpace(uri) == "" {
+		t.Fatal("the panel has no live WKWebView carrying a URI: the webview was never created, or never navigated")
+	}
+	t.Logf("the panel's webkit view is live at %s", uri)
+
 	// 4. Submit a prompt FROM THE COMPOSER: put text in the input buffer the
 	//    way a user types it, then PRESS RET. The fake SDK answers; a plain
 	//    prompt with no "!" prefix falls through to the default prose
@@ -240,10 +346,14 @@ func TestEmacsProofOfLife(t *testing.T) {
 	// 5. The response is visible in EMACS's own state: the roster row for
 	//    this workspace settles on a settled arm, which is the finish edge
 	//    Emacs's four reactions all ride.
+	//    The arm is read through the module's OWN accessor rather than by
+	//    `plist-get`: a row's `:status` is the DECODED ONEOF, so a direct
+	//    `plist-get` yields `(:arm :none :value nil)` -- never equal to any
+	//    arm keyword, and therefore a predicate that could only time out.
 	e.AwaitEval("the roster row to settle after the turn",
 		`(let (arms)
                    (maphash (lambda (_id row)
-                              (push (format "%s" (plist-get row :status)) arms))
+                              (push (format "%s" (agent-repl-roster-row-status row)) arms))
                             agent-repl-roster--rows-by-id)
                    arms)`,
 		func(raw json.RawMessage) bool {
@@ -277,6 +387,16 @@ func elispString(s string) string {
 		quoted = append(quoted, r)
 	}
 	return string(append(quoted, '"'))
+}
+
+// elispStringList renders a Go slice as space-separated elisp string
+// literals, for splicing into a `(list ...)` form.
+func elispStringList(xs []string) string {
+	quoted := make([]string, 0, len(xs))
+	for _, x := range xs {
+		quoted = append(quoted, elispString(x))
+	}
+	return strings.Join(quoted, " ")
 }
 
 func decodeStrings(raw json.RawMessage) []string {
