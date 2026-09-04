@@ -113,6 +113,7 @@ func emHOAwaitNewDaemon(t *testing.T, e *Emacs, before int) {
 // locally and rebuilt from a cache — they are rebuilt FROM THE ROSTER the
 // new daemon pushes, and the tab bar follows that order strictly.
 func TestEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
+	t.Parallel()
 	// Arrange: two registered workspaces, so the assertion is about an
 	// ORDER and not merely about a single row surviving.
 	w, e := emGHIWorld(t)
@@ -190,6 +191,7 @@ func TestEmacsTabsRehydrateFromTheRosterOnConnect(t *testing.T) {
 // the same worktree — a registry that grew, or a duplicate tab, because a
 // re-registration was treated as a new workspace.
 func TestEmacsReRegisterIsIdempotentByDir(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, e := emGHIWorld(t)
 	first, firstDir := emGHIRegister(t, e, w.Emacs.box, "repo-reregister-one")
@@ -241,6 +243,7 @@ func TestEmacsReRegisterIsIdempotentByDir(t *testing.T) {
 // reconnect loop is armed rather than the outage being swallowed, and that
 // the link comes back when a daemon returns.
 func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, e := emGHIWorld(t)
 	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-daemon-down")
@@ -401,6 +404,7 @@ func emHO40AddedName(t *testing.T, before, after []string) string {
 // `agent-repl-link--primary` with the old connection released — not a
 // reconnect that happened to find a new address, and not Emacs's own dial.
 func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
+	t.Parallel()
 	// Arrange: a world whose Emacs — and therefore whose daemon — is told
 	// which checkout is the daemon's OWN, and given a merge gate that
 	// passes, so a commit landing on it fires a real self-merge rollout.

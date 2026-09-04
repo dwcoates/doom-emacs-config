@@ -259,6 +259,10 @@ type EmacsOpts struct {
 func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Helper()
 
+	// THE SLOT COMES BEFORE ANYTHING IS STARTED. Every scenario is parallel;
+	// the machine is not unbounded. See emacsParallelSlots.
+	takeEmacsSlot(t)
+
 	root := filepath.Join(box.Scratch(), "emacs")
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
 	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
@@ -1293,4 +1297,83 @@ func (e *Emacs) AddReapPath(p string) {
 	e.reapMu.Lock()
 	defer e.reapMu.Unlock()
 	e.reap = append(e.reap, p)
+}
+
+// ===========================================================================
+// THE PARALLELISM BOUND
+// ===========================================================================
+
+// Every scenario in this layer is `t.Parallel()`, and it is isolated well
+// enough to be: `requireSandbox` mints a fresh `os.MkdirTemp` scratch per
+// test, so the Emacs HOME, its Doom tree, the state root, the two account
+// roots, the store database, the kernel-lock directory and the fake SDK's
+// spool root are all per-test paths; every socket is `shortSocketPath`, which
+// carries four random bytes; and each Emacs draws on its OWN Xvfb, started
+// with `-displayfd 1` so the X server picks a free display number under its
+// own `/tmp/.X<n>-lock` rather than one this layer guesses. Nothing in the
+// layer reads or writes a process-wide variable -- there is no `t.Setenv`
+// anywhere in it -- and the per-run artifacts (the daemon, the shim bundle,
+// the store and sidecar binaries, the staged webapp dist) are all built or
+// checked under a `sync.Once`.
+//
+// WHAT IS NOT UNBOUNDED IS THE MACHINE. One scenario is a real Emacs with a
+// GUI frame (206 MiB resident), an Xvfb, a daemon, a shim under Node
+// (95 MiB), a store and a sidecar; the Docker VM this layer runs in has
+// 4 CPUs and 5.8 GiB, and it is shared with whatever else is running on the
+// host. So the layer bounds ITSELF rather than trusting `-parallel` to be
+// passed correctly: a scenario takes a slot before it starts an Emacs and
+// gives it back after its teardown, so a caller who runs `go test` with no
+// flags at all still gets the measured degree of concurrency and no more.
+
+// emacsParallelSlots is how many scenarios may hold an Emacs at once.
+//
+// MEASURED, on the 4-CPU/5.8 GiB Docker VM this layer runs in. See
+// EMACS-LAYER-SPEC.md, "The parallelism bound, measured", for the run at each
+// setting: wall time, peak container memory, and whether the pass set held.
+const emacsParallelSlots = 3
+
+// emacsParallelEnv overrides the slot count. It exists so the bound above can
+// be RE-MEASURED on a different machine the same way it was measured on this
+// one -- `go test` at each setting, reading the wall and the peak -- and not
+// so a caller can quietly turn the bound off: a value the machine cannot
+// afford does not fail here, it OOM-kills an Emacs mid-scenario.
+const emacsParallelEnv = "AGENT_REPL_E2E_EMACS_PARALLEL"
+
+var (
+	emacsSlotsOnce sync.Once
+	emacsSlots     chan struct{}
+)
+
+// emacsSlotGate answers the semaphore, sized once per test binary.
+func emacsSlotGate(t *testing.T) chan struct{} {
+	emacsSlotsOnce.Do(func() {
+		n := emacsParallelSlots
+		if raw := os.Getenv(emacsParallelEnv); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 {
+				// A misspelled override must not silently fall back to the
+				// default: the whole point of setting it is to measure a
+				// specific number, and measuring the wrong one is worse
+				// than not measuring.
+				t.Fatalf("e2e: %s=%q is not a positive integer", emacsParallelEnv, raw)
+			}
+			n = parsed
+		}
+		emacsSlots = make(chan struct{}, n)
+	})
+	return emacsSlots
+}
+
+// takeEmacsSlot blocks until this scenario may start an Emacs, and returns it
+// on the test's way out.
+func takeEmacsSlot(t *testing.T) {
+	t.Helper()
+	gate := emacsSlotGate(t)
+	// Registered BEFORE the slot is taken, so t.Cleanup's LIFO unwind
+	// returns it LAST -- after the stray reaper, after Emacs and its daemon
+	// are gone. A slot handed back while this scenario's processes are still
+	// resident would let the next one start against a budget that is not
+	// actually free.
+	t.Cleanup(func() { <-gate })
+	gate <- struct{}{}
 }

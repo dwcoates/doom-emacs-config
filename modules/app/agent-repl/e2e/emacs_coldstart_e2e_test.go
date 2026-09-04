@@ -76,6 +76,7 @@ func procFields(t *testing.T, pid int, file string) []string {
 
 // TestEmacsColdStartBuildsAndSpawnsTheDaemon is scenario 1.
 func TestEmacsColdStartBuildsAndSpawnsTheDaemon(t *testing.T) {
+	t.Parallel()
 	w := coldStartWorld(t)
 	e := w.Emacs
 
@@ -99,6 +100,7 @@ func TestEmacsColdStartBuildsAndSpawnsTheDaemon(t *testing.T) {
 // and SPEC.md §G raised it as unresolved, because only a test where Emacs
 // spawns the daemon can see the argv the launcher actually composed.
 func TestEmacsLauncherArgvCarriesBothAccountRoots(t *testing.T) {
+	t.Parallel()
 	w := coldStartWorld(t)
 	e := w.Emacs
 
@@ -155,6 +157,7 @@ func flagValue(argv []string, flag string) (string, bool) {
 // the other side: the daemon exits 2, and the launcher refuses to spend the
 // boot timeout finding that out.
 func TestEmacsLauncherRefusesWithoutAnAccountRoot(t *testing.T) {
+	t.Parallel()
 	w := coldStartWorld(t)
 	e := w.Emacs
 
@@ -189,6 +192,7 @@ func TestEmacsLauncherRefusesWithoutAnAccountRoot(t *testing.T) {
 // adopts any daemon that answers DaemonHealth, healthy or not, and NEVER
 // kills one.
 func TestEmacsAdoptsAnAlreadyAnsweringDaemon(t *testing.T) {
+	t.Parallel()
 	w := coldStartWorld(t)
 	e := w.Emacs
 
@@ -218,6 +222,7 @@ func TestEmacsAdoptsAnAlreadyAnsweringDaemon(t *testing.T) {
 // the cross-system contract, so the launcher STATES it on the spawn rather
 // than letting the child inherit whatever the session had.
 func TestEmacsStateRootTravelsInTheEnvironment(t *testing.T) {
+	t.Parallel()
 	w := coldStartWorld(t)
 	e := w.Emacs
 
@@ -274,6 +279,7 @@ func envValue(env []string, key string) (string, bool) {
 // the modeline segment's own composition IS the subject, so there is no
 // variable to read instead.
 func TestEmacsBuildFailureSurfacesInTheModeline(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)
 	e := w.Emacs

@@ -37,6 +37,7 @@ import (
 // Go. A poll samples; the hook sees every push, so a transient running arm
 // cannot be missed and the walk cannot be observed out of order.
 func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 	installArmObserver(t, e)
@@ -115,6 +116,7 @@ func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 // documented ingress every push travels through. The claim is that it
 // REFUSES rather than defaulting to some fallback dot.
 func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 
@@ -166,6 +168,7 @@ func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
 //     registered and selected through the ordinary command so the first is
 //     genuinely unselected.
 func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 
 	// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send' —
@@ -252,6 +255,7 @@ func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 // module's own `agent-repl-notify-make-fake-backend' test seam, which proves
 // what Emacs DECIDED to post without any host notification tool existing.
 func TestEmacsFinishEdgeFiresTheReadyReaction(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 
@@ -314,6 +318,7 @@ func TestEmacsFinishEdgeFiresTheReadyReaction(t *testing.T) {
 // is the sanctioned exception to "never scrape human text where a variable
 // exists". The variable behind it (`agent-repl-link-drain') is asserted too.
 func TestEmacsDrainScheduleDrawsTheStandingBanner(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 

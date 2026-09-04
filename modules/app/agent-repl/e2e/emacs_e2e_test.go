@@ -304,6 +304,7 @@ func resolveOrFail(t *testing.T, dir string) string {
 // commands, and hands state back as data — so the remaining 43 scenarios are
 // a matter of writing scenarios rather than of building machinery.
 func TestEmacsProofOfLife(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)
 	e := w.Emacs

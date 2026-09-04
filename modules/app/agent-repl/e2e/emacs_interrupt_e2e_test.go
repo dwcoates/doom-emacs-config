@@ -229,6 +229,7 @@ func emGHIAssertResponsive(t *testing.T, e *Emacs, after string) {
 // forced restart that quietly re-drove the turn would look identical at the
 // first assertion alone.
 func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered workspace with a genuinely live turn. The parked
 	// scenario is what makes "mid-turn" a fact rather than a race.
 	w, e := emGHIWorld(t)
@@ -265,6 +266,7 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 // finish edge. This is the deferral edge, and it is the difference between
 // "the restart lost my prompt" and "the restart delayed it".
 func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
+	t.Parallel()
 	// Arrange. The parked turn here is the fake's TURN GATE, not
 	// `emGHIParkedPrompt`: a GRACEFUL restart waits for the turn to finish,
 	// and `!interrupt` parks inside `awaitInterrupt()`, which only a FORCED
@@ -326,6 +328,7 @@ func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 // that provoked it, so the test's claim is not about the restart's outcome
 // but about Emacs still being alive on the far side of it.
 func TestEmacsRestartDoesNotWedgeEmacs(t *testing.T) {
+	t.Parallel()
 	// Arrange: a live panel and a live turn, so the restart tears down real
 	// buffers and real processes rather than nothing.
 	w, e := emGHIWorld(t)

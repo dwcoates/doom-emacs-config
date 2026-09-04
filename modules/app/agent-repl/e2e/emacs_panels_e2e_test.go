@@ -112,6 +112,7 @@ func awaitPanelWindows(e *Emacs, frontendPrefix, panelPrefix string) {
 
 // TestEmacsPanelOpensIntoTheMainArea is scenario 14.
 func TestEmacsPanelOpensIntoTheMainArea(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -145,6 +146,7 @@ func TestEmacsPanelOpensIntoTheMainArea(t *testing.T) {
 // TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone is scenario 15: the
 // close variant that only hides, pressed as `SPC o c`.
 func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 2)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -175,6 +177,7 @@ func TestEmacsPlainCloseHidesPanelsAndLeavesTheTabAlone(t *testing.T) {
 // the difference: `SPC o C` records `:saved-tab-index` and pushes the
 // workspace's tab to the back.
 func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 2)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -203,6 +206,7 @@ func TestEmacsDeprioCloseShufflesTheTab(t *testing.T) {
 
 // TestEmacsFocusInputSelectsTheComposer is scenario 17.
 func TestEmacsFocusInputSelectsTheComposer(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -243,6 +247,7 @@ func TestEmacsFocusInputSelectsTheComposer(t *testing.T) {
 // `agent-repl-fullscreen-and-focus` moves point to the composer instead,
 // which is a different claim and not this scenario's.
 func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
@@ -283,6 +288,7 @@ func TestEmacsFullscreenTogglesAndRestores(t *testing.T) {
 // non-terminal stage past `:requested`" are the two shapes of success; a
 // phase in `agent-repl--open-progress-terminal-phases` is the failure.
 func TestEmacsOpenProgressLadderReachesRendered(t *testing.T) {
+	t.Parallel()
 	w, _ := emacsPanelWorld(t, 1)
 	e := w.Emacs
 	frontendPrefix, panelPrefix := bufferNamePrefixes(e)

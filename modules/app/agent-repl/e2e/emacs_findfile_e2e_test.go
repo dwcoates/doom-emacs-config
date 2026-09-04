@@ -158,6 +158,7 @@ func hashKeys(e *Emacs, table string) []string {
 // dropping it into a popup would be the module's own "a popup is not where a
 // file belongs" rule broken.
 func TestEmacsVisitingAFileRoutesIntoItsOwningWorkspace(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -199,6 +200,7 @@ func TestEmacsVisitingAFileRoutesIntoItsOwningWorkspace(t *testing.T) {
 // because a REFUSAL is the precondition and there is no other way to make the
 // daemon refuse an ordinary directory on demand.
 func TestEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -249,6 +251,7 @@ func TestEmacsAnUnroutableFileRecordsARefusal(t *testing.T) {
 // `agent-repl-add-project-workspace' on the same directory, whose roster push
 // reconciles the tab into existence.
 func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -300,6 +303,7 @@ func TestEmacsPendingPlacementResolvesAfterRosterReconcile(t *testing.T) {
 // window's side is `right', its width is about half the frame, and point is
 // on the requested (1-indexed) line.
 func TestEmacsPopupOpensAFileRightSideHalfWidth(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
@@ -335,6 +339,7 @@ func TestEmacsPopupOpensAFileRightSideHalfWidth(t *testing.T) {
 // right-side popup. A per-caller variant for directories is exactly the
 // divergence popup.el exists to prevent.
 func TestEmacsPopupOpensADirectoryInDired(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsFindFileFixture(t, box)
 	e := f.Emacs
