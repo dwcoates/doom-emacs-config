@@ -104,6 +104,7 @@ type skillScenarioCase struct {
 }
 
 func TestSkillInvocation(t *testing.T) {
+	t.Parallel()
 	// #64 SkillInvocation -- `skill-invocation` -- tool_use -> ack -> isMeta
 	// document triple, driven bare ("!skill" with no name/args), which the
 	// fake's skillInvocationOf resolves to its documented default,
@@ -118,6 +119,7 @@ func TestSkillInvocation(t *testing.T) {
 }
 
 func TestSkillNamedAndArgsParameterized(t *testing.T) {
+	t.Parallel()
 	// #65 SkillNamedAndArgsParameterized -- `!skill [skill-name] [args]`
 	// (landed addition; E2E-EVENT-INVENTORY.md remediation item 5) -- an
 	// ARBITRARY skill name/args/document body, replacing the fixed

@@ -142,6 +142,7 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 // file header) and AgentUpdate.context_cut(ContextCleared) (observed as a
 // feed separation row, matching every other context-cut test in this repo).
 func TestClearRotatesIdentity(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -183,6 +184,7 @@ func TestClearRotatesIdentity(t *testing.T) {
 // the second rotation onto its already-rotated state rather than this test
 // fabricating an intermediate identity.
 func TestSecondRotateUnderRotatedIdentity(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)

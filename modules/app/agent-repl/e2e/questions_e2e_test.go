@@ -189,6 +189,7 @@ func givenAnswer(t *testing.T, answered *frontendv1.FeedQuestionAnswered, header
 // ---------------------------------------------------------------------------
 
 func TestQuestionFreeText(t *testing.T) {
+	t.Parallel()
 	w, ws := newQuestionWorkspace(t)
 	const question = "Which model should the sweep use?"
 	const freeText = "Whichever one is cheapest right now."
@@ -235,6 +236,7 @@ func TestQuestionFreeText(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestQuestionSingleSelect(t *testing.T) {
+	t.Parallel()
 	w, ws := newQuestionWorkspace(t)
 	const question = "How do you want the new branch set up?"
 	const chosenLabel = "New worktree off master"
@@ -323,6 +325,7 @@ func askMultiOpen(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *fronten
 // produce (AnswerQuestionMultiPickOnSingleSelect exists precisely because a
 // single-select batch element refuses more than one).
 func TestQuestionMultiSelect(t *testing.T) {
+	t.Parallel()
 	w, ws := newQuestionWorkspace(t)
 	open := askMultiOpen(t, w, ws)
 	items := open.GetQuestion().GetQuestions()
@@ -361,6 +364,7 @@ func TestQuestionMultiSelect(t *testing.T) {
 // (FeedQuestionAnswered.answers doc: "One per question, in the batch's
 // order") — proof the join is by text, not by request-list position.
 func TestQuestionMultipleInOneBatch(t *testing.T) {
+	t.Parallel()
 	w, ws := newQuestionWorkspace(t)
 	open := askMultiOpen(t, w, ws)
 	items := open.GetQuestion().GetQuestions()
@@ -434,6 +438,7 @@ func TestQuestionMultipleInOneBatch(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestQuestionUnanswered(t *testing.T) {
+	t.Parallel()
 	w, ws := newQuestionWorkspace(t)
 	const question = "Should I keep going?"
 
