@@ -349,6 +349,27 @@ ARG TARGETARCH
 # binary between the two packages cannot silently remove it. The harness
 # keeps a runtime `exec.LookPath("script")` check as a backstop for images
 # built before this line existed.
+# `dbus-x11` IS NAMED EXPLICITLY SO `apt-get` NEVER PULLS IN `systemd`.
+#
+# Without it, this install silently drags in the full `systemd` +
+# `systemd-sysv` init system, and its postinst prints
+# `sysctl: cannot open "/etc/sysctl.d/99-sysctl.conf"` on stderr (there is no
+# writable /etc/sysctl.d at build time, and no init running to apply it to
+# regardless — this image never runs systemd). The chain, traced with
+# `apt-cache depends`/`rdepends` against this same snapshot: `libsoup-3.0-0`
+# (a real xwidgets runtime dependency, hence in emacs-runtime-pkgs.txt) hard
+# -Depends on `glib-networking`, which hard-Depends on
+# `gsettings-desktop-schemas`, which Depends on `dconf-gsettings-backend` ->
+# `dconf-service`, whose `default-dbus-session-bus | dbus-session-bus`
+# alternative apt resolves by installing `dbus-user-session` — and THAT
+# package hard-Depends on `systemd` outright (no alternative). None of this
+# is needed here: no session D-Bus is started, no service is ever run, and
+# there is no Recommends involved for `--no-install-recommends` to catch.
+# `dbus-x11` provides the same `dbus-session-bus` virtual package
+# `dbus-user-session` does, so apt's alternative resolver picks it first and
+# satisfies `dconf-service` without ever considering `dbus-user-session` (and
+# therefore `systemd`) at all — it depends on plain `dbus-daemon` +
+# `dbus-bin`, both already required here.
 COPY --from=emacs-builder /emacs-runtime-pkgs.txt /tmp/emacs-runtime-pkgs.txt
 RUN set -eux; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
@@ -356,6 +377,7 @@ RUN set -eux; \
         binutils \
         bsdutils \
         curl \
+        dbus-x11 \
         gcc \
         git \
         rsync \
@@ -370,7 +392,11 @@ RUN set -eux; \
     command -v git; \
     command -v rsync; \
     command -v gcc; \
-    command -v Xvfb
+    command -v Xvfb; \
+    if dpkg -s systemd >/dev/null 2>&1; then \
+      echo "sandbox: systemd got pulled in after all; dbus-x11 no longer heads off the dconf/dbus-user-session chain" >&2; \
+      exit 1; \
+    fi
 
 # --- the Emacs built in stage 1 -------------------------------------------
 COPY --from=emacs-builder /emacs-dist/ /
