@@ -239,7 +239,7 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!usage-sampling-failure", Wait: waitTerminal},
 	{Prompt: "!rate-limit", Wait: waitTerminal},
 	{
-		Prompt: "!context-budget", Wait: waitTerminal, BudgetWarning: true,
+		Prompt: "!context-budget-warning", Wait: waitTerminal, BudgetWarning: true,
 		BlockedExpectation: mockBlockedContextBudget,
 	},
 	{Prompt: "!compact", Wait: waitTerminal, ContextCut: true},
