@@ -439,6 +439,26 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// the daemon never re-attached leaves the evidence standing.
 	f.closeLinkFaults(ctx, log, ws)
 
+	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
+	// the adopt path precisely because a shim is still alive on this
+	// conversation, and a live shim has ALREADY started its one session:
+	// shim.v1 answers a second StartSession with `already_started`, so sending
+	// one turns a perfectly good mount into a failed rpc. The session facts
+	// come from the shim's own re-announcement of SessionStarted on the watch
+	// this install opens (landing 7) — the same attach-only path the
+	// handover's successor and the boot adoption take.
+	if adopted {
+		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+		if err := f.Install(ctx, ws, client); err != nil {
+			log.Error(opBringUp, "the adopted shim could not be installed", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("start session for %q: install the adopted shim: %w", ws, err)
+		}
+		log.Info(opBringUp, "attached to a surviving shim without starting a session", dlog.Context{
+			"adopted": true, "shim_pid": client.PID(),
+		})
+		return nil
+	}
+
 	started, err := f.startSession(ctx, log, ws, client, src, session)
 	if err != nil {
 		return err
@@ -489,7 +509,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
-		"adopted": adopted, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
+		"adopted": false, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
 	})
 	// A SESSION NOW EXISTS where none did: the host view's whole session arm
 	// changed, and nothing the server can see says so.
