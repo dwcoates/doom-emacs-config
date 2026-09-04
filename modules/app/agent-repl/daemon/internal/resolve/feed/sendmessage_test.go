@@ -254,3 +254,102 @@ func (h *harness) sendRowAt(feed feedid.Feed, unit string) *frontendv1.FeedAgent
 	h.t.Fatalf("no send row %q on the feed", want)
 	return nil
 }
+
+func TestASendDrawsTheProducersDeliveryArmOnTheSendersRow(t *testing.T) {
+	tests := []struct {
+		name     string
+		delivery func(*conversationv1.AgentSendMessageSuccess)
+		want     string
+	}{
+		{
+			name: "the recipient was already running and the message queued",
+			delivery: func(s *conversationv1.AgentSendMessageSuccess) {
+				s.Delivery = &conversationv1.AgentSendMessageSuccess_QueuedToLive{
+					QueuedToLive: &conversationv1.AgentSendMessageQueuedToLive{},
+				}
+			},
+			want: "queued_to_live",
+		},
+		{
+			name: "the recipient was dormant and was resumed to receive it",
+			delivery: func(s *conversationv1.AgentSendMessageSuccess) {
+				s.Delivery = &conversationv1.AgentSendMessageSuccess_ResumedRecipient{
+					ResumedRecipient: &conversationv1.AgentSendMessageResumedRecipient{},
+				}
+			},
+			want: "resumed_recipient",
+		},
+		{
+			name:     "the producer stated no arm, so the row states none either",
+			delivery: nil,
+			want:     "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			success := &conversationv1.AgentSendMessageSuccess{
+				RecipientAgentId: &conversationv1.AgentId{Value: "agent-sub"},
+			}
+			if tc.delivery != nil {
+				tc.delivery(success)
+			}
+
+			// Act.
+			h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+			h.sendMessage("unit-1", success)
+
+			// Assert.
+			if got := deliveryWord(h.sendRow()); got != tc.want {
+				t.Fatalf("delivery = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestADeliveredPromptsRecipientCopyCarriesNoDeliveryArm(t *testing.T) {
+	// Arrange: a subagent bubble whose feed the delivered prompt is drawn on.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "spawn an explorer")
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act: the prompt delivered to that subagent.
+	h.resolver.OnPrompt(testWorkspace, mainAgent(), &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-2"},
+		Agent:  created,
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{textBlock("also check the shim")},
+		}},
+	}, noAddress())
+
+	// Assert: the recipient's copy states no delivery — the arm is the
+	// SENDER's row alone.
+	var seen int
+	for _, row := range h.rows(feedid.Feed{Agent: created}) {
+		prompt := row.GetAgentPrompt()
+		if prompt == nil {
+			continue
+		}
+		seen++
+		if got := deliveryWord(prompt); got != "" {
+			t.Fatalf("recipient copy delivery = %q, want unset", got)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("no agent-prompt row on the recipient's feed to check")
+	}
+}
+
+// deliveryWord names the drawn delivery arm, empty when the row states none.
+func deliveryWord(prompt *frontendv1.FeedAgentPrompt) string {
+	switch prompt.GetDelivery().(type) {
+	case *frontendv1.FeedAgentPrompt_QueuedToLive:
+		return "queued_to_live"
+	case *frontendv1.FeedAgentPrompt_ResumedRecipient:
+		return "resumed_recipient"
+	}
+	return ""
+}
