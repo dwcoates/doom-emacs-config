@@ -583,19 +583,41 @@ RUN set -eux; \
     doom install --no-config --no-env --no-install; \
     doom sync
 
-# --- prime the npm caches so `npm ci` runs OFFLINE at test time ------------
+# --- BAKE the node dependency trees, and prime the npm cache behind them ---
 #
-# Only the lockfiles are copied: `npm ci` in a throwaway directory populates
-# ~/.npm with every tarball the lockfile names, and the throwaway tree is
-# then deleted. At run time the entrypoint's `npm ci --offline` in the
-# writable working copy resolves entirely from this cache.
-COPY --chown=sandbox:sandbox npm-lockfiles/shim/   /sandbox/npm-prime/shim/
-COPY --chown=sandbox:sandbox npm-lockfiles/webapp/ /sandbox/npm-prime/webapp/
+# THE INSTALL IS AN IMAGE ARTIFACT, NOT A PER-RUN STEP. The predecessor kept
+# only the npm CACHE here and left the entrypoint to run `npm ci --offline`
+# twice in every container. That cost each run about seven seconds and, far
+# worse, about 730 MiB of the container's memory budget: the working copy
+# lives on a tmpfs, so `node_modules` (621 MiB for the shim, 108 MiB for the
+# webapp) was 730 MiB of RAM re-materialized on every single run. Two
+# concurrent sandboxes then exceeded the Docker VM outright and the kernel
+# OOM-killed `npm ci` (exit 137) and Emacs.
+#
+# Installed HERE, the same trees are an ordinary read-only image layer that
+# every container shares and none of them pays for. The entrypoint links the
+# working copy's `node_modules` at these, after checking the lockfile the
+# image installed from is byte-for-byte the lockfile the checkout carries --
+# which is what keeps the shortcut honest: a checkout whose lockfile has
+# moved on does NOT silently run against the image's older dependency tree,
+# it says so and falls back to a real `npm ci --offline` from the cache the
+# same install primed.
+#
+# The flags are the entrypoint's own (`--no-audit --no-fund`, scripts NOT
+# ignored), so the baked tree is exactly the tree the per-run install used to
+# produce -- a package whose `postinstall` builds something still gets to
+# build it.
+COPY --chown=sandbox:sandbox npm-lockfiles/shim/   /sandbox/deps/shim/
+COPY --chown=sandbox:sandbox npm-lockfiles/webapp/ /sandbox/deps/webapp/
 RUN set -eux; \
-    for d in /sandbox/npm-prime/shim /sandbox/npm-prime/webapp; do \
-      (cd "$d" && npm ci --ignore-scripts); \
+    for d in /sandbox/deps/shim /sandbox/deps/webapp; do \
+      (cd "$d" && npm ci --no-audit --no-fund); \
+      test -d "$d/node_modules" || { echo "sandbox: npm ci produced no node_modules in $d" >&2; exit 1; }; \
+      sha256sum "$d/package-lock.json" | cut -d" " -f1 > "$d/.lock-sha256"; \
+      test -s "$d/.lock-sha256"; \
     done; \
-    rm -rf /sandbox/npm-prime
+    test -f /sandbox/deps/shim/node_modules/@anthropic-ai/claude-agent-sdk/package.json \
+      || { echo "sandbox: the baked shim deps do not carry the vendor SDK the bundle resolves from beside itself" >&2; exit 1; }
 
 # --- prime the Go module cache so `go build`/`go test` run OFFLINE --------
 #

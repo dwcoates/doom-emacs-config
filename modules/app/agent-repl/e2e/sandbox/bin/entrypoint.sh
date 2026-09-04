@@ -183,20 +183,91 @@ log "doom module :app agent-repl -> $REPO/$MODULE_REL"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$GOCACHE"
 [[ -s ${GIT_CONFIG_GLOBAL:-} ]] || die "no git identity at ${GIT_CONFIG_GLOBAL:-<unset>}; the image did not bake one"
 
-# Node dependencies, offline, from the cache baked into the image.
-if [[ ${SANDBOX_SKIP_NPM:-0} != 1 ]]; then
-  primed=${SANDBOX_CACHE:?SANDBOX_CACHE unset}/npm
+# --- node dependencies: LINKED from the image, never installed per run -----
+#
+# The image bakes a complete `node_modules` for the shim and the webapp (see
+# the Dockerfile's "BAKE the node dependency trees" step) at
+# /sandbox/deps/<name>/node_modules, together with the sha256 of the
+# package-lock.json it installed from.
+#
+# Linking rather than installing is worth two things at once. It removes
+# about seven seconds of `npm ci` from every run, and -- the reason it exists
+# -- it removes about 730 MiB from every container's MEMORY budget, because
+# the working copy is a tmpfs and an installed `node_modules` is therefore
+# resident RAM, while an image layer is shared and paid for once.
+#
+# IT IS NOT A BLIND SHORTCUT. The link is taken only when the checkout's
+# lockfile hashes to exactly what the image installed from. When it does not,
+# the mismatch is announced with both digests and the run falls back to the
+# real `npm ci --offline` out of the npm cache the same bake primed, so a
+# checkout that has moved its dependencies on can never be silently tested
+# against the image's older tree. SANDBOX_NODE_MODULES=copy forces a writable
+# per-run copy for a caller that needs to write inside node_modules (vitest's
+# own `node_modules/.vite` cache is the case that wants it); `install` forces
+# the `npm ci` path outright.
+sandbox_npm_cache_ready=0
+prepare_npm_cache() {
+  (( sandbox_npm_cache_ready )) && return 0
+  local primed=${SANDBOX_CACHE:?SANDBOX_CACHE unset}/npm
   [[ -d $primed ]] || die "no primed npm cache at $primed"
   log "copying the primed npm cache into the writable HOME"
   mkdir -p "$HOME/.npm"
   cp -a "$primed/." "$HOME/.npm/"
   export NPM_CONFIG_CACHE="$HOME/.npm" npm_config_cache="$HOME/.npm"
-  for rel in "$MODULE_REL/agent-shim/claude/shim" "$MODULE_REL/webapp"; do
-    dir=$REPO/$rel
-    [[ -f $dir/package-lock.json ]] || { log "no lockfile in $rel; skipping"; continue; }
-    log "npm ci --offline in $rel"
-    (cd "$dir" && npm ci --offline --no-audit --no-fund)
-  done
+  sandbox_npm_cache_ready=1
+}
+
+install_node_deps() {
+  local dir=$1 rel=$2
+  prepare_npm_cache
+  log "npm ci --offline in $rel"
+  (cd "$dir" && npm ci --offline --no-audit --no-fund)
+}
+
+stage_node_deps() {
+  local name=$1 rel=$2
+  local dir=$REPO/$rel
+  local baked=/sandbox/deps/$name
+  [[ -f $dir/package-lock.json ]] || { log "no lockfile in $rel; skipping"; return 0; }
+
+  local mode=${SANDBOX_NODE_MODULES:-link}
+  if [[ $mode == install ]]; then
+    install_node_deps "$dir" "$rel"
+    return 0
+  fi
+
+  if [[ ! -d $baked/node_modules || ! -s $baked/.lock-sha256 ]]; then
+    log "WARNING: the image bakes no node_modules for $name at $baked; installing instead"
+    install_node_deps "$dir" "$rel"
+    return 0
+  fi
+
+  local want have
+  want=$(cut -d" " -f1 < "$baked/.lock-sha256")
+  have=$(sha256sum "$dir/package-lock.json" | cut -d" " -f1)
+  if [[ $want != "$have" ]]; then
+    log "WARNING: $rel/package-lock.json has moved since this image was built"
+    log "  image installed from sha256:$want"
+    log "  checkout carries      sha256:$have"
+    log "  the baked node_modules is therefore STALE and is NOT used; installing from the primed cache instead."
+    log "  rebuild the image (e2e-sandbox.sh build) to get the fast path back."
+    install_node_deps "$dir" "$rel"
+    return 0
+  fi
+
+  rm -rf "$dir/node_modules"
+  if [[ $mode == copy ]]; then
+    log "copying the image's baked node_modules into $rel (SANDBOX_NODE_MODULES=copy)"
+    cp -a "$baked/node_modules" "$dir/node_modules"
+    return 0
+  fi
+  ln -s "$baked/node_modules" "$dir/node_modules"
+  log "$rel/node_modules -> $baked/node_modules (image-baked, lockfile sha256:$want)"
+}
+
+if [[ ${SANDBOX_SKIP_NPM:-0} != 1 ]]; then
+  stage_node_deps shim   "$MODULE_REL/agent-shim/claude/shim"
+  stage_node_deps webapp "$MODULE_REL/webapp"
 fi
 
 # Optional `--dir <relpath>`, consumed before the command: <relpath> is

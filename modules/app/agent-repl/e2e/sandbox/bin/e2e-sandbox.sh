@@ -253,6 +253,20 @@ if [ ! -d "$EMACSDIR/.local" ]; then
   echo "MISSING: $EMACSDIR/.local (doom sync was not baked into the image)" >&2
   fail=1
 fi
+# The node dependency trees must be baked too, WITH the lockfile digest the
+# entrypoint checks the checkout against. Without them every run reinstalls
+# them onto a tmpfs -- seven seconds and ~730 MiB of the container's memory
+# budget, which is what made two concurrent sandboxes OOM the VM.
+for d in shim webapp; do
+  if [ ! -d "/sandbox/deps/$d/node_modules" ]; then
+    echo "MISSING: /sandbox/deps/$d/node_modules (the node deps were not baked into the image)" >&2
+    fail=1
+  fi
+  if [ ! -s "/sandbox/deps/$d/.lock-sha256" ]; then
+    echo "MISSING: /sandbox/deps/$d/.lock-sha256 (no lockfile digest, so staleness could not be checked)" >&2
+    fail=1
+  fi
+done
 exit "$fail"
 PROBE
 )
@@ -261,7 +275,7 @@ PROBE
   # that only works for non-login shells is caught here.
   "$rt" run --rm --network none --entrypoint /bin/bash "$IMAGE" -lc "$probe" \
     || die "image '$IMAGE' is missing required contents (see above)"
-  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom + a baked doom sync"
+  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom, a baked doom sync and baked node deps"
 }
 
 # --- run -------------------------------------------------------------------
