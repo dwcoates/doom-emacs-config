@@ -850,3 +850,38 @@ func TestStatusListsUntrackedFilesUnderUall(t *testing.T) {
 		t.Fatalf("`status --porcelain -uall` = %q, want the scripted dirty entry", got.Stdout)
 	}
 }
+
+func TestRunSkipsGitGlobalOptionsBeforeTheSubcommand(t *testing.T) {
+	tests := []struct {
+		name string
+		lead []string
+	}{
+		{name: "magit's prefix", lead: []string{"--no-pager", "--literal-pathspecs", "-c", "core.preloadIndex=true", "-c", "color.ui=false"}},
+		{name: "-C after other options", lead: []string{"--no-pager", "-C"}},
+		{name: "attached -c", lead: []string{"-ccolor.ui=false"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			s, _, dir := world(t)
+			args := append([]string(nil), tt.lead...)
+			if args[len(args)-1] == "-C" {
+				args = append(args, dir, "rev-parse", "--show-toplevel")
+				dir = t.TempDir()
+			} else {
+				args = append(args, "rev-parse", "--show-toplevel")
+			}
+
+			// Act.
+			got := Run(s, dir, args)
+
+			// Assert.
+			if got.Exit != 0 {
+				t.Fatalf("exit %d, stderr %q; want the subcommand dispatched", got.Exit, got.Stderr)
+			}
+			if !strings.HasSuffix(got.Stdout, "/repo\n") {
+				t.Fatalf("stdout %q; want the toplevel", got.Stdout)
+			}
+		})
+	}
+}

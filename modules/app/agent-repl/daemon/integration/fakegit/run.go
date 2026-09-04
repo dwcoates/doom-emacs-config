@@ -27,11 +27,7 @@ const fakeGitVersion = "git version 2.39.5"
 func Run(s *State, cwd string, args []string) Result {
 	s.Calls = append(s.Calls, Call{Args: append([]string(nil), args...), Cwd: cwd})
 
-	dir := cwd
-	subject := args
-	if len(args) >= 2 && args[0] == "-C" {
-		dir, subject = args[1], args[2:]
-	}
+	dir, subject := splitGlobalOptions(cwd, args)
 	if len(subject) == 0 {
 		return Result{Stderr: "usage: git <command>\n", Exit: 129}
 	}
@@ -697,3 +693,30 @@ func render(format string, c *Commit) string {
 // FieldSep is the unit separator the git leaf's commit template uses. Tests
 // build expectations with it rather than repeating the byte.
 const FieldSep = fieldSep
+
+// splitGlobalOptions consumes git's leading global options -- the ones that
+// precede the subcommand -- and returns the working directory they select
+// plus the subcommand vector. Magit prefixes every call with several
+// (`--no-pager --literal-pathspecs -c key=value ...`), and real git accepts
+// them in any order before the subcommand.
+func splitGlobalOptions(cwd string, args []string) (string, []string) {
+	dir := cwd
+	i := 0
+	for i < len(args) {
+		switch a := args[i]; {
+		case a == "-C" && i+1 < len(args):
+			dir = args[i+1]
+			i += 2
+		case a == "-c" && i+1 < len(args):
+			i += 2
+		case a == "--no-pager", a == "-P", a == "--literal-pathspecs",
+			a == "--no-optional-locks", a == "--no-replace-objects",
+			strings.HasPrefix(a, "--git-dir="), strings.HasPrefix(a, "--work-tree="),
+			strings.HasPrefix(a, "-c") && len(a) > 2:
+			i++
+		default:
+			return dir, args[i:]
+		}
+	}
+	return dir, nil
+}
