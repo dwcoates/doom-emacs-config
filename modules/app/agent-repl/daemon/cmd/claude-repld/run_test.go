@@ -286,3 +286,29 @@ func holdsRecord(records []dlog.Record, level, message string) bool {
 	}
 	return false
 }
+
+func TestJoinQueueWorkReturnsWhenTheQueuesWorkHasLeft(t *testing.T) {
+	// Arrange: a queue whose background work is already done.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	joinQueueWork(func(time.Duration) bool { return true }, loopJoinBound, log)
+
+	// Assert.
+	if !holdsRecord(log.Records(), "debug", "the prompt queue's background work left before the teardown") {
+		t.Fatalf("records = %+v, want the queue's work joined", log.Records())
+	}
+}
+
+func TestJoinQueueWorkReportsWorkThatOutlivesTheBound(t *testing.T) {
+	// Arrange: a queue whose drain answers that its work is still running.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	joinQueueWork(func(time.Duration) bool { return false }, loopJoinBound, log)
+
+	// Assert: reported, never waited on forever.
+	if !holdsRecord(log.Records(), "error", "the prompt queue's background work outlived its serving context; tearing down under it") {
+		t.Fatalf("records = %+v, want the overrun reported", log.Records())
+	}
+}

@@ -54,6 +54,12 @@ func expectSessionKillRecords(d *harness.Daemon) {
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
 		"daemon.sessionwatcher.watch_agent", "daemon.workspace.kill",
+		// The adopted-death witness: the monitor can see the stream break
+		// before the exit is decoded, so it says "shim link broke; redialing"
+		// and then "redial stopped" the moment the death is evidence. Whether
+		// it gets there first is a scheduling matter, so the pair is declared
+		// rather than raced on.
+		"daemon.shimclient.redial", "daemon.sessionwatcher.reopen",
 	)
 }
 
