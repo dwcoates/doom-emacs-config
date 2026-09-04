@@ -518,6 +518,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		// still gets the unconditional Kill/ReapStrays underneath.
 		d.gracefulStopForCoverage()
 		d.Kill()
+		// The shims are stood down gracefully first on a coverage run, for
+		// the same reason: a node process SIGKILLed by ReapStrays writes no
+		// NODE_V8_COVERAGE profile, while one that takes SIGTERM leaves
+		// through main.ts's stand-down and does.
+		d.standDownStraysForCoverage()
 		// The daemon's group is gone; its shims are in groups of their own and
 		// would otherwise outlive the test.
 		d.ReapStrays()
@@ -758,6 +763,36 @@ func (d *Daemon) gracefulStopForCoverage() {
 		return
 	}
 	d.awaitReapWithin(DefaultTimeout)
+}
+
+// standDownStraysForCoverage SIGTERMs every process still naming this run's
+// state directory and waits, bounded, for them to leave — ONLY on a coverage
+// run, and reporting nothing. ReapStrays still runs underneath, so a process
+// that ignores the signal is killed exactly as it always was.
+func (d *Daemon) standDownStraysForCoverage() {
+	if !CoverageEnabled() {
+		return
+	}
+	pids := d.strayPIDs()
+	if len(pids) == 0 {
+		return
+	}
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+	deadline := time.After(DefaultTimeout)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-ticker.C:
+			if len(d.strayPIDs()) == 0 {
+				return
+			}
+		}
+	}
 }
 
 // Kill ends the process group without warning, for crash simulation and for

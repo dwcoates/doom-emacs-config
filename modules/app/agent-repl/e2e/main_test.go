@@ -289,7 +289,16 @@ func requireShimBundle(t *testing.T) string {
 // daemon/e2e's buildShim did: never from a stale, gitignored dist/, so this
 // suite can never silently stop covering the source it exists to cover.
 func buildShimBundle(node string) (string, error) {
-	outDir := filepath.Join(e2eBinDir, "shim-dist")
+	// THE BUNDLE MUST OUTLIVE THE RUN ON A COVERAGE RUN. The v8 profiles name
+	// the bundle by path and attribute back to src/**/*.ts only through the
+	// map beside it, and both are read by the REPORTER, after this process
+	// (and with it e2eBinDir) is gone. Under coverage the bundle is therefore
+	// staged beneath the coverage root, which the reporter owns.
+	root := e2eBinDir
+	if covRoot := harness.CoverageRoot(); covRoot != "" {
+		root = filepath.Join(covRoot, "shim-bundle")
+	}
+	outDir := filepath.Join(root, "shim-dist")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", fmt.Errorf("make shim build dir: %w", err)
 	}

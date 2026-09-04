@@ -38,7 +38,17 @@ TIMEOUT="${E2E_COVERAGE_TIMEOUT:-45m}"
 # Each Go binary this suite spawns, paired with the module whose sources it
 # was built from. The names are the GOCOVERDIR subdirectories the harness
 # creates (harness.CoverageDir).
+# `go tool cover -func` resolves a profile's packages through the MODULE it
+# reports on, so each report runs from that module's own directory.
 GO_BINARIES=(claude-repld shim-store shim-claude-sidecar)
+go_module_dir() {
+    case "$1" in
+        claude-repld)         printf '%s' "$ROOT/daemon" ;;
+        shim-store)           printf '%s' "$ROOT/agent-shim/shim-store" ;;
+        shim-claude-sidecar)  printf '%s' "$ROOT/agent-shim/claude/shim-sidecar" ;;
+        *) die "no module directory is declared for '$1'" ;;
+    esac
+}
 
 log() { printf '[agent-repl-e2e-coverage] %s\n' "$*"; }
 die() { printf '[agent-repl-e2e-coverage] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -98,7 +108,7 @@ for binary in "${GO_BINARIES[@]}"; do
         report_failed "$binary: go tool covdata textfmt failed"
         continue
     fi
-    if ! go tool cover -func="$profile" >"$functions"; then
+    if ! (cd "$(go_module_dir "$binary")" && go tool cover -func="$profile") >"$functions"; then
         report_failed "$binary: go tool cover -func failed"
         continue
     fi
@@ -112,25 +122,38 @@ for binary in "${GO_BINARIES[@]}"; do
 done
 
 # --- Shim: render the v8 profiles against the bundle's source map ---------
-SHIM_DIR_COV="$COVERAGE_ROOT/shim"
-if [ ! -d "$SHIM_DIR_COV" ] || [ -z "$(ls -A "$SHIM_DIR_COV" 2>/dev/null)" ]; then
-    report_failed "the shim wrote no v8 coverage into $SHIM_DIR_COV — NODE_V8_COVERAGE reaches a shim only through the daemon's spawn environment"
+#
+# c8 is run FROM THE COVERAGE ROOT on purpose: its default file filter keeps
+# only scripts beneath the working directory, and the bundle the v8 profiles
+# name lives under this root (e2e/main_test.go stages it there under
+# coverage). The report is then remapped through the bundle's source map, so
+# every entry is a real source file -- ours under agent-shim/**/src, plus the
+# dependencies esbuild inlined. The summary below keeps OURS.
+SHIM_COV_DIR="$COVERAGE_ROOT/shim"
+SHIM_REPORT_DIR="$COVERAGE_ROOT/shim-report"
+if [ ! -d "$SHIM_COV_DIR" ] || [ -z "$(ls -A "$SHIM_COV_DIR" 2>/dev/null)" ]; then
+    report_failed "the shim wrote no v8 coverage into $SHIM_COV_DIR — NODE_V8_COVERAGE reaches a shim only through the daemon's spawn environment, and a SIGKILLed node process writes nothing"
 elif [ "${E2E_COVERAGE_SKIP_SHIM_REPORT:-0}" = "1" ]; then
-    log "shim: raw v8 profiles kept at $SHIM_DIR_COV (rendering skipped on request)"
+    log "shim: raw v8 profiles kept at $SHIM_COV_DIR (rendering skipped on request)"
 else
     require_command npx
+    require_command node
     log "shim: rendering v8 coverage with c8"
     if (
-        cd "$SHIM_DIR"
+        cd "$COVERAGE_ROOT"
         npx --yes "c8@${E2E_COVERAGE_C8_VERSION:-10}" report \
-            --temp-directory="$SHIM_DIR_COV" \
-            --reports-dir="$COVERAGE_ROOT/shim-report" \
-            --reporter=text-summary --reporter=json-summary \
-            --include='src/**/*.ts' --all --src=src
-    ); then
-        SUMMARY+=("shim see $COVERAGE_ROOT/shim-report")
+            --temp-directory="$SHIM_COV_DIR" \
+            --reports-dir="$SHIM_REPORT_DIR" \
+            --reporter=json-summary --reporter=html
+    ) && [ -f "$SHIM_REPORT_DIR/coverage-summary.json" ]; then
+        if shim_summary="$(node "$THIS_DIR/e2e-shim-coverage-summary.mjs" "$SHIM_REPORT_DIR")"; then
+            log "shim: $shim_summary"
+            SUMMARY+=("shim $shim_summary")
+        else
+            report_failed "shim: the c8 summary carried no agent-shim source (the bundle's source map is the only thing that attributes the bundle back to src/**/*.ts)"
+        fi
     else
-        report_failed "shim: c8 report failed (raw v8 profiles remain at $SHIM_DIR_COV)"
+        report_failed "shim: c8 report failed (raw v8 profiles remain at $SHIM_COV_DIR)"
     fi
 fi
 
