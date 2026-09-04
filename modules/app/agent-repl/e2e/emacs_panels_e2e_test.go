@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 
 	var names []string
 	for i := 0; i < count; i++ {
-		dir := filepath.Join(box.Scratch(), "repo-"+itoa(i))
+		dir := filepath.Join(box.Scratch(), "repo-"+strconv.Itoa(i))
 		repository := harness.NewRepoAt(t, dir)
 		e.Eval(`(agent-repl-add-project-workspace ` + elispString(repository.Dir) + `)`)
 		want := i + 1
