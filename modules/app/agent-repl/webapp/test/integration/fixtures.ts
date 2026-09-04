@@ -673,6 +673,7 @@ export const PERMISSION_ANSWERS = [
   "allowedStanding",
   "deniedByUser",
   "deniedByPolicy",
+  "deniedUndecidable",
 ] as const;
 export type PermissionAnswer = (typeof PERMISSION_ANSWERS)[number];
 
@@ -693,7 +694,18 @@ export function permissionRow(
           answer:
             state === "deniedByPolicy"
               ? { case: "deniedByPolicy", value: { text: "policy forbids it" } }
-              : { case: state as Exclude<PermissionAnswer, "deniedByPolicy">, value: {} },
+              : state === "deniedUndecidable"
+                ? {
+                    case: "deniedUndecidable",
+                    value: { text: "denied for want of a decider" },
+                  }
+                : {
+                    case: state as Exclude<
+                      PermissionAnswer,
+                      "deniedByPolicy" | "deniedUndecidable"
+                    >,
+                    value: {},
+                  },
         },
       }
     : state === "abandoned"

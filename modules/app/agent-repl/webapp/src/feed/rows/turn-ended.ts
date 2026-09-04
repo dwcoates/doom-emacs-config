@@ -33,11 +33,18 @@ import type {
   FeedTurnEndedInterrupted,
   FeedTurnErrorHeadline,
   FeedTurnErrorMessage,
+  FeedTurnErrorQueryDied,
   FeedTurnErrorVendorUnmodeled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
+
+/** What each query-died cause says. */
+export const QUERY_CAUSE_WORDS = {
+  unexpectedEof: "the agent's stream ended without a close",
+  iteratorFailure: "the agent sdk's iterator failed",
+} as const satisfies Record<string, string>;
 
 const PATH = "FeedTurnEnded";
 
@@ -158,6 +165,9 @@ export function drawFeedTurnEndedErrored(
   if (error.case === "vendorUnmodeled") {
     el.append(drawFeedTurnErrorVendorUnmodeled(error.value));
   }
+  if (error.case === "queryDied" && error.value.cause.case !== undefined) {
+    el.append(drawFeedTurnErrorQueryCause(error.value.cause));
+  }
   if (errored.message !== undefined) {
     el.append(drawFeedTurnErrorMessage(errored.message));
   }
@@ -219,6 +229,39 @@ export function drawFeedTurnErrorVendorUnmodeled(
   el.className = "turn-ended-vendor-type";
   el.setAttribute("data-vendor-type", unmodeled.type);
   el.textContent = unmodeled.type;
+  return el;
+}
+
+/**
+ * WHICH WAY THE QUERY DIED, when the producer named it.
+ *
+ * The headline says the query died; the cause says whether the agent binary's
+ * stream ended without a close or the SDK's iterator threw — two different
+ * faults with two different owners, which is the whole reason the arm was
+ * given a cause. An UNSET cause appends nothing: the line stays exactly what
+ * it was before the cause existed, rather than gaining a stand-in.
+ */
+export function drawFeedTurnErrorQueryCause(
+  cause: FeedTurnErrorQueryDied["cause"],
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "turn-ended-query-cause";
+  switch (cause.case) {
+    case "unexpectedEof":
+    case "iteratorFailure":
+      el.setAttribute("data-query-cause", cause.case);
+      el.textContent = QUERY_CAUSE_WORDS[cause.case];
+      break;
+    default:
+      return unreachableArm(
+        `${PATH}.errored.query_died.cause`,
+        armName(cause as unknown as { case: string }),
+      );
+  }
+  log("debug", `the query died: ${cause.case}`, {
+    operation: "feed.turn-error-query-cause",
+    context: { cause: cause.case },
+  });
   return el;
 }
 

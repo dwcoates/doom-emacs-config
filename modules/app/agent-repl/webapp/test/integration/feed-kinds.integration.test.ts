@@ -1003,6 +1003,17 @@ describe("a policy denial", () => {
   });
 });
 
+describe("an undecidable denial", () => {
+  it("carries its own verdict value, apart from the policy denial's", async () => {
+    // Arrange / Act
+    const row = await drawRow(permissionRow("deniedUndecidable"));
+    // Assert
+    expect(
+      row.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict"),
+    ).toBe("deniedUndecidable");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Questions
 // ---------------------------------------------------------------------------
