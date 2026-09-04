@@ -426,3 +426,98 @@ func TestTheSweepWritesItsPerWorkspaceRecordsToThatWorkspacesSink(t *testing.T) 
 		t.Fatalf("no %s record carried a workspace_dir; the sweep wrote its per-workspace records globally", opSweep)
 	}
 }
+
+// TestSweepGivesUpOnAShimThatNeverAnswersTheDirective covers the hang the
+// idle sweep was found in: the shim ACCEPTS a call and never answers, and the
+// sweep runs on the drain loop's own goroutine, so an unbounded call there
+// stops every later pass and every standing schedule -- not just this
+// workspace.
+func TestSweepGivesUpOnAShimThatNeverAnswersTheDirective(t *testing.T) {
+	// Arrange: an idle session whose shim takes the directive and goes quiet.
+	h := newHarness(t, func(d *Deps) { d.StandBound = 5 * time.Millisecond })
+	h.stand.wedge = true
+	h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act: the pass must RETURN. The test's own deadline is the assertion.
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want nothing hibernated behind a wedged shim", hibernated)
+	}
+}
+
+// TestSweepRecordsTheShimThatNeverAnsweredAsAFailedDirective is that give-up's
+// account: the deferral is never silent, because a shim that stopped answering
+// is a fault worth finding.
+func TestSweepRecordsTheShimThatNeverAnsweredAsAFailedDirective(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps) { d.StandBound = 5 * time.Millisecond })
+	h.stand.wedge = true
+	h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert.
+	found := false
+	for _, r := range records(h.log, opSweep) {
+		if r.Level == "error" && r.Message == "the hibernate directive failed; deferring the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the sweep gave up on a wedged shim without recording it")
+	}
+}
+
+// TestSweepReachesTheNextWorkspaceAfterAWedgedOne is the guarantee the bound
+// exists for, spelled as the package's own comment already claims it: one
+// wedged session must not stop the sweep reaching the rest.
+func TestSweepReachesTheNextWorkspaceAfterAWedgedOne(t *testing.T) {
+	// Arrange: two idle sessions, both behind the same wedged shim, so the
+	// second is reached only if the first was given up on.
+	h := newHarness(t, func(d *Deps) { d.StandBound = 5 * time.Millisecond })
+	h.stand.wedge = true
+	first := h.workspace(t, instant.Add(-2*time.Hour))
+	second := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert: both were tried.
+	h.stand.mu.Lock()
+	tried := append([]ids.WorkspaceID(nil), h.stand.hibernated...)
+	h.stand.mu.Unlock()
+	if len(tried) != 2 {
+		t.Fatalf("hibernate directives = %v, want one for each of %s and %s", tried, first, second)
+	}
+}
+
+// TestSweepGivesUpOnAShimThatNeverAnswersTheStandDown covers the OTHER round
+// trip, which is the one the hang was actually observed in: the directive is
+// acked and the graceful KillSession never answers.
+func TestSweepGivesUpOnAShimThatNeverAnswersTheStandDown(t *testing.T) {
+	// Arrange: the directive succeeds; only the stand-down goes quiet.
+	h := newHarness(t, func(d *Deps) { d.StandBound = 5 * time.Millisecond })
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.wedgeKillOnly()
+
+	// Act.
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want %s deferred behind a stand-down that never answered", hibernated, ws)
+	}
+}
