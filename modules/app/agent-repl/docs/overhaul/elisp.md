@@ -522,9 +522,9 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
 
 ## Landing 10 relay (2026-09-04, project lead)
 
-- SetModelError.cold: the host's model-switch verb surfaces the typed cold
-  refusal (message naming the gate) instead of the unlanded-arm text. No
-  feed shapes reach Emacs.
+- NO elisp change. Emacs has no SetModel client (the model picker is the
+  webapp topbar's); the relay's first draft assumed one. No feed shapes
+  reach Emacs either.
 
 ## Landing 9 relay (2026-09-03, project lead)
 
