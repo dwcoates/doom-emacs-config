@@ -8,6 +8,16 @@ package convert
 // for the same unit observed on the stream plane. That is why every spelling
 // lives here rather than at its call site — two producers cannot agree on a
 // convention that is written down in twenty places.
+//
+// WHERE THE TWO PRODUCERS CANNOT AGREE, ONE OF THEM OWNS THE ROW. A hook is the
+// grounded case (ruling 2026-09-04): the vendor hands the planes DISJOINT
+// identity material — a `hook_id` on the stream, a `toolUseID` in the transcript
+// attachment, and differing record uuids — so no key in this space can name one
+// firing on both planes. The STREAM plane therefore owns the served hook row
+// under `activity:<hook_id>`, exactly as R15 gives it the one served prompt row,
+// and this reader keys its hook attachments into the RESIDUE space by the
+// record's own uuid (ResidueKey) as unserved items. There is deliberately no
+// HookKey here: minting one would re-create the second, unjoinable row.
 
 // ActivityKey names one unit of work for its whole life: a tool call by the
 // vendor's tool_use_id, a text or thinking block by message id + block index.
