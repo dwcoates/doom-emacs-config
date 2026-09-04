@@ -523,8 +523,9 @@ purpose).
   travel only in StartSession; readiness = the first healthy `diagnostics`
   push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
   store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
-  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
-  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(symlink-resolved
+  abs dir)[:8]>.lock` (shim-held from StartSession to process death, per the
+  2026-09-02 relay ruling below; the daemon probes ONLY this one,
   flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
   inside StartSession; pre-minted on a fresh start); proto/vocab/
   render-colors.json + paint-classes.json are the daemon's, consumed by
