@@ -2,6 +2,21 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--kill-buffer-safely "worktree")
+(declare-function agent-repl--ws-add-buffer "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-resolve-persp "workspace")
+
+;; Special variables owned by other sources in this module, declared here
+;; so the byte-compiler binds and reads them dynamically rather than
+;; lexically.
+(defvar agent-repl--workspaces)
+
 (require 'cl-lib)
 
 ;;;; ---- Timer registry ----
@@ -383,7 +398,8 @@ what you want is a smaller LOG FILE, this is the wrong knob — set
   "Master kill-switch for file-writing of agent-repl log lines.
 When non-nil (the default), every call to `agent-repl--log',
 `agent-repl--info', `agent-repl--warn', `agent-repl--do-log',
-`agent-repl--error', or `agent-repl--fatal' appends its JSONL record to the workspace's canonical
+`agent-repl--error', or `agent-repl--fatal' appends its JSONL record to
+the workspace's canonical
 sink, or to `agent-repl-log-file-name' when the call is genuinely
 workspace-agnostic, REGARDLESS of `agent-repl-debug'.
 `agent-repl--log-verbose' persists as well; `agent-repl-debug' controls
@@ -687,6 +703,10 @@ metadata as an argument rather than splicing it into the format."
     (concat (format-time-string "%H:%M:%S.%3N") " [agent-repl] "
             safe-fmt (agent-repl--format-ws-metadata ws))))
 
+(defvar agent-repl--validated-private-log-directories
+  (make-hash-table :test #'equal)
+  "Private temporary log directories validated during this Emacs process.")
+
 (defun agent-repl--logfile-path ()
   "Return the expanded path of `agent-repl-log-file-name'.
 The parent directory is created if it does not exist.  The default
@@ -704,10 +724,6 @@ constructing every file-backed log entry."
                  (directory-file-name (agent-repl--default-log-directory)))
       (agent-repl--validate-private-log-directory dir))
     path))
-
-(defvar agent-repl--validated-private-log-directories
-  (make-hash-table :test #'equal)
-  "Private temporary log directories validated during this Emacs process.")
 
 (defun agent-repl--validate-private-log-directory (dir)
   "Validate ownership and permissions for private temporary log DIR once.
@@ -832,7 +848,8 @@ order is the whole point.  persp-mode's built-ins (\"none\",
 `+workspaces-main') are not workspaces and own no directory of their own —
 but nothing STOPS a stray `agent-repl--ws-put' from writing one into their
 hash entry, and one did: on 2026-08-11 the live registry held
-`main' -> .../marcos-pr-remediation/ and `none' -> .../slack-cee-ceac-integration-shj/,
+`main' -> .../marcos-pr-remediation/ and
+`none' -> .../slack-cee-ceac-integration-shj/,
 the trailing-slash shape of a captured `default-directory'.  Those entries
 satisfied every clause below, so both built-ins were ROUTABLE, and every
 record they carried was written into a real workspace's durable log and
@@ -1079,7 +1096,8 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
                             (error "agent-repl log routing invariant violated: workspace %S has no workspace ID" ws)))))
 
 (defun agent-repl--log-add-workspace-identity (record ws)
-  "Add WS identity and its durable conversation id to JSON RECORD when WS is non-nil.
+  "Add WS identity and its durable conversation id to JSON RECORD.
+A nil WS adds nothing.
 `claude_session_id' is the CLI transcript uuid: it survives the daemon,
 names the conversation on disk, and is the resume target, so it is the
 one conversation identifier worth correlating a log line by."

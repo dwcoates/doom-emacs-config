@@ -22,6 +22,19 @@
 
 ;;; Code:
 
+;; `agent-repl--config-file' is defined by config.el at the module root,
+;; which is the loader rather than a lisp/ source.
+(defvar agent-repl--config-file)
+
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--live-ws-names "workspace")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-get "workspace")
+
 ;;;; ---- Helpers a binding needs -----------------------------------------
 
 (defun agent-repl--read-known-workspace (prompt)
