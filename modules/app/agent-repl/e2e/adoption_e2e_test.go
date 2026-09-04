@@ -98,7 +98,6 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
-	w.WatchWorkspaceLogs(repo.Dir)
 
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
@@ -107,7 +106,6 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	// cold-boot a successor against the SAME state root, kernel-lock dir,
 	// and store socket.
 	successor := adColdBoot(t, w)
-	successor.WatchWorkspaceLogs(repo.Dir)
 
 	// Assert: the cold-started successor's OpenFeed page replays the prior
 	// REAL session's turn purely from the store's durable rows (store.md
@@ -176,7 +174,6 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
-	w.WatchWorkspaceLogs(repo.Dir)
 
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
 
@@ -211,7 +208,6 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	// Landing 7: the shim re-announces SessionStarted once per watch "so an
 	// adopting daemon (crash boot, handover) attaches purely."
 	successor := adColdBoot(t, w)
-	successor.WatchWorkspaceLogs(repo.Dir)
 	successor.AwaitCumulativeWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
 
 	// Assert: the exact cardinality (SPEC.md #48), not merely presence. The
