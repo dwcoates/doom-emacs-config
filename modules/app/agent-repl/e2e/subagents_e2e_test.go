@@ -272,7 +272,7 @@ func TestSubagentSyncNestedActivity(t *testing.T) {
 	// AgentSubagentPrompt.text is "drawn only where there is room for it — a
 	// bubble's body, not its head", so the instruction lands here, addressed
 	// from the caller, and nowhere else.
-	if !pageHasAgentPromptText(subRows, "Do the sweep and report.") {
+	if !pageHasAgentPromptText(subRows, "Read the module's AGENTS.md and report the test command.") {
 		t.Errorf("sub-feed page %v, want an agent_prompt row carrying the commission verbatim", subPage)
 	}
 }
