@@ -326,9 +326,12 @@ type EmacsOpts struct {
 func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Helper()
 
-	// THE SLOT COMES BEFORE ANYTHING IS STARTED. Every scenario is parallel;
-	// the machine is not unbounded. See emacsParallelSlots.
-	takeEmacsSlot(t)
+	// The parallelism slot is NewEmacsWorld's to take, and it takes it before
+	// the per-run builds rather than here -- see the comment there. This is
+	// asserted rather than assumed, because the only thing standing between
+	// this layer and an unbounded number of concurrent Emacsen is that every
+	// caller goes through NewEmacsWorld.
+	requireEmacsSlot(t)
 
 	root := filepath.Join(box.Scratch(), "emacs")
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
@@ -1445,6 +1448,10 @@ func emacsSlotGate(t *testing.T) chan struct{} {
 	return emacsSlots
 }
 
+// emacsSlotHolders records which scenarios hold a slot, so StartEmacs can
+// REFUSE to start an Emacs outside the gate rather than quietly exceed it.
+var emacsSlotHolders sync.Map // *testing.T -> struct{}
+
 // takeEmacsSlot blocks until this scenario may start an Emacs, and returns it
 // on the test's way out.
 func takeEmacsSlot(t *testing.T) {
@@ -1455,8 +1462,27 @@ func takeEmacsSlot(t *testing.T) {
 	// are gone. A slot handed back while this scenario's processes are still
 	// resident would let the next one start against a budget that is not
 	// actually free.
-	t.Cleanup(func() { <-gate })
+	t.Cleanup(func() {
+		emacsSlotHolders.Delete(t)
+		<-gate
+	})
 	gate <- struct{}{}
+	emacsSlotHolders.Store(t, struct{}{})
+}
+
+// requireEmacsSlot fails the test unless it is inside the gate.
+//
+// The bound is only real if EVERY Emacs is started under it, and the one
+// thing that could break that is a future scenario calling StartEmacs
+// directly. This makes that a loud failure at the moment it happens rather
+// than an OOM in some other test.
+func requireEmacsSlot(t *testing.T) {
+	t.Helper()
+	if _, ok := emacsSlotHolders.Load(t); !ok {
+		t.Fatalf("StartEmacs was called outside the parallelism gate: take a slot first "+
+			"(NewEmacsWorld does). Starting an Emacs outside it means more than %d "+
+			"concurrent editors on a machine measured to hold that many.", emacsParallelSlots)
+	}
 }
 
 // recordEvalMax keeps the longest eval this Emacs has answered, so evalBound

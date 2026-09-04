@@ -63,6 +63,21 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		option(&cfg)
 	}
 
+	// THE SLOT COMES FIRST, BEFORE THE PER-RUN BUILDS AND BEFORE THE STORE.
+	//
+	// Every scenario is parallel and the machine is not unbounded; see
+	// emacsParallelSlots. Taking the slot HERE rather than inside StartEmacs
+	// matters for two measured reasons:
+	//
+	//   * The first scenarios of a run also do this suite's one-time builds
+	//     -- the esbuild shim bundle and four Go binaries. Under the old
+	//     placement those ran BESIDE two booting Emacsen instead of counting
+	//     against the budget, and the boots they starved missed Doom's own
+	//     3500ms bound in scenarios that had nothing to do with them.
+	//   * A scenario blocked on a slot would otherwise already be holding a
+	//     running store and sidecar, paying for a world it cannot yet use.
+	takeEmacsSlot(t)
+
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
 	sidecarBin := requireSidecarBinary(t)
