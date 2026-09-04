@@ -1190,8 +1190,6 @@ gated push would then drop the very repaint this exists for."
       (fmakunbound 'persp-frame-save-state)
       (should-not (agent-repl--ws-frame-save-state)))))
 
-;;;; ---- Tests: --ws-materialize-daemon-workspace roster durability ----
-
 ;;;; ---- Tests: --ws-create ----
 
 (ert-deftest agent-repl-test-ws-create-returns-persp-and-tags-project ()

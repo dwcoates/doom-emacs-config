@@ -435,8 +435,7 @@ REFUSED — see the body."
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name
     :frontend-buffer
-    :incoming-session-id
-    :daemon-workspace-metadata)
+    :incoming-session-id)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
@@ -1544,17 +1543,6 @@ Callers must use this function instead of calling `persp-add-new' or
         ;; through this creation boundary.
         (agent-repl--ws-put ws :project-dir project-dir))
       persp)))
-
-(defun agent-repl--ws-daemon-materialization-matches-p (ws metadata)
-  "Return non-nil when live WS exactly matches daemon METADATA.
-METADATA is the authoritative plist assembled from a
-`WorkspaceAvailable' frame.  This comparison is the replay/idempotency
-boundary: only an exact job, path, session, and creation-metadata match is
-accepted as an already-materialized workspace.  Unknown and tombstoned
-workspaces return nil."
-  (and (agent-repl--ws-live-p ws)
-       (equal (agent-repl--ws-get ws :daemon-workspace-metadata)
-              metadata)))
 
 (defun agent-repl--ws-add-buffer (buffer persp &optional switch)
   "Attach BUFFER to perspective PERSP via `persp-add-buffer'.
