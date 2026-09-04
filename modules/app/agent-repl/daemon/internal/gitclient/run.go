@@ -18,9 +18,21 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"claude-repld/internal/dlog"
 )
+
+// terminatingSignal reports the signal that killed the process, when one did.
+// A process that exited on its own is not signalled and answers false, so the
+// ordinary nonzero exit keeps its status untouched.
+func terminatingSignal(state *os.ProcessState) (syscall.Signal, bool) {
+	status, ok := state.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return 0, false
+	}
+	return status.Signal(), true
+}
 
 // strippedVars are the environment bindings that select a repository, an
 // index, or an object store independently of `-C dir`. Every one of them is
@@ -93,6 +105,10 @@ type invocation struct {
 	exitCode int
 	stdout   string
 	stderr   string
+	// signal names the signal that killed git, when a signal did. It is set
+	// ONLY for a death nobody in this process asked for: a cancellation is
+	// classified before this and carries no exit status at all.
+	signal string
 }
 
 // fail shapes the invocation as the leaf's evidence-carrying error.
@@ -103,6 +119,7 @@ func (in invocation) fail() *Error {
 		ExitCode: in.exitCode,
 		Stdout:   in.stdout,
 		Stderr:   in.stderr,
+		Signal:   in.signal,
 	}
 }
 
@@ -115,13 +132,20 @@ func (in invocation) cancelled(cause error) *Cancelled {
 // logContext is the structured context every record about this invocation
 // carries.
 func (in invocation) logContext() dlog.Context {
-	return dlog.Context{
+	fields := dlog.Context{
 		"dir":       in.dir,
 		"args":      in.args,
 		"exit_code": in.exitCode,
 		"stdout":    in.stdout,
 		"stderr":    in.stderr,
 	}
+	// THE SIGNAL IS THE EVIDENCE when there is one, and it is the ONLY
+	// evidence: a killed git writes no stderr, so a record without this field
+	// says "exit -1" and nothing a person could act on.
+	if in.signal != "" {
+		fields["signal"] = in.signal
+	}
+	return fields
 }
 
 // invoke runs `git -C dir args...` with the scrubbed environment and reports
@@ -155,6 +179,19 @@ func (c *client) invoke(ctx context.Context, dir string, args ...string) (invoca
 		in.exitCode = -1
 		return in, in.cancelled(ctx.Err())
 	case errors.As(err, new(*exec.ExitError)):
+		if sig, killed := terminatingSignal(cmd.ProcessState); killed {
+			// SOMEBODY ELSE KILLED IT. The context is fine, so this is not our
+			// cancellation, and there is no exit status: ExitCode() answers -1
+			// for a signalled death and git wrote no stderr on its way out. A
+			// caller that reads that as "git exited nonzero, exit -1" is told
+			// nothing it can act on and may even read the -1 as an ANSWER (a
+			// conflict, a dirty tree). The signal is the fact, it is carried as
+			// the evidence, and the invocation is a failure rather than a
+			// judgeable exit code.
+			in.signal = sig.String()
+			in.exitCode = -1
+			return in, in.fail()
+		}
 		in.exitCode = cmd.ProcessState.ExitCode()
 		return in, nil
 	default:
@@ -203,6 +240,10 @@ func (c *client) runRaw(ctx context.Context, operation, dir string, args ...stri
 				"stderr":     in.stderr,
 				"cause":      cancelled.Cause.Error(),
 			})
+			return in, err
+		}
+		if in.signal != "" {
+			c.log.Global().Error(operation, "git was killed by a signal", in.logContext())
 			return in, err
 		}
 		c.log.Global().Error(operation, "git could not be run", in.logContext())

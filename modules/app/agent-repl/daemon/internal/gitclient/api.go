@@ -110,10 +110,20 @@ type Error struct {
 	Stdout string
 	// Stderr is git's stderr.
 	Stderr string
+	// Signal names the signal that killed git, when a signal did rather than
+	// git deciding anything. It is empty for every ordinary failure. A
+	// signalled git has NO exit status (ExitCode is -1) and wrote no stderr,
+	// so this is the only evidence such a failure carries.
+	Signal string
 }
 
-// Error carries git's own words, because the evidence is the point.
+// Error carries git's own words, because the evidence is the point — or, for a
+// git nobody let finish, the signal that ended it, because there are no words.
 func (e *Error) Error() string {
+	if e.Signal != "" {
+		return fmt.Sprintf("git %s (in %s) was killed by %s",
+			strings.Join(e.Args, " "), e.Dir, e.Signal)
+	}
 	return fmt.Sprintf("git %s (in %s) exited %d: %s",
 		strings.Join(e.Args, " "), e.Dir, e.ExitCode, strings.TrimSpace(e.Stderr))
 }

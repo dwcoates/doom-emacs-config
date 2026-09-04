@@ -52,6 +52,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
+  | `loopJoinBound` (cmd/claude-repld/run.go) | 2s | the orderly exit's wait for the background loops, and for the prompt queue's own goroutines, to leave their cancelled serving context | NOT a shutdown budget: every loop is a ticker whose iteration is itself bounded, so this covers one in-flight iteration finishing. An overrun is reported at ERROR and the teardown proceeds, because an unbounded wait is a daemon that does not exit |
 
   A wait that needs longer than `DefaultTimeout` gets one of the rows above —
   never a bigger default. Package `-timeout 180s` leaves ample margin over the
@@ -125,7 +126,18 @@ environment. Every flag is optional.
    — `rollout.Controller.Join`;
 9. `server.New` behind `server.H2C` on the claimed listener;
 10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn, the
-    streams are closed, and the state client and the log sinks are closed.
+    streams are closed, the BACKGROUND LOOPS and the PROMPT QUEUE's own
+    goroutines are joined (both bounded by `loopJoinBound`, 2s, and an overrun
+    is reported, never waited on), and then
+    the state client and the log sinks are closed. The join is registered last
+    so it runs FIRST of every teardown: a loop's iteration reads and writes the
+    state client off its own goroutine — the drain sweep's hibernation releases
+    the lease and then tells the prompt queue — and a SIGTERM landing inside one
+    left `daemon.promptqueue.lease_changed: could not read the standing holds —
+    sql: database is closed` in the log of an ORDERLY exit. The queue's
+    asynchronous classification verdicts and background revivals are the same
+    class (`daemon.promptqueue.tray` / `daemon.promptqueue.classify` on a closed
+    database) and are joined through `promptqueue.Queue.Drain`.
 
 A lock probe that could NOT TELL is never read as free: such a workspace is
 neither adopted nor orphan-closed, and the boot report names it.
