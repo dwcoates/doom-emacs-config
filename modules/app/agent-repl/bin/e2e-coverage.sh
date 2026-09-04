@@ -136,12 +136,17 @@ if [ ! -d "$SHIM_COV_DIR" ] || [ -z "$(ls -A "$SHIM_COV_DIR" 2>/dev/null)" ]; th
 elif [ "${E2E_COVERAGE_SKIP_SHIM_REPORT:-0}" = "1" ]; then
     log "shim: raw v8 profiles kept at $SHIM_COV_DIR (rendering skipped on request)"
 else
-    require_command npx
     require_command node
+    # c8 is the shim's own pinned devDependency (package.json), never fetched
+    # at run time: a coverage run must be reproducible and work offline.
+    C8_BIN="$SHIM_DIR/node_modules/.bin/c8"
+    if [ ! -x "$C8_BIN" ]; then
+        die "shim: c8 is not installed at $C8_BIN — run npm ci in agent-shim/claude/shim"
+    fi
     log "shim: rendering v8 coverage with c8"
     if (
         cd "$COVERAGE_ROOT"
-        npx --yes "c8@${E2E_COVERAGE_C8_VERSION:-10}" report \
+        "$C8_BIN" report \
             --temp-directory="$SHIM_COV_DIR" \
             --reports-dir="$SHIM_REPORT_DIR" \
             --reporter=json-summary --reporter=html
