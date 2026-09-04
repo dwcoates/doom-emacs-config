@@ -293,7 +293,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	d := &Daemon{
 		StateDir:           opts.StateDir,
 		ProfileDir:         filepath.Join(root, "shim-profiles"),
-		LockDir:            filepath.Join(root, "locks"),
 		PromptsDir:         CopyPrompts(t, filepath.Join(root, "prompts")),
 		WebappDir:          NewFakeWebappDist(t, filepath.Join(root, "dist")),
 		DefaultConfigDir:   NewConfigRoot(t, filepath.Join(root, "config-default"), accountEmail(opts.DefaultAccountEmail, "default@example.invalid")),
@@ -318,6 +317,21 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
 	t.Cleanup(d.assertNoUnexpectedWarnings)
+	// THE LOCK DIRECTORY IS A CROSS-DAEMON RENDEZVOUS, not a per-start temp
+	// dir, so it is keyed to the STATE ROOT and settled only now that the root
+	// is known.
+	//
+	// A shim outlives the daemon that spawned it and holds its workspace lock
+	// in the directory THAT daemon named. A successor given a fresh directory
+	// therefore probes a file nobody could ever hold, reads it free, and
+	// spawns a second shim onto a conversation the survivor is still serving
+	// — the very failure the lock exists to prevent, manufactured by the
+	// harness. Sharing a state root is how this suite spells "the same daemon,
+	// restarted", so every daemon over one state root probes one set of locks.
+	// It is a SIBLING of the state root rather than a child: the boot's own
+	// refusal tests hand the daemon an unwritable state root, and a lock
+	// directory beneath it could not be created at all.
+	d.LockDir = filepath.Join(filepath.Dir(d.StateDir), "locks")
 	requireSocketPathBudget(t, d.StateDir)
 	for _, dir := range []string{d.ProfileDir, d.LockDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
