@@ -8,6 +8,45 @@
 
 ;;; Code:
 
+;; magit is an external package and is not installable under `emacs -Q', so
+;; its functions and special variables are declared here for the
+;; byte-compiler.  The `defvar's matter beyond silencing a warning:
+;; `agent-repl--magit-status-same-window' let-binds
+;; `magit-display-buffer-function' to force same-window display, and without
+;; the special declaration that binding compiles LEXICALLY and never reaches
+;; `magit-status'.
+(declare-function magit--insert-log "magit-log")
+(declare-function magit-add-section-hook "magit-section")
+(declare-function magit-diff-visit-file "magit-diff")
+(declare-function magit-diff-visit-file-other-window "magit-diff")
+(declare-function magit-diff-visit-worktree-file "magit-diff")
+(declare-function magit-insert-heading "magit-section")
+(declare-function magit-insert-unpushed-to-upstream-or-recent "magit-status")
+(declare-function magit-refresh "magit-mode")
+(declare-function magit-status "magit-status")
+(defvar magit-diff-visit-previous-blob)
+(defvar magit-display-buffer-function)
+(defvar magit-file-section-map)
+(defvar magit-hunk-section-map)
+(defvar magit-no-confirm)
+(defvar magit-section-initial-visibility-alist)
+
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--close-buffer-window "panels")
+(declare-function agent-repl--gh-string-quiet "core")
+(declare-function agent-repl--git-string "core")
+(declare-function agent-repl--git-string-quiet "core")
+(declare-function agent-repl--hide-panels "panels")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--panels-visible-p "panels")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-put "workspace")
+
 (declare-function magit-commit-at-point "magit-git")
 
 (defcustom agent-repl-magit-no-confirm-extras '(abort-revert abort-rebase abort-merge)
@@ -340,7 +379,8 @@ replaces the selected window's buffer rather than splitting.
 
 This is the canonical door every workspace-bring-up path opens magit
 through (restore via `+workspaces-switch-project-function', worktree
-create via `agent-repl--drain-pending-magit').  Without the same-window binding, Doom's
+create via `agent-repl--drain-pending-magit').  Without the same-window
+binding, Doom's
 `+magit-display-buffer-fn' routes a `magit-status-mode' buffer through
 `+magit--display-buffer-in-direction' (a SPLIT) whenever the selected
 window already shows a DIFFERENT repo's `magit-status' buffer — so a
