@@ -26,6 +26,7 @@ const truncatedTranscriptRecord = `{"type":"assistant","uuid":"t-1","isSidechain
 // transcript's contents in place with something shorter and asserts the durable
 // cursor comes back to the new length, with the new record actually stored.
 func TestATruncatedTranscriptIsReReadFromItsNewStart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -55,8 +56,14 @@ func TestATruncatedTranscriptIsReReadFromItsNewStart(t *testing.T) {
 	}
 	truncateInPlace(t, path, after)
 
-	// Assert: the durable cursor comes back to exactly the new length...
-	cs := awaitCursorAtMost(ctx, t, fake, path, int64(len(after)))
+	// Assert: the durable cursor comes back DOWN — the shrink was noticed —
+	// and then SETTLES at exactly the new file's whole length. Both waits are
+	// needed: O_TRUNC and the write that follows it are two syscalls, so a poll
+	// can land between them and commit a correct cursor of 0 for a genuinely
+	// empty file, and stopping at the first position at-or-below the new length
+	// would read that intermediate state as the end state.
+	awaitCursorAtMost(ctx, t, fake, path, int64(len(after)))
+	cs := awaitCursorSettledAt(ctx, t, fake, path, int64(len(after)))
 	if got := cs.GetOffset(); got != int64(len(after)) {
 		t.Errorf("the cursor settled at %d after truncation, wanted the new file's whole length %d", got, int64(len(after)))
 	}

@@ -93,6 +93,7 @@ func seedCompactionBoundary(t *testing.T, tree *vendorTree, cwd, session string)
 // TestABoundaryWithoutItsSummaryParksTheCursorShort asserts the cursor advances
 // only to the held frame's offset, so the boundary is read again.
 func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -120,6 +121,7 @@ func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
 // TestABoundaryWithoutItsSummaryWritesNothingForIt asserts the held record is
 // not converted on incomplete evidence.
 func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -142,6 +144,7 @@ func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
 // TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord asserts the boundary and
 // the summary become ONE ContextCut page line of the main agent's book.
 func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -193,6 +196,7 @@ func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
 // BOUNDED: on the second delivery the handler converts it whether or not the
 // summary ever arrived, so nothing can be held forever.
 func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -266,6 +270,7 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 // TestABoundaryHeldOnceIsNotWrittenTwice asserts the redelivered record is
 // converted ONCE — the write_id absorbs a repeat rather than doubling the row.
 func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

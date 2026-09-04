@@ -49,6 +49,7 @@ func ingestGreenPath(t *testing.T) []logRecord {
 // TestTheLogIsStrictJsonl asserts every emitted line parses as a JSON object.
 // readLog fails the test on the first line that does not.
 func TestTheLogIsStrictJsonl(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -61,6 +62,7 @@ func TestTheLogIsStrictJsonl(t *testing.T) {
 // TestEveryRecordCarriesTheRequiredFields asserts the contract's required
 // fields are present on every record.
 func TestEveryRecordCarriesTheRequiredFields(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -112,6 +114,7 @@ func TestEveryRecordCarriesTheRequiredFields(t *testing.T) {
 // interleaved with the shim's and the store's, so a divergence here is a
 // timeline nobody can merge.
 func TestEveryTimestampIsTheContractsRendering(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -127,6 +130,7 @@ func TestEveryTimestampIsTheContractsRendering(t *testing.T) {
 // TestTheGreenPathLogsNoErrors asserts a clean ingest of a real capture never
 // reaches an error branch.
 func TestTheGreenPathLogsNoErrors(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -143,6 +147,7 @@ func TestTheGreenPathLogsNoErrors(t *testing.T) {
 // TestWriteRecordsCarryTheirCorrelationKeys asserts a record that reports a
 // write names the file, the position and the write it made.
 func TestWriteRecordsCarryTheirCorrelationKeys(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -163,6 +168,7 @@ func TestWriteRecordsCarryTheirCorrelationKeys(t *testing.T) {
 // TestPageLineRecordsNameTheirAgent asserts agent_id is a dedicated context key
 // rather than prose inside the message.
 func TestPageLineRecordsNameTheirAgent(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -175,6 +181,7 @@ func TestPageLineRecordsNameTheirAgent(t *testing.T) {
 // TestRetiredCorrelationKeysAreGone asserts the old (session_id, seq) addressing
 // vocabulary died with the addressing it named.
 func TestRetiredCorrelationKeysAreGone(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -198,6 +205,7 @@ func TestRetiredCorrelationKeysAreGone(t *testing.T) {
 // with AGENT_REPL_LOG_VERBOSE unset, the log is lifecycle-sized rather than
 // one record per converted line.
 func TestHotDiagnosticsRideTheVerboseHelper(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

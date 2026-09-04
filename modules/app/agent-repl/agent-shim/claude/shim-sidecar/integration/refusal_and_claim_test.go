@@ -26,6 +26,7 @@ import (
 // treated as the RECOVERABLE kind — production suspends and recovers — rather
 // than parking a file on a verdict the store never actually gave.
 func TestAKindlessRefusalIsAContractViolationThatStillSuspends(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -69,6 +70,7 @@ func TestAKindlessRefusalIsAContractViolationThatStillSuspends(t *testing.T) {
 // forbids. The file's cursor must still be nowhere, and the defect still stated
 // exactly once.
 func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
+	t.Parallel()
 	// Arrange: a store whose socket and database outlive the process, so the
 	// second one is genuinely the same store — and still holds the decoy row
 	// that makes the sidecar's batch a permanent producer defect.
@@ -128,6 +130,7 @@ func TestAParkedFileStaysParkedAcrossAStoreBounce(t *testing.T) {
 // is permanently unresolvable, the conflict is its own ERROR operation, and the
 // spool's bytes fall to residue rather than being attributed to a guess.
 func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -194,6 +197,7 @@ func TestTwoLaunchesClaimingOneSpoolAttributeNothingAndSayWhy(t *testing.T) {
 // it there would leave the run open forever with no terminal; the reader keeps
 // one pending stop per task and applies it the moment the spool is claimed.
 func TestAStopArrivingBeforeTheSpoolIsClaimedCancelsItOnClaim(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

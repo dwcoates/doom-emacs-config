@@ -20,6 +20,7 @@ import (
 // TestARestartLeavesNoGapAndNoRepeat stops the sidecar mid-file, grows the file,
 // restarts, and asserts the book holds each unit exactly once.
 func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -67,6 +68,7 @@ func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
 // TestARestartMintsIdenticalWriteIdsForReplayedRecords asserts a re-read yields
 // the identical write_id, which is what makes absorption possible at all.
 func TestARestartMintsIdenticalWriteIdsForReplayedRecords(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -117,6 +119,7 @@ func TestARestartMintsIdenticalWriteIdsForReplayedRecords(t *testing.T) {
 // queue-operation lines) ahead of the only user prompt in the file, which is
 // exactly that "before the turn" region.
 func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -249,6 +252,7 @@ func turnStartOffsetAtOrBefore(t *testing.T, lines []string, limit int64) int64 
 // TestAFreshStoreReadsEveryFileFromZero asserts an empty GetSidecarCursors
 // answer is the legitimate fresh-store answer, not a failure.
 func TestAFreshStoreReadsEveryFileFromZero(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -275,6 +279,7 @@ func TestAFreshStoreReadsEveryFileFromZero(t *testing.T) {
 // sidecar is stopped between a tool_use line and its tool_result, the result is
 // then appended, and the result UPSERTS its call rather than landing as residue.
 func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -318,6 +323,7 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 // TestARewindIsStatedInTheLog asserts the rewind is a stated decision, naming
 // the offset it rewound to, rather than a silent re-read.
 func TestARewindIsStatedInTheLog(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -381,6 +387,7 @@ func toSet(counts map[string]int) map[string]bool {
 // key (a digest of the file position, say) this would still have passed, which
 // is why the assertion also pins that the key is the record's uuid.
 func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

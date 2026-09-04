@@ -22,6 +22,7 @@ import (
 // TestAWorkflowPerAgentTranscriptLandsAsDeclaredWorkflowResidue drives a
 // workflow run's per-agent transcript and asserts the declared disposition.
 func TestAWorkflowPerAgentTranscriptLandsAsDeclaredWorkflowResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

@@ -54,6 +54,7 @@ func writeSubagentMeta(t *testing.T, tree *vendorTree, slug, session, agent stri
 // TestASidechainWithoutItsMetaIsHeldRatherThanIngested asserts the transcript
 // produces nothing while its meta is absent, and says so.
 func TestASidechainWithoutItsMetaIsHeldRatherThanIngested(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -89,6 +90,7 @@ func TestASidechainWithoutItsMetaIsHeldRatherThanIngested(t *testing.T) {
 // TestASidechainIsIngestedOnceItsMetaAppears asserts the held file is picked up
 // — never dropped — as soon as the meta is written.
 func TestASidechainIsIngestedOnceItsMetaAppears(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -114,6 +116,7 @@ func TestASidechainIsIngestedOnceItsMetaAppears(t *testing.T) {
 // keyed by the agent's OWN identity — the spawning call's tool_use_id from its
 // meta.json — and not by the owning session or by the file's name.
 func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -141,6 +144,7 @@ func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 // the `agent-<id>` locator must reach no book at all, or one agent would have two
 // — one per plane — that no consumer could reconcile.
 func TestASubagentsBookIsNotItsFileName(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -171,6 +175,7 @@ func TestASubagentsBookIsNotItsFileName(t *testing.T) {
 // sidechain frame is the owning session's main agent — the nearest non-sync
 // ancestor — because this spawn was not backgrounded.
 func TestASubagentsFramesNameTheSessionsMainAgentAsTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -207,6 +212,7 @@ func TestASubagentsFramesNameTheSessionsMainAgentAsTopLevel(t *testing.T) {
 // TestASubagentsFirstUserMessageIsWithheld asserts the sidechain's opening user
 // message is a commission, not a served prompt (R15).
 func TestASubagentsFirstUserMessageIsWithheld(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

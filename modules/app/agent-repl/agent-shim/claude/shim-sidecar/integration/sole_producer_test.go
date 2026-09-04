@@ -24,6 +24,7 @@ import (
 // context-budget attachment through the sidecar and reads it back out of the
 // store as a page line of the agent's own book.
 func TestTheContextBudgetWarningReachesTheAgentsBook(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -62,6 +63,7 @@ func TestTheContextBudgetWarningReachesTheAgentsBook(t *testing.T) {
 // facts arrive as page lines: the memory files and skills the vendor pulled in
 // with no tool call of their own.
 func TestInjectedContextReachesTheAgentsBook(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -99,6 +101,7 @@ func TestInjectedContextReachesTheAgentsBook(t *testing.T) {
 // file-plane announcement would be a SECOND announcement of one detachment,
 // keyed the same and racing the stream's.
 func TestTheSidecarNeverAnnouncesDetachedWork(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -131,6 +134,7 @@ func TestTheSidecarNeverAnnouncesDetachedWork(t *testing.T) {
 // the wire: every row's run is the spawning call's AgentActivityId, so a vendor
 // task id never becomes a handle a consumer would have to resolve.
 func TestABashRunsHandleIsItsSpawningCall(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

@@ -125,6 +125,7 @@ func soleToolUseBlock(t *testing.T, obj map[string]any) map[string]any {
 // identity: the deltas are keyed by the tool_use_id of the call that spawned
 // them, never by the vendor's task id.
 func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -156,6 +157,7 @@ func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) 
 // TestBashDeltasCarryContiguousOffsets asserts every update's from_offset
 // equals the bytes already accumulated — no gap and no overlap.
 func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -205,6 +207,7 @@ func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
 // grew three times replays THREE deltas. One key for the run would leave only
 // the last, and the output before it would be gone.
 func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -247,6 +250,7 @@ func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
 // the store holds no row for is refused at the transport, never answered with an
 // empty stream that reads as "the run produced nothing".
 func TestAnUnknownRunIsARefusedOpen(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -265,6 +269,7 @@ func TestAnUnknownRunIsARefusedOpen(t *testing.T) {
 // the run as COMPLETED with the shell's own verdict — a nonzero exit is still
 // the success arm.
 func TestTheExitMarkerSettlesTheRunAsCompleted(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -309,6 +314,7 @@ func TestTheExitMarkerSettlesTheRunAsCompleted(t *testing.T) {
 // TestASplitSpoolLineConvertsOnceAndWhole asserts the carry: a spool cut
 // mid-line and then completed yields the line once, entire.
 func TestASplitSpoolLineConvertsOnceAndWhole(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -341,6 +347,7 @@ func TestASplitSpoolLineConvertsOnceAndWhole(t *testing.T) {
 // routed to the lifecycle record and never to a book — the spawning CALL is
 // already the page line.
 func TestDetachedRunFramesAreNeverPageLines(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -374,6 +381,7 @@ func TestDetachedRunFramesAreNeverPageLines(t *testing.T) {
 // the TaskStop CALL is dropped, but its RESULT is consumed as the owning task's
 // cancelled terminal — deliberately-stopped work must never resolve LOST.
 func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -428,6 +436,7 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 // TestTaskStopCallItselfIsDropped asserts the exempt-set half of the carve-out:
 // the CALL produces nothing at all — not a page line, not residue.
 func TestTaskStopCallItselfIsDropped(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

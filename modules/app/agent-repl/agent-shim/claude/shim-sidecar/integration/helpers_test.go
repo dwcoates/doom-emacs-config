@@ -2257,6 +2257,34 @@ func awaitCursorInBatches(ctx context.Context, t *testing.T, f *fakeStore, path 
 	}
 }
 
+// awaitCursorSettledAt waits until the sidecar's DURABLE cursor for a path
+// stands at EXACTLY an offset.
+//
+// It is the counterpart to awaitCursorInBatches (at-or-past) and
+// awaitCursorAtMost (at-or-below): a subject whose whole claim is "the reader
+// came back to the file's new length" cannot express itself as an inequality,
+// because every intermediate position a legitimate re-read passes through
+// satisfies one side or the other.
+func awaitCursorSettledAt(ctx context.Context, t *testing.T, f *fakeStore, path string, offset int64) *storev1.CursorState {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		// The LAST cursor offered, not the highest: a truncation moves the
+		// position BACKWARD, so latestCursorFor's maximum would keep answering
+		// the pre-truncation offset forever.
+		if cs := lastCursorOfferedFor(f.AckedBatches(), path); cs != nil && cs.GetOffset() == offset {
+			return cs
+		}
+		select {
+		case <-ctx.Done():
+			cs := lastCursorOfferedFor(f.AckedBatches(), path)
+			t.Fatalf("the sidecar's durable cursor for %s never settled at %d (last: %v) within the deadline", path, offset, cs)
+		case <-tick.C:
+		}
+	}
+}
+
 // latestCursorFor answers the newest cursor advance a producer offered for a
 // path, or nil when it offered none.
 func latestCursorFor(batches []*storev1.WriteBatchRequest, path string) *storev1.CursorState {
@@ -2351,6 +2379,7 @@ func awaitCursorPast(ctx context.Context, t *testing.T, f *fakeStore, path strin
 // TestCwdSlugMatchesTheCapturedProjectDirectory asserts the harness spells a
 // project directory exactly as the vendor did in the checked-in capture.
 func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	captured := loadCapturedSession(t)
 	cwd := "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj"
@@ -2368,6 +2397,7 @@ func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
 // the example that distinguishes it from the narrower "/ and . only" reading:
 // the underscore collapses onto '-' like every other non-alphanumeric byte.
 func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	cwd := "/private/var/folders/_m/x"
 
@@ -2383,6 +2413,7 @@ func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
 // TestCwdSlugPreservesCase asserts the mapping touches only the bytes outside
 // [A-Za-z0-9]; a capital stays capital.
 func TestCwdSlugPreservesCase(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	cwd := "/Users/DodgeCoates/Repo9"
 
@@ -2399,6 +2430,7 @@ func TestCwdSlugPreservesCase(t *testing.T) {
 // transcript subject asserts against: a re-capture that changed them must fail
 // here, loudly, rather than as a mystifying page-order failure.
 func TestTheCapturedTranscriptStillCarriesItsExpectedUnits(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	captured := loadCapturedSession(t)
 	joined := strings.Join(captured.Lines, "\n")
@@ -2418,6 +2450,7 @@ func TestTheCapturedTranscriptStillCarriesItsExpectedUnits(t *testing.T) {
 // TestGrowingFileReportsTheOffsetEachRecordStartedAt asserts the harness's own
 // offset accounting, which every cursor assertion rests on.
 func TestGrowingFileReportsTheOffsetEachRecordStartedAt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	g := newGrowingFile(t, filepath.Join(t.TempDir(), "grow.jsonl"))
 
@@ -2470,6 +2503,7 @@ func setMessageID(t *testing.T, obj map[string]any, id string) map[string]any {
 // --spool-root is the PARENT of claude-<uid>, so the real tree is
 // /tmp/claude-<uid>/<project>/<session>/tasks/.
 func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
 	slug := cwdSlug("/Users/dodgecoates/layout-probe")
@@ -2516,6 +2550,7 @@ func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
 // is easy to get wrong: --spool-root does NOT include claude-<uid>; the sidecar
 // resolves that segment itself.
 func TestTheSpoolRootIsTheParentOfTheUidSegment(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
 	slug := cwdSlug("/Users/dodgecoates/spool-root-probe")

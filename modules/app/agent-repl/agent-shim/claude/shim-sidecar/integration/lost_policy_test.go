@@ -48,9 +48,24 @@ import (
 const (
 	shortGrace   = 60 * time.Millisecond
 	shortSilence = 150 * time.Millisecond
-	longWindow   = 30 * time.Second
-	fastRescan   = 25 * time.Millisecond
-	fastPoll     = 20 * time.Millisecond
+	// growthSilence is the shell-silence window of the ONE subject that must
+	// KEEP a file alive across the window rather than let it fall silent.
+	//
+	// Every other short-window subject writes once and then waits for a
+	// verdict, so a longer window only costs it patience. The growth subject
+	// runs a loop — append, wait for the reader's cursor to acknowledge the
+	// append — and it LOSES if any single iteration takes longer than the
+	// window, which makes the window a bound on the harness's own latency
+	// rather than on the policy. One iteration is a file write plus a store
+	// round trip, measured at ~10ms quiet and ~150ms worst under this
+	// package's own parallelism; 750ms is ~5x that worst case. It is the one
+	// place in this file where the wall clock is INHERENT: the policy under
+	// test is a silence window, and a subject about staying non-silent has to
+	// stay non-silent for one.
+	growthSilence = 750 * time.Millisecond
+	longWindow    = 30 * time.Second
+	fastRescan    = 25 * time.Millisecond
+	fastPoll      = 20 * time.Millisecond
 )
 
 // lostOptions builds sidecar options whose LOST windows are all long, so a
@@ -189,6 +204,7 @@ func lostArmName(lost *conversationv1.DetachedLost) string {
 // absorbs the ordinary rename race, and past it the disappearance IS the
 // conclusion.
 func TestAVanishedSpoolIsConcludedFileVanished(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -214,6 +230,7 @@ func TestAVanishedSpoolIsConcludedFileVanished(t *testing.T) {
 // TestAVanishedSpoolSettlesItsRunAsInterrupted asserts the terminal: the run is
 // closed with the output it managed to produce, under the interrupted arm.
 func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -252,6 +269,7 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 // that is still present: no EXIT marker ever arrived, and its silence outlasted
 // the shell window.
 func TestASpoolThatStopsGrowingIsConcludedWentSilent(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -276,6 +294,7 @@ func TestASpoolThatStopsGrowingIsConcludedWentSilent(t *testing.T) {
 // TestASilentSpoolSettlesItsRunAsInterrupted asserts the same terminal reaches
 // the wire for a run that merely went quiet.
 func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -333,6 +352,7 @@ func seedPreBootSpool(t *testing.T, tree *vendorTree, cwd, session, payload stri
 // survives a reboot, so a run whose file has not been written since before the
 // machine booted was never going to report again.
 func TestAPreBootUnclaimedSpoolIsConcludedSweptUp(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -357,6 +377,7 @@ func TestAPreBootUnclaimedSpoolIsConcludedSweptUp(t *testing.T) {
 // claimed the spool, so its bytes land as unparsed residue naming it as their
 // source.
 func TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -405,6 +426,7 @@ func TestAPreBootUnclaimedSpoolsBytesStillLandAsResidue(t *testing.T) {
 // know the sweep has run under the same short window, so the growing spool's
 // having no conclusion is a decision rather than an absence of one.
 func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -413,7 +435,7 @@ func TestASpoolThatKeepsGrowingIsNeverConcludedLost(t *testing.T) {
 	session := "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1"
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-growing-probe", session)
 	opts := lostOptions(t, store.Socket, tree)
-	opts.StaleShellSilence = shortSilence
+	opts.StaleShellSilence = growthSilence
 	// The fence: an unclassifiable spool is tailed at once and claimed by
 	// nobody, so it goes silent immediately and concludes under the same window.
 	fencePath := tree.spoolPath(cwdSlug("/Users/dodgecoates/lost-growing-probe"), session, "z0uncla551f1able")
