@@ -349,39 +349,6 @@ func (m *mockTree) LastMainAgentID() string {
 	return ids[len(ids)-1]
 }
 
-// SubagentIDs answers each subagent transcript's vendor agent id — the
-// `agent-<id>` file name, which is also the sidechain records' `agentId`.
-func (m *mockTree) SubagentIDs() []string {
-	ids := make([]string, 0, len(m.Subagents))
-	for _, p := range m.Subagents {
-		ids = append(ids, strings.TrimSuffix(strings.TrimPrefix(filepath.Base(p), "agent-"), ".jsonl"))
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-// ShellSpoolTaskIDs answers the `b*` task ids — the DETACHED SHELL spools.
-func (m *mockTree) ShellSpoolTaskIDs() []string {
-	return m.spoolTaskIDs("b")
-}
-
-// AgentSpoolTaskIDs answers the `a*` task ids — the backgrounded AGENT spools.
-func (m *mockTree) AgentSpoolTaskIDs() []string {
-	return m.spoolTaskIDs("a")
-}
-
-func (m *mockTree) spoolTaskIDs(prefix string) []string {
-	var out []string
-	for _, p := range m.Spools {
-		id := strings.TrimSuffix(filepath.Base(p), ".output")
-		if strings.HasPrefix(id, prefix) {
-			out = append(out, id)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // ---------------------------------------------------------------------------
 // Driving one scenario.
 // ---------------------------------------------------------------------------
@@ -1105,15 +1072,6 @@ func (in *mockIngest) awaitDrained(t *testing.T) {
 		}
 		awaitCursorAtLeast(ctx, t, in.Store.Client, resolved(path), info.Size())
 	}
-}
-
-// Entries answers every StoreEntry the store now holds for one agent's book,
-// read back through the store's own read verb.
-func (in *mockIngest) BookLines(t *testing.T, agent string) []*storev1.StoreLineAt {
-	t.Helper()
-	ctx, cancel := testContext(t)
-	defer cancel()
-	return bookLines(ctx, t, in.Store.Client, agent, 500)
 }
 
 // mockLogTail answers the last few records of the mocked vendor's own log —
