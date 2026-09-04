@@ -80,6 +80,21 @@ effect."
             (error "AGENT_REPL_E2E_SERVER is unset"))
           ;; A real frame with a tab-bar: the layer asserts window and tab
           ;; state, and both need the modes actually on.
+          ;;
+          ;; persp-mode IS LOADED FIRST, and that ordering is load-bearing.
+          ;; Doom's `:ui workspaces' hangs
+          ;; `+workspaces-set-up-tab-bar-integration-h' on
+          ;; `tab-bar-mode-hook', and that handler calls straight into
+          ;; persp-mode (`safe-persp-name', `get-current-persp'). persp-mode
+          ;; itself is deferred by Doom until a file or buffer edge that a
+          ;; headless boot never reaches, so turning the tab bar on first
+          ;; aborted this hook with "Symbol's function definition is void:
+          ;; safe-persp-name" -- and the boot published a failed stamp
+          ;; instead of a server. Requiring it is also honest about what the
+          ;; scenarios need: `workspace.el' drives perspectives, so a
+          ;; persp-mode that was never loaded would not have served them
+          ;; anyway.
+          (require 'persp-mode)
           (tab-bar-mode 1)
           (setq server-name socket)
           (server-start)
