@@ -144,11 +144,6 @@ Maintained by `agent-repl--record-workspace-history' on every workspace
 activation.  Read by the rename and workspace-merge paths and by
 `agent-repl-open-most-recent-workspace'.")
 
-(defvar agent-repl--opened-recent-workspaces nil
-  "Workspaces already returned by `agent-repl-open-most-recent-workspace'
-this session, so repeated invocations cycle through history instead of
-returning the same workspace twice.")
-
 (defvar agent-repl--workspace-log-targets)
 
 (defun agent-repl--ws-forget-emacs-log-target (ws reason)
