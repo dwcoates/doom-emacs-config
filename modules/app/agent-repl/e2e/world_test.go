@@ -216,6 +216,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		ConfigRoots: []string{d.DefaultConfigDir, d.MultiRepoConfigDir},
 		SpoolRoot:   spoolRoot,
 		LogPath:     filepath.Join(logsDir, "sidecar.log"),
+		StateDir:    stateRoot,
 	})
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
@@ -777,6 +778,13 @@ type sidecarOpts struct {
 	ConfigRoots []string
 	SpoolRoot   string
 	LogPath     string
+	// StateDir is the state root the DAEMON runs on, and therefore the one it
+	// exports into every shim it spawns. The shim's identity records live under
+	// it, and they are the only link between a vendor session id a `/clear`
+	// rotated and the conversation's original one; a sidecar pointed at any
+	// other root would book a rotated transcript under a second id, which the
+	// store refuses.
+	StateDir string
 }
 
 // startSidecar launches the sidecar against the daemon's own two account
@@ -785,10 +793,17 @@ type sidecarOpts struct {
 // harness plumbing is needed to make the sidecar watch the right trees.
 func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	t.Helper()
+	if opts.StateDir == "" {
+		// An empty --state-dir resolves to $AGENT_REPL_STATE_DIR and then to
+		// $HOME/.claude-emacs: a test sidecar would read the DEVELOPER'S live
+		// identity records. Refused rather than defaulted.
+		t.Fatal("e2e: the sidecar needs the world's state root; an empty --state-dir would point it at the developer's own ~/.claude-emacs")
+	}
 	args := []string{
 		"--store-socket", opts.StoreSocket,
 		"--config-roots", strings.Join(opts.ConfigRoots, ","),
 		"--spool-root", opts.SpoolRoot,
+		"--state-dir", opts.StateDir,
 		"--log", opts.LogPath,
 		"--poll-interval", "50ms",
 		"--rescan-interval", "200ms",

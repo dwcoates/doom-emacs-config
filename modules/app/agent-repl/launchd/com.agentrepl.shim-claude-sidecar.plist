@@ -16,6 +16,17 @@
     --config-roots   comma-separated Claude config roots whose projects/*
                      transcripts + subagent spools are observed
     --spool-root     base dir under which /tmp/claude-<uid>/ task spools live
+    --state-dir      agent-repl state root (~/.claude-emacs) holding the
+                     shim's identity records — agent-id.json and
+                     vendor-id/<vendor-session-id>.json. They are the ONLY
+                     link between a vendor session id a /clear rotated and
+                     the conversation's original one, and without them a
+                     rotated transcript's rows are offered to the store under
+                     a second book, refused, and the file's cursor freezes.
+
+  It is passed EXPLICITLY even though it is also the default, on the same
+  grounds as --store-socket: an OS-managed service is pinned to the real path
+  by its argv, so no environment can move it off the root the daemon uses.
 
   Nothing else is passed: --log, --poll-interval (1s) and --rescan-interval
   (30s) keep their defaults, and this service needs no other flag.
@@ -40,6 +51,8 @@
         <string>~/.claude,~/.claude-chesscom</string>
         <string>--spool-root</string>
         <string>/tmp</string>
+        <string>--state-dir</string>
+        <string>~/.claude-emacs</string>
     </array>
 
     <key>RunAtLoad</key>
