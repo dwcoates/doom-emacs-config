@@ -66,6 +66,38 @@ const pollInterval = 5 * time.Millisecond
 // the two constants are documented on each other and move together.
 const FakeShimDefaultBuildSHA = "fake"
 
+// BuildIdentityEnv is the build-identity environment EVERY daemon this suite
+// starts must carry, and the only place the three variables are named. The
+// three answer to ONE string, FakeShimDefaultBuildSHA, so the build the
+// daemon exports to each shim, the build the fake shim reports back, and the
+// build the daemon reads as DEPLOYED cannot disagree:
+//
+//   - AGENT_REPL_CHECKOUT pins the checkout the daemon resolves its stamps
+//     from to a harness-owned tree that carries neither stamp file. Left
+//     unpinned, the daemon walks up from its temp binary to the compiled-in
+//     source root and reads the HOST's agent-shim/claude/shim/dist/.built-sha
+//     — a real git sha written by whatever frontend build ran last — as the
+//     shim build it exports, because that file beats SHIM_BUILD_SHA.
+//   - SHIM_BUILD_SHA is the identity every shim spawn is stamped with. With
+//     no stamp under the pinned checkout it is the only answer.
+//   - AGENT_REPL_DEPLOY_STAMP is the deployed build the rollout staleness
+//     check compares the session's reported build against. It beats
+//     daemon/bin/.built-sha unconditionally.
+//
+// Disagreement does not fail visibly: the daemon judges every freshly spawned
+// fake shim stale, relaunches it, stands the first one down, and every test
+// waiting on the fake's control socket times out.
+//
+// A test that WANTS a mismatch overrides either half through ExtraEnv, which
+// StartDaemon appends after this.
+func BuildIdentityEnv(checkout string) []string {
+	return []string{
+		"AGENT_REPL_CHECKOUT=" + checkout,
+		"SHIM_BUILD_SHA=" + FakeShimDefaultBuildSHA,
+		"AGENT_REPL_DEPLOY_STAMP=" + FakeShimDefaultBuildSHA,
+	}
+}
+
 // Opts configures one daemon process.
 type Opts struct {
 	// StateDir overrides the state root; empty mints a fresh temp one.
@@ -367,15 +399,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
-		// The fake shim has no built bundle, so the daemon's stamp comes from
-		// the environment, and it must match what the fake reports as its
-		// runtime shim_build_sha or the rollout staleness check bounces every
-		// session. A test that wants a mismatch overrides either half through
-		// ExtraEnv, which is appended after this.
-		"SHIM_BUILD_SHA="+FakeShimDefaultBuildSHA,
+		// HOME and PATH aside, the build identity is stated in one place only.
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
+	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	// The daemon's OWN checkout identity is always overridden, whether or not
 	// a test cares which repository it is. The merge orchestrator's two
 	// methods key on it, so it resolves that identity for EVERY merge -- and
