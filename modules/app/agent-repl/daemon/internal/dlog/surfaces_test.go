@@ -638,7 +638,13 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRefusesAfterClose(t *testing.T) {
+// TestShimSinkRefusesAfterClose is the OTHER half of the closed-surface rule.
+// A workspace LOGGER after Close drops its records rather than fail the caller
+// (TestWorkspaceLoggingAfterCloseNeverFailsTheCaller), because logging may
+// never fail an rpc. A borrowed SHIM SINK is not logging: it is the real file
+// descriptor a spawned shim inherits as fd 3, and there is no such descriptor
+// once the surfaces are closed, so it still refuses.
+func TestShimSinkRefusesAfterClose(t *testing.T) {
 	// Arrange.
 	s, _ := testSurfaces(t)
 	dir := t.TempDir()
@@ -647,11 +653,11 @@ func TestWorkspaceRefusesAfterClose(t *testing.T) {
 	}
 
 	// Act.
-	_, err := s.Workspace(dir)
+	_, err := s.ShimSink(dir)
 
 	// Assert.
 	if err == nil {
-		t.Fatalf("Workspace succeeded after Close")
+		t.Fatalf("ShimSink succeeded after Close")
 	}
 }
 
@@ -803,4 +809,69 @@ func TestWorkspaceKeepsItsSinkAfterTheDirectoryIsRemoved(t *testing.T) {
 		t.Fatalf("Workspace after the directory was removed = error %v, want the already-open sink", err)
 	}
 	log.Info("daemon.workspace.after_removal", "recorded", nil)
+}
+
+// TestWorkspaceLoggingAfterCloseNeverFailsTheCaller covers the shutdown race a
+// handover exposes: the outgoing daemon closes its log surfaces while a request
+// for a workspace it just transferred is still in flight. Resolving that
+// workspace's sink must NOT fail -- the request has to reach its handler and
+// receive the handler's own typed answer -- so a closed surface costs the
+// record and nothing else.
+func TestWorkspaceLoggingAfterCloseNeverFailsTheCaller(t *testing.T) {
+	tests := []struct {
+		name     string
+		resolved bool // the workspace already had an open sink before Close
+	}{
+		{name: "a workspace whose sink was already open", resolved: true},
+		{name: "a workspace first seen after the close", resolved: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			dir := filepath.Join(t.TempDir(), "worktree")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if tc.resolved {
+				if _, err := s.Workspace(dir); err != nil {
+					t.Fatalf("Workspace before the close: %v", err)
+				}
+			}
+			if err := s.Close(); err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+
+			// Act: the late request resolves its sink.
+			log, err := s.Workspace(dir)
+
+			// Assert: a logger, no error, and emitting through it is inert.
+			if err != nil {
+				t.Fatalf("Workspace after Close = error %v, want a dropping logger and no error", err)
+			}
+			if log == nil {
+				t.Fatalf("Workspace after Close returned a nil logger")
+			}
+			log.Error("daemon.test.after_close", "dropped", nil)
+		})
+	}
+}
+
+// TestWorkspaceAfterCloseStillRejectsAnUnusableDirectory keeps the closed-surface
+// fallback from swallowing a caller's own bad argument: an empty directory is
+// the caller's fault and stays an error even after Close.
+func TestWorkspaceAfterCloseStillRejectsAnUnusableDirectory(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act.
+	_, err := s.Workspace("")
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Workspace(\"\") after Close = nil error, want the caller's own argument refused")
+	}
 }
