@@ -405,11 +405,22 @@ func TestContextBudgetWarning(t *testing.T) {
 	// header) scenario to completion.
 	driveScenarioToCompletion(t, w, ws, configDir, "context-budget-warning")
 
-	// Assert: the footer's standing activity line carries the warning text.
+	// Assert: the footer's standing activity line carries the warning text
+	// VERBATIM. FooterStatusActivityContextBudget.text is "the composed line,
+	// drawn verbatim" (proto/src/frontend/v1/footer.proto:664-667), and the
+	// converter copies the attachment's `content` through unchanged
+	// (agent-shim/claude/shim/src/convert/attachments.ts's
+	// convertContextBudgetWarning: `const text = record.attachment?.content`,
+	// then ContextBudgetWarningSchema{text}), which the footer resolver in turn
+	// stores as `warning.GetText()` with no composition of its own
+	// (daemon/internal/resolve/footer/resolver.go OnContextBudgetWarning). So
+	// the whole path is pinned by one exact string: the scenario's own
+	// attachment content (session.ts's CONTEXT_BUDGET_WARNING).
+	const wantBudgetText = "The conversation is approaching its context window budget."
 	view := cpAwaitFooterView(t, w, footer.Stream, "context-budget activity line", func(v *frontendv1.FooterView) bool {
 		return cpContextBudgetText(v) != ""
 	})
-	if got := cpContextBudgetText(view); got == "" {
-		t.Errorf("footer context-budget activity text = %q, want non-empty", got)
+	if got := cpContextBudgetText(view); got != wantBudgetText {
+		t.Errorf("footer context-budget activity text = %q, want %q", got, wantBudgetText)
 	}
 }
