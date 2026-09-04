@@ -1194,6 +1194,51 @@ as if it were understood."
     (should (null agent-repl-link--pending))))
 
 
+;;;; ---- The acceptance gate, told apart from a missing successor ----
+
+(ert-deftest agent-repl-test-link-successor-pending-p-is-nil-with-no-handover ()
+  "No announcement, no dial: nothing is pending and nothing is on its way."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act / Assert
+    (should (null (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-test-link-successor-pending-p-holds-between-the-dial-and-acceptance ()
+  "The window a `transferred' push routinely lands in must be tellable apart."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act: the announcement alone, with the acceptance deliberately withheld.
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Assert
+      (should (agent-repl-link-successor-pending-p)))))
+
+(ert-deftest agent-repl-test-link-successor-pending-p-answers-nil-once-accepted ()
+  "Acceptance moves the successor out of the pending slot; the wait is over."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      ;; Act
+      (agent-repl-test-link--accept agent-repl-link--pending-successor)
+      ;; Assert
+      (should (null (agent-repl-link-successor-pending-p))))))
+
+(ert-deftest agent-repl-test-link-successor-pending-p-holds-for-a-dialed-successor ()
+  "A refusal-driven dial is the same window as an announced one."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Assert
+    (should (agent-repl-link-successor-pending-p))))
+
 ;;;; ---- Dialing a successor from a per-workspace refusal ----
 
 (ert-deftest agent-repl-test-link-dial-successor-stands-a-pending-successor ()
