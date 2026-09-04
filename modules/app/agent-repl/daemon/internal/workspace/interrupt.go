@@ -248,7 +248,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Info(opInterrupt, "stopped a detached shell", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
 	default:
-		return InterruptOutcome{}, refuse(log, "Interrupt", ArmUnservedAnswer,
+		return InterruptOutcome{}, refuse(log, "Interrupt", ArmNotDetachedWork,
 			fmt.Sprintf("row kind %q addresses no detached work", ref.Row.Kind), true)
 	}
 }
