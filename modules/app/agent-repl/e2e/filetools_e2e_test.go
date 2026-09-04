@@ -90,6 +90,7 @@ func requireSucceeded(t *testing.T, row *frontendv1.FeedRow, toolName string) *f
 // "edit" (SPEC.md §C #66). Zero support in the old fake-query.ts per the
 // shim coverage report; this is the round trip's first real e2e coverage.
 func TestEdit(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 
@@ -114,6 +115,7 @@ func TestEdit(t *testing.T) {
 // omitted arm (AgentGlobOmittedExact) — this asserts that arm reaches the
 // frontend's composed FeedToolCallLinesOutput.omitted.
 func TestGlob(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 
@@ -141,6 +143,7 @@ func TestGlob(t *testing.T) {
 // GrepContentFilesCount. AgentGrepSuccess.matches is a three-way oneof
 // (content/files/count); each row below drives one arm.
 func TestGrepContentFilesCount(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 
@@ -219,6 +222,7 @@ func TestGrepContentFilesCount(t *testing.T) {
 // predates the range arm, which was added at tag 10 after the extents at
 // tags 2-8; it does not license dropping a middle slice's extent line.
 func TestReadWholeHeadRange(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 
@@ -271,6 +275,7 @@ func TestReadWholeHeadRange(t *testing.T) {
 // populated too, never empty, even though the WRITE_CREATE fixture's own
 // vendor-reported structuredPatch is [].
 func TestWriteCreatedAndUpdated(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 
@@ -309,6 +314,7 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 // edit unit, after the edit's own result, so this asserts the settled row's
 // diagnostics arm specifically rather than merely the edit's own success.
 func TestIdeDiagnosticsAfterEdit(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
 

@@ -72,6 +72,7 @@ import (
 // ===========================================================================
 
 func TestMcpServerHealths(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -215,6 +216,7 @@ func slashCommandSaid(text string) *conversationv1.UserSaid {
 // ===========================================================================
 
 func TestMcpUnmodeledTool(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -308,6 +310,7 @@ func assertFeedRowsMentionNoneOf(t *testing.T, w *World, ws *workspacev1.Workspa
 // ===========================================================================
 
 func TestMonitorDeadline(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
@@ -328,6 +331,7 @@ func TestMonitorDeadline(t *testing.T) {
 }
 
 func TestMonitorPersistent(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)

@@ -177,6 +177,7 @@ func pmExpectNoTurnEndedPush(t *testing.T, ctx context.Context, stream *harness.
 // it; the turn does NOT end") — every arm reaches the manifest's
 // success.completed terminal, deny included.
 func TestPermissionAskAnsweredArms(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name         string
 		prompt       string
@@ -315,6 +316,7 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 // prompt is submitted so it can prove the open state was never observed —
 // not merely absent from the final snapshot (see pmWatchFeedFromNow).
 func TestPermissionDeniedByPolicy(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := pmNewPermissionWorld(t)
 	stream := pmWatchFeedFromNow(t, w, ws)
@@ -367,6 +369,7 @@ func TestPermissionDeniedByPolicy(t *testing.T) {
 // ("can_use_tool request never answered ... interrupted with a pending
 // gate").
 func TestPermissionUndecidableParked(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := pmNewPermissionWorld(t)
 	turn := SubmitPrompt(t, w, ws, "!perm-hold")
@@ -411,6 +414,7 @@ func TestPermissionUndecidableParked(t *testing.T) {
 // "Deliver NOW — override the hold (interrupting the running turn when that
 // is what delivery takes)".
 func TestHeldTurnGate(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := pmNewPermissionWorld(t)
 	turn1 := SubmitPrompt(t, w, ws, "!hold")
@@ -483,6 +487,7 @@ func TestHeldTurnGate(t *testing.T) {
 // permission mode, restated authoritatively on WatchSession" — surfaced here
 // on the topbar's permission-mode picker (frontend/v1/topbar.proto).
 func TestPermissionModeChangedMidSession(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, ws := pmNewPermissionWorld(t)
 	topbar := w.WatchTopbar(ws)

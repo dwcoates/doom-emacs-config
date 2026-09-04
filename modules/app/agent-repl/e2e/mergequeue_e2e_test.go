@@ -245,6 +245,7 @@ func (fw *mqFeedWatch) AwaitRow(what string, pred func(*frontendv1.FeedRow) bool
 // ---------------------------------------------------------------------------
 
 func TestMergeLeaseRefusesSubmit(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace whose merge will hit a scripted conflict, so the
 	// daemon starts a real conflict-repair turn on it.
 	repo, _ := mqCleanRepo(t)
@@ -308,6 +309,7 @@ func mqSaid(text string) *conversationv1.UserSaid {
 // ---------------------------------------------------------------------------
 
 func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		selfRepo bool
@@ -404,6 +406,7 @@ func TestMergeBubbleCoalescesIntoOneFeedRow(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
+	t.Parallel()
 	// Arrange: park a merge on a scripted conflict.
 	repo, _ := mqCleanRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{SelfRepo: repo.Dir}})
@@ -504,6 +507,7 @@ func TestMergeParkedRecognizedFromLeaseState(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
+	t.Parallel()
 	const displacedText = "keep going"
 	mqExpectedBounceWarnings := []string{
 		"daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab",
@@ -732,6 +736,7 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFanWideCancel(t *testing.T) {
+	t.Parallel()
 	// Arrange: a plain registered, opened workspace (no repository/merge
 	// machinery needed for this scenario).
 	repo := harness.NewRepo(t)
