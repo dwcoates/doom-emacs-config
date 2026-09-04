@@ -1107,6 +1107,42 @@ describe("the open-tail ledger", () => {
     expect(fake.openTails()).toEqual([success.watch?.value]);
   });
 
+  it("tailOpened resolves on a tail that opens AFTER the wait began", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 10);
+    const opened = fake.tailOpened();
+
+    // Act.
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Assert.
+    expect(await opened).toBe(success.watch?.value);
+  });
+
+  it("tailOpened resolves immediately on a tail that is ALREADY open", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Act.
+    const token = await fake.tailOpened();
+
+    // Assert.
+    expect(token).toBe(success.watch?.value);
+  });
+
   it("DROPS the entry once the client ABORTS the call", async () => {
     // A client that stops reading must CANCEL THE CALL, not merely stop pulling
     // its iterator: Connect's stream close drains the body, which on a standing

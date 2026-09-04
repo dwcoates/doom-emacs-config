@@ -1266,6 +1266,15 @@ describe("keep-alives", () => {
     await shim.log.record((record) => record.context.outcome === "keepalive_submitted");
   };
 
+  /** Resolves once the shim has CLOSED a keep-alive turn, debt booked. */
+  const keepaliveTurnClosed = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+  ): Promise<void> => {
+    await shim.log.record(
+      (record) => record.message === "closed a turn" && record.context.keepalive === true,
+    );
+  };
+
   test("a keep-alive's rows land UNSERVED rather than in the book", async () => {
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
@@ -1302,7 +1311,13 @@ describe("keep-alives", () => {
     const shim = await spawnBeating();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
-    await keepaliveSubmitted(shim);
+    // THE DEBT IS BOOKED AT THE KEEP-ALIVE TURN'S CLOSE, not at its submission,
+    // and a StartTurn arriving while that turn is still open is REFUSED
+    // `turn_already_open` — the daemon holds the queue, never the shim. So the
+    // wait is on the close: prompting on the submission alone races the vendor
+    // and, when the machine is loaded enough to lose that race, asks for a
+    // rewind that is not yet owed and gets a refusal instead of a turn.
+    await keepaliveTurnClosed(shim);
 
     const rewound = shim.log.record((record) => record.context.resume_session_at !== undefined);
     // What the VENDOR received, not merely what the shim intended: the mock
@@ -1311,7 +1326,11 @@ describe("keep-alives", () => {
     const atVendor = shim.log.record(
       (record) => record.context.vendor_resume_session_at !== undefined,
     );
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" }));
+    // The turn is ACCEPTED, which is the half a refusal would silently take
+    // away: a refused StartTurn never reaches the rewind at all.
+    turnStarted(
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" })),
+    );
     const record = await rewound;
 
     expect(record.context.discarded_keepalive_turns).toBeDefined();
