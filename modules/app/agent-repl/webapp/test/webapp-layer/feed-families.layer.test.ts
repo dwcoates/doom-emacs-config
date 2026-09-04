@@ -189,6 +189,43 @@ it(
 // §F2 #7 — activity / FeedHook. A SUCCEEDED hook draws NOTHING by contract
 // ("quiet automation stays quiet"), so the family is driven by the two
 // failing arms the hooks area already drives.
+//
+// GAP RECORDED — ONE FAILING HOOK DRAWS TWO ROWS, and this layer found it.
+// Dumping every `activity.hook` row standing on the page after the three hook
+// scenarios below shows FOUR, in two pairs — one pair per failing scenario:
+//
+//   turn=<the scenario's turn>  id=activity/<hook_id uuid>
+//     "hook blocked: PostToolUse:Edit (PostToolUse) …"
+//   turn=undefined              id=activity/hook:PostToolUse:Edit:<toolUseID>
+//     "hook blocked …"                      (no name, no event, NO TURN)
+//
+// A hook reaches the store on BOTH planes by vendor design, and each plane
+// mints its OWN activity id, so nothing downstream can join them:
+//   - the STREAM plane — the `hook_started`/`hook_response` pair, keyed by the
+//     vendor's `hook_id` (a uuid). The start frame is what carries the hook's
+//     name and event, so this is the row with the full composed headline, and
+//     it is the one attributed to a turn.
+//   - the FILE plane — the `attachment` record, keyed by
+//     `"hook:" + hookName + ":" + toolUseID`
+//     (shim-claude-sidecar/internal/convert/attachment.go's hookAttachment,
+//     whose own comment explains why the identity is shaped that way). This
+//     plane writes no start frame ("the vendor writes ONE record per hook
+//     execution … so a start frame would be a fact this reader invented"), so
+//     daemon bubbles.go's drawHook finds an empty `u.input` and falls back to
+//     the bare "hook blocked"/"hook failed" headline.
+//
+// This is a PRODUCTION defect, not a page arrangement: a reader sees the same
+// hook firing twice, the second time degraded and unattributed. It is NOT
+// fixable at this layer, and not fixable in the daemon alone either — the two
+// activity ids share no join key, so deduplicating needs a producer/contract
+// decision about which plane owns the row (or a key that spans both). Reported
+// to the sidecar and daemon owners; when it lands, the assertions below tighten
+// from "a row of this arm" to "exactly one row of this arm, carrying the
+// composed headline".
+//
+// The three tests below are written to be correct EITHER WAY: both rows of a
+// pair carry the same outcome arm, so the arm assertions hold, and the
+// succeeded-hook test scopes its count to its own turn (see its own note).
 it(
   "draws a blocked hook's card",
   async () => {
