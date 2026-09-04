@@ -91,10 +91,23 @@ const HeartbeatBound = 1250 * time.Millisecond
 // the heartbeat catches an Emacs that is gone, and it is still the faster of
 // the two.
 //
-// MEASURED: see EMACS-LAYER-SPEC.md, "The bounds, measured". `go test -v`
-// prints `emacs phase eval-max` for every scenario, which is the number a
-// future revision must re-derive this from.
-const evalBound = 5 * time.Second
+// MEASURED, over 92 scenarios of a `-count=2` run at the layer's own
+// parallelism bound: the slowest healthy eval was 409ms and the spread is
+// tight (the top eight were 409, 408, 406, 403, 384, 383, 381ms). 3x that.
+//
+// The one observation above it in that run was 5.001s, and it is NOT a slow
+// eval: it is `agent-repl-add-project-workspace` blocking Emacs's command
+// loop, which the heartbeat catches as EMACS WEDGED at 1.25s while the eval
+// sits there. Deriving a bound from it would enshrine that defect as the
+// expectation.
+//
+// It lands on the same number HeartbeatBound carries, which is a coincidence
+// of two similar measurements and not a reason to fuse them again: they bound
+// different phenomena and will move apart the moment either one does.
+//
+// `go test -v` prints `emacs phase eval-max` for every scenario, which is the
+// number a future revision must re-derive this from.
+const evalBound = 1250 * time.Millisecond
 
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
