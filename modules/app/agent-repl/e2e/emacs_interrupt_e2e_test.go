@@ -79,7 +79,7 @@ func emGHIRegister(t *testing.T, e *Emacs, box sandbox, dirName string) (string,
 // emGHIWorkspaceNamesForm reads the workspace REGISTRY as data, which is
 // EMACS-LAYER-SPEC.md's named readback for "workspace registry" — never a
 // buffer name.
-const emGHIWorkspaceNamesForm = `(let (names) (maphash (lambda (k _v) (push k names)) agent-repl--workspaces) (sort names #'string<))`
+const emGHIWorkspaceNamesForm = `(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) (sort names #'string<))`
 
 // emGHINewName answers the single name the registry gained.
 func emGHINewName(t *testing.T, names []string, before int) string {
