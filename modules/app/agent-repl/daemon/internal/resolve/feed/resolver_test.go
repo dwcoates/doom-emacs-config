@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -259,6 +260,79 @@ func TestUnresolvableWorkspaceIsRecordedAsAnInvariantViolation(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.workspace_sink_unavailable", log.Records())
+	}
+}
+
+// TestAWorkspaceLookupFailureIsClassifiedByItsCause separates the two things a
+// failed workspace lookup can mean. The lookup runs under the DAEMON'S OWN
+// context, so a cancelled read is the daemon shutting down -- a fact, recorded
+// at INFO, whose global fallback is not cached because the workspace is still
+// perfectly resolvable. Any other cause is the invariant violation it always
+// was: an ERROR, with the global fallback cached.
+func TestAWorkspaceLookupFailureIsClassifiedByItsCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		cause     error
+		wantLevel string
+		wantOp    string
+		wantCache bool
+	}{
+		{
+			name:      "the daemon's context was cancelled",
+			cause:     context.Canceled,
+			wantLevel: "info",
+			wantOp:    "daemon.feed.workspace_lookup_cancelled",
+			wantCache: false,
+		},
+		{
+			name:      "the daemon's context hit its deadline",
+			cause:     context.DeadlineExceeded,
+			wantLevel: "info",
+			wantOp:    "daemon.feed.workspace_lookup_cancelled",
+			wantCache: false,
+		},
+		{
+			name:      "the workspace is genuinely unresolvable",
+			cause:     errors.New("no such workspace"),
+			wantLevel: "error",
+			wantOp:    "daemon.feed.workspace_unresolved",
+			wantCache: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			r, err := newResolver(Deps{
+				Log:          &fakeSurfaces{log: log},
+				WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", tc.cause },
+				Encode:       testEncode,
+				EncodeFeed:   testEncodeFeed,
+			})
+			if err != nil {
+				t.Fatalf("newResolver: %v", err)
+			}
+
+			// Act.
+			r.mu.Lock()
+			r.logger(testWorkspace)
+			_, cached := r.loggers[testWorkspace]
+			r.mu.Unlock()
+
+			// Assert.
+			found := false
+			for _, record := range log.Records() {
+				if record.Level == tc.wantLevel && record.Operation == tc.wantOp {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("records = %+v, want a %s %s", log.Records(), tc.wantLevel, tc.wantOp)
+			}
+			if cached != tc.wantCache {
+				t.Fatalf("the global fallback cached = %v, want %v", cached, tc.wantCache)
+			}
+		})
 	}
 }
 
