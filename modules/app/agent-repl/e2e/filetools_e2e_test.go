@@ -349,20 +349,15 @@ func TestIdeDiagnosticsAfterEdit(t *testing.T) {
 // arithmetic and without a second request." The fixture returns 2 of the
 // file's 4 lines, so the composed line is pinned exactly.
 //
-// DISPUTE, recorded rather than absorbed: the scenario DECLARES the arm
-// "AgentReadSuccess.cut=token_cap", and it does not produce it. The shim's
-// converter reaches AgentReadCutAtTokenCap only when the vendor's
-// toolUseResult sets `truncatedByTokenCap` (convert/tools/read.ts
-// textExtent), and READ_TRUNCATED's fixture never sets it — a short read
-// with no offset and no limit asked falls to the line-cap head instead. The
-// vendor's own `read_truncation_notice` attachment the scenario also emits
-// has no converter at all (nothing in the shim's src/ reads that type), so
-// it is unconverted residue and cannot supply the cut either. NOTHING IS
-// ASSERTED ABOUT THE CUT ARM HERE because the two cuts are in any case
-// indistinguishable downstream: FeedToolCallCodeOutput carries the composed
-// omitted line and no cut arm of its own, so even a token-capped read draws
-// exactly what this test asserts. The gap is the fixture's, and closing it
-// is the mock owner's call.
+// THE CUT ARM, resolved: the scenario declares "AgentReadSuccess.cut=
+// token_cap", and the shim's converter reaches AgentReadCutAtTokenCap only
+// when the vendor's toolUseResult sets `truncatedByTokenCap`
+// (convert/tools/read.ts textExtent). The fixture now sets it, so the
+// declared arm is the one produced. NOTHING IS ASSERTED ABOUT THE CUT HERE
+// because the two cuts are indistinguishable downstream:
+// FeedToolCallCodeOutput carries the composed omitted line and no cut arm of
+// its own, so a token-capped read draws exactly what this test asserts. The
+// cut itself is pinned at the converter (shim test/convert/tools/read.ts).
 func TestReadTruncatedStatesTheCut(t *testing.T) {
 	t.Parallel()
 	// Arrange
