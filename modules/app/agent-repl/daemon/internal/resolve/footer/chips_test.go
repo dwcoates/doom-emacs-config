@@ -690,3 +690,86 @@ func TestTheLoadingActivityIsAlwaysPresent(t *testing.T) {
 		t.Fatalf("the loading activity is REQUIRED: the injection IS the status")
 	}
 }
+
+// wakeupStopped retires the pending self-scheduled wakeup.
+func wakeupStopped() *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "wake-1"},
+		Item: &conversationv1.AgentActivity_ScheduleWakeup{
+			ScheduleWakeup: &conversationv1.AgentScheduleWakeup{
+				Result: &conversationv1.AgentScheduleWakeup_Success{
+					Success: &conversationv1.AgentScheduleWakeupSuccess{
+						Outcome: &conversationv1.AgentScheduleWakeupSuccess_Stopped{
+							Stopped: &conversationv1.AgentScheduleWakeupStopped{},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// THE ⏱ CHIP IS ABOUT SCHEDULED JOBS, not about crons alone: footer.proto
+// words it "live scheduled jobs (cron/wakeup schedules)", so a pending
+// self-scheduled wakeup sets it exactly as a cron job does.
+func TestTheScheduledJobsChipCountsCronsAndTheWakeup(t *testing.T) {
+	tests := []struct {
+		name  string
+		acts  []*conversationv1.AgentActivity
+		want  uint32
+		unset bool
+	}{
+		{
+			name: "a cron job alone sets the chip",
+			acts: []*conversationv1.AgentActivity{
+				cronListed(&conversationv1.AgentCronJob{JobId: "j1", Cron: "* * * * *", HumanSchedule: "every min"}),
+			},
+			want: 1,
+		},
+		{
+			name: "a pending wakeup alone sets the chip",
+			acts: []*conversationv1.AgentActivity{wakeupScheduled(instant.Add(5 * time.Minute))},
+			want: 1,
+		},
+		{
+			name: "a cron job and a wakeup both count",
+			acts: []*conversationv1.AgentActivity{
+				cronListed(&conversationv1.AgentCronJob{JobId: "j1", Cron: "* * * * *", HumanSchedule: "every min"}),
+				wakeupScheduled(instant.Add(5 * time.Minute)),
+			},
+			want: 2,
+		},
+		{
+			name: "stopping the only wakeup retires the chip",
+			acts: []*conversationv1.AgentActivity{
+				wakeupScheduled(instant.Add(5 * time.Minute)),
+				wakeupStopped(),
+			},
+			unset: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			for _, act := range tc.acts {
+				h.r.OnActivity(testWS, mainAgent, act)
+			}
+
+			// Assert
+			chip := h.view(t).GetStrip().GetLiveWork().GetCrons()
+			if tc.unset {
+				if chip != nil {
+					t.Fatalf("the scheduled-jobs chip = %+v, want UNSET once nothing is scheduled", chip)
+				}
+				return
+			}
+			if got := chip.GetCount(); got != tc.want {
+				t.Fatalf("scheduled-jobs chip = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
