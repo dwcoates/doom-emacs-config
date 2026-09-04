@@ -127,9 +127,6 @@ func New(stateDir string, log *logging.Bound) *Index {
 	}
 }
 
-// StateDir is the root this index reads, empty when it resolves nothing.
-func (i *Index) StateDir() string { return i.stateDir }
-
 // Refresh re-reads every identity record under the state root.
 //
 // It runs on the rescan interval, beside discovery, because a rotation's link
