@@ -70,7 +70,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		}}
 	case *conversationv1.AgentSubagent_Failure:
 		settled := &frontendv1.FeedSubagentSettled{EndedAtMs: failureSettledMs(frame.Failure.GetError())}
-		subagentFailureOutcome(frame.Failure)(settled)
+		subagentFailureOutcome(r.logger(s.id), unitID, frame.Failure)(settled)
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: settled}
 	default:
 		return nil, errNotARow
@@ -211,10 +211,16 @@ func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSu
 // fault, and work we merely stopped being able to see is LOST rather than
 // failed — the word carries the distinction so it never draws as a plain
 // failure.
-func subagentFailureOutcome(failure *conversationv1.AgentSubagentFailure) subagentOutcome {
-	if lostCauseOfSubagent(failure) != lostNone {
+func subagentFailureOutcome(log dlog.Logger, unitID string, failure *conversationv1.AgentSubagentFailure) subagentOutcome {
+	if cause := lostCauseOfSubagent(failure); cause != lostNone {
 		return func(settled *frontendv1.FeedSubagentSettled) {
-			settled.Outcome = &frontendv1.FeedSubagentSettled_Lost{Lost: &frontendv1.FeedSubagentLost{}}
+			lost := &frontendv1.FeedSubagentLost{}
+			if !applySubagentLostHow(lost, cause) {
+				log.Warn("daemon.feed.subagent_lost_unlanded_arm",
+					"a spawn was lost in a way this build does not draw; the bubble carries no cause",
+					dlog.Context{"unit": unitID, "cause": cause.String()})
+			}
+			settled.Outcome = &frontendv1.FeedSubagentSettled_Lost{Lost: lost}
 		}
 	}
 	if _, stopped := failure.GetCause().(*conversationv1.AgentSubagentFailure_StoppedByUser); stopped {
@@ -386,7 +392,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		sh.lastProgressMs = frame.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentBash_Success:
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
-		settled = shellSettled(frame.Success)
+		settled = shellSettled(log, workID, frame.Success)
 	case *conversationv1.AgentBash_Failure:
 		settled = &frontendv1.FeedShellSettled{
 			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
@@ -459,7 +465,7 @@ func capSpool(spool string) (string, uint64) {
 
 // shellSettled renders a settled shell. A non-zero exit still COMPLETED —
 // "failure" is the reader's judgment of the code, never an arm.
-func shellSettled(success *conversationv1.AgentBashSuccess) *frontendv1.FeedShellSettled {
+func shellSettled(log dlog.Logger, workID string, success *conversationv1.AgentBashSuccess) *frontendv1.FeedShellSettled {
 	settled := &frontendv1.FeedShellSettled{EndedAtMs: success.GetSettledAt().GetAtMs()}
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentBashSuccess_Completed:
@@ -468,8 +474,14 @@ func shellSettled(success *conversationv1.AgentBashSuccess) *frontendv1.FeedShel
 		}
 		settled.Outcome = &frontendv1.FeedShellSettled_Completed{Completed: &frontendv1.FeedShellCompleted{}}
 	case *conversationv1.AgentBashSuccess_Interrupted:
-		if lostCauseOfBash(outcome.Interrupted) != lostNone {
-			settled.Outcome = &frontendv1.FeedShellSettled_Lost{Lost: &frontendv1.FeedShellLost{}}
+		if cause := lostCauseOfBash(outcome.Interrupted); cause != lostNone {
+			lost := &frontendv1.FeedShellLost{}
+			if !applyShellLostHow(lost, cause) {
+				log.Warn("daemon.feed.shell_lost_unlanded_arm",
+					"a shell was lost in a way this build does not draw; the bubble carries no cause",
+					dlog.Context{"work": workID, "cause": cause.String()})
+			}
+			settled.Outcome = &frontendv1.FeedShellSettled_Lost{Lost: lost}
 			break
 		}
 		settled.Outcome = &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}}
