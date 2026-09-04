@@ -365,7 +365,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	var settled *frontendv1.FeedShellSettled
 	switch frame := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
-		sh.command = frame.Start.GetCommand().GetLine()
+		sh.stateCommand(frame.Start.GetCommand().GetLine())
 		if sh.startedAtMs == 0 {
 			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		}
@@ -385,7 +385,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	case *conversationv1.AgentBash_Progress:
 		sh.lastProgressMs = frame.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentBash_Success:
-		sh.command = frame.Success.GetCommand().GetLine()
+		sh.stateCommand(frame.Success.GetCommand().GetLine())
 		settled = shellSettled(frame.Success)
 	case *conversationv1.AgentBash_Failure:
 		settled = &frontendv1.FeedShellSettled{
