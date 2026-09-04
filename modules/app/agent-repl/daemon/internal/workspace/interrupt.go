@@ -46,8 +46,8 @@ func (c *ConfirmRequired) Error() string {
 //   - DETACHED: the addressed bubble decodes to either a detached subagent
 //     (UpdateAgent.stop) or a detached shell (StopBash) — the row kind decides,
 //     never a guess.
-//   - ALL AGENTS: every live detached agent is stopped and the count is
-//     reported.
+//   - ALL AGENTS: every live detached item — agents AND shells — is stopped
+//     and the count is reported.
 //
 // The footer's waiting-interrupting status fires the MOMENT the interrupt
 // registers, before the real turn end arrives, because the turn end is what the
@@ -114,7 +114,7 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 	// stop is what makes that answer true rather than relying on the vendor to
 	// reap the detached units as a side effect of the query dying.
 	if detached > 0 {
-		if err := v.stopDetachedForConfirm(ctx, log, ws, shim, running); err != nil {
+		if _, err := v.stopEveryDetached(ctx, log, ws, shim, running); err != nil {
 			return InterruptOutcome{}, err
 		}
 	}
@@ -161,43 +161,52 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 	return InterruptOutcome{Turn: true}, nil
 }
 
-// stopDetachedForConfirm stops every live detached item a confirmed turn
-// interrupt was told to take with it. A BENIGN shim refusal is one item that
-// finished on its own between the freeness read and the stop, which is the
-// state the caller asked for; every other refusal fails the interrupt, because
-// a user who confirmed must not be told the work is gone when it is not.
-func (v *verbs) stopDetachedForConfirm(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) error {
+// stopEveryDetached stops every live detached item — agents AND shells — and
+// answers how many it reached. It is the ONE sweep both fan-wide stops use: the
+// `all_agents` target and a CONFIRMED turn interrupt are the same user act
+// ("stop the detached work"), so they must not drift apart in what they reach
+// or in how they answer a refusal.
+//
+// A BENIGN shim refusal is one item that finished on its own between the
+// freeness read and the stop, which is the state the caller asked for, so it is
+// skipped rather than counted; every other refusal fails the sweep, because a
+// user who asked for the work to stop must not be told it is gone when it is
+// not.
+func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) (int, error) {
+	stopped := 0
 	for _, agent := range running.LiveWork.Agents {
-		fields := dlog.Context{"agent": agent.GetValue()}
+		fields := dlog.Context{"agent": agent.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
 				if refusal.Benign() {
 					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
 					continue
 				}
-				return refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+				return stopped, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
 			}
-			log.Error(opInterrupt, "could not stop a confirmed detached agent", withCause(fields, err))
-			return fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
+			log.Error(opInterrupt, "could not stop a detached agent", withCause(fields, err))
+			return stopped, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
 		}
-		log.Debug(opInterrupt, "stopped a detached agent the confirmed interrupt takes", fields)
+		log.Debug(opInterrupt, "stopped a detached agent", fields)
+		stopped++
 	}
 	for _, shell := range running.LiveWork.Shells {
-		fields := dlog.Context{"shell": shell.GetValue()}
+		fields := dlog.Context{"shell": shell.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopBash(ctx, shell); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
 				if refusal.Benign() {
 					log.Debug(opInterrupt, "a detached shell was already not running", withArm(fields, refusal))
 					continue
 				}
-				return refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+				return stopped, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
 			}
-			log.Error(opInterrupt, "could not stop a confirmed detached shell", withCause(fields, err))
-			return fmt.Errorf("interrupt %q: stop shell %q: %w", ws, shell.GetValue(), err)
+			log.Error(opInterrupt, "could not stop a detached shell", withCause(fields, err))
+			return stopped, fmt.Errorf("interrupt %q: stop shell %q: %w", ws, shell.GetValue(), err)
 		}
-		log.Debug(opInterrupt, "stopped a detached shell the confirmed interrupt takes", fields)
+		log.Debug(opInterrupt, "stopped a detached shell", fields)
+		stopped++
 	}
-	return nil
+	return stopped, nil
 }
 
 // interruptDetached stops ONE detached bubble. The row's kind decides which
@@ -234,33 +243,23 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	}
 }
 
-// interruptAllAgents stops every live detached agent and reports the count. It
-// is fan-wide over AGENTS only: a detached shell is stopped by naming it, never
-// by a sweep.
+// interruptAllAgents stops EVERY live detached item at once — the fan-wide stop
+// — and reports how many it reached. Fan-wide means the whole live set: a
+// detached shell is detached work exactly as a detached subagent is, and a stop
+// that left one behind would not have emptied anything, which is precisely what
+// the caller asked for. (The turn interrupt's confirm challenge is a different
+// question — how many AGENTS the user is being asked about — and counts agents
+// only; see interruptTurn.)
 func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) (InterruptOutcome, error) {
-	if len(running.LiveWork.Agents) == 0 {
+	if len(running.LiveWork.Agents) == 0 && len(running.LiveWork.Shells) == 0 {
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "all_agents"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
-	stopped := 0
-	for _, agent := range running.LiveWork.Agents {
-		if err := shim.StopAgent(ctx, agent); err != nil {
-			fields := dlog.Context{"agent": agent.GetValue(), "stopped_so_far": stopped}
-			if refusal, ok := AsShimRefusal(err); ok {
-				if refusal.Benign() {
-					// One agent finishing on its own mid-sweep is not a failure
-					// of the sweep: it is simply no longer live.
-					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
-					continue
-				}
-				return InterruptOutcome{}, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
-			}
-			log.Error(opInterrupt, "could not stop a detached agent", withCause(fields, err))
-			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
-		}
-		stopped++
+	stopped, err := v.stopEveryDetached(ctx, log, ws, shim, running)
+	if err != nil {
+		return InterruptOutcome{}, err
 	}
-	log.Info(opInterrupt, "stopped every live detached agent", dlog.Context{"count": stopped})
+	log.Info(opInterrupt, "stopped every live detached item", dlog.Context{"count": stopped})
 	return InterruptOutcome{DetachedCount: stopped}, nil
 }
 
