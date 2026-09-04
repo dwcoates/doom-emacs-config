@@ -2,6 +2,35 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--agent-view-buffer-name-p "core")
+(declare-function agent-repl--agent-view-buffer-p "core")
+(declare-function agent-repl--cancel-timer-key "core")
+(declare-function agent-repl--error "core")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--register-timer "core")
+(declare-function agent-repl--ws-after-system-load "workspace")
+(declare-function agent-repl--ws-by-ref-id "workspace")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl--ws-render-status "workspace")
+(declare-function agent-repl--ws-resolve-persp "workspace")
+(declare-function agent-repl--ws-tab-face "workspace")
+(declare-function agent-repl--ws-tab-selected-face "workspace")
+(declare-function agent-repl--ws-tabline-names "workspace")
+(declare-function agent-repl--ws-window-conf "workspace")
+(declare-function agent-repl-roster-row-attention-p "roster")
+(declare-function agent-repl-roster-row-id "roster")
+(declare-function agent-repl-roster-row-priority-label "roster")
+(declare-function agent-repl-roster-walk "roster")
+
 ;;; Priority badge images
 ;;
 ;; Each image is a small PNG loaded from the module's images/ directory and
@@ -792,7 +821,8 @@ finished must not paint a marker the daemon has already retracted."
     (agent-repl--log-verbose ws "elisp.status.attention-cleared: ws=%s already-clear" ws)))
 
 (defun agent-repl-status-sync-attention (roster)
-  "Follow ROSTER's attention markers: blink then steady where set, cleared where not.
+  "Follow ROSTER's attention markers.
+Blink then steady where a marker is set, cleared where it is not.
 Registered on `agent-repl-roster-update-functions'.
 
 A marker that ARRIVES on a row runs the canonical cadence — the cadence
@@ -2046,8 +2076,11 @@ fix into an older live process does not leave its timer or hook behind."
             timer-cancelled t))
     (when (boundp 'pre-redisplay-function)
       (let ((prior-hook pre-redisplay-function))
+        ;; Quoted, not `#'': the watchdog is DELETED.  Its name survives
+        ;; only as the hook entry an older live process still carries, so
+        ;; there is deliberately no definition for `#'' to point at.
         (remove-function pre-redisplay-function
-                         #'agent-repl--redisplay-storm-watchdog)
+                         'agent-repl--redisplay-storm-watchdog)
         (setq hook-present (not (eq prior-hook pre-redisplay-function)))))
     (list :timer-cancelled timer-cancelled :hook-present hook-present)))
 
