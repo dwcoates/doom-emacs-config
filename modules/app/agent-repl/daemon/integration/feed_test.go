@@ -21,6 +21,7 @@ import (
 // ==========================================================================
 
 func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T) {
+	t.Parallel()
 	// Arrange: one row lands before the feed is ever opened.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-seam", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -67,6 +68,7 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 }
 
 func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -99,6 +101,7 @@ func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 }
 
 func TestGetFeedPageNextWithNoWalkStandingIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
@@ -120,6 +123,7 @@ func TestGetFeedPageNextWithNoWalkStandingIsRefused(t *testing.T) {
 }
 
 func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
+	t.Parallel()
 	// Arrange: push MORE than one page's worth of rows off harness.FeedPageSize
 	// — the daemon's own feed.DefaultPageSize, not a guessed number — so a
 	// second page provably exists regardless of what the page size is.
@@ -175,6 +179,7 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 }
 
 func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *testing.T) {
+	t.Parallel()
 	// Arrange: spawn a subagent and push MORE than one page of its own work,
 	// plus a distinguishable row that lands only on the ROOT feed.
 	f := newOpened(t, harness.Opts{})
@@ -246,6 +251,7 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 }
 
 func TestGetFeedPageWithAnUndecodableFeedIdAnswersFeedUndecodable(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -266,6 +272,7 @@ func TestGetFeedPageWithAnUndecodableFeedIdAnswersFeedUndecodable(t *testing.T) 
 }
 
 func TestGetFeedPageWithAnotherWorkspacesBubbleFeedIdAnswersFeedNotInWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange: a second, independent workspace on the same daemon, with its
 	// own subagent bubble.
 	f := newOpened(t, harness.Opts{})
@@ -298,6 +305,7 @@ func TestGetFeedPageWithAnotherWorkspacesBubbleFeedIdAnswersFeedNotInWorkspace(t
 }
 
 func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
+	t.Parallel()
 	// Arrange: walk all the way to the feed's start.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-atstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -380,6 +388,7 @@ func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 }
 
 func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
+	t.Parallel()
 	// Arrange: walk one page older, so the reader's position is no longer the
 	// newest page.
 	f := newOpened(t, harness.Opts{})
@@ -421,6 +430,7 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 }
 
 func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
+	t.Parallel()
 	// Arrange: enough rows for at least one older page, and a walk
 	// established on connection A.
 	f := newOpened(t, harness.Opts{})
@@ -460,6 +470,7 @@ func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
 }
 
 func TestGetFeedPageWalkIsNotPersistedAcrossAReconnect(t *testing.T) {
+	t.Parallel()
 	// Arrange: establish a walk on one connection, then abandon it.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
@@ -495,6 +506,7 @@ func TestGetFeedPageWalkIsNotPersistedAcrossAReconnect(t *testing.T) {
 // ==========================================================================
 
 func TestAGrowingResponseRepushesTheSameFeedIdThenSettlesWhole(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-grow", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -540,6 +552,7 @@ func TestAGrowingResponseRepushesTheSameFeedIdThenSettlesWhole(t *testing.T) {
 }
 
 func TestALostResponseFragmentSelfCorrectsOnTheTerminal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-selfcorrect", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -569,6 +582,7 @@ func TestALostResponseFragmentSelfCorrectsOnTheTerminal(t *testing.T) {
 }
 
 func TestAResponseWithASynthesizedNoticeDrawsItsComposedHeading(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -606,6 +620,7 @@ func TestAResponseWithASynthesizedNoticeDrawsItsComposedHeading(t *testing.T) {
 // ==========================================================================
 
 func TestReadToolCardDrawsCodeOutputWithPaintSpansAndOmittedForAHeadCut(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-read", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -650,6 +665,7 @@ func TestReadToolCardDrawsCodeOutputWithPaintSpansAndOmittedForAHeadCut(t *testi
 }
 
 func TestWriteToolCardDrawsDiffLines(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-write", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -685,6 +701,7 @@ func TestWriteToolCardDrawsDiffLines(t *testing.T) {
 }
 
 func TestEditToolCardDrawsDiffLines(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-edit", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -718,6 +735,7 @@ func TestEditToolCardDrawsDiffLines(t *testing.T) {
 }
 
 func TestGrepToolCardDrawsLinesOutputWithOmitted(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-grep", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -758,6 +776,7 @@ func TestGrepToolCardDrawsLinesOutputWithOmitted(t *testing.T) {
 }
 
 func TestGlobToolCardDrawsLinesOutput(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-glob", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -792,6 +811,7 @@ func TestGlobToolCardDrawsLinesOutput(t *testing.T) {
 }
 
 func TestBashForegroundToolCardDrawsTextOutput(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-bash", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -830,6 +850,7 @@ func TestBashForegroundToolCardDrawsTextOutput(t *testing.T) {
 }
 
 func TestAProgressFrameRepushesRunningLastProgress(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-progress", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -859,6 +880,7 @@ func TestAProgressFrameRepushesRunningLastProgress(t *testing.T) {
 }
 
 func TestAFailedToolCallDrawsReturnedFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-toolfail", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -891,6 +913,7 @@ func TestAFailedToolCallDrawsReturnedFailed(t *testing.T) {
 }
 
 func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
+	t.Parallel()
 	// Arrange: the ruled sequence. A gated call arrives as a START, the
 	// permission unit settles DENIED, and the tool unit then reaches its
 	// `failure` terminal with NO content, because nothing ran. The permission
@@ -942,6 +965,7 @@ func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
 // ==========================================================================
 
 func TestSkillCardComposesFromExactlyTheStartAndSuccessFrames(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-skill", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -980,6 +1004,7 @@ func TestSkillCardComposesFromExactlyTheStartAndSuccessFrames(t *testing.T) {
 // ==========================================================================
 
 func TestASendMessageDrawsAnAgentPromptOnTheSendersFeed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-send", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1016,6 +1041,7 @@ func TestASendMessageDrawsAnAgentPromptOnTheSendersFeed(t *testing.T) {
 // ==========================================================================
 
 func TestPlanModeEnterThenExitCoalesceOntoOneFeedId(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-plan", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1069,6 +1095,7 @@ func TestPlanModeEnterThenExitCoalesceOntoOneFeedId(t *testing.T) {
 }
 
 func TestPlanModeExitWithoutEnterIsLegal(t *testing.T) {
+	t.Parallel()
 	// Arrange: a session started in the plan permission mode never calls
 	// EnterPlanMode at all.
 	f := newOpened(t, harness.Opts{})
@@ -1106,6 +1133,7 @@ func TestPlanModeExitWithoutEnterIsLegal(t *testing.T) {
 // ==========================================================================
 
 func TestWorktreeEnterDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-wt-enter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1143,6 +1171,7 @@ func TestWorktreeEnterDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
 }
 
 func TestWorktreeExitDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-wt-exit", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1188,6 +1217,7 @@ func TestWorktreeExitDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
 // ==========================================================================
 
 func TestContextCutClearedDrawsASeparation(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-clear", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1210,6 +1240,7 @@ func TestContextCutClearedDrawsASeparation(t *testing.T) {
 }
 
 func TestContextCutCompactedDrawsASeparationWithFormattedTokens(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-compact", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1237,6 +1268,7 @@ func TestContextCutCompactedDrawsASeparationWithFormattedTokens(t *testing.T) {
 }
 
 func TestContextCutCompactionFailedDrawsTheCompactionFailedDivider(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-compactfail", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1274,6 +1306,7 @@ func TestContextCutCompactionFailedDrawsTheCompactionFailedDivider(t *testing.T)
 // ==========================================================================
 
 func TestPermissionStartDrawsOpenRowFooterAndHostNotification(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-permstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1305,6 +1338,7 @@ func TestPermissionStartDrawsOpenRowFooterAndHostNotification(t *testing.T) {
 }
 
 func TestPermissionAnsweredRepushesAsAnswered(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-permanswer", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1329,6 +1363,7 @@ func TestPermissionAnsweredRepushesAsAnswered(t *testing.T) {
 }
 
 func TestQuestionStartDrawsAnOpenRow(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-qstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1359,6 +1394,7 @@ func TestQuestionStartDrawsAnOpenRow(t *testing.T) {
 }
 
 func TestQuestionAnsweredRepushesWithEchoedLabels(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-qanswer", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1413,6 +1449,7 @@ func TestQuestionAnsweredRepushesWithEchoedLabels(t *testing.T) {
 // ==========================================================================
 
 func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-subagent", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1459,6 +1496,7 @@ func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *tes
 }
 
 func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-subsettled", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1500,6 +1538,7 @@ func TestASettledSubagentDrawsSettledSucceededWithTokens(t *testing.T) {
 }
 
 func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-detachsub", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1525,6 +1564,7 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 // ==========================================================================
 
 func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1547,6 +1587,7 @@ func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashDeltas(t *testing.T) {
 }
 
 func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-detachshellend", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1580,6 +1621,7 @@ func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 }
 
 func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notobserved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1616,6 +1658,7 @@ func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testin
 }
 
 func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-spoolgap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1641,6 +1684,7 @@ func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 // ==========================================================================
 
 func TestTurnEndedConcludedStampsTheAnsweringResponse(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-concluded", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1664,6 +1708,7 @@ func TestTurnEndedConcludedStampsTheAnsweringResponse(t *testing.T) {
 }
 
 func TestInterruptedTurnDrawsInterrupted(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1678,6 +1723,7 @@ func TestInterruptedTurnDrawsInterrupted(t *testing.T) {
 }
 
 func TestApiRequestFailedRateLimitedRespellsWithRetryAfter(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-429", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1702,6 +1748,7 @@ func TestApiRequestFailedRateLimitedRespellsWithRetryAfter(t *testing.T) {
 }
 
 func TestApiRequestFailedAuthenticationFailedRespells(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-401", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1723,6 +1770,7 @@ func TestApiRequestFailedAuthenticationFailedRespells(t *testing.T) {
 }
 
 func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-refusal", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1746,6 +1794,7 @@ func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
 }
 
 func TestApiRequestFailedMaxOutputTokensRespells(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-maxtokens", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1771,6 +1820,7 @@ func TestApiRequestFailedMaxOutputTokensRespells(t *testing.T) {
 // Stop-hook arm, which does not.
 
 func TestMaxTurnsDrawsTheRunsOwnTerminalArm(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-maxturns", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1799,6 +1849,7 @@ func TestMaxTurnsDrawsTheRunsOwnTerminalArm(t *testing.T) {
 }
 
 func TestStopHookPreventedDrawsTheStopHookTerminalArm(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-stophook", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1820,6 +1871,7 @@ func TestStopHookPreventedDrawsTheStopHookTerminalArm(t *testing.T) {
 }
 
 func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn in flight when the query dies out from under it.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-querydied", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1852,6 +1904,7 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 // ==========================================================================
 
 func TestABlockedHookDrawsACard(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-hookblocked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1879,6 +1932,7 @@ func TestABlockedHookDrawsACard(t *testing.T) {
 }
 
 func TestAFailedHookDrawsACard(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-hookfailed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1906,6 +1960,7 @@ func TestAFailedHookDrawsACard(t *testing.T) {
 }
 
 func TestASucceededHookDrawsNothing(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-hookok", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1935,6 +1990,7 @@ func TestASucceededHookDrawsNothing(t *testing.T) {
 // ==========================================================================
 
 func TestArtifactPublishDrawsThePurpleBubble(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-artifact", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1972,6 +2028,7 @@ func TestArtifactPublishDrawsThePurpleBubble(t *testing.T) {
 }
 
 func TestArtifactListDrawsNothing(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-artifactlist", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -2000,6 +2057,7 @@ func TestArtifactListDrawsNothing(t *testing.T) {
 // ==========================================================================
 
 func TestFindingsDrawRowsInServedOrder(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-findings", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -2045,6 +2103,7 @@ func TestFindingsDrawRowsInServedOrder(t *testing.T) {
 // ==========================================================================
 
 func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the unmodeled activity the test feeds.
@@ -2073,6 +2132,7 @@ func TestAnUnmodeledToolDrawsNoRowAndAddsOneTopbarWarning(t *testing.T) {
 }
 
 func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the unmodeled activity the test feeds.
@@ -2218,6 +2278,7 @@ func findRow(page *frontendv1.FeedPage, pred func(*frontendv1.FeedRow) bool) *fr
 // is what makes the refusal reachable at all: at the built-in 4096 no test
 // could publish its way past the pin.
 func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon retaining exactly one published row per feed, and a
 	// token minted against a page opened before anything else lands.
 	f := newOpened(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_FEED_TAIL_RETENTION=1"}})
@@ -2278,6 +2339,7 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 // the `[thinking, text]` response states its usage on the THINKING unit — the
 // unit for its first content block — and the prose unit states none.
 func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-usage-stamp", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

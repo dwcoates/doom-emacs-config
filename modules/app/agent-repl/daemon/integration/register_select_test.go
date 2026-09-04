@@ -18,6 +18,7 @@ import (
 )
 
 func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -54,6 +55,7 @@ func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
 // process over the SAME state root (so wsm.db persists) answers the id the
 // first daemon minted, and the roster carries no second row for it.
 func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
+	t.Parallel()
 	// Arrange: register once, then restart the daemon on the same state root.
 	f := newRegistered(t, harness.Opts{})
 	firstID := f.ws.GetId()
@@ -85,6 +87,7 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 }
 
 func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	plain := t.TempDir()
@@ -105,6 +108,7 @@ func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 }
 
 func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -129,6 +133,7 @@ func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {
 }
 
 func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.selectWorkspace()
@@ -154,6 +159,7 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 // contract, so the assertion moved onto it; the same amendment already stands
 // on TestRegisterWorkspaceRefusesANonWorktree above.)
 func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is a LANDED CloseWorkspaceError arm (see the comment
@@ -179,6 +185,7 @@ func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 // the registry. `workspace_ref_mismatch` is landed too, and its arm carries
 // the dir the registry actually holds, so the client can correct its echo.
 func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// workspace_ref_mismatch is a LANDED CloseWorkspaceError arm too, answered
@@ -203,6 +210,7 @@ func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 }
 
 func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -229,6 +237,7 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 // SelectWorkspaceError.unknown_workspace), mirroring the same arm already
 // pinned on CloseWorkspace above.
 func TestSelectWorkspaceRefusesABogusWorkspaceRef(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is answered in band at DEBUG through server.refuse,
@@ -252,6 +261,7 @@ func TestSelectWorkspaceRefusesABogusWorkspaceRef(t *testing.T) {
 // marker ONLY on the workspace it names. Selecting workspace B must leave
 // workspace A's own marker standing.
 func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T) {
+	t.Parallel()
 	// Arrange: two workspaces in separate repos, A carrying a notification.
 	d := newDaemon(t, harness.Opts{})
 	repoA := harness.NewRepo(t)

@@ -29,6 +29,7 @@ import (
 // ---- UpdateShutdownSchedule ----
 
 func TestUpdateShutdownScheduleSchedulePushesDrainScheduledToEverySubscriber(t *testing.T) {
+	t.Parallel()
 	// Arrange: two subscribers, standing in for Emacs and a webview.
 	d := newDaemon(t, harness.Opts{})
 	emacs := d.WatchDaemonStream()
@@ -57,6 +58,7 @@ func TestUpdateShutdownScheduleSchedulePushesDrainScheduledToEverySubscriber(t *
 }
 
 func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	stream := d.WatchDaemonStream()
@@ -86,6 +88,7 @@ func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 }
 
 func TestUpdateShutdownScheduleCancelWithNothingScheduledIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
@@ -106,6 +109,7 @@ func TestUpdateShutdownScheduleCancelWithNothingScheduledIsRefused(t *testing.T)
 }
 
 func TestUpdateShutdownScheduleWithABlankOperatorNoteIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -127,6 +131,7 @@ func TestUpdateShutdownScheduleWithABlankOperatorNoteIsRefused(t *testing.T) {
 }
 
 func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	stream := d.WatchDaemonStream()
@@ -184,6 +189,7 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 // schedule's own deadline regardless of the 5-minute sweep cadence) fires the
 // instant the deadline passes.
 func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	stream := d.WatchDaemonStream()
@@ -240,6 +246,7 @@ func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *te
 // ---- Drain intake and exit ----
 
 func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	tray := f.d.WatchHolds(f.ws)
@@ -292,6 +299,7 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 // minute, internal/drain/controller.go — nothing wires a flag or env to
 // compress it) logs the running counts at DEBUG instead, never a second WARN.
 func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T) {
+	t.Parallel()
 	// Arrange: a drain in force, so every submission is held under the
 	// shutdown lease and reported to the rate limiter.
 	f := newOpened(t, harness.Opts{})
@@ -350,6 +358,7 @@ func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T
 }
 
 func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn in flight when the drain fires now.
 	f := newOpened(t, harness.Opts{})
 	resp := f.submit("do the thing", "k-drain-now", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -388,6 +397,7 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 // ---- Reload webapp (webapp-only rollout) ----
 
 func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
+	t.Parallel()
 	// Arrange: the merge target is the daemon's own checkout; a landed
 	// commit touching only the webapp subsystem classifies as webapp-only.
 	selfRepo, d := drainSelfRepoDaemon(t)
@@ -415,6 +425,7 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 // ---- Handover ----
 
 func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.T) {
+	t.Parallel()
 	// Arrange: an ordinary, idle workspace whose host+web streams are open at
 	// the moment the handover is announced, so it is an expected participant.
 	selfRepo, d := drainSelfRepoDaemon(t)
@@ -532,6 +543,7 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 }
 
 func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsInOrder(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	selfRepo, d := drainSelfRepoDaemon(t)
 	f := drainOpenWorkspace(t, d)
@@ -599,6 +611,7 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 // AGENT_REPL_HOLDOUT_WARN_EVERY test knob compresses it so the warning is
 // observable inside a bounded window.
 func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon whose holdout cadence is milliseconds, with a
 	// workspace held busy by a turn that never concludes.
 	selfRepo := harness.NewRepo(t)
@@ -652,6 +665,7 @@ func numeric(v any) float64 {
 }
 
 func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered, never opened — no host or web stream ever existed
 	// for it, so it has zero rendezvous participants.
 	selfRepo, d := drainSelfRepoDaemon(t)
@@ -691,6 +705,7 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 // (proto/src/agentrepl/v1/endpoint_adopt_web_workspace.proto) and
 // rollout.ErrParticipantNotExpected (internal/rollout/adopt.go).
 func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement(t *testing.T) {
+	t.Parallel()
 	// Arrange: only the HOST stream is open when the handover fires, so the
 	// manifest's ExpectedWeb is false (internal/rollout/handover.go: the
 	// snapshot is taken at announcement) — no web participant was ever
@@ -747,6 +762,7 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 // internal/server/adopt.go marks this refusal Info (the ORDINARY case on
 // every non-handover page boot), never WARN.
 func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *testing.T) {
+	t.Parallel()
 	// Arrange: an ordinary opened workspace; no handover was ever announced on
 	// this daemon.
 	f := newOpened(t, harness.Opts{})
@@ -800,6 +816,7 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 // persisted schedule and forwards it to the Announcer before the server starts
 // serving.
 func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T) {
+	t.Parallel()
 	// Arrange: schedule a drain far enough out that it never fires during this
 	// test, and confirm it is standing before the restart.
 	d1 := newDaemon(t, harness.Opts{})
@@ -834,6 +851,7 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 // ---- Asset origin ----
 
 func TestAssetOriginServesIndexWithNoStoreCacheControl(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -854,6 +872,7 @@ func TestAssetOriginServesIndexWithNoStoreCacheControl(t *testing.T) {
 }
 
 func TestRewritingIndexHtmlOnDiskIsServedOnTheNextRequestWithoutRestart(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	indexPath := d.WebappDir + "/index.html"
@@ -877,6 +896,7 @@ func TestRewritingIndexHtmlOnDiskIsServedOnTheNextRequestWithoutRestart(t *testi
 }
 
 func TestAssetsAreServedWithoutNoStore(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
