@@ -294,21 +294,260 @@ func TestARateLimitWithNoStatedWaitCarriesNone(t *testing.T) {
 	}
 }
 
-func TestAProducerArmWithNoDrawnCounterpartIsKeptByName(t *testing.T) {
+// A PRODUCER TERMINAL WITH NO DEDICATED ARM lands under turn_failed carrying
+// the vendor's own word — never under vendor_unmodeled, which feed.proto
+// confines to "an API error class this schema does not model".
+func TestEveryUnclassifiedProducerTerminalDrawsTurnFailedWithItsStopReason(t *testing.T) {
+	tests := []struct {
+		name     string
+		failure  *conversationv1.AgentFailure
+		reason   string
+		headline string
+	}{
+		{
+			name:     "blocking limit",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BlockingLimit{BlockingLimit: &conversationv1.AgentStoppedAtBlockingLimit{}}},
+			reason:   "blocking_limit",
+			headline: "an account-level block stopped the run",
+		},
+		{
+			name:     "rapid refill breaker",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_RapidRefillBreaker{RapidRefillBreaker: &conversationv1.AgentStoppedByRapidRefillBreaker{}}},
+			reason:   "rapid_refill_breaker",
+			headline: "the account's refill-rate breaker tripped — this is a wait, not a fault",
+		},
+		{
+			name:     "prompt too long",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}}},
+			reason:   "prompt_too_long",
+			headline: "the prompt was too long to send — the context must be cut first",
+		},
+		{
+			name:     "image error",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ImageError{ImageError: &conversationv1.AgentImageRejected{}}},
+			reason:   "image_error",
+			headline: "an image in the request could not be processed",
+		},
+		{
+			name:     "model error",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}}},
+			reason:   "model_error",
+			headline: "the model errored in a way the API did not classify",
+		},
+		{
+			name:     "malformed tool use exhausted",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MalformedToolUseExhausted{MalformedToolUseExhausted: &conversationv1.AgentMalformedToolUseExhausted{}}},
+			reason:   "malformed_tool_use_exhausted",
+			headline: "the model's tool calls could not be parsed and the attempts ran out",
+		},
+		{
+			name:     "hook stopped",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}}},
+			reason:   "hook_stopped",
+			headline: "a hook ended the run",
+		},
+		{
+			name:     "tool deferred",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferred{ToolDeferred: &conversationv1.AgentToolDeferred{}}},
+			reason:   "tool_deferred",
+			headline: "the run ended waiting on a deferred tool call",
+		},
+		{
+			name:     "tool deferred unavailable",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ToolDeferredUnavailable{ToolDeferredUnavailable: &conversationv1.AgentToolDeferredUnavailable{}}},
+			reason:   "tool_deferred_unavailable",
+			headline: "the run ended on a tool call deferred to something unavailable",
+		},
+		{
+			name:     "turn setup failed",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_TurnSetupFailed{TurnSetupFailed: &conversationv1.AgentTurnSetupFailed{}}},
+			reason:   "turn_setup_failed",
+			headline: "the run could not be set up and never reached the model",
+		},
+		{
+			name:     "continuation prevented",
+			failure:  &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ContinuationPrevented{ContinuationPrevented: &conversationv1.AgentContinuationPrevented{}}},
+			reason:   "continuation_prevented",
+			headline: "a producer notice ended the run",
+		},
+		{
+			name:     "no stated cause",
+			failure:  &conversationv1.AgentFailure{},
+			reason:   "unset",
+			headline: "the run ended on a failure with no stated cause",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+
+			// Act.
+			h.terminal("turn-1", nil, tc.failure)
+
+			// Assert.
+			errored := h.terminalRow("turn-1").GetErrored()
+			if got := erroredArmWord(errored); got != "turn_failed" {
+				t.Fatalf("arm = %q, want turn_failed", got)
+			}
+			if got := errored.GetTurnFailed().GetStopReason(); got != tc.reason {
+				t.Fatalf("stop_reason = %q, want the vendor's own word %q", got, tc.reason)
+			}
+			if got := errored.GetHeadline().GetText(); got != tc.headline {
+				t.Fatalf("headline = %q, want %q", got, tc.headline)
+			}
+		})
+	}
+}
+
+// PROMPT-TOO-LONG IS NOT A 413. request_too_large is the vendor's own API
+// status, which this producer terminal never carried.
+func TestPromptTooLongIsNotDrawnAsTheApiRequestTooLarge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}},
+	})
+
+	// Assert.
+	if h.terminalRow("turn-1").GetErrored().GetRequestTooLarge() != nil {
+		t.Fatal("a producer prompt_too_long was drawn as the API's request_too_large")
+	}
+}
+
+// THE REFUSAL ARM. AgentModelError is an empty message, so the refusal is
+// drawn from the response frame that stated it.
+func TestAModelErrorAfterARefusedResponseDrawsTheRefusalArm(t *testing.T) {
+	// Arrange: a response the vendor refused, then the run's model_error end.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
+			Prose: &conversationv1.AgentResponseProse{},
+			Reason: &conversationv1.AgentResponseFailureReason{
+				Reason: &conversationv1.AgentResponseFailureReason_Refused{
+					Refused: &conversationv1.AgentResponseRefused{},
+				},
+			},
+		}, nil), noAddress())
+
+	// Act.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
+	})
+
+	// Assert.
+	errored := h.terminalRow("turn-1").GetErrored()
+	if errored.GetRefusal() == nil {
+		t.Fatalf("arm = %q, want refusal", erroredArmWord(errored))
+	}
+	if got := errored.GetHeadline().GetText(); got != "the model refused to continue — there is no answer" {
+		t.Fatalf("headline = %q", got)
+	}
+}
+
+// A NON-REFUSAL response failure leaves the terminal alone: only `refused`
+// carries the refusal fact.
+func TestAModelErrorAfterAMaxTokensResponseIsNotARefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "half an ans"},
+			Reason: &conversationv1.AgentResponseFailureReason{
+				Reason: &conversationv1.AgentResponseFailureReason_MaxTokens{
+					MaxTokens: &conversationv1.AgentResponseStoppedAtMaxTokens{},
+				},
+			},
+		}, nil), noAddress())
+
+	// Act.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
+	})
+
+	// Assert.
+	errored := h.terminalRow("turn-1").GetErrored()
+	if errored.GetRefusal() != nil {
+		t.Fatal("a max-tokens stop was drawn as a refusal")
+	}
+	if got := errored.GetTurnFailed().GetStopReason(); got != "model_error" {
+		t.Fatalf("stop_reason = %q, want model_error", got)
+	}
+}
+
+// THE REFUSAL DOES NOT OUTLIVE ITS TURN: the next turn's model_error is its
+// own unclassified end.
+func TestARefusalDoesNotColorTheNextTurnsModelError(t *testing.T) {
+	// Arrange: turn-1 refuses and ends.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "do the thing")
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseFailure{
+			Prose: &conversationv1.AgentResponseProse{},
+			Reason: &conversationv1.AgentResponseFailureReason{
+				Reason: &conversationv1.AgentResponseFailureReason_Refused{
+					Refused: &conversationv1.AgentResponseRefused{},
+				},
+			},
+		}, nil), noAddress())
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
+	})
+
+	// Act: a second turn ends the same way, having refused nothing.
+	h.deliverPrompt("turn-2", "again")
+	h.terminal("turn-2", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ModelError{ModelError: &conversationv1.AgentModelError{}},
+	})
+
+	// Assert.
+	errored := h.terminalRow("turn-2").GetErrored()
+	if errored.GetRefusal() != nil {
+		t.Fatal("turn-1's refusal colored turn-2's terminal")
+	}
+	if got := errored.GetTurnFailed().GetStopReason(); got != "model_error" {
+		t.Fatalf("stop_reason = %q, want model_error", got)
+	}
+}
+
+// A STOP HOOK gets its own arm, not turn_failed.
+func TestAStopHookPreventedDrawsItsOwnArm(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}},
+		Failure: &conversationv1.AgentFailure_StopHookPrevented{StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}},
 	})
 
-	// Assert: never flattened into a generic failure.
+	// Assert.
 	errored := h.terminalRow("turn-1").GetErrored()
-	if got := errored.GetVendorUnmodeled().GetType(); got != "hook_stopped" {
-		t.Fatalf("type = %q, want the arm's own name", got)
+	if errored.GetStopHookPrevented() == nil {
+		t.Fatalf("arm = %q, want stop_hook_prevented", erroredArmWord(errored))
 	}
-	if got := errored.GetHeadline().GetText(); got != "a hook ended the run" {
-		t.Fatalf("headline = %q", got)
+}
+
+// AN ABORT IS THE USER'S STOP, whichever phase it reached the producer in:
+// the turn ended INTERRUPTED, never errored.
+func TestAnAbortEndsTheTurnInterruptedRatherThanErrored(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Interrupted{
+			Interrupted: &conversationv1.AgentInterrupted{},
+		},
+	}, nil)
+
+	// Assert.
+	ended := h.terminalRow("turn-1")
+	if ended.GetInterrupted() == nil {
+		t.Fatalf("outcome = %T, want interrupted", ended.GetOutcome())
 	}
 }
 
@@ -472,20 +711,6 @@ func stopHookFailure() *conversationv1.AgentFailure {
 	return &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_StopHookPrevented{
 			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}},
-	}
-}
-
-func TestAPromptTooLongIsDrawnAsARequestTooLarge(t *testing.T) {
-	// Arrange, Act.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}},
-	})
-
-	// Assert.
-	if h.terminalRow("turn-1").GetErrored().GetRequestTooLarge() == nil {
-		t.Fatalf("arm = %q, want request_too_large", erroredArmWord(h.terminalRow("turn-1").GetErrored()))
 	}
 }
 

@@ -81,6 +81,17 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	case *conversationv1.AgentResponse_Failure:
 		// The prose that landed stays drawn, marked broken. WHY it died is the
 		// turn's terminal row, never this bubble's business.
+		//
+		// A REFUSAL IS REMEMBERED FOR THE TERMINAL, though: the failure the
+		// producer ends the run with (AgentModelError) is an empty message, so
+		// this is the only frame that says the vendor refused rather than
+		// errored, and feed.proto's `refusal` arm is drawn from it.
+		if _, refused := state.Failure.GetReason().GetReason().(*conversationv1.AgentResponseFailureReason_Refused); refused && s.turnInFlight != nil {
+			s.turnRefusals[string(*s.turnInFlight)] = true
+			log.Debug("daemon.feed.response_refused",
+				"a response ended on the vendor's refusal; the turn's terminal draws the refusal arm",
+				dlog.Context{"unit": unit, "turn": string(*s.turnInFlight)})
+		}
 		fold.markdown = state.Failure.GetProse().GetMarkdown()
 		fold.settled = true
 		bubble.Result = &frontendv1.FeedResponse_Error{Error: &frontendv1.FeedResponseError{
