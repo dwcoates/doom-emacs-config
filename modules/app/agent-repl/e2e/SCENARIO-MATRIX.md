@@ -318,3 +318,44 @@ prompts against the registry's 147 named scenarios:
   test data (out of scope for e2e coverage per the owner's ruling, but likely worth
   a one-line fix — rename the prompt to `"!context-budget-warning"` — whenever
   that file is next touched).
+
+## Arms without an e2e lever (project-lead ruling, 2026-09-04)
+
+Two SPEC.md arms were dropped as e2e tests because they skipped
+unconditionally on every run — a perpetual skip is noise, not coverage, per
+project-lead ruling. Each is covered only at the unit level, cited below; a
+future documented scenario or env lever could re-open an e2e test for
+either, but none exists on this branch.
+
+- **KillTurnFailure.cause.not_the_open_turn** (formerly SPEC.md #55,
+  `TestKillTurnNotTheOpenTurn`): an internal daemon/shim race — the daemon
+  always names its own currently-tracked open turn, so no client input can
+  select this arm — with no documented scenario or env lever and no harness
+  seam to force the underlying TOCTOU race deterministically. Covered by
+  shim unit/integration tests only: `agent-shim/claude/shim/test/service/failures.test.ts`
+  (`describe("killTurnFailure", ...)`, the `notTheOpenTurn` case),
+  `agent-shim/claude/shim/test/engine/turn.test.ts` (asserts
+  `failureKind(response)` is `"notTheOpenTurn"`), and
+  `agent-shim/claude/shim/test/integration/turn.test.ts` ("a TurnId that is
+  not the open turn is refused not_the_open_turn").
+
+- **DetachForeground applied to a foreground subagent** (formerly SPEC.md
+  #34, `TestVendorBackgroundedSubagent`, golden
+  `ctrl-b-detach-of-foreground-subagent`): `DetachForeground` (shim.v1) has
+  no caller-facing `agentrepl.v1` rpc or daemon-internal trigger on this
+  branch (`daemon/internal/sessionwatcher/fakes_test.go`'s fake client
+  panics on it — "sessionwatcher must not call DetachForeground" — and
+  `endpoint_interrupt.proto` is STOP-only), and no fake-SDK scenario
+  backgrounds a subagent the way `shell.ts`'s `VENDOR_BACKGROUNDED`
+  backgrounds a Bash call. Covered by shim unit tests only, generically
+  over `AgentActivityId` (not subagent-specific, since no unit exercises a
+  subagent-shaped activity id through this path):
+  `agent-shim/claude/shim/test/engine/turn.test.ts`
+  (`describe("DetachForeground", ...)` — `unknownUnit`, `alreadyConcluded`,
+  success — and `describe("DetachForeground on a live foreground unit",
+  ...)` — `unsupported`, the two CONFIRMS cases) and
+  `agent-shim/claude/shim/test/engine/session.test.ts`. Applying
+  `DetachForeground` specifically to a subagent unit (as opposed to a bash
+  unit) is a GAP: no unit test constructs a subagent-shaped
+  `AgentActivityId` for this rpc, so the subagent-specific shape the
+  deleted e2e test named is untested at every layer.
