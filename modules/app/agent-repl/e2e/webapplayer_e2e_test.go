@@ -27,6 +27,7 @@ package e2e
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -68,6 +69,49 @@ import (
 // budgets (BOOT_BUDGET_MS and TURN_BUDGET_MS in test/webapp-layer/drive.ts)
 // fail a stuck assertion long before this fires.
 const WebappLayerTimeout = 300 * time.Second
+
+// TestWebappLayerParticipantHoldOutlivesTheWaitBound pins the bound the host
+// participant hold runs on.
+//
+// The hold exists so the footer reads CONNECTED for the whole vitest child
+// (internal/resolve/footer/status.go refuses `connected` while either
+// participant stream is down). Bounding it by harness.DefaultTimeout — which
+// is what `Daemon.WatchHost` does, correctly, for a WAIT — expired the hold
+// five seconds into a child that runs far longer: the footer dropped to
+// `disconnected`, the real page closed its composer gate, and every later
+// submission was swallowed by the app itself with nothing reaching the daemon.
+// A hold is bounded by the thing it is held FOR, so this asserts the two
+// bounds are the ones the arrangement needs and not each other.
+func TestWebappLayerParticipantHoldOutlivesTheWaitBound(t *testing.T) {
+	tests := []struct {
+		name  string
+		bound time.Duration
+		floor time.Duration
+	}{
+		{
+			name:  "the child's bound outlives the harness's wait bound",
+			bound: WebappLayerTimeout,
+			floor: harness.DefaultTimeout,
+		},
+		{
+			name:  "the child's bound outlives the handover chain it may drive",
+			bound: WebappLayerTimeout,
+			floor: harness.HandoverChainTimeout,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act: the constants themselves are the subject.
+			got := tc.bound
+
+			// Assert.
+			if got <= tc.floor {
+				t.Errorf("the participant hold's bound = %s, want more than %s", got, tc.floor)
+			}
+		})
+	}
+}
 
 // npmOnce/npmBin resolve `npm` once per run, the same shape requireNode uses.
 var (
@@ -475,7 +519,21 @@ func wlDriveArea(t *testing.T, vitestFile string, expectWarnings ...string) {
 	//
 	// This is the same participant-gating World.WatchFooter does for every Go
 	// footer wait in this suite, held here for exactly the child's lifetime.
-	host := w.Daemon.WatchHost(ws)
+	//
+	// ON THE CHILD'S BOUND, NEVER THE HARNESS'S. `Daemon.WatchHost` runs on
+	// d.ctx, which expires at harness.DefaultTimeout — five seconds, sized for
+	// one wait. A vitest file runs far longer than that, so the hold used to
+	// expire mid-file: the daemon dropped `host_stream` to false, the footer
+	// resolved `disconnected/severed`, the real page closed its composer gate,
+	// and every later `send()` in drive.ts became a silent no-op — observed in
+	// run 10 as six feed-family scenarios timing out five seconds apart with
+	// no SubmitPrompt reaching the daemon at all. The hold therefore runs on
+	// the bound of the thing it is held for, and is DRAINED so the harness's
+	// own pump cannot wedge on a buffer nobody reads.
+	holdCtx, releaseHold := context.WithTimeout(context.Background(), WebappLayerTimeout)
+	defer releaseHold()
+	host := w.Daemon.WatchHostFor(holdCtx, ws)
+	host.Drain()
 	defer host.Close()
 
 	// The daemon's serving address, as the daemon itself published it. This is
