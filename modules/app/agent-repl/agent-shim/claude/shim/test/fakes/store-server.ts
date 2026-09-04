@@ -125,6 +125,15 @@ export interface FakeStore {
    */
   openTails(): readonly string[];
   /**
+   * The token of an OPEN tail, awaiting one if none is open yet.
+   *
+   * The tail's open crosses a socket too: a client that has already been served
+   * a row is not proof its `WatchAgentSession` generator has begun on this
+   * side, so {@link openTails} read as a level races the store. This is the
+   * edge — the only sound way to assert on a tail that is expected to exist.
+   */
+  tailOpened(): Promise<string>;
+  /**
    * Resolves the moment the tail on `token` closes, or immediately if it is
    * already gone.
    *
@@ -250,6 +259,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const openTailTokens = new Set<string>();
   /** Whoever is waiting for a given tail to unwind — see {@link FakeStore.tailClosed}. */
   const tailClosedWaiters = new Map<string, Array<() => void>>();
+  /** Whoever is waiting for ANY tail to open — see {@link FakeStore.tailOpened}. */
+  const tailOpenWaiters: Array<(token: string) => void> = [];
 
   /**
    * The refusal standing against one verb, if any.
@@ -506,6 +517,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         // survives exactly as long as the subscription does, and a client that
         // walks away without cancelling leaves it behind for the test to see.
         openTailTokens.add(token);
+        for (const resolve of tailOpenWaiters.splice(0)) resolve(token);
         try {
           while (!state.closed && !context.signal.aborted) {
             const next = state.pending.shift();
@@ -795,6 +807,13 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     },
     writeBatches: () => [...writeVerdicts],
     openTails: () => [...openTailTokens],
+    tailOpened: async () => {
+      const already = [...openTailTokens][0];
+      if (already !== undefined) return already;
+      return new Promise<string>((resolve) => {
+        tailOpenWaiters.push(resolve);
+      });
+    },
     tailClosed: async (token) => {
       if (!openTailTokens.has(token)) return;
       await new Promise<void>((resolve) => {
