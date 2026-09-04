@@ -34,6 +34,7 @@ import type {
   FeedShellCommand,
   FeedShellExit,
   FeedShellLastProgress,
+  FeedShellLost,
   FeedShellRuntime,
   FeedShellSettled,
   FeedShellSpool,
@@ -78,6 +79,31 @@ const SETTLED_CLASSES = {
   cancelled: "shell-outcome-cancelled",
   lost: "shell-outcome-lost",
 } as const satisfies Record<string, string>;
+
+/**
+ * The cause each `lost` arm names — the sidecar's staleness ruling, said in
+ * words rather than left as the bare "lost sight of".
+ */
+const LOST_CAUSE_WORDS = {
+  fileVanished: "file vanished",
+  wentSilent: "went silent",
+  sweptUp: "swept up at boot",
+} as const satisfies Record<string, string>;
+
+/** Every lost cause this build words, for the suite to hold to the schema. */
+export const SHELL_LOST_CAUSE_ARMS: readonly string[] = Object.keys(LOST_CAUSE_WORDS);
+
+/**
+ * The clause the lost cause adds to the outcome word.
+ *
+ * An UNSET `how` is an older daemon that never ruled, not a malformed row: the
+ * outcome then stays the plain word it has always been.
+ */
+function lostCauseClause(lost: FeedShellLost): string {
+  const how = lost.how;
+  if (how.case === undefined) return "";
+  return `: ${LOST_CAUSE_WORDS[how.case]}`;
+}
 
 /** Every settled outcome this build draws, for the suite to hold to the schema. */
 export const SHELL_SETTLED_ARMS: readonly string[] = Object.keys(SETTLED_WORDS);
@@ -132,7 +158,10 @@ export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
       }
       const word = document.createElement("span");
       word.className = `shell-outcome ${SETTLED_CLASSES[outcome.case]}`;
-      word.textContent = SETTLED_WORDS[outcome.case];
+      word.textContent =
+        outcome.case === "lost"
+          ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
+          : SETTLED_WORDS[outcome.case];
       head.append(word);
       break;
     }
