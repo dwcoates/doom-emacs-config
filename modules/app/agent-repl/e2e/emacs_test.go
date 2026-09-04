@@ -360,7 +360,9 @@ func (e *Emacs) stageEmacsDir() {
 	if err != nil {
 		e.t.Fatalf("read the image's Doom install at %s: %v", src, err)
 	}
-	if err := os.MkdirAll(e.EmacsDir, 0o755); err != nil {
+	// 0o700: Emacs 30 refuses a user-emacs-directory "accessible by others"
+	// and Doom's early-init aborts before any stamp is written.
+	if err := os.MkdirAll(e.EmacsDir, 0o700); err != nil {
 		e.t.Fatalf("prepare %s: %v", e.EmacsDir, err)
 	}
 
