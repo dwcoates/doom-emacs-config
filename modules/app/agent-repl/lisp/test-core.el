@@ -4455,3 +4455,147 @@ the theft would land in a file no reader opens."
   ;; Arrange / Act / Assert
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--workspace-log-target-entry "never-registered"))))
+
+;;;; ---- Tests: wait-for-process-exit ----
+;;
+;; `agent-repl--capture-process-output' — the shared implementation behind
+;; every `agent-repl--git-*' / `--gh-*' wrapper — calls
+;; `agent-repl--wait-for-process-exit'.  That definition was deleted as
+;; collateral when worktree.el was slimmed, leaving every real capture path
+;; signalling `void-function'; the whole suite stayed green because every
+;; capture test stubs the wait.  The first test below pins the definition's
+;; existence so the seam cannot silently reopen.
+;;
+;; No real process is spawned anywhere here: the process primitives are
+;; stubbed, per AGENTS.md "No External Processes or External State in Tests".
+
+(ert-deftest agent-repl-test-wait-for-process-exit-is-defined ()
+  "`agent-repl--wait-for-process-exit' exists for its production callers."
+  ;; Arrange / Act / Assert
+  (should (fboundp 'agent-repl--wait-for-process-exit)))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-dispatches-to-main-on-main-thread ()
+  "On the main thread the wait routes to the `accept-process-output' path."
+  ;; Arrange
+  (let ((routed nil))
+    (cl-letf (((symbol-function 'agent-repl--wait-for-process-exit--main)
+               (lambda (&rest _) (setq routed 'main) 0))
+              ((symbol-function 'agent-repl--wait-for-process-exit--worker)
+               (lambda (&rest _) (setq routed 'worker) 0)))
+      ;; Act
+      (agent-repl--wait-for-process-exit nil 1 nil nil)
+      ;; Assert
+      (should (eq routed 'main)))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-dispatches-to-worker-off-main-thread ()
+  "Off the main thread the wait routes to the condition-variable path."
+  ;; Arrange
+  (let ((routed nil))
+    (cl-letf (((symbol-function 'current-thread) (lambda () 'some-worker))
+              ((symbol-function 'agent-repl--wait-for-process-exit--main)
+               (lambda (&rest _) (setq routed 'main) 0))
+              ((symbol-function 'agent-repl--wait-for-process-exit--worker)
+               (lambda (&rest _) (setq routed 'worker) 0)))
+      ;; Act
+      (agent-repl--wait-for-process-exit nil 1 nil nil)
+      ;; Assert
+      (should (eq routed 'worker)))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-returns-exit-status ()
+  "A process already exited yields its exit status, not `timeout'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+            ((symbol-function 'process-exit-status) (lambda (_) 7)))
+    ;; Act / Assert
+    (should (equal (agent-repl--wait-for-process-exit--main 'proc 1 nil nil) 7))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-returns-timeout-past-deadline ()
+  "A process still live past the deadline yields the symbol `timeout'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+            ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--kill-process-safely) (lambda (_) t)))
+    ;; Act / Assert — a zero-second budget is already expired on first check
+    (should (eq (agent-repl--wait-for-process-exit--main 'proc 0 nil nil)
+                'timeout))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-kills-the-process-on-timeout ()
+  "The timeout path tears the overrunning process down."
+  ;; Arrange
+  (let ((killed nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--kill-process-safely)
+               (lambda (p) (setq killed p) t)))
+      ;; Act
+      (agent-repl--wait-for-process-exit--main 'proc 0 nil nil)
+      ;; Assert
+      (should (eq killed 'proc)))))
+
+;;;; ---- Tests: thread-safe process teardown ----
+
+(ert-deftest agent-repl-test-kill-process-safely-deletes-on-the-main-thread ()
+  "On the main thread the live process is deleted directly."
+  ;; Arrange
+  (let ((deleted nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p))))
+      ;; Act
+      (should (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should (eq deleted 'proc)))))
+
+(ert-deftest agent-repl-test-kill-process-safely-is-a-no-op-for-a-dead-process ()
+  "A process that is no longer live is not deleted again."
+  ;; Arrange
+  (let ((deleted nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p))))
+      ;; Act
+      (should-not (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should-not deleted))))
+
+(ert-deftest agent-repl-test-kill-process-safely-defers-off-the-main-thread ()
+  "Off the main thread the delete is handed to the main thread, not run here."
+  ;; Arrange
+  (let ((deleted nil)
+        (deferred nil))
+    (cl-letf (((symbol-function 'current-thread) (lambda () 'some-worker))
+              ((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'process-name) (lambda (_) "proc"))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p)))
+              ((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (thunk) (setq deferred thunk))))
+      ;; Act
+      (should (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should (functionp deferred))
+      (should-not deleted))))
+
+(ert-deftest agent-repl-test-defer-to-main-thread-schedules-on-the-timer-queue ()
+  "The deferral hands the thunk to `run-at-time' rather than calling it.
+The harness overrides `agent-repl--defer-to-main-thread' to run its thunk
+synchronously (see test-helpers.el), so this test lifts every advice off
+the symbol for its duration to reach the production body underneath, and
+restores them afterwards."
+  ;; Arrange
+  (let ((scheduled nil)
+        (called nil)
+        (advices nil))
+    (advice-mapc (lambda (fn props) (push (cons fn props) advices))
+                 'agent-repl--defer-to-main-thread)
+    (dolist (entry advices)
+      (advice-remove 'agent-repl--defer-to-main-thread (car entry)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (secs repeat thunk)
+                     (setq scheduled (list secs repeat thunk)))))
+          ;; Act
+          (agent-repl--defer-to-main-thread (lambda () (setq called t))))
+      (dolist (entry (reverse advices))
+        (advice-add 'agent-repl--defer-to-main-thread :override (car entry)
+                    (cdr entry))))
+    ;; Assert
+    (should (equal (list (nth 0 scheduled) (nth 1 scheduled)) '(0 nil)))
+    (should-not called)))

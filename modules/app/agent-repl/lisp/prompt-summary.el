@@ -36,6 +36,17 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--live-ws-names "workspace")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--state-save "history")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-put "workspace")
+
 (declare-function agent-repl--kill-buffer-safely "worktree" (buf))
 
 ;;;; Defcustoms

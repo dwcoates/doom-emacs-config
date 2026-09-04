@@ -2,6 +2,76 @@
 
 ;;; Code:
 
+;; evil is an external package, absent under `emacs -Q'.
+(declare-function evil-window-left "evil-commands")
+
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--agent-panel-buffer-p "core")
+(declare-function agent-repl--align-buffer-to-ws-dir "status")
+(declare-function agent-repl--buffer-name "core")
+(declare-function agent-repl--buffer-owner "core")
+(declare-function agent-repl--create-buffer "core")
+(declare-function agent-repl--foreign-owned-buffer-p "core")
+(declare-function agent-repl--frontend-dispatch-hide "frontends")
+(declare-function agent-repl--frontend-dispatch-show "frontends")
+(declare-function agent-repl--frontend-webview-buffer-name "frontend")
+(declare-function agent-repl--history-restore "history")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl--kill-cause-str "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--magit-status-same-window "magit")
+(declare-function agent-repl--open-initial-buffers "worktree")
+(declare-function agent-repl--pseudo-workspace-name-p "core")
+(declare-function agent-repl--remove-doom-dashboard "worktree")
+(declare-function agent-repl--safe-buffer-name "window")
+(declare-function agent-repl--sanitize-ws-name "core")
+(declare-function agent-repl--send-to-agent "commands")
+(declare-function agent-repl--state-save "history")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-buffers "workspace")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-frame-ordered-names "workspace")
+(declare-function agent-repl--ws-frame-save-state "workspace")
+(declare-function agent-repl--ws-frontend "frontends")
+(declare-function agent-repl--ws-frontend-name "frontends")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-gui-frontend-p "frontends")
+(declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-log-name "workspace")
+(declare-function agent-repl--ws-names-cache "workspace")
+(declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl--ws-remove-buffer "workspace")
+(declare-function agent-repl--ws-resolve-persp "workspace")
+(declare-function agent-repl--ws-switch "workspace")
+(declare-function agent-repl--ws-system-available-p "workspace")
+(declare-function agent-repl--ws-update-names-cache "workspace")
+(declare-function agent-repl-frontend-kill-fn "frontends")
+(declare-function agent-repl-frontend-open-fn "frontends")
+(declare-function agent-repl-frontend-restart-fn "frontends")
+(declare-function agent-repl-frontend-running-p-fn "frontends")
+(declare-function agent-repl-frontend-show-fn "frontends")
+(declare-function agent-repl-input-mode "input")
+(declare-function agent-repl-window--delete-buffer-windows "window")
+(declare-function agent-repl-window--delete-or-neutralize "window")
+(declare-function agent-repl-window--delete-where "window")
+(declare-function agent-repl-window--ensure-layout "window")
+(declare-function agent-repl-window--panel-window "window")
+(declare-function agent-repl-window--panels-restorable-p "window")
+(declare-function agent-repl-window--side-window-p "window")
+
+;; Special variables owned by other sources in this module, declared here
+;; so the byte-compiler binds and reads them dynamically rather than
+;; lexically.
+(defvar agent-repl--eager-open-in-progress)
+(defvar agent-repl--frontend-buffer-re)
+(defvar agent-repl--input-buffer-re)
+(defvar agent-repl--kill-cause)
+
 ;; open-progress.el loads AFTER this file (it needs frontend.el's main-area
 ;; host resolution, which this file's layout helpers sit beside), so the
 ;; entry point's placeholder calls are declared rather than resolved at
@@ -30,7 +100,8 @@ kill/merge whose bookkeeping never reached persp-mode's own saved
 perspective list) — and fires `persp-activated-functions' for each one
 exactly as it would for a live switch.
 
-Such a WS is neither a pseudo perspective (`agent-repl--pseudo-workspace-name-p',
+Such a WS is neither a pseudo perspective
+(`agent-repl--pseudo-workspace-name-p',
 persp-mode's own \"none\"/\"main\") nor a workspace agent-repl has ever
 registered (`agent-repl--ws-known-p' — live, tombstoned, or mid-creation
 via `agent-repl--preregistration-log-workspace-p'): it is simply not ours.
@@ -684,13 +755,14 @@ No-op when there is no current workspace, or when it holds no tab."
           (message "Pushed '%s' to the back." current))))))
 
 (defun agent-repl--on-close (&optional ws)
-  "Full close: restore the pre-panel layout, hide the panels, save the tab index.
+  "Full close: restore the pre-panel layout, hide panels, save the tab index.
 Writes no state, exactly like the simple-close path — a closed workspace
 stays listed, and only the roster takes a workspace off the tab bar.
 Restores the pre-panel layout via
 `agent-repl--restore-fullscreen-config' before hiding so the
 frame-filling panels go away cleanly (same contract as
-`agent-repl--on-simple-close').  Then hides panels and pushes WS to the LAST tab position via
+`agent-repl--on-simple-close').  Then hides panels and pushes WS to the
+LAST tab position via
 `agent-repl-workspace-push-to-back', snapshotting the tab index
 first via `agent-repl--save-tab-index' so a future reopen can
 restore the position.
