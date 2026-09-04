@@ -369,6 +369,103 @@ describe("UpdateAgent.stop", () => {
   });
 });
 
+/**
+ * The gate holds ONE book for the whole session, so an ask raised under a
+ * subagent survives that subagent being stopped. Answering it would settle a
+ * promise for an agent that is gone and report `delivered` for a delivery that
+ * reached nobody, so the addressee is resolved BEFORE the gate is asked.
+ *
+ * Each case leaves the gate EMPTY on purpose: an empty gate answers
+ * `noOpenAsk`, so `unknownAgent` can only come from the addressee check, and
+ * `noOpenAsk` proves the check let the answer through to the gate.
+ */
+describe("UpdateAgent.answer addressee", () => {
+  const answer = (target?: conversationv1.AgentId): shimv1.UpdateAgentRequest =>
+    create(shimv1.UpdateAgentRequestSchema, {
+      ...(target === undefined ? {} : { target }),
+      input: create(conversationv1.AgentInputSchema, {
+        input: {
+          case: "answer",
+          value: create(conversationv1.AgentAnswerSchema, {
+            answer: {
+              case: "permissionDecision",
+              value: create(conversationv1.AgentPermissionDecisionSchema, {
+                ask: create(conversationv1.AgentPermissionIdSchema, { value: "ask-1" }),
+                decision: {
+                  case: "denied",
+                  value: create(conversationv1.AgentPermissionDeniedByUserSchema, {}),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+
+  const started = (taskId: string, toolUseId: string): SdkTaskStartedMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      description: "",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    }) as SdkTaskStartedMessage;
+
+  const cases: {
+    readonly name: string;
+    readonly live: readonly SdkTaskStartedMessage[];
+    readonly target: string | undefined;
+    readonly want: string | undefined;
+  }[] = [
+    {
+      name: "reaches the gate for the main agent, which names no subagent at all",
+      live: [],
+      target: undefined,
+      want: "noOpenAsk",
+    },
+    {
+      name: "reaches the gate for a subagent addressed by its task id",
+      live: [started("a01", "toolu_1")],
+      target: "a01",
+      want: "noOpenAsk",
+    },
+    {
+      name: "reaches the gate for a subagent addressed by its spawning tool_use_id",
+      live: [started("a01", "toolu_1")],
+      target: "toolu_1",
+      want: "noOpenAsk",
+    },
+    {
+      name: "REFUSES unknown_agent for an ask whose subagent has been stopped",
+      live: [],
+      target: "a01",
+      want: "unknownAgent",
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, async () => {
+      // Arrange.
+      const h = await harness();
+      for (const message of testCase.live) h.live.onTaskStarted(message);
+
+      // Act.
+      const response = await h.turns.updateAgent(
+        answer(
+          testCase.target === undefined
+            ? undefined
+            : create(conversationv1.AgentIdSchema, { value: testCase.target }),
+        ),
+      );
+
+      // Assert.
+      expect(failureKind(response)).toBe(testCase.want);
+    });
+  }
+});
+
 describe("UpdateAgent.prompt", () => {
   const prompt = (target: conversationv1.AgentId): shimv1.UpdateAgentRequest =>
     create(shimv1.UpdateAgentRequestSchema, {
