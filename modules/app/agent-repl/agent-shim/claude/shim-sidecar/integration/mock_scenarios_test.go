@@ -76,6 +76,17 @@ func TestMockScenarios(t *testing.T) {
 			tree := generateMock(t, tc.Prompt, tc.Wait)
 			in := ingestMock(t, tree)
 			entries := in.Entries()
+			// THE ORPHAN INVARIANT RUNS FIRST, AHEAD OF THE BLOCKED SKIP.
+			// An orphan tool_result is a settle the converter failed to
+			// perform (see mock_orphans_test.go for the subject's own
+			// statement of it), and a BLOCKED row is still a row whose
+			// fixture was generated and ingested — so it is still evidence
+			// about the join, and the concern that blocks its own
+			// expectation does not license a missed settle. It is asserted
+			// here, on THIS scenario's already-generated tree, rather than
+			// by a second function regenerating all 133 scenarios to run
+			// one assertion.
+			requireNoOrphanToolResults(t, tc.Prompt, entries)
 			if tc.Blocked != "" {
 				// Generated and ingested regardless: the fixture is the evidence.
 				t.Skipf("this row is BLOCKED: %s", tc.Blocked)
