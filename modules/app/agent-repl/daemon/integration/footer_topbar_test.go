@@ -779,9 +779,13 @@ func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
 		}},
 	})
 	// The chip resolves from the same fact, so its arrival is the synchronizing
-	// edge for the panel the fact also feeds.
-	awaitTopbar(t, f, topbar, "the context chip carrying the pushed usage", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != ""
+	// edge for the panel the fact also feeds. THE EDGE NAMES THIS FACT'S OWN
+	// FIGURE: the fake states an opening context usage of its own alongside
+	// readiness (fakeshim.DefaultContextUsage, 1000 tokens and no categories),
+	// so a merely non-empty chip is already true before this push lands and
+	// would let the panel be read from that opening fact instead.
+	awaitTopbar(t, f, topbar, "the context chip carrying the pushed 50,000 tokens", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == "50k"
 	})
 
 	// Assert: the /context panel — the topbar resolver's OTHER product from
@@ -1300,8 +1304,12 @@ func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
 			TotalTokens: 50_000, MaxTokens: 200_000, Percentage: 25, Model: "claude-opus-5",
 		}},
 	})
+	// The edge names THIS push's own figure: the fake's opening context usage
+	// (1000 tokens) already draws a non-empty chip, so "non-empty" would be
+	// satisfied before this update — and therefore before the two mcp_server
+	// frames ahead of it — had been applied.
 	awaitTopbar(t, f, topbar, "the context chip that follows the mcp_server updates", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != ""
+		return v.GetContext().GetText() == "50k"
 	})
 
 	// Assert
