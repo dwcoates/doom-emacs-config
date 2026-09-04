@@ -533,8 +533,12 @@ func TestPlanModeEnterExit(t *testing.T) {
 
 func TestPushNotificationSent(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange. The footer is watched BEFORE the turn is driven: the
+	// notification is raised mid-turn and a later activity can replace the
+	// standing line, so a stream opened afterwards could legitimately miss it.
 	w, ws := rmNewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "push-sent")
@@ -548,6 +552,70 @@ func TestPushNotificationSent(t *testing.T) {
 	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
 	if ended.GetConcluded() == nil {
 		t.Fatalf("the push-sent turn ended = %v, want a concluded outcome", ended)
+	}
+
+	// Assert the SPECIFIC negative rather than merely declining to look: not
+	// one row of the whole feed is an agent-notification row of any kind.
+	// FeedTurnActivity's oneof (feed.proto) has no notification arm at all, so
+	// the honest statement of "no feed row" is that the turn's rows are the
+	// tool call, the response and the terminal — and nothing else appears
+	// carrying the pushed message.
+	rmAssertNoRowCarriesText(t, w, ws, rmPushMessage)
+
+	// Assert the surface the push DOES reach, which the proto names:
+	// FooterStatusActivityNotification is "an agent notification, shown until
+	// the next activity replaces it" (footer.proto:176-177, :219-220), its
+	// `text` "the composed line, drawn verbatim" (footer.proto:658-661). The
+	// daemon raises it from the push's START state, message verbatim
+	// (daemon/internal/resolve/footer/chips.go applyNotification), and the fake
+	// pushes one fixed message for every push arm (automation.ts pushScenario).
+	rmAwaitFooter(t, w, footer, "the footer's standing notification line from the sent push", func(v *frontendv1.FooterView) bool {
+		return rmNotificationText(v) == rmPushMessage
+	})
+}
+
+// rmPushMessage is the one message every push arm of automation.ts's
+// pushScenario sends ("The offline run finished."), asserted verbatim because
+// the whole path from the tool result to the footer copies it unchanged.
+const rmPushMessage = "The offline run finished."
+
+// rmNotificationText answers the footer's standing notification line whichever
+// status arm is in effect, since the notification outlives the turn that raised
+// it and the status underneath it therefore changes (footer.proto declares the
+// same FooterStatusActivityNotification under idle, thinking and waiting).
+func rmNotificationText(v *frontendv1.FooterView) string {
+	status := v.GetStrip().GetStatus()
+	switch {
+	case status.GetIdle().GetActivity().GetNotification() != nil:
+		return status.GetIdle().GetActivity().GetNotification().GetText()
+	case status.GetThinking().GetActivity().GetNotification() != nil:
+		return status.GetThinking().GetActivity().GetNotification().GetText()
+	case status.GetWaiting().GetActivity().GetNotification() != nil:
+		return status.GetWaiting().GetActivity().GetNotification().GetText()
+	}
+	return ""
+}
+
+// rmAssertNoRowCarriesText fails if any row of ws's materialized root feed
+// draws the given text as a prompt body, a response, or a tool-call name — the
+// specific negative behind "a push notification draws no feed row".
+func rmAssertNoRowCarriesText(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, text string) {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if row.GetAgentPrompt().GetAddress().GetText() == text {
+			t.Errorf("feed row %s draws the pushed message as an agent prompt, want no row for a notification", row.GetId().GetValue())
+		}
+		if row.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == text {
+			t.Errorf("feed row %s draws the pushed message as a response, want no row for a notification", row.GetId().GetValue())
+		}
 	}
 }
 
@@ -567,8 +635,10 @@ func TestPushNotificationSent(t *testing.T) {
 
 func TestPushNotificationNotSent(t *testing.T) {
 	t.Parallel()
-	// Arrange
+	// Arrange. As in the sent arm, the footer is watched before any turn runs.
 	w, ws := rmNewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	cases := []string{"push-config-off", "push-user-present", "push-no-transport"}
 	for _, scenario := range cases {
@@ -584,6 +654,19 @@ func TestPushNotificationNotSent(t *testing.T) {
 			if ended.GetConcluded() == nil {
 				t.Fatalf("the %s turn ended = %v, want a concluded outcome", scenario, ended)
 			}
+
+			// The specific negative, stated rather than merely implied.
+			rmAssertNoRowCarriesText(t, w, ws, rmPushMessage)
+
+			// The surface a push DOES reach is raised from the push's START
+			// state, which every arm of pushScenario emits — the
+			// disabled-reason lives on the vendor's RESULT, so the standing
+			// notification line stands here exactly as it does for push-sent
+			// (daemon/internal/resolve/footer/chips.go applyNotification takes
+			// only AgentPushNotification_Start).
+			rmAwaitFooter(t, w, footer, "the footer's standing notification line from the "+scenario+" push", func(v *frontendv1.FooterView) bool {
+				return rmNotificationText(v) == rmPushMessage
+			})
 		})
 	}
 }
@@ -641,31 +724,70 @@ func TestScheduleWakeupScheduleAndStop(t *testing.T) {
 
 	// A wakeup draws NO feed row: feed.proto's FeedTurnActivity oneof has no
 	// wakeup arm, and "wakeups" is named outright in the daemon resolver's
-	// draws-nothing default arm (daemon/internal/resolve/feed/sink.go). Both
-	// arms are therefore pinned at the turn's own terminal.
+	// draws-nothing default arm (daemon/internal/resolve/feed/sink.go). The
+	// FOOTER is where the contract puts it, so both arms are pinned there as
+	// well as at their own turn terminals.
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act + Assert: schedule.
 	scheduleTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "wakeup-schedule")
 	if ended := AwaitTurnEnded(t, w, ws, scheduleTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the wakeup-schedule turn ended = %v, want a concluded outcome", ended)
 	}
+	// The pending wakeup owns the footer's status once the turn is done:
+	// footer.proto:241-243 declares FooterSubStatusWaitingWakeup as "the
+	// self-scheduled wakeup fallback: shown only when the footer would
+	// otherwise read idle/done", and the resolver publishes exactly that arm
+	// while a scheduled wakeup stands
+	// (daemon/internal/resolve/footer/status.go's wakeup()).
+	rmAwaitFooter(t, w, footer, "the footer's waiting-on-wakeup status while the scheduled wakeup stands", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
+	})
+	// The ⏱ chip is what footer.proto:849-851 names for it: "live scheduled
+	// jobs (CRON/WAKEUP SCHEDULES). Set iff at least one job is scheduled."
+	//
+	// DISPUTE, written to the proto rather than to the daemon: the chip is
+	// built from `len(s.crons)` alone (chips.go:547-549), and applyWakeup
+	// keeps the pending wakeup in `s.wakeup`, a field the chip never consults
+	// — so a session whose only scheduled job is a wakeup draws no ⏱ chip.
+	// The proto names wakeup schedules in that chip, so this asserts the chip
+	// and is expected to fail until the daemon counts them.
+	rmAwaitFooter(t, w, footer, "the footer's ⏱ chip counting the scheduled wakeup", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetCrons().GetCount() > 0
+	})
 
 	// Act + Assert: stop.
 	stopTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "wakeup-stop")
 	if ended := AwaitTurnEnded(t, w, ws, stopTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the wakeup-stop turn ended = %v, want a concluded outcome", ended)
 	}
+	// The stop RETIRES both: applyWakeup's Stopped outcome clears `s.wakeup`,
+	// so the waiting arm goes away and the footer falls back to the idle/done
+	// status the fallback was only ever standing in front of.
+	rmAwaitFooter(t, w, footer, "the footer's waiting-on-wakeup status to be retired by the stop", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() == nil &&
+			v.GetStrip().GetLiveWork().GetCrons() == nil
+	})
 }
 
 // ===========================================================================
 // #95 SendMessageQueuedAndResumed — golden
 // "send-message-queued-and-resumed", registered as TWO scenario names
 // (tasks.ts SEND_MESSAGE_QUEUED "send-message", SEND_MESSAGE_RESUMED
-// "send-message-resumed") — driven as one combined test. The corpus-noted
-// discriminator between the two deliveries is `resumedAgentId`, present only
-// on the resumed arm; a send reaches no frontend surface of the sender's at
-// all (see the body), so neither that field nor any composed output is
-// observable here and this test pins each delivery at its own turn terminal.
+// "send-message-resumed") — driven as one combined test.
+//
+// CORRECTED: an earlier version of this header said a send "reaches no
+// frontend surface of the sender's at all". It does. sink.go routes
+// AgentActivity_SendMessage to drawSendMessage, which draws a FeedAgentPrompt
+// on the SENDER's own feed — address "→ <recipient label>", body the caller's
+// one-line summary (daemon/internal/resolve/feed/sendmessage.go, landed by "a
+// SendMessage draws agent_prompt on the sender's feed with a composed address
+// line and the caller's summary"). Each delivery is pinned on that row.
+//
+// The corpus-noted discriminator between the two deliveries is
+// `resumedAgentId`, present only on the resumed arm; that half genuinely has
+// no drawn shape — see the dispute noted in the body.
 // ===========================================================================
 
 func TestSendMessageQueuedAndResumed(t *testing.T) {
@@ -673,23 +795,89 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
 
-	// A send draws NO feed row on the SENDER's feed: feed.proto's
-	// FeedTurnActivity oneof has no send arm, and "sends" is named in the
-	// daemon resolver's draws-nothing default arm
-	// (daemon/internal/resolve/feed/sink.go). Both deliveries are therefore
-	// pinned at the turn's own terminal.
+	// A send DOES draw on the sender's own feed, as an agent_prompt row:
+	// feed.proto:1421-1433's FeedAgentPrompt is "ONE component, both ends: on
+	// the SENDER's feed it is the outgoing send, on the recipient's the
+	// delivered prompt; only the address line differs", its address "'→
+	// Explore' on the sender's feed", its body the prompt's content. The
+	// daemon composes exactly that — `"→ " + sendRecipientLabel(...)` with the
+	// caller's ONE-LINE SUMMARY as the sole body block, never the relayed body
+	// (daemon/internal/resolve/feed/sendmessage.go, landed as "a SendMessage
+	// draws agent_prompt on the sender's feed with a composed address line and
+	// the caller's summary").
 
-	// Act + Assert: queued (to a live agent).
+	// Act + Assert: queued (to a live agent). tasks.ts SEND_MESSAGE_QUEUED
+	// addresses the literal id "a1234567890abcde" with the summary "check the
+	// branch"; nothing in this workspace has a feed for that id, so
+	// sendRecipientLabel falls to rule 2 — the addressed string exactly as the
+	// caller wrote it — and both halves of the row are exact.
 	queuedTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message")
 	if ended := AwaitTurnEnded(t, w, ws, queuedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the send-message (queued) turn ended = %v, want a concluded outcome", ended)
 	}
+	queuedRow := rmAwaitFeedRow(t, w, ws, "the sender's outgoing-send agent_prompt row", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == queuedTurn.GetValue() && r.GetAgentPrompt() != nil
+	}).GetAgentPrompt()
+	if got, want := queuedRow.GetAddress().GetText(), "→ a1234567890abcde"; got != want {
+		t.Errorf("outgoing send address = %q, want %q", got, want)
+	}
+	if got, want := rmAgentPromptText(t, queuedRow), "check the branch"; got != want {
+		t.Errorf("outgoing send body = %q, want the caller's summary %q", got, want)
+	}
 
-	// Act + Assert: resumed (idle agent, resumed from transcript).
+	// Act + Assert: resumed (idle agent, resumed from transcript). The
+	// recipient id is MINTED by the fake (ctx.mintAgentTaskId()), so the
+	// address is pinned by its composed shape rather than a literal, while the
+	// summary — the half the contract says a surface draws — is exact.
+	//
+	// DISPUTE: the RESUMPTION itself has no drawn shape.
+	// conversation/v1/agent_activity.proto:2583-2593 says the two deliveries
+	// "differ in a way a reader cares about: one costs nothing beyond the
+	// message, the other RESTARTED A DORMANT AGENT, which begins consuming
+	// tokens again" and gives it its own arm
+	// (AgentSendMessageResumedRecipient), but frontend/v1's FeedAgentPrompt
+	// carries only an address and a body, and sendmessage.go reads only
+	// Success.recipient_agent_id — so the resumed delivery is indistinguishable
+	// from the queued one on every frontend surface. Asserted as far as the
+	// frontend proto allows, and reported.
 	resumedTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message-resumed")
 	if ended := AwaitTurnEnded(t, w, ws, resumedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the send-message-resumed turn ended = %v, want a concluded outcome", ended)
 	}
+	resumedRow := rmAwaitFeedRow(t, w, ws, "the resumed send's agent_prompt row", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == resumedTurn.GetValue() && r.GetAgentPrompt() != nil
+	}).GetAgentPrompt()
+	address := resumedRow.GetAddress().GetText()
+	if !strings.HasPrefix(address, "→ ") {
+		t.Errorf("resumed send address = %q, want the composed \"→ <recipient>\" form", address)
+	}
+	if name := strings.TrimPrefix(address, "→ "); name == "" || name == sendNotNamedLabel {
+		t.Errorf("resumed send address = %q, want it to name the resumed recipient", address)
+	}
+	if got, want := rmAgentPromptText(t, resumedRow), "resume the sweep"; got != want {
+		t.Errorf("resumed send body = %q, want the caller's summary %q", got, want)
+	}
+}
+
+// sendNotNamedLabel is the daemon's honest stand-in when nothing on the wire
+// names a send's recipient (daemon/internal/resolve/feed/sendmessage.go's
+// sendNotNamed) — the one label the resumed arm's address must NOT be.
+const sendNotNamedLabel = "an agent the send did not name"
+
+// rmAgentPromptText answers the single text block an outgoing send's body
+// carries, failing loudly on any other shape: the contract is that the drawn
+// body is the caller's one-line summary and nothing else.
+func rmAgentPromptText(t *testing.T, prompt *frontendv1.FeedAgentPrompt) string {
+	t.Helper()
+	blocks := prompt.GetBody().GetBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("outgoing send body has %d blocks, want exactly 1 (the caller's summary)", len(blocks))
+	}
+	text := blocks[0].GetText()
+	if text == nil {
+		t.Fatalf("outgoing send body block = %v, want a text block", blocks[0])
+	}
+	return text.GetText()
 }
 
 // ===========================================================================
