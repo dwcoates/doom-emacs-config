@@ -48,6 +48,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		if turn.GetValue() != "" {
 			running := ids.TurnID(turn.GetValue())
 			s.turnInFlight = &running
+			s.turnStamp = &running
 		}
 		log.Debug("daemon.feed.user_prompt",
 			"a delivered prompt was drawn as a user-prompt row",
