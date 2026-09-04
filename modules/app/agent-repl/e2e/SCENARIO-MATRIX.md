@@ -347,15 +347,21 @@ either, but none exists on this branch.
   panics on it — "sessionwatcher must not call DetachForeground" — and
   `endpoint_interrupt.proto` is STOP-only), and no fake-SDK scenario
   backgrounds a subagent the way `shell.ts`'s `VENDOR_BACKGROUNDED`
-  backgrounds a Bash call. Covered by shim unit tests only, generically
-  over `AgentActivityId` (not subagent-specific, since no unit exercises a
-  subagent-shaped activity id through this path):
+  backgrounds a Bash call. Covered by shim unit tests, now including a
+  subagent-shaped activity id:
   `agent-shim/claude/shim/test/engine/turn.test.ts`
   (`describe("DetachForeground", ...)` — `unknownUnit`, `alreadyConcluded`,
-  success — and `describe("DetachForeground on a live foreground unit",
-  ...)` — `unsupported`, the two CONFIRMS cases) and
-  `agent-shim/claude/shim/test/engine/session.test.ts`. Applying
-  `DetachForeground` specifically to a subagent unit (as opposed to a bash
-  unit) is a GAP: no unit test constructs a subagent-shaped
-  `AgentActivityId` for this rpc, so the subagent-specific shape the
-  deleted e2e test named is untested at every layer.
+  success, generic over `AgentActivityId`; `describe("DetachForeground on a
+  live foreground unit", ...)` — `unsupported`, the two CONFIRMS cases, over
+  a bash unit; and `describe("DetachForeground on a live foreground
+  subagent", ...)` — a live foreground subagent addressed by its tool_use id
+  is refused `unsupported` (the same declared contract gap as a bash call:
+  the pinned SDK offers no verb to INITIATE a detachment) and is CONFIRMED
+  once `backgroundTasks(unit)` reports the vendor already holds live
+  background work for it, while a stale/unknown subagent tool_use id is
+  refused `unknownUnit`) and `agent-shim/claude/shim/test/engine/session.test.ts`.
+  Still no caller-facing `agentrepl.v1` rpc or daemon-internal trigger, and
+  no fake-SDK scenario backgrounds a subagent the way `shell.ts`'s
+  `VENDOR_BACKGROUNDED` backgrounds a Bash call, so the deleted e2e test's
+  scenario remains an e2e-level GAP — this closes only the shim-unit
+  portion of it.
