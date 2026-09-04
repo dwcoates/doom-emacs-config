@@ -259,6 +259,23 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     for (const listener of faultListeners) listener(fault);
   };
 
+  /**
+   * Whoever is waiting to learn that the store has GONE degraded.
+   *
+   * The durable path is the only waiter: it must abandon an inline wait the
+   * instant the outage is known rather than sitting out a retry schedule that
+   * is longer than its caller's RPC deadline.
+   */
+  let degradedWaiters: (() => void)[] = [];
+
+  /** Resolves as soon as the writer is in an open degraded window. */
+  const whenDegraded = (): Promise<void> =>
+    degradedSince !== undefined
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          degradedWaiters.push(resolve);
+        });
+
   const openDegraded = (reason: string): void => {
     if (degradedSince !== undefined) return;
     degradedSince = options.nowMs();
@@ -282,6 +299,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         }),
       );
     }
+    const waiters = degradedWaiters;
+    degradedWaiters = [];
+    for (const wake of waiters) wake();
     emitFault("store_unreachable", reason);
   };
 
@@ -405,6 +425,33 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     }
   };
 
+  /**
+   * Send one batch ONCE, for a caller that is holding an RPC open.
+   *
+   * THE RETRY SCHEDULE BELONGS TO THE BUFFER, NOT TO A BLOCKED CALLER. The
+   * schedule spans seconds by design, which is longer than the deadline the
+   * daemon holds its `StartTurn` under -- so replaying inline turns a store
+   * outage into a turn the daemon never sees accepted, which is exactly the
+   * outcome the durable write's own contract forbids. One attempt is made; a
+   * non-terminal failure opens the degraded window and is reported to the
+   * caller, whose answer is to re-queue the row on the ordered retry buffer
+   * that owns the outage. The write id is deterministic, so the replay the
+   * buffer performs is absorbed if this attempt half-landed.
+   */
+  const deliverOnce = async (batch: PendingBatch): Promise<boolean> => {
+    batch.attempts += 1;
+    const failure = await attempt(batch.entries);
+    if (failure === null) {
+      reader.noteAgentRows(new Set(batch.entries.map((entry) => entry.agentId.value)));
+      closeDegraded();
+      LOGGER.logVerbose({ entries: batch.entries.length, attempts: batch.attempts }, "batch is durable");
+      return true;
+    }
+    openDegraded(failure.detail);
+    if (failure.terminal) dropLoudly(batch, failure.detail);
+    return false;
+  };
+
   /** Drain the queue in order. One loop, so batches land in the order written. */
   const drain = async (): Promise<void> => {
     while (queue.length > 0) {
@@ -487,14 +534,24 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       noteShellRuns(entries);
       // ORDERED BEHIND WHATEVER IS BUFFERED: a durable write that jumped the
       // queue could land a turn's first activity frame before the prompt row
-      // that R15 says precedes it.
-      await this.flush();
+      // that R15 says precedes it. The wait is abandoned the moment the store
+      // is known to be down, because the drain it is waiting on is then
+      // replaying on a schedule measured in seconds and the caller is holding
+      // an RPC open. Abandoning keeps the order: the caller's answer to the
+      // refusal is to re-queue the row at the TAIL of the same buffer.
+      if (degradedSince === undefined) await Promise.race([this.flush(), whenDegraded()]);
+      if (degradedSince !== undefined) {
+        throw new PersistenceError(
+          "store_unavailable",
+          `the store is unreachable (${degradedReason}); ${entries.length} durable row(s) belong on the retry buffer`,
+        );
+      }
       const batch: PendingBatch = { entries, attempts: 0 };
-      const landed = await deliver(batch);
+      const landed = await deliverOnce(batch);
       if (!landed) {
         throw new PersistenceError(
           "store_unavailable",
-          `the store did not accept ${entries.length} durable row(s) after ${batch.attempts} attempts`,
+          `the store did not accept ${entries.length} durable row(s) after ${batch.attempts} attempt(s)`,
         );
       }
     },
