@@ -51,6 +51,12 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 		r.o.deps.PauseInTerminal(ctx, r.ws)
 	}
 
+	if r.exiting() {
+		// The stamps and the publishes below all go through the state client
+		// that is already closing; teardown states what was left.
+		r.teardown(ctx, out)
+		return nil
+	}
 	if out.failed != "" {
 		r.head(&frontendv1.FeedMergeError{
 			EndedAtMs: endedMS,
@@ -91,6 +97,17 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 func (r *run) abort(ctx context.Context, summary string) {
 	r.enterTerminal(terminalOwedFailed)
 	defer r.leaveTerminal()
+	// A RUN THAT ENDED BECAUSE THE DAEMON IS EXITING DID NOT FAIL. Its phase
+	// broke on a git or a shim that the orderly exit had already taken away,
+	// so recording it as a fault -- and publishing a failure the next boot
+	// contradicts -- names the wrong cause. It takes stop's account and
+	// abandons what it holds to the recovery, exactly like a cancelled git.
+	if r.exiting() {
+		r.o.deps.Log.Global().Info("daemon.merge.stop", "a merge ended when the daemon exited", dlog.Context{
+			"workspace": string(r.ws), "lease": string(r.lease.ID), "cause": summary})
+		r.teardown(ctx, outcome{failed: summary})
+		return
+	}
 	r.o.log(ctx, r.ws).Error("daemon.merge.abort", "a merge could not continue", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "summary": summary})
 	if r.lease.ID != "" {
@@ -137,6 +154,10 @@ func (r *run) stopped(ctx context.Context, err error) bool {
 // fires the self-reload last.
 func (r *run) teardown(ctx context.Context, out outcome) {
 	const op = "daemon.merge.teardown"
+	if r.exiting() {
+		r.abandonToRecovery(ctx, terminalOwed(out))
+		return
+	}
 	log := r.o.log(ctx, r.ws)
 
 	// The session's rows go back to the root feed the moment the bubble stops
@@ -247,7 +268,53 @@ func (r *run) enterTerminal(owed string) {
 	if o.terminals == nil {
 		o.terminals = map[ids.WorkspaceID]*terminal{}
 	}
+	// THE DRAIN'S SNAPSHOT AND THIS REGISTRATION SHARE THE MUTEX, which is
+	// what makes the two sides of the window exact rather than likely: a
+	// registration that gets in while draining is false is IN the drain's
+	// snapshot and will be waited for, so its durable work is safe; one that
+	// arrives after is not, and nothing holds the state client open for it.
+	r.afterDrain = o.draining
 	o.terminals[r.ws] = &terminal{ws: r.ws, done: make(chan struct{}), owed: owed, lease: r.lease.ID}
+}
+
+// exiting reports that this run reached its terminal after the shutdown drain
+// had closed its snapshot: the daemon is on its way out, the state client is
+// closing, and the boot recovery owns everything this run still holds.
+func (r *run) exiting() bool { return r.afterDrain }
+
+// abandonToRecovery is the terminal a run takes when the daemon exited out
+// from under it. It gives back everything that lives in THIS process -- the
+// output address, the occupancy guard, the orchestrator's maps, the queue lock
+// -- and touches the state client, the git and the shim not at all: those
+// writes would run against a closed store and fail, and the boot recovery
+// redoes every one of them from the lease that is still on the row.
+//
+// IT IS RECORDED, AND AT INFO. An orderly exit is not a fault, so this is not
+// an error; but the record names exactly what was left undone and who owns it,
+// which is the same account the drain writes for a merge left mid-phase.
+func (r *run) abandonToRecovery(ctx context.Context, owed string) {
+	r.o.deps.Feed.SetOutputAddress(r.ws, nil)
+	if r.releaseOccupancy != nil {
+		r.releaseOccupancy()
+	}
+	r.o.mu.Lock()
+	delete(r.o.running, r.repo)
+	delete(r.o.runsByWorkspace, r.ws)
+	delete(r.o.repoOf, r.ws)
+	delete(r.o.ledgerOf, r.ws)
+	r.o.mu.Unlock()
+	r.o.clearOffer(r.ws)
+	if err := r.lock.Release(); err != nil {
+		r.o.log(ctx, r.ws).Warn("daemon.merge.teardown", "could not release the repository's queue lock on the way out",
+			dlog.Context{"repo": string(r.repo), "error": err.Error()})
+	}
+	r.o.deps.Log.Global().Info("daemon.merge.teardown",
+		"the daemon exited before this merge's terminal could be written; the boot recovery owns what it left",
+		dlog.Context{
+			"workspace": string(r.ws),
+			"lease":     string(r.lease.ID),
+			"unstamped": owed,
+		})
 }
 
 // leaveTerminal retires the registration and releases whatever is waiting on
