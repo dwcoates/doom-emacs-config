@@ -404,8 +404,8 @@ const (
 	// agent) and then goes on waiting for the turn's terminal. Without this the
 	// turn parks forever and the mock writes only the records before the gate.
 	waitAnswer
-	// waitDetach — a scenario that BLOCKS ON THE USER'S CTRL-B: foreground work
-	// the user moves to the background mid-flight. The drive calls
+	// waitDetach — a scenario that BLOCKS ON a vendor-side backgrounding of
+	// foreground work mid-flight. The drive calls
 	// DetachForeground on the bash unit as its start frame arrives and then goes
 	// on waiting for the turn's terminal.
 	//
@@ -784,8 +784,9 @@ func answerOpenAsk(
 	}
 }
 
-// detachOpenBash performs the user's Ctrl-B on one announced foreground bash
-// unit, so a scenario parked on the detachment can reach its terminal.
+// detachOpenBash confirms one announced foreground bash unit's
+// vendor-side backgrounding, so a scenario parked on the detachment can
+// reach its terminal.
 //
 // THE UNIT IS THE BASH'S OWN ACTIVITY ID, which is the vendor tool_use id the
 // mock's `backgroundTasks(toolUseId)` answers on — the same identity
@@ -814,7 +815,7 @@ func detachOpenBash(
 		t.Fatalf("DetachForeground on the bash unit of %q: %v (log: %s)", prompt, err, tree.LogPath)
 	}
 	if resp.Msg.GetSuccess() == nil {
-		t.Fatalf("the mocked vendor REFUSED the Ctrl-B on %q: %v (log: %s)",
+		t.Fatalf("the mocked vendor REFUSED the DetachForeground on %q: %v (log: %s)",
 			prompt, resp.Msg.GetFailure(), tree.LogPath)
 	}
 }
