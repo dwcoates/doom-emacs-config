@@ -41,6 +41,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -531,4 +532,166 @@ func TestPermissionModeChangedMidSession(t *testing.T) {
 	}
 
 	AwaitTurnEnded(t, w, ws, turn)
+}
+
+// ---------------------------------------------------------------------------
+// Coverage extension — `!perm-no-standing`: an ask that offers NO standing.
+// ---------------------------------------------------------------------------
+
+// TestPermissionAskOffersNoStanding drives "!perm-no-standing"
+// (permissions.ts's PERM_NO_STANDING, which calls askPermission with
+// `{ suggestions: [] }` — "the shape the vendor sends when no standing rule
+// could be written for the call. The ask can only ever produce a
+// once-allow").
+//
+// The contract fact under test is feed.proto's FeedPermission.standing_offered
+// (field 5): "PRESENT iff the vendor offered a standing form — presence is
+// what makes the 'always allow' button drawable." So an ask with no
+// suggestions must draw the card with standing_offered UNSET, and that
+// absence is the whole assertion: it is the exact negative of
+// TestPermissionAskAnsweredArms's positive check, which requires the field
+// PRESENT for the three scenarios whose asks do offer one.
+//
+// The once-allow is then answered for real, so the test also pins that a
+// no-standing ask still reaches the ordinary allowed_once verdict and runs
+// its gated call — an unoffered standing narrows the buttons, it does not
+// break the card.
+func TestPermissionAskOffersNoStanding(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := pmNewPermissionWorld(t)
+
+	// Act
+	turn := SubmitPrompt(t, w, ws, "!perm-no-standing")
+	askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
+	})
+
+	// Assert: the card offers NO standing.
+	if askRow.GetPermission().GetStandingOffered() != nil {
+		t.Fatalf("permission ask standing_offered = present, want UNSET: the scenario's ask carries no "+
+			"suggestions, and feed.proto declares standing_offered \"PRESENT iff the vendor offered a standing "+
+			"form\" (row %v)", askRow)
+	}
+
+	// Act: the only answer such an ask can produce is a once-allow.
+	resp, err := w.Client().AnswerPermission(w.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace:  ws,
+		Permission: askRow.GetId(),
+		Answer:     &agentreplv1.AnswerPermissionRequest_AllowOnce{AllowOnce: &agentreplv1.AnswerPermissionAllowOnce{}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerPermission(AllowOnce) = %v, %v, want a success", resp, err)
+	}
+
+	// Assert: it settles allowed_once, still with no standing offered.
+	answeredRow := pmAwaitFeedRow(t, w, ws, "the answered permission card", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == askRow.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
+	})
+	if answeredRow.GetPermission().GetAnswered().GetAllowedOnce() == nil {
+		t.Fatalf("answered permission = %v, want allowed_once", answeredRow.GetPermission().GetAnswered())
+	}
+	if answeredRow.GetPermission().GetStandingOffered() != nil {
+		t.Errorf("answered card standing_offered = present, want UNSET: answering must not synthesize an offer the ask never made (row %v)", answeredRow)
+	}
+
+	// Assert: the gated `git log -1` ran and the turn concluded.
+	toolRow := pmAwaitFeedRow(t, w, ws, "the gated Bash tool call's settled state", func(r *frontendv1.FeedRow) bool {
+		call := r.GetActivity().GetSimpleToolCall()
+		return r.GetTurn().GetValue() == turn.GetValue() && call != nil && (call.GetReturned() != nil || call.GetDenied() != nil)
+	})
+	if call := toolRow.GetActivity().GetSimpleToolCall(); call.GetReturned().GetSucceeded() == nil {
+		t.Fatalf("gated Bash outcome = %v, want returned.succeeded", call)
+	}
+	if ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("turn ended = %v, want concluded", ended)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Coverage extension — `!perm-undecidable`: denied for want of a decider.
+// ---------------------------------------------------------------------------
+
+// TestPermissionDeniedForWantOfDecider drives "!perm-undecidable"
+// (permissions.ts's PERM_UNDECIDABLE) for real, rather than merely naming it
+// in a comment as TestPermissionDeniedByPolicy does.
+//
+// # THE DISCRIMINATOR GAP, RECORDED
+//
+// permission.proto declares THREE denial arms and gives `undecidable` its own
+// (AgentPermissionDenied.undecidable, field 3): "NOBODY REFUSED ... Drawn as a
+// user refusal it accuses the user of something they did not do; drawn as
+// policy it implies a rule that does not exist." The shim honors that at the
+// conversation layer — src/convert/permission.ts maps
+// `decision_reason_type: "classifier"` (its UNDECIDED_DECIDER constant) onto
+// the undecidable arm, and every other discriminator onto `policy`.
+//
+// BUT THE FRONTEND CONTRACT HAS NO SUCH ARM. feed.proto's
+// FeedPermissionAnswered.answer oneof declares exactly four verdicts —
+// allowed_once, allowed_standing, denied_by_user, denied_by_policy — and no
+// undecidable one, so daemon/internal/resolve/feed/permission.go's
+// decisionArm folds the undecidable arm onto denied_by_policy, carrying the
+// distinction in the composed REASON TEXT instead of in the arm.
+//
+// Per the matrix's instruction, this test therefore asserts the arm the
+// daemon DOES produce (denied_by_policy) and pins the one thing that still
+// separates it from an ordinary policy deny at this surface: the composed
+// wording "denied for want of a decider", which permission.go spells only for
+// the undecidable arm and never for a real policy denial.
+func TestPermissionDeniedForWantOfDecider(t *testing.T) {
+	t.Parallel()
+	// Arrange: watch from BEFORE the prompt — like a policy denial, this one
+	// never has an open ask, and a watch started afterward could only ever
+	// see the row's final value (see pmWatchFeedFromNow).
+	w, ws := pmNewPermissionWorld(t)
+	stream := pmWatchFeedFromNow(t, w, ws)
+	defer stream.Close()
+
+	// Act
+	turn := SubmitPrompt(t, w, ws, "!perm-undecidable")
+
+	// Assert
+	var sawOpen, sawToolDenied bool
+	var answered *frontendv1.FeedPermissionAnswered
+	for answered == nil || !sawToolDenied {
+		row := harness.AwaitNext(t, w.Ctx(), stream, "a permission/tool push for this turn")
+		if row.GetTurn().GetValue() != turn.GetValue() {
+			continue
+		}
+		if p := row.GetPermission(); p != nil {
+			if p.GetOpen() != nil {
+				sawOpen = true
+			}
+			if a := p.GetAnswered(); a != nil {
+				answered = a
+			}
+		}
+		if call := row.GetActivity().GetSimpleToolCall(); call.GetDenied() != nil {
+			sawToolDenied = true
+		}
+	}
+	if sawOpen {
+		t.Errorf("an undecidable denial showed an open ask; want none ever — the classifier denied without " +
+			"reaching the callback, exactly as a policy denial does")
+	}
+	if answered.GetDeniedByPolicy() == nil {
+		t.Fatalf("answered permission = %v, want denied_by_policy: frontend/v1/feed.proto's "+
+			"FeedPermissionAnswered.answer oneof declares no undecidable arm, so the daemon folds the "+
+			"conversation layer's AgentPermissionDenied.undecidable onto this one", answered)
+	}
+	if got := answered.GetDeniedByPolicy().GetText(); !strings.Contains(got, "denied for want of a decider") {
+		t.Errorf("denied_by_policy text = %q, want it to carry the undecidable wording %q — the ONLY thing "+
+			"separating this from an ordinary policy deny at the frontend surface (see this test's header)",
+			got, "denied for want of a decider")
+	}
+	// The vendor's own account rides along as the detail clause, which is
+	// what makes the composed line say WHAT could not decide.
+	if got := answered.GetDeniedByPolicy().GetText(); !strings.Contains(got, "could not reach a verdict") {
+		t.Errorf("denied_by_policy text = %q, want the scenario's own detail (%q) appended as the reason clause",
+			got, "could not reach a verdict")
+	}
+
+	if ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded(); ended.GetConcluded() == nil {
+		t.Fatalf("turn ended = %v, want concluded (a denial is an answer, and the agent routes around it)", ended)
+	}
 }
