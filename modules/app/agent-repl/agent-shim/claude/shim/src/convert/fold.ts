@@ -27,7 +27,11 @@
  *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
  *     and the vendor states the boundary before the summary;
  *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
- *     and only the fold has seen which one it was.
+ *     and only the fold has seen which one it was;
+ *   - the LAST VENDOR API ERROR of the turn, because the result record states
+ *     only the HTTP status and the vendor's own error CLASS and retry delay ride
+ *     records that arrive before it (`api_retry`, and an assistant message's
+ *     `error`) — cleared by the terminal that consumes it.
  *
  * # Why the output is PersistEntry and not frames
  *
@@ -79,7 +83,7 @@ import {
   convertThinkingTokens,
   type BlockState,
 } from "./stream-events.js";
-import { convertResult } from "./terminals.js";
+import { convertResult, type VendorApiError } from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
 import { createCallRegistry, type CallRegistry } from "./tool-calls.js";
 import { TOOL_CONVERTERS } from "./tools/registry.js";
@@ -141,6 +145,7 @@ interface FoldState {
   readonly taskKinds: TaskKindRegistry;
   pendingCompaction?: PendingCompaction;
   lastAnswer?: conversationv1.AgentActivityId;
+  vendorApiError?: VendorApiError;
 }
 
 /**
@@ -242,6 +247,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
         ...convertAssistantMessage(message, context, state.blocks, state.calls, TOOL_CONVERTERS),
       ];
       rememberAnswer(message, entries, state);
+      rememberVendorApiError(message, state);
       return { entries };
     }
 
@@ -256,8 +262,14 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
         ),
       };
 
-    case "result":
-      return convertResult(message, context, state.lastAnswer);
+    case "result": {
+      // CONSUMED, NOT KEPT: the class belongs to the request that just failed,
+      // and leaving it behind would let the next turn's terminal claim a class
+      // this turn's vendor never stated.
+      const vendorApiError = state.vendorApiError ?? {};
+      state.vendorApiError = undefined;
+      return convertResult(message, context, state.lastAnswer, vendorApiError);
+    }
 
     case "tool_progress":
       return {
@@ -305,6 +317,12 @@ function convertSystemMessage(
       return convertHookResponse(message, context, state.hooks);
     case "thinking_tokens":
       return convertThinkingTokens(message, context, state.blocks);
+    case "api_retry":
+      // NO ROW — `convertSessionMessage` states why — but the record IS the
+      // vendor's own account of WHICH class failed and HOW LONG it said to
+      // wait, and the terminal has no other source for either.
+      rememberVendorApiError(message, state);
+      return convertSessionMessage(message, context);
     default:
       return convertSessionMessage(message, context, (pending) => {
         state.pendingCompaction = pending;
@@ -346,6 +364,37 @@ function settleCompaction(
   }
   state.pendingCompaction = undefined;
   return [compactionEntry(context, pending, summary)];
+}
+
+/**
+ * Remember the vendor's own account of a failed API request.
+ *
+ * ONE REMEMBERED VALUE, the last of the turn: a run can fail several times
+ * before it gives up, and the class that ended the turn is the last one stated.
+ * `retry_after_ms` is only ever carried when the vendor stated a delay — an
+ * absent one stays absent rather than becoming a zero wait.
+ */
+function rememberVendorApiError(
+  message: { readonly error?: unknown; readonly retry_delay_ms?: unknown },
+  state: FoldState,
+): void {
+  const errorClass = typeof message.error === "string" ? message.error : undefined;
+  const retryAfterMs =
+    typeof message.retry_delay_ms === "number" && Number.isFinite(message.retry_delay_ms)
+      ? Math.round(message.retry_delay_ms)
+      : undefined;
+  if (errorClass === undefined && retryAfterMs === undefined) return;
+  const previous = state.vendorApiError;
+  const merged: { errorClass?: string; retryAfterMs?: number } = {};
+  const heldClass = errorClass ?? previous?.errorClass;
+  if (heldClass !== undefined) merged.errorClass = heldClass;
+  const heldWait = retryAfterMs ?? previous?.retryAfterMs;
+  if (heldWait !== undefined) merged.retryAfterMs = heldWait;
+  state.vendorApiError = merged;
+  LOGGER.logVerbose(
+    { vendor_error: merged.errorClass, retry_after_ms: merged.retryAfterMs },
+    "the vendor stated an API failure class; held for the turn's terminal",
+  );
 }
 
 /**
