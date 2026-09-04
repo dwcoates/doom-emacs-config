@@ -209,6 +209,10 @@ type Emacs struct {
 	// state root is the cross-system contract, so the daemon Emacs spawns
 	// and the Go client that cross-checks frames read the same tree.
 	StateDir string
+	// LogFile is where the MODULE's own elisp log goes for this scenario.
+	// Under the state root, so the failure artifacts already carry it, and
+	// per scenario, so no other Emacs in this container writes to it.
+	LogFile string
 	// DefaultConfigDir and MultiRepoConfigDir are the two account roots the
 	// launcher is given, and the same two the sidecar is told to watch.
 	DefaultConfigDir   string
@@ -368,6 +372,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		EmacsDir:           filepath.Join(root, ".emacs.d"),
 		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
 		StateDir:           filepath.Join(root, "state"),
+		LogFile:            filepath.Join(root, "state", "logs", "doom-agent-repl.log"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
@@ -538,6 +543,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 		e.DefaultConfigDir,
 		e.MultiRepoConfigDir,
 		e.MultiRepoRoot,
+		filepath.Dir(e.LogFile),
 		filepath.Join(e.Root, "eval"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -573,6 +579,18 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
+;; THE MODULE'S OWN LOG GETS A PER-SCENARIO ROOT.
+;; The agent-repl-log-file-name default is
+;; <temporary-file-directory>/doom-agent-repl-<uid>/doom-agent-repl.log --
+;; ONE file, keyed by uid and nothing else.  Every scenario in this container
+;; runs as the same uid, so in a parallel run every Emacs appended to that
+;; one file and rotated it out from under the others: the records a failure
+;; needed were interleaved with three unrelated scenarios' and then truncated
+;; mid-scenario by whichever of them hit the size cap first.  Pointing it
+;; under this scenario's own state root makes the log this scenario's alone,
+;; and the state root is already what dumpArtifacts copies on a failure.
+(setq agent-repl-log-file-name %q)
+
 (setq agent-repl-daemon-command (list %s)
       agent-repl-daemon-build-script %q
       agent-repl-daemon-default-config-dir %q
@@ -582,6 +600,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 (provide 'agent-repl-e2e-settings)
 ;;; e2e-settings.el ends here
 `,
+		e.LogFile,
 		elispStringList(append([]string{opts.DaemonBinary}, opts.DaemonArgs...)),
 		buildScript,
 		e.DefaultConfigDir,
