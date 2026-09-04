@@ -54,6 +54,10 @@
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
+(declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
+(declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
+(declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
+(declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--kill-one-workspace "agent-repl-workspace" (ws &optional preserve))
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
@@ -104,6 +108,36 @@ so a workspace without one cannot be addressed at all."
       (progn
         (agent-repl--warn ws "elisp.verbs.no-ref ws=%s" ws)
         (user-error "agent-repl: workspace %s has no daemon identity yet" ws))))
+
+(defun agent-repl-verbs--registered-ws-names ()
+  "Return the live registry entries that are really agent-repl workspaces.
+persp-mode's and Doom's own perspectives (`persp-nil-name', \"main\") can
+be live registry entries while intentionally owning no `:project-dir'
+(see `agent-repl--pseudo-workspace-name-p'), and a verb must never act on
+one: it is not a workspace, so there is nothing for the daemon to address."
+  (cl-remove-if-not
+   (lambda (ws)
+     (and (not (agent-repl--pseudo-workspace-name-p ws))
+          (agent-repl--ws-get ws :project-dir)
+          t))
+   (agent-repl--live-ws-names)))
+
+(defun agent-repl-verbs--target-ws (ws prompt)
+  "Return the workspace a verb should act on, or refuse.
+An explicit WS is taken verbatim.  Otherwise the current perspective is
+used when it is a registered workspace; when it is one of persp-mode's own
+perspectives the user PICKS from the registered ones rather than having the
+verb act on \"main\", and when nothing is registered at all the verb refuses
+with the picker's own message before any wire call is made."
+  (or ws
+      (let ((current (agent-repl--ws-current-name))
+            (known (agent-repl-verbs--registered-ws-names)))
+        (unless known
+          (agent-repl--warn current "elisp.verbs.no-workspaces-registered prompt=%S" prompt)
+          (user-error "No agent-repl workspaces registered"))
+        (if (member current known)
+            current
+          (agent-repl--read-known-workspace prompt)))))
 
 (defun agent-repl-verbs--conn (&optional ws)
   "Return the connection to address WS on, or the primary link.
@@ -662,19 +696,19 @@ and a doctor reading only the pull would miss them."
 (defun agent-repl-close-workspace (&optional ws)
   "Close the current workspace (`SPC j x')."
   (interactive)
-  (agent-repl-verb-close (or ws (agent-repl--ws-current-name))))
+  (agent-repl-verb-close (agent-repl-verbs--target-ws ws "Close workspace: ")))
 
 (defun agent-repl-kill-workspace (&optional ws)
   "Kill the current workspace's session by force."
   (interactive)
-  (agent-repl-verb-kill (or ws (agent-repl--ws-current-name))))
+  (agent-repl-verb-kill (agent-repl-verbs--target-ws ws "Kill workspace: ")))
 
 (defun agent-repl-nuke-workspace (&optional ws)
   "Destroy the current workspace, its worktree and its branch.
 Confirms first: this is the ONE verb that destroys data, and it is
 unrecoverable by design."
   (interactive)
-  (let ((ws (or ws (agent-repl--ws-current-name))))
+  (let ((ws (agent-repl-verbs--target-ws ws "Nuke workspace: ")))
     (if (yes-or-no-p (format "Nuke %s?  Its worktree and branch are DELETED: " ws))
         (agent-repl-verb-nuke ws)
       (agent-repl--info ws "elisp.verbs.nuke-declined ws=%s" ws))))
@@ -697,14 +731,14 @@ unrecoverable by design."
 (defun agent-repl-merge-workspace (&optional ws)
   "Enqueue the current workspace's merge (`SPC TAB M')."
   (interactive)
-  (agent-repl-verb-merge (or ws (agent-repl--ws-current-name))))
+  (agent-repl-verb-merge (agent-repl-verbs--target-ws ws "Merge workspace: ")))
 
 (defun agent-repl-restart-workspace (&optional force ws)
   "Restart the current workspace's session (`SPC o C-c').
 A prefix argument makes it a FORCED restart: the live turn and every
 background task are interrupted, and the agent is not resumed."
   (interactive "P")
-  (agent-repl-verb-restart (or ws (agent-repl--ws-current-name)) (and force t)))
+  (agent-repl-verb-restart (agent-repl-verbs--target-ws ws "Restart workspace: ") (and force t)))
 
 ;;;; ---- Priority ---------------------------------------------------------
 
