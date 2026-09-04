@@ -229,25 +229,23 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return err
 	}
 
-	sequence, err := boot.New(built.Boot)
-	if err != nil {
-		return fmt.Errorf("claude-repld: build the boot sequence: %w", err)
-	}
-	report, err := sequence.Run(ctx)
-	if err != nil {
-		return err
-	}
-	log.Debug("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
-		"adopted":        len(report.Adopted),
-		"orphans_closed": len(report.Orphaned),
-		"holds_restored": report.HoldsRestored,
-	})
-
 	// THE WATCHERS CLOSE BEFORE THE STATE CLIENT. Deferred here, after
 	// `defer db.Close()`, so it runs FIRST: a session watcher's sinks read the
 	// state client off the watcher's own goroutine, and the orderly exit that
 	// closed the store under one would leave a turn end being handled with a
 	// refused read on a path that owes no error at all.
+	//
+	// THE TEARDOWNS ARE ARMED BEFORE THE BOOT RUNS, NOT AFTER IT. The boot
+	// sequence ADOPTS surviving shims (boot step "adopt"), which installs a
+	// live watcher whose frame pump is already delivering into the resolvers;
+	// a LATER step of the same sequence can still fail the boot outright
+	// (restoreHolds on a corrupt held_prompts row is the worked example), and
+	// `sequence.Run`'s error returns from this function. Armed after the run,
+	// these defers were never registered on that path, so `defer db.Close()`
+	// closed the store under the adopted watcher's in-flight frames and the
+	// feed resolver's next workspace lookup read a closed database. Arming
+	// them here makes the failed boot tear down in exactly the order the
+	// orderly exit does.
 	if built.CloseWatchers != nil {
 		defer built.CloseWatchers()
 	}
@@ -262,6 +260,20 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if built.DrainMerges != nil {
 		defer built.DrainMerges(context.Background())
 	}
+
+	sequence, err := boot.New(built.Boot)
+	if err != nil {
+		return fmt.Errorf("claude-repld: build the boot sequence: %w", err)
+	}
+	report, err := sequence.Run(ctx)
+	if err != nil {
+		return err
+	}
+	log.Debug("daemon.cmd.boot", "the boot reconciliation completed", dlog.Context{
+		"adopted":        len(report.Adopted),
+		"orphans_closed": len(report.Orphaned),
+		"holds_restored": report.HoldsRestored,
+	})
 
 	srv, err := h.Server(built.Server)
 	if err != nil {
