@@ -4,6 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -200,6 +203,58 @@ func spawnAliveLen(t *testing.T, path string) int64 {
 		t.Fatalf("stat the liveness file: %v", err)
 	}
 	return info.Size()
+}
+
+func TestSpawnPutsTheSuccessorInItsOwnSession(t *testing.T) {
+	// Arrange: a stand-in successor that reports its own pid alongside the
+	// address. Emacs runs the incumbent on a pty it owns, so a successor left
+	// in the incumbent's session takes the SIGHUP that closing the pty
+	// delivers -- the session is the guarantee, not the exit's manners.
+	state := t.TempDir()
+	pidFile := filepath.Join(state, "successor.pid")
+	script := filepath.Join(state, "successor.sh")
+	body := "#!/bin/sh\n" +
+		"printf '%s' \"$$\" > " + pidFile + "\n" +
+		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" +
+		"sleep 5\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	spawner := NewProcessSpawner(script, state)
+	spawner.Poll = time.Millisecond
+	spawner.Timeout = 10 * time.Second
+
+	// Act
+	if _, err := spawner.Spawn(context.Background(), "127.0.0.1:7777"); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	raw, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read the successor's pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse the successor's pid %q: %v", raw, err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	child, err := syscall.Getpgid(pid)
+	if err != nil {
+		t.Fatalf("Getpgid(successor): %v", err)
+	}
+	self, err := syscall.Getpgid(os.Getpid())
+	if err != nil {
+		t.Fatalf("Getpgid(self): %v", err)
+	}
+
+	// Assert: a session leader's process group is its own pid, and it is not
+	// the spawning process's.
+	if child == self {
+		t.Fatalf("the successor is in the incumbent's process group %d; it must lead its own session", child)
+	}
+	if child != pid {
+		t.Fatalf("the successor's process group is %d, want its own pid %d (a session leader leads its own group)", child, pid)
+	}
 }
 
 func TestSpawnFailsWhenTheSuccessorNeverReports(t *testing.T) {
