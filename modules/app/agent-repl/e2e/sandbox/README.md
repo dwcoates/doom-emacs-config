@@ -213,6 +213,9 @@ $S run doom sync
 # a unit suite of another submodule with its own go.mod, e.g. the daemon
 $S run --dir daemon go test ./...
 
+# does INTERACTIVE Doom actually come up in this image? (see below)
+$S run --dir e2e/sandbox bin/doom-boot-probe.sh
+
 # poke around
 $S shell
 ```
@@ -389,38 +392,64 @@ should be a drop-in. Three podman-specific notes:
    so that is fine, but it is why the directive is a comment and not a
    requirement.
 
-## What is unverified
+## What is verified, and what is not
 
-Explicitly, so nothing here reads as a tested claim:
+Verified by building and running the image on 2026-09-04 (arm64, Docker
+Desktop). Everything below was OBSERVED, not reasoned about:
 
-- **The image has never been built.** No `docker build` or `podman build` has
-  run. Apt package availability at `SNAPSHOT_STAMP`, the Node/Go tarball
-  URLs, the Doom clone, `doom install`, `doom sync` under this minimal
-  profile, and both cache primes are all *unexecuted*.
-- **No test has run inside the sandbox.** Whether the e2e suite and the ERT
-  suites actually pass under this Emacs on Linux is unknown.
-- **The offline claim is untested.** `npm ci --offline` and `GOPROXY=off`
-  succeeding purely from the baked caches is a design intent that a build
-  would confirm or refute. If `go mod download` (build list only) turns out
-  to miss something a `go test` needs, the run will fail loudly under
-  `--network none` — which is the correct failure, and the fix is to widen
-  the prime.
-- **`doom install --no-config --no-env --no-fonts --no-hooks` flag names**
-  are from Doom's documented CLI, not from a run of this Doom SHA.
-- **Nothing about the Emacs client layer's Doom boot has been observed.**
-  That Doom boots from a staged `~/.emacs.d` under a scratch `HOME`; that the
-  copy set the staging uses is exactly the set Doom writes at startup (a
-  read-only path Doom insists on writing would fail the boot, loudly, with
-  the pty output); that `doom-after-init-hook` exists in whichever `DOOM_REF`
-  a build picks (the profile falls back to `emacs-startup-hook`); and that
-  `apt-get install bsdutils util-linux` resolves at `SNAPSHOT_STAMP` — all
-  unexecuted.
-- **Base image digest, tarball checksums, the Emacs SHA and the Doom SHA
-  cannot be resolved
-  without a registry or a download** — so they are resolved once from a real
-  build and recorded in `pins.env`, which `build` reads. The gate is
-  unchanged: anything pinned in neither `pins.env` nor the environment is
-  still a refusal to build.
+- **`bin/e2e-sandbox.sh build` succeeds and `verify_image` passes.** Apt at
+  `SNAPSHOT_STAMP`, the Emacs source build, both tarball checksums, the Doom
+  clone, `doom install`, `doom sync`, and both cache primes all ran.
+- **Emacs is the host's own build.** From inside the image:
+
+  ```
+  GNU Emacs 30.2
+  emacs-version: 30.2
+  repo-version: 636f166cfc86aa90d63f592fd99f3fdd9ef95ebd
+  (featurep 'xwidget-internal)  => t
+  (native-comp-available-p)     => t
+  system-configuration-options:
+    --prefix=/usr/local --with-native-compilation=aot --with-tree-sitter
+    --with-modules --with-gnutls --with-xml2 --with-pgtk --with-xwidgets
+    --disable-gc-mark-trace 'CFLAGS=-O3 -DFD_SETSIZE=10000'
+  ```
+
+  `configure`'s own summary reported "Does Emacs support Xwidgets? yes" and
+  "Does Emacs have native lisp compiler? yes", and the runtime WebKitGTK is
+  2.40.5 — under Emacs's `< 2.41.92` ceiling, which is the whole reason for
+  the September-2023 snapshot.
+- **INTERACTIVE Doom boots and publishes its readiness stamp.**
+  `bin/doom-boot-probe.sh` replicates what `e2e/emacs_test.go` StartEmacs does
+  — staged `~/.emacs.d` under a scratch HOME, a pty from `script(1)`,
+  `TERM=xterm-256color` — and reports the stamp:
+
+  ```json
+  {"ok":true,"emacs_version":"30.2","doom":true,"doom_version":"2.1.0",
+   "map_bang":true,"popup_rule":true,"agent_repl":true}
+  ```
+
+  Every field `awaitDoom` asserts is true, which is what lifts the Emacs-28.2
+  block recorded in `e2e/EMACS-LAYER-SPEC.md`. The probe exits non-zero and
+  dumps the pty when the stamp is missing or reports a failed boot; it is how
+  both bugs above were found.
+- **The offline claim holds for the entrypoint's own work.** `npm ci
+  --offline` resolved both lockfiles from the baked cache under
+  `--network none`.
+
+Still unverified, stated plainly:
+
+- **No e2e or ERT suite has been RUN inside the sandbox.** Whether
+  `go test ./...` and the ERT suites pass under this Emacs on Linux is
+  unknown; only the boot they depend on is established.
+- **`GOPROXY=off` has not been exercised by an actual build.** The module
+  cache was primed successfully, but no `go build`/`go test` has consumed it
+  offline, so a gap between `go mod download`'s build list and what a test
+  actually needs would still surface at run time.
+- **The xwidget webview has not been created.** The binary supports it and
+  `Xvfb` is present; nothing has yet started a display and a graphical frame
+  (see *Limitations*).
+- **Only arm64 has been built.** The amd64 checksums in `pins.env` are
+  recorded but unexercised.
 
 Verified on the authoring machine:
 
