@@ -142,6 +142,66 @@ func TestSpawnAnswersTheAddressTheSuccessorReports(t *testing.T) {
 	}
 }
 
+func TestSpawnLeavesTheSuccessorRunningWhenTheIncumbentsContextEnds(t *testing.T) {
+	// Arrange: a stand-in successor that reports its address and then keeps
+	// running, exactly as the real daemon does once its listener is bound.
+	// The context is the INCUMBENT'S serving lifetime, which the handover
+	// ends -- binding the child to it killed the successor Emacs had already
+	// been handed.
+	state := t.TempDir()
+	alive := filepath.Join(state, "alive")
+	script := filepath.Join(state, "successor.sh")
+	body := "#!/bin/sh\n" +
+		"printf '127.0.0.1:7788\\n' > " + JoiningAddrPath(state) + ".tmp\n" +
+		"mv " + JoiningAddrPath(state) + ".tmp " + JoiningAddrPath(state) + "\n" +
+		"trap 'exit 0' TERM\n" +
+		"i=0\n" +
+		"while [ $i -lt 200 ]; do printf 'x' >> " + alive + "; i=$((i+1)); sleep 0.01; done\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write the stand-in: %v", err)
+	}
+	spawner := NewProcessSpawner(script, state)
+	spawner.Poll = time.Millisecond
+	spawner.Timeout = 10 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the handover completes, then the incumbent's lifetime ends.
+	if _, err := spawner.Spawn(ctx, "127.0.0.1:7777"); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	before := spawnAliveLen(t, alive)
+	cancel()
+
+	// Assert: the successor is still writing after the cancellation. Polling
+	// for GROWTH is the liveness proof; a killed child's file never moves
+	// again, so the wait ends on the first larger read rather than on a sleep.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if spawnAliveLen(t, alive) > before {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the successor stopped writing after the incumbent's context was cancelled; "+
+				"it must outlive the daemon that spawned it (size stayed %d)", before)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// spawnAliveLen reports how much the stand-in successor has written so far.
+// An absent file is zero: the child may not have reached its first write.
+func spawnAliveLen(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("stat the liveness file: %v", err)
+	}
+	return info.Size()
+}
+
 func TestSpawnFailsWhenTheSuccessorNeverReports(t *testing.T) {
 	// Arrange
 	state := t.TempDir()
