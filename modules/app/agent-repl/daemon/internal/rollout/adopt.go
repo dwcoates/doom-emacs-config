@@ -93,27 +93,11 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	headless := make([]ids.WorkspaceID, 0, len(m.Sessions))
-	c.mu.Lock()
-	if c.joining == nil {
-		c.joining = make(map[ids.WorkspaceID]bool, len(m.Sessions))
-	}
-	if c.owned == nil {
-		c.owned = make(map[ids.WorkspaceID]bool, len(m.Sessions))
-	}
-	for _, session := range m.Sessions {
-		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
-		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
-		c.joining[session.Workspace] = true
-		if expected.Count() == 0 {
-			headless = append(headless, session.Workspace)
-		}
-	}
-	c.mu.Unlock()
+	headless, armed := c.armSessions(m.Sessions)
 
 	c.log.Info(opJoin, "armed the adopt rendezvous from the intent manifest", dlog.Context{
 		"outgoing_daemon": string(m.Daemon),
-		"workspaces":      len(m.Sessions),
+		"workspaces":      armed,
 		"headless":        len(headless),
 	})
 
@@ -128,31 +112,52 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// armSessions arms the rendezvous for every manifest session NOT already
+// armed, and reports the newly armed headless workspaces alongside how many
+// entries it added.
+//
+// THE RENDEZVOUS IS ONE-SHOT PER HANDOVER. An entry a participant has already
+// called on — or that has already completed its adoption — keeps its ledger:
+// re-arming it would reset host_called/web_called, orphan the waiters on the
+// old `done` channel, and leave a recovered page's own boot adopt waiting for
+// a host participant that already came and went. The manifest is read more
+// than once by design (a successor boots before the incumbent writes it, and
+// both the awaiting poll and a participant's own call re-read it), so every
+// read must be additive.
+func (c *controller) armSessions(sessions []ManifestSession) ([]ids.WorkspaceID, int) {
+	headless := make([]ids.WorkspaceID, 0, len(sessions))
+	added := 0
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.joining == nil {
+		c.joining = make(map[ids.WorkspaceID]bool, len(sessions))
+	}
+	if c.owned == nil {
+		c.owned = make(map[ids.WorkspaceID]bool, len(sessions))
+	}
+	for _, session := range sessions {
+		if _, already := c.rendezvous[session.Workspace]; already {
+			continue
+		}
+		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
+		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
+		c.joining[session.Workspace] = true
+		added++
+		if expected.Count() == 0 {
+			headless = append(headless, session.Workspace)
+		}
+	}
+	return headless, added
+}
+
 // armFromManifest arms the rendezvous from the intent manifest as it stands
-// NOW, adding what is not already armed and touching nothing that is: an entry
-// a participant has already called on keeps its ledger.
+// NOW, adding what is not already armed and touching nothing that is.
 func (c *controller) armFromManifest() error {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil || !found {
 		return err
 	}
-	added := 0
-	c.mu.Lock()
-	for _, session := range m.Sessions {
-		if _, already := c.rendezvous[session.Workspace]; already {
-			continue
-		}
-		c.rendezvous[session.Workspace] = &entry{
-			expected: Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb},
-			done:     make(chan struct{}),
-		}
-		if c.joining == nil {
-			c.joining = map[ids.WorkspaceID]bool{}
-		}
-		c.joining[session.Workspace] = true
-		added++
-	}
-	c.mu.Unlock()
+	_, added := c.armSessions(m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
 			dlog.Context{"workspaces": added})
