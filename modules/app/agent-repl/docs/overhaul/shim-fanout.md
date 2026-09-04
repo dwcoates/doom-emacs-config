@@ -177,6 +177,24 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
   sidecar classifies transcript user records as unserved). StartTurn writes
   it and has its durable ack BEFORE the turn's first activity frame is
   written.
+- HOOK ROWS: PLANE OWNERSHIP (ruling 2026-09-04). The shim's
+  `activity:<hook_id>` row is the ONE served hook row, on the R15 precedent
+  above; the sidecar classifies its transcript hook attachments as unserved
+  items keyed by the attachment RECORD's uuid (`residue:<uuid>`).
+  - THE REASON IS DISJOINT IDENTITY, not preference. The vendor gives the two
+    planes no shared identity material for one firing: the stream's
+    `hook_started`/`hook_response` pair carries a `hook_id` and never a
+    `tool_use_id`, the transcript attachment carries a `toolUseID` and never
+    a `hook_id`, and the two records' uuids differ. No key can span them, so
+    a hook converted on both planes drew TWO feed rows nothing downstream
+    could reconcile — and the file plane's was the poorer of the two, with no
+    turn, no hook name and no event, because that plane writes no start frame.
+  - `AgentHookStart.gated_call` stays UNSET (daemon.md ~1306). It is never
+    invented from the attachment's `toolUseID`: that names the gated call on
+    a record the stream's firing cannot be joined to.
+  - THE COST, stated rather than hidden: a transcript-only session — one the
+    sidecar read with no shim ever having watched it — shows its hooks as
+    unserved items, not as live rows.
 
 ## The fold (convert/) — rules every converter obeys
 
