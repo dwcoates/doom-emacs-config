@@ -49,51 +49,75 @@ import (
 //   * `sandbox/doom/config.el` defines the readback helper and, on Doom's
 //     own after-init edge, starts the server and writes a readiness stamp.
 
+// THE BOUNDS BELOW ARE MEASURED, not guessed.
+//
+// Every one is derived from ten healthy boots of this layer inside the
+// sandbox (two `-count=5` runs), whose per-phase durations the harness itself
+// reports on every run -- see `Emacs.record` / `reportPhases`, and the table
+// in EMACS-LAYER-SPEC.md, "The bounds, measured". Rerunning `go test -v`
+// prints the numbers a future revision must re-derive them from, so no bound
+// here can quietly drift back into a guess.
+
 // HeartbeatBound is how long one `emacsclient --eval '(emacs-pid)'` probe
 // may take before the running test fails.
 //
-// PROVISIONAL. EMACS-LAYER-SPEC.md requires this be replaced with a measured
-// value — a small multiple of the observed healthy maximum — before the
-// scenario list beyond the proof-of-life test is implemented, per the module
-// AGENTS.md rule that bounds are measured, never guessed. It is deliberately
-// TIGHT rather than generous: the failure it exists to catch is a hang, and
-// a hang that clears itself is still the recursion defect.
-const HeartbeatBound = 2 * time.Second
+// MEASURED: the longest healthy probe was 414ms. It is not a measure of
+// emacsclient's round trip -- probes ride the same socket every scenario
+// uses, so a probe queues behind whatever Emacs is doing and the maximum is
+// set by the longest command a scenario runs. 3x that, because the failure
+// this exists to catch is a hang, and a hang that clears itself is still the
+// sentinel/kill-buffer recursion.
+const HeartbeatBound = 1250 * time.Millisecond
 
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
 // and therefore measures the command loop's real responsiveness rather than
 // merely whether the process is alive.
+//
+// MEASURED, and left where it was: at 250ms it is already BELOW the observed
+// probe latency, so the detector samples as fast as the command loop can
+// answer and a shorter interval would buy nothing but queued probes.
 const heartbeatInterval = 250 * time.Millisecond
 
-// emacsBootBound is how long Emacs may take to create its server socket and
-// finish loading the module's sources.
+// emacsBootBound is how long emacsclient may take to reach the server socket
+// once Doom's readiness stamp says the server was started.
 //
-// PROVISIONAL for the same reason as HeartbeatBound. It is a multiple of the
-// default bound rather than a new number because booting Emacs chains a
-// process spawn onto loading roughly fifty elisp sources — structurally two
-// startup events, the same shape HandoverChainTimeout documents.
-const emacsBootBound = HandoverChainTimeout
+// MEASURED: the longest healthy wait was 49ms. The multiple here is 10x
+// rather than 3x, and deliberately: three times a number this small is not a
+// bound, it is a race with the scheduler.
+const emacsBootBound = 500 * time.Millisecond
+
+// daemonLinkBound is how long EnsureDaemon may take: the launcher spawning
+// `claude-repld`, the daemon binding its address, and Emacs dialling it.
+//
+// It used to be emacsBootBound, which was wrong in kind rather than in size:
+// one name covered two unrelated events, so neither could ever be measured
+// against its own phase. Per SPEC.md section B a per-site bound is a NAMED
+// constant with a stated reason, and this is that site's.
+//
+// MEASURED: the longest healthy link was 265ms, remarkably stable across
+// runs (263-265ms). Not quite 4x that.
+const daemonLinkBound = 1 * time.Second
 
 // doomBootBound is how long Emacs may take to finish Doom's own
 // initialization and publish the readiness stamp.
 //
-// PROVISIONAL, like the two above, and for one extra reason: nobody has ever
-// timed a Doom boot in this image, because no container has ever run. It is
-// TWICE emacsBootBound because a Doom boot is emacsBootBound's work plus
-// Doom's core, its enabled modules and their `config.el`s -- strictly more
-// than loading the module alone, and the only honest thing to say about the
-// difference until it is measured is that it is a small multiple.
-const doomBootBound = 2 * emacsBootBound
+// MEASURED: the longest healthy boot was 1.162s, and the spread is narrow
+// (1.041s-1.162s). 3x that. It is no longer expressed as a multiple of
+// emacsBootBound: the two phases turned out to differ by a factor of twenty,
+// so tying them together would let a change in one silently move the other.
+const doomBootBound = 3500 * time.Millisecond
 
 // doomStageBound bounds each `cp -a` that stages one entry of Doom's
 // `.local` tree into the test's scratch.
 //
-// PROVISIONAL. The tree's size is unmeasured (see stageEmacsDir), and the
-// copy is a tmpfs-to-tmpfs one within one container, so this is generous by
-// design: the failure it exists to catch is a copy that cannot finish at
-// all, not a slow one.
-const doomStageBound = 60 * time.Second
+// MEASURED, and the measurement is the reason it stays generous: the WHOLE
+// staging -- every entry, not one `cp` -- finished in 4ms at its slowest, so
+// there is no "slow copy" regime to bound. What it exists to catch is a copy
+// that cannot finish AT ALL, and five seconds is three orders above the
+// observation while still failing a hang in the same test rather than at the
+// suite's own timeout.
+const doomStageBound = 5 * time.Second
 
 // Emacs is one sandboxed Emacs process, its server socket, and its
 // heartbeat.
@@ -143,6 +167,45 @@ type Emacs struct {
 	wedgeCause atomic.Pointer[string]
 
 	stopHeartbeat context.CancelFunc
+
+	// heartbeatMax is the longest probe this Emacs has answered, in
+	// nanoseconds. It is what MEASURES HeartbeatBound: the bound is a small
+	// multiple of this number across healthy runs, never a guess. Reported
+	// once per test by reportPhases.
+	heartbeatMax atomic.Int64
+	// phases are the boot durations this Emacs observed, in the order they
+	// happened. They MEASURE emacsBootBound, doomBootBound and
+	// doomStageBound the same way.
+	phasesMu sync.Mutex
+	phases   []phase
+}
+
+// phase is one measured boot step.
+type phase struct {
+	name string
+	took time.Duration
+}
+
+// record adds one measured phase.
+func (e *Emacs) record(name string, took time.Duration) {
+	e.phasesMu.Lock()
+	defer e.phasesMu.Unlock()
+	e.phases = append(e.phases, phase{name: name, took: took})
+}
+
+// reportPhases logs every measured duration, ALWAYS -- a passing run is
+// exactly the run whose numbers the bounds are derived from, so they must not
+// be visible only on failure. `go test -v` is where the measurement is read.
+func (e *Emacs) reportPhases() {
+	e.phasesMu.Lock()
+	defer e.phasesMu.Unlock()
+	for _, p := range e.phases {
+		e.t.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
+	}
+	if max := e.heartbeatMax.Load(); max > 0 {
+		e.t.Logf("emacs phase heartbeat-probe-max took %s (bound %s)",
+			time.Duration(max).Round(time.Millisecond), HeartbeatBound)
+	}
 }
 
 // DoomReady is the readiness stamp `sandbox/doom/config.el` writes once Doom
@@ -214,15 +277,19 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	}
 
 	e.writeSettings(opts)
+	staged := time.Now()
 	e.stageEmacsDir()
+	e.record("stage-emacs-dir", time.Since(staged))
 
 	// THE DISPLAY COMES FIRST. The panel is an `xwidget-webkit` webview, so
 	// Emacs must take a GRAPHICAL frame, which needs an X display that
 	// already exists when it starts. Starting it here also gets the teardown
 	// order right for free: t.Cleanup unwinds LIFO, so the Emacs stop
 	// registered below runs BEFORE the display is torn down.
+	displayStarted := time.Now()
 	display := startXvfb(t, box, filepath.Join(root, "display"))
 	e.Display = display
+	e.record("xvfb-ready", time.Since(displayStarted))
 
 	// HOME is the per-test scratch root, and `~/.emacs.d` under it is the
 	// staged Doom. The image's Emacs 30.2 does have `--init-directory`
@@ -289,9 +356,14 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		}
 	})
 
+	doomStarted := time.Now()
 	e.awaitDoom()
+	e.record("doom-boot", time.Since(doomStarted))
+	serverStarted := time.Now()
 	e.awaitServer()
+	e.record("server-answers", time.Since(serverStarted))
 	e.armHeartbeat()
+	t.Cleanup(e.reportPhases)
 	return e
 }
 
@@ -560,9 +632,13 @@ func (e *Emacs) armHeartbeat() {
 			case <-ticker.C:
 			}
 			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
+			started := time.Now()
 			_, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
 			probeCancel()
 			if err == nil {
+				if took := int64(time.Since(started)); took > e.heartbeatMax.Load() {
+					e.heartbeatMax.Store(took)
+				}
 				continue
 			}
 			if ctx.Err() != nil || e.proc.Exited() {
@@ -1006,10 +1082,12 @@ func (e *Emacs) LeaderBinding(keys string) string {
 // launcher performs the launch.
 func (e *Emacs) EnsureDaemon() {
 	e.t.Helper()
+	started := time.Now()
 	e.Eval("(agent-repl-frontend-daemon-ensure)")
-	e.AwaitEvalFor(emacsBootBound, "emacs to hold a daemon link",
+	e.AwaitEvalFor(daemonLinkBound, "emacs to hold a daemon link",
 		"(and agent-repl-link--primary t)",
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.record("daemon-link", time.Since(started))
 }
 
 // DaemonAddr is the address the daemon published, read from the same
