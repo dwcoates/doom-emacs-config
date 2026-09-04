@@ -225,6 +225,19 @@ RUN set -eux; \
 #
 #   -O3  ->  KEPT. Generic, architecture-neutral optimization.
 #
+#   -g  ->  ADDED, and it is the one flag here the host's line does not have.
+#     This Emacs exists to be DIAGNOSED. When it stalls it answers no lisp
+#     witness at all -- not the server socket, not a nested eval, not SIGUSR2,
+#     not SIGINT -- so the only account left is a native backtrace, which the
+#     harness takes with gdb (`nativeBacktrace` in e2e/emacs_test.go). Without
+#     `-g` those frames carry bare function names from the symbol table and
+#     nothing about WHERE inside a five-hundred-line C function the loop is
+#     spinning, which for `wait_reading_process_output` or `redisplay_internal`
+#     is most of the answer. `-g` changes no code generation whatsoever: it
+#     only emits DWARF alongside the same `-O3` object files, so nothing about
+#     what this Emacs DOES differs from the host's because of it. The cost is
+#     image size, paid once per image and never by a test run.
+#
 #   --with-native-compilation=aot, --with-tree-sitter, --with-modules,
 #   --with-gnutls, --with-xml2, --with-xwidgets, --disable-gc-mark-trace
 #     ->  ALL KEPT VERBATIM. None is platform-specific.
@@ -258,7 +271,7 @@ RUN set -eux; \
         --with-pgtk \
         --with-xwidgets \
         --disable-gc-mark-trace \
-        CFLAGS='-O3 -DFD_SETSIZE=10000' \
+        CFLAGS='-O3 -g -DFD_SETSIZE=10000' \
       | tee /tmp/configure.log; \
     grep -Ei 'xwidgets\?[[:space:]]*yes' /tmp/configure.log \
       || { echo "sandbox: configure did NOT enable xwidgets; refusing to build a degraded Emacs" >&2; \
