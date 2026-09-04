@@ -714,23 +714,58 @@ func stopHookFailure() *conversationv1.AgentFailure {
 	}
 }
 
+// A LOST AGENT TERMINAL IS `turn_failed`, never `vendor_unmodeled`: the latter
+// is confined to API error classes, while the producer's own "lost" vocabulary
+// is an unclassified abnormal end whose stop_reason names the cause.
 func TestALostAgentSaysWeStoppedSeeingItRatherThanThatItFailed(t *testing.T) {
-	// Arrange, Act.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "hello")
-	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_Lost{Lost: &conversationv1.DetachedLost{
-			How: &conversationv1.DetachedLost_SweptUp{SweptUp: &conversationv1.DetachedLostSweptUp{}},
-		}},
-	})
-
-	// Assert.
-	errored := h.terminalRow("turn-1").GetErrored()
-	if got := errored.GetVendorUnmodeled().GetType(); got != "lost:swept_up" {
-		t.Fatalf("type = %q, want the lost cause named", got)
+	tests := []struct {
+		name     string
+		lost     *conversationv1.DetachedLost
+		reason   string
+		headline string
+	}{
+		{
+			name:     "the transcript vanished from disk",
+			lost:     &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_FileVanished{FileVanished: &conversationv1.DetachedLostFileVanished{}}},
+			reason:   "lost:file_vanished",
+			headline: "its transcript disappeared from disk",
+		},
+		{
+			name:     "the run went silent",
+			lost:     &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}}},
+			reason:   "lost:went_silent",
+			headline: "it went silent past the reader's ruling",
+		},
+		{
+			name:     "a boot sweep found it open",
+			lost:     &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_SweptUp{SweptUp: &conversationv1.DetachedLostSweptUp{}}},
+			reason:   "lost:swept_up",
+			headline: "a boot sweep found it open with no living producer",
+		},
 	}
-	if !contains(errored.GetHeadline().GetText(), "we lost sight of this work") {
-		t.Fatalf("headline = %q, want the lost wording", errored.GetHeadline().GetText())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+
+			// Act
+			h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+				Failure: &conversationv1.AgentFailure_Lost{Lost: tc.lost},
+			})
+
+			// Assert
+			errored := h.terminalRow("turn-1").GetErrored()
+			if got := erroredArmWord(errored); got != "turn_failed" {
+				t.Fatalf("arm = %q, want turn_failed: lost is not an unmodeled API error class", got)
+			}
+			if got := errored.GetTurnFailed().GetStopReason(); got != tc.reason {
+				t.Fatalf("stop reason = %q, want %q", got, tc.reason)
+			}
+			if !contains(errored.GetHeadline().GetText(), tc.headline) {
+				t.Fatalf("headline = %q, want the lost wording %q", errored.GetHeadline().GetText(), tc.headline)
+			}
+		})
 	}
 }
 

@@ -243,7 +243,10 @@ func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv
 // The reader still learns which of these happened — from the stop reason.
 func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *conversationv1.AgentFailure, refused bool) string {
 	if cause := lostCauseOfAgentFailure(failure); cause != lostNone {
-		errored.Error = unmodeledArm("lost:" + cause.String())
+		// A LOST RUN IS NOT AN UNMODELED API ERROR CLASS: vendor_unmodeled is
+		// confined to those, so the producer's own "lost" vocabulary lands
+		// under turn_failed with the cause as the stop reason.
+		errored.Error = turnFailedArm("lost:" + cause.String())
 		return lostSentence(cause)
 	}
 	switch failure.GetFailure().(type) {
@@ -339,14 +342,6 @@ func turnFailedArm(reason string) *frontendv1.FeedTurnEndedErrored_TurnFailed {
 // what an empty field means, rather than a figure invented here.
 func vendorFailureContext() *frontendv1.VendorFailureContext {
 	return &frontendv1.VendorFailureContext{}
-}
-
-// unmodeledArm keeps a producer arm BY NAME so it is never silently
-// mishandled.
-func unmodeledArm(name string) *frontendv1.FeedTurnEndedErrored_VendorUnmodeled {
-	return &frontendv1.FeedTurnEndedErrored_VendorUnmodeled{
-		VendorUnmodeled: &frontendv1.FeedTurnErrorVendorUnmodeled{Type: name},
-	}
 }
 
 // drawQueryDied draws the turn's terminal for a query that died out from under
