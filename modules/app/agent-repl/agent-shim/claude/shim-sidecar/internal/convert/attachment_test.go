@@ -13,22 +13,16 @@ func attachmentLineOf(uuid, body string) string {
 		`","attachment":` + body + `}`
 }
 
-func TestHookOutcomeArmsTable(t *testing.T) {
-	// Arrange. THE ARM IS THE OUTCOME. A succeeded hook draws nothing, a failing
-	// one draws a card, and a BLOCKING one is a refusal the user must understand.
-	cases := []struct {
-		kind string
-		arm  func(*conversationv1.AgentHook) bool
-	}{
-		{kind: "hook_success", arm: func(h *conversationv1.AgentHook) bool { return h.GetSucceeded() != nil }},
-		{kind: "hook_blocking_error", arm: func(h *conversationv1.AgentHook) bool { return h.GetBlockingError() != nil }},
-		{kind: "hook_non_blocking_error", arm: func(h *conversationv1.AgentHook) bool { return h.GetNonBlockingError() != nil }},
-		{kind: "hook_cancelled", arm: func(h *conversationv1.AgentHook) bool { return h.GetCancelled() != nil }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.kind, func(t *testing.T) {
+func TestHookOutcomeKindsAreAllKeptWholeAsUnservedItems(t *testing.T) {
+	// Arrange. THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04):
+	// the two planes are handed disjoint identity material, so a hook converted
+	// on both drew two rows nothing could reconcile. Every outcome kind the
+	// vendor writes is still READ here — kept whole and unserved, never dropped.
+	cases := []string{"hook_success", "hook_blocking_error", "hook_non_blocking_error", "hook_cancelled"}
+	for _, kind := range cases {
+		t.Run(kind, func(t *testing.T) {
 			c := newTestConverter(t)
-			body := `{"type":"` + tc.kind + `","hookName":"PostToolUse:Edit","toolUseID":"toolu_gated",` +
+			body := `{"type":"` + kind + `","hookName":"PostToolUse:Edit","toolUseID":"toolu_gated",` +
 				`"hookEvent":"PostToolUse","command":"/h.sh","exitCode":0,"durationMs":45,` +
 				`"blockingError":{"blockingError":"refused","command":"/h.sh"}}`
 
@@ -39,20 +33,17 @@ func TestHookOutcomeArmsTable(t *testing.T) {
 			if len(entries) != 1 {
 				t.Fatalf("entries = %d, want 1", len(entries))
 			}
-			hook := activityOf(entries[0]).GetHook()
-			if hook == nil {
-				t.Fatalf("%s did not reach the hook arm", tc.kind)
-			}
-			if !tc.arm(hook) {
-				t.Fatalf("%s did not reach its own outcome arm", tc.kind)
+			if got := vendorKindOf(entries[0]); got != "attachment/"+kind {
+				t.Fatalf("kind = %q, want the record kept whole under %q", got, "attachment/"+kind)
 			}
 		})
 	}
 }
 
-func TestBlockingHookCarriesItsRefusalText(t *testing.T) {
-	// Arrange. The refusal text is THE WHOLE POINT of that arm: it is what the
-	// user reads to understand why the gated action did not happen.
+func TestAHookAttachmentNeverReachesAPage(t *testing.T) {
+	// Arrange. The whole point of the ruling: the file plane writes NO served
+	// hook row, so the stream's row stands alone and a reader sees one firing
+	// once.
 	c := newTestConverter(t)
 	body := `{"type":"hook_blocking_error","hookName":"PostToolUse:Edit","toolUseID":"toolu_gated",` +
 		`"hookEvent":"PostToolUse","blockingError":{"blockingError":"the webapp suite failed","command":"/run.sh"}}`
@@ -61,12 +52,46 @@ func TestBlockingHookCarriesItsRefusalText(t *testing.T) {
 	entries := convertLines(t, c, attachmentLineOf("h1", body))
 
 	// Assert.
-	blocking := activityOf(entries[0]).GetHook().GetBlockingError()
-	if got := blocking.GetBlockingText(); got != "the webapp suite failed" {
-		t.Fatalf("blocking_text = %q, want the hook's stated reason", got)
+	if entries[0].GetAgentUpdate().GetServeableFrame() != nil {
+		t.Fatalf("a hook attachment reached a page: %v", entries[0].GetAgentUpdate().GetServeableFrame())
 	}
-	if got := blocking.GetCommand(); got != "/run.sh" {
-		t.Fatalf("command = %q, want the command that ran", got)
+}
+
+func TestAHookAttachmentIsKeyedByItsOwnRecordUuid(t *testing.T) {
+	// Arrange. The record's uuid is the key, which is also what the shim and
+	// this reader would collapse onto if both ever stored the same line.
+	c := newTestConverter(t)
+	body := `{"type":"hook_success","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh"}`
+
+	// Act.
+	entries := convertLines(t, c, attachmentLineOf("h1", body))
+
+	// Assert.
+	if got := entries[0].GetUpsertKey(); got != "residue:h1" {
+		t.Fatalf("upsert_key = %q, want the attachment record's own uuid key", got)
+	}
+}
+
+func TestBlockingHookCarriesItsRefusalTextIntoTheStoredRecord(t *testing.T) {
+	// Arrange. The refusal text is what a reader needs to understand why the
+	// gated action did not happen, so it must survive the withhold VERBATIM
+	// rather than being summarized away with the row.
+	c := newTestConverter(t)
+	body := `{"type":"hook_blocking_error","hookName":"PostToolUse:Edit","toolUseID":"toolu_gated",` +
+		`"hookEvent":"PostToolUse","blockingError":{"blockingError":"the webapp suite failed","command":"/run.sh"}}`
+
+	// Act.
+	entries := convertLines(t, c, attachmentLineOf("h1", body))
+
+	// Assert.
+	raw := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetRaw().AsMap()
+	attachment, _ := raw["attachment"].(map[string]any)
+	blocking, _ := attachment["blockingError"].(map[string]any)
+	if got := blocking["blockingError"]; got != "the webapp suite failed" {
+		t.Fatalf("blockingError = %v, want the hook's stated reason carried verbatim", got)
+	}
+	if got := blocking["command"]; got != "/run.sh" {
+		t.Fatalf("command = %v, want the command that ran", got)
 	}
 }
 
@@ -89,9 +114,30 @@ func TestTwoFiringsAroundOneCallDoNotCollapseOntoOneRow(t *testing.T) {
 	}
 }
 
-func TestHookThatPrintedNothingLeavesOutputUnset(t *testing.T) {
-	// Arrange. UNSET when it printed nothing, which is different from empty
-	// streams a consumer would draw as a card with blank output.
+func TestTwoFiringsOfOneHookNameUnderOneToolUseIdStayTwoItems(t *testing.T) {
+	// Arrange. THE CASE THE OLD IDENTITY LOST. The vendor reuses one toolUseID
+	// across every firing that gates the same call — testdata/captures/hook-blocked
+	// carries FOUR PreToolUse:Bash firings under one of them — so keying on
+	// `hook:<hookName>:<toolUseID>` left one row where there were four facts.
+	c := newTestConverter(t)
+	body := `{"type":"hook_success","hookName":"PreToolUse:Bash","toolUseID":"toolu_same","hookEvent":"PreToolUse","command":"/h.sh"}`
+
+	// Act.
+	entries := convertLines(t, c, attachmentLineOf("h1", body), attachmentLineOf("h2", body))
+
+	// Assert.
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want one per firing", len(entries))
+	}
+	if entries[0].GetUpsertKey() == entries[1].GetUpsertKey() {
+		t.Fatalf("both firings landed on %q; three of the capture's four would be erased", entries[0].GetUpsertKey())
+	}
+}
+
+func TestAHookThatPrintedNothingInventsNoOutputFields(t *testing.T) {
+	// Arrange. UNSET when it printed nothing: the record is carried exactly as
+	// the vendor wrote it, so a consumer never reads empty streams the hook
+	// never produced.
 	c := newTestConverter(t)
 	body := `{"type":"hook_success","hookName":"PreToolUse:Read","toolUseID":"toolu_g","hookEvent":"PreToolUse","command":"/h.sh","exitCode":0}`
 
@@ -99,8 +145,12 @@ func TestHookThatPrintedNothingLeavesOutputUnset(t *testing.T) {
 	entries := convertLines(t, c, attachmentLineOf("h1", body))
 
 	// Assert.
-	if activityOf(entries[0]).GetHook().GetSucceeded().Output != nil {
-		t.Fatal("a hook that printed nothing must leave output UNSET")
+	raw := entries[0].GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetRaw().AsMap()
+	attachment, _ := raw["attachment"].(map[string]any)
+	for _, field := range []string{"stdout", "stderr"} {
+		if _, ok := attachment[field]; ok {
+			t.Fatalf("the stored record carries an invented %q the hook never printed", field)
+		}
 	}
 }
 
