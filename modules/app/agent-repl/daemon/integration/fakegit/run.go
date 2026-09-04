@@ -27,7 +27,7 @@ const fakeGitVersion = "git version 2.39.5"
 // filesystem effects a worktree command has, so it is unit-testable without a
 // process.
 func Run(s *State, cwd string, args []string) Result {
-	s.Calls = append(s.Calls, Call{Args: append([]string(nil), args...), Cwd: cwd})
+	s.Calls = append(s.Calls, Call{Args: append([]string(nil), args...), Cwd: cwd, At: time.Now().UTC()})
 
 	dir, subject := splitGlobalOptions(cwd, args)
 	if len(subject) == 0 {
