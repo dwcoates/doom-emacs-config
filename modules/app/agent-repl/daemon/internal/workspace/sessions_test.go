@@ -1479,3 +1479,107 @@ func TestResumeColdSurfacesAShimRefusal(t *testing.T) {
 		t.Fatal("ResumeCold() = nil error, want the failed re-open surfaced")
 	}
 }
+
+// liveHostSessionID reads the identity the fleet is operating a workspace's
+// session under -- the same value its shim was spawned with.
+func liveHostSessionID(t *testing.T, fleet *Fleet, ws ids.WorkspaceID) string {
+	t.Helper()
+	fleet.mu.RLock()
+	defer fleet.mu.RUnlock()
+	session, ok := fleet.sessions[ws]
+	if !ok {
+		t.Fatalf("the fleet has no live session for %q", ws)
+	}
+	return session.hostSessionID
+}
+
+// sessionStamps returns the agent_repl_session_id of every captured record
+// that carries one.
+func sessionStamps(records []dlog.Record) []string {
+	var out []string
+	for _, r := range records {
+		if id, ok := r.Context[dlog.KeyAgentReplSessionID].(string); ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func TestStartStampsTheSessionIdentityOnTheWorkspaceRecords(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert: the bring-up's own records carry the identity the shim was
+	// spawned with, so the two runtimes' records join on it.
+	want := liveHostSessionID(t, f.fleet, ws.ID)
+	stamps := sessionStamps(f.log.logger.Records())
+	if len(stamps) == 0 {
+		t.Fatalf("no record carried %s; records = %+v", dlog.KeyAgentReplSessionID, f.log.logger.Records())
+	}
+	for _, got := range stamps {
+		if got != want {
+			t.Fatalf("%s = %q, want the session's host identity %q", dlog.KeyAgentReplSessionID, got, want)
+		}
+	}
+}
+
+func TestStartStampsNothingBeforeTheIdentityIsDecided(t *testing.T) {
+	// Arrange: a refused start never reaches the mint, so no record may claim
+	// a session identity.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1",
+		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "/clear"},
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err == nil {
+		t.Fatal("Start() = nil error, want the deleted session refused")
+	}
+
+	// Assert.
+	if stamps := sessionStamps(f.log.logger.Records()); len(stamps) != 0 {
+		t.Fatalf("%s stamped %v on a start that never minted one", dlog.KeyAgentReplSessionID, stamps)
+	}
+}
+
+func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
+	// Arrange: a fresh start after a stop mints a new identity, and the
+	// records of the second start must carry only that one.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	first := liveHostSessionID(t, f.fleet, ws.ID)
+	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	// The recorded conversation is gone, so the second start is FRESH and
+	// mints a second identity rather than keeping the first.
+	delete(f.db.sessions, ws.ID)
+	before := len(f.log.logger.Records())
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+
+	// Assert.
+	second := liveHostSessionID(t, f.fleet, ws.ID)
+	if second == first {
+		t.Fatalf("the restart kept host session id %q; the fixture must rotate it", first)
+	}
+	for _, got := range sessionStamps(f.log.logger.Records()[before:]) {
+		if got != second {
+			t.Fatalf("%s = %q after the restart, want the rotated identity %q", dlog.KeyAgentReplSessionID, got, second)
+		}
+	}
+}

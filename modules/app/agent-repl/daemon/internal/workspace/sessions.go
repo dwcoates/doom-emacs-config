@@ -455,6 +455,13 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 			"host_session_id": hostSessionID, "fresh": src.Fresh,
 		})
 	}
+	// THE DAEMON STAMPS THE IDENTITY IT HANDS THE SHIM. The shim is spawned
+	// with AGENT_REPL_SESSION_ID=<hostSessionID>, so every daemon record about
+	// this bring-up carries the same agent_repl_session_id its shim's records
+	// do and the two sides of one session join on that field. The stamp is
+	// applied to a logger resolved fresh for THIS start, so a rotated identity
+	// restamps and nothing carries a previous session's id forward.
+	log = stampSession(log, hostSessionID)
 
 	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
 	if err != nil {
@@ -625,6 +632,7 @@ func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdR
 	if hostSessionID == "" {
 		hostSessionID = wsm.NewHostSessionID()
 	}
+	log = stampSession(log, hostSessionID)
 
 	started, err := f.startSession(ctx, log, ws, session.client, source{
 		VendorSessionID: resume.VendorSessionID,
@@ -1122,6 +1130,17 @@ func (f *Fleet) CloseWatchers() {
 				"a session watcher could not be closed", dlog.Context{"error": err.Error()})
 		}
 	}
+}
+
+// stampSession binds a workspace logger to the session identity the daemon
+// exported to that session's shim (AGENT_REPL_SESSION_ID), so daemon and shim
+// records of one session correlate through agent_repl_session_id. An empty
+// identity leaves the logger unstamped rather than writing an empty field.
+func stampSession(log dlog.Logger, hostSessionID string) dlog.Logger {
+	if hostSessionID == "" {
+		return log
+	}
+	return log.With(dlog.Context{dlog.KeyAgentReplSessionID: hostSessionID})
 }
 
 // remember records a workspace's live session.
