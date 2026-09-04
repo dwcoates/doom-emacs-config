@@ -23,7 +23,12 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		state = &subagentState{}
 		s.subagents[unitID] = state
 	}
-	if detached {
+	// THE MARK IS CLAIMED UNCONDITIONALLY, never behind the flag: a detachment
+	// announced before this unit drew is exactly the case the flag cannot
+	// carry, and leaving the mark standing would report the unit as one
+	// nothing ever drew.
+	_, announcedDetached := s.claimDetached(unitID)
+	if detached || announcedDetached {
 		state.detached = true
 	}
 	bubble := state.bubble
@@ -258,19 +263,16 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 				dlog.Context{"unit": unitID, "work": workID})
 			return
 		}
-		if u, ok := s.units[unitID]; ok && u.input != "" {
-			sh := s.shell(workID)
-			sh.command = u.input
-			sh.startedAtMs = u.startedAtMs
-			sh.feed = at
-			r.publishShell(s, workID, sh, nil)
-			log.Debug("daemon.feed.detached_shell",
-				"a foreground shell became a detached shell bubble",
-				dlog.Context{"unit": unitID, "work": workID})
+		if r.detachForegroundShell(s, at, unitID, workID) {
 			return
 		}
-		log.Warn("daemon.feed.detached_unknown_unit",
-			"work detached from a unit this resolver never drew",
+		// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
+		// against its identity so the unit lands through the detached
+		// placement when it does draw; a mark still standing when the turn
+		// ends is what earns the warning, in drawTerminal.
+		s.markDetached(unitID, workID)
+		log.Debug("daemon.feed.detachment_held",
+			"a detachment named a unit this resolver has not drawn yet; it is held until the unit draws",
 			dlog.Context{"unit": unitID, "work": workID})
 	case *conversationv1.AgentDetachedWork_Created:
 		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
@@ -296,6 +298,42 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 				"a detached-work kind draws no feed row", dlog.Context{"work": workID})
 		}
 	}
+}
+
+// detachForegroundShell turns an already-drawn foreground shell into its
+// detached bubble, answering whether there was one to turn.
+func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workID string) bool {
+	u, ok := s.units[unitID]
+	if !ok || u.input == "" {
+		return false
+	}
+	sh := s.shell(workID)
+	sh.command = u.input
+	sh.startedAtMs = u.startedAtMs
+	sh.feed = at
+	r.publishShell(s, workID, sh, nil)
+	r.logger(s.id).Debug("daemon.feed.detached_shell",
+		"a foreground shell became a detached shell bubble",
+		dlog.Context{"unit": unitID, "work": workID})
+	return true
+}
+
+// applyHeldDetachment completes a detachment that was announced BEFORE the
+// unit it named had drawn. A subagent claims its own mark while composing its
+// bubble, because the mark decides which wrapper the bubble rides; a shell has
+// no such choice, so its held detachment is applied once its foreground row
+// exists.
+func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) {
+	work, held := s.claimDetached(unitID)
+	if !held {
+		return
+	}
+	if r.detachForegroundShell(s, at, unitID, work) {
+		return
+	}
+	// NOT DRAWABLE AS A SHELL AND NOT A SPAWN: the mark goes back, so the
+	// turn's terminal still reports a detachment that never found its unit.
+	s.markDetached(unitID, work)
 }
 
 // republishSubagent re-pushes a bubble whose placement wrapper changed.

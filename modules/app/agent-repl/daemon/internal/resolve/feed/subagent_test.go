@@ -355,15 +355,16 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 	}
 }
 
-func TestWorkDetachedFromAUnitWeNeverDrewIsWarned(t *testing.T) {
-	// Arrange, Act.
+func TestWorkDetachedFromAUnitWeNeverDrewIsWarnedWhenTheTurnEnds(t *testing.T) {
+	// Arrange: a detachment naming a unit nothing ever draws.
 	h := newHarness(t)
-	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
-		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
-			DetachedFromId: &conversationv1.AgentActivityId{Value: "never-seen"},
-		}},
-	}, noAddress())
+	h.detachWork("work-1", "never-seen")
+
+	// Act: the turn ends, which is the last moment the mark could have been
+	// claimed.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
 
 	// Assert.
 	if !h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
@@ -915,6 +916,20 @@ func last(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
 	return rows[len(rows)-1]
 }
 
+// detachWork announces one detachment of a unit.
+func (h *harness) detachWork(work, unit string) {
+	h.t.Helper()
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause: &conversationv1.DetachedWorkDetached_Requested{
+				Requested: &conversationv1.DetachedCauseRequested{},
+			},
+		}},
+	}, noAddress())
+}
+
 // commissionRow finds a spawn's commission row on the created agent's feed.
 func (h *harness) commissionRow(unit string, created *conversationv1.AgentId) *frontendv1.FeedRow {
 	h.t.Helper()
@@ -1010,5 +1025,41 @@ func TestARestatedCommissionDoesNotRepublishItsRow(t *testing.T) {
 	// Assert: one commission row, not one per frame.
 	if got := len(h.rows(feedid.Feed{Agent: created})); got != before {
 		t.Fatalf("sub-feed rows = %d, want the same %d (the commission is one row)", got, before)
+	}
+}
+
+// ---- ORDER INDEPENDENCE: a detachment announced before its unit drew ----
+
+func TestADetachmentAnnouncedBeforeItsSpawnStillDrawsTheWrapper(t *testing.T) {
+	// Arrange: the detachment arrives first, as a store replay delivers it —
+	// the unit's row replays at its LAST upsert, after the announcement.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.detachWork("spawn-1", "spawn-1")
+
+	// Act.
+	row := h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert: the bubble rides the detached wrapper, not the sync arm.
+	if row.GetDetachedSubagent() == nil {
+		t.Fatalf("row = %T, want the detached wrapper", row.GetRow())
+	}
+}
+
+func TestAClaimedDetachmentIsNotReportedAsUnknownWhenTheTurnEnds(t *testing.T) {
+	// Arrange: the detachment arrives before its spawn, and the spawn draws.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.detachWork("spawn-1", "spawn-1")
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
+		t.Fatalf("records = %+v, want no unknown-unit warning for a claimed detachment", h.records())
 	}
 }
