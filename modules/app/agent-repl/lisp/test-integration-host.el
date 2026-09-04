@@ -1052,6 +1052,42 @@ that — no verb announces it."
                                primary "host" (plist-get ref :id)))))
             (agent-repl-connect-close successor-conn)))))))
 
+(ert-deftest agent-repl-itest-host-transferred-while-the-successor-is-pending-adopts-on-acceptance ()
+  "THE REAL ORDERING: the transfer notice beats the successor\='s acceptance.
+The outgoing daemon announces the stand-down and transfers every FREE
+workspace about a millisecond later — before this Emacs has read the
+announcement, dialed the successor and had its `WatchDaemon' accepted.
+So `transferred' lands while `agent-repl-link-successor' still answers
+nil, and the adopt must be LATCHED onto daemon-link\='s acceptance seam
+rather than dropped as a missing-successor breach."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor)))
+              (agent-repl-link-handover-functions nil))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor) (lambda () nil))
+                        ((symbol-function 'agent-repl-link-successor-pending-p)
+                         (lambda () t)))
+                ;; Act: the push arrives inside the acceptance window.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                (agent-repl-itest--await-log
+                 primary "elisp.host.transferred-awaiting-successor" "info")
+                (should (null (agent-repl-itest--calls successor "AdoptHostWorkspace")))
+                ;; Act: the successor proves it is listening.
+                (run-hook-with-args 'agent-repl-link-handover-functions
+                                    nil successor-conn)
+                ;; Assert.
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                (let ((body (car (agent-repl-itest--call-bodies
+                                  successor "AdoptHostWorkspace"))))
+                  (should (equal (agent-repl-itest--body-field body 'workspace 'id)
+                                 (plist-get ref :id)))))
+            (agent-repl-connect-close successor-conn)))))))
+
 (ert-deftest agent-repl-itest-host-transferred-without-a-successor-logs-error ()
   "`transferred' with no successor connection is an ERROR, stream kept.
 There is nowhere to adopt, and dropping the stream would lose the only
