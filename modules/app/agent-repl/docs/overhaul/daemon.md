@@ -1395,6 +1395,22 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   "a Stop hook ended the run"), message = the vendor's wording when recorded.
   The workspace resolves PURPLE per failure.proto for the four vendor arms.
 
+## Landing 11 relay (2026-09-04, project lead; user-approved)
+
+- FeedShellLost.how / FeedSubagentLost.how: resolve/feed/seams.go's
+  `applyShellLostHow` / `applySubagentLostHow` relay the DetachedLost arm BY
+  NAME onto the feed's lost rows, off the same `detachedLostCause` the lost
+  detection already reads. Call sites: `shellSettled` (from
+  AgentBashInterrupted.cause.lost) and `subagentFailureOutcome` (from
+  AgentSubagentFailure.cause.lost), both in resolve/feed/subagent.go.
+- AN ARM THIS BUILD DOES NOT CARRY IS NEVER DEFAULTED: the mappers report it
+  instead, and the caller states it once through the workspace logger
+  (`daemon.feed.shell_lost_unlanded_arm`, `daemon.feed.subagent_lost_unlanded_arm`)
+  and sends the row with `how` unset rather than with a wrong arm.
+- A wire `lost` whose own `how` is UNSET stays as it was: `lostCauseOf` reads
+  no arm, so the row draws cancelled/failed and makes no lost claim. The feed
+  never states an arm the producer did not name.
+
 ## Landing 10 relay (2026-09-04, project lead; user-approved)
 
 - FeedAgentPrompt.delivery: resolve/feed/sendmessage.go sets queued_to_live /
