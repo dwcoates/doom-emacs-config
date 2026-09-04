@@ -319,6 +319,22 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
+	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
+	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
+	// writes no counters — and a graceful shutdown emits records an abruptly
+	// killed one never wrote. Registered here, ahead of the warning sweep, it
+	// runs AFTER that sweep (t.Cleanup unwinds last-registered-first), so the
+	// sweep reads exactly the log content it reads without coverage and the
+	// suite's pass set is unchanged. The ordinary teardown below stands down
+	// while this one is armed, so the process is still killed exactly once.
+	if CoverageEnabled() {
+		t.Cleanup(func() {
+			d.gracefulStopForCoverage()
+			d.Kill()
+			d.standDownStraysForCoverage()
+			d.ReapStrays()
+		})
+	}
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
@@ -453,6 +469,23 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		// needs a live session — which is the only thing NoFake is for.
 		env = append(env, "AGENT_REPL_FAKE_SHIMS=1")
 	}
+	// COVERAGE, WHEN THE RUN ASKED FOR IT. GOCOVERDIR is this daemon's own
+	// counter directory; NODE_V8_COVERAGE is inherited by every shim the
+	// daemon spawns (shimclient.spawnEnv copies the daemon's environment
+	// forward verbatim outside its fixed override set). Both are absent
+	// entirely on an ordinary run.
+	if root := CoverageRoot(); root != "" {
+		daemonCov, err := CoverageEnv(root, "claude-repld")
+		if err != nil {
+			t.Fatalf("harness: %v", err)
+		}
+		nodeCov, err := NodeCoverageEnv(root)
+		if err != nil {
+			t.Fatalf("harness: %v", err)
+		}
+		env = append(env, daemonCov...)
+		env = append(env, nodeCov...)
+	}
 	env = append(env, opts.ExtraEnv...)
 
 	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
@@ -492,6 +525,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	}
 	d.cmd = cmd
 	t.Cleanup(func() {
+		// On a coverage run the teardown registered ahead of the warning
+		// sweep owns this and runs it after that sweep instead.
+		if CoverageEnabled() {
+			return
+		}
 		d.Kill()
 		// The daemon's group is gone; its shims are in groups of their own and
 		// would otherwise outlive the test.
@@ -719,6 +757,50 @@ func (d *Daemon) Stop() {
 	}
 	d.t.Errorf("harness: the daemon did not exit within %s of SIGTERM; killing it", DefaultTimeout)
 	d.Kill()
+}
+
+// gracefulStopForCoverage sends SIGTERM and waits, bounded, for the daemon to
+// leave — but ONLY on a coverage run, and it reports nothing: it is a
+// best-effort flush of the daemon's coverage counters ahead of the cleanup
+// kill, not a shutdown assertion. Daemon.Stop remains the assertion.
+func (d *Daemon) gracefulStopForCoverage() {
+	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+		return
+	}
+	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return
+	}
+	d.awaitReapWithin(DefaultTimeout)
+}
+
+// standDownStraysForCoverage SIGTERMs every process still naming this run's
+// state directory and waits, bounded, for them to leave — ONLY on a coverage
+// run, and reporting nothing. ReapStrays still runs underneath, so a process
+// that ignores the signal is killed exactly as it always was.
+func (d *Daemon) standDownStraysForCoverage() {
+	if !CoverageEnabled() {
+		return
+	}
+	pids := d.strayPIDs()
+	if len(pids) == 0 {
+		return
+	}
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+	deadline := time.After(DefaultTimeout)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-ticker.C:
+			if len(d.strayPIDs()) == 0 {
+				return
+			}
+		}
+	}
 }
 
 // Kill ends the process group without warning, for crash simulation and for

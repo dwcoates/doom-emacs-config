@@ -36,6 +36,14 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 // dist/ is gitignored) checked-out bundle. Unset, the output is unchanged.
 const outfile = process.env.SHIM_BUILD_OUTFILE || path.join(dir, "dist/main.js");
 
+// SHIM_BUILD_SOURCEMAP=1 emits an external source map beside the bundle. It
+// exists for ONE caller: the e2e suite's coverage build, where v8 reports
+// coverage against the bundle and only the map attributes those ranges back
+// to src/**/*.ts. It is OFF by default and nothing in the deploy path sets
+// it, so the production bundle's bytes — and with them the build identity
+// bin/build-frontend.sh stamps — are exactly what they were.
+const sourcemap = process.env.SHIM_BUILD_SOURCEMAP === "1";
+
 await build({
   entryPoints: [path.join(dir, "src/main.ts")],
   outfile,
@@ -43,6 +51,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node20",
+  sourcemap,
   external: ["@anthropic-ai/claude-agent-sdk"],
   // Resolve bare imports (notably @bufbuild/protobuf, imported by the
   // out-of-package proto stubs) from THIS package's node_modules.
