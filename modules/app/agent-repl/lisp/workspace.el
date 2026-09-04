@@ -55,6 +55,20 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--do-log "core")
+(declare-function agent-repl--git-string-quiet "core")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl--kill-cause-str "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--pseudo-workspace-name-p "core")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-log-routable-p "core")
+
 (require 'cl-lib)
 
 ;; Forward declarations for symbols defined later in the load order (status.el).
