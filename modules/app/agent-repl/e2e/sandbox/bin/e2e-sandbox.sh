@@ -97,7 +97,7 @@ stage_context() {
 
 # --- recorded pins ---------------------------------------------------------
 #
-# pins.env holds the four identifiers the Dockerfile cannot resolve from a
+# pins.env holds the identifiers the Dockerfile cannot resolve from a
 # checkout, so a normal build needs no `--allow-unpinned`. An environment
 # variable of the same name always WINS over the recorded value, which is
 # what keeps an override deliberate; the gate below is untouched, so a pin
@@ -155,6 +155,7 @@ do_build() {
   [[ -n ${SANDBOX_BASE_IMAGE:-} ]] || unpinned+=("SANDBOX_BASE_IMAGE (base image digest)")
   [[ -n ${SANDBOX_NODE_SHA256:-} ]] || unpinned+=("SANDBOX_NODE_SHA256")
   [[ -n ${SANDBOX_GO_SHA256:-} ]] || unpinned+=("SANDBOX_GO_SHA256")
+  [[ -n ${SANDBOX_EMACS_REF:-} ]] || unpinned+=("SANDBOX_EMACS_REF (upstream emacs commit sha)")
   [[ -n ${SANDBOX_DOOM_REF:-} ]] || unpinned+=("SANDBOX_DOOM_REF (doom commit sha)")
   if (( ${#unpinned[@]} )) && (( allow_unpinned == 0 )); then
     log "refusing to build: these identifiers are not pinned:"
@@ -181,8 +182,9 @@ do_build() {
   [[ -n ${SANDBOX_NODE_SHA256:-} ]] && args+=(--build-arg "NODE_SHA256=$SANDBOX_NODE_SHA256")
   [[ -n ${SANDBOX_GO_VERSION:-} ]] && args+=(--build-arg "GO_VERSION=$SANDBOX_GO_VERSION")
   [[ -n ${SANDBOX_GO_SHA256:-} ]] && args+=(--build-arg "GO_SHA256=$SANDBOX_GO_SHA256")
-  # DOOM_REF has no default in the Dockerfile: an empty one fails the build
-  # loudly rather than silently tracking Doom's master.
+  # Neither EMACS_REF nor DOOM_REF has a default in the Dockerfile: an empty
+  # one fails the build loudly rather than silently tracking upstream master.
+  args+=(--build-arg "EMACS_REF=${SANDBOX_EMACS_REF:-}")
   args+=(--build-arg "DOOM_REF=${SANDBOX_DOOM_REF:-}")
   args+=(${extra[@]+"${extra[@]}"} "$ctx")
 
@@ -218,6 +220,33 @@ fail=0
 for b in emacs node npm go git rsync script doom; do
   command -v "$b" >/dev/null 2>&1 || { echo "MISSING BINARY: $b" >&2; fail=1; }
 done
+# EMACS MUST BE THE HOST'S OWN BUILD, WITH XWIDGETS AND NATIVE COMP.
+#
+#   * the VERSION, because the pinned Doom refuses to start an interactive
+#     session below 29.1 (a `-nw` frame IS interactive), and because the
+#     sandbox is only worth trusting if it runs the Emacs our users run;
+#   * XWIDGETS, because the webapp panel this module renders IS an
+#     `xwidget-webkit` webview — no distro Emacs is built with it, and
+#     without it the panel does not work at all;
+#   * NATIVE COMPILATION, because it is how the host's Emacs is built and
+#     because `native-comp-available-p` is the only check that proves
+#     libgccjit and gcc are actually usable at RUN time, not merely that
+#     `configure` said yes at build time.
+#
+# All three are asserted in the Dockerfile too. They are re-asserted HERE so
+# the property belongs to the IMAGE — an image built by some other path, or
+# an older one still lying around under the same tag, cannot pass this gate.
+emacs_version=$(emacs -Q --batch --eval '(princ emacs-version)' 2>/dev/null || echo unknown)
+case "$emacs_version" in
+  30.2*) ;;
+  *) echo "WRONG EMACS: '$emacs_version' (expected 30.2, the host build)" >&2; fail=1 ;;
+esac
+emacs -Q --batch --eval '(unless (featurep (quote xwidget-internal)) (kill-emacs 1))' 2>/dev/null \
+  || { echo "EMACS HAS NO XWIDGETS: the webapp panel's webview cannot exist" >&2; fail=1; }
+emacs -Q --batch --eval '(unless (native-comp-available-p) (kill-emacs 1))' 2>/dev/null \
+  || { echo "EMACS HAS NO NATIVE COMPILATION available at run time" >&2; fail=1; }
+command -v Xvfb >/dev/null 2>&1 \
+  || { echo "MISSING BINARY: Xvfb (an xwidget frame needs a display)" >&2; fail=1; }
 # `doom sync` must have been baked at build time: the profile's .local is
 # what proves it, and without it every Emacs test would pay the sync.
 if [ ! -d "$EMACSDIR/.local" ]; then
@@ -232,7 +261,7 @@ PROBE
   # that only works for non-login shells is caught here.
   "$rt" run --rm --network none --entrypoint /bin/bash "$IMAGE" -lc "$probe" \
     || die "image '$IMAGE' is missing required contents (see above)"
-  log "verified: image exists and carries emacs/node/go/script/doom + a baked doom sync"
+  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom + a baked doom sync"
 }
 
 # --- run -------------------------------------------------------------------
