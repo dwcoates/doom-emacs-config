@@ -55,10 +55,13 @@
 package harness
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +71,7 @@ var (
 	fakeshimBinary string
 	gitBinary      string
 	buildErr       error
+	pinnedCheckout string
 )
 
 // Main builds the daemon and the fake shim, runs the suite, and reports the
@@ -120,7 +124,94 @@ func MainAt(m *testing.M, module string) int {
 			return 1
 		}
 	}
+	repo := filepath.Dir(module)
+	pinnedCheckout, err = newPinnedCheckout(filepath.Join(dir, "checkout"), repo)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	// The self-check runs BEFORE any test, because a build identity that
+	// disagrees fails as a stale-shim relaunch on every spawn rather than as
+	// anything a test can read.
+	if err := checkBuildIdentityAgrees(pinnedCheckout); err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
 	return m.Run()
+}
+
+// newPinnedCheckout lays out the checkout root every daemon in this suite
+// resolves its build stamps from: a directory that carries NEITHER
+// agent-shim/claude/shim/dist/.built-sha nor daemon/bin/.built-sha, so the
+// harness's SHIM_BUILD_SHA and AGENT_REPL_DEPLOY_STAMP are the only answers
+// and no host build can be read as this suite's deployed build. The shared
+// render vocabulary is the one asset beneath the checkout that has no flag
+// override, so the real tree's proto/ is linked in.
+func newPinnedCheckout(dir, repo string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir the pinned checkout %s: %w", dir, err)
+	}
+	link := filepath.Join(dir, "proto")
+	if err := os.Symlink(filepath.Join(repo, "proto"), link); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", fmt.Errorf("link the render vocabulary into %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
+// PinnedCheckout is the harness-owned checkout root, or a fatal failure if
+// Main did not lay it out.
+func PinnedCheckout(t *testing.T) string {
+	t.Helper()
+	if pinnedCheckout == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	return pinnedCheckout
+}
+
+// checkBuildIdentityAgrees is this harness's self-check for the invariant
+// BuildIdentityEnv exists to hold: the build the daemon EXPORTS to each shim,
+// the build the fake shim REPORTS, and the build the daemon reads as its
+// DEPLOYED one are one string, and no stamp file under the pinned checkout
+// can answer ahead of them.
+func checkBuildIdentityAgrees(checkout string) error {
+	env := BuildIdentityEnv(checkout)
+	reported, deployed := valueOf(env, "SHIM_BUILD_SHA"), valueOf(env, "AGENT_REPL_DEPLOY_STAMP")
+	if reported == "" || deployed == "" {
+		return fmt.Errorf("build identity is unset: SHIM_BUILD_SHA=%q AGENT_REPL_DEPLOY_STAMP=%q", reported, deployed)
+	}
+	if reported != deployed {
+		return fmt.Errorf("build identity disagrees: the daemon would export SHIM_BUILD_SHA=%q "+
+			"while reading AGENT_REPL_DEPLOY_STAMP=%q as its deployed build; every fake shim would be judged stale and relaunched",
+			reported, deployed)
+	}
+	if reported != FakeShimDefaultBuildSHA {
+		return fmt.Errorf("build identity is %q, but the fake shim reports %q; every fake shim would be judged stale and relaunched",
+			reported, FakeShimDefaultBuildSHA)
+	}
+	if root := valueOf(env, "AGENT_REPL_CHECKOUT"); root != checkout {
+		return fmt.Errorf("the pinned checkout is %q, but the daemon would resolve %q", checkout, root)
+	}
+	for _, stamp := range []string{
+		filepath.Join(checkout, "agent-shim", "claude", "shim", "dist", ".built-sha"),
+		filepath.Join(checkout, "daemon", "bin", ".built-sha"),
+	} {
+		if _, err := os.Stat(stamp); err == nil {
+			return fmt.Errorf("the pinned checkout carries the build stamp %s, which answers ahead of the harness's own identity", stamp)
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("stat the build stamp %s: %w", stamp, err)
+		}
+	}
+	return nil
+}
+
+// valueOf answers a KEY=VALUE list's entry for key, or "" when it carries none.
+func valueOf(env []string, key string) string {
+	for _, kv := range env {
+		if name, value, ok := strings.Cut(kv, "="); ok && name == key {
+			return value
+		}
+	}
+	return ""
 }
 
 // DaemonBinary is the built daemon, or a fatal failure if Main did not build.
