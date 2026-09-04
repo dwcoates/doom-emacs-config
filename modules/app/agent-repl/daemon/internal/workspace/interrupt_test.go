@@ -228,7 +228,7 @@ func TestInterruptDetachedRefusesARowThatIsNotDetachedWork(t *testing.T) {
 	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmNotDetachedWork)
 }
 
 func TestInterruptAllAgentsStopsEveryLiveAgent(t *testing.T) {
@@ -646,19 +646,174 @@ func TestInterruptAllAgentsSkipsAShellThatAlreadyFinished(t *testing.T) {
 	}
 }
 
-// TestInterruptAllAgentsPropagatesAShellRefusal pins that a NON-benign shell
-// refusal fails the fan-wide stop by name, exactly as an agent's does.
+// TestInterruptAllAgentsPropagatesAShellRefusal pins that a shell refusal which
+// does NOT say the shell is gone fails the fan-wide stop by name, exactly as an
+// agent's does. It was written against `unknown_work`, which the sweep now
+// reads as staleness — a shell the shim no longer knows is a shell that is no
+// longer running, and endpoint_interrupt.proto's InterruptError carries no
+// `unknown_work` arm to answer it with — so it pins the same rule on the one
+// remaining StopBash refusal that is a genuine failure.
 func TestInterruptAllAgentsPropagatesAShellRefusal(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	runningTurn(f, 0)
 	runningShells(f, 1)
-	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork}
+	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnspecified}
 
 	// Act.
 	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
 
 	// Assert.
-	asRefusal(t, err, ArmShimUnknownWork)
+	asRefusal(t, err, ArmShimUnspecified)
+}
+
+// TestInterruptAllAgentsSkipsItemsTheShimHasForgotten pins the SECOND fan-wide
+// stop: the freeness read's snapshot still carries the items the first stop
+// ended, because the live set is stream-driven and the shim's frames have not
+// landed yet. Stopping one the shim has already dropped answers `unknown_agent`
+// / `unknown_work`, which endpoint_interrupt.proto's InterruptError does not
+// carry at all — and could not, since a fan-wide request names no agent. Those
+// items are gone, which is exactly what the caller asked for.
+func TestInterruptAllAgentsSkipsItemsTheShimHasForgotten(t *testing.T) {
+	tests := []struct {
+		name         string
+		agents       int
+		shells       int
+		stopAgentErr error
+		stopBashErr  error
+		wantNothing  bool
+		wantCount    int
+	}{
+		{
+			name: "every agent forgotten", agents: 2,
+			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			wantNothing:  true,
+		},
+		{
+			name: "every shell forgotten", shells: 2,
+			stopBashErr: &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantNothing: true,
+		},
+		{
+			name: "the whole live set forgotten", agents: 2, shells: 1,
+			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			stopBashErr:  &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork},
+			wantNothing:  true,
+		},
+		{
+			name: "a forgotten agent beside a live shell", agents: 2, shells: 1,
+			stopAgentErr: &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent},
+			wantCount:    1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			runningTurn(f, tc.agents)
+			runningShells(f, tc.shells)
+			f.shim.stopAgentErr = tc.stopAgentErr
+			f.shim.stopBashErr = tc.stopBashErr
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt(all_agents) = error %v, want a success", err)
+			}
+			if outcome.NothingRunning != tc.wantNothing {
+				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			}
+			if outcome.DetachedCount != tc.wantCount {
+				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
+			}
+		})
+	}
+}
+
+// TestInterruptAllAgentsStillFailsOnARefusalThatIsNotStaleness guards the
+// skip's edge: a refusal that does NOT say the item is gone must still fail the
+// sweep, because a user who asked for the work to stop must not be told it is
+// gone when it is not.
+func TestInterruptAllAgentsStillFailsOnARefusalThatIsNotStaleness(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 2)
+	f.shim.stopAgentErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNoSession}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimNoSession)
+}
+
+// TestInterruptDetachedResolvesTheSubagentBubbleRow pins the row form the feed
+// ACTUALLY serves for a subagent bubble. resolve/feed/subagent.go mints it as
+// RowKey{Kind: activity, ID: <spawn unit>, Sub: <agent id>} — nothing mints
+// `detached_subagent` — and endpoint_interrupt.proto's detached target takes
+// "the bubble row's FeedId exactly as the feed served it", so that form must
+// resolve to the subagent's stop rather than be refused as no detached work.
+func TestInterruptDetachedResolvesTheSubagentBubbleRow(t *testing.T) {
+	tests := []struct {
+		name string
+		row  feedid.RowKey
+		want string
+	}{
+		{
+			name: "the bubble row the feed serves",
+			row:  feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-unit-1", Sub: "agent-7"},
+			want: "agent-7",
+		},
+		{
+			name: "the detached_subagent kind, whose id IS the agent",
+			row:  feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-9"},
+			want: "agent-9",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			ref := feedid.Ref{WS: "w1", Row: tc.row}
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt(detached) = error %v, want a success", err)
+			}
+			if outcome.DetachedCount != 1 {
+				t.Fatalf("stopped count = %d, want 1", outcome.DetachedCount)
+			}
+			if len(f.shim.stoppedAgents) != 1 || f.shim.stoppedAgents[0] != tc.want {
+				t.Fatalf("stopped agents = %v, want [%s]", f.shim.stoppedAgents, tc.want)
+			}
+		})
+	}
+}
+
+// TestInterruptDetachedRefusesAnActivityRowWithNoSubagent guards the resolution's
+// edge: a Sub on an activity row is what names a subagent, so a plain activity
+// row — a tool call, not a bubble — still addresses no detached work.
+func TestInterruptDetachedRefusesAnActivityRowWithNoSubagent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "act-1"}}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmNotDetachedWork)
+	if len(f.shim.stoppedAgents) != 0 {
+		t.Fatalf("stopped agents = %v, want none", f.shim.stoppedAgents)
+	}
 }

@@ -35,8 +35,8 @@ live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s
 quiet check fills all five. The evidence is expressible; nothing is owed here.
 | SubmitPrompt (the one-shot finish hook) | `brief_missing` | `prompts/oneshot-create-pr-then-close-followup.md` is absent or will not splice when the one-shot's turn concludes | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `not_deliverable` (landing 3, `UpdateAgentFailure.kind.not_deliverable`) | the SDK has no route to the addressed subagent; answered honestly, the control is not hidden this wave | workspace |
-| Interrupt / AnswerPermission / AnswerQuestion | `unknown_agent`, `no_open_ask`, `answer_mismatch`, `no_session` | the shim's own `UpdateAgentFailure` arm, propagated by NAME rather than collapsed into a sentence | workspace |
-| Interrupt | `unknown_work` | the shim's `StopBashFailure.unknown_work`: the addressed detached shell is stale | workspace |
+| Interrupt / AnswerPermission / AnswerQuestion | `unknown_agent`, `no_open_ask`, `answer_mismatch`, `no_session` | the shim's own `UpdateAgentFailure` arm, propagated by NAME rather than collapsed into a sentence. `unknown_agent` is propagated only by a stop that ADDRESSED that agent — the fan-wide `all_agents` sweep names no agent, so it reads the arm as "this item is already gone" and skips it | workspace |
+| Interrupt | `unknown_work` | the shim's `StopBashFailure.unknown_work`: the ADDRESSED detached shell is stale. As with `unknown_agent`, the fan-wide `all_agents` sweep skips it instead | workspace |
 | Interrupt | `live`, `not_the_open_turn`, `no_session` | the shim's `KillTurnFailure` cause, propagated by name | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `unspecified` | a shim failure whose `kind` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
 

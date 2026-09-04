@@ -167,18 +167,18 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 // ("stop the detached work"), so they must not drift apart in what they reach
 // or in how they answer a refusal.
 //
-// A BENIGN shim refusal is one item that finished on its own between the
-// freeness read and the stop, which is the state the caller asked for, so it is
-// skipped rather than counted; every other refusal fails the sweep, because a
-// user who asked for the work to stop must not be told it is gone when it is
-// not.
+// A refusal that says the item is GONE — it finished on its own, or the shim no
+// longer knows it at all, between the freeness read and the stop — is the state
+// the caller asked for, so it is skipped rather than counted; every other
+// refusal fails the sweep, because a user who asked for the work to stop must
+// not be told it is gone when it is not.
 func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) (int, error) {
 	stopped := 0
 	for _, agent := range running.LiveWork.Agents {
 		fields := dlog.Context{"agent": agent.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
-				if refusal.Benign() {
+				if refusal.GoneFromTheSweep() {
 					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
 					continue
 				}
@@ -194,7 +194,7 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		fields := dlog.Context{"shell": shell.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopBash(ctx, shell); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
-				if refusal.Benign() {
+				if refusal.GoneFromTheSweep() {
 					log.Debug(opInterrupt, "a detached shell was already not running", withArm(fields, refusal))
 					continue
 				}
@@ -209,14 +209,24 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	return stopped, nil
 }
 
-// interruptDetached stops ONE detached bubble. The row's kind decides which
-// stop verb it is: a subagent bubble stops through UpdateAgent, a shell bubble
-// through StopBash, and any other kind is not a detached item at all.
+// interruptDetached stops ONE detached bubble. The row decides which stop verb
+// it is: a subagent bubble stops through UpdateAgent, a shell bubble through
+// StopBash, and any other row is not a detached item at all.
+//
+// A SUBAGENT BUBBLE IS SERVED AS AN ACTIVITY ROW. The feed mints it as
+// RowKey{Kind: activity, ID: <spawn unit>, Sub: <created agent id>} — feedid's
+// own RowKey doc says exactly that, and resolve/feed/subagent.go is the one
+// site that mints it; `detached_subagent` is a kind no resolver produces at
+// all. endpoint_interrupt.proto addresses the detached target "by the bubble
+// row's FeedId exactly as the feed served it", so the activity-with-a-subagent
+// form is the form that actually arrives, and the agent to stop is the row's
+// Sub.
 func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, ref feedid.Ref) (InterruptOutcome, error) {
 	fields := dlog.Context{"row_kind": string(ref.Row.Kind), "row_id": ref.Row.ID}
-	switch ref.Row.Kind {
-	case feedid.KindDetachedSubagent:
-		agent := &conversationv1.AgentId{Value: ref.Row.ID}
+	switch {
+	case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row):
+		agent := &conversationv1.AgentId{Value: subagentOf(ref.Row)}
+		fields["agent"] = agent.GetValue()
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
 				return outcome, refusal
@@ -226,7 +236,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		log.Info(opInterrupt, "stopped a detached agent", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
-	case feedid.KindDetachedShell:
+	case ref.Row.Kind == feedid.KindDetachedShell:
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
@@ -238,7 +248,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		log.Info(opInterrupt, "stopped a detached shell", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
 	default:
-		return InterruptOutcome{}, refuse(log, "Interrupt", ArmUnservedAnswer,
+		return InterruptOutcome{}, refuse(log, "Interrupt", ArmNotDetachedWork,
 			fmt.Sprintf("row kind %q addresses no detached work", ref.Row.Kind), true)
 	}
 }
@@ -259,8 +269,32 @@ func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.
 	if err != nil {
 		return InterruptOutcome{}, err
 	}
+	if stopped == 0 {
+		// Every item in the freeness snapshot turned out already gone, so the
+		// sweep reached nothing. That is the `nothing_running` ANSWER, not an
+		// `interrupted_detached` of zero: the stop found the session quiet.
+		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "all_agents", "reason": "every live item was already gone"})
+		return InterruptOutcome{NothingRunning: true}, nil
+	}
 	log.Info(opInterrupt, "stopped every live detached item", dlog.Context{"count": stopped})
 	return InterruptOutcome{DetachedCount: stopped}, nil
+}
+
+// subagentBubble reports whether a row is a subagent bubble: the feed mints one
+// as an activity row whose secondary key is the created agent's id, so a Sub on
+// an activity row is exactly what names a subagent.
+func subagentBubble(row feedid.RowKey) bool {
+	return row.Kind == feedid.KindActivity && row.Sub != ""
+}
+
+// subagentOf answers the agent id a subagent-addressing row names: the bubble's
+// Sub when it has one, and the row's own id for the `detached_subagent` kind,
+// whose primary key IS the agent.
+func subagentOf(row feedid.RowKey) string {
+	if row.Sub != "" {
+		return row.Sub
+	}
+	return row.ID
 }
 
 // withCause adds a failure's cause to a record's context without mutating the

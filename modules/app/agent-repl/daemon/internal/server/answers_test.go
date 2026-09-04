@@ -8,6 +8,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/workspace"
 )
@@ -239,5 +240,56 @@ func TestAnswerColdGateRequiresACompactScope(t *testing.T) {
 	// Assert.
 	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", code)
+	}
+}
+
+// TestInterruptAnswersNotDetachedWorkAsTheTypedArm pins that the arm
+// endpoint_interrupt.proto carries for "the FeedId names no detached item" is
+// answered as InterruptError.not_detached_work by BOTH layers that can raise it
+// — the transport, when the id will not decode, and the verb, when the decoded
+// row is not detached work — rather than as a Connect error under an arm the
+// contract does not carry.
+func TestInterruptAnswersNotDetachedWorkAsTheTypedArm(t *testing.T) {
+	tests := []struct {
+		name      string
+		detached  *frontendv1.FeedId
+		refusedBy *workspace.Refusal
+	}{
+		{
+			name:     "the transport, on an id it cannot decode",
+			detached: &frontendv1.FeedId{Value: "not-a-feed-id"},
+		},
+		{
+			name:     "the verb, on a row that is not detached work",
+			detached: feedIDFor(testWorkspaceID),
+			refusedBy: &workspace.Refusal{
+				Arm:    workspace.ArmNotDetachedWork,
+				Reason: `row kind "prompt" addresses no detached work`,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tc.refusedBy != nil {
+				h.Verbs.interruptErr = tc.refusedBy
+			}
+
+			// Act.
+			resp, err := h.Client.Interrupt(context.Background(),
+				connect.NewRequest(&agentreplv1.InterruptRequest{
+					Workspace: ref(),
+					Target:    &agentreplv1.InterruptRequest_Detached{Detached: tc.detached},
+				}))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt = error %v, want the typed not_detached_work arm", err)
+			}
+			if resp.Msg.GetError().GetNotDetachedWork() == nil {
+				t.Fatalf("Interrupt = %v, want InterruptError.not_detached_work", resp.Msg)
+			}
+		})
 	}
 }
