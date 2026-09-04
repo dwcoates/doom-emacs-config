@@ -3,6 +3,7 @@ package e2e
 import (
 	"encoding/json"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -293,7 +294,7 @@ func TestEmacsDrainScheduleDrawsTheStandingBanner(t *testing.T) {
 	before := e.EvalInt(`(truncate (* 1000 (float-time)))`)
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
                         (lambda (&rest _) ` + elispString(reason) + `)))
-              (agent-repl-daemon-shutdown-schedule ` + itoa(drainMinutes) + `)
+              (agent-repl-daemon-shutdown-schedule ` + strconv.Itoa(drainMinutes) + `)
               t)`)
 
 	// The daemon echoes the schedule back as a `drain_scheduled' push; the
@@ -337,17 +338,4 @@ func decodeBool(raw json.RawMessage) bool {
 		return false
 	}
 	return string(raw) != "false"
-}
-
-// itoa renders a small non-negative int for splicing into an elisp form.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
