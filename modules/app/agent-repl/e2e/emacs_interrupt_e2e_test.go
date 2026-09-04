@@ -26,6 +26,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -46,13 +47,22 @@ import (
 // interrupt_e2e_test.go gives for driving it from the Go client.
 const emGHIParkedPrompt = "!interrupt"
 
+// emGHIGatedPrompt is the prompt scenario 36 parks on the fake's TURN GATE
+// (hibernation_e2e_test.go's turnGatePathEnv/turnGateTextEnv, implemented in
+// agent-shim/claude/shim/src/fake/index.ts's `awaitTurnGate`). It carries no
+// scenario marker, so the fake answers it ordinarily once the gate opens —
+// which is exactly what a GRACEFUL restart needs and what
+// `emGHIParkedPrompt` cannot give: `!interrupt` leaves its park only on an
+// interrupt, so a graceful restart would wait on it forever.
+const emGHIGatedPrompt = "hold here until the gate opens"
+
 // emGHIWorld brings up the Emacs world and has EMACS spawn the daemon,
 // which is the whole layer's premise: nothing here composes the daemon's
 // argv.
-func emGHIWorld(t *testing.T) (*EmacsWorld, *Emacs) {
+func emGHIWorld(t *testing.T, options ...EmacsWorldOption) (*EmacsWorld, *Emacs) {
 	t.Helper()
 	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box)
+	w := NewEmacsWorld(t, box, options...)
 	w.Emacs.EnsureDaemon()
 	return w, w.Emacs
 }
@@ -255,12 +265,21 @@ func TestEmacsForcedRestartInterruptsTheTurn(t *testing.T) {
 // finish edge. This is the deferral edge, and it is the difference between
 // "the restart lost my prompt" and "the restart delayed it".
 func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
-	// Arrange
-	w, e := emGHIWorld(t)
+	// Arrange. The parked turn here is the fake's TURN GATE, not
+	// `emGHIParkedPrompt`: a GRACEFUL restart waits for the turn to finish,
+	// and `!interrupt` parks inside `awaitInterrupt()`, which only a FORCED
+	// restart resolves. A gated turn is the one park with two exits — the
+	// gate file releases it into an ORDINARY terminal — so the finish edge
+	// this scenario is about can actually happen.
+	box := requireSandbox(t)
+	gatePath := filepath.Join(box.Scratch(), "graceful-restart-gate")
+	w, e := emGHIWorld(t,
+		WithEmacsEnv(turnGatePathEnv, gatePath),
+		WithEmacsEnv(turnGateTextEnv, emGHIGatedPrompt))
 	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-graceful-restart")
 	emGHISelect(t, e, dir, ws)
 	emGHIOpenPanel(t, e)
-	emGHISubmit(t, e, ws, emGHIParkedPrompt)
+	emGHISubmit(t, e, ws, emGHIGatedPrompt)
 	emGHIAwaitStatus(t, e, ws, "the turn to be running before the restart", emGHIRunningArms...)
 
 	// Act: the user writes a second prompt mid-turn and enqueues it through
@@ -281,6 +300,14 @@ func TestEmacsGracefulRestartHoldsPromptsMeanwhile(t *testing.T) {
 	}
 
 	e.Eval(`(agent-repl-restart-workspace nil ` + elispString(ws) + `)`)
+
+	// The graceful restart WAITS for the turn; nothing else will end it, so
+	// the gate is opened here. This is the act that lets the restart reach
+	// its finish edge, and it is deliberately after the restart is issued —
+	// the restart has to be in flight while the turn still is.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("e2e: open the turn gate: %v", err)
+	}
 
 	// Assert: the queue drains on the finish edge the restart produces. One
 	// entry per finished turn is the queue's own contract, and one entry is
