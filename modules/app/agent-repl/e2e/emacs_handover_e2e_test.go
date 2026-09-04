@@ -9,14 +9,17 @@
 // contribution on reconnect is to rebuild its tabs from the roster it is
 // pushed and to re-register what it already holds, idempotently.
 //
-// Scenario 40 (HandoverTransfersAtFreeness) is NOT in this file. See the
-// comment at the bottom for exactly why, and what the layer would need
-// before it can be written honestly.
+// Scenario 40 (HandoverTransfersAtFreeness) provokes a REAL self-merge
+// rollout to get the one announcement that carries a successor's address.
+// See the block above `TestEmacsHandoverTransfersAtFreeness`.
 package e2e
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
+
+	"claude-repld/integration/harness"
 )
 
 // emHOTabOrderForm reads the tab order as data — `agent-repl-roster--tab-order`
@@ -227,32 +230,244 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SCENARIO 40 — HandoverTransfersAtFreeness — NOT WRITTEN, and why
+// SCENARIO 40 — HandoverTransfersAtFreeness
 // ---------------------------------------------------------------------------
 //
-// Scenario 40 asks for `agent-repl-link--successor` to be promoted to
-// `agent-repl-link--primary` off a real `transferred` push. Emacs only ever
-// attaches a successor from a `shutdown_announced` push that CARRIES AN
-// ADDRESS, and the daemon publishes exactly one such announcement:
-// `daemon/internal/rollout/handover.go`, fired by a self-merge rollout
-// landing on the daemon's own checkout. `drain/controller.go`'s two
-// announcements carry no address and are the plain-bounce path (area E's
-// scenario 30), so they cannot stand in.
-//
-// Provoking that rollout needs two things this layer cannot reach today:
-//
-//   1. `AGENT_REPL_SELF_REPO_DIR` and `AGENT_REPL_TEST_ALL_SCRIPT` in the
-//      EMACS process's environment, so the daemon Emacs spawns inherits
-//      them. They are set per-daemon by `harness.Opts` for the Go layer;
-//      for this layer the daemon's environment is composed by
-//      `NewEmacsWorld`, which takes no options and is another area's file.
-//   2. A create-child-and-merge drive against the daemon Emacs launched.
-//      `adoption_e2e_test.go`'s `adTriggerSelfMergeRollout` does exactly
-//      this, but it and its feed-watching helpers are methods on `*World`,
-//      which this layer deliberately does not build.
-//
-// Both are harness changes, not test-writing, and this file's author does
-// not own either file. Reported to the project lead rather than absorbed by
-// weakening the scenario into "call `agent-repl-link-dial-successor` at an
-// address nothing announced", which would assert Emacs's dial and not the
+// Emacs attaches a successor from EXACTLY ONE push: a `shutdown_announced`
+// that CARRIES AN ADDRESS, published only by
+// `daemon/internal/rollout/handover.go` when a self-merge rollout lands on
+// the daemon's own checkout. `drain/controller.go`'s announcements carry no
+// address and are the plain-bounce path (area E's scenario 30), so they
+// cannot stand in, and dialing `agent-repl-link-dial-successor` at an
+// address nothing announced would assert Emacs's dial rather than the
 // handover.
+//
+// So the rollout is provoked for real, the way the Go layer's
+// `adTriggerSelfMergeRollout` provokes it, but every act is EMACS's: the
+// daemon's own checkout is stated as environment the Emacs process carries
+// (`WithEmacsEnv`) and its daemon child inherits, the trigger workspace is
+// created through `agent-repl-create-workspace`, and the merge is enqueued
+// through `agent-repl-merge-workspace`.
+
+// emHO40SelfMergeTriggerPath is the daemon-subsystem-prefixed path whose
+// landed range classifies as a self-merge rollout worth handing over for —
+// the same path `adoption_e2e_test.go` commits for the Go layer's own
+// handover tests.
+const emHO40SelfMergeTriggerPath = "modules/app/agent-repl/daemon/cmd/claude-repld/main.go"
+
+// emHO40TriggerName is the name given to the trigger workspace at creation.
+const emHO40TriggerName = "trigger"
+
+// emHO40Prompt is the fake SDK's plain streamed-prose scenario: it concludes
+// on its own, which is what the merge requires (a workspace merges from
+// idle), and it never parks.
+const emHO40Prompt = "!prose-streamed"
+
+// emHO40Instrument arms the two link hooks the handover runs through, so the
+// ATTACH and the PROMOTION are each recorded at the moment they happen
+// rather than polled for afterwards — a promotion that completed between two
+// polls would otherwise be indistinguishable from one that never occurred.
+//
+// `agent-repl-link-promote-functions` runs from
+// `agent-repl-link--promote-successor` and NOWHERE else, so a recorded
+// promotion is proof the successor path ran, not an ordinary reconnect.
+const emHO40Instrument = `(progn
+  (defvar em-ho40-handover nil)
+  (defvar em-ho40-promoted nil)
+  (setq em-ho40-handover nil em-ho40-promoted nil)
+  (add-hook 'agent-repl-link-handover-functions
+            (lambda (_old new)
+              (setq em-ho40-handover (agent-repl-connect-connection-address new))))
+  (add-hook 'agent-repl-link-promote-functions
+            (lambda (_old new)
+              (setq em-ho40-promoted (agent-repl-connect-connection-address new))))
+  t)`
+
+// emHO40SectionLabelForm answers the roster label of DIR's repository
+// section, or the empty string while the roster does not carry it yet. The
+// section is keyed by the COMMON DIR, so both spellings are checked.
+func emHO40SectionLabelForm(dir string) string {
+	return `(or (cl-loop for s in (agent-repl-verbs--repo-sections)
+                         when (member (plist-get (agent-repl-verbs--section-ref s) :dir)
+                                      (list ` + elispString(dir) + ` (concat ` + elispString(dir) + ` "/.git")))
+                         return (agent-repl-verbs--section-label s))
+               "")`
+}
+
+// emHO40AwaitSectionLabel waits until the roster carries DIR's repository
+// section and answers its label — the string the create command's repository
+// picker is answered with.
+func emHO40AwaitSectionLabel(t *testing.T, e *Emacs, dir string) string {
+	t.Helper()
+	raw := e.AwaitEval("the roster to carry the daemon's own repository section",
+		emHO40SectionLabelForm(dir),
+		func(raw json.RawMessage) bool {
+			var got string
+			return json.Unmarshal(raw, &got) == nil && got != ""
+		})
+	var label string
+	if err := json.Unmarshal(raw, &label); err != nil {
+		t.Fatalf("decode the repository section label for %s: %v", dir, err)
+	}
+	return label
+}
+
+// emHO40Create runs the ORDINARY create command with only its READERS
+// stubbed, the way scenario 44 stubs its confirmation reader: the command's
+// own call sites are what run, and nothing reaches past the command.
+func emHO40Create(t *testing.T, e *Emacs, label string) {
+	t.Helper()
+	e.Eval(`(cl-letf (((symbol-function 'completing-read)
+                        (lambda (&rest _) ` + elispString(label) + `))
+                       ((symbol-function 'read-string)
+                        (lambda (prompt &rest _)
+                          (cond ((string-prefix-p "Initial prompt" prompt) ` + elispString(emHO40Prompt) + `)
+                                ((string-prefix-p "Name" prompt) ` + elispString(emHO40TriggerName) + `)
+                                (t "")))))
+                 (agent-repl-create-workspace)
+                 t)`)
+}
+
+// emHO40AddedName answers the ONE name the registry gained, by set
+// difference — the daemon mints the name, so its sort position is not the
+// test's to assume.
+func emHO40AddedName(t *testing.T, before, after []string) string {
+	t.Helper()
+	had := map[string]bool{}
+	for _, name := range before {
+		had[name] = true
+	}
+	var added []string
+	for _, name := range after {
+		if !had[name] {
+			added = append(added, name)
+		}
+	}
+	if len(added) != 1 {
+		t.Fatalf("the workspace registry gained %v (before %v, after %v), want exactly one workspace", added, before, after)
+	}
+	return added[0]
+}
+
+// TestEmacsHandoverTransfersAtFreeness is scenario 40.
+//
+// The assertion is the HANDOVER: a successor announced by a real self-merge
+// rollout is attached, and at freeness it is PROMOTED to
+// `agent-repl-link--primary` with the old connection released — not a
+// reconnect that happened to find a new address, and not Emacs's own dial.
+func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
+	// Arrange: a world whose Emacs — and therefore whose daemon — is told
+	// which checkout is the daemon's OWN, and given a merge gate that
+	// passes, so a commit landing on it fires a real self-merge rollout.
+	box := requireSandbox(t)
+	selfRepo := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "self-repo"))
+	gate := harness.NewTestAllScript(t, selfRepo.Dir)
+	gate.SetExitCode(0)
+	gate.SetStdout("e2e: passed in 1s\n")
+	w := NewEmacsWorld(t, box,
+		WithEmacsEnv("AGENT_REPL_SELF_REPO_DIR", selfRepo.Dir),
+		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+	e := w.Emacs
+	e.EnsureDaemon()
+
+	// Arrange: a HEADLESS workspace — registered through the ordinary
+	// command, never opened — so it has zero rendezvous participants and is
+	// free the instant the handover looks at it.
+	headless, headlessDir := emGHIRegister(t, e, box, "repo-handover-headless")
+	emGHISelect(t, e, headlessDir, headless)
+
+	// Arrange: the hooks are armed BEFORE anything can announce, so neither
+	// edge can be missed.
+	e.Eval(emHO40Instrument)
+
+	// Arrange: the daemon's own checkout is registered too, so the roster
+	// carries the repository section the create command picks from.
+	before := e.EvalStrings(emGHIWorkspaceNamesForm)
+	e.Eval(`(agent-repl-add-project-workspace ` + elispString(selfRepo.Dir) + `)`)
+	label := emHO40AwaitSectionLabel(t, e, selfRepo.Dir)
+	e.AwaitEval("the daemon's own checkout to appear in Emacs's registry",
+		emGHIWorkspaceNamesForm,
+		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(before)+1 })
+
+	// Act: create the trigger workspace on that repository, through the
+	// ordinary command, and let its turn conclude — a merge is enqueued from
+	// idle, never mid-turn.
+	beforeCreate := e.EvalStrings(emGHIWorkspaceNamesForm)
+	emHO40Create(t, e, label)
+	after := decodeStrings(e.AwaitEval("the trigger workspace to appear in Emacs's registry",
+		emGHIWorkspaceNamesForm,
+		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == len(beforeCreate)+1 }))
+	trigger := emHO40AddedName(t, beforeCreate, after)
+	emGHIAwaitStatus(t, e, trigger, "the trigger workspace's opening turn to conclude", emGHISettledArms...)
+
+	triggerDir := e.EvalString(`(or (plist-get (agent-repl-host-ref ` + elispString(trigger) + `) :dir) "")`)
+	if triggerDir == "" {
+		t.Fatalf("the trigger workspace %q holds no worktree directory, want the daemon-minted one", trigger)
+	}
+
+	// Act: land a scripted commit touching a daemon-subsystem path in that
+	// worktree, then enqueue the merge through the ordinary command. The
+	// merge lands, the rollout classifies, and the handover announces.
+	sha := selfRepo.CommitIn(triggerDir, emHO40SelfMergeTriggerPath, "trigger\n")
+	selfRepo.SetPaths(sha, emHO40SelfMergeTriggerPath)
+	e.Eval(`(agent-repl-merge-workspace ` + elispString(trigger) + `)`)
+
+	// Assert: a successor was ATTACHED, from the announced address. This is
+	// the half no plain bounce can produce — a `shutdown_announced` without
+	// an address never reaches these hooks.
+	successor := ""
+	e.AwaitEvalFor(emacsBootBound, "a successor to be attached from the announcement",
+		`(or em-ho40-handover "")`,
+		func(raw json.RawMessage) bool {
+			var got string
+			if json.Unmarshal(raw, &got) != nil || got == "" {
+				return false
+			}
+			successor = got
+			return true
+		})
+
+	// Assert: at freeness the successor is PROMOTED, and to the SAME address
+	// it was attached at. A promotion to some other address would be a
+	// reconnect wearing the handover's name.
+	promoted := ""
+	e.AwaitEvalFor(emacsBootBound, "the successor to be promoted at freeness",
+		`(or em-ho40-promoted "")`,
+		func(raw json.RawMessage) bool {
+			var got string
+			if json.Unmarshal(raw, &got) != nil || got == "" {
+				return false
+			}
+			promoted = got
+			return true
+		})
+	if promoted != successor {
+		t.Fatalf("the promoted connection is at %q, want the announced successor's %q", promoted, successor)
+	}
+
+	// Assert: the promotion RELEASED the handover state — the successor slot
+	// is empty and the primary is the successor's own connection. A primary
+	// left on the old daemon, or a successor still held, would be a handover
+	// that only half happened.
+	e.AwaitEvalFor(emacsBootBound, "the successor slot to be released by the promotion",
+		`(if agent-repl-link--successor nil t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	if got := e.EvalString(`(or (agent-repl-connect-connection-address agent-repl-link--primary) "")`); got != successor {
+		t.Fatalf("the primary link is at %q after the handover, want the successor's %q", got, successor)
+	}
+
+	// Assert: the link is UP on the successor, and no reconnect loop was
+	// armed — a handover is not an outage, and a timer still ticking would
+	// say Emacs had treated it as one.
+	emHOAwaitLinkUp(t, e, "the link to be up on the promoted successor")
+	e.AwaitEvalFor(emacsBootBound, "no reconnect loop to be armed after the handover",
+		`(if (timerp agent-repl-link--reconnect-timer) nil t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+
+	// Assert: the headless workspace TRANSFERRED — it is still Emacs's, on
+	// the promoted connection, which is what "transfers at freeness" means
+	// for a workspace with zero rendezvous participants.
+	if got := e.EvalString(`(or (agent-repl-connect-connection-address (agent-repl-host-conn ` + elispString(headless) + `)) "")`); got != successor {
+		t.Fatalf("the headless workspace %q is held on %q after the handover, want the successor's %q", headless, got, successor)
+	}
+}
