@@ -13,12 +13,11 @@
  * chain (recorded in `e2e/WEBAPP-LAYER-SPEC.md` §F2), never guessed from a
  * name.
  *
- * TWO FAMILIES ARE ABSENT AND SAID SO, rather than covered with an invented
- * fixture: `agent_prompt` and `cold_gate`. No fake-SDK scenario any Go area
- * test drives produces either row — `send-message`, `wakeup-schedule` and
- * `cron` all draw a plain response, and no Go e2e test references the cold
- * gate at all. Both are reported to the fake-SDK owner; when a scenario
- * lands, each becomes one more `it` here.
+ * ONE FAMILY IS ABSENT AND SAID SO, rather than covered with an invented
+ * fixture: `cold_gate`. No Go e2e test references the cold gate at all; it is
+ * reported to the fake-SDK owner, and when a scenario lands it becomes one
+ * more `it` here. `agent_prompt` IS covered, since landing 10 gave the row a
+ * delivery outcome and `!send-message-resumed` drives it.
  *
  * ONE PAGE, ONE WORKSPACE, MANY TURNS. The page is mounted once for the file
  * (the Go driver hands this child exactly one world), so rows accumulate as
@@ -29,7 +28,16 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { BOOT_BUDGET_MS, TURN_TEST_MS, bootLayer, driveTurn, rows, textOf } from "./drive";
+import {
+  BOOT_BUDGET_MS,
+  TURN_TEST_MS,
+  awaitDrawn,
+  bootLayer,
+  driveTurn,
+  rows,
+  submit,
+  textOf,
+} from "./drive";
 
 let app: MountedApp;
 
@@ -389,6 +397,67 @@ it(
     // Assert — a worktree episode draws BOTH dividers (entered and left).
     expect(rows(app, "separation").length).toBeGreaterThanOrEqual(before + 2);
     expect(app.$$(".sep-worktree").length).toBeGreaterThan(0);
+  },
+  TURN_TEST_MS,
+);
+
+// §F2 — agent_prompt, and landing 10's delivery outcome on the SENDER's row.
+it(
+  "names the resumption on the sender's agent-prompt row when the send woke the recipient",
+  async () => {
+    // Arrange / Act — `!send-message-resumed` sends to an IDLE agent, which the
+    // vendor resumes to receive it.
+    const row = await family("send-message-resumed", "agentPrompt");
+
+    // Assert — the delivery arm is stated, and it is the resumption.
+    expect(row.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe(
+      "resumedRecipient",
+    );
+  },
+  TURN_TEST_MS,
+);
+
+/** Drive a scenario whose turn dies, and read the terminal row it added. */
+async function died(scenario: string): Promise<HTMLElement> {
+  const before = rows(app, "turnEnded").length;
+  await submit(app, `!${scenario}`);
+  await awaitDrawn(
+    app,
+    `the terminal row for !${scenario}`,
+    () => rows(app, "turnEnded").length > before,
+  );
+  const drawn = rows(app, "turnEnded");
+  return drawn[drawn.length - 1] as HTMLElement;
+}
+
+// §F2 — landing 10: the turn-error line NAMES which way the query died.
+it(
+  "names an unexpected eof on the turn-error line",
+  async () => {
+    // Arrange / Act — `!query-eof` ends the agent's stream without a close.
+    const row = await died("query-eof");
+
+    // Assert
+    expect(row.querySelector("[data-turn-error]")?.getAttribute("data-turn-error")).toBe(
+      "queryDied",
+    );
+    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
+      "unexpectedEof",
+    );
+  },
+  TURN_TEST_MS,
+);
+
+it(
+  "names an iterator failure on the turn-error line",
+  async () => {
+    // Arrange / Act — `!query-fail` throws out of the sdk's iterator.
+    const row = await died("query-fail");
+
+    // Assert
+    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
+      "iteratorFailure",
+    );
   },
   TURN_TEST_MS,
 );
