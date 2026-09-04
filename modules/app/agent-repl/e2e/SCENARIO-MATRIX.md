@@ -61,7 +61,6 @@ as `!(default prose)`).
 | `!context-usage-drift` | grounded | accounting_e2e_test.go | — | — | Go: TestContextUsage asserts ContextPanelView.Header non-empty and differs across two reads, Categories non-empty. | covered |
 | `!context-window` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!cron` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateListDelete asserts turn Concluded and footer LiveWork.Crons chip Count positive. | covered |
-| `!ctrl-b` | grounded | detachedbash_e2e_test.go | — | — | Go: TestCtrlBDetachOfForegroundWork only checks tool name/Running() before t.Skip (deliberately incomplete, out-of-scope ruling). | weak |
 | `!edit` | grounded | filetools_e2e_test.go | feed-families.layer.test.ts | — | Go: TestEdit asserts a diff output form. Web: feed-families.layer asserts [data-diff-line] count>0. | covered |
 | `!fail-aborted-tools` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!fail-blocking-limit` | ungrounded | — | — | — | no covering test in any layer | uncovered |
@@ -161,6 +160,7 @@ as `!(default prose)`).
 | `!usage-service-unavailable` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!usage-utilization-unavailable` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!usage-window-unavailable` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!vendor-backgrounded` | grounded | — | — | — | no e2e-layer test; the Go e2e test for the golden this scenario stands in for was removed (owner ruling, PROTO-CHANGES.md Landing 8, 2026-09-04). Its DetachForeground-confirm path is covered only by shim test/integration/detached.test.ts (excluded from this count per the owner's ruling above). | uncovered |
 | `!wakeup-schedule` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts only Concluded. | weak |
 | `!wakeup-stop` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts only Concluded. | weak |
 | `!web-fetch` | grounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestWebFetch asserts tool call Succeeded, non-empty Text. Web: feed-families.layer only checks .tool-head exists and non-empty text (weak; no link-specific selector despite the file's own comment claiming one). | covered |

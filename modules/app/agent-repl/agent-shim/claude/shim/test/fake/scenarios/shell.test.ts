@@ -62,7 +62,7 @@ describe("foreground shells", () => {
 
   it("states a TIMEOUT backgrounding through timedOutAfterMs on the tool result", async () => {
     // Arrange + Act. The task stream says nothing about the cause; this field is
-    // the only discriminator between a timeout and a Ctrl-B.
+    // the only discriminator between a timeout and a vendor-backgrounded detach.
     const timedOut = await result("!bash-timeout");
 
     // Assert
@@ -239,17 +239,17 @@ describe("explicit poll/retrieval of a detached shell", () => {
   });
 });
 
-describe("Ctrl-B", () => {
+describe("VendorBackgrounded", () => {
   /**
-   * Drive `!ctrl-b` all the way through its detach.
+   * Drive `!vendor-backgrounded` all the way through its detach.
    *
    * The scenario PARKS until something backgrounds the call, because a real
-   * Ctrl-B is a caller's action and not something the scenario can decide the
-   * moment of. Nothing detaches it here, so a plain `driveScenario` would sit
-   * on the parked run forever.
+   * vendor-side detach is not something the scenario can decide the moment
+   * of. Nothing detaches it here, so a plain `driveScenario` would sit on
+   * the parked run forever.
    */
-  const driveCtrlB = async (): Promise<Record<string, unknown>> => {
-    const driven = await driveScenario(["!ctrl-b"], {
+  const driveVendorBackgrounded = async (): Promise<Record<string, unknown>> => {
+    const driven = await driveScenario(["!vendor-backgrounded"], {
       during: async (query, _prompts, messages) => {
         for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
         const started = messages.find((m) => m.subtype === "task_started");
@@ -262,7 +262,7 @@ describe("Ctrl-B", () => {
 
   it("states a USER backgrounding through backgroundedByUser, not timedOutAfterMs", async () => {
     // Arrange + Act
-    const detached = await driveCtrlB();
+    const detached = await driveVendorBackgrounded();
 
     // Assert
     expect({ byUser: detached.backgroundedByUser, timedOut: detached.timedOutAfterMs }).toEqual({
@@ -273,21 +273,22 @@ describe("Ctrl-B", () => {
 
   it("keeps the output produced before the detach on the foreground result", async () => {
     // Arrange + Act
-    const detached = await driveCtrlB();
+    const detached = await driveVendorBackgrounded();
 
     // Assert
     expect(detached.stdout).toBe("first line before the detach\n");
   });
 
   it("puts the backgrounded result on the stream BEFORE backgroundTasks answers", async () => {
-    // A real Ctrl-B has already published the detachment by the time the binary
-    // reports it; answering first would let a caller observe DetachForeground
-    // succeeding against a conversation that still shows foreground work.
+    // A real vendor-side detach has already published the detachment by the
+    // time the binary reports it; answering first would let a caller observe
+    // DetachForeground succeeding against a conversation that still shows
+    // foreground work.
     // Arrange.
     let resultsWhenAnswered = -1;
 
     // Act.
-    await driveScenario(["!ctrl-b"], {
+    await driveScenario(["!vendor-backgrounded"], {
       during: async (query, _prompts, messages) => {
         for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
         const started = messages.find((m) => m.subtype === "task_started");
@@ -305,7 +306,7 @@ describe("Ctrl-B", () => {
 
   it("marks the task is_backgrounded when backgroundTasks names its tool call", async () => {
     // Arrange + Act
-    const driven = await driveScenario(["!ctrl-b"], {
+    const driven = await driveScenario(["!vendor-backgrounded"], {
       during: async (query, _prompts, messages) => {
         for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
         const started = messages.find((m) => m.subtype === "task_started");

@@ -78,8 +78,14 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `context-injected-skills` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | `!skills-injected` | single turn | 56 KB |
 | `context-usage` | 2026-09-02 | `hook`, `thinking`, `read`, `response` → `success.completed` | `!context-usage-drift` | single turn | 96 KB |
 | `cron-create-list-delete` | 2026-09-01 | `hook`, `thinking`, `response`, `cron` → `success.completed` | `!cron` | single turn | 108 KB |
-| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | `!subagent` — REACHABLE-ONLY: no scenario backgrounds a subagent the way a real Ctrl-B would; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 92 KB |
-| `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | `!ctrl-b` — REACHABLE-ONLY: parks a live foreground Bash call but nothing can make a real DetachForeground resolve it; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 108 KB |
+| `ctrl-b-detach-of-foreground-subagent` | 2026-09-01 | `hook`, `thinking`, `subagent`, `bash`, `response` → `success.completed` | `!subagent` — REACHABLE-ONLY: no scenario backgrounds a subagent the way a real vendor-side detach would; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 92 KB |
+| `ctrl-b-detach-of-foreground-work` | 2026-09-01 | `hook`, `thinking`, `bash`, `response`, `read` → `success.completed` | `!vendor-backgrounded` — REACHABLE-ONLY: parks a live foreground Bash call but nothing can make a real DetachForeground resolve it; RULED out of scope (PROTO-CHANGES.md Landing 8) | single turn | 108 KB |
+
+These two capture directory names are historical: they predate the owner
+ruling (2026-09-04, PROTO-CHANGES.md Landing 8) that dropped "ctrl-b"/"Ctrl-B"
+naming from the mocked vendor's scenario inventory (the fake scenario is now
+`vendor-backgrounded`). Renaming the recorded capture directories themselves
+would be pure churn, so they keep their original names.
 | `diagnostics` | 2026-09-01 | `hook`, `thinking`, `response` → `success.completed` | (none registered — reproduced by ANY plain prompt falling through to the default `""` prose scenario; the e2e test asserts by absence of a topbar warning) | single turn | 116 KB |
 | `edit` | 2026-09-01 | `hook`, `thinking`, `read`, `edit`, `response` → `success.completed` | `!edit` | single turn | 80 KB |
 | `fan-wide-cancel` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!cancel-all` | single turn | 96 KB |

@@ -14,8 +14,6 @@
 // act is `agent-repl-restart-workspace` with a prefix argument (`SPC o C-c`,
 // `C-u` = force) — "Forced: interrupt and bounce; the agent is NOT resumed
 // afterwards." These tests therefore drive that command and nothing else.
-// The ctrl-b detach of foreground work has no daemon verb and is ruled out
-// of scope (the Go layer already carries two skips for it).
 //
 // This file also holds the helpers area G, H and I share. They are
 // area-local by design: EMACS-LAYER-SPEC.md's shared harness
