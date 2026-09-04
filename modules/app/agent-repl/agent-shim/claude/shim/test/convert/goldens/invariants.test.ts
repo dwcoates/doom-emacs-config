@@ -319,17 +319,33 @@ describe("the shim never invents a context cut", () => {
     ]);
   });
 
-  it("the captures that cut are the /clear and the real compaction, and the failed-compaction arm stays ungrounded", () => {
-    // A `/clear` IS a cut and the vendor records it, and — since the
-    // 2026-09-03 re-capture — so does `compaction-directed`'s real
-    // `/compact`. `ContextCompactionFailed` (a FAILED compaction) has no
-    // capture at all — the MANIFEST records that gap — so naming the whole
-    // set here keeps a manufactured cut from appearing anywhere without a
-    // human noticing.
+  // GROUNDED (2026-09-04): the VENDOR's own automatic compaction, provoked by
+  // paced window occupancy rather than by a `/compact`. `trigger: "auto"` is
+  // the only discriminator on the boundary, so the fold's arm is the same
+  // `compacted` one the directed capture grounds.
+  it("auto-compaction says `compacting` and cuts via a vendor-initiated compact_boundary", () => {
+    const run = foldScenario("auto-compaction");
+    expect(sessionUpdateArms(run)).toContain("compacting");
+    expect(arms(run).filter((arm) => arm.includes("context_cut"))).toEqual([
+      "agent_update.context_cut.compacted",
+    ]);
+  });
+
+  it("the captures that cut are the /clear and the two real compactions, and the failed-compaction arm stays ungrounded", () => {
+    // A `/clear` IS a cut and the vendor records it; so does
+    // `compaction-directed`'s real `/compact` (2026-09-03 re-capture) and
+    // `auto-compaction`'s vendor-initiated one (2026-09-04).
+    // `ContextCompactionFailed` (a FAILED compaction) has no capture at all —
+    // the MANIFEST records that gap — so naming the whole set here keeps a
+    // manufactured cut from appearing anywhere without a human noticing.
     const withCuts = SCENARIOS.filter((scenario) =>
       arms(foldScenario(scenario)).some((arm) => arm.includes("context_cut")),
     );
-    expect(withCuts).toEqual(["compaction-directed", "identity-rotation-clear"]);
+    expect(withCuts).toEqual([
+      "auto-compaction",
+      "compaction-directed",
+      "identity-rotation-clear",
+    ]);
     const cleared = arms(foldScenario("identity-rotation-clear")).filter((arm) =>
       arm.includes("context_cut"),
     );
