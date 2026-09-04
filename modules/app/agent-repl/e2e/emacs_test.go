@@ -177,6 +177,15 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Helper()
 
 	root := filepath.Join(box.Scratch(), "emacs")
+	// 0o700 before anything else creates it: this root is the Emacs HOME,
+	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
+	// early-init then aborts before any readiness stamp is written.
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("prepare the Emacs root %s: %v", root, err)
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatalf("restrict the Emacs root %s: %v", root, err)
+	}
 	e := &Emacs{
 		t:                  t,
 		box:                box,
