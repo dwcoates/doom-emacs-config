@@ -65,6 +65,34 @@ function eventOf(hookEvent: string): conversationv1.AgentHookEvent | undefined {
   return (hook.result.value as conversationv1.AgentHookStart).event;
 }
 
+describe("the row a hook firing owns", () => {
+  // THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04). The vendor
+  // hands the two planes disjoint identity material — a `hook_id` here, a
+  // `toolUseID` in the transcript attachment the sidecar reads, and differing
+  // record uuids — so nothing can join them and only one plane may serve the
+  // row. This key IS that decision, so it is asserted as a literal.
+  it("is keyed by the vendor's own hook_id, on the START", () => {
+    const registry = createHookRegistry();
+    const entries = convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
+    expect(entries[0]?.upsertKey).toBe("activity:hook-abc");
+  });
+
+  it("is the SAME key on the response, so a firing is one row and not two", () => {
+    const registry = createHookRegistry();
+    const start = convertHookStarted(started("PreToolUse", "hook-abc"), foldContext(), registry);
+    const end = convertHookResponse(response({ hook_id: "hook-abc" }), foldContext(), registry);
+    expect(end[0]?.upsertKey).toBe("activity:hook-abc");
+    expect(end[0]?.upsertKey).toBe(start[0]?.upsertKey);
+  });
+
+  it("keeps two firings of one hook on two rows", () => {
+    const registry = createHookRegistry();
+    const first = convertHookStarted(started("PreToolUse", "hook-1"), foldContext(), registry);
+    const second = convertHookStarted(started("PreToolUse", "hook-2"), foldContext(), registry);
+    expect(first[0]?.upsertKey).not.toBe(second[0]?.upsertKey);
+  });
+});
+
 describe("the vendor's hook event, in this contract's enum", () => {
   // Every event the enum declares, spelled as the vendor spells it. A miss on
   // any of these used to answer UNSPECIFIED, which the proto calls malformed.
