@@ -183,6 +183,154 @@ func TestShutdownNowCarriesNoSuccessorAddress(t *testing.T) {
 	}
 }
 
+// TestShutdownNowForcesEverySessionDownBeforeExiting pins the process-tree
+// half of the immediate stop: the daemon's own exit reclaims nothing but the
+// daemon, because every shim was spawned into a process group of its own so a
+// BOUNCE could hand it to an adopting successor. `now` has no successor, so
+// the shims are this call's to stand down.
+func TestShutdownNowForcesEverySessionDownBeforeExiting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first := h.workspace(t, instant)
+	second := h.workspace(t, instant)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	stood := map[ids.WorkspaceID]bool{}
+	for _, call := range h.stand.Killed() {
+		if !call.Force {
+			t.Fatalf("stand-down of %s was graceful, want forced: an immediate stop bought no freeness to wait on", call.WS)
+		}
+		stood[call.WS] = true
+	}
+	for _, ws := range []ids.WorkspaceID{first, second} {
+		if !stood[ws] {
+			t.Fatalf("workspace %s was never stood down; its shim and both shim-lock holders would outlive the daemon (stood down: %v)", ws, h.stand.Killed())
+		}
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started")
+	}
+}
+
+// TestShutdownNowStandsDownAWorkspaceParkedAtAPermissionGate is the defect's
+// own shape: a turn parked at a permission gate never falls free on its own,
+// so a stop that waited for freeness would never come. `now` waits for none —
+// it never asks — and the parked workspace is stood down like any other.
+func TestShutdownNowStandsDownAWorkspaceParkedAtAPermissionGate(t *testing.T) {
+	// Arrange: the workspace is NOT free, and the gate that would release it
+	// is never opened.
+	h := newHarness(t)
+	parked := h.workspace(t, instant)
+	h.freeness.SetFree(parked, false)
+	h.freeness.Gate(parked)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if awaited := h.freeness.Awaited(); len(awaited) != 0 {
+		t.Fatalf("ShutdownNow waited on freeness for %v; an immediate stop waits for none", awaited)
+	}
+	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].WS != parked {
+		t.Fatalf("stand-downs = %v, want exactly the parked workspace %s", killed, parked)
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started for a workspace parked at a permission gate")
+	}
+}
+
+// TestShutdownNowExitsWhenAShimWillNotStandDown pins the failure policy: the
+// leaked shim is REPORTED at ERROR, its siblings are still stood down, and the
+// exit happens regardless — an exit skipped over one bad shim leaks the daemon
+// too.
+func TestShutdownNowExitsWhenAShimWillNotStandDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	stubborn := h.workspace(t, instant)
+	healthy := h.workspace(t, instant)
+	h.stand.failKill(stubborn, errFake)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	stood := map[ids.WorkspaceID]bool{}
+	for _, call := range h.stand.Killed() {
+		stood[call.WS] = true
+	}
+	if !stood[healthy] {
+		t.Fatalf("the healthy workspace %s was not stood down after a sibling refused", healthy)
+	}
+	var reported bool
+	for _, rec := range records(h.log, opNow) {
+		if rec.Level == "error" && rec.Context["workspace"] == string(stubborn) {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("%s recorded no ERROR naming the workspace whose shim will outlive the daemon", opNow)
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started after a stand-down failed")
+	}
+}
+
+// TestShutdownNowIsNotHeldByAWedgedShim pins the bound: a shim that ACCEPTS
+// the stand-down and never answers costs StandBound and no more. Without the
+// bound the immediate stop would hang on exactly the shim it exists to reclaim.
+func TestShutdownNowIsNotHeldByAWedgedShim(t *testing.T) {
+	// Arrange
+	bound := 50 * time.Millisecond
+	h := newHarness(t, func(d *Deps) { d.StandBound = bound })
+	h.workspace(t, instant)
+	h.stand.wedgeKillOnly()
+
+	// Act
+	started := time.Now()
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+	elapsed := time.Since(started)
+
+	// Assert
+	if elapsed < bound {
+		t.Fatalf("ShutdownNow returned after %s, short of its own %s stand-down bound", elapsed, bound)
+	}
+	// Ten times the bound: the call is one bounded stand-down plus bookkeeping,
+	// so anything near a second means the bound was not applied at all.
+	if elapsed > 10*bound {
+		t.Fatalf("ShutdownNow took %s on one wedged shim, want it bounded by %s", elapsed, bound)
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started after a wedged stand-down")
+	}
+}
+
+// maintenanceReason is the typed reason the immediate-shutdown tests state
+// when the reason itself is not the subject.
+func maintenanceReason() *agentreplv1.DrainReason {
+	return &agentreplv1.DrainReason{
+		Kind: &agentreplv1.DrainReason_Maintenance{Maintenance: &agentreplv1.DrainReasonMaintenance{}},
+	}
+}
+
 func TestShutdownNowRefusesAnArmlessReason(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

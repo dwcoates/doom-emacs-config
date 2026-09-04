@@ -263,6 +263,13 @@ func (s *fakeStand) wedgeKillOnly() {
 	s.wedgeKill = true
 }
 
+// failKill makes one workspace's stand-down refuse.
+func (s *fakeStand) failKill(ws ids.WorkspaceID, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.killErr[ws] = err
+}
+
 func (s *fakeStand) Killed() []killCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
