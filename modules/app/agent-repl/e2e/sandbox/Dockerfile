@@ -499,12 +499,27 @@ COPY --chown=sandbox:sandbox doom/ /sandbox/doom/
 
 # --- Doom itself, pinned to a SHA ------------------------------------------
 #
-# `sources/doom+/modules` is created because doom.el:189 puts it on
-# `doom-module-load-path` unconditionally. A fresh clone does not contain it,
-# and every `doom` invocation then printed "Setting current directory: No
-# such file or directory, .../sources/doom+/modules" onto the output the
-# suite reads. Creating the (empty) directory makes the path Doom already
-# expects actually resolve.
+# DOOM_REF IS THE HOST'S OWN DOOM, for the same reason EMACS_REF is the
+# host's own Emacs: the sandbox is only worth trusting if it runs what the
+# user runs. It is the release tag v2.1.0, not master — see pins.env, and see
+# the module-library assertion below for what master silently costs.
+#
+# THE CHECKOUT MUST CARRY A REAL MODULE LIBRARY, and that is ASSERTED rather
+# than assumed. Upstream master has split the module trees out of this
+# repository into a separate `sources/doom+` collection, so a plain clone of
+# master has `modules/doom` and nothing else. Nothing fails loudly when that
+# happens: `doom sync` SUCCEEDS, the `doom!` block in doom/init.el resolves
+# to no modules at all, and the breakage only surfaces much later as
+# `set-popup-rule!` being unbound in a booted Emacs. Checking for one module
+# every profile here needs turns that into a build failure at the moment the
+# ref is wrong.
+#
+# `sources/doom+/modules` is created only when this Doom actually names it:
+# revisions that do put it on `doom-module-load-path` print "Setting current
+# directory: No such file or directory, .../sources/doom+/modules" on every
+# `doom` invocation, onto output the suite reads, and creating the empty
+# directory makes the path Doom already expects resolve. Revisions that do
+# not name it (v2.1.0 among them) get no stray directory.
 RUN set -eux; \
     if [ -z "${DOOM_REF}" ]; then \
       echo "sandbox: DOOM_REF is empty; pass a Doom commit SHA (--build-arg DOOM_REF=<sha>)" >&2; \
@@ -512,7 +527,13 @@ RUN set -eux; \
     fi; \
     git clone --filter=blob:none https://github.com/doomemacs/doomemacs "${EMACSDIR}"; \
     git -C "${EMACSDIR}" checkout "${DOOM_REF}"; \
-    mkdir -p "${EMACSDIR}/sources/doom+/modules"
+    for m in ui/popup editor/evil emacs/vc tools/magit lang/emacs-lisp; do \
+      test -d "${EMACSDIR}/modules/$m" \
+        || { echo "sandbox: DOOM_REF ${DOOM_REF} has no modules/$m; this Doom keeps its module library elsewhere (upstream master moved it to sources/doom+), so doom/init.el would resolve NO modules and set-popup-rule! would be unbound at run time" >&2; exit 1; }; \
+    done; \
+    if grep -q 'sources/doom+/modules' "${EMACSDIR}/lisp/doom.el"; then \
+      mkdir -p "${EMACSDIR}/sources/doom+/modules"; \
+    fi
 ENV PATH=/sandbox/emacs.d/bin:${PATH}
 
 # --- the module's own packages.el, for the build-time `doom sync` ----------
