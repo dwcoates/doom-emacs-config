@@ -438,13 +438,46 @@ the narrower/alternate state**:
     that cwd recreated, so `resume: <session id>` resolves;
   - the first query opened with `resume`, rather than a later turn.
 
-  This was implemented and then REVERTED unrun: the seeding step writes into
-  the operator's real `~/.claude` account root, which is outside the project
-  and needs the owner's explicit per-use approval. It is a permission
-  decision for the project lead, not a technical unknown. NOTE ALSO, from
-  `prose-streamed`'s meta: a committed capture carries everything the lever
-  needs — `vendor_session_id`, `cwd_slug`, and a single
+  That lever is now BUILT — `resume_capture` in `worlds.mjs`, plus
+  `readCapturedSession` and `seedResumableSession` in `capture.mjs`, all unit
+  tested — and `cold-resume` names `prose-streamed` as the session it resumes.
+  It has still NOT RUN, and the blocker is AUTHENTICATION rather than the
+  lever:
+
+  - Seeding a synthetic transcript into the operator's real `~/.claude` is
+    REFUSED: that root is bind-mounted and shared, and a stray write there has
+    damaged this project before. `seedResumableSession` throws on
+    `AUTH_CONFIG_ROOT` rather than trusting an operator to remember, so the
+    "scratch only" rule is structural and not a note.
+  - That leaves the two account roots the harness throws away.
+    `--seed-credentials` is IMPOSSIBLE on this machine: the vendor keeps OAuth
+    credentials in the macOS Keychain and leaves `~/.claude/.credentials.json`
+    zero bytes, so there is nothing to seed and the preflight refuses. Copying
+    the root elsewhere does not help either — the CLI keys its Keychain entry
+    on `CLAUDE_CONFIG_DIR`, so a root at any other path reads as a different,
+    logged-out account.
+  - The inherited-token mode (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`)
+    WOULD work and does give a throwaway root, but neither variable is
+    exported here, and a capture agent must not extract the owner's credential
+    from the Keychain to manufacture one.
+
+  So this needs the OWNER to supply a token for the run. Nothing about the
+  vendor's cold-resume shape has been observed yet, so `!cold-seed` stays
+  UNGROUNDED and must NOT be adjusted from guesswork — no `SessionCold`
+  refusal has ever been recorded.
+
+  NOTE, from `prose-streamed`'s meta: a committed capture already carries
+  everything the lever needs — `vendor_session_id`, `cwd_slug`, and a single
   `files/projects/<slug>/<session id>.jsonl`.
+
+  SEPARATE HYGIENE BUG, found while checking this and NOT fixed here: under
+  `--config-root` the per-scenario reclaim and the sweep-end `lateReclaimAll`
+  do not fully clean up. `~/.claude/projects/` currently holds seven
+  `*agent-repl-capture-*` directories — from the 2026-09-03 runs and from
+  2026-09-04's — each with one file the vendor late-flushed after the reclaim
+  pass had already run. They are unambiguously capture residue rather than the
+  operator's own projects, but the harness claims to "LEAVE THE ACCOUNT AS
+  FOUND" and does not.
 
 This reconciliation is now COMPLETE and AUTHORITATIVE: every one of the 69
 goldens above names its registered scenario(s), every registered scenario

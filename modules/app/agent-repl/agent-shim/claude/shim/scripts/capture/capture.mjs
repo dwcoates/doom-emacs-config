@@ -60,7 +60,7 @@ import {
   anonymizePlainText,
 } from "./anonymize.mjs";
 import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
-import { isPromptDriven, planWorlds, promptTurnsOf, worldOf } from "./worlds.mjs";
+import { isPromptDriven, planWorlds, promptTurnsOf, resumeCaptureOf, worldOf } from "./worlds.mjs";
 import {
   AUTH_CONFIG_ROOT,
   AuthRefusedError,
@@ -711,6 +711,105 @@ export function lateReclaimAll(auth, reclaims, log) {
   return reclaims.map((entry) => lateReclaimSlug({ ...entry, log }));
 }
 
+/** Where the committed capture corpus lives, relative to this script. */
+export const CORPUS_DIR = path.join(HERE, "..", "..", "testdata", "captures");
+
+/**
+ * Read a committed capture's own cwd and vendor session id back off disk.
+ *
+ * The cwd is NOT reconstructed from the project slug. The slug flattens both
+ * `/` and `_` to `-`, so inverting it is ambiguous — and a wrong guess does not
+ * fail loudly, it resumes in a directory the vendor has no session for and
+ * silently starts a FRESH one, which is the exact non-event this scenario has
+ * already produced twice. The cwd is read from the transcript, which records it
+ * verbatim on its own lines, and cross-checked against the slug the committed
+ * directory is named for.
+ */
+export function readCapturedSession(corpusDir, captureName) {
+  const projectsDir = path.join(corpusDir, captureName, "files", "projects");
+  if (!existsSync(projectsDir)) {
+    throw new Error(
+      `capture: resume_capture ${captureName} has no files/projects tree at ${projectsDir}`,
+    );
+  }
+  const slugs = readdirSync(projectsDir).filter((entry) =>
+    statSync(path.join(projectsDir, entry)).isDirectory(),
+  );
+  if (slugs.length !== 1) {
+    throw new Error(
+      `capture: resume_capture ${captureName} has ${slugs.length} project slugs; expected exactly 1`,
+    );
+  }
+  const slugDir = path.join(projectsDir, slugs[0]);
+  const transcripts = readdirSync(slugDir).filter((entry) => entry.endsWith(".jsonl"));
+  if (transcripts.length !== 1) {
+    throw new Error(
+      `capture: resume_capture ${captureName} has ${transcripts.length} transcripts; expected exactly 1`,
+    );
+  }
+  const transcriptPath = path.join(slugDir, transcripts[0]);
+  const sessionId = transcripts[0].slice(0, -".jsonl".length);
+  let cwd = null;
+  for (const line of readFileSync(transcriptPath, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof parsed?.cwd === "string" && parsed.cwd !== "") {
+      cwd = parsed.cwd;
+      break;
+    }
+  }
+  if (cwd === null) {
+    throw new Error(
+      `capture: resume_capture ${captureName}'s transcript records no cwd, so the session ` +
+        "cannot be resumed into the directory the vendor slugged it under",
+    );
+  }
+  if (cwdSlug(cwd) !== slugs[0]) {
+    throw new Error(
+      `capture: resume_capture ${captureName}'s recorded cwd ${cwd} slugs to ` +
+        `${cwdSlug(cwd)}, not the committed ${slugs[0]}`,
+    );
+  }
+  return { sessionId, slug: slugs[0], cwd, transcriptPath };
+}
+
+/**
+ * Put a committed capture's transcript where the vendor will find it, and
+ * recreate the cwd it was slugged from, so `resume: <id>` resolves.
+ *
+ * THE ACCOUNT ROOT MUST BE SCRATCH, and this refuses rather than trusts the
+ * caller. `--config-root` names the operator's REAL root (`~/.claude` by
+ * default), which is bind-mounted and shared; seeding a synthetic transcript
+ * into it would leave a session there that nothing cleans up, in a tree a stray
+ * write has damaged before. A resumed-capture scenario therefore runs ONLY
+ * under an account root the harness itself created and throws away — the
+ * `--seed-credentials` mode — and the refusal here is what makes that
+ * structural rather than a note somebody has to remember.
+ */
+export function seedResumableSession(auth, accountRoot, seed) {
+  if (auth.mode === AUTH_CONFIG_ROOT) {
+    throw new Error(
+      `capture: a resume_capture scenario must not seed a transcript into the operator's ` +
+        `real account root (${accountRoot}). Re-run it with --seed-credentials, which gives ` +
+        "the run a throwaway account root of its own.",
+    );
+  }
+  mkdirSync(seed.cwd, { recursive: true });
+  const projectDir = path.join(accountRoot, "projects", seed.slug);
+  const target = path.join(projectDir, `${seed.sessionId}.jsonl`);
+  if (existsSync(target)) {
+    throw new Error(`capture: ${target} already exists; refusing to overwrite it`);
+  }
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(target, readFileSync(seed.transcriptPath, "utf8"), "utf8");
+  return { projectDir, target };
+}
+
 /**
  * Create the scratch world a group of scenarios shares.
  *
@@ -720,12 +819,15 @@ export function lateReclaimAll(auth, reclaims, log) {
  * one, which is why each scenario's project directory is reclaimed and deleted
  * afterwards.
  */
-export function createWorld(auth, label) {
+export function createWorld(auth, label, seedCwd = null) {
   // realpath, not the mkdtemp spelling: the vendor slugs the project directory
   // from the cwd's RESOLVED path (macOS `/var` is `/private/var`), and the
   // reclaim step must compute the same slug or it misses the transcripts.
   const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${label}-`)));
-  const cwd = path.join(scratch, "cwd");
+  // A RESUMED world keeps the ORIGINAL capture's cwd: the vendor slugs its
+  // project directory from the cwd, so resuming from anywhere else looks up a
+  // project holding no such session and quietly starts a fresh one instead.
+  const cwd = seedCwd === null ? path.join(scratch, "cwd") : seedCwd;
   const scratchConfigDir = path.join(scratch, "config");
   const spoolRoot = path.join(scratch, "spool");
   mkdirSync(cwd, { recursive: true });
@@ -885,7 +987,10 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   };
 
   try {
-    openQuery({});
+    // A resumed-capture scenario opens its FIRST query against the old
+    // session: the cold read is what lands with the first prompt, so opening
+    // warm and resuming later would capture the wrong thing entirely.
+    openQuery(world.resumeSessionId ? { resume: world.resumeSessionId } : {});
 
     for (const control of scenario.controls ?? []) {
       if (control.at !== "session_start") continue;
@@ -1104,7 +1209,20 @@ async function main(argv, env) {
     });
     if (runnable.length === 0) continue;
 
-    const world = createWorld(auth, group.world ?? runnable[0].name);
+    // A RESUMED-CAPTURE scenario reopens a session recorded on an earlier run,
+    // days cold. `resumeCaptureOf` forbids pairing it with a shared world, so
+    // such a group is always exactly one scenario.
+    const resumeCapture = resumeCaptureOf(runnable[0]);
+    const seed = resumeCapture === null ? null : readCapturedSession(CORPUS_DIR, resumeCapture);
+    const world = createWorld(auth, group.world ?? runnable[0].name, seed?.cwd ?? null);
+    if (seed !== null) {
+      seedResumableSession(auth, world.configDir, seed);
+      world.resumeSessionId = seed.sessionId;
+      process.stderr.write(
+        `capture.mjs: ${runnable[0].name} resumes ${resumeCapture}'s session ` +
+          `${seed.sessionId} (captured earlier, so its prompt cache has long lapsed)\n`,
+      );
+    }
     if (group.world !== null) {
       process.stderr.write(
         `capture.mjs: world ${group.world} — ${runnable.map((s) => s.name).join(" -> ")}\n`,
