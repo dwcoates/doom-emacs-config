@@ -517,3 +517,336 @@ func TestRunAnswersGitVersionOutsideAnyRepository(t *testing.T) {
 		})
 	}
 }
+
+// subdir registers a tracked subdirectory of the fixture worktree and answers
+// its path, so the probes can be asked from below the top of the tree.
+func subdir(t *testing.T, dir, name string) string {
+	t.Helper()
+	sub := filepath.Join(dir, name)
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	return sub
+}
+
+func TestRevParseAnswersOneShapeFlag(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	tests := []struct {
+		name string
+		flag string
+		want string
+	}{
+		{name: "toplevel", flag: "--show-toplevel", want: Canon(dir) + "\n"},
+		{name: "cdup at the top", flag: "--show-cdup", want: "\n"},
+		{name: "git dir at the top", flag: "--git-dir", want: ".git\n"},
+		{name: "absolute git dir", flag: "--absolute-git-dir", want: repo.CommonDir + "\n"},
+		{name: "common dir", flag: "--git-common-dir", want: repo.CommonDir + "\n"},
+		{name: "inside work tree", flag: "--is-inside-work-tree", want: "true\n"},
+		{name: "bare", flag: "--is-bare-repository", want: "false\n"},
+		{name: "inside git dir", flag: "--is-inside-git-dir", want: "false\n"},
+		{name: "prefix at the top", flag: "--show-prefix", want: "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := Run(s, dir, []string{"rev-parse", tt.flag})
+
+			// Assert.
+			if got.Exit != 0 || got.Stdout != tt.want {
+				t.Fatalf("`rev-parse %s` = %+v, want stdout %q", tt.flag, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRevParseAnswersEveryFlagOfOneCallInOrder(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "--is-inside-work-tree", "--is-bare-repository", "--show-toplevel"})
+
+	// Assert.
+	want := "true\nfalse\n" + Canon(dir) + "\n"
+	if got.Stdout != want {
+		t.Fatalf("the combined probe = %q, want one line per flag in order: %q", got.Stdout, want)
+	}
+}
+
+func TestRevParseAnswersCdupFromASubdirectory(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	sub := subdir(t, dir, filepath.Join("a", "b"))
+
+	// Act.
+	got := Run(s, sub, []string{"rev-parse", "--show-cdup"})
+
+	// Assert.
+	if got.Stdout != "../../\n" {
+		t.Fatalf("`--show-cdup` two levels down = %q, want %q", got.Stdout, "../../\n")
+	}
+}
+
+func TestRevParseAnswersPrefixFromASubdirectory(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+	sub := subdir(t, dir, filepath.Join("a", "b"))
+
+	// Act.
+	got := Run(s, sub, []string{"rev-parse", "--show-prefix"})
+
+	// Assert.
+	if got.Stdout != "a/b/\n" {
+		t.Fatalf("`--show-prefix` = %q, want %q", got.Stdout, "a/b/\n")
+	}
+}
+
+func TestRevParseAnswersAnAbsoluteGitDirBelowTheTop(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	sub := subdir(t, dir, "a")
+
+	// Act.
+	got := Run(s, sub, []string{"rev-parse", "--git-dir"})
+
+	// Assert.
+	if got.Stdout != repo.CommonDir+"\n" {
+		t.Fatalf("`--git-dir` below the top = %q, want the absolute %q", got.Stdout, repo.CommonDir)
+	}
+}
+
+func TestRevParseAnswersALinkedWorktreesOwnGitDir(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	linked := filepath.Join(filepath.Dir(dir), "wt")
+	if got := Run(s, dir, []string{"worktree", "add", "-b", "feature", linked, "main"}); got.Exit != 0 {
+		t.Fatalf("worktree add = %+v", got)
+	}
+
+	// Act.
+	got := Run(s, linked, []string{"rev-parse", "--git-dir"})
+
+	// Assert.
+	want := filepath.Join(repo.CommonDir, "worktrees", "wt") + "\n"
+	if got.Stdout != want {
+		t.Fatalf("a linked worktree's `--git-dir` = %q, want %q", got.Stdout, want)
+	}
+}
+
+func TestRevParseStillResolvesARevision(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"rev-parse", "--verify", "HEAD"})
+
+	// Assert.
+	if got.Stdout != repo.BranchHeads["main"]+"\n" {
+		t.Fatalf("`rev-parse --verify HEAD` = %+v, want the head sha", got)
+	}
+}
+
+func TestSymbolicRefAnswersTheShortBranch(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"symbolic-ref", "--short", "HEAD"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "main\n" {
+		t.Fatalf("`symbolic-ref --short HEAD` = %+v, want main", got)
+	}
+}
+
+func TestSymbolicRefAnswersTheFullBranchRef(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"symbolic-ref", "HEAD"})
+
+	// Assert.
+	if got.Stdout != "refs/heads/main\n" {
+		t.Fatalf("`symbolic-ref HEAD` = %+v, want refs/heads/main", got)
+	}
+}
+
+func TestSymbolicRefRefusesADetachedHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Branch = ""
+
+	// Act.
+	got := Run(s, dir, []string{"symbolic-ref", "--short", "HEAD"})
+
+	// Assert.
+	if got.Exit != 128 || got.Stderr != "fatal: ref HEAD is not a symbolic ref\n" {
+		t.Fatalf("a detached HEAD = %+v, want real git's 128", got)
+	}
+}
+
+func TestSymbolicRefStillAnswersTheOriginHead(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.OriginHead = "refs/remotes/origin/main"
+
+	// Act.
+	got := Run(s, dir, []string{"symbolic-ref", "refs/remotes/origin/HEAD"})
+
+	// Assert.
+	if got.Stdout != "refs/remotes/origin/main\n" {
+		t.Fatalf("the origin head probe = %+v, want it unchanged", got)
+	}
+}
+
+func TestConfigAnswersCoreBare(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"config", "--get", "core.bare"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "false\n" {
+		t.Fatalf("`config --get core.bare` = %+v, want false", got)
+	}
+}
+
+func TestConfigReportsAnUnsetKeyAsRealGitDoes(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"config", "--get", "magit.nosuchkey"})
+
+	// Assert.
+	if got.Exit != 1 || got.Stdout != "" {
+		t.Fatalf("an unset key = %+v, want an empty exit 1", got)
+	}
+}
+
+func TestDescribeReportsNoNamesFound(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"describe", "--tags", "--exact-match", "HEAD"})
+
+	// Assert.
+	if got.Exit != 128 || got.Stderr != "fatal: No names found, cannot describe anything.\n" {
+		t.Fatalf("`describe` with no tags = %+v, want real git's fatal", got)
+	}
+}
+
+func TestLsFilesListsTheTrackedPathsNulTerminated(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Files = []string{"README.md", "src/main.go"}
+
+	// Act.
+	got := Run(s, dir, []string{"ls-files", "-zco", "--exclude-standard"})
+
+	// Assert.
+	if got.Stdout != "README.md\x00src/main.go\x00" {
+		t.Fatalf("projectile's listing = %q, want NUL-terminated tracked paths", got.Stdout)
+	}
+}
+
+func TestLsFilesTerminatesWithNewlinesWithoutTheZFlag(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Files = []string{"README.md", "src/main.go"}
+
+	// Act.
+	got := Run(s, dir, []string{"ls-files"})
+
+	// Assert.
+	if got.Stdout != "README.md\nsrc/main.go\n" {
+		t.Fatalf("`ls-files` = %q, want newline-terminated paths", got.Stdout)
+	}
+}
+
+func TestLsFilesAnswersRelativeToTheDirectoryItRanIn(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Files = []string{"README.md", "src/main.go"}
+	sub := subdir(t, dir, "src")
+
+	// Act.
+	got := Run(s, sub, []string{"ls-files", "-z"})
+
+	// Assert.
+	if got.Stdout != "main.go\x00" {
+		t.Fatalf("`ls-files` in a subdirectory = %q, want the path relative to it", got.Stdout)
+	}
+}
+
+func TestLsFilesAnswersNothingForAWorktreeWithNoFixedPaths(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"ls-files", "-z"})
+
+	// Assert.
+	if got.Exit != 0 || got.Stdout != "" {
+		t.Fatalf("an unpopulated worktree = %+v, want an empty success", got)
+	}
+}
+
+func TestStatusTerminatesEntriesWithNulUnderTheZFlag(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	got := Run(s, dir, []string{"status", "--porcelain", "-z"})
+
+	// Assert.
+	if got.Stdout != " M dirty.txt\x00" {
+		t.Fatalf("`status --porcelain -z` = %q, want a NUL terminator", got.Stdout)
+	}
+}
+
+func TestStatusPrependsTheBranchHeader(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	got := Run(s, dir, []string{"status", "--porcelain", "--branch"})
+
+	// Assert.
+	if got.Stdout != "## main\n" {
+		t.Fatalf("`status --porcelain --branch` = %q, want the branch header", got.Stdout)
+	}
+}
+
+func TestStatusHeadsADetachedTreeAsRealGitDoes(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Branch = ""
+
+	// Act.
+	got := Run(s, dir, []string{"status", "--porcelain", "--branch"})
+
+	// Assert.
+	if got.Stdout != "## HEAD (no branch)\n" {
+		t.Fatalf("a detached tree's header = %q, want real git's shape", got.Stdout)
+	}
+}
+
+func TestStatusListsUntrackedFilesUnderUall(t *testing.T) {
+	// Arrange.
+	s, repo, dir := world(t)
+	repo.Worktrees[0].Dirty = true
+
+	// Act.
+	got := Run(s, dir, []string{"status", "--porcelain", "-uall"})
+
+	// Assert.
+	if got.Stdout != " M dirty.txt\n" {
+		t.Fatalf("`status --porcelain -uall` = %q, want the scripted dirty entry", got.Stdout)
+	}
+}

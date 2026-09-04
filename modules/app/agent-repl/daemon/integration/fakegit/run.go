@@ -55,7 +55,7 @@ func Run(s *State, cwd string, args []string) Result {
 
 	switch subject[0] {
 	case "symbolic-ref":
-		return symbolicRef(repo, subject)
+		return symbolicRef(repo, wt, subject)
 	case "config":
 		return config(repo, subject)
 	case "show-ref":
@@ -76,6 +76,10 @@ func Run(s *State, cwd string, args []string) Result {
 		return diff(s, repo, wt, subject)
 	case "status":
 		return status(wt, subject)
+	case "ls-files":
+		return lsFiles(wt, dir, subject)
+	case "describe":
+		return describe()
 	case "rev-list":
 		return revList(s, repo, subject)
 	case "show":
@@ -114,7 +118,17 @@ func hasPrefix(args, match []string) bool {
 	return true
 }
 
-func symbolicRef(repo *Repo, subject []string) Result {
+func symbolicRef(repo *Repo, wt *Worktree, subject []string) Result {
+	// `symbolic-ref [--short] HEAD` is vc-git's branch probe.
+	if subject[len(subject)-1] == "HEAD" {
+		if wt == nil || wt.Branch == "" {
+			return Result{Stderr: "fatal: ref HEAD is not a symbolic ref\n", Exit: 128}
+		}
+		if contains(subject, "--short") {
+			return Result{Stdout: wt.Branch + "\n"}
+		}
+		return Result{Stdout: "refs/heads/" + wt.Branch + "\n"}
+	}
 	if repo.OriginHead == "" {
 		return Result{Stderr: "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref\n", Exit: 128}
 	}
@@ -128,6 +142,11 @@ func config(repo *Repo, subject []string) Result {
 		}
 		return Result{Stdout: repo.DefaultBranch + "\n"}
 	}
+	// magit reads core.bare at startup; every other key is unset, which real
+	// git reports as an empty exit 1.
+	if len(subject) >= 3 && subject[1] == "--get" && subject[2] == "core.bare" {
+		return Result{Stdout: "false\n"}
+	}
 	return Result{Exit: 1}
 }
 
@@ -140,7 +159,99 @@ func showRef(repo *Repo, subject []string) Result {
 	return Result{Exit: 1}
 }
 
+// revParseInfo answers one of the repository-shape flags Emacs's magit and
+// vc-git probe on the first project switch. A nil answer means the flag is not
+// one of them.
+func revParseInfo(repo *Repo, wt *Worktree, dir string, flag string) (string, bool) {
+	switch flag {
+	case "--show-toplevel":
+		return Canon(wt.Dir), true
+	case "--show-cdup":
+		return cdup(wt.Dir, dir), true
+	case "--git-dir":
+		// Real git prints the bare `.git` only from the top of the main
+		// worktree; anywhere else it prints the absolute path.
+		if isMainWorktree(repo, wt) && Canon(dir) == Canon(wt.Dir) {
+			return ".git", true
+		}
+		return gitDir(repo, wt), true
+	case "--absolute-git-dir":
+		return gitDir(repo, wt), true
+	case "--git-common-dir":
+		return repo.CommonDir, true
+	case "--is-inside-work-tree":
+		return "true", true
+	case "--is-bare-repository":
+		return "false", true
+	case "--is-inside-git-dir":
+		return "false", true
+	case "--show-prefix":
+		return prefix(wt.Dir, dir), true
+	}
+	return "", false
+}
+
+// isMainWorktree reports whether wt is the repository's main worktree, which
+// git registers first.
+func isMainWorktree(repo *Repo, wt *Worktree) bool {
+	return len(repo.Worktrees) > 0 && repo.Worktrees[0] == wt
+}
+
+// gitDir is the absolute git directory of one worktree: the common dir for the
+// main worktree, and the per-worktree subdirectory under it for a linked one,
+// exactly as real git reports them.
+func gitDir(repo *Repo, wt *Worktree) string {
+	if isMainWorktree(repo, wt) {
+		return repo.CommonDir
+	}
+	return filepath.Join(repo.CommonDir, "worktrees", filepath.Base(Canon(wt.Dir)))
+}
+
+// cdup is `--show-cdup`: the relative path back up to the top of the worktree,
+// with a trailing separator, and empty at the top.
+func cdup(top, dir string) string {
+	depth := len(splitPrefix(top, dir))
+	return strings.Repeat("../", depth)
+}
+
+// prefix is `--show-prefix`: the path from the top of the worktree down to the
+// directory, with a trailing separator, and empty at the top.
+func prefix(top, dir string) string {
+	parts := splitPrefix(top, dir)
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "/") + "/"
+}
+
+// splitPrefix is the path segments between the top of a worktree and a
+// directory inside it.
+func splitPrefix(top, dir string) []string {
+	rel, err := filepath.Rel(Canon(top), Canon(dir))
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return nil
+	}
+	return strings.Split(filepath.ToSlash(rel), "/")
+}
+
 func revParse(repo *Repo, wt *Worktree, dir string, subject []string) Result {
+	// magit passes several shape flags in ONE call and reads one line per
+	// flag, in the order it passed them.
+	if wt != nil {
+		var b strings.Builder
+		answered := false
+		for _, flag := range subject[1:] {
+			line, ok := revParseInfo(repo, wt, dir, flag)
+			if !ok {
+				continue
+			}
+			answered = true
+			b.WriteString(line + "\n")
+		}
+		if answered {
+			return Result{Stdout: b.String()}
+		}
+	}
 	switch {
 	case contains(subject, "--git-common-dir"):
 		return Result{Stdout: repo.CommonDir + "\n"}
@@ -466,17 +577,74 @@ func status(wt *Worktree, subject []string) Result {
 	if wt == nil {
 		return Result{Stderr: "fatal: not a working tree\n", Exit: 128}
 	}
-	if wt.Dirty {
-		return Result{Stdout: " M dirty.txt\n"}
-	}
-	if len(wt.Conflicted) > 0 {
-		out := ""
-		for _, p := range wt.Conflicted {
-			out += "UU " + p + "\n"
+	var entries []string
+	// `--branch` prepends the branch header, which vc-git reads.
+	if contains(subject, "--branch") || contains(subject, "-b") {
+		head := "HEAD (no branch)"
+		if wt.Branch != "" {
+			head = wt.Branch
 		}
-		return Result{Stdout: out}
+		entries = append(entries, "## "+head)
 	}
-	return Result{}
+	switch {
+	case wt.Dirty:
+		entries = append(entries, " M dirty.txt")
+	case len(wt.Conflicted) > 0:
+		for _, p := range wt.Conflicted {
+			entries = append(entries, "UU "+p)
+		}
+	}
+	if len(entries) == 0 {
+		return Result{}
+	}
+	// `-z` terminates each entry with NUL instead of newline.
+	sep := "\n"
+	if contains(subject, "-z") {
+		sep = "\x00"
+	}
+	return Result{Stdout: strings.Join(entries, sep) + sep}
+}
+
+// lsFiles answers the tracked paths of a worktree, relative to the directory
+// the command ran in, which is what projectile and magit list a project with.
+// `-o` adds untracked paths and the fixture models none.
+func lsFiles(wt *Worktree, dir string, subject []string) Result {
+	if wt == nil {
+		return Result{Stderr: "fatal: not a working tree\n", Exit: 128}
+	}
+	under := prefix(wt.Dir, dir)
+	var kept []string
+	for _, f := range wt.Files {
+		if !strings.HasPrefix(f, under) {
+			continue
+		}
+		kept = append(kept, strings.TrimPrefix(f, under))
+	}
+	if len(kept) == 0 {
+		return Result{}
+	}
+	sep := "\n"
+	if hasZFlag(subject) {
+		sep = "\x00"
+	}
+	return Result{Stdout: strings.Join(kept, sep) + sep}
+}
+
+// hasZFlag reports whether NUL termination was asked for, including inside a
+// bundled short-flag cluster such as `-zco`.
+func hasZFlag(subject []string) bool {
+	for _, a := range subject {
+		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "z") {
+			return true
+		}
+	}
+	return false
+}
+
+// describe answers what real git answers in a repository with no tags, which is
+// how magit and vc-git learn there is no description to show.
+func describe() Result {
+	return Result{Stderr: "fatal: No names found, cannot describe anything.\n", Exit: 128}
 }
 
 func revList(s *State, repo *Repo, subject []string) Result {
