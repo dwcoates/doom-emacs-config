@@ -142,14 +142,14 @@ func TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity(t *testing.T) 
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
 
 	// Assert: the run is READABLE under the spawning call's identity...
-	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID, bashRowsOnTheWire(fake.Entries(), fx.CallID))
 	if !ok || len(rows) == 0 {
 		t.Fatalf("no bash row was readable for run %q; runs seen: %v",
 			fx.CallID, runsSeen(fake.Entries()))
 	}
 	// ...and under nothing else. The vendor task id must never reach the run's
 	// identity space: a row keyed by it can be joined to no call in the book.
-	if _, found := watchBashRun(ctx, t, storeClient(fake.Socket), fx.TaskID); found {
+	if _, found := watchBashRun(ctx, t, storeClient(fake.Socket), fx.TaskID, 0); found {
 		t.Fatalf("the run was also readable under the vendor task id %q", fx.TaskID)
 	}
 }
@@ -182,7 +182,7 @@ func TestBashDeltasCarryContiguousOffsets(t *testing.T) {
 
 	// Assert: read the run back and walk its deltas in the order the store
 	// replays them, which is the order a consumer accumulates them in.
-	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID, bashRowsOnTheWire(fake.Entries(), fx.CallID))
 	if !ok {
 		t.Fatalf("the run %q was not readable at all; runs seen: %v", fx.CallID, runsSeen(fake.Entries()))
 	}
@@ -227,7 +227,7 @@ func TestEachSpoolDeltaIsItsOwnRowSoNoneErasesAnother(t *testing.T) {
 	}
 
 	// Assert.
-	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID)
+	rows, ok := watchBashRun(ctx, t, storeClient(fake.Socket), fx.CallID, bashRowsOnTheWire(fake.Entries(), fx.CallID))
 	if !ok {
 		t.Fatalf("the run %q was not readable at all", fx.CallID)
 	}
@@ -257,7 +257,7 @@ func TestAnUnknownRunIsARefusedOpen(t *testing.T) {
 	fake := startFakeStore(t)
 
 	// Act.
-	_, ok := watchBashRun(ctx, t, storeClient(fake.Socket), "toolu_no_such_run")
+	_, ok := watchBashRun(ctx, t, storeClient(fake.Socket), "toolu_no_such_run", 0)
 
 	// Assert.
 	if ok {
@@ -516,6 +516,23 @@ func exitCodeOf(t *testing.T, spool []byte) int {
 }
 
 // runsSeen lists every detached run the sidecar named, for a failure message.
+// bashRowsOnTheWire counts the bash rows a producer WROTE for one run.
+//
+// It is what a subject hands watchBashRun as the number of rows to expect back,
+// and the handing over is itself a cross-check: the wire and the store's read
+// verb have to agree about how many rows a run has, and a read that stopped
+// short of the count would fail on the deadline rather than quietly return a
+// prefix.
+func bashRowsOnTheWire(entries []*storev1.StoreEntry, run string) int {
+	var n int
+	for _, b := range bashFramesOf(entries) {
+		if b.GetRun().GetValue() == run {
+			n++
+		}
+	}
+	return n
+}
+
 func runsSeen(entries []*storev1.StoreEntry) []string {
 	var out []string
 	for _, b := range bashFramesOf(entries) {
