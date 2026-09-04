@@ -204,6 +204,36 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     SHIM_BUILD_SHA: ITEST_BUILD_SHA,
     AGENT_REPL_SESSION_ID: `host-itest-${++spawnCounter}`,
     AGENT_REPL_FORBID_VENDOR_CALLS: "1",
+    // THE TWO PRODUCTION WINDOWS, SCALED — not weakened. Both are `--fake`-only
+    // overrides the shim refuses for a real session (`src/main.ts`), so the
+    // production defaults are untouched; what changes is only how long a test
+    // that legitimately SPENDS one of them sits idle.
+    //
+    // The quiet-drain budget is a LAST RESORT bound. The forced-kill scenarios
+    // leave a stream deliberately un-concluded, so they spend the whole thing;
+    // at the production 5,000ms that made them the two slowest tests in the
+    // suite. What they assert is that the exit WAITS for the wire and then ends
+    // anyway, which a 500ms budget proves exactly as well — and every other
+    // test's exit settles on its responses' own close events in microseconds
+    // and never reaches this bound at all.
+    AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS: "500",
+    // The teardown's per-tail conclusion budget, the window the forced-kill
+    // scenarios actually spend: they leave a tail whose consumer stopped
+    // pulling, so the teardown waits out the whole thing. What those tests
+    // assert is the ORDERING — the tail's terminal reaches the consumer before
+    // the process goes — which 500ms establishes exactly as well as 5,000ms.
+    AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS: "500",
+    // The retry schedule keeps its SHAPE — four rising delays, five attempts,
+    // a 256-deep buffer — and only shrinks the waiting, 10x down from the
+    // production [50, 200, 800, 3000]. What the outage scenarios assert is the
+    // attempt count, the bounded buffer, the loud exhaustion and the preserved
+    // order, none of which is a function of the idle time between attempts;
+    // `maxAttempts` and `bufferCapacity` are not reachable from the environment
+    // at all, precisely so this cannot become a way to weaken them. The
+    // 405ms total still leaves the transient-outage test, which restores the
+    // store within one event-loop turn of an awaited rpc, orders of magnitude
+    // of margin before a batch could exhaust.
+    AGENT_REPL_FAKE_STORE_BACKOFF_MS: "5,20,80,300",
   };
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) delete env[key];
