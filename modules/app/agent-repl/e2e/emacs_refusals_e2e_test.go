@@ -44,6 +44,7 @@ func emRFCatch(t *testing.T, e *Emacs, form string) string {
 // that cleared the composer on a failure would destroy the only copy of what
 // the user wrote.
 func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered workspace, then no daemon. Emacs asks the daemon
 	// to exit — it never kills one — and the link drops at the transport.
 	w, e := emGHIWorld(t)
@@ -92,6 +93,7 @@ func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
 // this scenario as one of the two rendered-string assertions in the layer,
 // because the message IS the contract.
 func TestEmacsNoWorkspacesRegisteredRefusesThePicker(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon, and NO workspace registered against it. This is a
 	// fresh Emacs, so the registry is empty by construction rather than by
 	// something the test cleared.
@@ -137,6 +139,7 @@ const emGHIWorkspaceCountForm = `(let ((n 0))
 // of the single call, the standard ERT way, so the command still runs its
 // own confirmation code path rather than being reached past.
 func TestEmacsNukeConfirmsBeforeDestroying(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, e := emGHIWorld(t)
 	ws, dir := emGHIRegister(t, e, w.Emacs.box, "repo-nuke-declined")
