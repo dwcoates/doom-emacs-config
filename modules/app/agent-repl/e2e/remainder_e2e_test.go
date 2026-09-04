@@ -824,22 +824,22 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	if got, want := rmAgentPromptText(t, queuedRow), "check the branch"; got != want {
 		t.Errorf("outgoing send body = %q, want the caller's summary %q", got, want)
 	}
+	// The delivery arm (landing 10): the recipient was already live, so the
+	// message queued for it and nothing was started.
+	if queuedRow.GetQueuedToLive() == nil {
+		t.Errorf("queued send delivery = %T, want the queued_to_live arm", queuedRow.GetDelivery())
+	}
 
 	// Act + Assert: resumed (idle agent, resumed from transcript). The
 	// recipient id is MINTED by the fake (ctx.mintAgentTaskId()), so the
 	// address is pinned by its composed shape rather than a literal, while the
 	// summary — the half the contract says a surface draws — is exact.
 	//
-	// DISPUTE: the RESUMPTION itself has no drawn shape.
-	// conversation/v1/agent_activity.proto:2583-2593 says the two deliveries
-	// "differ in a way a reader cares about: one costs nothing beyond the
-	// message, the other RESTARTED A DORMANT AGENT, which begins consuming
-	// tokens again" and gives it its own arm
-	// (AgentSendMessageResumedRecipient), but frontend/v1's FeedAgentPrompt
-	// carries only an address and a body, and sendmessage.go reads only
-	// Success.recipient_agent_id — so the resumed delivery is indistinguishable
-	// from the queued one on every frontend surface. Asserted as far as the
-	// frontend proto allows, and reported.
+	// The RESUMPTION has its own drawn shape as of landing 10:
+	// FeedAgentPrompt.resumed_recipient mirrors
+	// AgentSendMessageResumedRecipient, so a reader can tell the delivery that
+	// "RESTARTED A DORMANT AGENT, which begins consuming tokens again" from the
+	// one that cost nothing beyond the message.
 	resumedTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "send-message-resumed")
 	if ended := AwaitTurnEnded(t, w, ws, resumedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the send-message-resumed turn ended = %v, want a concluded outcome", ended)
@@ -856,6 +856,9 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	}
 	if got, want := rmAgentPromptText(t, resumedRow), "resume the sweep"; got != want {
 		t.Errorf("resumed send body = %q, want the caller's summary %q", got, want)
+	}
+	if resumedRow.GetResumedRecipient() == nil {
+		t.Errorf("resumed send delivery = %T, want the resumed_recipient arm", resumedRow.GetDelivery())
 	}
 }
 
@@ -1125,6 +1128,12 @@ func TestSendMessageRefused(t *testing.T) {
 	}
 	if len(bodies) != 1 || bodies[0] != "continue" {
 		t.Errorf("refused send body blocks = %q, want exactly the caller's summary [%q]", bodies, "continue")
+	}
+
+	// Assert: NOTHING was delivered, so the delivery oneof stays unset — the
+	// arm states how a send landed, never that one was attempted.
+	if prompt.GetDelivery() != nil {
+		t.Errorf("refused send delivery = %T, want unset", prompt.GetDelivery())
 	}
 
 	// Assert: the refusal is the VENDOR's, not the turn's — a tool that
