@@ -1194,8 +1194,8 @@ workspace beside it can."
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore)
-                        ((symbol-function 'agent-repl--frontend-session-view)
-                         (lambda (_) '(:claudeSessionId "claude-session-1"))))
+                        ((symbol-function 'agent-repl-host--live)
+                         (lambda (_) '(:vendor-info (:arm :claude :value (:session-id "claude-session-1"))))))
                 (agent-repl--log ws "identity test")))
             (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
@@ -1259,8 +1259,8 @@ workspace beside it can."
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
-              (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                         (lambda (_) '(:claudeSessionId 99))))
+              (cl-letf (((symbol-function 'agent-repl-host--live)
+                         (lambda (_) '(:vendor-info (:arm :claude :value (:session-id 99))))))
                 (should-error (agent-repl--log ws "invalid claude identity"))))
             (should-not (agent-repl--workspace-log-target-entry ws)))
         (delete-directory project t)))))
@@ -2078,31 +2078,32 @@ ownership intact across that transition."
 ;; handed it back as a resume pointer, which made Emacs a second authority on
 ;; which conversation a workspace owns.
 
-(ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-view ()
-  "ws-observed-claude-session-id reads the daemon-pushed SessionView."
+(ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-host-frame ()
+  "ws-observed-claude-session-id reads the pushed HostWorkspace's vendor arm."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (key) (when (equal key "/w") '(:claudeSessionId "cli-uuid-1")))))
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (ws) (when (equal ws "ws1")
+                              '(:vendor-info (:arm :claude :value (:session-id "cli-uuid-1")))))))
       (should (equal (agent-repl--ws-observed-claude-session-id "ws1") "cli-uuid-1")))))
 
 (ert-deftest agent-repl-test-observed-session-id-ignores-the-in-memory-instantiation ()
   "An instantiation carrying a uuid is NOT a source for attribution.
 Reading it back would be the persisted-pointer path returning by another
-name; the daemon-pushed view is the only source."
+name; the daemon-pushed host frame is the only source."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :active-env :bare-metal)
     (agent-repl--ws-put "ws1" :bare-metal
                         (make-agent-repl-instantiation :session-id "stale-uuid"))
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+    (cl-letf (((symbol-function 'agent-repl-host--live)
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-observed-session-id-nil-without-a-bound-session ()
-  "A workspace with no daemon session has nothing to attribute to."
+(ert-deftest agent-repl-test-observed-session-id-nil-while-no-vendor-conversation-exists ()
+  "The vendor oneof is legally UNSET until a conversation exists."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (_) '(:claudeSessionId "cli-uuid-1"))))
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (_) '(:vendor-info nil))))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
 (ert-deftest agent-repl-test-observed-session-id-nil-before-the-first-push ()
@@ -2110,8 +2111,15 @@ name; the daemon-pushed view is the only source."
 An unattributed log record is accepted by the daemon; a misattributed one is
 what gets rejected, so guessing would be strictly worse than saying nothing."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+    (cl-letf (((symbol-function 'agent-repl-host--live)
                (lambda (_) nil)))
+      (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
+
+(ert-deftest agent-repl-test-observed-session-id-nil-for-an-empty-vendor-id ()
+  "An empty vendor id is the vendor naming nothing, not an identity."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (_) '(:vendor-info (:arm :claude :value (:session-id ""))))))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
 ;;;; ---- Tests: buffer-name edge cases ----

@@ -2487,30 +2487,40 @@ expected to only invoke this from contexts where a workspace is active."
 ;; Treat these as part of the encapsulation boundary (they live
 ;; immediately upstream of the wrapper API rather than downstream).
 
-(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (workspace))
+(declare-function agent-repl-host--live "host" (ws))
 
 (defun agent-repl--ws-observed-claude-session-id (ws)
   "Return the vendor conversation uuid WS's session is CURRENTLY on, or nil.
 
-FOR OBSERVABILITY ONLY, and read straight off the daemon-pushed
-`SessionView' store rather than from anything Emacs remembers.  Emacs holds
+FOR OBSERVABILITY ONLY, and read straight off the last `HostWorkspace'
+the daemon pushed rather than from anything Emacs remembers.  Emacs holds
 no durable copy of this value and must never acquire one: a persisted
 vendor uuid made Emacs a second authority on which conversation a workspace
 owns, and when its copy went stale five workspaces opened fresh
-conversations over intact transcripts.  The daemon owns that question now
-\(see `agent-repl--frontend-create-session' and its RESUME-MODE).
+conversations over intact transcripts.  The daemon owns that question now.
 
-Nil is a normal answer — before the first pushed frame, or for an unbound
-workspace.  An unattributed log record is ACCEPTED by the daemon; a
+The value is `HostSessionLive.claude.session_id', which the host stream
+already decodes and `host.el' already stores; it is UNSET while no vendor
+conversation exists yet, which the oneof allows on exactly this message.
+
+Nil is a normal answer — before the first pushed frame, for a workspace
+whose session is not live, and for one whose vendor conversation has not
+started.  An unattributed log record is ACCEPTED by the daemon; a
 misattributed one is what gets rejected, so guessing here would be strictly
 worse than saying nothing.
 
 Never enters the logger: JSON record construction calls this while the
 logging stack is already active, and instrumenting it would recursively
 construct another workspace record."
-  (when (fboundp 'agent-repl--frontend-session-view)
-    (when-let ((workspace (agent-repl--ws-get ws :project-dir)))
-      (plist-get (agent-repl--frontend-session-view workspace) :claudeSessionId))))
+  (when (fboundp 'agent-repl-host--live)
+    (let ((vendor (plist-get (agent-repl-host--live ws) :vendor-info)))
+      (when (eq (plist-get vendor :arm) :claude)
+        (let ((id (plist-get (plist-get vendor :value) :session-id)))
+          ;; An EMPTY id is the vendor naming nothing, so it is answered as the
+          ;; "not yet" it is.  Anything else is handed on unexamined: a
+          ;; malformed identity is the record builder's invariant violation to
+          ;; raise, and screening it here would hide it.
+          (if (equal id "") nil id))))))
 
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.
