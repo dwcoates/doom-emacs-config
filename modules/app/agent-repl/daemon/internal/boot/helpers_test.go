@@ -3,6 +3,7 @@ package boot
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/wsm"
 )
@@ -154,6 +156,11 @@ type harness struct {
 	probes map[string]sessionlock.State
 	// probeErrs is the scripted probe error per workspace directory.
 	probeErrs map[string]error
+	// socketProbes is the scripted listener state per socket path. An unset
+	// path answers ABSENT, which is the ordinary "nothing ever bound here".
+	socketProbes map[string]shimsocket.State
+	// socketProbeErrs is the scripted socket-probe error per socket path.
+	socketProbeErrs map[string]error
 }
 
 // newHarness builds a boot sequence over a REAL WSM store in the test's temp
@@ -164,7 +171,16 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 
 	log := dlog.NewTestSurfaces()
-	root := t.TempDir()
+	// A SHORT state root, not t.TempDir(): the layout's shim socket paths live
+	// under it, t.TempDir() embeds the test's name, and an AF_UNIX path over
+	// the kernel's 104-byte sun_path limit cannot be bound or dialed at all —
+	// which would make a socket probe answer "undetermined" for a reason that
+	// has nothing to do with the behavior under test.
+	root, err := os.MkdirTemp("", "boot")
+	if err != nil {
+		t.Fatalf("temp state root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	db, err := wsm.Open(context.Background(), filepath.Join(root, "wsm.db"), wsm.WithLogger(log.Global()))
 	if err != nil {
 		t.Fatalf("wsm.Open: %v", err)
@@ -185,6 +201,9 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 		log:        log,
 		probes:     map[string]sessionlock.State{},
 		probeErrs:  map[string]error{},
+
+		socketProbes:    map[string]shimsocket.State{},
+		socketProbeErrs: map[string]error{},
 	}
 	h.deps = Deps{
 		Layout:     layout,
@@ -201,6 +220,16 @@ func newHarness(t *testing.T, adjust ...func(*Deps, *harness)) *harness {
 			state, ok := h.probes[dir]
 			if !ok {
 				return sessionlock.StateFree, nil
+			}
+			return state, nil
+		},
+		SocketProbe: func(path string) (shimsocket.State, error) {
+			if err, ok := h.socketProbeErrs[path]; ok {
+				return shimsocket.StateUndetermined, err
+			}
+			state, ok := h.socketProbes[path]
+			if !ok {
+				return shimsocket.StateAbsent, nil
 			}
 			return state, nil
 		},

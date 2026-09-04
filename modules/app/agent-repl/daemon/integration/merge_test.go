@@ -1031,6 +1031,14 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
 	// The sweep covers every test; the declared records are evidence of the unfinished merge a restart leaves.
 	d.ExpectWarnings("daemon.merge.recover")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design. The successor appends to the SAME run log, so this daemon's
+	// own log assertion reads the record too.
+	d.ExpectWarnings("daemon.rollout.reconcile")
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
@@ -1051,6 +1059,13 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir})
 	// The sweep covers every test; the declared records are evidence of the unfinished merge a restart leaves.
 	d2.ExpectWarnings("daemon.merge.recover")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design.
+	d2.ExpectWarnings("daemon.rollout.reconcile")
 	d2.AwaitRunLogOperation("daemon.merge.recover")
 
 	// Assert: the workspace's merge status is a resolved merge arm, never an

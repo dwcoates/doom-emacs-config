@@ -31,6 +31,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/stateroot"
 	"claude-repld/internal/wsm"
 )
@@ -97,6 +98,12 @@ type Deps struct {
 	// injected so a test drives the adopt-versus-orphan decision without a
 	// real flock; nil means the production probe.
 	Probe ProbeFunc
+	// SocketProbe answers whether a shim is listening on a workspace's socket
+	// path. It is a SECOND kernel fact beside the lock, because the lock says
+	// a conversation is owned and only the socket says the owner is
+	// reachable; injected so a test drives the decision without a real
+	// listener, nil means the production probe.
+	SocketProbe SocketProbeFunc
 	// Adopted installs a client adopted from a surviving shim, so the session
 	// fleet serves the workspace through the process that is already running.
 	// It is a FUNCTION because the fleet sits beside boot rather than beneath
@@ -114,6 +121,9 @@ type Deps struct {
 // directory and the worktree. It takes the two inputs rather than a path so
 // the whole derive-and-probe step is one injection point.
 type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
+
+// SocketProbeFunc probes ONE workspace's shim socket path for a listener.
+type SocketProbeFunc func(socketPath string) (shimsocket.State, error)
 
 // AdoptFunc installs a client adopted from a surviving shim.
 type AdoptFunc func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client) error
@@ -133,6 +143,14 @@ func probeWorkspaceLock(log dlog.Logger) ProbeFunc {
 			return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
 		}
 		return sessionlock.ProbeWithLog(log, path)
+	}
+}
+
+// probeShimSocket builds the production socket probe over log.
+func probeShimSocket(log dlog.Logger) SocketProbeFunc {
+	log = log.With(dlog.Context{"component": "daemon.boot.probe_shim_socket"})
+	return func(socketPath string) (shimsocket.State, error) {
+		return shimsocket.ProbeWithLog(log, socketPath)
 	}
 }
 
@@ -162,9 +180,13 @@ func New(deps Deps) (Sequence, error) {
 	if probe == nil {
 		probe = probeWorkspaceLock(deps.Log.Global())
 	}
+	socketProbe := deps.SocketProbe
+	if socketProbe == nil {
+		socketProbe = probeShimSocket(deps.Log.Global())
+	}
 	now := deps.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &sequence{deps: deps, probe: probe, now: now}, nil
+	return &sequence{deps: deps, probe: probe, socketProbe: socketProbe, now: now}, nil
 }

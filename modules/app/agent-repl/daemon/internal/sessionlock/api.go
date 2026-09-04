@@ -89,7 +89,7 @@ func WorkspaceLockPath(runDir, workspaceDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("sessionlock: absolute workspace dir %q: %w", workspaceDir, err)
 	}
-	sum := md5.Sum([]byte(filepath.Clean(abs)))
+	sum := md5.Sum([]byte(resolveForKey(abs)))
 	return filepath.Join(dir, "workspace-"+hex.EncodeToString(sum[:])[:8]+".lock"), nil
 }
 
@@ -165,6 +165,38 @@ func ProbeWithLog(log dlog.Logger, lockPath string) (State, error) {
 	}
 	log.Debug("daemon.sessionlock.probe", "workspace lock probed", ctx)
 	return state, nil
+}
+
+// resolveForKey is the workspace key's canonical spelling: the absolute path
+// with every symlink resolved.
+//
+// IT MUST AGREE WITH THE SHIM'S, and the shim's is not a choice. The daemon
+// chdirs the shim into the worktree and the shim keys its lock off
+// `process.cwd()` — the KERNEL's answer, which is always fully resolved. So a
+// daemon that hashed the path as WSM spelled it disagreed with the shim on
+// every workspace reached through a symlink, which on macOS is every path
+// under /var/folders (a symlink to /private/var/folders): the shim held
+// `workspace-<hash of /private/var/...>.lock` and the daemon probed
+// `workspace-<hash of /var/...>.lock`, found it free, and spawned a second
+// shim onto a conversation a live one was serving.
+//
+// The LONGEST EXISTING PREFIX is resolved rather than the whole path, so a
+// worktree that has since been deleted still hashes to the same key its
+// running shim locked under. A path with nothing resolvable keeps its cleaned
+// spelling, which is what filepath.Clean already gave.
+func resolveForKey(abs string) string {
+	rest := ""
+	for dir := filepath.Clean(abs); ; {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Clean(abs)
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
 }
 
 // resolveRunDir answers the caller's run directory, or the resolved default
