@@ -5603,3 +5603,9 @@ body.draining #composer-input::placeholder {
   font-style: italic;
   opacity: 0.85;
 }
+
+/* ---- query-died cause (src/feed/rows/turn-ended.ts) ---- */
+.turn-ended-query-cause {
+  font-size: 0.85em;
+  opacity: 0.75;
+}
