@@ -349,20 +349,15 @@ func TestIdeDiagnosticsAfterEdit(t *testing.T) {
 // arithmetic and without a second request." The fixture returns 2 of the
 // file's 4 lines, so the composed line is pinned exactly.
 //
-// DISPUTE, recorded rather than absorbed: the scenario DECLARES the arm
-// "AgentReadSuccess.cut=token_cap", and it does not produce it. The shim's
-// converter reaches AgentReadCutAtTokenCap only when the vendor's
-// toolUseResult sets `truncatedByTokenCap` (convert/tools/read.ts
-// textExtent), and READ_TRUNCATED's fixture never sets it — a short read
-// with no offset and no limit asked falls to the line-cap head instead. The
-// vendor's own `read_truncation_notice` attachment the scenario also emits
-// has no converter at all (nothing in the shim's src/ reads that type), so
-// it is unconverted residue and cannot supply the cut either. NOTHING IS
-// ASSERTED ABOUT THE CUT ARM HERE because the two cuts are in any case
-// indistinguishable downstream: FeedToolCallCodeOutput carries the composed
-// omitted line and no cut arm of its own, so even a token-capped read draws
-// exactly what this test asserts. The gap is the fixture's, and closing it
-// is the mock owner's call.
+// THE CUT ARM, resolved: the scenario declares "AgentReadSuccess.cut=
+// token_cap", and the shim's converter reaches AgentReadCutAtTokenCap only
+// when the vendor's toolUseResult sets `truncatedByTokenCap`
+// (convert/tools/read.ts textExtent). The fixture now sets it, so the
+// declared arm is the one produced. NOTHING IS ASSERTED ABOUT THE CUT HERE
+// because the two cuts are indistinguishable downstream:
+// FeedToolCallCodeOutput carries the composed omitted line and no cut arm of
+// its own, so a token-capped read draws exactly what this test asserts. The
+// cut itself is pinned at the converter (shim test/convert/tools/read.ts).
 func TestReadTruncatedStatesTheCut(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -387,28 +382,28 @@ func TestReadTruncatedStatesTheCut(t *testing.T) {
 	}
 }
 
-// TestReadImageProducesNoSuccessFrame drives the `read-image` fake scenario
+// TestReadImageSettlesWithNoOutput drives the `read-image` fake scenario
 // (files.ts READ_IMAGE: a Read of a png answered with an image content block
 // and an image `toolUseResult` carrying dimensions).
 //
-// THE CONTRACT SAYS THIS READ HAS NO EXTENT. agent_activity.proto's
-// AgentReadSuccess.extent oneof carries whole/head/range and records that
-// "Tags 4-8 are RETIRED: the image, pdf, notebook, split-to-directory and
-// unchanged extents are deferred". The shim's converter honors that by
-// refusing to invent one — convert/tools/read.ts readSuccess: "The image,
-// pdf, notebook, parts and file_unchanged extents are RETIRED tags on
-// AgentReadSuccess this wave. No arm exists, so nothing is said." — and
-// produces NO settle frame at all, logging the gap to the shim's own sink.
+// THE RULING: the contract has no arm for HOW MUCH of an image came back —
+// agent_activity.proto's AgentReadSuccess.extent oneof carries whole/head/
+// range and records that "Tags 4-8 are RETIRED: the image, pdf, notebook,
+// split-to-directory and unchanged extents are deferred" — but it does have
+// an arm for the read HAVING SETTLED. An AgentReadSuccess whose extent oneof
+// is UNSET states the path and the settle instant and claims nothing about
+// the contents, and the daemon already answers exactly that: resolve/feed/
+// toolcall.go readForm returns no output form for an unset extent ("A read
+// that came back with no extent has nothing to draw; the card still says it
+// returned"), which applyReturnedForm renders as feed.proto's
+// FeedToolCallNoOutput — "The call returned NOTHING to draw: the output
+// section is omitted. An arm, never an empty text — presence, not a
+// sentinel."
 //
-// So the drawn shape is the RUNNING card the start frame minted, still
-// running after the turn's terminal: the daemon never received a result to
-// settle it with. Asserted here as a specific positive (a Read card exists,
-// with the running outcome) and a specific negative (it never reached the
-// returned outcome, so no `none`-form success card was fabricated for an
-// extent the contract deferred). driveScenarioToCompletion has already
-// waited for the turn's terminal and the store's durable write, so this is
-// the settled end state, not a snapshot mid-flight.
-func TestReadImageProducesNoSuccessFrame(t *testing.T) {
+// So the drawn shape is a SETTLED card with the succeeded verdict and the
+// `none` output form. A card that never settles would be the defect: the
+// call did finish, and a perpetually-running card says otherwise.
+func TestReadImageSettlesWithNoOutput(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
@@ -417,16 +412,10 @@ func TestReadImageProducesNoSuccessFrame(t *testing.T) {
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "read-image")
 
 	// Assert
-	row := awaitFeedRow(t, w, ws, "the image read's running tool card", func(r *frontendv1.FeedRow) bool {
-		call := r.GetActivity().GetSimpleToolCall()
-		return r.GetTurn().GetValue() == turn.GetValue() && call.GetName().GetText() == "Read"
-	})
-	call := row.GetActivity().GetSimpleToolCall()
-	if call.GetRunning() == nil {
-		t.Errorf("the image read's card outcome = %v, want the running outcome the start frame minted", call.GetOutcome())
-	}
-	if call.GetReturned() != nil {
-		t.Errorf("the image read's card settled as returned (%v), want no settled outcome: AgentReadSuccess has no image extent this wave, so the shim states nothing rather than inventing one",
-			call.GetReturned())
+	row := awaitFeedRow(t, w, ws, "the image read's settled tool card", toolCallSettled(turn, "Read"))
+	returned := requireSucceeded(t, row, "Read")
+	if returned.GetNone() == nil {
+		t.Errorf("the image read's output form = %v, want the `none` arm: AgentReadSuccess has no image extent this wave, so nothing is drawn below the divider",
+			returned.GetForm())
 	}
 }

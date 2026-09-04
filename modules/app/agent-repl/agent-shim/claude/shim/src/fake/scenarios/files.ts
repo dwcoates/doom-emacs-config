@@ -32,17 +32,24 @@ function readResult(fields: {
   numLines: number;
   startLine: number;
   totalLines: number;
+  /**
+   * The vendor's own statement that IT auto-paginated the read at a token
+   * budget. This is the ONLY signal for AgentReadSuccess.cut=token_cap — the
+   * converter reads exactly this field (convert/tools/read.ts textExtent), and
+   * the `read_truncation_notice` banner is prose beside it, never the fact. A
+   * fixture that omits it declares a token cap and produces a line cap.
+   */
+  truncatedByTokenCap?: boolean;
 }): Record<string, unknown> {
-  return {
-    type: "text",
-    file: {
-      filePath: FILE,
-      content: fields.content,
-      numLines: fields.numLines,
-      startLine: fields.startLine,
-      totalLines: fields.totalLines,
-    },
+  const file: Record<string, unknown> = {
+    filePath: FILE,
+    content: fields.content,
+    numLines: fields.numLines,
+    startLine: fields.startLine,
+    totalLines: fields.totalLines,
   };
+  if (fields.truncatedByTokenCap === true) file.truncatedByTokenCap = true;
+  return { type: "text", file };
 }
 
 const READ_WHOLE = scenario({
@@ -103,7 +110,17 @@ const READ_TRUNCATED = scenario({
     ctx.log({ turn: ctx.turn, branch: "read-truncated" }, "fake truncated-read turn");
     const call = ctx.toolUse("Read", { file_path: FILE });
     const head = FILE_BODY.split("\n").slice(0, 2).join("\n");
-    ctx.toolResult(call, head, readResult({ content: head, numLines: 2, startLine: 1, totalLines: 4 }));
+    ctx.toolResult(
+      call,
+      head,
+      readResult({
+        content: head,
+        numLines: 2,
+        startLine: 1,
+        totalLines: 4,
+        truncatedByTokenCap: true,
+      }),
+    );
     ctx.attachment({
       type: "read_truncation_notice",
       banner:
