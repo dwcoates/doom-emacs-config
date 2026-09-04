@@ -1,0 +1,277 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// identity_test.go — WHICH BOOK A ROTATED TRANSCRIPT'S RECORDS LAND IN.
+//
+// A `/clear` mints a new vendor session id and a new transcript file, and the
+// vendor's files carry no lineage between them. The shim keeps the main agent's
+// AgentId exactly where it was (R9) and leaves the link the files lack at
+// `<state>/shim/<workspace-key>/vendor-id/<new-id>.json`. These subjects are the
+// reader's half: the rotated transcript is booked under the ORIGINAL id, so the
+// store is never asked to move a row from one book to another.
+
+const (
+	// The three fixture ids, spelled as the uuids the vendor actually mints.
+	bookOriginal  = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	bookRotated   = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	bookWorkspace = "0a1b2c3d"
+)
+
+// mintIdentity writes the shim's agent-id.json for a workspace, in
+// engine/identity.ts's own field names.
+func (h *harness) mintIdentity(t *testing.T, workspaceKey, originalID string) {
+	t.Helper()
+	dir := filepath.Join(h.state, "shim", workspaceKey)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	h.write(t, filepath.Join(dir, "agent-id.json"), `{
+  "original_vendor_session_id": "`+originalID+`",
+  "workspace_key": "`+workspaceKey+`",
+  "minted_at_ms": 1735689600000
+}
+`)
+}
+
+// linkVendorSession writes the pointer file a rotation leaves behind.
+func (h *harness) linkVendorSession(t *testing.T, workspaceKey, vendorID, originalID string) {
+	t.Helper()
+	dir := filepath.Join(h.state, "shim", workspaceKey, "vendor-id")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("creating %s: %v", dir, err)
+	}
+	h.write(t, filepath.Join(dir, vendorID+".json"), `{
+  "vendor_session_id": "`+vendorID+`",
+  "original_vendor_session_id": "`+originalID+`",
+  "linked_at_ms": 1735689700000
+}
+`)
+}
+
+// TestARotatedTranscriptIsWatchedUnderTheOriginalsBook is the whole point: the
+// file named by the NEW id writes to the book the conversation has always had.
+func TestARotatedTranscriptIsWatchedUnderTheOriginalsBook(t *testing.T) {
+	// Arrange: the shim minted an identity and then rotated it.
+	h := newHarness(t, &fakeStore{})
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	path := h.transcript(t, bookRotated, promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	w, ok := h.sc.watchers[path]
+	if !ok {
+		t.Fatalf("the rotated transcript is not watched; the watchers were %v", h.sc.watchers)
+	}
+	if got := w.ctx.MainAgentID; got != bookOriginal {
+		t.Errorf("the rotated transcript books to %q, want the conversation's original id %q", got, bookOriginal)
+	}
+	// The vendor session id is an ATTRIBUTE of the agent, never its address, so
+	// it must still be the id the file is actually named by.
+	if got := w.ctx.SessionID; got != bookRotated {
+		t.Errorf("the watched context names vendor session %q, want the file's own id %q", got, bookRotated)
+	}
+}
+
+// TestTheBookResolutionIsStatedOncePerTranscript: the resolution decides where
+// everything that file ever produces lands, so it is a record, not a guess.
+func TestTheBookResolutionIsStatedOncePerTranscript(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.transcript(t, bookRotated, promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	rec := h.requireOnce(t, "identity-resolve", "")
+	if got := ctxString(t, rec, "vendor_session_id"); got != bookRotated {
+		t.Errorf("the resolution names vendor session %q, want %q", got, bookRotated)
+	}
+	if got := ctxString(t, rec, "book_agent_id"); got != bookOriginal {
+		t.Errorf("the resolution names book %q, want %q", got, bookOriginal)
+	}
+}
+
+// TestAnUnlinkedTranscriptKeepsItsOwnBook: a conversation that never rotated has
+// no link file, and the reader's answer for it must not change.
+func TestAnUnlinkedTranscriptKeepsItsOwnBook(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	path := h.transcript(t, bookOriginal, promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+		t.Errorf("an unrotated transcript books to %q, want its own id %q", got, bookOriginal)
+	}
+}
+
+// TestATranscriptWithNoIdentityRecordKeepsItsOwnBook is the no-shim case — a
+// tree the sidecar reads that no shim ever wrote a record for.
+func TestATranscriptWithNoIdentityRecordKeepsItsOwnBook(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, bookRotated, promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookRotated {
+		t.Errorf("an unrecorded transcript books to %q, want its own id %q", got, bookRotated)
+	}
+}
+
+// TestALinkThatAppearsMidTailMovesTheWatchedFilesBook: discovery order is not
+// causal order, so the book is re-resolved on every rescan.
+func TestALinkThatAppearsMidTailMovesTheWatchedFilesBook(t *testing.T) {
+	// Arrange: the transcript is watched before the link file exists.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, bookRotated, promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookRotated {
+		t.Fatalf("precondition: the file booked to %q before any link existed, want %q", got, bookRotated)
+	}
+
+	// Act: the shim rotates, and the next rescan sees it.
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.sc.rescan()
+
+	// Assert.
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+		t.Errorf("after the link appeared the file books to %q, want %q", got, bookOriginal)
+	}
+	rec := h.requireOnce(t, "identity-rekey", "warn")
+	if got := ctxString(t, rec, "book_agent_id"); got != bookOriginal {
+		t.Errorf("the re-key names book %q, want %q", got, bookOriginal)
+	}
+}
+
+// TestAnUnchangedBookIsNotReKeyed: the re-key pass runs on every rescan, so a
+// steady book must produce neither a move nor a record.
+func TestAnUnchangedBookIsNotReKeyed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.transcript(t, bookOriginal, promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	h.requireNone(t, "identity-rekey", "warn")
+	h.requireNone(t, "identity-remap", "warn")
+}
+
+// TestTheBookMoveUnparksTheFileTheStoreRefused is the refusal-turned-remap. A
+// park is otherwise permanent, and rightly so; a book move is the one refusal
+// that stops being true once the link file names the original.
+func TestTheBookMoveUnparksTheFileTheStoreRefused(t *testing.T) {
+	// Arrange: the rotated transcript is read before its link exists, and the
+	// store refuses the batch for naming a book those rows are not in.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, bookRotated, promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "would move the row from book " + bookOriginal + " to " + bookRotated
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+	h.sc.pollAll()
+	if !h.sc.parked[path] {
+		t.Fatalf("precondition: the refused file was not parked; parked=%v", h.sc.parked)
+	}
+	store.writeFail, store.writeInvalidField = "", ""
+
+	// Act: the link appears and the next rescan re-resolves the book.
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.sc.rescan()
+
+	// Assert: the file reads again, under the book the store already holds.
+	if h.sc.parked[path] {
+		t.Error("the file is still parked after its book moved; its cursor can never advance again")
+	}
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+		t.Errorf("the un-parked file books to %q, want %q", got, bookOriginal)
+	}
+	h.requireOnce(t, "identity-remap", "warn")
+}
+
+// TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook: the cursor never moved
+// past the refused batch, so the identical bytes are re-read — which is
+// progress rather than a replay, because they now name the right book.
+func TestTheUnparkedFileRereadsTheSameBytesUnderTheNewBook(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, bookRotated, promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "would move the row from book " + bookOriginal + " to " + bookRotated
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+	h.sc.pollAll()
+	store.writeFail, store.writeInvalidField = "", ""
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.sc.rescan()
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: the cursor advanced, which it could not do while parked.
+	if got := h.sc.watchers[path].tailer.Offset(); got == 0 {
+		t.Error("the un-parked file committed nothing; the same bytes must be re-read and accepted under the moved book")
+	}
+	if got := bookOfLastWrite(t, store); got != bookOriginal {
+		t.Errorf("the re-read records landed in book %q, want %q", got, bookOriginal)
+	}
+}
+
+// bookOfLastWrite answers the book the store's LAST batch named. The fake keeps
+// every batch it was handed, refused ones included, so the last is the one the
+// re-key produced.
+func bookOfLastWrite(t *testing.T, store *fakeStore) string {
+	t.Helper()
+	if len(store.writes) == 0 {
+		t.Fatal("the store was handed no batch at all")
+	}
+	for _, entry := range store.writes[len(store.writes)-1].GetEntries() {
+		// `top_level` is the agent whose book the update belongs to, whatever
+		// arm the update itself carries — a page line or, for a record the
+		// converter has no frame for yet, durable residue.
+		if book := entry.GetAgentUpdate().GetTopLevel().GetValue(); book != "" {
+			return book
+		}
+	}
+	t.Fatal("the last batch carried no agent update to read a book off")
+	return ""
+}
