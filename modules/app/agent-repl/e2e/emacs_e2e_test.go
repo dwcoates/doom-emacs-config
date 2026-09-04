@@ -65,6 +65,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
 	sidecarBin := requireSidecarBinary(t)
+	lockBin := requireLockBinary(t)
 	daemonBin := harness.DaemonBinary(t)
 	webappDist := requireWebappDist(t)
 
@@ -107,14 +108,11 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		t.Fatalf("e2e: install the fake git: %v", err)
 	}
 
-	// The kernel-lock run directory, redirected and CREATED. The daemon only
-	// PROBES this directory -- the shim is what creates it, and the shim
-	// cannot run until the probe says the lock is free -- so a run directory
-	// that does not exist makes every submission fail with "the workspace
-	// lock probe could not tell". `daemon/integration/harness/daemon.go`
-	// states the same two facts for the daemons IT starts; this layer's
-	// daemon is started by EMACS, so the statement has to be made here, at
-	// the Emacs process the daemon inherits its environment from.
+	// The kernel-lock run directory, redirected. `sessionlock.Probe` creates
+	// it when it is missing -- nobody can hold a lock in a directory that
+	// does not exist -- but it is created here too, so this world's tree is
+	// complete before anything runs rather than as a side effect of the first
+	// probe.
 	lockDir := filepath.Join(box.Scratch(), "locks")
 	if err := os.MkdirAll(lockDir, 0o755); err != nil {
 		t.Fatalf("e2e: mkdir %s: %v", lockDir, err)
@@ -123,6 +121,11 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	extraEnv := append([]string{
 		"PATH=" + fakeBin + ":" + os.Getenv("PATH"),
 		"AGENT_REPL_LOCK_DIR=" + lockDir,
+		// THE LOCK HOLDER. Node cannot take a flock, so the shim spawns
+		// shim-lock for each kernel claim and refuses every session without
+		// it. Emacs starts the daemon here, so the statement travels as
+		// environment from this process, the same way the lock directory does.
+		"AGENT_REPL_SHIM_LOCK_BIN=" + lockBin,
 		"FAKEGIT_STATE=" + git.StateFile,
 		// FAKE MODE, the counterpart of the vendor prohibition StartEmacs
 		// sets. `AGENT_REPL_FORBID_VENDOR_CALLS=1` alone makes the daemon

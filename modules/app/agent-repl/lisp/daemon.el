@@ -432,7 +432,7 @@ timer wipe the later one's status."
 
 ;;;; ---- The build ----
 
-(defconst agent-repl-daemon--default-build-targets '("shim" "webapp" "daemon")
+(defconst agent-repl-daemon--default-build-targets '("shim" "webapp" "daemon" "lock")
   "The targets `bin/build-frontend.sh' builds when given none.
 Mirrors the script's own default set; the elisp pre-check has to know
 which artifacts a default run would cover in order to decide whether one
@@ -471,6 +471,13 @@ is worth starting at all.")
              :artifact (expand-file-name "shim-claude-sidecar" cache-bin)
              :sources (list (at "agent-shim/claude/shim-sidecar") (at "agent-shim/wire")
                             (at "agent-shim/logging/go") (at "proto/gen/go"))
+             :match agent-repl-daemon--go-source-regexp)
+       ;; The shim spawns this for every kernel claim and refuses to start a
+       ;; session without it, which is why it is in the DEFAULT target set
+       ;; while the two launchd services are not.  It reads no proto.
+       (list "lock"
+             :artifact (expand-file-name "shim-lock" cache-bin)
+             :sources (list (at "agent-shim/shim-lock") (at "agent-shim/logging/go"))
              :match agent-repl-daemon--go-source-regexp))))
   "Per-target artifact and source set, mirroring `bin/build-frontend.sh'.
 

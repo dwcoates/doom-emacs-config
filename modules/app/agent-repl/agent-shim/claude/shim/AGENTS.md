@@ -38,7 +38,8 @@ src/
   main.ts              argv, env, the log fd, signals, --version, wiring (NO locks)
   build-identity.ts    SHIM_BUILD_SHA + sdk/agent-binary versions (SessionRuntime)
   log.ts               THE canonical JSONL logging API
-  locks.ts             the two kernel flocks (both taken inside StartSession)
+  locks.ts             the two kernel flocks (both taken inside StartSession,
+                       each held by a spawned agent-shim/shim-lock child)
   vendor-guard.ts      the ONLY dynamic import of the SDK; the FORBID_VENDOR_CALLS gate
   metaprompt.ts        the canonical metaprompt append
   proto.ts             THE single import site: shimv1 / storev1 / conversationv1 namespaces
@@ -99,6 +100,11 @@ means the daemon and this build disagree about the contract.
   - `AGENT_REPL_LOCK_DIR` (default `~/.cache/agent-repl/run`) — the kernel-lock
     directory. Both the shim and the daemon's probe read it, which is what makes
     relocation safe.
+  - `AGENT_REPL_SHIM_LOCK_BIN` (default `~/.cache/agent-repl/bin/shim-lock`) —
+    the lock-holder binary. Node cannot take a `flock`, so each kernel claim is
+    a `shim-lock` CHILD PROCESS this shim keeps the stdin pipe of; see
+    `agent-shim/shim-lock/AGENTS.md`. Every suite that spawns a real shim
+    overrides it at the binary that suite built.
   - `AGENT_REPL_FORBID_VENDOR_CALLS` — the guard (see below).
   - `AGENT_REPL_FAKE_TURN_GATE`, `AGENT_REPL_FAKE_TURN_GATE_TEXT`,
     `AGENT_REPL_FAKE_SPOOL_ROOT`, `AGENT_REPL_FAKE_REFUSE` — `--fake` only.
@@ -115,6 +121,13 @@ means the daemon and this build disagree about the contract.
   the daemon's side "someone else owns this conversation" is one fact — with
   the contended lock path in the detail. The daemon's probe is unchanged: a
   held lock still means a live shim owns the conversation.
+- **A claim is a child process, not an fd.** `locks.ts` spawns
+  `shim-lock <path>`, waits for its `locked` line, and releases by closing its
+  stdin; the holder takes the real `flock(2)` the daemon probes. The
+  predecessor used `open(2)`'s `O_EXLOCK`, which is macOS/BSD only and made the
+  shim refuse every session on Linux. `shim-lock` exit 3 is the distinct
+  "another process holds it" answer, and anything else is a hard failure —
+  never `conversation_owned`.
 - **Signals**: SIGTERM is the one authorized shutdown and takes the
   `KillSession{force:true}` path, then exits 0 (nonzero if the stand-down
   failed). SIGINT is REFUSED and logged at error — an attached terminal's Ctrl-C

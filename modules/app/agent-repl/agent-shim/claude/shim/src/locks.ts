@@ -46,23 +46,32 @@
  *
  * # Mechanism
  *
- * `open(2)`'s `O_EXLOCK`, which takes a BSD flock as part of opening the file —
- * the same lock Go's `syscall.Flock` takes, so the daemon's probe and this
- * claim interoperate. Two properties matter and neither is available from a
- * plain lock FILE:
+ * A `flock(2)` — the same lock Go's `syscall.Flock` takes, so the daemon's
+ * probe and this claim interoperate. Two properties matter and neither is
+ * available from a plain lock FILE:
  *
  *   - the kernel enforces it, so exclusion is not advisory bookkeeping; and
  *   - it is released automatically when the process dies, however it dies, so
  *     there is no stale lock to reap and no PID-reuse hazard.
  *
- * `O_EXLOCK` is macOS/BSD only. Linux has no equivalent in Node without native
- * code, so there acquiring FAILS LOUDLY rather than pretending the session is
- * claimed — a silent no-op would hand the daemon a false "free" and let it
- * spawn the duplicate this exists to prevent.
+ * NODE CANNOT TAKE ONE. It has no `flock` binding, and the predecessor reached
+ * one through `open(2)`'s `O_EXLOCK`, which exists only on macOS/BSD — so on
+ * Linux the shim refused to start ANY session and every Linux deployment was
+ * dead in the water.
+ *
+ * So the claim is a CHILD PROCESS: `shim-lock <path>` (agent-shim/shim-lock)
+ * takes the flock, writes one `locked` line, and holds it until its stdin
+ * reaches EOF. This process keeps the write end of that pipe, so both
+ * properties survive intact: the lock is a real kernel flock on the path the
+ * daemon probes, and when THIS process dies however it dies the kernel closes
+ * the pipe, the holder reads EOF and exits, and the lock goes with it. One
+ * code path on both platforms; nothing here is conditioned on the platform any
+ * more.
  */
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { bindLog } from "./log.js";
 
@@ -70,19 +79,39 @@ const COMPONENT = "shim-session-lock";
 const LOGGER = bindLog({ component: COMPONENT, operation: "shim.session-lock.lifecycle" });
 
 /**
- * `O_EXLOCK` from `<sys/fcntl.h>`: take an exclusive advisory lock as part of
- * open(2), the same lock `flock(2)` takes — so the daemon's Go-side probe
- * (`syscall.Flock`) and this claim contend correctly with each other. Verified
- * both directions: while Node holds it Go gets EWOULDBLOCK, and once Node
- * closes the fd Go acquires.
+ * The exit code `shim-lock` reserves for "another process already holds this".
  *
- * Spelled numerically because Node does not expose it on `fs.constants`, even
- * on platforms whose open(2) honors it — flags are passed straight through, so
- * the raw value works. BSD/macOS only; undefined elsewhere, which
- * acquireSessionLock turns into a loud refusal rather than a silent no-op.
+ * It is spelled distinctly from a generic failure because the two answers are
+ * not the same refusal: a held lock is a live shim owning the conversation,
+ * which `StartSession` reports as `conversation_owned`, while any other
+ * failure is the claim not having been ATTEMPTED. Collapsing them would make
+ * an unwritable lock directory look like a duplicate shim.
  */
-const O_EXLOCK: number | undefined =
-  process.platform === "darwin" || process.platform.endsWith("bsd") ? 0x20 : undefined;
+const HELD_EXIT_CODE = 3;
+
+/** The one line `shim-lock` writes to stdout, and only once it holds the lock. */
+const READY_LINE = "locked";
+
+/**
+ * The environment variable that names the lock-holder binary.
+ *
+ * It exists for the suites and worlds that build their own `shim-lock` rather
+ * than reading the deployed one: the e2e harnesses compile it into a temp
+ * directory, and a shim that only ever looked in the deploy location would
+ * take its locks with whatever binary the machine happened to have installed.
+ */
+export const LOCK_BIN_ENV = "AGENT_REPL_SHIM_LOCK_BIN";
+
+/**
+ * The `shim-lock` binary this process spawns: the override when set, otherwise
+ * the deploy location `bin/build-frontend.sh lock` installs it at, beside
+ * shim-store and shim-claude-sidecar.
+ */
+export function lockBinaryPath(): string {
+  const override = process.env[LOCK_BIN_ENV];
+  if (override !== undefined && override !== "") return override;
+  return path.join(os.homedir(), ".cache", "agent-repl", "bin", "shim-lock");
+}
 
 /**
  * The environment variable that relocates the kernel-lock directory.
@@ -143,17 +172,26 @@ export function workspaceLockPath(cwd: string): string {
 }
 
 /**
+ * The teardown half of a claim: drop the lock and wait for the holder to be
+ * gone. Awaiting matters — a caller that re-acquires immediately (the daemon
+ * retiring a shim and starting its replacement) must not race the holder's
+ * exit.
+ */
+export type LockRelease = () => void | Promise<void>;
+
+/**
  * Take this session's exclusive lock and hold it until the process exits.
  *
  * Returns a release function for a deliberate teardown. Not calling it is fine
  * and is the normal path — the kernel drops the lock when the process dies,
  * which is precisely the property that makes the lock trustworthy.
  *
- * Throws when the lock is already held (another shim owns this session) or when
- * the platform cannot take it. Both are refusals to run, not warnings: a shim
- * that cannot prove it is the only one for its session must not start.
+ * Rejects when the lock is already held (another shim owns this session) or
+ * when the claim could not be attempted at all. Both are refusals to run, not
+ * warnings: a shim that cannot prove it is the only one for its session must
+ * not start.
  */
-export function acquireSessionLock(sessionId: string): () => void {
+export function acquireSessionLock(sessionId: string): Promise<LockRelease> {
   return acquireExclusiveLock({
     kind: "session",
     subject: `session ${sessionId}`,
@@ -167,12 +205,12 @@ export function acquireSessionLock(sessionId: string): () => void {
  *
  * Identical in contract to acquireSessionLock, and taken AFTER it: the fixed
  * order is what keeps two shims racing for the same pair from deadlocking each
- * other. Throws when another shim already owns the workspace or when the
- * platform cannot take the lock; a shim that cannot prove it is the workspace's
- * only one must not start A SESSION — the caller turns the throw into
+ * other. Rejects when another shim already owns the workspace or when the
+ * claim could not be attempted; a shim that cannot prove it is the workspace's
+ * only one must not start A SESSION — the caller turns the rejection into
  * `StartSession{conversation_owned}` and keeps serving, inert.
  */
-export function acquireWorkspaceLock(cwd: string): () => void {
+export function acquireWorkspaceLock(cwd: string): Promise<LockRelease> {
   return acquireExclusiveLock({
     kind: "workspace",
     subject: `workspace ${cwd}`,
@@ -181,48 +219,131 @@ export function acquireWorkspaceLock(cwd: string): () => void {
   });
 }
 
-/** One kernel-enforced claim, which is the whole of both locks' mechanism. */
+/**
+ * One kernel-enforced claim, which is the whole of both locks' mechanism.
+ *
+ * Resolves once `shim-lock` has announced it HOLDS the flock, never merely
+ * once it has been spawned.
+ */
 function acquireExclusiveLock(claim: {
   kind: string;
   subject: string;
   file: string;
   context: Record<string, unknown>;
-}): () => void {
+}): Promise<LockRelease> {
   LOGGER.log({ ...claim.context, platform: process.platform }, `acquiring exclusive shim ${claim.kind} lock`);
-  if (O_EXLOCK === undefined) {
-    throw new Error(
-      `${COMPONENT}: ${process.platform} has no O_EXLOCK, so the shim cannot claim ${claim.subject} ` +
-        `exclusively; refusing to start rather than risk two shims writing one transcript`,
-    );
-  }
   const file = claim.file;
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const binary = lockBinaryPath();
 
-  let fd: number;
+  let child: ChildProcessWithoutNullStreams;
   try {
-    // O_NONBLOCK so an already-held lock fails immediately instead of hanging
-    // this process behind whichever shim owns the claim.
-    fd = fs.openSync(file, fs.constants.O_CREAT | fs.constants.O_RDWR | O_EXLOCK | fs.constants.O_NONBLOCK);
+    // stdin is a PIPE and stays open for the claim's whole life: it is the
+    // channel whose EOF releases the lock, and the kernel closes it for us when
+    // this process dies however it dies.
+    child = spawn(binary, [file], { stdio: ["pipe", "pipe", "pipe"] });
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EAGAIN" || code === "EWOULDBLOCK") {
-      throw new Error(
-        `${COMPONENT}: ${claim.subject} is already held by another shim (${file}); refusing to start a duplicate`,
-      );
-    }
-    throw new Error(`${COMPONENT}: cannot take the ${claim.kind} lock ${file}: ${(err as Error).message}`);
+    return Promise.reject(
+      new Error(
+        `${COMPONENT}: cannot spawn the lock holder ${binary} for the ${claim.kind} lock ${file}: ` +
+          `${(err as Error).message}`,
+      ),
+    );
   }
 
-  LOGGER.log(claim.context, `holding ${claim.kind} lock ${file}`);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      fs.closeSync(fd); // closing drops the flock
-      LOGGER.log({ ...claim.context, lock_path: file }, `released exclusive shim ${claim.kind} lock`);
-    } catch (err) {
-      LOGGER.log({ level: "error", ...claim.context, cause: err }, `releasing the ${claim.kind} lock failed: ${(err as Error).message}`);
-    }
-  };
+  return new Promise<LockRelease>((resolve, reject) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+
+    /** Every branch below ends here, so no claim can resolve and reject both. */
+    const settle = (act: () => void): void => {
+      if (settled) return;
+      settled = true;
+      act();
+    };
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    // A write to a holder that has already died raises EPIPE on this stream.
+    // It is recorded rather than thrown: the holder being gone IS the release
+    // this process was asking for, and an unhandled 'error' event would take
+    // the shim down over a lock it no longer needs.
+    child.stdin.on("error", (err: Error) => {
+      LOGGER.log(
+        { level: "warn", ...claim.context, lock_path: file, cause: err.message },
+        `the ${claim.kind} lock holder's stdin failed; the holder is gone and so is the lock`,
+      );
+    });
+
+    child.on("error", (err: Error) => {
+      settle(() =>
+        reject(
+          new Error(
+            `${COMPONENT}: the lock holder ${binary} for the ${claim.kind} lock ${file} could not run: ` +
+              `${err.message}`,
+          ),
+        ),
+      );
+    });
+
+    // THE HOLDER'S OWN DIAGNOSTICS, folded into this component's records rather
+    // than left on a pipe nobody drains. A held lock's reason is on stderr, and
+    // it is what makes a refusal readable.
+    const exited = new Promise<void>((exit) => {
+      child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
+        settle(() =>
+          reject(
+            code === HELD_EXIT_CODE
+              ? new Error(
+                  `${COMPONENT}: ${claim.subject} is already held by another shim (${file}); ` +
+                    `refusing to start a duplicate`,
+                )
+              : new Error(
+                  `${COMPONENT}: the lock holder for the ${claim.kind} lock ${file} exited ` +
+                    `(code ${code ?? "null"}, signal ${signal ?? "null"}) before taking it: ${stderr.trim()}`,
+                ),
+          ),
+        );
+        exit();
+      });
+    });
+
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (!stdout.includes("\n")) return;
+      const line = stdout.slice(0, stdout.indexOf("\n")).trim();
+      if (line !== READY_LINE) {
+        settle(() => {
+          child.kill("SIGKILL");
+          reject(
+            new Error(
+              `${COMPONENT}: the lock holder for the ${claim.kind} lock ${file} announced ` +
+                `${JSON.stringify(line)}, not ${JSON.stringify(READY_LINE)}`,
+            ),
+          );
+        });
+        return;
+      }
+      settle(() => {
+        LOGGER.log(claim.context, `holding ${claim.kind} lock ${file}`);
+        let released = false;
+        resolve(async () => {
+          if (released) return;
+          released = true;
+          // Closing stdin is the release; awaiting the exit is what makes the
+          // lock provably gone by the time this resolves.
+          child.stdin.end();
+          await exited;
+          LOGGER.log(
+            { ...claim.context, lock_path: file, holder_stderr: stderr.trim() },
+            `released exclusive shim ${claim.kind} lock`,
+          );
+        });
+      });
+    });
+  });
 }

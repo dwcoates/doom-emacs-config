@@ -3,7 +3,6 @@ package sessionlock
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -190,8 +189,14 @@ func TestProbeHeld(t *testing.T) {
 // TestProbeUnknownOnUnopenableLock asserts a lock that cannot even be opened
 // is unknown WITH the error, never free.
 func TestProbeUnknownOnUnopenableLock(t *testing.T) {
-	// Arrange: a lock under a directory that does not exist.
-	path := filepath.Join(t.TempDir(), "missing", "workspace-deadbeef.lock")
+	// Arrange: a REGULAR FILE standing where the run directory would go, so
+	// neither the directory nor the lock file can be made.
+	root := t.TempDir()
+	blocker := filepath.Join(root, "run")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("writing the blocker: %v", err)
+	}
+	path := filepath.Join(blocker, "workspace-deadbeef.lock")
 
 	// Act.
 	state, err := Probe(path)
@@ -200,8 +205,37 @@ func TestProbeUnknownOnUnopenableLock(t *testing.T) {
 	if state != StateUnknown {
 		t.Fatalf("Probe() = %v, want StateUnknown", state)
 	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("Probe() error = %v, want a not-exist error", err)
+	if err == nil {
+		t.Fatal("Probe() error = nil, want the unopenable-lock error")
+	}
+}
+
+// TestProbeCreatesTheRunDirectoryAndAnswersFree is the BOOTSTRAP: on a machine
+// that has never started a session the run directory does not exist, and the
+// daemon will not spawn the shim that would create it until a probe says free.
+// A missing directory answered StateUnknown, so nothing could ever start.
+func TestProbeCreatesTheRunDirectoryAndAnswersFree(t *testing.T) {
+	// Arrange: a run directory that has never existed.
+	runDir := filepath.Join(t.TempDir(), "run")
+	path := filepath.Join(runDir, "workspace-deadbeef.lock")
+
+	// Act.
+	state, err := Probe(path)
+
+	// Assert: nobody can hold a lock in a directory that does not exist, so the
+	// honest answer is free — and the directory now exists for the shim.
+	if err != nil {
+		t.Fatalf("Probe() error = %v", err)
+	}
+	if state != StateFree {
+		t.Fatalf("Probe() = %v, want StateFree", state)
+	}
+	info, statErr := os.Stat(runDir)
+	if statErr != nil {
+		t.Fatalf("the run directory was not created: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("the run directory is not a directory: %v", info.Mode())
 	}
 }
 
@@ -248,9 +282,15 @@ func TestProbeWithLogRecordsTheOrdinaryBranch(t *testing.T) {
 // TestProbeWithLogRecordsTheFailureBranch asserts a probe that could not tell
 // logs at error with its evidence.
 func TestProbeWithLogRecordsTheFailureBranch(t *testing.T) {
-	// Arrange.
+	// Arrange: a regular file where the run directory would go. A merely
+	// MISSING directory is no longer a failure -- the probe creates it, because
+	// nobody can hold a lock in a directory that does not exist.
 	log := dlog.NewTestLogger()
-	path := filepath.Join(t.TempDir(), "missing", "workspace-deadbeef.lock")
+	blocker := filepath.Join(t.TempDir(), "run")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("writing the blocker: %v", err)
+	}
+	path := filepath.Join(blocker, "workspace-deadbeef.lock")
 
 	// Act.
 	if _, err := ProbeWithLog(log, path); err == nil {
@@ -265,7 +305,7 @@ func TestProbeWithLogRecordsTheFailureBranch(t *testing.T) {
 	if records[0].Level != "error" {
 		t.Fatalf("level = %q, want \"error\"", records[0].Level)
 	}
-	if msg, _ := records[0].Context["error"].(string); !strings.Contains(msg, "sessionlock: open") {
-		t.Fatalf("context error = %q, want the open failure", msg)
+	if msg, _ := records[0].Context["error"].(string); !strings.Contains(msg, "sessionlock: create the run directory") {
+		t.Fatalf("context error = %q, want the run-directory failure", msg)
 	}
 }

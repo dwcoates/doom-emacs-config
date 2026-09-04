@@ -98,6 +98,7 @@ type layout struct {
 	sidecarDir     string // .../agent-shim/claude/shim-sidecar
 	agentShimDir   string // .../agent-shim
 	storeDir       string // .../agent-shim/shim-store
+	lockDir        string // .../agent-shim/shim-lock
 	moduleRoot     string // .../modules/app/agent-repl
 	corpusDir      string // .../modules/app/agent-repl/testdata/corpus
 	projectsDir    string // .../modules/app/agent-repl/projects
@@ -112,6 +113,7 @@ func resolveLayout() (layout, error) {
 	l.sidecarDir = filepath.Dir(l.integrationDir)
 	l.agentShimDir = filepath.Dir(filepath.Dir(l.sidecarDir)) // shim-sidecar -> claude -> agent-shim
 	l.storeDir = filepath.Join(l.agentShimDir, "shim-store")
+	l.lockDir = filepath.Join(l.agentShimDir, "shim-lock")
 	l.moduleRoot = filepath.Dir(l.agentShimDir)
 	l.corpusDir = filepath.Join(l.moduleRoot, "testdata", "corpus")
 	l.projectsDir = filepath.Join(l.moduleRoot, "projects")
@@ -146,6 +148,13 @@ var (
 	storeBinOnce sync.Once
 	storeBinPath string
 	storeBinErr  error
+
+	// The shim's lock holder, built for the same reason and on the same
+	// lazy terms: only the mocked-vendor subjects spawn a real shim, and a
+	// real shim takes its kernel claims by spawning this binary.
+	lockBinOnce sync.Once
+	lockBinPath string
+	lockBinErr  error
 )
 
 func TestMain(m *testing.M) {
@@ -174,6 +183,7 @@ func runSuite(m *testing.M) int {
 	}
 	sidecarBin = binPath
 	storeBinPath = filepath.Join(binDir, "shim-store")
+	lockBinPath = filepath.Join(binDir, "shim-lock")
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
@@ -683,6 +693,22 @@ func storeBinary(t *testing.T) string {
 		t.Fatalf("this subject runs against the REAL store, which does not build: %v", storeBinErr)
 	}
 	return storeBinPath
+}
+
+// lockBinary builds the shim's lock holder on first use and answers its path.
+//
+// EVERY REAL SHIM NEEDS IT. Node cannot take a flock, so the shim's session and
+// workspace claims are shim-lock child processes; without the binary the shim
+// refuses every StartSession and the mocked vendor generates nothing.
+func lockBinary(t *testing.T) string {
+	t.Helper()
+	lockBinOnce.Do(func() {
+		lockBinErr = goBuild(repo.lockDir, lockBinPath)
+	})
+	if lockBinErr != nil {
+		t.Fatalf("the real shim takes its kernel claims with shim-lock, which does not build: %v", lockBinErr)
+	}
+	return lockBinPath
 }
 
 func startRealStore(t *testing.T) *realStore {

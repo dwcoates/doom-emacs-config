@@ -85,6 +85,7 @@ type layout struct {
 	daemonDir  string // .../modules/app/agent-repl/daemon
 	shimDir    string // .../modules/app/agent-repl/agent-shim/claude/shim
 	storeDir   string // .../modules/app/agent-repl/agent-shim/shim-store
+	lockDir    string // .../modules/app/agent-repl/agent-shim/shim-lock
 	sidecarDir string // .../modules/app/agent-repl/agent-shim/claude/shim-sidecar
 }
 
@@ -100,6 +101,7 @@ func resolveLayout() (layout, error) {
 	l.daemonDir = filepath.Join(l.repoDir, "daemon")
 	l.shimDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim")
 	l.storeDir = filepath.Join(l.repoDir, "agent-shim", "shim-store")
+	l.lockDir = filepath.Join(l.repoDir, "agent-shim", "shim-lock")
 	l.sidecarDir = filepath.Join(l.repoDir, "agent-shim", "claude", "shim-sidecar")
 	for name, dir := range map[string]string{
 		"daemon module":  l.daemonDir,
@@ -405,6 +407,30 @@ func requireSidecarBinary(t *testing.T) string {
 		t.Fatalf("e2e: this suite runs against the REAL sidecar, which does not build: %v", sidecarErr)
 	}
 	return sidecarPath
+}
+
+var (
+	lockOnce sync.Once
+	lockPath string
+	lockErr  error
+)
+
+// requireLockBinary builds the real shim-lock, once per run.
+//
+// EVERY SHIM THIS SUITE SPAWNS NEEDS IT. Node cannot take a flock, so the
+// shim's session and workspace claims are shim-lock CHILD PROCESSES; a shim
+// that cannot find the binary refuses every StartSession. The path travels to
+// the shim as AGENT_REPL_SHIM_LOCK_BIN, so what is claimed here is the binary
+// THIS checkout built, never whatever happens to be deployed on the machine.
+func requireLockBinary(t *testing.T) string {
+	t.Helper()
+	lockOnce.Do(func() {
+		lockPath, lockErr = goBuildOnce(repo.lockDir, filepath.Join(e2eBinDir, "shim-lock"))
+	})
+	if lockErr != nil {
+		t.Fatalf("e2e: this suite runs against the REAL shim, whose lock holder does not build: %v", lockErr)
+	}
+	return lockPath
 }
 
 func goBuildOnce(moduleDir, out string) (string, error) {
