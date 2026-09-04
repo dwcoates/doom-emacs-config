@@ -9,14 +9,16 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
 // sequence is the boot sequence.
 type sequence struct {
-	deps  Deps
-	probe ProbeFunc
-	now   func() time.Time
+	deps        Deps
+	probe       ProbeFunc
+	socketProbe SocketProbeFunc
+	now         func() time.Time
 }
 
 // Joining reports whether this daemon was spawned as a successor. The
@@ -103,6 +105,39 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			continue
 		}
 		state, err := s.probe(s.deps.RunDir, ws.Dir)
+		socketPath := s.deps.Layout.ShimSocket(string(ws.ID))
+		// THE SOCKET IS THE SECOND KERNEL FACT. A lock that reads FREE says
+		// no shim CLAIMS this conversation; it does not say no shim is
+		// LISTENING for it. A survivor still bound to the path is reachable,
+		// and the daemon that spawned over it put a newcomer onto a path it
+		// could not bind — the newcomer died, this daemon dialed the path and
+		// reached the SURVIVOR, which refused StartSession `already_started`
+		// and the turn was lost to a shim nobody adopted. So a live listener
+		// is adopted whatever the lock says, and the disagreement is recorded
+		// rather than resolved silently.
+		socket, socketErr := s.socketProbe(socketPath)
+		if state == sessionlock.StateFree && socket == shimsocket.StateLive {
+			log.Warn("daemon.boot.adopt", "the workspace lock reads free but a shim is listening; adopting the survivor",
+				dlog.Context{
+					"workspace_id": string(ws.ID),
+					"socket_path":  socketPath,
+					"lock_state":   state.String(),
+				})
+			state = sessionlock.StateHeld
+		}
+		// A SOCKET THAT COULD NOT BE PROBED IS NEVER SPAWNED OVER, for the
+		// same reason an unreadable lock is never read as free: the answer
+		// this daemon needs is "is anybody there", and "could not tell" is
+		// not it.
+		if state == sessionlock.StateFree && socket == shimsocket.StateUndetermined {
+			context := dlog.Context{"workspace_id": string(ws.ID), "socket_path": socketPath}
+			if socketErr != nil {
+				context["error"] = socketErr.Error()
+			}
+			log.Warn("daemon.boot.adopt", "the shim socket probe could not tell; never read as free", context)
+			report.Undetermined = append(report.Undetermined, ws.ID)
+			continue
+		}
 		switch {
 		case state == sessionlock.StateHeld:
 			client, adoptErr := s.deps.Supervisor.Adopt(ctx, ws.ID, ws.Dir, s.deps.Layout.ShimSocket(string(ws.ID)))
@@ -125,6 +160,21 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 			})
 			report.Adopted = append(report.Adopted, ws.ID)
 		case state == sessionlock.StateFree:
+			// NOTHING HOLDS AND NOTHING LISTENS, so a socket FILE left here is
+			// a dead shim's leavings — an AF_UNIX path is not reclaimed on
+			// process death the way a flock is — and the next spawn would
+			// fail to bind it for a reason that no longer exists. Clearing it
+			// is part of declaring the workspace client-less; a clear that
+			// fails fails the BOOT rather than leaving a path the next spawn
+			// will trip over.
+			if clearErr := shimsocket.ClearStale(log, socketPath); clearErr != nil {
+				log.Error("daemon.boot.adopt", "the dead shim's socket path could not be cleared", dlog.Context{
+					"workspace_id": string(ws.ID),
+					"socket_path":  socketPath,
+					"error":        clearErr.Error(),
+				})
+				return nil, fmt.Errorf("boot: clear the stale shim socket of %s: %w", ws.ID, clearErr)
+			}
 			log.Debug("daemon.boot.adopt", "no shim survives for this workspace", dlog.Context{
 				"workspace_id": string(ws.ID),
 			})
