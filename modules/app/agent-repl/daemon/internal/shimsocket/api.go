@@ -144,7 +144,12 @@ func ClearStale(log dlog.Logger, path string) error {
 			return fmt.Errorf("shimsocket: unlink the stale socket %q: %w", path, err)
 		}
 		if log != nil {
-			log.Warn("daemon.shimsocket.clear", "unlinked a socket path whose listener is gone",
+			// INFO, not WARN. A dead shim always leaves its socket file
+			// behind — an AF_UNIX path is not reclaimed on process death —
+			// so sweeping one is the ordinary course of a bring-up after a
+			// crash, not a fault. The record still lands, because a spawn
+			// that had to clear a path is worth reading in a diagnosis.
+			log.Info("daemon.shimsocket.clear", "unlinked a socket path whose listener is gone",
 				dlog.Context{"socket_path": path})
 		}
 		return nil
