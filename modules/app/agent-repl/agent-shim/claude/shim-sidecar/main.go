@@ -13,6 +13,7 @@
 // Flags (the launchd plists reference these):
 //
 //	--store-socket     store UDS path (default $AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
+//	--state-dir        agent-repl state root (default $AGENT_REPL_STATE_DIR, else ~/.claude-emacs)
 //	--config-roots     comma-separated config roots (~/.claude,~/.claude-chesscom)
 //	--spool-root       task-spool root (/tmp; resolves claude-<uid>/… itself)
 //	--log              append-only log file (also to stderr)
@@ -75,6 +76,21 @@ const (
 // somewhere private without either side hard-coding the path.
 const StoreSocketEnv = "AGENT_REPL_STORE_SOCKET"
 
+// StateDirEnv names the agent-repl state root — the same variable the daemon
+// resolves and exports into every shim it spawns. The sidecar reads it because
+// the shim's identity records live under it: `shim/<workspace-key>/agent-id.json`
+// and `shim/<workspace-key>/vendor-id/<vendor-session-id>.json` are the ONLY
+// place the link between a rotated vendor session id and the conversation's
+// original one exists — the vendor's own transcripts carry no lineage.
+// An explicit --state-dir beats it, exactly as --store-socket beats its env.
+const StateDirEnv = "AGENT_REPL_STATE_DIR"
+
+// DefaultStateDirName is the state root's location under the home directory
+// when neither the flag nor the environment names one. It is the daemon's
+// stateroot.DefaultDirName, restated here because this module cannot import the
+// daemon; the two are documented on each other and move together or not at all.
+const DefaultStateDirName = ".claude-emacs"
+
 // The env vars that stand in for the LOST policy's four window flags. An
 // explicit flag beats the env, exactly as --store-socket does.
 const (
@@ -98,6 +114,8 @@ const (
 func main() {
 	base := defaultCacheDir()
 	storeSocket := flag.String("store-socket", defaultStoreSocket(base), "store UDS path (default $"+StoreSocketEnv+")")
+	stateDir := flag.String("state-dir", "",
+		"agent-repl state root holding the shim's identity records (default $"+StateDirEnv+", else ~/"+DefaultStateDirName+")")
 	configRoots := flag.String("config-roots", "~/.claude,~/.claude-chesscom", "comma-separated config roots")
 	spoolRoot := flag.String("spool-root", "/tmp", "task-spool root (resolves claude-<uid>/ itself)")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (also to stderr)")
@@ -144,6 +162,7 @@ func main() {
 
 	options := Options{
 		StoreSocket:        *storeSocket,
+		StateDir:           resolveStateDir(*stateDir),
 		ConfigRoots:        parseRoots(*configRoots),
 		SpoolRoot:          *spoolRoot,
 		PollInterval:       *pollInterval,
@@ -161,7 +180,12 @@ func main() {
 
 // Options is the sidecar's whole configuration, after flag and env resolution.
 type Options struct {
-	StoreSocket    string
+	StoreSocket string
+	// StateDir is the agent-repl state root the shim writes its identity
+	// records under. Empty means no root could be resolved, and the reader then
+	// books every transcript under its own vendor session id — which is what it
+	// did before the records existed.
+	StateDir       string
 	ConfigRoots    []string
 	SpoolRoot      string
 	PollInterval   time.Duration
@@ -301,6 +325,29 @@ func resolveBackoffOptions(min, max durationSource) (time.Duration, time.Duratio
 	return resolvedMin, resolvedMax, nil
 }
 
+// resolveStateDir answers the state root: the flag when the operator passed one,
+// else $AGENT_REPL_STATE_DIR, else $HOME/.claude-emacs — the same precedence the
+// daemon's stateroot.Root applies, so both processes resolve one root.
+//
+// A HOME THAT CANNOT BE RESOLVED IS NOT A BOOTSTRAP FAILURE. Nothing else in
+// this process needs the state root, and refusing to start over it would take
+// the whole file plane down for a facility only rotated conversations use. It
+// answers empty, which the index reports as "resolves nothing" rather than
+// guessing a path.
+func resolveStateDir(flagValue string) string {
+	if dir := strings.TrimSpace(flagValue); dir != "" {
+		return expandHome(dir)
+	}
+	if dir := strings.TrimSpace(os.Getenv(StateDirEnv)); dir != "" {
+		return expandHome(dir)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, DefaultStateDirName)
+}
+
 // defaultStoreSocket resolves the store socket's default: the shared env var
 // when it is set, otherwise the cache-dir path both services agree on.
 func defaultStoreSocket(base string) string {
@@ -382,8 +429,8 @@ func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
 func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) error {
 	sc := newSidecar(options, logf)
 	logf.With(logging.Context{Operation: "start"}).Log(
-		"sidecar starting config_roots=%v spool_root=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
-		options.ConfigRoots, options.SpoolRoot, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
+		"sidecar starting config_roots=%v spool_root=%s state_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
+		options.ConfigRoots, options.SpoolRoot, options.StateDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
 	if err := sc.Run(stop); err != nil {
 		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
 		return err
