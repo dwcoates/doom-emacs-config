@@ -108,6 +108,12 @@ type graph struct {
 	// read that client, and a turn end still being handled when the store
 	// closes under it is a refused read on a path that owes no error.
 	CloseWatchers func()
+	// DrainQueue is the BOUNDED wait for the prompt queue's own background
+	// goroutines — the asynchronous classification verdicts and the background
+	// revivals. `run` calls it BEFORE the state client closes, for the reason
+	// promptqueue.Queue.Drain states: both read and write that client off their
+	// own goroutine.
+	DrainQueue func(bound time.Duration) bool
 	// DrainMerges is the BOUNDED wait for merge runs that have reached their
 	// terminal. `run` calls it BEFORE the watchers close and before the state
 	// client does: a SIGTERM landing mid-terminal used to close the store
@@ -639,6 +645,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "command_file_ingress", Run: ingress.Run},
 		},
 		CloseWatchers: fleet.CloseWatchers,
+		DrainQueue:    queue.Drain,
 		DrainMerges:   mergeOrchestrator.Drain,
 	}, nil
 }
