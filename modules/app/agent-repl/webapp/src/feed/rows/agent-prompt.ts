@@ -14,7 +14,8 @@
  */
 import { bubbleWaveStyle } from "../../breathing.js";
 import { log } from "../../log.js";
-import { requireMessage } from "../../rpc/strict.js";
+import { armName } from "../renderers.js";
+import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedAgentPrompt,
   FeedAgentPromptAddress,
@@ -24,6 +25,19 @@ import type {
 import { drawPromptBlockArm } from "./blocks.js";
 
 const PATH = "FeedAgentPrompt";
+
+/**
+ * What each delivery arm says.
+ *
+ * THE SENDER'S ROW ONLY. `delivery` is unset on the recipient's copy of the
+ * same prompt — the outcome is a fact about the SEND, and stating it on the
+ * delivered row would tell the recipient something about its own resumption
+ * that the sender's feed is the one authority on.
+ */
+export const DELIVERY_WORDS = {
+  queuedToLive: "queued for the live recipient",
+  resumedRecipient: "resumed the recipient",
+} as const satisfies Record<string, string>;
 
 /**
  * The agent-addressed prompt bubble: the prompt bubble's chrome plus the
@@ -42,6 +56,11 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
   bubble.append(
     drawFeedAgentPromptBody(requireMessage(msg.body, `${PATH}.body`), `${PATH}.body`),
   );
+  // AN UNSET DELIVERY DRAWS NOTHING. The oneof is absent on every recipient
+  // copy, which is not a missing fact but the absence of one.
+  if (msg.delivery.case !== undefined) {
+    bubble.append(drawFeedAgentPromptDelivery(msg.delivery));
+  }
   return bubble;
 }
 
@@ -69,4 +88,35 @@ export function drawFeedAgentPromptBody(body: FeedAgentPromptBody, path: string)
 /** One block of an agent prompt — the shared drawn block vocabulary. */
 export function drawFeedAgentPromptBlock(block: FeedAgentPromptBlock, path: string): HTMLElement {
   return drawPromptBlockArm(block.block, `${path}.block`);
+}
+
+/**
+ * The delivery outcome marker on the SENDER's row.
+ *
+ * Stated because a resumption is the cause of another agent's renewed activity
+ * and renewed cost (feed.proto, FeedAgentPromptResumedRecipient), which the
+ * reader cannot otherwise attribute to their own send.
+ */
+export function drawFeedAgentPromptDelivery(
+  delivery: FeedAgentPrompt["delivery"],
+): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "prompt-delivery";
+  switch (delivery.case) {
+    case "queuedToLive":
+    case "resumedRecipient":
+      el.setAttribute("data-delivery", delivery.case);
+      el.textContent = DELIVERY_WORDS[delivery.case];
+      break;
+    default:
+      return unreachableArm(
+        `${PATH}.delivery`,
+        armName(delivery as unknown as { case: string }),
+      );
+  }
+  log("debug", `the agent prompt was delivered: ${delivery.case}`, {
+    operation: "feed.agent-prompt-delivery",
+    context: { delivery: delivery.case },
+  });
+  return el;
 }
