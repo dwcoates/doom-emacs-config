@@ -74,7 +74,7 @@ func (s *server) Interrupt(
 			// Interrupt has no feed arms; `not_detached_work` is the arm the
 			// contract carries for a target that is not detached work.
 			return answer(resp, s.refuse(subject.Log, rpc, resp, s.fill(refusal{
-				Arm:    "not_detached_work",
+				Arm:    workspace.ArmNotDetachedWork,
 				Reason: refused.Reason,
 			})))
 		}
