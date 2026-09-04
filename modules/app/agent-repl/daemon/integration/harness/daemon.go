@@ -110,6 +110,12 @@ type Opts struct {
 	// hibernation tests
 	// use so the cutoff can be a handful of milliseconds.
 	IdleCutoffMS int
+	// FooterMomentaryDwell compresses the footer's momentary-status dwell via
+	// --footer-momentary-dwell. It exists for the two tests whose subject IS
+	// the retirement: the product window is 1.5s because a person has to read
+	// the status, and a test that only needs to see the successor push arrive
+	// has no reason to sit through a window sized for human eyes.
+	FooterMomentaryDwell time.Duration
 	// Pprof sets the profiling listener address; empty leaves it off.
 	Pprof string
 	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
@@ -382,6 +388,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		args = append(args, "--idle-cutoff", opts.IdleCutoff.String())
 	case opts.IdleCutoffMS > 0:
 		args = append(args, "--idle-cutoff", (time.Duration(opts.IdleCutoffMS) * time.Millisecond).String())
+	}
+	if opts.FooterMomentaryDwell > 0 {
+		args = append(args, "--footer-momentary-dwell", opts.FooterMomentaryDwell.String())
 	}
 	if opts.Pprof != "" {
 		args = append(args, "--pprof", opts.Pprof)
