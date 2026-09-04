@@ -1907,7 +1907,12 @@ describe("the converter's own health", () => {
     expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
   });
 
-  it("returns to healthy once a message converts", async () => {
+  // THE TURN IS THE UNIT OF RECOVERY, not the message: the messages after a
+  // refusal are the same turn's own remainder, and the turn that lost a record
+  // stays degraded for its whole length. The `!fault-converter` /
+  // `!fault-recover` pair states exactly that — the defective turn leaves an
+  // OPEN window, and the clean turn after it is what closes it.
+  it("stays degraded for the rest of the turn a message was refused in", async () => {
     const h = harness();
     await started(h);
     h.fold.faultFor = (message) =>
@@ -1915,6 +1920,19 @@ describe("the converter's own health", () => {
     await h.engine.onSdkMessage(prose("u-defect"));
 
     await h.engine.onSdkMessage(prose("u-good"));
+
+    expect(diagnostics(h).health.case).toBe("unhealthy");
+  });
+
+  it("returns to healthy at the end of a turn that refused nothing", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid === "u-defect" ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
 
     expect(diagnostics(h).health.case).toBe("healthy");
   });
@@ -1926,8 +1944,9 @@ describe("the converter's own health", () => {
       (message as { uuid?: string }).uuid?.startsWith("u-defect") === true ? "boom" : undefined;
     await h.engine.onSdkMessage(prose("u-defect-1"));
     await h.engine.onSdkMessage(prose("u-defect-2"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
 
-    await h.engine.onSdkMessage(prose("u-good"));
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
 
     const window = diagnostics(h).degradedWindows[0];
     expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : -1n).toBe(2n);
@@ -1944,13 +1963,26 @@ describe("the converter's own health", () => {
     expect(diagnostics(h).degradedWindows.length).toBe(1);
   });
 
-  it("closes the window at the turn's end", async () => {
+  it("leaves the window OPEN at the end of the turn that refused a message", async () => {
     const h = harness();
     await started(h);
     h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
     await h.engine.onSdkMessage(prose("u-defect"));
 
     await h.engine.onSdkMessage(resultMessage("u-result"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
+  });
+
+  it("closes the window at the end of the next clean turn", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+    await h.engine.onSdkMessage(prose("u-defect"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
+    h.fold.faultFor = () => undefined;
+
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
 
     expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("closed");
   });
