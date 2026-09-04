@@ -209,3 +209,120 @@ func TestDetachedLostCauseString(t *testing.T) {
 		})
 	}
 }
+
+// Landing 11: the DetachedLost arm is relayed BY NAME onto both feed lost
+// rows, and a cause this build does not carry sets no arm at all.
+
+func TestApplySubagentLostHowRelaysEachArmByName(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause detachedLostCause
+		want  func(*frontendv1.FeedSubagentLost) bool
+	}{
+		{
+			name:  "file vanished",
+			cause: lostFileVanished,
+			want:  func(l *frontendv1.FeedSubagentLost) bool { return l.GetFileVanished() != nil },
+		},
+		{
+			name:  "went silent",
+			cause: lostWentSilent,
+			want:  func(l *frontendv1.FeedSubagentLost) bool { return l.GetWentSilent() != nil },
+		},
+		{
+			name:  "swept up",
+			cause: lostSweptUp,
+			want:  func(l *frontendv1.FeedSubagentLost) bool { return l.GetSweptUp() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			lost := &frontendv1.FeedSubagentLost{}
+
+			// Act.
+			ok := applySubagentLostHow(lost, tc.cause)
+
+			// Assert.
+			if !ok {
+				t.Fatalf("applySubagentLostHow(%v) reported the arm unlanded", tc.cause)
+			}
+			if !tc.want(lost) {
+				t.Fatalf("how = %T, want the %s arm", lost.GetHow(), tc.name)
+			}
+		})
+	}
+}
+
+func TestApplySubagentLostHowLeavesAnUnnamedCauseUnset(t *testing.T) {
+	// Arrange.
+	lost := &frontendv1.FeedSubagentLost{}
+
+	// Act.
+	ok := applySubagentLostHow(lost, lostNone)
+
+	// Assert: NEVER SILENTLY DEFAULTED — no arm, and the caller is told.
+	if ok {
+		t.Fatal("an unnamed cause reported a landed arm")
+	}
+	if lost.GetHow() != nil {
+		t.Fatalf("how = %T, want unset", lost.GetHow())
+	}
+}
+
+func TestApplyShellLostHowRelaysEachArmByName(t *testing.T) {
+	tests := []struct {
+		name  string
+		cause detachedLostCause
+		want  func(*frontendv1.FeedShellLost) bool
+	}{
+		{
+			name:  "file vanished",
+			cause: lostFileVanished,
+			want:  func(l *frontendv1.FeedShellLost) bool { return l.GetFileVanished() != nil },
+		},
+		{
+			name:  "went silent",
+			cause: lostWentSilent,
+			want:  func(l *frontendv1.FeedShellLost) bool { return l.GetWentSilent() != nil },
+		},
+		{
+			name:  "swept up",
+			cause: lostSweptUp,
+			want:  func(l *frontendv1.FeedShellLost) bool { return l.GetSweptUp() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			lost := &frontendv1.FeedShellLost{}
+
+			// Act.
+			ok := applyShellLostHow(lost, tc.cause)
+
+			// Assert.
+			if !ok {
+				t.Fatalf("applyShellLostHow(%v) reported the arm unlanded", tc.cause)
+			}
+			if !tc.want(lost) {
+				t.Fatalf("how = %T, want the %s arm", lost.GetHow(), tc.name)
+			}
+		})
+	}
+}
+
+func TestApplyShellLostHowLeavesAnUnnamedCauseUnset(t *testing.T) {
+	// Arrange.
+	lost := &frontendv1.FeedShellLost{}
+
+	// Act.
+	ok := applyShellLostHow(lost, lostNone)
+
+	// Assert.
+	if ok {
+		t.Fatal("an unnamed cause reported a landed arm")
+	}
+	if lost.GetHow() != nil {
+		t.Fatalf("how = %T, want unset", lost.GetHow())
+	}
+}

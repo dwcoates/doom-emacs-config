@@ -6,6 +6,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 )
 
@@ -1171,5 +1172,144 @@ func TestADetachedForegroundShellsTerminalKeepsTheCallsOwnCommand(t *testing.T) 
 	}
 	if shell.GetSettled().GetExit().GetCode() != 0 {
 		t.Fatalf("settled = %+v, want the exit chip the terminal carried", shell.GetSettled())
+	}
+}
+
+// Landing 11: the settled row carries the DetachedLost arm the producer named,
+// on both the spawn's bubble and the shell's.
+
+func TestSubagentFailureOutcomeCarriesEachLostArm(t *testing.T) {
+	tests := []struct {
+		name string
+		lost *conversationv1.DetachedLost
+		want func(*frontendv1.FeedSubagentLost) bool
+	}{
+		{
+			name: "file vanished",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_FileVanished{FileVanished: &conversationv1.DetachedLostFileVanished{}}},
+			want: func(l *frontendv1.FeedSubagentLost) bool { return l.GetFileVanished() != nil },
+		},
+		{
+			name: "went silent",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}}},
+			want: func(l *frontendv1.FeedSubagentLost) bool { return l.GetWentSilent() != nil },
+		},
+		{
+			name: "swept up",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_SweptUp{SweptUp: &conversationv1.DetachedLostSweptUp{}}},
+			want: func(l *frontendv1.FeedSubagentLost) bool { return l.GetSweptUp() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			failure := &conversationv1.AgentSubagentFailure{
+				Cause: &conversationv1.AgentSubagentFailure_Lost{
+					Lost: tc.lost,
+				},
+			}
+			settled := &frontendv1.FeedSubagentSettled{}
+
+			// Act.
+			subagentFailureOutcome(log, "unit-1", failure)(settled)
+
+			// Assert.
+			lost := settled.GetLost()
+			if lost == nil {
+				t.Fatalf("outcome = %T, want lost", settled.GetOutcome())
+			}
+			if !tc.want(lost) {
+				t.Fatalf("how = %T, want the %s arm", lost.GetHow(), tc.name)
+			}
+		})
+	}
+}
+
+func TestSubagentFailureWithAnUnsetLostArmIsNotDrawnAsLost(t *testing.T) {
+	// Arrange: the producer said "lost" and named no way.
+	log := dlog.NewTestLogger()
+	failure := &conversationv1.AgentSubagentFailure{
+		Cause: &conversationv1.AgentSubagentFailure_Lost{Lost: &conversationv1.DetachedLost{}},
+	}
+	settled := &frontendv1.FeedSubagentSettled{}
+
+	// Act.
+	subagentFailureOutcome(log, "unit-1", failure)(settled)
+
+	// Assert: an unnamed way is no lost claim, so no lost row states one.
+	if settled.GetLost() != nil {
+		t.Fatalf("outcome = lost with how %T, want no lost claim", settled.GetLost().GetHow())
+	}
+}
+
+func TestShellSettledCarriesEachLostArm(t *testing.T) {
+	tests := []struct {
+		name string
+		lost *conversationv1.DetachedLost
+		want func(*frontendv1.FeedShellLost) bool
+	}{
+		{
+			name: "file vanished",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_FileVanished{FileVanished: &conversationv1.DetachedLostFileVanished{}}},
+			want: func(l *frontendv1.FeedShellLost) bool { return l.GetFileVanished() != nil },
+		},
+		{
+			name: "went silent",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}}},
+			want: func(l *frontendv1.FeedShellLost) bool { return l.GetWentSilent() != nil },
+		},
+		{
+			name: "swept up",
+			lost: &conversationv1.DetachedLost{How: &conversationv1.DetachedLost_SweptUp{SweptUp: &conversationv1.DetachedLostSweptUp{}}},
+			want: func(l *frontendv1.FeedShellLost) bool { return l.GetSweptUp() != nil },
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := dlog.NewTestLogger()
+			success := &conversationv1.AgentBashSuccess{
+				Outcome: &conversationv1.AgentBashSuccess_Interrupted{
+					Interrupted: &conversationv1.AgentBashInterrupted{
+						Cause: &conversationv1.AgentBashInterrupted_Lost{
+							Lost: tc.lost,
+						},
+					},
+				},
+			}
+
+			// Act.
+			settled := shellSettled(log, "work-1", success)
+
+			// Assert.
+			lost := settled.GetLost()
+			if lost == nil {
+				t.Fatalf("outcome = %T, want lost", settled.GetOutcome())
+			}
+			if !tc.want(lost) {
+				t.Fatalf("how = %T, want the %s arm", lost.GetHow(), tc.name)
+			}
+		})
+	}
+}
+
+func TestShellSettledWithAnUnsetLostArmIsNotDrawnAsLost(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	success := &conversationv1.AgentBashSuccess{
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{
+			Interrupted: &conversationv1.AgentBashInterrupted{
+				Cause: &conversationv1.AgentBashInterrupted_Lost{Lost: &conversationv1.DetachedLost{}},
+			},
+		},
+	}
+
+	// Act.
+	settled := shellSettled(log, "work-1", success)
+
+	// Assert.
+	if settled.GetLost() != nil {
+		t.Fatalf("outcome = lost with how %T, want no lost claim", settled.GetLost().GetHow())
 	}
 }
