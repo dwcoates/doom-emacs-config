@@ -39,6 +39,24 @@ type fixture struct {
 	web  *harness.Stream[*agentreplv1.WatchWebWorkspaceResponse]
 }
 
+// expectSessionKillRecords declares the WARN and ERROR trail that ENDING A LIVE
+// SESSION ON PURPOSE leaves on the workspace's own log sink: the shim's death,
+// the severed link, the two standing streams that end without the session
+// ending, and — when the shim is hung or already gone — the forced KillSession
+// that never answers.
+//
+// It exists because five tests kill a live session as their ARRANGEMENT, and
+// each of them declared a different subset of the same trail while the sweep
+// read the workspace sink through a symlink and saw none of it. One statement
+// of the trail is what keeps those five from drifting apart again.
+func expectSessionKillRecords(d *harness.Daemon) {
+	d.ExpectWarnings(
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent", "daemon.workspace.kill",
+	)
+}
+
 // newDaemon starts a daemon with no workspace.
 func newDaemon(t *testing.T, opts harness.Opts) *harness.Daemon {
 	t.Helper()
@@ -52,7 +70,6 @@ func newRegistered(t *testing.T, opts harness.Opts) *fixture {
 	d := harness.StartDaemon(t, opts)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
-	d.WatchWorkspaceLogs(repo.Dir)
 	return &fixture{d: d, repo: repo, ws: ws, t: t}
 }
 
@@ -83,7 +100,6 @@ func newOpenedWorktree(t *testing.T, opts harness.Opts, name string) *fixture {
 	repo := harness.NewRepo(t)
 	dir := worktreeOf(t, repo, name)
 	ws := harness.Register(t, d, dir)
-	d.WatchWorkspaceLogs(dir)
 	f := &fixture{d: d, repo: repo, ws: ws, t: t}
 	f.open()
 	f.host = f.d.WatchHost(f.ws)

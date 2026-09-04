@@ -521,7 +521,6 @@ func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *te
 		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
 	}
 	ws := resp.Msg.GetSuccess().GetWorkspace()
-	d.WatchWorkspaceLogs(ws.GetDir())
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()
@@ -605,6 +604,9 @@ func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
 	f := newOpenedWorktree(t, harness.Opts{}, "nuke-order")
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
 	f.d.ExpectWarnings("daemon.health.open_fault")
+	// The nuke ends a LIVE session whose shim is hung, which is the whole
+	// arrangement; the trail it leaves is evidence, not a fault.
+	expectSessionKillRecords(f.d)
 	f.shim.ExpectStartSession()
 	f.shim.Hang()
 

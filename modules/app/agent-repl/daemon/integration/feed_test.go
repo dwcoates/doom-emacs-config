@@ -2227,7 +2227,6 @@ func secondWorkspaceOn(t *testing.T, d *harness.Daemon) *fixture {
 	t.Helper()
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
-	d.WatchWorkspaceLogs(repo.Dir)
 	other := &fixture{d: d, repo: repo, ws: ws, t: t}
 	other.open()
 	other.host = d.WatchHost(ws)
