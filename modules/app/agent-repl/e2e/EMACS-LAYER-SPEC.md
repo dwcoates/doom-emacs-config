@@ -254,7 +254,7 @@ exposes the full pushed state as data, so this is nearly always possible:
 | what | read from | not from |
 |---|---|---|
 | roster rows / arms | `agent-repl-roster--rows-by-id`, `agent-repl-roster--status-by-id` | the sidebar's drawn text |
-| tab order | `agent-repl-roster--tab-order`, `tab-bar-tabs` | the tab-bar string |
+| tab order | `agent-repl-roster--tab-order`, `agent-repl--ws-tabline-names` | the tab-bar string, `tab-bar-tabs` |
 | workspace registry | `agent-repl--workspaces` | buffer names |
 | host state / session ids | `agent-repl-host--by-name` | anything rendered |
 | panels + layout | `window-list` + `window-buffer` + `window-parameter` | `format-mode-line` |
@@ -600,7 +600,7 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 
 7. **CreateWorkspaceAppearsOnTheRoster** -- `agent-repl-create-workspace` --
    `agent-repl-roster--rows-by-id` gains one row, `agent-repl-roster--tab-order`
-   and `tab-bar-tabs` both list it. The daemon minted the identity; Emacs
+   and `agent-repl--ws-tabline-names` both list it. The daemon minted the identity; Emacs
    only reacted.
 8. **RegisterAnExistingDirectory** -- `agent-repl-add-project-workspace` --
    `agent-repl--workspaces` gains the name and `agent-repl-host--by-name`
@@ -609,7 +609,7 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
    `agent-repl-host-last-selected-id` is that workspace's ref id. Select is
    one of Emacs's only two inputs to the roster.
 10. **CloseWorkspaceIsAViewAct** -- `agent-repl-close-workspace` -- the tab
-    is gone from `tab-bar-tabs` and the host entry is dropped, while the
+    is gone from `agent-repl--ws-tabline-names` and the host entry is dropped, while the
     daemon-side session is still alive (cross-checked on the Go client).
 11. **CloseWithAHeldPromptDoesNotTearTheTabDown** --
     `agent-repl-queue-deferred-prompt` then `agent-repl-close-workspace` --
@@ -617,7 +617,8 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
     Per `elisp.md`, the refusal manifests in the WEBAPP FOOTER, not an Emacs
     dialog, so what Emacs owes is precisely to not act; undelivered user
     intent may never be silently discarded.
-12. **KillWorkspaceNeverBlocks** -- `agent-repl-kill-workspace` -- tab gone,
+12. **KillWorkspaceNeverBlocks** -- `agent-repl-kill-workspace` -- the name
+    is gone from `agent-repl--ws-tabline-names`,
     session dead daemon-side, no refusal path taken even with work in flight.
 13. **CloseThenKillDoesNotWedgeEmacs** -- both commands back to back on a
     workspace with a live panel -- **the heartbeat is the assertion.** This
@@ -726,7 +727,7 @@ they drive the same verbs, and assert Emacs's own state rather than frames.
 
 38. **TabsRehydrateFromTheRosterOnConnect** -- stop and restart the daemon
     under Emacs -- `agent-repl-roster--tab-order` is rebuilt from the roster
-    and `tab-bar-tabs` matches it. The daemon is the source of which
+    and `agent-repl--ws-tabline-names` matches it. The daemon is the source of which
     workspaces exist.
 39. **ReRegisterIsIdempotentByDir** -- after a daemon restart --
     `agent-repl--workspaces` has the same count and the same names; no
