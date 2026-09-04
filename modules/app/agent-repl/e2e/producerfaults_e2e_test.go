@@ -211,6 +211,10 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	if errored.GetQueryDied() == nil {
 		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
 	}
+	// Landing 10 gave the arm a cause; an EOF is the agent binary vanishing.
+	if errored.GetQueryDied().GetUnexpectedEof() == nil {
+		t.Errorf("query_died cause = %v, want unexpected_eof", errored.GetQueryDied())
+	}
 	if errored.GetHeadline().GetText() == "" {
 		t.Errorf("turn error headline = %q, want the daemon's composed sentence (FeedTurnErrorHeadline)", errored.GetHeadline().GetText())
 	}
@@ -252,12 +256,11 @@ func TestQueryDiedBlocksTheFooter(t *testing.T) {
 // REJECTING rather than ending, "the producer died rather than finished"
 // (lifecycle.ts), whose arm is SessionQueryDied.cause=iterator_failure.
 //
-// The CAUSE distinguishes the two deaths on conversation/v1's wire only:
-// feed.proto models the turn's end with ONE arm, FeedTurnErrorQueryDied
-// ("Empty: the arm is the cause" is not said of it, but it carries no cause
-// field), so this test asserts that same arm and, separately from
-// TestQueryEofEndsTheTurnAsQueryDied, that a REJECTION reaches it too —
-// which is the fact a converter that only handled EOF would break.
+// The CAUSE was once observable on conversation/v1's wire alone; landing 10
+// gave FeedTurnErrorQueryDied its own `cause` oneof mirroring
+// SessionQueryDied's, so the distinction the writer noted as unobservable now
+// is one — and this test pins the iterator-failure half of it, separately
+// from TestQueryEofEndsTheTurnAsQueryDied's EOF.
 func TestQueryFailEndsTheTurnAsQueryDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -276,6 +279,9 @@ func TestQueryFailEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 	if errored.GetQueryDied() == nil {
 		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
+	}
+	if errored.GetQueryDied().GetIteratorFailure() == nil {
+		t.Errorf("query_died cause = %v, want iterator_failure (the SDK's iterator threw)", errored.GetQueryDied())
 	}
 }
 
