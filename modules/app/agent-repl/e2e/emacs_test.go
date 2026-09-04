@@ -255,6 +255,11 @@ type Emacs struct {
 	// multiple of this number across healthy runs, never a guess. Reported
 	// once per test by reportPhases.
 	heartbeatMax atomic.Int64
+	// artifactDirOnce and artifactRoot name the ONE directory this Emacs's
+	// evidence lands in, claimed on first use. See artifactDir.
+	artifactDirOnce sync.Once
+	artifactRoot    string
+
 	// nativeOnce guards the gdb capture. ONE capture per Emacs: gdb attaching
 	// STOPS the inferior for the duration, so a second attach would describe
 	// a process the first one already perturbed, and the stall this exists
@@ -926,9 +931,8 @@ func (e *Emacs) dumpArtifacts() {
 			ArtifactsEnv, tailBytes([]byte(e.proc.Output()), artifactTailBytes))
 		return
 	}
-	out := filepath.Join(dir, artifactDirName(e.t.Name()))
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		e.t.Logf("preserve emacs artifacts under %s: %v", out, err)
+	out := e.artifactDir(dir)
+	if out == "" {
 		return
 	}
 	path := filepath.Join(out, "emacs.pty.log")
@@ -952,6 +956,44 @@ func (e *Emacs) dumpArtifacts() {
 			e.t.Logf("preserve %s: %v", extra, err)
 		}
 	}
+}
+
+// artifactDirName is not unique enough on its own, and this is what makes it
+// so. A `-count=N` run repeats ONE test name, so every repetition resolved to
+// the same directory and each failure ERASED the one before it -- which for a
+// defect that fires once in twenty-four runs means the evidence collected is
+// the evidence of whichever repetition happened to fail last. The first free
+// suffix is claimed with `os.Mkdir`, the one filesystem operation that is
+// atomic and fails if the name exists, so two Emacsen failing at once cannot
+// both believe they own the same directory. Memoized, because one Emacs's
+// wedge report and its teardown dump belong together.
+//
+// Answers "" when no directory could be made, having said why.
+func (e *Emacs) artifactDir(root string) string {
+	e.artifactDirOnce.Do(func() {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			e.t.Logf("preserve emacs artifacts under %s: %v", root, err)
+			return
+		}
+		base := filepath.Join(root, artifactDirName(e.t.Name()))
+		for n := 0; ; n++ {
+			dir := base
+			if n > 0 {
+				dir = fmt.Sprintf("%s.%d", base, n)
+			}
+			err := os.Mkdir(dir, 0o755)
+			if err == nil {
+				e.artifactRoot = dir
+				return
+			}
+			if os.IsExist(err) {
+				continue
+			}
+			e.t.Logf("preserve emacs artifacts under %s: %v", dir, err)
+			return
+		}
+	})
+	return e.artifactRoot
 }
 
 // copyTree copies a file or a directory tree; a missing source is not an
@@ -1220,9 +1262,8 @@ func (e *Emacs) writeNativeBacktrace(text string) {
 	if dir == "" {
 		return
 	}
-	out := filepath.Join(dir, artifactDirName(e.t.Name()))
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		e.t.Logf("preserve the native backtrace under %s: %v", out, err)
+	out := e.artifactDir(dir)
+	if out == "" {
 		return
 	}
 	path := filepath.Join(out, nativeBacktraceFile)
