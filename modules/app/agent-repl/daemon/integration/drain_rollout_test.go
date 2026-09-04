@@ -436,21 +436,45 @@ func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T
 	}
 }
 
+// TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor
+// is the SCHEDULED drain's bargain, stated by the proto:
+// UpdateShutdownScheduleSchedule is "drain then exit at/after this instant:
+// finish in-flight turns, hold new prompts, exit when quiet". Waiting the turn
+// out is what "finish in-flight turns" means, and the wait is the whole
+// mechanism — the drain never interrupts the vendor to get there.
+//
+// IT DRIVES A SCHEDULE, NOT `now`. It used to send
+// UpdateShutdownSchedule{now} and then assert these same schedule properties,
+// which contradicts that arm's own proto sentence ("Exit now: stop accepting
+// work, flush in-flight writes, go") and the drain controller's own
+// ShutdownNow ("takes no lease and waits for no freeness"). It passed only
+// because harness.Daemon.Exited() read the daemon's unreaped ZOMBIE as still
+// running: the daemon it asserted was "still up" had already exited. `now`'s
+// contract is covered by the two tests above it.
 func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor(t *testing.T) {
 	t.Parallel()
-	// Arrange: a turn in flight when the drain fires now.
+	// Arrange: a turn in flight when the drain's deadline passes.
 	f := newOpened(t, harness.Opts{})
 	resp := f.submit("do the thing", "k-drain-now", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
 		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
 	}
 	f.shim.ExpectStartTurn()
+	// THE SCHEDULE'S OWN HOLD, SEEN TWICE. Schedule() takes the drain hold on
+	// every workspace the instant it is armed, and fire() takes it again when
+	// the deadline passes; the second attempt finds the first one standing,
+	// which is the state fire() explicitly anticipates ("the drain will wait
+	// on it as it stands") and the state client records as a refused write.
+	f.d.ExpectWarnings("daemon.wsm.acquire_lease", "daemon.drain.fire")
 
 	// Act
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{Reason: drainReasonOperator("draining now")}},
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs:   time.Now().UnixMilli(),
+			Reason: drainReasonOperator("draining now"),
+		}},
 	})); err != nil {
-		t.Fatalf("UpdateShutdownSchedule{now} = error %v, want a success", err)
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
 	}
 
 	// Assert: still up, and the vendor is never interrupted for a drain.

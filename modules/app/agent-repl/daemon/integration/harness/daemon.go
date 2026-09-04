@@ -901,7 +901,29 @@ func (d *Daemon) Exited() bool {
 		return true
 	}
 	// Signal 0 probes liveness without disturbing the process.
-	return d.cmd.Process.Signal(syscall.Signal(0)) != nil
+	if d.cmd.Process.Signal(syscall.Signal(0)) != nil {
+		return true
+	}
+	// A ZOMBIE HAS EXITED. Signal 0 succeeds against a process that has run to
+	// completion but has not been reaped, and this harness reaps only in Wait
+	// — which the tests asking this question have deliberately NOT called. The
+	// probe alone therefore reported a daemon that had already gone as still
+	// running, which is how a drain test asserting "the daemon is still up"
+	// passed against a daemon that had exited milliseconds earlier. The kernel
+	// is the only witness left, so it is asked.
+	return isZombie(d.cmd.Process.Pid)
+}
+
+// isZombie reports whether a pid names a process that has exited and is
+// waiting to be reaped. An unreadable state is NOT read as exited: the caller
+// already has the signal probe's answer, and guessing here would turn a `ps`
+// failure into a false exit report.
+func isZombie(pid int) bool {
+	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }
 
 // AwaitExit waits for the process to leave and answers its exit status,
