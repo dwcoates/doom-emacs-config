@@ -228,7 +228,7 @@ func TestInterruptDetachedRefusesARowThatIsNotDetachedWork(t *testing.T) {
 	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmNotDetachedWork)
 }
 
 func TestInterruptAllAgentsStopsEveryLiveAgent(t *testing.T) {
@@ -812,7 +812,7 @@ func TestInterruptDetachedRefusesAnActivityRowWithNoSubagent(t *testing.T) {
 	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmNotDetachedWork)
 	if len(f.shim.stoppedAgents) != 0 {
 		t.Fatalf("stopped agents = %v, want none", f.shim.stoppedAgents)
 	}
