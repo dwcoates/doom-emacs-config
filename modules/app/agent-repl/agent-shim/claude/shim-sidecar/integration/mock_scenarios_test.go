@@ -71,11 +71,30 @@ type mockScenario struct {
 
 // TestMockScenarios drives every scenario the mocked vendor declares.
 func TestMockScenarios(t *testing.T) {
+	t.Parallel()
 	for _, tc := range mockScenarios {
 		t.Run(tc.Prompt, func(t *testing.T) {
+			// EACH ROW IS ITS OWN FOUR PROCESSES OVER ITS OWN t.TempDir()
+			// trees and its own randomly-named sockets, so no row can observe
+			// another's records and the table is safe to run concurrently.
+			// generateMock's own drive slot is what keeps "concurrently" from
+			// meaning "all 133 at once".
+			t.Parallel()
+
 			tree := generateMock(t, tc.Prompt, tc.Wait)
 			in := ingestMock(t, tree)
 			entries := in.Entries()
+			// THE ORPHAN INVARIANT RUNS FIRST, AHEAD OF THE BLOCKED SKIP.
+			// An orphan tool_result is a settle the converter failed to
+			// perform (see mock_orphans_test.go for the subject's own
+			// statement of it), and a BLOCKED row is still a row whose
+			// fixture was generated and ingested — so it is still evidence
+			// about the join, and the concern that blocks its own
+			// expectation does not license a missed settle. It is asserted
+			// here, on THIS scenario's already-generated tree, rather than
+			// by a second function regenerating all 133 scenarios to run
+			// one assertion.
+			requireNoOrphanToolResults(t, tc.Prompt, entries)
 			if tc.Blocked != "" {
 				// Generated and ingested regardless: the fixture is the evidence.
 				t.Skipf("this row is BLOCKED: %s", tc.Blocked)
@@ -315,6 +334,7 @@ const mockBlockedCancelAll = "the mocked vendor writes `EXIT=143` into the AGENT
 // sidecar sees in production — and the turn's every record must land on
 // `unserved_item.keepalive`, structurally unable to reach a page.
 func TestMockKeepAliveTurnsNeverReachAPage(t *testing.T) {
+	t.Parallel()
 	tree := generateMock(t, keepaliveMarker+" say something short", waitTerminal)
 	in := ingestMock(t, tree)
 	entries := in.Entries()

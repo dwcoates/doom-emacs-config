@@ -21,6 +21,7 @@ import (
 // TestAWorkflowJournalIsTailedToResidueAndReachesNoPage drives the checked-in
 // complete journal capture through the discovered journal path.
 func TestAWorkflowJournalIsTailedToResidueAndReachesNoPage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

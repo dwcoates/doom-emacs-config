@@ -32,6 +32,7 @@ func seedApiError(t *testing.T, tree *vendorTree, cwd, session string) (*growing
 
 // TestAnApiErrorLandsAsAPageLineUnderItsOwnKey asserts the carrier and the key.
 func TestAnApiErrorLandsAsAPageLineUnderItsOwnKey(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -65,6 +66,7 @@ func TestAnApiErrorLandsAsAPageLineUnderItsOwnKey(t *testing.T) {
 // TestAnApiErrorIsNeverATerminal asserts the frame is an UPDATE: the agent must
 // remain live, so nothing on the success or failure arm may be produced for it.
 func TestAnApiErrorIsNeverATerminal(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -99,6 +101,7 @@ func TestAnApiErrorIsNeverATerminal(t *testing.T) {
 // carried rather than re-classified. The corpus record is a connection error
 // with a retry hint, which the vendor did not class as a rate limit.
 func TestAnApiErrorCarriesTheVendorsOwnKind(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
