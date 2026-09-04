@@ -15,7 +15,7 @@
  * (`setAccountUsageArm`, `setMcpArm`) and let the shim's own cadence discover
  * it — which is the real production path, not a shortcut around it.
  */
-import type { AccountUsageArm } from "../scenario.js";
+import type { AccountUsageArm, ScenarioContext } from "../scenario.js";
 import { conclude, scenario, withheldThinking } from "./support.js";
 
 const ROTATE = scenario({
@@ -491,6 +491,43 @@ const CONTEXT_BUDGET_WARNING = scenario({
   },
 });
 
+/**
+ * The preserved-segment bookkeeping a REAL `compact_boundary` carries.
+ *
+ * GROUNDED, and grounded twice: `testdata/captures/compaction-directed`
+ * (trigger `manual`) and `testdata/captures/auto-compaction` (trigger `auto`)
+ * agree on the whole shape, so neither is a one-run accident.
+ *
+ *   - `head_uuid` and `tail_uuid` are the FIRST and LAST entries of
+ *     `preserved_messages.uuids` — the span is a real span, several messages
+ *     wide, not a point.
+ *   - `anchor_uuid` is a uuid of its OWN and appears in NEITHER uuid list.
+ *   - `uuids` and `all_uuids` carry the same entries.
+ *
+ * The fake previously collapsed all five onto the transcript's chain head, so
+ * an anchor was indistinguishable from a preserved message and the head/tail
+ * span did not exist at all. A consumer that reads the span, or that expects an
+ * anchor outside the preserved set, could not be exercised against that shape.
+ */
+function preservedUuids(ctx: ScenarioContext, head: string) {
+  const uuids = [head, ctx.newUuid(), ctx.newUuid()];
+  const tail = uuids[uuids.length - 1]!;
+  const anchor = ctx.newUuid();
+  return {
+    head,
+    tail,
+    anchor,
+    stream: {
+      preserved_segment: { head_uuid: head, anchor_uuid: anchor, tail_uuid: tail },
+      preserved_messages: { anchor_uuid: anchor, uuids, all_uuids: uuids },
+    },
+    file: {
+      preservedSegment: { headUuid: head, anchorUuid: anchor, tailUuid: tail },
+      preservedMessages: { anchorUuid: anchor, uuids, allUuids: uuids },
+    },
+  };
+}
+
 const COMPACT = scenario({
   name: "compact",
   prompt: "!compact [summary]",
@@ -500,13 +537,13 @@ const COMPACT = scenario({
     "`status{compact_result:\"success\"}`. `ContextCompacted.Summary` is derived from the assistant prose that " +
     "follows the boundary (`settleCompaction`), so a caller names its own distinctive summary as the prompt's " +
     "argument instead of the fixed default",
-  writes: "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved head, plus a summary user line",
+  writes: "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved TAIL, plus a summary user line",
   arms: "SessionCompacting + AgentUpdate.context_cut(ContextCompacted) with trigger=requested",
   run(ctx) {
     const summary = ctx.args === "" ? "Compacted the conversation." : ctx.args;
     ctx.log({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
-    const head = ctx.files.transcript.chainHead ?? ctx.newUuid();
+    const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
     ctx.emit({
       type: "system",
       subtype: "compact_boundary",
@@ -516,10 +553,12 @@ const COMPACT = scenario({
         post_tokens: 8_639,
         cumulative_dropped_tokens: 705_119,
         duration_ms: 194_511,
-        preserved_segment: { head_uuid: head, anchor_uuid: head, tail_uuid: head },
-        preserved_messages: { anchor_uuid: head, uuids: [head], all_uuids: [head] },
+        ...preserved.stream,
       },
-      logical_parent_uuid: head,
+      // GROUNDED: in BOTH real captures `logical_parent_uuid` equals the
+      // preserved TAIL, not the head — it names the message the post-boundary
+      // transcript hangs off, which is the last preserved one.
+      logical_parent_uuid: preserved.tail,
     });
     ctx.files.transcript.append({
       type: "system",
@@ -527,13 +566,12 @@ const COMPACT = scenario({
       content: "Conversation compacted",
       isMeta: false,
       level: "info",
-      logicalParentUuid: head,
+      logicalParentUuid: preserved.tail,
       compactMetadata: {
         trigger: "manual",
         preTokens: 435_029,
         durationMs: 194_511,
-        preservedSegment: { headUuid: head, anchorUuid: head, tailUuid: head },
-        preservedMessages: { anchorUuid: head, uuids: [head], allUuids: [head] },
+        ...preserved.file,
         postTokens: 8_639,
         cumulativeDroppedTokens: 705_119,
       },
@@ -554,20 +592,23 @@ const COMPACT_AUTO = scenario({
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "compact-auto" }, "fake auto-compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
-    const head = ctx.files.transcript.chainHead ?? ctx.newUuid();
+    const preserved = preservedUuids(ctx, ctx.files.transcript.chainHead ?? ctx.newUuid());
     ctx.emit({
       type: "system",
       subtype: "compact_boundary",
+      // GROUNDED, verbatim from `testdata/captures/auto-compaction` (Haiku,
+      // 2026-09-04): sixteen paced 40000-byte reads carried the window to
+      // 165716 tokens and the vendor compacted on its own. The figures were
+      // invented before that capture existed.
       compact_metadata: {
         trigger: "auto",
-        pre_tokens: 190_000,
-        post_tokens: 12_000,
-        cumulative_dropped_tokens: 178_000,
-        duration_ms: 42_000,
-        preserved_segment: { head_uuid: head, anchor_uuid: head, tail_uuid: head },
-        preserved_messages: { anchor_uuid: head, uuids: [head], all_uuids: [head] },
+        pre_tokens: 165_716,
+        post_tokens: 13_675,
+        cumulative_dropped_tokens: 152_041,
+        duration_ms: 18_695,
+        ...preserved.stream,
       },
-      logical_parent_uuid: head,
+      logical_parent_uuid: preserved.tail,
     });
     ctx.files.transcript.append({
       type: "system",
@@ -575,15 +616,14 @@ const COMPACT_AUTO = scenario({
       content: "Conversation compacted",
       isMeta: false,
       level: "info",
-      logicalParentUuid: head,
+      logicalParentUuid: preserved.tail,
       compactMetadata: {
         trigger: "auto",
-        preTokens: 190_000,
-        durationMs: 42_000,
-        preservedSegment: { headUuid: head, anchorUuid: head, tailUuid: head },
-        preservedMessages: { anchorUuid: head, uuids: [head], allUuids: [head] },
-        postTokens: 12_000,
-        cumulativeDroppedTokens: 178_000,
+        preTokens: 165_716,
+        durationMs: 18_695,
+        ...preserved.file,
+        postTokens: 13_675,
+        cumulativeDroppedTokens: 152_041,
       },
       uuid: ctx.newUuid(),
       timestamp: ctx.nowIso(),
