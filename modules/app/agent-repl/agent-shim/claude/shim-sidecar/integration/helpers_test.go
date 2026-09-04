@@ -756,11 +756,13 @@ func (p *sidecarProc) Stop() {
 // Kill ENDS the process where it stands, with no chance to shut down.
 //
 // It exists for the subjects that stop a sidecar while it is FROZEN inside a
-// withheld store write (see writeGate). SIGTERM would not reach such a process
-// until its own rpc timeout expired, and releasing the write first would let it
-// take one more poll — which is precisely the poll those subjects exist to cut
-// it off before. A kill is also the harsher precondition: the restarted reader
-// gets no orderly shutdown's help, only what the store already made durable.
+// withheld store write (see writeGate). SIGTERM now cancels that write and the
+// process leaves promptly (see sigterm_wedged_write_test.go), but it leaves
+// through its ORDERLY shutdown; a kill is the harsher precondition those
+// subjects want: the restarted reader gets no shutdown's help, only what the
+// store already made durable. Releasing the write first is not an option
+// either, since that would let the process take one more poll — precisely the
+// poll those subjects exist to cut it off before.
 func (p *sidecarProc) Kill() {
 	p.t.Helper()
 	if p.stopped {
