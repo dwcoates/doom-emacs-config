@@ -44,7 +44,7 @@ as `!(default prose)`).
 | `!bash` | grounded | detachedbash_e2e_test.go | feed-families.layer.test.ts | — | Go: TestBashForegroundCompleted asserts Succeeded verdict, exact stdout text, and absence of a detached_shell row. Web: feed-families.layer asserts [data-input-form]/[data-output-body]. | covered |
 | `!bash-detach` | grounded | detachedbash_e2e_test.go | feed-families.layer.test.ts | — | Go: TestBashDetachedStartAndComplete asserts Exit.Code==0, live growth, spool text. Web: feed-families.layer asserts dataset.rowKind==detachedShell. | covered |
 | `!bash-detach-fail` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!bash-detach-live` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!bash-detach-live` | ungrounded | detachedbash_e2e_test.go, detachedlost_e2e_test.go | — | — | Go: TestBashDetachedLiveNeverSettles asserts the live, never-settling shape. detachedlost_e2e_test.go then drives all three `DetachedLost` arms off this same scenario — TestDetachedLostWentSilent, TestDetachedLostFileVanished, TestDetachedLostSweptUp — each asserting `FeedShellSettled.outcome.lost` plus the sidecar's own `reason` key naming the arm. | covered |
 | `!bash-detach-poll` | ungrounded | detachedbash_e2e_test.go | — | — | Go: TestBashDetachExplicitPoll asserts settled exit 0, spool text, and a negative check that no TopbarWarning.UnmodeledTool names TaskOutput. | covered |
 | `!bash-fail` | grounded | detachedbash_e2e_test.go | — | — | Go: TestBashNonzeroExit asserts Succeeded verdict despite nonzero exit, exact stdout text. | covered |
 | `!bash-hold` | ungrounded | — | — | — | no covering test in any layer | uncovered |
@@ -198,9 +198,8 @@ Fully covered: `!compact`, `!compact-auto`, `!compact-failed`, `!context-budget-
 ### Subagents (1)
 - `!subagent-failed` — no test drives a subagent that ends in failure (distinct from `!subagent-detached-live`'s user-stopped case, which IS covered).
 
-### Detached bash (3)
+### Detached bash (2)
 - `!bash-detach-fail` — no test drives a detached shell ending non-zero.
-- `!bash-detach-live` — no test drives a detached shell left running forever (distinct from `!bash-detach-poll`'s live-growth check mid-turn).
 - `!bash-hold` — no test drives a live-forever FOREGROUND bash (the lever AGENTS.md says exists specifically to reach DetachForeground's `unsupported` refusal; that refusal path itself appears untested).
 
 ### Merge/hold (0)
@@ -359,3 +358,35 @@ either, but none exists on this branch.
   unit) is a GAP: no unit test constructs a subagent-shaped
   `AgentActivityId` for this rpc, so the subagent-specific shape the
   deleted e2e test named is untested at every layer.
+
+## Closed gap: the sidecar's three LOST arms (2026-09-04)
+
+`DetachedLost {file_vanished | went_silent | swept_up}`
+(`conversation/v1/agent_activity.proto`), drawn by the daemon as
+`FeedShellLost` (`frontend/v1/feed.proto`), used to have NO e2e coverage:
+reaching any of the three arms needs the sidecar's own staleness ruling to
+ELAPSE or its boot sweep to run, and its production windows (30s grace, 30m
+shell silence) cannot be reached inside this suite's budget.
+
+CLOSED by `detachedlost_e2e_test.go`, which buys short windows through
+`NewWorldWithSidecarStaleness` (`world_test.go`, wrapping the sidecar's own
+`--stale-grace` / `--stale-shell-silence` / `--stale-agent-silence` /
+`--stale-workflow-silence` / `--unowned-spool-window` flags) and drives each
+arm off `!bash-detach-live`, whose spool never carries an `EXIT=` terminator:
+
+- `went_silent` — a 400ms shell-silence window over the scenario's own
+  silence. Observed conclusion 404ms after the last append.
+- `file_vanished` — a 400ms grace over a spool the test deletes from the
+  world's own scratch spool root. Observed conclusion 436ms after the delete.
+- `swept_up` — the leftover spool stamped pre-boot and the sidecar RESTARTED
+  over it (`Sidecar.Restart`), since `Tracker.BootSweep` runs once per
+  PROCESS and boot time is read from the kernel rather than from a flag.
+
+REMAINING GAP, recorded rather than absorbed: `FeedShellLost` and
+`FeedSubagentLost` are EMPTY messages, so the frontend proto carries no
+cause — WHICH arm was concluded is not observable at the feed at all. These
+tests pin the arm on the sidecar's own `lost-terminal` `reason` key (the same
+word the wire's `DetachedLost` arm carries), which is the only statement of
+the arm an e2e test — speaking `agentrepl.v1` and never reading a store row —
+can reach. The SUBAGENT lost arms (`AgentSubagentFailure.cause.lost`,
+`FeedSubagentLost`) remain undriven by any e2e test.
