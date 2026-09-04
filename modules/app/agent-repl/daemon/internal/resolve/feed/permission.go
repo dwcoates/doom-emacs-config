@@ -77,11 +77,7 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 			// The unit is joined by id: `gated_call` when the frame names one,
 			// and otherwise the permission's OWN id, which the shim mints as
 			// the gated unit's AgentActivityId.
-			gated := p.GetGatedCall().GetValue()
-			if gated == "" {
-				gated = p.GetId().GetValue()
-			}
-			r.markCallDenied(s, gated, denialWord(denied.Denied))
+			r.markCallDenied(s, gatedUnit(p), denialWord(denied.Denied))
 		}
 	case *conversationv1.AgentPermission_Failure:
 		card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{
@@ -91,6 +87,17 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		return
 	}
 
+	// THE HEADLINE IS REQUIRED, and a gate that SETTLED WITHOUT EVER ASKING
+	// sent no `Start` frame to carry the vendor's sentence. `!perm-undecidable`
+	// is exactly that shape -- the classifier reaches no verdict and the vendor
+	// denies the call outright -- and the card published without a headline
+	// drew as an unreadable row on the client rather than as the denial it is.
+	// The vendor's own title, when it composes none of its own, IS the tool
+	// name (the gate defaults `title` to it), so the unasked card says the same
+	// thing rather than inventing a sentence the vendor never said.
+	if card.Headline == nil {
+		card.Headline = &frontendv1.FeedPermissionHeadline{Text: r.unaskedHeadline(s, gatedUnit(p))}
+	}
 	if card.Arguments == nil {
 		card.Arguments = &frontendv1.FeedPermissionArguments{}
 	}
@@ -147,6 +154,33 @@ func (r *resolver) gatedArgumentLines(s *wsState, gatedCall string) []string {
 		return nil
 	}
 	return []string{u.input}
+}
+
+// gatedUnit names the unit an ask gates: `gated_call` when the frame carries
+// one, and otherwise the permission's OWN id, which the shim mints as the
+// gated unit's AgentActivityId.
+func gatedUnit(p *conversationv1.AgentPermission) string {
+	if gated := p.GetGatedCall().GetValue(); gated != "" {
+		return gated
+	}
+	return p.GetId().GetValue()
+}
+
+// unaskedHeadline composes the headline for a card whose ask never opened, by
+// naming the gated tool. A gated call the feed never drew leaves nothing to
+// name, and the card says so rather than claiming a tool it cannot identify.
+func (r *resolver) unaskedHeadline(s *wsState, gatedCall string) string {
+	if gatedCall != "" {
+		if u, ok := s.units[gatedCall]; ok {
+			if name := u.row.GetActivity().GetSimpleToolCall().GetName().GetText(); name != "" {
+				return name
+			}
+			if skill := u.row.GetActivity().GetSkill(); skill != nil {
+				return skill.GetInvocation().GetText()
+			}
+		}
+	}
+	return "a gated call"
 }
 
 // decisionArm renders the verdict line's treatment. A DENIAL IS AN ANSWER, not
