@@ -23,8 +23,15 @@ passed; every other flag keeps its default.
   `--watch-buffer` stay at their defaults.
 - `com.agentrepl.shim-claude-sidecar` — `--store-socket` (the same store
   socket), `--config-roots` (the Claude config roots whose transcripts and
-  spools are observed) and `--spool-root`. `--log`, `--poll-interval` (1s) and
-  `--rescan-interval` (30s) stay at their defaults.
+  spools are observed), `--spool-root`, and `--state-dir` (`~/.claude-emacs`,
+  the state root holding the shim's identity records — how a rotated vendor
+  session id resolves to the conversation's original one). `--log`,
+  `--poll-interval` (1s) and `--rescan-interval` (30s) stay at their defaults.
+
+`AGENT_REPL_STATE_DIR` is the sidecar's `--state-dir` default, and the same
+variable the daemon resolves and exports into every shim it spawns; the two
+processes must agree on one root or the identity records the shim writes are
+not the ones the sidecar reads.
 
 `AGENT_REPL_STORE_SOCKET` is the TEST-ONLY override of the socket default (the
 store's `--socket`, the sidecar's `--store-socket`); an explicit flag always

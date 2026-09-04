@@ -552,7 +552,12 @@ func retargetSession(t *testing.T, obj map[string]any, session, cwd string) map[
 // ---------------------------------------------------------------------------
 
 type sidecarOptions struct {
-	StoreSocket  string
+	StoreSocket string
+	// StateDir is the agent-repl state root the shim writes its identity
+	// records under, passed as --state-dir. A zero value is not passed at all,
+	// so the sidecar resolves its production default and no subject that is not
+	// about identity is affected.
+	StateDir     string
 	ConfigRoots  []string
 	SpoolRoot    string
 	LogPath      string
@@ -687,6 +692,9 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		"--log", opts.LogPath,
 		"--poll-interval", opts.PollInterval.String(),
 		"--rescan-interval", opts.RescanEvery.String(),
+	}
+	if opts.StateDir != "" {
+		args = append(args, "--state-dir", opts.StateDir)
 	}
 	for _, window := range []struct {
 		flag  string
