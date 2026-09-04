@@ -83,7 +83,10 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		// A SKILL'S OWN RETURN IS WORTHLESS TO DRAW: the producer answers with a
 		// bare acknowledgement restating the name. The unit settles when the
 		// DOCUMENT lands, as a separate injected-context record linked back to
-		// this call — so nothing is emitted here.
+		// this call — so nothing is emitted here. THE ALLOWANCES RIDE THIS
+		// ACKNOWLEDGEMENT AND NOTHING ELSE, so they are retained onto the call
+		// the document will settle.
+		call.retainedAllowedTools = skillAllowedTools(result)
 		c.rememberSkillCall(call)
 		c.log.With(at.ctxFor("skill")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
 			LogVerbose("skill call acknowledged; the unit settles when its document lands")
