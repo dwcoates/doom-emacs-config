@@ -408,6 +408,29 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// it is the terminal a user of this module actually runs Emacs on, so
 		// the frame the scenarios inspect is the frame a user would see.
 		"TERM=xterm-256color",
+		// NO ACCESSIBILITY BRIDGE, AND THEREFORE NO D-BUS.
+		//
+		// MEASURED, and it is a boot bound's worth: a graphical GTK Emacs
+		// asks D-Bus for the accessibility bus on startup, and this
+		// container has no session bus, so GTK autolaunches one --
+		// `dbus-launch --autolaunch <machine-id>` plus a `dbus-daemon
+		// --session`, both of which showed up as strays -- and then fails
+		// the lookup anyway with
+		//
+		//   AT-SPI: Error retrieving accessibility bus address:
+		//   org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus
+		//   was not provided by any .service files
+		//
+		// The failure is harmless; the WAIT is not. Boots that took that
+		// path were the only ones to miss doomBootBound -- 3.5s against a
+		// mean of 792ms -- and they did it in three unrelated scenarios per
+		// `-count=2` run, which is exactly the shape of a flake.
+		//
+		// Nothing is given up. There is no screen reader in a container and
+		// no assertion in this layer touches accessibility or D-Bus; the
+		// only thing switched off is a lookup that was always going to fail.
+		"NO_AT_BRIDGE=1",
+		"GTK_A11Y=none",
 	}, display.Env()...)
 	env = append(env, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
