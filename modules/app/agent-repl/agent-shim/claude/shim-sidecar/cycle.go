@@ -36,6 +36,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -106,6 +107,16 @@ type sidecar struct {
 	disc    *discover.Discoverer
 	tracker *stale.Tracker
 	log     *logging.Bound
+
+	// shutdown is the context every store rpc derives from, so a SIGTERM that
+	// arrives while a call is in flight cancels THAT CALL rather than being
+	// read only once rpcTimeout expires. Cancelling a WriteBatch mid-flight
+	// loses nothing: the store commits records and cursor in one transaction,
+	// so a cancelled call committed nothing, the tailer's cursor therefore
+	// never advanced, and the next boot recovers that same cursor and re-reads
+	// the identical durable bytes into the identical deterministic write ids /
+	// upsert keys. Nil only in tests that drive the cycle's steps directly.
+	shutdown context.Context
 
 	watchers map[string]*watched // by resolved path
 	owners   *ownerIndex
@@ -218,7 +229,32 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 }
 
 // Run drives the cycle until a termination signal.
+//
+// THE SIGNAL CANCELS IN-FLIGHT STORE CALLS. The cycle runs on this goroutine,
+// so a sidecar blocked inside a WriteBatch could not reach this select until
+// the call returned — which for a wedged store meant waiting out rpcTimeout
+// before shutdown even began. The signal is therefore watched on its own
+// goroutine, and all it does is cancel the context every store rpc derives
+// from: the blocked call returns at once, the cycle unwinds through its normal
+// paths, and this loop leaves by ctx.Done() with the usual shutdown record.
 func (s *sidecar) Run(stop <-chan os.Signal) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.shutdown = ctx
+	// Buffered so the watcher never blocks, and read only after ctx.Done() —
+	// which happens-after the send — so the name is there without a race.
+	signalled := make(chan os.Signal, 1)
+	watching := make(chan struct{})
+	defer close(watching)
+	go func() {
+		select {
+		case sig := <-stop:
+			signalled <- sig
+			cancel()
+		case <-watching:
+		}
+	}()
+
 	pollT := time.NewTicker(s.options.PollInterval)
 	rescanT := time.NewTicker(s.options.RescanInterval)
 	sweepT := time.NewTicker(s.options.RescanInterval)
@@ -232,8 +268,8 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 
 	for {
 		select {
-		case signal := <-stop:
-			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; shutting the sidecar down", signal)
+		case <-ctx.Done():
+			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; shutting the sidecar down", <-signalled)
 			s.store.Close()
 			return nil
 		case <-attemptT.C:
@@ -282,6 +318,13 @@ func (s *sidecar) attempt() {
 	s.attempting = true
 	defer func() { s.attempting = false }()
 	if err := s.beginCycle(); err != nil {
+		if s.interrupted(err) {
+			// The shutdown cancelled the recovery. Nothing was read and nothing
+			// was written, so there is no outage to open and no ladder to climb.
+			s.log.With(logging.Context{Operation: "shutdown"}).Log(
+				"shutdown interrupted a cursor recovery; the next boot recovers it")
+			return
+		}
 		s.attempts++
 		s.backoff = nextBackoff(s.backoff, s.backoffMin, s.backoffMax)
 		delay := s.jitter(s.backoff)
@@ -333,7 +376,7 @@ func (s *sidecar) stateSuspension(operation string, cause error) {
 // point — a cycle that could write but had no recovery state is exactly the
 // cold start this design removes.
 func (s *sidecar) beginCycle() error {
-	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	ctx, cancel := s.rpcContext()
 	defer cancel()
 	cursors, err := s.store.Cursors(ctx, "")
 	if err != nil {
@@ -389,6 +432,11 @@ func (s *sidecar) suspend(operation string, cause error) {
 // being wrong is re-ingesting a conversation.
 func (s *sidecar) noteStoreErr(operation string, err error) {
 	if err == nil {
+		return
+	}
+	if s.interrupted(err) {
+		// The shutdown cancelled the call; the store never said anything is
+		// wrong, and the caller has already stated the replay.
 		return
 	}
 	if _, invalid := storeclient.InvalidRequest(err); invalid {
@@ -554,7 +602,7 @@ func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.C
 	if cursor := s.cursors[identity]; cursor != nil {
 		return cursor, true
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	ctx, cancel := s.rpcContext()
 	defer cancel()
 	cursors, err := s.store.Cursors(ctx, identity)
 	if err != nil {
@@ -824,6 +872,11 @@ func (s *sidecar) pollAll() {
 			continue
 		}
 		if err := s.writeBatch(result); err != nil {
+			if s.interrupted(err) {
+				// The process is going away; storeWrite stated the replay and
+				// the cursor stayed where it was.
+				return
+			}
 			if field, invalid := storeclient.InvalidRequest(err); invalid {
 				// A PRODUCER DEFECT, NOT AN OUTAGE (ruling R-S2). The store can
 				// never accept these bytes, so retrying them is a tight
@@ -958,6 +1011,10 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 		return
 	}
 	if err := s.storeWrite(what, &storev1.EntryBatch{Entries: entries}); err != nil {
+		if s.interrupted(err) {
+			// storeWrite already stated the shutdown; there is no outage here.
+			return
+		}
 		if field, invalid := storeclient.InvalidRequest(err); invalid {
 			// These conclusions name no file position — they were inferred, not
 			// read — so there is no tailer to park. The defect is stated and
@@ -977,12 +1034,37 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 	}
 }
 
+// rpcContext bounds one store call by rpcTimeout AND ties it to the process's
+// shutdown, so the deadline is the ceiling rather than the only way out.
+func (s *sidecar) rpcContext() (context.Context, context.CancelFunc) {
+	parent := s.shutdown
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, rpcTimeout)
+}
+
+// interrupted reports that this error is the shutdown cancelling an in-flight
+// store call rather than anything wrong with the store. Callers skip their
+// outage narration for it; storeWrite states the one INFO record.
+func (s *sidecar) interrupted(err error) bool {
+	return err != nil && s.shutdown != nil && s.shutdown.Err() != nil && errors.Is(err, context.Canceled)
+}
+
 // storeWrite is the sidecar's ONLY path to the store. Routing every write
 // through here is what makes an unreachable store impossible to miss.
 func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) error {
-	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	ctx, cancel := s.rpcContext()
 	defer cancel()
 	err := s.store.WriteBatch(ctx, batch)
+	if s.interrupted(err) {
+		// NOT AN OUTAGE AND NOT SWALLOWED: the error still returns, but the
+		// store was fine and the records replay from the unadvanced cursor on
+		// the next boot.
+		s.log.With(logging.Context{Operation: "shutdown"}).Log(
+			"shutdown interrupted a write; it will replay (%s, %d record(s))", what, len(batch.GetEntries()))
+		return err
+	}
 	s.noteStoreErr(what, err)
 	return err
 }
