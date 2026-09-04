@@ -85,7 +85,11 @@ const VERDICT_WORDS = {
 export const PERMISSION_ANSWERED_ARMS: readonly string[] = [
   ...Object.keys(VERDICT_WORDS),
   "deniedByPolicy",
+  "deniedUndecidable",
 ];
+
+/** The attribute the verdict element names its answered arm with. */
+export const VERDICT_ATTRIBUTE = "data-permission-verdict";
 
 /** The consent card. */
 export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLElement {
@@ -227,6 +231,7 @@ export function drawFeedPermissionAnswered(
   const el = document.createElement("div");
   el.className = "perm-verdict";
   el.setAttribute("data-arm", answer.case);
+  el.setAttribute(VERDICT_ATTRIBUTE, answer.case);
 
   const word = document.createElement("span");
   word.className =
@@ -242,6 +247,14 @@ export function drawFeedPermissionAnswered(
     case "deniedByPolicy":
       // The daemon's own wording, so a policy refusal never reads as the user's
       // act — which is the whole reason this arm carries text at all.
+      word.textContent = answer.value.text;
+      break;
+    case "deniedUndecidable":
+      // ITS OWN ARM, NOT A POLICY DENIAL. Nobody decided — no rule refused and
+      // no user refused — so it carries its own verdict value and its own
+      // class, and like the policy arm its wording is the daemon's, verbatim,
+      // so it can never read as the user's act.
+      word.classList.add("arm-deniedUndecidable");
       word.textContent = answer.value.text;
       break;
     default:

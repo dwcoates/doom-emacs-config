@@ -5597,3 +5597,9 @@ body.draining #composer-input::placeholder {
   font-size: 0.85em;
   opacity: 0.7;
 }
+
+/* ---- undecidable permission verdict (src/feed/asks/permission.ts) ---- */
+.perm-verdict .badge.arm-deniedUndecidable {
+  font-style: italic;
+  opacity: 0.85;
+}
