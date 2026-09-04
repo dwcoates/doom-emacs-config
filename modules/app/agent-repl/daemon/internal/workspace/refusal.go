@@ -52,6 +52,16 @@ const (
 	// lock first, and two vendor processes on one conversation is what that
 	// lock exists to prevent. OpenWorkspaceError has no arm for it.
 	ArmConversationOwned = "conversation_owned"
+	// ArmAlreadyStarted is a StartSession the shim refused because it ALREADY
+	// serves a session: one shim serves exactly one. The daemon never sends a
+	// second StartSession to a shim it adopted, so reaching this arm means the
+	// daemon dialed a live shim it did not recognize as one — and that is a
+	// state a client must be told about by NAME rather than through an untyped
+	// internal. OpenWorkspaceError has no arm for it.
+	ArmAlreadyStarted = "already_started"
+	// ArmStartSessionUnspecified is a StartSessionFailure whose `cause` oneof
+	// is unset — illegal on the wire, surfaced rather than guessed at.
+	ArmStartSessionUnspecified = "start_session_unspecified"
 	// ArmVendorStartFailed is a StartSession the shim refused because the
 	// VENDOR failed to start inside an already-running shim: the shim process
 	// itself is up and serving, so this is neither `spawn_failed` nor
