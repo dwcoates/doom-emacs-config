@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,7 +142,12 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		}
 	})
 
-	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
+	// The module's workspace-agnostic elisp log lives under Emacs's
+	// temporary-file-directory (core.el, agent-repl--default-log-file-name);
+	// workspace-owned records go to each repo's .claude/emacs, which a test
+	// adds once it has a repo.
+	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir,
+		filepath.Join(os.TempDir(), fmt.Sprintf("doom-agent-repl-%d", os.Getuid())))
 	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
 }
 
@@ -178,6 +184,7 @@ func TestEmacsProofOfLife(t *testing.T) {
 	// A scripted fake-git worktree for the workspace to be registered
 	// against. No real git runs.
 	repository := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo"))
+	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
 
 	// 2. Register the directory through the ORDINARY command the user runs
 	//    (SPC TAB C-n). The DAEMON mints the identity; Emacs echoes it.
