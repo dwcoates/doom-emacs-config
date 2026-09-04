@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -286,6 +287,99 @@ func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int 
 		}
 	}
 	return seen
+}
+
+// WorkspaceLogTargets names every daemon-runtime target file behind one
+// workspace sink, oldest first.
+//
+// The canonical <workspace>/.claude/emacs/<sink>.log symlink names only the
+// CURRENT runtime's target: internal/dlog/sink.go mints a fresh target per
+// runtime ("A restart never trusts the previous run's destination") and
+// atomically re-points the link at it. A test that spans a crash and a cold
+// boot must therefore read every target the runtimes minted for that sink,
+// never the link alone, which answers only the successor's own records.
+func WorkspaceLogTargets(t *testing.T, workspaceDir, sink string) []string {
+	t.Helper()
+	link := WorkspaceLogPath(workspaceDir, sink)
+	current, err := filepath.EvalSymlinks(link)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("harness: resolve the %s sink link %s: %v", sink, link, err)
+	}
+	base := filepath.Base(current)
+	marker := "-" + sink + "-"
+	cut := strings.LastIndex(base, marker)
+	if cut < 0 {
+		t.Fatalf("harness: log target %q does not name the %q sink", current, sink)
+	}
+	pattern := filepath.Join(filepath.Dir(current), base[:cut+len(marker)]+"*.log")
+	targets, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("harness: glob the %s sink targets %s: %v", sink, pattern, err)
+	}
+	mod := make(map[string]time.Time, len(targets))
+	for _, target := range targets {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("harness: stat the %s sink target %s: %v", sink, target, err)
+		}
+		mod[target] = info.ModTime()
+	}
+	sort.SliceStable(targets, func(i, j int) bool {
+		if mod[targets[i]].Equal(mod[targets[j]]) {
+			return targets[i] < targets[j]
+		}
+		return mod[targets[i]].Before(mod[targets[j]])
+	})
+	return targets
+}
+
+// ReadCumulativeWorkspaceLog reads one workspace sink's records across EVERY
+// daemon runtime that wrote it, oldest runtime first.
+func ReadCumulativeWorkspaceLog(t *testing.T, workspaceDir, sink string) []LogRecord {
+	t.Helper()
+	var out []LogRecord
+	for _, target := range WorkspaceLogTargets(t, workspaceDir, sink) {
+		out = append(out, readLog(t, target)...)
+	}
+	return out
+}
+
+// CumulativeWorkspaceLogOperationCount answers how many records a workspace's
+// daemon sink holds under an operation across every runtime that wrote it.
+func (d *Daemon) CumulativeWorkspaceLogOperationCount(workspaceDir, operation string) int {
+	d.t.Helper()
+	seen := 0
+	for _, r := range ReadCumulativeWorkspaceLog(d.t, workspaceDir, "daemon") {
+		if r.Operation == operation {
+			seen++
+		}
+	}
+	return seen
+}
+
+// AwaitCumulativeWorkspaceLogOperationCount waits until a workspace's daemon
+// sink holds at least `n` records under `operation` across every runtime that
+// wrote it — the cross-restart counterpart of
+// AwaitWorkspaceLogOperationCount, for a test that crashes a daemon and cold
+// boots its successor.
+func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		seen := d.CumulativeWorkspaceLogOperationCount(workspaceDir, operation)
+		if seen >= n {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, d.ctx.Err())
+		}
+	}
 }
 
 // OpTurnOpened is the record the session watcher writes once a turn is OPEN on
