@@ -182,3 +182,37 @@ func applyResolvedCompact(compact *frontendv1.FeedColdGateResolvedCompact, model
 	compact.Model = &frontendv1.FeedColdGateModel{Model: model}
 	compact.Scope = scope
 }
+
+// applySubagentLostHow relays a DetachedLost arm by name onto a subagent's
+// lost row. It reports false when the cause names no arm this build carries:
+// AN UNLANDED ARM IS NEVER SILENTLY DEFAULTED — the caller says so in the log
+// and the row goes out with no `how` rather than with a wrong one.
+func applySubagentLostHow(lost *frontendv1.FeedSubagentLost, cause detachedLostCause) bool {
+	switch cause {
+	case lostFileVanished:
+		lost.How = &frontendv1.FeedSubagentLost_FileVanished{FileVanished: &frontendv1.FeedSubagentLostFileVanished{}}
+	case lostWentSilent:
+		lost.How = &frontendv1.FeedSubagentLost_WentSilent{WentSilent: &frontendv1.FeedSubagentLostWentSilent{}}
+	case lostSweptUp:
+		lost.How = &frontendv1.FeedSubagentLost_SweptUp{SweptUp: &frontendv1.FeedSubagentLostSweptUp{}}
+	default:
+		return false
+	}
+	return true
+}
+
+// applyShellLostHow relays a DetachedLost arm by name onto a shell's lost row,
+// on the same terms as applySubagentLostHow.
+func applyShellLostHow(lost *frontendv1.FeedShellLost, cause detachedLostCause) bool {
+	switch cause {
+	case lostFileVanished:
+		lost.How = &frontendv1.FeedShellLost_FileVanished{FileVanished: &frontendv1.FeedShellLostFileVanished{}}
+	case lostWentSilent:
+		lost.How = &frontendv1.FeedShellLost_WentSilent{WentSilent: &frontendv1.FeedShellLostWentSilent{}}
+	case lostSweptUp:
+		lost.How = &frontendv1.FeedShellLost_SweptUp{SweptUp: &frontendv1.FeedShellLostSweptUp{}}
+	default:
+		return false
+	}
+	return true
+}
