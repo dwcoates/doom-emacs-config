@@ -281,7 +281,8 @@ and an artifact LIST act (`artifact-list`).
    real shim answers it, and the response row (carrying the echo of what this
    page sent) is drawn in the real webapp DOM.
 
-### F2. Feed row families (22 tests) — `feed-families.layer.test.ts`
+### F2. Feed row families (22 tests) — `feed-families.layer.test.ts`, plus
+`query-death.layer.test.ts` (1 test)
 
 One test per drawn family, plus one per output form and per non-drawing rule:
 `user_prompt`; response body and terminal state; the tool-call shell's input
@@ -291,6 +292,15 @@ succeeded hook; a plan bubble; a findings bubble with its findings; an
 artifact bubble with its url; NO row for a list act; a sync subagent head; a
 detached subagent drawn through the SAME head; a detached shell; the terminal
 row; compaction, rotation and worktree separations.
+
+**ONE QUERY DEATH PER AREA FILE — `query-death.layer.test.ts`.** A dead vendor
+query ends its session: the shim refuses every later `StartTurn` with
+`StartTurnFailure.query_dead`. One area file mounts one page against one
+workspace and therefore drives ONE session, so a file can exercise at most one
+query death. `!query-eof` (`unexpected_eof`) is this file's last test, and
+`!query-fail` (`iterator_failure`) has an area file of its own so the Go driver
+gives it its own world. Both areas DECLARE `daemon.health.open_fault`: the
+vendor query dying is their subject, not incidental noise.
 
 **`agent_prompt` IS NOT A ROOT-FEED FAMILY.** It is a SUB-FEED row — "THE
 CONNECTION IS THE PLACEMENT ... a subagent's rows never name a parent, they

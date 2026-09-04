@@ -430,7 +430,18 @@ async function died(scenario: string): Promise<HTMLElement> {
   return drawn[drawn.length - 1] as HTMLElement;
 }
 
-// §F2 — landing 10: the turn-error line NAMES which way the query died.
+/**
+ * §F2 — landing 10: the turn-error line NAMES which way the query died.
+ *
+ * LAST IN THE FILE, AND THE ONLY DEATH IN IT. A dead vendor query is the end
+ * of its session: the shim refuses every later `StartTurn` with `query_dead`
+ * (`StartTurnFailure.query_dead`, held by `shim/test/integration/turn.test.ts`
+ * as "`!query-eof` then StartTurn"), and this file shares ONE session across
+ * its tests. So a second death scenario here would not fail on its own
+ * subject -- its prompt would never reach the vendor at all -- and the other
+ * cause arm is driven by `query-death.layer.test.ts`, which the Go driver
+ * gives a world of its own.
+ */
 it(
   "names an unexpected eof on the turn-error line",
   async () => {
@@ -443,20 +454,6 @@ it(
     );
     expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
       "unexpectedEof",
-    );
-  },
-  TURN_TEST_MS,
-);
-
-it(
-  "names an iterator failure on the turn-error line",
-  async () => {
-    // Arrange / Act — `!query-fail` throws out of the sdk's iterator.
-    const row = await died("query-fail");
-
-    // Assert
-    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
-      "iteratorFailure",
     );
   },
   TURN_TEST_MS,
