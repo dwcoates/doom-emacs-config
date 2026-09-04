@@ -1097,6 +1097,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return;
     }
+    if (message.type === "system" && message.subtype === "model_refusal_fallback") {
+      // THE VENDOR'S OWN ANNOUNCEMENT OF THE SWAP. `SessionUpdate.model_changed`
+      // is stated "by SetSessionModel, or by the vendor … so one place is
+      // authoritative", so the fallback record folds into the SAME fact rather
+      // than an arm of its own — the proto retired the model-fallback arm.
+      //
+      // Stated FROM THE RECORD and not only from the fallback leg's assistant
+      // message: the record arrives first, and a fallback whose retry produces
+      // no assistant message at all would otherwise never move the chip.
+      // `noteReportedModel` is idempotent, so the assistant message that
+      // follows restates nothing, and a fallback naming the model ALREADY in
+      // effect states nothing — the fact is that the effective model CHANGED.
+      noteReportedModel((message as { fallback_model?: unknown }).fallback_model);
+      return;
+    }
     if (message.type === "system" && message.subtype === "status") {
       if (message.status === "compacting") {
         // The vendor compacts on its own when the window fills. The status
