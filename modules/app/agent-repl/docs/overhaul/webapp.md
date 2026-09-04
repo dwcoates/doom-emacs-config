@@ -485,6 +485,16 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   existing headline path (the daemon composes the sentence); the schema-driven
   arm enumeration must pick them up; one test per arm.
 
+## Landing 11 relay (2026-09-04, project lead)
+
+- FeedShellLost.how / FeedSubagentLost.how: the settled outcome names WHICH
+  lost it was — "lost sight of: file vanished" / ": went silent" / ": swept up
+  at boot" — one clause appended to the word both surfaces already said.
+- The cause is a clause, never a register change: `lost` keeps its own dot and
+  its own class, and still never reads as failure.
+- An UNSET `how` is an older daemon that never ruled, not a malformed row: the
+  outcome stays the plain "lost sight of" it drew before this landing.
+
 ## Landing 10 relay (2026-09-04, project lead)
 
 - FeedAgentPrompt.delivery: the sender's agent-prompt row shows the delivery
