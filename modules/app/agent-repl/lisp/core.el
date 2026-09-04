@@ -1683,12 +1683,6 @@ to emit again rather than allowing unbounded diagnostic state."
 (defvar agent-repl--log-transition-states (make-hash-table :test 'equal)
   "Last observed diagnostic state keyed by caller-owned transition key.")
 
-(defvar agent-repl--log-transition-order nil
-  "FIFO order for bounded `agent-repl--log-transition-states'.")
-
-(defconst agent-repl--log-transition-capacity 4096
-  "Maximum process-local transition keys retained for hot diagnostics.")
-
 ;;;; ---- Runtime log-verbosity controls ----
 ;;
 ;; The three knobs a reader reaches for mid-investigation, as ordinary
