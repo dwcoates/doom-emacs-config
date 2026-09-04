@@ -25,7 +25,8 @@ make_tree() {
 }
 
 # make_stubs writes a `go` that fabricates counter files on `test` and a
-# report on `cover`, and an `npx` that writes a c8 json-summary.
+# report on `cover`, and a `c8` (the shim's pinned devDependency, at its
+# node_modules/.bin path) that writes a json-summary.
 make_stubs() {
     local stubs="$1"
     mkdir -p "$stubs"
@@ -58,13 +59,14 @@ case "${1:-} ${2:-}" in
 esac
 exit 0
 EOF
-    cat >"$stubs/npx" <<'EOF'
+    mkdir -p "$stubs/../agent-shim/claude/shim/node_modules/.bin"
+    cat >"$stubs/../agent-shim/claude/shim/node_modules/.bin/c8" <<'EOF'
 #!/usr/bin/env bash
 reports_dir=""
 for arg in "$@"; do
     case "$arg" in --reports-dir=*) reports_dir="${arg#--reports-dir=}" ;; esac
 done
-[ "${NPX_STUB_FAIL:-0}" = "1" ] && exit 1
+[ "${C8_STUB_FAIL:-0}" = "1" ] && exit 1
 mkdir -p "$reports_dir"
 cat >"$reports_dir/coverage-summary.json" <<'JSON'
 {
@@ -75,7 +77,7 @@ cat >"$reports_dir/coverage-summary.json" <<'JSON'
 JSON
 exit 0
 EOF
-    chmod +x "$stubs/go" "$stubs/npx"
+    chmod +x "$stubs/go" "$stubs/../agent-shim/claude/shim/node_modules/.bin/c8"
 }
 
 run_coverage() {
@@ -87,7 +89,7 @@ run_coverage() {
         GO_STUB_TEST_STATUS="${GO_STUB_TEST_STATUS:-0}" \
         GO_STUB_NO_COUNTERS="${GO_STUB_NO_COUNTERS:-0}" \
         GO_STUB_MALFORMED_REPORT="${GO_STUB_MALFORMED_REPORT:-0}" \
-        NPX_STUB_FAIL="${NPX_STUB_FAIL:-0}" \
+        C8_STUB_FAIL="${C8_STUB_FAIL:-0}" \
         "$tree/bin/e2e-coverage.sh" "$@" >"$tree/stdout" 2>"$tree/stderr"
     RUN_RC=$?
     set -e
@@ -160,7 +162,7 @@ test_malformed_go_summary_is_loud() {
 test_c8_failure_is_loud() {
     local tree="$TMP/c8-failure"
     setup "$tree"
-    NPX_STUB_FAIL=1 run_coverage "$tree"
+    C8_STUB_FAIL=1 run_coverage "$tree"
 
     if [ "$RUN_RC" -ne 0 ] &&
         grep -q 'c8 report failed' "$tree/stderr"; then
