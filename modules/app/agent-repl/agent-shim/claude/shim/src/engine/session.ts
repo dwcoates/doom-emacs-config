@@ -453,6 +453,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let converterDegraded: { droppedCount: number } | undefined;
   /** Set by the fault channel during ONE fold call, cleared before the next. */
   let converterDefectThisMessage = false;
+  /** Set by any refusal within the turn now open; cleared when that turn ends. */
+  let converterDefectThisTurn = false;
 
   /**
    * The fold refused a vendor message.
@@ -464,6 +466,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function noteConverterDefect(detail: string): void {
     converterDefectThisMessage = true;
+    converterDefectThisTurn = true;
     if (converterDegraded === undefined) {
       converterDegraded = { droppedCount: 0 };
       pushes.openDegradedWindow(
@@ -479,7 +482,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushes.fault(sessionFault({ kind: "converterDefect" }, CONVERTER_COMPONENT, detail));
   }
 
-  /** A message converted cleanly (or the turn ended): the converter is well. */
+  /** A TURN converted with nothing refused: the converter is well. */
   function noteConverterHealthy(): void {
     if (converterDegraded === undefined) return;
     const droppedCount = converterDegraded.droppedCount;
@@ -1015,8 +1018,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const output = deps.fold.onSdkMessage(message, foldContext());
     if (converterDefectThisMessage) {
       LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
-    } else {
-      noteConverterHealthy();
     }
     const entries = [...output.entries];
     noteForegroundUnits(entries);
@@ -1030,10 +1031,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const uuid = (message as { uuid?: string }).uuid;
     if (typeof uuid === "string" && uuid !== "") rewind.noteRecord(uuid, open?.keepalive === true);
     if (output.turnEnded !== undefined) {
-      // THE TURN'S END IS ALSO A RECOVERY POINT: a defect on the turn's last
-      // convertible message would otherwise leave the window open until some
-      // later turn happened to arrive.
-      noteConverterHealthy();
+      // THE TURN IS THE UNIT OF RECOVERY. A defective turn is degraded for its
+      // WHOLE length: the messages that follow the refused one are the same
+      // turn's own remainder, and recovering on the next of them closed the
+      // window a millisecond after opening it — before any consumer could
+      // observe it, and while the turn that lost a record was still running.
+      // So the window closes only at the end of a turn that refused nothing.
+      if (!converterDefectThisTurn) noteConverterHealthy();
+      converterDefectThisTurn = false;
       await closeTurn();
     }
   }
