@@ -355,12 +355,28 @@ export class TurnEngine {
       case "stop":
         return this.stopAgent(target, isMain);
       case "answer":
-        return this.answer(input.input.value);
+        return this.answer(input.input.value, target, isMain);
       case "prompt":
         return this.promptAgent(target, isMain);
       default:
         throw new Error("shim turn: UpdateAgent reached the engine with no input arm");
     }
+  }
+
+  /**
+   * The live entry a non-main `AgentId` addresses, or `undefined`.
+   *
+   * ONE HANDLE, NO VENDOR IDS. A subagent's `AgentId` on the wire is the
+   * SPAWNING CALL's tool_use_id -- the vendor's own task id never crosses the
+   * boundary -- so a target resolves through the spawn map as well as by the
+   * task id. Resolving only the task id refuses every address a consumer was
+   * actually given.
+   */
+  private liveTarget(target: conversationv1.AgentId): LiveWorkEntry | undefined {
+    return (
+      this.session.live.all().find((item) => item.taskId === target.value) ??
+      this.session.live.byToolUseId(target.value)
+    );
   }
 
   private async stopAgent(
@@ -387,9 +403,7 @@ export class TurnEngine {
     // boundary — so a target is resolved through the spawn map as well as by
     // the task id. Looking only at the task id refused every stop a consumer
     // addressed by the id it was actually given.
-    const entry =
-      this.session.live.all().find((item) => item.taskId === target.value) ??
-      this.session.live.byToolUseId(target.value);
+    const entry = this.liveTarget(target);
     if (entry === undefined) {
       return updateAgentRefused(
         { kind: "unknownAgent" },
@@ -401,7 +415,31 @@ export class TurnEngine {
     return updateAgentDelivered();
   }
 
-  private answer(answer: conversationv1.AgentAnswer): Promise<shimv1.UpdateAgentResponse> {
+  /**
+   * Deliver a consumer's answer to the agent that asked.
+   *
+   * THE ADDRESSEE IS RESOLVED BEFORE THE GATE IS ASKED. The gate holds one
+   * book for the whole session, so an ask raised under a subagent stays in it
+   * after that subagent is stopped: answering it would settle a promise for an
+   * agent that is gone and report `delivered` for a delivery that reached
+   * nobody. A non-main target the live table no longer holds is therefore
+   * refused `unknown_agent` -- the same arm a stop addressed to it answers --
+   * which the daemon relays BY NAME (daemon/ERROR-ARMS.md, "Interrupt /
+   * AnswerPermission / AnswerQuestion").
+   */
+  private answer(
+    answer: conversationv1.AgentAnswer,
+    target: conversationv1.AgentId,
+    isMain: boolean,
+  ): Promise<shimv1.UpdateAgentResponse> {
+    if (!isMain && this.liveTarget(target) === undefined) {
+      return Promise.resolve(
+        updateAgentRefused(
+          { kind: "unknownAgent" },
+          `no live work is addressed by ${JSON.stringify(target.value)}, so its ask can no longer be answered`,
+        ),
+      );
+    }
     switch (answer.answer.case) {
       case "questionAnswer": {
         const value = answer.answer.value;
