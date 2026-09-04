@@ -2018,6 +2018,70 @@ describe("the model the vendor answers on", () => {
     expect(names).not.toContain(SYNTHETIC_MODEL);
   });
 
+  /** The vendor's own announcement that it retried on another model. */
+  const refusalFallback = (original: string, fallback: string): never =>
+    ({
+      type: "system",
+      subtype: "model_refusal_fallback",
+      uuid: `u-fallback-${fallback}`,
+      session_id: "s",
+      trigger: "refusal",
+      direction: "retry",
+      original_model: original,
+      fallback_model: fallback,
+      request_id: "req_fallback",
+      api_refusal_category: "cyber",
+      api_refusal_explanation: null,
+      retracted_message_uuids: [],
+      refused_user_message_uuid: null,
+      content: `Switched to ${fallback}.`,
+    }) as never;
+
+  it("folds the vendor's refusal fallback into model_changed", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-haiku-4-5"));
+    });
+
+    expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("states nothing when the fallback names the model already in effect", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-opus-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-opus-5").length).toBe(1);
+  });
+
+  it("states the fallback once when the fallback leg's answer agrees with it", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-haiku-4-5"));
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
+  });
+
+  it("never adopts the synthetic marker from a fallback record", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", SYNTHETIC_MODEL));
+    });
+
+    expect(names).not.toContain(SYNTHETIC_MODEL);
+  });
+
   it("keeps the adopted model for the next message that agrees with it", async () => {
     const h = harness();
     await started(h);
