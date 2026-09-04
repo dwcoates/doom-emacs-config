@@ -79,6 +79,12 @@ const (
 	// ArmUnservedAnswer is an answer whose question text, chosen label or
 	// permission id was never served.
 	ArmUnservedAnswer = "unserved_answer"
+	// ArmNotDetachedWork is an Interrupt(detached) whose addressed row names no
+	// detached item. InterruptError carries this arm by name
+	// (endpoint_interrupt.proto: "The FeedId names no detached item") and
+	// carries no `unserved_answer`, which is an ANSWER verb's arm — a value the
+	// served ask never offered — and says nothing about a row.
+	ArmNotDetachedWork = "not_detached_work"
 	// ArmAskNotStanding is an answer addressed to a card that is not standing:
 	// an ask the answer never names, or one no batch is open under. It is a
 	// DISTINCT arm from ArmUnservedAnswer, which is a value the standing batch

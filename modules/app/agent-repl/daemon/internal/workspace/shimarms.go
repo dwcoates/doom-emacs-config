@@ -118,6 +118,27 @@ func (r *ShimRefusal) Benign() bool {
 	}
 }
 
+// GoneFromTheSweep reports whether this refusal means the swept item is no
+// longer there to stop: the shim has forgotten the agent or the shell run
+// entirely. It is DISTINCT from Benign, which is the answer a SINGLE addressed
+// stop gives its caller — an addressed row the shim has forgotten is a stale
+// row the caller clicked, and it is told so by name.
+//
+// A FAN-WIDE sweep never addresses a specific item, so it has no such row to
+// report on: it walks the freeness read's snapshot, and an item the shim has
+// already dropped between that read and the stop is exactly the state the
+// caller asked for. Answering it with a per-agent arm the Interrupt contract
+// does not carry (endpoint_interrupt.proto's InterruptError has no
+// `unknown_agent`) would fail a stop that in fact succeeded.
+func (r *ShimRefusal) GoneFromTheSweep() bool {
+	switch r.Arm {
+	case ArmShimUnknownAgent, ArmShimUnknownWork:
+		return true
+	default:
+		return r.Benign()
+	}
+}
+
 // updateAgentArm names an UpdateAgent failure's arm.
 func updateAgentArm(failure *shimv1.UpdateAgentFailure) string {
 	switch failure.GetKind().(type) {
