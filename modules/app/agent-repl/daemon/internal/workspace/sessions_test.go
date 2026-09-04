@@ -1188,3 +1188,52 @@ func TestFleetProbeWorkspaceLockRecordsAnUnderivablePath(t *testing.T) {
 		t.Fatalf("records = %+v, want one error daemon.workspace.probe_workspace_lock record", records)
 	}
 }
+
+// alreadyStartedResponse is the refusal a shim answers a SECOND StartSession
+// with: one shim serves exactly one session.
+func alreadyStartedResponse() *shimv1.StartSessionResponse {
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_AlreadyStarted{AlreadyStarted: &shimv1.StartSessionAlreadyStarted{}},
+			Detail: "this shim already started its session; one shim serves exactly one",
+		}},
+	}
+}
+
+
+
+func TestStartRefusesAnAlreadyStartedShimUnderItsOwnArm(t *testing.T) {
+	// Arrange: a SPAWNED shim that answers already_started is a named state,
+	// never an untyped internal on a contract path.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = alreadyStartedResponse()
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the already-started refusal surfaced")
+	}
+	asRefusal(t, err, ArmAlreadyStarted)
+}
+
+func TestStartRefusesAnUnsetStartFailureCauseUnderItsOwnArm(t *testing.T) {
+	// Arrange: an unset cause oneof is illegal on the wire; it is surfaced
+	// rather than guessed at.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{Detail: "no cause"}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the unset cause surfaced")
+	}
+	asRefusal(t, err, ArmStartSessionUnspecified)
+}
