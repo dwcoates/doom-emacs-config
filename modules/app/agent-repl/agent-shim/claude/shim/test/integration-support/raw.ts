@@ -5,13 +5,18 @@
  *
  * One obligation cannot be observed through a client: the standing-stream
  * transport ruling says the shim FLUSHES RESPONSE HEADERS the moment it accepts
- * a `WatchSession`/`WatchAgent`/`WatchBash`, so acceptance is observable before
- * the first frame. A Connect client hands back an async iterable and hides the
- * head entirely — from up there, "accepted" and "sent a frame" are the same
- * event. Reaching for the raw response means the two are separately
- * observable: `headersAt` is stamped when the head arrives, `firstByteAt` when
- * the first body byte does, and `bodyBeforeHeaders` records whether any byte
- * had already arrived when the head landed.
+ * a `WatchSession`/`WatchAgent`/`WatchBash`. A Connect client hands back an
+ * async iterable and hides the head entirely — from up there, "accepted" and
+ * "sent a frame" are the same event.
+ *
+ * The raw dial splits them, but WHAT it can split depends on the transport:
+ *
+ * - over h2c the head is its own HEADERS frame, so `rawStreamOpenH2` observes
+ *   the ORDERING directly — `headersAt`, `firstByteAt`, and `bodyBeforeHeaders`;
+ * - over HTTP/1.1 the head and the first frame share one byte stream and can
+ *   land in one read, so ordering is NOT an observable there. `rawHeadH1`
+ *   instead witnesses what h1 does decide: the head alone parses and carries
+ *   acceptance, with no frame consulted.
  *
  * # The framing, by hand
  *
@@ -36,7 +41,7 @@ export function envelope(bytes: Uint8Array): Buffer {
   return Buffer.concat([prefix, Buffer.from(bytes)]);
 }
 
-/** What a raw stream open observed, in the order it observed it. */
+/** What a raw h2c stream open observed, in the order it observed it. */
 export interface RawStreamOpen {
   /** The HTTP status of the response head. */
   readonly status: number;
@@ -56,84 +61,80 @@ export interface RawStreamOpen {
   readonly bodyBeforeHeaders: boolean;
 }
 
+/** A response head observed on its own, with no frame consulted. */
+export interface RawStreamHead {
+  /** The HTTP status of the response head. */
+  readonly status: number;
+  /** The head's content type, which says the stream was accepted as one. */
+  readonly contentType: string;
+  /** Every header of the head, lower-cased names to values. */
+  readonly headers: ReadonlyMap<string, string>;
+  /** `process.hrtime.bigint()` when the head was complete. */
+  readonly headersAt: bigint;
+}
+
 /**
- * Open a server stream over HTTP/1.1 and report the head/body ordering.
+ * Open a server stream over HTTP/1.1 and report the RESPONSE HEAD ALONE.
  *
- * DIALED AT THE SOCKET, not through `http.request`. Node's client parses the
- * response and hands back a stream whose `data` events are already past the
- * head, so from up there "the head arrived alone" and "the head arrived glued
- * to a frame" are indistinguishable — which is why an earlier version of this
- * helper simply reported `bodyBeforeHeaders: false` and asserted nothing.
+ * WHAT HTTP/1.1 CAN AND CANNOT WITNESS. The head and the body share one byte
+ * stream and one TCP window, so a head flushed on accept and a head written
+ * together with the first frame can land in the same read — head-before-body
+ * ORDERING is simply not an observable over h1, and asserting it is a coin
+ * toss under load. The h2c sibling keeps that ordering claim, because there
+ * the head is its own HEADERS frame and its own event.
  *
- * On HTTP/1.1 the head and the body share one byte stream, so the observable
- * is WHICH CHUNK completes the head: a server that flushed on accept writes the
- * head by itself and the chunk carrying `\r\n\r\n` ends there, while a server
- * that withheld its head until it had something to say writes the head and the
- * first frame together. That is the same question `rawStreamOpenH2` answers by
- * comparing two events, asked in the shape HTTP/1.1 makes it available.
+ * What h1 DOES witness is the claim the standing-stream transport ruling
+ * actually rests on: ACCEPTANCE IS DECIDABLE FROM THE HEAD ALONE. This helper
+ * resolves the moment the header block is complete — it never waits for a body
+ * byte, and never reads one to decide anything. If the shim withheld its head
+ * until it had a verdict to report, or reported the verdict as an HTTP-level
+ * refusal, this promise would either not resolve or resolve to a head that does
+ * not say "accepted". Resolving with a 200 and a Connect stream content type is
+ * the whole acceptance answer, with zero frames consulted.
  *
- * Resolves once the first body byte has arrived (or the response ended), which
- * is the point at which both stamps exist. The socket is destroyed before
- * resolving: a standing stream never ends, and leaving it open would hold the
- * shim's listener past the test.
+ * DIALED AT THE SOCKET, not through `http.request`: Node's client would parse
+ * the head for us and buffer past it, which is exactly the boundary under test.
+ * The socket is destroyed before resolving — a standing stream never ends, and
+ * leaving it open would hold the shim's listener past the test.
  */
-export function rawStreamOpenH1(
+export function rawHeadH1(
   socketPath: string,
   procedure: string,
   body: Buffer,
-): Promise<RawStreamOpen> {
-  return new Promise<RawStreamOpen>((resolve, reject) => {
+): Promise<RawStreamHead> {
+  return new Promise<RawStreamHead>((resolve, reject) => {
     const socket = netConnect(socketPath);
     socket.once("error", reject);
 
     let buffered = Buffer.alloc(0);
-    let headersAt: bigint | null = null;
-    let firstByteAt: bigint | null = null;
-    let status = 0;
-    let contentType = "";
-    let bodyBeforeHeaders = false;
     let settled = false;
 
-    const settle = (): void => {
-      if (settled || headersAt === null) return;
-      settled = true;
-      socket.destroy();
-      resolve({ status, contentType, headersAt, firstByteAt, bodyBeforeHeaders });
-    };
-
     socket.on("data", (chunk: Buffer) => {
+      if (settled) return;
       const at = process.hrtime.bigint();
-      if (headersAt === null) {
-        buffered = Buffer.concat([buffered, chunk]);
-        const boundary = buffered.indexOf("\r\n\r\n");
-        if (boundary < 0) return;
-        headersAt = at;
-        const head = buffered.subarray(0, boundary).toString("latin1").split("\r\n");
-        status = Number(head[0]?.split(" ")[1] ?? 0);
-        for (const line of head.slice(1)) {
-          const colon = line.indexOf(":");
-          if (colon < 0) continue;
-          if (line.slice(0, colon).toLowerCase() === "content-type") {
-            contentType = line.slice(colon + 1).trim();
-          }
-        }
-        // THE ASSERTION THIS HELPER EXISTS FOR: body bytes riding in the very
-        // chunk that completed the head mean the server had already produced a
-        // frame when it finally flushed.
-        const trailing = buffered.length - (boundary + 4);
-        if (trailing > 0) {
-          bodyBeforeHeaders = true;
-          firstByteAt = at;
-          settle();
-          return;
-        }
-        return;
+      buffered = Buffer.concat([buffered, chunk]);
+      const boundary = buffered.indexOf("\r\n\r\n");
+      if (boundary < 0) return;
+      settled = true;
+
+      const lines = buffered.subarray(0, boundary).toString("latin1").split("\r\n");
+      const headers = new Map<string, string>();
+      for (const line of lines.slice(1)) {
+        const colon = line.indexOf(":");
+        if (colon < 0) continue;
+        headers.set(line.slice(0, colon).toLowerCase().trim(), line.slice(colon + 1).trim());
       }
-      if (firstByteAt === null) firstByteAt = at;
-      settle();
+      socket.destroy();
+      resolve({
+        status: Number(lines[0]?.split(" ")[1] ?? 0),
+        contentType: headers.get("content-type") ?? "",
+        headers,
+        headersAt: at,
+      });
     });
-    socket.once("end", settle);
-    socket.once("close", settle);
+    socket.once("close", () => {
+      if (!settled) reject(new Error("the connection closed before a complete response head"));
+    });
 
     socket.write(
       [
@@ -150,7 +151,12 @@ export function rawStreamOpenH1(
   });
 }
 
-/** The same observation over h2c, where the head is its own event. */
+/**
+ * Observe head-versus-first-frame ORDERING over h2c, where the head is its own
+ * HEADERS frame and therefore its own event — the one transport on which the
+ * standing-stream flush is observable as an ordering, rather than only as an
+ * acceptance decidable from the head (see `rawHeadH1`).
+ */
 export function rawStreamOpenH2(
   socketPath: string,
   procedure: string,
