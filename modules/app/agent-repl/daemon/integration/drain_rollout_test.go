@@ -180,6 +180,85 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
 }
 
+// TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate is the
+// process-tree half of the host's stop, and the defect it pins was MEASURED:
+// over one 24-scenario Emacs e2e run the reaper found 17 leaked `claude-repld`
+// processes, 24 leaked shims and 48 leaked `shim-lock` holders, and the
+// container's memory climbed from 0.5 GiB to 3.1 GiB across a full run.
+//
+// The workspace here is parked exactly where the leak was worst: a turn is in
+// flight and a permission ask is standing unanswered, so the workspace never
+// falls free on its own. A stop that waited for freeness would wait forever;
+// `now` waits for none.
+func TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session parked at a permission gate.
+	f := newOpened(t, harness.Opts{})
+	expectSessionKillRecords(f.d)
+	// Standing the session down on purpose opens the shim_died and
+	// link_severed faults and, because the fake shim exits on the forced kill
+	// rather than answering it, the "session kill did not answer" WARN.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	feed := f.watchRootFeed()
+	f.submit("do the thing", "k-stop-at-a-gate", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-stop", "act-stop")},
+	}))
+	awaitRow(t, f, feed, "the standing permission card", func(r *frontendv1.FeedRow) bool {
+		return r.GetPermission() != nil
+	})
+	if before := f.d.StrayPIDs(); len(before) == 0 {
+		t.Fatal("no process names this run's state directory before the stop, so this test could pass without reclaiming anything")
+	}
+
+	// Act
+	resp, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("emacs"),
+		}},
+	}))
+
+	// Assert: the proto's `now` has exactly one outcome arm, success, and the
+	// daemon and its whole tree go with it.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} at a permission gate = (%v, %v), want a success", resp, err)
+	}
+	f.d.AwaitExit()
+	// The stand-down SIGKILLs each shim's whole process group and waits for
+	// the reap before it returns, so nothing is left the moment the daemon has
+	// gone. The bound is for the kernel's own bookkeeping catching up in `ps`,
+	// not for a process still standing down.
+	if left := awaitNoStrays(t, f.d, strayReclaimBound); len(left) > 0 {
+		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim outliving its daemon holds the workspace lock that refuses the next session", len(left), left)
+	}
+}
+
+// strayReclaimBound is how long the kernel is given to finish reaping a
+// process group the daemon already SIGKILLed and already waited on.
+//
+// MEASURED: with the stand-down in place, the stray set is empty on the first
+// read every time (observed over the -count=10 run of this test). This is a
+// hundred times that, and anything still present after it is a leak rather
+// than a slow reap.
+const strayReclaimBound = 2 * time.Second
+
+// awaitNoStrays polls until nothing names the daemon's state directory any
+// more, answering whatever is left when the bound expires.
+func awaitNoStrays(t *testing.T, d *harness.Daemon, bound time.Duration) []int {
+	t.Helper()
+	deadline := time.Now().Add(bound)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		left := d.StrayPIDs()
+		if len(left) == 0 || time.Now().After(deadline) {
+			return left
+		}
+		<-ticker.C
+	}
+}
+
 // TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause is
 // critique 15: strengthens the shutdown-announcement assertions onto the ONE
 // cause no other test in this file reaches — a schedule that actually fires
@@ -357,21 +436,45 @@ func TestDrainRefusalLogsAreRateLimitedWithSuppressedAndTotalCounts(t *testing.T
 	}
 }
 
+// TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor
+// is the SCHEDULED drain's bargain, stated by the proto:
+// UpdateShutdownScheduleSchedule is "drain then exit at/after this instant:
+// finish in-flight turns, hold new prompts, exit when quiet". Waiting the turn
+// out is what "finish in-flight turns" means, and the wait is the whole
+// mechanism — the drain never interrupts the vendor to get there.
+//
+// IT DRIVES A SCHEDULE, NOT `now`. It used to send
+// UpdateShutdownSchedule{now} and then assert these same schedule properties,
+// which contradicts that arm's own proto sentence ("Exit now: stop accepting
+// work, flush in-flight writes, go") and the drain controller's own
+// ShutdownNow ("takes no lease and waits for no freeness"). It passed only
+// because harness.Daemon.Exited() read the daemon's unreaped ZOMBIE as still
+// running: the daemon it asserted was "still up" had already exited. `now`'s
+// contract is covered by the two tests above it.
 func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor(t *testing.T) {
 	t.Parallel()
-	// Arrange: a turn in flight when the drain fires now.
+	// Arrange: a turn in flight when the drain's deadline passes.
 	f := newOpened(t, harness.Opts{})
 	resp := f.submit("do the thing", "k-drain-now", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
 		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
 	}
 	f.shim.ExpectStartTurn()
+	// THE SCHEDULE'S OWN HOLD, SEEN TWICE. Schedule() takes the drain hold on
+	// every workspace the instant it is armed, and fire() takes it again when
+	// the deadline passes; the second attempt finds the first one standing,
+	// which is the state fire() explicitly anticipates ("the drain will wait
+	// on it as it stands") and the state client records as a refused write.
+	f.d.ExpectWarnings("daemon.wsm.acquire_lease", "daemon.drain.fire")
 
 	// Act
 	if _, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
-		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{Reason: drainReasonOperator("draining now")}},
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs:   time.Now().UnixMilli(),
+			Reason: drainReasonOperator("draining now"),
+		}},
 	})); err != nil {
-		t.Fatalf("UpdateShutdownSchedule{now} = error %v, want a success", err)
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
 	}
 
 	// Assert: still up, and the vendor is never interrupted for a drain.

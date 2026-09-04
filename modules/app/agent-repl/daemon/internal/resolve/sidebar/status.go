@@ -56,7 +56,7 @@ func statusArm(s *wsState, rec wsm.Workspace, session *wsm.Session, log dlog.Log
 	if arm := noSessionArm(s, session); arm != "" {
 		return arm
 	}
-	if arm := linkArm(s); arm != "" {
+	if arm := linkArm(s, session); arm != "" {
 		return arm
 	}
 	return sessionArm(s, log)
@@ -114,9 +114,28 @@ func parked(session *wsm.Session) bool {
 // linkArm names the route's arm, empty when the route serves undegraded. It
 // mirrors the footer's disconnected step, fact for fact, so the dot and the
 // strip cannot disagree about the same link.
-func linkArm(s *wsState) string {
+//
+// A ROUTE NOBODY HAS SEEN IS NOT A ROUTE THAT SERVES. `ready` means "live,
+// PROVEN USABLE, and idle" (sidebar.proto), and a workspace whose session
+// record exists while no link state has yet been observed has proven nothing:
+// the shim is being spawned and dialed. Falling through to `sessionArm` there
+// published `ready` for it, which is how the roster's arm walked
+// none -> ready -> init -> submitting -> thinking — `ready` BEFORE the `init`
+// it is supposed to follow, and `ready` for a workspace whose prompt the
+// daemon had already accepted (measured at ~340ms after SubmitPrompt answered
+// with its turn id). `init` — "starting up; the route is not yet proven" — is
+// what that state actually is, and saying so makes the published walk monotone
+// with the workspace's own lifecycle.
+//
+// A session that ENDED is the one case that still falls through: its route is
+// not coming up, there is nothing to wait on, and the lifecycle arms below are
+// what report how it ended.
+func linkArm(s *wsState, session *wsm.Session) string {
 	if !s.linkSeen {
-		return ""
+		if session != nil && session.Terminal != nil {
+			return ""
+		}
+		return "init"
 	}
 	switch {
 	case s.link == shimclient.LinkDialing:
