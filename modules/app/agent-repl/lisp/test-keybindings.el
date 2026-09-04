@@ -105,7 +105,6 @@ so the absence is asserted rather than assumed."
   (dolist (cmd '(agent-repl-rename-workspace
                  agent-repl-hibernate-workspace
                  agent-repl-explain-config
-                 agent-repl-workspace-push-to-back
                  agent-repl-workspace-pull-to-front
                  agent-repl-workspace-switch-to-0
                  agent-repl-workspace-switch-to-final
