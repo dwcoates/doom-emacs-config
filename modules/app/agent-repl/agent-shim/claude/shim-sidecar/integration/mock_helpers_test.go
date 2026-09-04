@@ -303,6 +303,11 @@ const (
 func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	t.Helper()
 	entry := mockShimEntry(t)
+	// EVERY DRIVE IS BOUNDED, not just the table's. The bound lives here rather
+	// than at the call sites so a new mocked-vendor subject cannot be added
+	// outside it, and so the count the semaphore enforces is the count of
+	// drives actually running.
+	takeMockDriveSlot(t)
 
 	base := t.TempDir()
 	tree := &mockTree{
