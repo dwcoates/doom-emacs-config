@@ -8,6 +8,12 @@
 // means WAITING for freeness; there is no interrupt-before-disconnect step,
 // and repeated refusals under the drain lease are logged RATE-LIMITED with
 // exact suppressed and total counts rather than flooding the log.
+//
+// THE ONE EXCEPTION IS `UpdateShutdownSchedule{now}`. That request states its
+// own bargain in the proto — "stop accepting work, flush in-flight writes, go"
+// — and buys no freeness at all, so ShutdownNow forces every session down
+// before it exits. Everything graceful (the scheduled drain's `fire`, the idle
+// sweep) still waits.
 package drain
 
 import (
@@ -105,8 +111,11 @@ type Stand interface {
 	// answer. The REFUSAL is an answer, not an error: turn_in_flight simply
 	// defers the workspace to a later pass.
 	Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.HibernateResponse, error)
-	// KillSession stands the shim down. The sweep NEVER forces: force is false
-	// on every call the drain makes, because teardown never interrupts.
+	// KillSession stands the shim down. The SWEEP never forces: force is false
+	// on every call the idle sweep makes, because teardown never interrupts a
+	// drain that bought the shim's freeness by waiting for it. The IMMEDIATE
+	// shutdown does force — it bought nothing, and a graceful stand-down there
+	// would wait on the very turn the operator asked to stop.
 	KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error
 }
 

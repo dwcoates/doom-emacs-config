@@ -1,7 +1,9 @@
 package sidebar_test
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -740,5 +742,166 @@ func TestAParkedSessionKeepsAnIdleArm(t *testing.T) {
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got != "ready" {
 		t.Fatalf("the parked row's status = %q, want an idle arm", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The arm's ORDER, not merely its value.
+//
+// THE DEFECT, MEASURED. On a cold workspace the roster published
+// `ready` ~340ms AFTER SubmitPrompt had answered with a turn id, and the whole
+// walk Emacs observed was none -> ready -> init -> submitting -> thinking.
+// Both halves of that contradict sidebar.proto: `ready` is "live, PROVEN
+// USABLE, and idle", and a workspace whose session record exists while no link
+// state has been seen has proven nothing and is not idle. `ready` also cannot
+// precede the `init` it is supposed to follow.
+// ---------------------------------------------------------------------------
+
+// TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen is the
+// resolver-level shape of the leading `ready`: the durable session row lands
+// before any link state does, and that window is `init`, never `ready`.
+func TestRowIsInitWhileTheSessionRecordExistsAndNoLinkHasBeenSeen(t *testing.T) {
+	// Arrange: a registry that already carries the session, with no OnLink yet.
+	r := arrange(t)
+
+	// Act.
+	r.SetRegistry(sidebar.Registry{
+		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+		Repositories: []wsm.Repository{repo},
+		Sessions:     []wsm.Session{{Workspace: theWS}},
+	})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "init" {
+		t.Fatalf("status = %q with a session record and no observed link, want init: nothing has proven the route usable yet", got)
+	}
+}
+
+// TestTheRowNeverReadsReadyBeforeInit walks the cold-start sequence the editor
+// saw and asserts the ORDER of what was published, not merely the final value.
+func TestTheRowNeverReadsReadyBeforeInit(t *testing.T) {
+	// Arrange: watch from before the first fact, so the walk is the subject.
+	r := arrange(t)
+	watch := watchStatusWalk(t, r)
+
+	// Act: the cold start, in the order the daemon produces it.
+	r.SetRegistry(sidebar.Registry{
+		Workspaces:   []wsm.Workspace{workspace(string(theWS), "one")},
+		Repositories: []wsm.Repository{repo},
+		Sessions:     []wsm.Session{{Workspace: theWS}},
+	})
+	r.OnLink(theWS, shimclient.LinkDialing)
+	r.OnLink(theWS, shimclient.LinkConnected)
+	r.OnSessionStarted(theWS, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert.
+	walk := watch.awaitArm(t, "ready")
+	sawInit := false
+	for _, arm := range walk {
+		switch arm {
+		case "init":
+			sawInit = true
+		case "ready":
+			if !sawInit {
+				t.Fatalf("the roster published ready before any init: %v", walk)
+			}
+		}
+	}
+	if !sawInit {
+		t.Fatalf("the cold start published no init at all: %v", walk)
+	}
+}
+
+// TestTheRowNeverReadsReadyOnceATurnIsAccepted is the accept side of the same
+// contract: `ready` says idle, and a workspace whose turn the daemon has
+// accepted is not idle until that turn ends.
+func TestTheRowNeverReadsReadyOnceATurnIsAccepted(t *testing.T) {
+	// Arrange: a proven, idle session, watched from the accept onward.
+	r := live(t, arrange(t))
+	watch := watchStatusWalk(t, r)
+
+	// Act: accept, then ack, then the activity that moves it to thinking —
+	// the turn's whole life short of its end.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.AckTurn(theWS)
+
+	// Assert: `ready` was the row's value when the watch opened, so the walk
+	// is read from the accept onward.
+	walk := watch.awaitArm(t, "thinking")
+	for _, arm := range walk[1:] {
+		if arm == "ready" {
+			t.Fatalf("the roster published ready while an accepted turn was in flight: %v", walk)
+		}
+	}
+	if walk[0] != "ready" {
+		t.Fatalf("the walk opened at %q, want the pre-accept ready this test reads past: %v", walk[0], walk)
+	}
+}
+
+// statusWalk records every status arm one workspace's row has been published
+// with, in order.
+type statusWalk struct {
+	mu   sync.Mutex
+	seen []string
+	// woke announces each append, so awaitArm blocks on an EVENT rather than
+	// polling or sleeping.
+	woke chan struct{}
+}
+
+// watchStatusWalk subscribes to the roster and records the workspace's status
+// arm from every roster published from now on.
+func watchStatusWalk(t *testing.T, r sidebar.Resolver) *statusWalk {
+	t.Helper()
+	rosters := subscribe(t, r)
+	w := &statusWalk{woke: make(chan struct{}, 1)}
+	// The goroutine ends when the subscription's channel closes, which
+	// subscribe's own cleanup guarantees.
+	go func() {
+		for roster := range rosters {
+			sections := roster.GetRepository().GetSections()
+			if len(sections) == 0 || len(sections[0].GetRows().GetRows()) == 0 {
+				continue
+			}
+			w.mu.Lock()
+			w.seen = append(w.seen, statusName(sections[0].GetRows().GetRows()[0]))
+			w.mu.Unlock()
+			select {
+			case w.woke <- struct{}{}:
+			default:
+			}
+		}
+	}()
+	return w
+}
+
+// walkBound is how long awaitArm waits for an arm that the acts before it have
+// already produced. The resolver publishes SYNCHRONOUSLY on every input and
+// the topic's pump is one goroutine hop away, so the arm is there
+// microseconds later; this is a failure bound, not a wait, and it exists only
+// so a defect reports itself instead of hanging the suite.
+const walkBound = 2 * time.Second
+
+// awaitArm blocks until arm has been published and answers the whole walk up
+// to and including it.
+func (w *statusWalk) awaitArm(t *testing.T, arm string) []string {
+	t.Helper()
+	deadline := time.After(walkBound)
+	for {
+		w.mu.Lock()
+		for i, got := range w.seen {
+			if got == arm {
+				out := append([]string(nil), w.seen[:i+1]...)
+				w.mu.Unlock()
+				return out
+			}
+		}
+		seen := append([]string(nil), w.seen...)
+		w.mu.Unlock()
+		select {
+		case <-w.woke:
+		case <-deadline:
+			t.Fatalf("the roster never published %q within %s; the walk was %v", arm, walkBound, seen)
+			return nil
+		}
 	}
 }
