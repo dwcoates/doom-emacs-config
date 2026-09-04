@@ -711,6 +711,133 @@ export function lateReclaimAll(auth, reclaims, log) {
   return reclaims.map((entry) => lateReclaimSlug({ ...entry, log }));
 }
 
+/**
+ * THE ORDERING HOLE this module closes: `session.close()` (the SDK's
+ * `Query#close`) aborts the query's `AbortController` and starts the
+ * transport tearing the CLI child down; it does not wait for that child to
+ * actually exit. `QueryLike` (src/sdk/types.ts) exposes no exit event and no
+ * pid — "aborting it ends the CLI child" describes what STARTS the shutdown,
+ * not when it FINISHES — so a reclaim run immediately after `close()` can
+ * still be racing a live vendor process that goes on to flush one more
+ * transcript write into the account root after the reclaim already ran. That
+ * is exactly the seven `*agent-repl-capture-*` residue directories
+ * `testdata/captures/MANIFEST.md` records: one late-flushed file each,
+ * written after both the per-scenario reclaim AND the sweep-end
+ * `lateReclaimAll` had already completed.
+ *
+ * There is no supported SDK API to await the real exit, so this uses the same
+ * technique the MANIFEST.md investigation already used by hand: walk the
+ * capture process's own descendant tree with `pgrep -P` and look for the
+ * vendor's own bundled binary among the survivors (its path always carries
+ * `claude-agent-sdk`, per the `query-death` scenario's note).
+ */
+export const VENDOR_CHILD_MARKER = "claude-agent-sdk";
+
+/** Every live descendant of `pid`, found by walking `pgrep -P` breadth-first. */
+export function descendantPids(pid) {
+  const seen = new Set();
+  const frontier = [pid];
+  while (frontier.length > 0) {
+    const current = frontier.shift();
+    const run = spawnSync("pgrep", ["-P", String(current)], { encoding: "utf8" });
+    if (run.status !== 0 || typeof run.stdout !== "string") continue;
+    for (const line of run.stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed === "") continue;
+      const childPid = Number(trimmed);
+      if (Number.isInteger(childPid) && !seen.has(childPid)) {
+        seen.add(childPid);
+        frontier.push(childPid);
+      }
+    }
+  }
+  return [...seen];
+}
+
+/** Descendants of `pid` whose command line names the vendor's own CLI binary. */
+export function vendorChildPids(pid) {
+  const descendants = descendantPids(pid);
+  if (descendants.length === 0) return [];
+  const run = spawnSync("ps", ["-o", "pid=,command=", "-p", descendants.join(",")], {
+    encoding: "utf8",
+  });
+  if (run.status !== 0 || typeof run.stdout !== "string") return [];
+  const survivors = [];
+  for (const line of run.stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || !trimmed.includes(VENDOR_CHILD_MARKER)) continue;
+    const survivorPid = Number(trimmed.split(/\s+/)[0]);
+    if (Number.isInteger(survivorPid)) survivors.push(survivorPid);
+  }
+  return survivors;
+}
+
+/**
+ * Block until every vendor CLI descendant of `pid` has actually exited.
+ *
+ * BOUNDED AND LOUD, on purpose: a vendor process wedged mid-shutdown must fail
+ * this run rather than let the reclaim quietly race it again. `listSurvivors`
+ * and `sleep` are injected so the unit tests drive the retry loop directly
+ * instead of spawning real processes.
+ */
+export async function waitForVendorChildExit({
+  pid = process.pid,
+  timeoutMs = 10_000,
+  intervalMs = 100,
+  listSurvivors = vendorChildPids,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const survivors = listSurvivors(pid);
+    if (survivors.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `capture: vendor CLI child process(es) still alive ${timeoutMs}ms after query close: ` +
+          `pid(s) ${survivors.join(", ")}. Refusing to reclaim against a live child — anything ` +
+          "it still flushes would resurrect residue in the account root.",
+      );
+    }
+    await sleep(intervalMs);
+  }
+}
+
+/**
+ * Any `*agent-repl-capture-*` directory still under `<accountRoot>/projects/`.
+ *
+ * The final verification behind the "LEAVE THE ACCOUNT AS FOUND" promise: even
+ * with {@link waitForVendorChildExit} closing the ordering hole, this is what
+ * turns a residual directory into a loud, non-zero failure instead of a silent
+ * leak the next MANIFEST.md audit has to rediscover by hand.
+ */
+export function findCaptureResidue(accountRoot) {
+  const projectsDir = path.join(accountRoot, "projects");
+  if (!existsSync(projectsDir)) return [];
+  return readdirSync(projectsDir)
+    .filter((name) => name.includes("agent-repl-capture-"))
+    .map((name) => path.join(projectsDir, name));
+}
+
+/**
+ * Verify every distinct account root this run touched is clean, and throw —
+ * loud, never silent — if any `agent-repl-capture-*` directory remains.
+ */
+export function assertNoCaptureResidue(auth, reclaims) {
+  if (auth.mode !== AUTH_CONFIG_ROOT) return [];
+  const roots = [...new Set(reclaims.map((entry) => entry.accountRoot))];
+  const residue = roots.flatMap((root) => findCaptureResidue(root));
+  if (residue.length > 0) {
+    throw new Error(
+      `capture: ${residue.length} agent-repl-capture-* residue director${
+        residue.length === 1 ? "y" : "ies"
+      } remain under the account root's projects/ after reclaim:\n` +
+        `${residue.map((p) => `  ${p}`).join("\n")}\n` +
+        "The account is not left as found; this run must not exit 0.",
+    );
+  }
+  return roots;
+}
+
 /** Where the committed capture corpus lives, relative to this script. */
 export const CORPUS_DIR = path.join(HERE, "..", "..", "testdata", "captures");
 
@@ -1068,6 +1195,12 @@ async function runScenario(sdk, scenario, opts, auth, world) {
     else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
   }
 
+  // NEVER HARVEST OR RECLAIM AGAINST A LIVE VENDOR CHILD: `session.close()`
+  // above only STARTS its shutdown (see waitForVendorChildExit's own doc
+  // comment for why). Bounded and loud — a wedged child fails the scenario
+  // rather than let the reclaim below race it.
+  await waitForVendorChildExit();
+
   // The vendor's own files are half the capture: the transcript, the subagent
   // sidechains and their .meta.json, and the spool the sidecar tails. A stream
   // without them cannot exercise the sidecar or the compaction experiment.
@@ -1241,10 +1374,17 @@ async function main(argv, env) {
     }
   }
 
-  // SWEEP END, after every query is closed and every SDK child has gone: the
-  // vendor flushes late transcript writes into the operator's real root after
-  // the per-scenario reclaim ran, and this pass is what keeps that root clean.
+  // SWEEP END, after every query is closed and every SDK child has gone —
+  // STRUCTURALLY, now: each scenario's own `waitForVendorChildExit` already
+  // blocked until its vendor process actually exited, not merely started
+  // closing. The vendor flushes late transcript writes into the operator's
+  // real root after the per-scenario reclaim ran, and this pass is what keeps
+  // that root clean.
   lateReclaimAll(auth, reclaims, (line) => process.stderr.write(line));
+  // THE FINAL VERIFICATION. Never trust that the sweep above actually left
+  // the account as found — check, and fail loudly, never silently, if any
+  // `agent-repl-capture-*` directory remains under its projects/.
+  assertNoCaptureResidue(auth, reclaims);
   writeFileSync(
     path.join(opts.outDir, "SKIPPED.json"),
     `${JSON.stringify({ skipped, reason: "manual scenarios have no prompt-only provocation" }, null, 2)}\n`,

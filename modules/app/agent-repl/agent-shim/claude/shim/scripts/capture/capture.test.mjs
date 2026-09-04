@@ -7,7 +7,7 @@
  * a spawn proves the module's top level does not import the SDK on the way to
  * the gate.
  */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -29,14 +29,18 @@ import {
   CaptureRefusedError,
   EXIT_REFUSED,
   FORBID_VENDOR_CALLS_ENV,
+  VENDOR_CHILD_MARKER,
   answersFor,
   assertCaptureAuthorized,
+  assertNoCaptureResidue,
   createInputChannel,
   controlMatches,
   createQuerySession,
   createWorld,
+  descendantPids,
   drainToResult,
   cwdSlug,
+  findCaptureResidue,
   fireTriggers,
   lateReclaimSlug,
   loadPrompts,
@@ -50,6 +54,8 @@ import {
   seedResumableSession,
   permissionResultFor,
   resolvePermissionDecision,
+  vendorChildPids,
+  waitForVendorChildExit,
 } from "./capture.mjs";
 import { AUTH_CONFIG_ROOT, AUTH_SEED_CREDENTIALS } from "./auth.mjs";
 
@@ -834,6 +840,224 @@ describe("mergeTreeAnonymized", () => {
     writeFileSync(path.join(from, "sub", "agent.json"), '{"id":"x"}', "utf8");
     mergeTreeAnonymized(from, to, { unparsed: [] });
     expect(existsSync(path.join(to, "sub", "agent.json"))).toBe(true);
+  });
+});
+
+describe("descendantPids and vendorChildPids", () => {
+  // Spawns a REAL, harmless child process (its own subtree, torn down at the
+  // end of the test) to prove the pid-walk itself, since `pgrep`/`ps` are OS
+  // utilities the harness already relies on directly — never the vendor.
+  function withSleepingChild(scriptDir, run) {
+    const dir = mkdtempSync(path.join(tmpdir(), scriptDir));
+    const script = path.join(dir, "child.mjs");
+    writeFileSync(script, "setTimeout(() => {}, 30000);\n", "utf8");
+    const child = spawn(process.execPath, [script], { stdio: "ignore" });
+    return new Promise((resolve, reject) => {
+      child.once("spawn", async () => {
+        try {
+          await run(child.pid);
+          resolve();
+        } catch (err) {
+          reject(err);
+        } finally {
+          child.kill("SIGKILL");
+        }
+      });
+      child.once("error", reject);
+    });
+  }
+
+  // Explicit, generous timeouts (not the suite's tight in-process default):
+  // these fork+exec a real OS process and shell out to pgrep/ps, which is
+  // measurably slower than the pure-JS logic the rest of this file covers.
+  it(
+    "descendantPids finds a real spawned child of this process",
+    () =>
+      withSleepingChild("capture-descendant-", async (childPid) => {
+        // Give the OS a moment to register the fork before pgrep looks for it.
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (descendantPids(process.pid).includes(childPid)) return;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(descendantPids(process.pid)).toContain(childPid);
+      }),
+    5000,
+  );
+
+  it(
+    "vendorChildPids ignores a descendant that is not the vendor binary",
+    () =>
+      withSleepingChild("capture-nonvendor-", async (childPid) => {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (descendantPids(process.pid).includes(childPid)) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(vendorChildPids(process.pid)).not.toContain(childPid);
+      }),
+    5000,
+  );
+
+  it(
+    "vendorChildPids finds a descendant whose command line names the marker",
+    () =>
+      withSleepingChild(`capture-${VENDOR_CHILD_MARKER}-`, async (childPid) => {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          if (vendorChildPids(process.pid).includes(childPid)) return;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        expect(vendorChildPids(process.pid)).toContain(childPid);
+      }),
+    5000,
+  );
+
+  it("returns an empty list for a pid with no children", () => {
+    expect(descendantPids(999999)).toEqual([]);
+    expect(vendorChildPids(999999)).toEqual([]);
+  });
+});
+
+describe("waitForVendorChildExit — the ordering hole's structural fix", () => {
+  it("returns immediately when no vendor child survives", async () => {
+    const seen = [];
+    await waitForVendorChildExit({
+      pid: 4242,
+      listSurvivors: (pid) => {
+        seen.push(pid);
+        return [];
+      },
+      sleep: () => {
+        throw new Error("must not sleep when the first poll is already clean");
+      },
+    });
+    expect(seen).toEqual([4242]);
+  });
+
+  it("polls until the vendor child is gone, then returns", async () => {
+    let calls = 0;
+    const sleeps = [];
+    await waitForVendorChildExit({
+      pid: 1,
+      listSurvivors: () => {
+        calls += 1;
+        return calls < 3 ? [999] : [];
+      },
+      sleep: (ms) => {
+        sleeps.push(ms);
+        return Promise.resolve();
+      },
+    });
+    expect(calls).toBe(3);
+    expect(sleeps.length).toBe(2);
+  });
+
+  it("throws — bounded and loud — rather than wait forever for a wedged child", async () => {
+    let now = 0;
+    const realNow = Date.now;
+    Date.now = () => now;
+    try {
+      await expect(
+        waitForVendorChildExit({
+          pid: 7,
+          timeoutMs: 500,
+          intervalMs: 100,
+          listSurvivors: () => [555],
+          sleep: (ms) => {
+            now += ms;
+            return Promise.resolve();
+          },
+        }),
+      ).rejects.toThrow(/vendor CLI child process\(es\) still alive/);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("names the surviving pid(s) in the thrown error", async () => {
+    let now = 0;
+    const realNow = Date.now;
+    Date.now = () => now;
+    try {
+      await expect(
+        waitForVendorChildExit({
+          pid: 7,
+          timeoutMs: 100,
+          intervalMs: 100,
+          listSurvivors: () => [555, 556],
+          sleep: (ms) => {
+            now += ms;
+            return Promise.resolve();
+          },
+        }),
+      ).rejects.toThrow(/555, 556/);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+});
+
+describe("findCaptureResidue", () => {
+  it("finds an agent-repl-capture-* directory left under projects/", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    const residue = path.join(
+      accountRoot,
+      "projects",
+      "-private-var-folders-agent-repl-capture-prose-streamed-abc123-cwd",
+    );
+    mkdirSync(residue, { recursive: true });
+    expect(findCaptureResidue(accountRoot)).toEqual([residue]);
+  });
+
+  it("ignores the operator's own real project directories", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    mkdirSync(path.join(accountRoot, "projects", "-Users-someone-real-project"), {
+      recursive: true,
+    });
+    expect(findCaptureResidue(accountRoot)).toEqual([]);
+  });
+
+  it("returns an empty list when the account root has no projects/ at all", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    expect(findCaptureResidue(accountRoot)).toEqual([]);
+  });
+});
+
+describe("assertNoCaptureResidue", () => {
+  it("does nothing under a non-config-root auth mode", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    mkdirSync(path.join(accountRoot, "projects", "agent-repl-capture-leftover"), {
+      recursive: true,
+    });
+    expect(() =>
+      assertNoCaptureResidue({ mode: AUTH_SEED_CREDENTIALS }, [{ accountRoot }]),
+    ).not.toThrow();
+  });
+
+  it("passes silently when every touched account root is clean", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    mkdirSync(path.join(accountRoot, "projects"), { recursive: true });
+    expect(() =>
+      assertNoCaptureResidue({ mode: AUTH_CONFIG_ROOT }, [{ accountRoot }]),
+    ).not.toThrow();
+  });
+
+  it("throws — loud, never silent — naming the exact residue path", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    const residue = path.join(accountRoot, "projects", "agent-repl-capture-leftover");
+    mkdirSync(residue, { recursive: true });
+    expect(() => assertNoCaptureResidue({ mode: AUTH_CONFIG_ROOT }, [{ accountRoot }])).toThrow(
+      new RegExp(residue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+  });
+
+  it("checks every distinct account root exactly once, deduplicated", () => {
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-residue-")));
+    mkdirSync(path.join(accountRoot, "projects"), { recursive: true });
+    expect(
+      assertNoCaptureResidue({ mode: AUTH_CONFIG_ROOT }, [
+        { accountRoot },
+        { accountRoot },
+      ]),
+    ).toEqual([accountRoot]);
   });
 });
 
