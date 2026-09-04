@@ -165,6 +165,18 @@ const ROWS: readonly ConformanceRow[] = [
     // MODEL CHOICE: the run Read the captured image back; the mock's Bash result carries the image inline, which is the shape under test.
     diverges: "MODEL CHOICE",
   },
+  {
+    capture: "auto-compaction",
+    prompt: "!compact-auto",
+    golden: ["thinking", "read", "response"],
+    mock: ["thinking", "response"],
+    // MODEL CHOICE: the capture reaches auto-compaction by READING sixteen
+    // 40000-byte files, so `read` is how the window was filled, not part of
+    // the compaction shape. The mock reproduces the boundary itself.
+    diverges: "MODEL CHOICE",
+    terminalsDiverge:
+      "as compaction-directed: the capture holds SIXTEEN turns (one per paced read) and the mock scenario is one; reproducing a capture's turn COUNT would make the mock a recording of that session rather than a model of the vendor's shape",
+  },
   { capture: "bash-interrupted-by-timeout", prompt: "!bash-timeout", golden: ["thinking", "bash", "response"], mock: ["thinking", "bash", "response"] },
   { capture: "bash-nonzero-exit", prompt: "!bash-fail", golden: ["thinking", "bash", "response"], mock: ["thinking", "bash", "response"] },
   {

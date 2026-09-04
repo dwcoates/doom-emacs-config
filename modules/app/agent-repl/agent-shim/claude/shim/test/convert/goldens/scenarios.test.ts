@@ -27,6 +27,7 @@ import {
 const UNIT_KINDS: readonly (readonly [string, readonly string[]])[] = [
   ["account-usage", ["hook", "thinking", "response"]],
   ["artifact-publish-and-list", ["hook", "thinking", "read", "bash", "response"]],
+  ["auto-compaction", ["hook", "thinking", "read", "response"]],
   ["bash-detached", ["hook", "thinking", "bash", "response"]],
   ["bash-foreground-completed", ["hook", "thinking", "bash", "response"]],
   ["bash-image-output", ["hook", "thinking", "bash", "read", "response"]],
@@ -104,6 +105,7 @@ const UNIT_KINDS: readonly (readonly [string, readonly string[]])[] = [
 const SESSION_ARMS: readonly (readonly [string, readonly string[]])[] = [
   ["account-usage", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["artifact-publish-and-list", ["mcpServer", "fastMode", "rateLimitStatus"]],
+  ["auto-compaction", ["mcpServer", "fastMode", "rateLimitStatus", "compacting"]],
   ["bash-detached", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["bash-foreground-completed", ["mcpServer", "fastMode", "rateLimitStatus"]],
   ["bash-image-output", ["mcpServer", "fastMode", "rateLimitStatus"]],
@@ -188,6 +190,30 @@ const SESSION_ARMS: readonly (readonly [string, readonly string[]])[] = [
 const TERMINALS: readonly (readonly [string, readonly string[]])[] = [
   ["account-usage", ["success.completed"]],
   ["artifact-publish-and-list", ["success.completed"]],
+  // 16 turns, one per paced 40000-byte read: the window climbs ~10k tokens a
+  // turn until the vendor compacts on its own between turns. Every turn ends
+  // `success.completed`; the auto-compaction is not a terminal of its own.
+  [
+    "auto-compaction",
+    [
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+      "success.completed",
+    ],
+  ],
   ["bash-detached", ["success.completed"]],
   ["bash-foreground-completed", ["success.completed"]],
   ["bash-image-output", ["success.completed"]],
