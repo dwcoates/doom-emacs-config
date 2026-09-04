@@ -369,3 +369,52 @@ func TestExpectedParticipantsIsZeroForAWorkspaceWithNoTransfer(t *testing.T) {
 		t.Fatalf("expected participants = %d, want none with no transfer announced", got)
 	}
 }
+
+func TestASecondManifestReadDoesNotReArmAnAdoptedRendezvous(t *testing.T) {
+	// Arrange — one host participant adopts the workspace, then the joining
+	// daemon reads the same stand-down manifest again, as its awaiting poll
+	// does when the manifest was already on disk.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true})
+	if err := h.c.AdoptHost(context.Background(), ws); err != nil {
+		t.Fatalf("AdoptHost: %v", err)
+	}
+
+	// Act
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join (second manifest read): %v", err)
+	}
+
+	// Assert — a recovered page's own boot adopt succeeds at once against the
+	// workspace that is already adopted.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := h.c.AdoptWeb(ctx, ws); err != nil {
+		t.Fatalf("AdoptWeb after a second manifest read = %v, want the adopted workspace to succeed at once", err)
+	}
+}
+
+func TestASecondManifestReadKeepsAPartialRendezvousLedger(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true, Web: true})
+	h.c.mu.Lock()
+	first := h.c.rendezvous[ws]
+	first.hostCalled = true
+	h.c.mu.Unlock()
+
+	// Act
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join (second manifest read): %v", err)
+	}
+
+	// Assert
+	h.c.mu.Lock()
+	again := h.c.rendezvous[ws]
+	h.c.mu.Unlock()
+	if again != first || !again.hostCalled {
+		t.Fatalf("rendezvous entry was re-armed (same=%v, host_called=%v), want the ledger kept", again == first, again.hostCalled)
+	}
+}
