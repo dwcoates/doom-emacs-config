@@ -103,21 +103,41 @@ const daemonLinkBound = 1 * time.Second
 // doomBootBound is how long Emacs may take to finish Doom's own
 // initialization and publish the readiness stamp.
 //
-// MEASURED: the longest healthy boot was 1.162s, and the spread is narrow
-// (1.041s-1.162s). 3x that. It is no longer expressed as a multiple of
-// emacsBootBound: the two phases turned out to differ by a factor of twenty,
-// so tying them together would let a change in one silently move the other.
+// RE-MEASURED after the image began carrying Doom's native code (the
+// Dockerfile's `doom sync --aot`) and after the scenarios became parallel,
+// because both moved this phase:
+//
+//	serial, JIT-compiling per test (the old regime)  mean 1437ms  max 1482ms
+//	serial, image-baked native code                  mean  836ms  max 1501ms
+//	at the layer's parallelism bound of 3 slots      mean  990ms  max 1780ms
+//
+// The bound STAYS at 3500ms. It is no longer 3x the worst healthy boot -- at
+// three slots that would be 5.3s -- and it is not raised to keep that ratio,
+// because a bound is a promise about the product and loosening it to
+// accommodate the harness's own concurrency would be the harness marking its
+// own homework. 3500ms is twice the worst boot observed under the bound the
+// layer actually runs at, and a scenario that misses it is telling the truth:
+// this machine is too loaded to run three Emacsen.
+//
+// It is not expressed as a multiple of emacsBootBound: the two phases differ
+// by a factor of twenty, so tying them together would let a change in one
+// silently move the other.
 const doomBootBound = 3500 * time.Millisecond
 
 // doomStageBound bounds each `cp -a` that stages one entry of Doom's
 // `.local` tree into the test's scratch.
 //
-// MEASURED, and the measurement is the reason it stays generous: the WHOLE
-// staging -- every entry, not one `cp` -- finished in 4ms at its slowest, so
-// there is no "slow copy" regime to bound. What it exists to catch is a copy
-// that cannot finish AT ALL, and five seconds is three orders above the
-// observation while still failing a hang in the same test rather than at the
-// suite's own timeout.
+// RE-MEASURED since the image began baking Doom's native code: `.local/cache`
+// carries 591 `.eln` files (58 MiB) now rather than 228 KiB, so this copy is
+// no longer free. The whole staging -- every entry, not one `cp` -- took
+// 310ms at its slowest serially and 1.039s at its slowest with four scenarios
+// contending for the VM's four CPUs, against 4ms before.
+//
+// Five seconds still stands, and the reason is unchanged rather than
+// stretched: what this exists to catch is a copy that cannot finish AT ALL,
+// and five seconds remains a large multiple of the worst observation while
+// still failing a hang in the test that caused it rather than at the suite's
+// own timeout.
 const doomStageBound = 5 * time.Second
 
 // Emacs is one sandboxed Emacs process, its server socket, and its
