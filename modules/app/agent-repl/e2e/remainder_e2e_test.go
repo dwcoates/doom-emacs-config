@@ -1087,19 +1087,21 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 // the START said, with this comment: "A send that could not be delivered
 // still HAPPENED, and its row is what explains the attempt."
 //
-// So FeedAgentPrompt carries NO delivery-outcome field at all — no failed
-// treatment, no refusal reason — and the refused send is drawn exactly as an
-// accepted one is. GAP RECORDED: the frontend surface cannot today
-// distinguish a refused send from a delivered one, so the strongest available
-// assertion is that the attempt is drawn AND SURVIVES the refusal (a resolver
-// that dropped the row on the failure arm, or that invented a recipient
-// identity the refusal never resolved, would fail here), plus the turn's own
-// terminal.
+// FeedAgentPrompt's ONLY outcome field is its `delivery` oneof, and that
+// oneof has exactly two arms — queued_to_live and resumed_recipient — both of
+// which state how a send LANDED. feed.proto declares no failure arm and no
+// refusal-reason field, and the field's own comment says the oneof is "UNSET
+// ... when the producer observed nothing; the row's presence already says the
+// attempt happened". So the refused send is drawn as an accepted one is,
+// except that its delivery stays unset.
 //
-// This also corrects, for this one scenario, the claim in
-// TestSendMessageQueuedAndResumed's comment above that "a send draws NO feed
-// row on the SENDER's feed": sink.go routes AgentActivity_SendMessage to
-// drawSendMessage, which returns a row on every arm but the unset one.
+// GAP RECORDED: the frontend surface therefore cannot distinguish a REFUSED
+// send from one whose producer simply stated no delivery. The strongest
+// available assertions are the three below — the attempt is drawn AND
+// SURVIVES the refusal (a resolver that dropped the row on the failure arm,
+// or that invented a recipient identity the refusal never resolved, would
+// fail here), the delivery oneof is unset (a resolver that reported a landing
+// the refusal never achieved would fail here), and the turn still concludes.
 func TestSendMessageRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
