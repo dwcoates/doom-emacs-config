@@ -288,7 +288,11 @@ export function subagentRow(
     detached?: boolean;
     startedAtMs?: bigint;
     lastProgressMs?: bigint;
-    settled?: { endedAtMs: bigint; outcome: "succeeded" | "failed" | "cancelled" | "lost" };
+    settled?: {
+      endedAtMs: bigint;
+      outcome: "succeeded" | "failed" | "cancelled" | "lost";
+      lostHow?: "fileVanished" | "wentSilent" | "sweptUp";
+    };
     description?: string;
     tokens?: string;
   } = {},
@@ -311,7 +315,10 @@ export function subagentRow(
             case: "settled",
             value: {
               endedAtMs: opts.settled.endedAtMs,
-              outcome: { case: opts.settled.outcome, value: {} },
+              outcome:
+                opts.settled.outcome === "lost" && opts.settled.lostHow !== undefined
+                  ? { case: "lost", value: { how: { case: opts.settled.lostHow, value: {} } } }
+                  : { case: opts.settled.outcome, value: {} },
             },
           },
   });

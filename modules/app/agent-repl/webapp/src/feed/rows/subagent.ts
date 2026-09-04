@@ -38,6 +38,7 @@ import type {
   FeedDetachedSubagent,
   FeedSubagent,
   FeedSubagentLastProgress,
+  FeedSubagentLost,
   FeedSubagentRuntime,
   FeedSubagentSettled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -71,6 +72,32 @@ const SETTLED_WORDS = {
   cancelled: "stopped",
   lost: "lost sight of",
 } as const satisfies Record<string, string>;
+
+/**
+ * The cause each `lost` arm names — the sidecar's staleness ruling, said in
+ * words rather than left as the bare "lost sight of". Still not a failure: the
+ * clause says WHICH lost it was, never that the work went wrong.
+ */
+const LOST_CAUSE_WORDS = {
+  fileVanished: "file vanished",
+  wentSilent: "went silent",
+  sweptUp: "swept up at boot",
+} as const satisfies Record<string, string>;
+
+/** Every lost cause this build words, for the suite to hold to the schema. */
+export const SUBAGENT_LOST_CAUSE_ARMS: readonly string[] = Object.keys(LOST_CAUSE_WORDS);
+
+/**
+ * The clause the lost cause adds to the outcome word.
+ *
+ * An UNSET `how` is an older daemon that never ruled, not a malformed row: the
+ * outcome then stays the plain word it has always been.
+ */
+function lostCauseClause(lost: FeedSubagentLost): string {
+  const how = lost.how;
+  if (how.case === undefined) return "";
+  return `: ${LOST_CAUSE_WORDS[how.case]}`;
+}
 
 /** Every settled outcome this build draws, for the suite to hold to the schema. */
 export const SUBAGENT_SETTLED_ARMS: readonly string[] = Object.keys(SETTLED_WORDS);
@@ -141,7 +168,10 @@ export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement
       el.append(drawSettledClock(runtime, state.value));
       const word = document.createElement("span");
       word.className = "subagent-outcome";
-      word.textContent = SETTLED_WORDS[outcome.case];
+      word.textContent =
+        outcome.case === "lost"
+          ? `${SETTLED_WORDS.lost}${lostCauseClause(outcome.value)}`
+          : SETTLED_WORDS[outcome.case];
       el.append(word);
       return el;
     }
