@@ -272,12 +272,12 @@ func insideSandbox() bool {
 
 // HasEmacs asks the Emacs in the image for its own version.
 //
-// The requirement is 27 or later, for `tab-bar-tabs`. It is NOT 29, and it
-// must never become 29: the image is Debian BOOKWORM's `emacs-nox`, which is
-// Emacs 28.2. An earlier revision of this layer passed `--init-directory`,
-// which landed in Emacs 29 and does not exist here; the layer now aims Emacs
-// at its Doom tree through HOME instead, which every version supports. Any
-// future scenario is bound by the same 28.2 ceiling.
+// The requirement is 27 or later, for `tab-bar-tabs`. The image now builds
+// Emacs 30.2 from source (with xwidgets and native-comp), so `--init-directory`
+// (Emacs 29+) is available, but the layer still aims Emacs at its Doom tree
+// through HOME instead: the container runs `--read-only` and the staged
+// `/sandbox/emacs.d` is not a tmpfs mount, so that choice is not a version
+// workaround and does not go away on a newer Emacs.
 func (s *localSandbox) HasEmacs() (bool, string) {
 	if !insideSandbox() {
 		return false, "not inside the sandbox"
