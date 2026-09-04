@@ -638,6 +638,26 @@ func (p *sidecarProc) Stop() {
 	}
 }
 
+// Kill ENDS the process where it stands, with no chance to shut down.
+//
+// It exists for the subjects that stop a sidecar while it is FROZEN inside a
+// withheld store write (see writeGate). SIGTERM would not reach such a process
+// until its own rpc timeout expired, and releasing the write first would let it
+// take one more poll — which is precisely the poll those subjects exist to cut
+// it off before. A kill is also the harsher precondition: the restarted reader
+// gets no orderly shutdown's help, only what the store already made durable.
+func (p *sidecarProc) Kill() {
+	p.t.Helper()
+	if p.stopped {
+		return
+	}
+	p.stopped = true
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	<-p.done
+}
+
 // ---------------------------------------------------------------------------
 // A Connect client over a UNIX domain socket.
 // ---------------------------------------------------------------------------
@@ -1059,6 +1079,9 @@ type fakeStore struct {
 	// rejections holds every batch the fake refused on its OWN validation, so a
 	// subject can state what the store objected to.
 	rejections []string
+	// gate, when armed, WITHHOLDS the response to the first batch that matches
+	// it. See writeGate.
+	gate *writeGate
 
 	batchC chan *storev1.WriteBatchRequest
 	callC  chan string
@@ -1327,10 +1350,94 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	f.mu.Lock()
 	f.acked = append(f.acked, recorded)
 	f.recordBashRows(recorded)
+	gate := f.gate
 	f.mu.Unlock()
+	// The batch is DURABLE here and only the ANSWER is withheld, so a subject
+	// waiting on the gate sees the same store state the producer just wrote.
+	gate.hold(recorded)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
+}
+
+// ---------------------------------------------------------------------------
+// The write gate: STOPPING THE PRODUCER, rather than out-running it.
+// ---------------------------------------------------------------------------
+
+// writeGate withholds the answer to ONE batch, chosen by a predicate.
+//
+// WHY A GATE AND NOT A LONGER TIMER. Several subjects have to act between two
+// things the sidecar does back to back — append a summary after a boundary was
+// held but before its forced redelivery, or stop the process while a cursor is
+// still parked. The way that used to be arranged was to stretch the sidecar's
+// poll interval (500ms here, 5s in the restart subject) so the second event was
+// far enough away for the test to win the race. That is a race the test usually
+// wins, not a race it cannot lose, and it made the hold subjects the slowest in
+// the package.
+//
+// The store is the interlock the system already has. Every batch is written
+// SYNCHRONOUSLY inside the cycle and the cursor only advances on a durable
+// success, so a store that has not answered is a cycle that has not moved on.
+// Holding the answer to the batch that states the hold therefore freezes the
+// sidecar at exactly the instant the subject needs, for as long as it needs,
+// at whatever poll interval production uses.
+type writeGate struct {
+	match    func(*storev1.WriteBatchRequest) bool
+	reached  chan struct{} // closed when a matching batch is inside the gate
+	released chan struct{} // closed by release(), letting the answer out
+
+	reachedOnce  sync.Once
+	releasedOnce sync.Once
+}
+
+// hold blocks a matching batch's answer until the gate is released. A nil gate
+// (nothing armed) is the ordinary case and blocks nothing.
+func (g *writeGate) hold(req *storev1.WriteBatchRequest) {
+	if g == nil || !g.match(req) {
+		return
+	}
+	g.reachedOnce.Do(func() { close(g.reached) })
+	<-g.released
+}
+
+// await blocks until the producer is INSIDE the gated write, and fails the
+// subject rather than hanging if it never gets there.
+func (g *writeGate) await(ctx context.Context, t *testing.T, what string) {
+	t.Helper()
+	select {
+	case <-g.reached:
+	case <-ctx.Done():
+		t.Fatalf("%s never reached the store within the deadline, so the producer was never stopped where the subject needs it", what)
+	}
+}
+
+// release lets the withheld answer out. It is idempotent so a subject can call
+// it explicitly AND register it as a cleanup, and a failed subject can never
+// leave a producer wedged.
+func (g *writeGate) release() {
+	g.releasedOnce.Do(func() { close(g.released) })
+}
+
+// gateOnBatch arms the one-shot gate. The gate is released at cleanup whatever
+// the subject does, so a t.Fatalf between arming and releasing cannot leave the
+// sidecar blocked in a write for the rest of the run.
+func (f *fakeStore) gateOnBatch(t *testing.T, match func(*storev1.WriteBatchRequest) bool) *writeGate {
+	t.Helper()
+	g := &writeGate{match: match, reached: make(chan struct{}), released: make(chan struct{})}
+	f.mu.Lock()
+	f.gate = g
+	f.mu.Unlock()
+	t.Cleanup(g.release)
+	return g
+}
+
+// cursorParkedAt matches the batch that offers a cursor for a path standing at
+// exactly an offset — the hold's own observable event.
+func cursorParkedAt(path string, offset int64) func(*storev1.WriteBatchRequest) bool {
+	return func(req *storev1.WriteBatchRequest) bool {
+		cs := req.GetBatch().GetCursorAdvance()
+		return cs != nil && samePath(cs.GetPath(), path) && cs.GetOffset() == offset
+	}
 }
 
 // recordBashRows keeps every bash row a durable batch carried. Caller holds mu.
