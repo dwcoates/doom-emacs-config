@@ -539,14 +539,20 @@ func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
 
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
-	for _, line := range captured.Lines[:4] {
+	// THE PREFIX IS SIZED TO THE FIRST PAGE LINE, which the capture reaches at
+	// its `skill_listing` attachment (line 6). It used to be four lines, because
+	// the capture's line 2 is a hook attachment and that ONCE landed a page
+	// line; the 2026-09-04 plane-ownership ruling made hook attachments unserved
+	// items, so a four-line prefix now opens no book at all and the watch below
+	// would be opened against an agent the store has never heard of.
+	for _, line := range captured.Lines[:7] {
 		g.AppendLine(line)
 	}
 	awaitBookLines(ctx, t, store.Client, captured.Session, 1)
 	_, tail := watchBook(ctx, t, store.Client, captured.Session, 200)
 
 	// Act: the rest of the file arrives after the watch was opened.
-	for _, line := range captured.Lines[4:] {
+	for _, line := range captured.Lines[7:] {
 		g.AppendLine(line)
 	}
 

@@ -117,6 +117,12 @@ func TestGoldenCorpusVendorSpecificKindsAreTheDeclaredSet(t *testing.T) {
 		"attachment/ultrathink_effort": true,
 		// The diagnostics attachment when no adjacent change was observed.
 		"attachment/diagnostics": true,
+		// The hook outcomes. READ AND KEPT WHOLE, never served: the STREAM plane
+		// owns the hook row (ruling 2026-09-04) because the vendor hands the two
+		// planes disjoint identity material and no key can name one firing on
+		// both — see convert/attachment.go's hookAttachment.
+		"attachment/hook_success": true, "attachment/hook_blocking_error": true,
+		"attachment/hook_non_blocking_error": true, "attachment/hook_cancelled": true,
 		// R15: a file-plane prompt can never be a page line.
 		"user_prompt": true, "user/meta": true,
 		// A settle whose call is behind the cursor.
