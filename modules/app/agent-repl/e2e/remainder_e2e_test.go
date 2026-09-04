@@ -741,21 +741,25 @@ func TestScheduleWakeupScheduleAndStop(t *testing.T) {
 	// otherwise read idle/done", and the resolver publishes exactly that arm
 	// while a scheduled wakeup stands
 	// (daemon/internal/resolve/footer/status.go's wakeup()).
-	rmAwaitFooter(t, w, footer, "the footer's waiting-on-wakeup status while the scheduled wakeup stands", func(v *frontendv1.FooterView) bool {
+	//
+	// The ⏱ chip is pinned on the SAME view rather than by a second wait. Both
+	// facts are rendered from the one `s.wakeup` field — the waiting arm by
+	// footer/status.go's wakeup(), the chip by chips.go:547-551, which counts
+	// the pending wakeup alongside `s.crons` because footer.proto:849-851
+	// words that chip as "live scheduled jobs (cron/wakeup schedules)". So a
+	// single publish carries both, and nothing obliges the daemon to publish
+	// again afterwards: the schedule turn has concluded and the session is
+	// idle. A second AwaitView on the same stream would consume only pushes
+	// AFTER the view the first wait returned, and so hangs out its whole
+	// budget whenever no unrelated update happens to follow — the observed
+	// flake under -parallel 8, where the daemon log falls silent between the
+	// wakeup publish and teardown.
+	view := rmAwaitFooter(t, w, footer, "the footer's waiting-on-wakeup status while the scheduled wakeup stands", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
 	})
-	// The ⏱ chip is what footer.proto:849-851 names for it: "live scheduled
-	// jobs (CRON/WAKEUP SCHEDULES). Set iff at least one job is scheduled."
-	//
-	// DISPUTE, written to the proto rather than to the daemon: the chip is
-	// built from `len(s.crons)` alone (chips.go:547-549), and applyWakeup
-	// keeps the pending wakeup in `s.wakeup`, a field the chip never consults
-	// — so a session whose only scheduled job is a wakeup draws no ⏱ chip.
-	// The proto names wakeup schedules in that chip, so this asserts the chip
-	// and is expected to fail until the daemon counts them.
-	rmAwaitFooter(t, w, footer, "the footer's ⏱ chip counting the scheduled wakeup", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetLiveWork().GetCrons().GetCount() > 0
-	})
+	if got := view.GetStrip().GetLiveWork().GetCrons().GetCount(); got == 0 {
+		t.Fatalf("the footer's ⏱ chip counts %d scheduled jobs while a wakeup stands, want the wakeup counted: %v", got, view.GetStrip().GetLiveWork())
+	}
 
 	// Act + Assert: stop.
 	stopTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "wakeup-stop")
