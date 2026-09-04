@@ -39,11 +39,13 @@ const xvfbScreen = "1280x1024x24"
 
 // xvfbReadyBound is how long Xvfb may take to bind a display and report it.
 //
-// PROVISIONAL, and marked so per the module AGENTS.md rule that bounds are
-// measured rather than guessed. The failure it exists to catch is a server
-// that cannot start at all -- no /tmp/.X11-unix, no free display -- not a
-// slow one.
-const xvfbReadyBound = 5 * time.Second
+// MEASURED: across ten healthy starts the slowest was 121ms and the rest sat
+// at 21-62ms. The slow one is always the FIRST in a fresh container, which
+// pays for creating /tmp/.X11-unix; the multiple here is therefore taken
+// against that first start rather than against the steady state. The failure
+// it exists to catch is a server that cannot start at all -- no free display,
+// no socket directory -- not a slow one.
+const xvfbReadyBound = 1 * time.Second
 
 // xdisplay is one Xvfb server and the display it bound.
 type xdisplay struct {
