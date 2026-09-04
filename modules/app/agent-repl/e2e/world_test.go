@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -458,6 +459,98 @@ func shortStateRoot(t *testing.T) string {
 }
 
 // ===========================================================================
+// Child-process exit tracking, shared by Store and Sidecar.
+// ===========================================================================
+
+// reapGrace bounds the wait for the kernel to reap a process that has already
+// been sent SIGKILL. SIGKILL cannot be caught, blocked or ignored, so this is
+// not a shutdown budget at all — it covers only the scheduling of an already
+// doomed process, which every observed run completes in single-digit
+// milliseconds. It is deliberately far below DefaultTimeout: a process still
+// unreaped after this is a fault to REPORT, never something to keep waiting
+// on, because the unbounded wait it replaces is what turned one failing
+// subtest into a 45-minute suite timeout.
+const reapGrace = 2 * time.Second
+
+// processExit records one child process's exit exactly once and lets any
+// number of observers ask about it.
+//
+// Readiness is a CLOSED channel plus a stored error, never a value delivered
+// down a buffered channel. That distinction is the whole point: a
+// `done chan error` of capacity one is DRAINED by the first receive, so the
+// non-disturbing `exited()` probe would consume the very exit a later Stop
+// needs to see, and that Stop would then wait on an empty channel forever. A
+// closed channel answers every observer, in any order, any number of times.
+type processExit struct {
+	done chan struct{}
+	err  error // written once, before done is closed; read only after it is
+}
+
+// watchProcess reaps cmd in the background and answers its exit through the
+// returned processExit. Exactly one cmd.Wait is ever issued per process.
+func watchProcess(cmd *exec.Cmd) *processExit {
+	p := &processExit{done: make(chan struct{})}
+	go func() {
+		p.err = cmd.Wait()
+		close(p.done)
+	}()
+	return p
+}
+
+// exited reports whether the process has already left, without disturbing it
+// and without consuming the answer.
+func (p *processExit) exited() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// awaitWithin waits at most budget for the process to leave, and reports
+// whether it did. Every teardown wait in this file goes through here, so no
+// teardown path can block a test run indefinitely.
+func (p *processExit) awaitWithin(budget time.Duration) bool {
+	select {
+	case <-p.done:
+		return true
+	case <-time.After(budget):
+		return false
+	}
+}
+
+// stopProcess is the one orderly stop every e2e-owned child process gets:
+// SIGTERM, a bounded wait, then SIGKILL and a SECOND BOUNDED wait. Neither
+// wait is unbounded, so a child that ignores both signals fails its test
+// rather than hanging the whole suite until the go-test alarm.
+//
+// Every Signal and Kill error is surfaced. os.ErrProcessDone is the one
+// benign case — the process left on its own between the probe and the signal
+// — and even then the reap is still confirmed rather than assumed; any other
+// error is a real fault and fails the test.
+func stopProcess(t *testing.T, name string, cmd *exec.Cmd, exit *processExit) {
+	t.Helper()
+	if cmd.Process == nil || exit.exited() {
+		return
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("e2e: SIGTERM %s: %v", name, err)
+	}
+	if exit.awaitWithin(DefaultTimeout) {
+		return
+	}
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("e2e: SIGKILL %s: %v", name, err)
+	}
+	if !exit.awaitWithin(reapGrace) {
+		t.Errorf("e2e: %s was still unreaped %s after SIGKILL, itself %s after SIGTERM", name, reapGrace, DefaultTimeout)
+		return
+	}
+	t.Errorf("e2e: %s did not exit within %s of SIGTERM", name, DefaultTimeout)
+}
+
+// ===========================================================================
 // Store: the real shim-store, restartable on the same socket + database, for
 // the degraded-state family's real outage window (ruling 2).
 // ===========================================================================
@@ -472,7 +565,7 @@ type Store struct {
 	Client  storev1connect.ShimStoreClient
 
 	cmd     *exec.Cmd
-	done    chan error
+	exit    *processExit
 	stopped bool
 }
 
@@ -503,9 +596,8 @@ func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 		LogPath: logPath,
 		Client:  storeClient(socket),
 		cmd:     cmd,
-		done:    make(chan error, 1),
+		exit:    watchProcess(cmd),
 	}
-	go func() { s.done <- cmd.Wait() }()
 	t.Cleanup(func() {
 		if !s.Exited() {
 			s.Stop()
@@ -549,14 +641,7 @@ func (s *Store) awaitReady() {
 
 // Exited reports whether the store process has already left, without
 // disturbing it.
-func (s *Store) Exited() bool {
-	select {
-	case <-s.done:
-		return true
-	default:
-		return false
-	}
-}
+func (s *Store) Exited() bool { return s.exit.exited() }
 
 // Stop sends SIGTERM and waits for the store to leave. It is ruling 2's real
 // degraded-state control: a test calls this while a session is live, asserts
@@ -569,19 +654,10 @@ func (s *Store) Stop() {
 		return
 	}
 	s.stopped = true
-	if s.cmd.Process != nil {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
+	stopProcess(s.t, "store", s.cmd, s.exit)
+	if err := os.Remove(s.Socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.t.Errorf("e2e: remove store socket %s: %v", s.Socket, err)
 	}
-	select {
-	case <-s.done:
-	case <-time.After(DefaultTimeout):
-		if s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
-		<-s.done
-		s.t.Fatalf("e2e: store did not exit within %s of SIGTERM", DefaultTimeout)
-	}
-	_ = os.Remove(s.Socket)
 }
 
 // StartSameDB relaunches the store on the SAME socket and database path this
@@ -601,8 +677,7 @@ func (s *Store) StartSameDB(t *testing.T) {
 	}
 	s.cmd = cmd
 	s.stopped = false
-	s.done = make(chan error, 1)
-	go func() { s.done <- cmd.Wait() }()
+	s.exit = watchProcess(cmd)
 	t.Cleanup(func() {
 		if !s.Exited() {
 			s.Stop()
@@ -639,7 +714,7 @@ type Sidecar struct {
 	// keep quoting the same variable.
 	SpoolRoot string
 	cmd       *exec.Cmd
-	done      chan error
+	exit      *processExit
 	stopped   bool
 }
 
@@ -707,8 +782,7 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: start sidecar: %v", err)
 	}
-	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, done: make(chan error, 1)}
-	go func() { s.done <- cmd.Wait() }()
+	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
 }
@@ -720,18 +794,7 @@ func (s *Sidecar) Stop() {
 		return
 	}
 	s.stopped = true
-	if s.cmd.Process != nil {
-		_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	select {
-	case <-s.done:
-	case <-time.After(DefaultTimeout):
-		if s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
-		<-s.done
-		s.t.Fatalf("e2e: sidecar did not exit within %s of SIGTERM", DefaultTimeout)
-	}
+	stopProcess(s.t, "sidecar", s.cmd, s.exit)
 }
 
 // Log reads every structured-log record the sidecar has written so far.
@@ -742,14 +805,7 @@ func (s *Sidecar) Log(t *testing.T) []harness.LogRecord {
 
 // Exited reports whether the sidecar process has already left, without
 // disturbing it.
-func (s *Sidecar) Exited() bool {
-	select {
-	case <-s.done:
-		return true
-	default:
-		return false
-	}
-}
+func (s *Sidecar) Exited() bool { return s.exit.exited() }
 
 // ===========================================================================
 // A process that exits before test cleanup fails the test loudly (SPEC.md
