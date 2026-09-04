@@ -58,6 +58,11 @@ type run struct {
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
 	displaced *Displaced
+	// afterDrain reports that this run reached its terminal AFTER the shutdown
+	// drain had already taken its snapshot, so NOTHING is waiting for it and
+	// the state client is closing under it. Set once, under the
+	// orchestrator's mutex, by enterTerminal.
+	afterDrain bool
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first phase. The queue is a
 	// tab like every other, so its interval is recorded like every other's.
