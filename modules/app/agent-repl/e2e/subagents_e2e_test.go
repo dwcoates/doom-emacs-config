@@ -25,6 +25,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,8 +265,34 @@ func TestSubagentSyncNestedActivity(t *testing.T) {
 	// "file-plane user prompts are NEVER page lines — classified as unserved
 	// vendor_specific{kind \"user_prompt\"}; the shim's AgentPrompt is the
 	// one served form (subagent commissions ride
-	// AgentSubagentStart.prompt)." The commission's CONTENT is already
-	// covered above, on the bubble's own description.
+	// AgentSubagentStart.prompt)."
+	//
+	// THE COMMISSION IS AN agent_prompt ROW ON THIS SUB-FEED. A bubble's body
+	// IS its sub-feed (feed.proto, "THE BUBBLE IS A FEED"), and
+	// AgentSubagentPrompt.text is "drawn only where there is room for it — a
+	// bubble's body, not its head", so the instruction lands here, addressed
+	// from the caller, and nowhere else.
+	if !pageHasAgentPromptText(subRows, "Do the sweep and report.") {
+		t.Errorf("sub-feed page %v, want an agent_prompt row carrying the commission verbatim", subPage)
+	}
+}
+
+// pageHasAgentPromptText answers whether any row on the page is an
+// agent_prompt whose body carries `text` in a text block, under an address
+// naming a sender.
+func pageHasAgentPromptText(rows []*frontendv1.FeedRow, text string) bool {
+	for _, row := range rows {
+		prompt := row.GetAgentPrompt()
+		if prompt == nil || !strings.HasPrefix(prompt.GetAddress().GetText(), "from ") {
+			continue
+		}
+		for _, block := range prompt.GetBody().GetBlocks() {
+			if block.GetText().GetText() == text {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
