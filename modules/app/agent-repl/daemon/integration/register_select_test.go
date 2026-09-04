@@ -268,8 +268,6 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 	repoB := harness.NewRepo(t)
 	a := harness.Register(t, d, repoA.Dir)
 	b := harness.Register(t, d, repoB.Dir)
-	d.WatchWorkspaceLogs(repoA.Dir)
-	d.WatchWorkspaceLogs(repoB.Dir)
 	roster := d.WatchRoster()
 
 	fa := &fixture{d: d, repo: repoA, ws: a, t: t}
