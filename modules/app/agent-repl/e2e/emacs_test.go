@@ -981,13 +981,26 @@ func (e *Emacs) stop() {
 	// is exactly why the kill below is unconditional.
 	if !e.isWedged() {
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-		_, _ = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
 			"--eval", "(ignore-errors (agent-repl-frontend-daemon-stop))")
 		cancel()
+		if err != nil {
+			// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
+			// exit, and every daemon, shim and shim-lock the reaper then
+			// reports as a stray is downstream of it. Swallowing the error
+			// left the reap looking like an unexplained leak.
+			e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
+		}
 
 		ctx, cancel = context.WithTimeout(context.Background(), DefaultTimeout)
-		_, _ = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		// `kill-emacs' never answers by design -- Emacs exits with the client
+		// still waiting -- so only a TIMEOUT is worth reporting: it means
+		// Emacs neither answered nor died, and the reaper is about to find it.
+		_, err = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
 			"--eval", "(kill-emacs)")
+		if err != nil && ctx.Err() != nil {
+			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
+		}
 		cancel()
 	}
 	e.proc.Kill()
