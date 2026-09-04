@@ -384,6 +384,13 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design.
+	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt to drop", "k-drop", origin)
@@ -412,6 +419,7 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 	nd := promptRestartDaemon(t, f)
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert: still gone.
 	newHolds := nd.WatchHolds(f.ws)
@@ -460,6 +468,13 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	f.d.ExpectWarnings("daemon.promptqueue.restore_holds")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design.
+	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt that must survive", "k-survive", origin)
@@ -469,6 +484,7 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	nd := promptRestartDaemon(t, f)
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	nd.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert
 	holds := nd.WatchHolds(f.ws)
@@ -501,7 +517,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
 	f.d.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
-		"daemon.wsm.all_held_prompts")
+		"daemon.wsm.all_held_prompts", "daemon.rollout.reconcile")
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("first held prompt", "k-corrupt-1", origin)
@@ -522,7 +538,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
 	nd.ExpectWarnings("daemon.boot.restore_holds", "daemon.promptqueue.restore_holds",
-		"daemon.wsm.all_held_prompts")
+		"daemon.wsm.all_held_prompts", "daemon.rollout.reconcile")
 	code := nd.AwaitExit()
 
 	// Assert: the boot refuses loudly.
@@ -1034,6 +1050,14 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	// check would bounce the shim out from under the test.
 	f := newOpened(t, harness.Opts{ExtraEnv: []string{
 		"AGENT_REPL_DEPLOY_STAMP=" + harness.FakeShimDefaultBuildSHA}})
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design. The successor appends to the SAME run log, so this daemon's
+	// own log assertion reads the record too.
+	f.d.ExpectWarnings("daemon.rollout.reconcile")
 	feed := f.watchRootFeed()
 
 	// Act
@@ -1083,6 +1107,7 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 
 	// Act: restart, and the mirrored row must be gone from the first page.
 	nd := promptRestartDaemon(t, f)
+	nd.ExpectWarnings("daemon.rollout.reconcile")
 	page, _ := f.openFeedOn(nd)
 
 	// Assert
