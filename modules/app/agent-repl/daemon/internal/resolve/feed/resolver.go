@@ -110,6 +110,12 @@ type wsState struct {
 	// turnEvidence collects per-turn evidence lines — a mid-turn api error, a
 	// compaction that failed — that the turn's terminal row surfaces.
 	turnEvidence map[string][]string
+	// turnRefusals records that a response in this turn ended on the vendor's
+	// REFUSAL. conversation.v1's AgentModelError is an empty message, so the
+	// terminal alone cannot say whether the model errored or refused; the
+	// response's own AgentResponseFailureReason.refused is the only place that
+	// fact is stated, and the terminal row is drawn after it.
+	turnRefusals map[string]bool
 	// turnInFlight is the turn the session is running, learned from the rows
 	// it stamps. It is what a session-scoped death (query_died) terminates.
 	turnInFlight *ids.TurnID
@@ -291,6 +297,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		questionAsks:   map[string]*questionState{},
 		gatedCalls:     map[string]string{},
 		turnEvidence:   map[string][]string{},
+		turnRefusals:   map[string]bool{},
 		answerRows:     map[string]*frontendv1.FeedId{},
 
 		unitAPIResponse:  map[string]uint64{},
