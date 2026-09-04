@@ -115,9 +115,21 @@ func SessionLockPath(runDir, vendorSessionID string) (string, error) {
 // again on success. Success is StateFree, EWOULDBLOCK is StateHeld, and every
 // other error is StateUnknown WITH the error: an unreadable lock is never
 // reported as free.
+//
+// THE RUN DIRECTORY IS CREATED HERE, and that is a bootstrap fix rather than a
+// convenience. A missing run directory made this probe answer StateUnknown; the
+// daemon refuses to spawn a shim until a probe says FREE; and the shim was the
+// only thing that ever created the directory — so on a machine that had never
+// run a session, nothing could ever start one. Nobody can hold a lock in a
+// directory that does not exist, so the honest answer to a missing directory is
+// FREE, and this probe is the process that gets there first. Creating the
+// directory is no more than the probe already did in creating the lock FILE.
 func Probe(lockPath string) (State, error) {
 	if strings.TrimSpace(lockPath) == "" {
 		return StateUnknown, errors.New("sessionlock: lock path is empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return StateUnknown, fmt.Errorf("sessionlock: create the run directory for %q: %w", lockPath, err)
 	}
 	f, err := os.OpenFile(lockPath, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
