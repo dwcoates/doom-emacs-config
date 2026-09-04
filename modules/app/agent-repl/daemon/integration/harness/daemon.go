@@ -875,7 +875,8 @@ func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
 }
 
 // ReapStrays kills every process whose command line names this run's state
-// directory, whatever process group it is in.
+// directory, whatever process group it is in — except a pid the test declared
+// its own through SpareFromStrayReaping.
 //
 // IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
 // its own process group and Kill ends that group, but every shim the daemon
@@ -895,6 +896,44 @@ func (d *Daemon) ReapStrays() {
 // on it.
 func (d *Daemon) StrayPIDs() []int { return d.strayPIDs() }
 
+// sparedFromReaping holds the pids of processes a TEST owns and stands down
+// itself. Nothing else may reap them.
+//
+// WHY IT EXISTS. strayPIDs keys on "this run's state directory appears in the
+// process's argv", which is an exact key for the shims the daemon spawned —
+// and an OVER-broad one for a world that also routes its own store's and
+// sidecar's log files into that same state root (e2e/world_test.go's logsDir).
+// Those two processes are not strays: the test starts them, stops them, and
+// asserts that they were still running when it ended. Reaping one SIGKILLs it
+// with no exit record and turns the world's own "exited before cleanup" check
+// into a failure whose cause has left no trace.
+var (
+	sparedMu          sync.Mutex
+	sparedFromReaping = map[int]bool{}
+)
+
+// SpareFromStrayReaping declares that a pid belongs to the TEST rather than to
+// the daemon's process tree, so no Daemon's ReapStrays will signal it. The
+// exemption is dropped at the end of the test that declared it, because the pid
+// is free for reuse the moment that process is reaped.
+func SpareFromStrayReaping(t *testing.T, pid int) {
+	t.Helper()
+	sparedMu.Lock()
+	sparedFromReaping[pid] = true
+	sparedMu.Unlock()
+	t.Cleanup(func() {
+		sparedMu.Lock()
+		delete(sparedFromReaping, pid)
+		sparedMu.Unlock()
+	})
+}
+
+func isSparedFromStrayReaping(pid int) bool {
+	sparedMu.Lock()
+	defer sparedMu.Unlock()
+	return sparedFromReaping[pid]
+}
+
 func (d *Daemon) strayPIDs() []int {
 	if d.StateDir == "" {
 		return nil
@@ -912,7 +951,7 @@ func (d *Daemon) strayPIDs() []int {
 		}
 		fields := strings.Fields(line)
 		pid, err := strconv.Atoi(fields[0])
-		if err != nil || pid == self {
+		if err != nil || pid == self || isSparedFromStrayReaping(pid) {
 			continue
 		}
 		pids = append(pids, pid)

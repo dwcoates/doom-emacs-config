@@ -229,10 +229,12 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// treats it as authoritative.
 	t.Cleanup(func() {
 		if store.Exited() && !store.stopped {
-			t.Errorf("e2e: the store exited before test cleanup, and was never stopped by the test:\n%s", tailStoreLog(t, store))
+			t.Errorf("e2e: the store exited before test cleanup (%s), and was never stopped by the test:\n%s",
+				store.exit.status(), tailStoreLog(t, store))
 		}
 		if sidecar.Exited() && !sidecar.stopped {
-			t.Errorf("e2e: the sidecar exited before test cleanup, and was never stopped by the test")
+			t.Errorf("e2e: the sidecar exited before test cleanup (%s), and was never stopped by the test",
+				sidecar.exit.status())
 		}
 	})
 
@@ -508,6 +510,19 @@ func (p *processExit) exited() bool {
 	}
 }
 
+// status answers how the process left, for a failure message that would
+// otherwise say only THAT it is gone. A process killed by a signal writes no
+// exit record of its own, so this is the only evidence such a death leaves.
+func (p *processExit) status() string {
+	if !p.exited() {
+		return "still running"
+	}
+	if p.err == nil {
+		return "exit status 0"
+	}
+	return p.err.Error()
+}
+
 // awaitWithin waits at most budget for the process to leave, and reports
 // whether it did. Every teardown wait in this file goes through here, so no
 // teardown path can block a test run indefinitely.
@@ -588,6 +603,13 @@ func startStore(t *testing.T, socket, dbPath, logPath string) *Store {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: start store: %v", err)
 	}
+	// The store's own --log path lives under the daemon's state root (logsDir),
+	// so this process's argv NAMES the state directory — the exact key
+	// harness.Daemon.ReapStrays uses to find the shims a dead daemon leaked.
+	// The store is not a stray: this test starts it, stops it, and asserts it
+	// was still running at the end. Declaring it spares it from every daemon's
+	// reap, including a cold-booted successor's on the same state root.
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
 	s := &Store{
 		t:       t,
 		bin:     bin,
@@ -675,6 +697,8 @@ func (s *Store) StartSameDB(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: restart store: %v", err)
 	}
+	// A restart is a NEW pid; the exemption is per-pid.
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
 	s.cmd = cmd
 	s.stopped = false
 	s.exit = watchProcess(cmd)
@@ -782,6 +806,9 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("e2e: start sidecar: %v", err)
 	}
+	// Same reasoning as startStore's: --log puts the state root in this
+	// process's argv, and the sidecar is the test's own, never a daemon stray.
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
 	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
