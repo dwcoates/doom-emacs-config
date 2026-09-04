@@ -49,6 +49,26 @@
 ;; and elisp behaves identically interpreted, byte-compiled or natively
 ;; compiled -- the only difference is speed, and this is the setting that
 ;; makes it faster here rather than slower.
+;; THE BOOT BREADCRUMB. A boot that never publishes its readiness stamp
+;; reports NOTHING today: the frame is graphical, so Emacs's own messages go
+;; to the frame rather than to the pty, and a boot that dies or blocks before
+;; `agent-repl-e2e--boot' runs cannot write the stamp -- not even the failed
+;; one the boot hook's own `condition-case' writes. The pty is empty, no
+;; server exists to ask, and the failure says only "no readiness stamp".
+;;
+;; So each stage of the boot appends a line to a file beside the stamp, and
+;; the Go side prints it when the boot bound is missed. It is one
+;; `write-region' per stage on a tmpfs.
+(defun agent-repl-e2e--breadcrumb (stage)
+  "Append STAGE and the time to the boot breadcrumb file, if one is named."
+  (let ((ready (getenv "AGENT_REPL_E2E_READY")))
+    (when (and ready (not (string-empty-p ready)))
+      (ignore-errors
+        (write-region (format "%.3f %s\n" (float-time) stage) nil
+                      (concat ready ".progress") 'append 'silent)))))
+
+(agent-repl-e2e--breadcrumb "init.el reached")
+
 (setq native-comp-jit-compilation nil
       ;; The Emacs 29 spelling, kept so the profile does not silently stop
       ;; working on an older Emacs than the image's 30.2.
@@ -125,8 +145,12 @@
 ;;
 ;; Absent the variable, this is inert, so an interactive `$S shell' session and
 ;; a `doom sync' behave exactly as they did before.
+(agent-repl-e2e--breadcrumb "doom! form evaluated")
+
 (let ((settings (getenv "AGENT_REPL_E2E_SETTINGS")))
   (when (and settings (not (string-empty-p settings)))
     (unless (file-readable-p settings)
       (error "AGENT_REPL_E2E_SETTINGS=%s is not readable" settings))
     (load settings nil t)))
+
+(agent-repl-e2e--breadcrumb "init.el finished")

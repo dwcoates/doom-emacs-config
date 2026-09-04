@@ -198,6 +198,14 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		ConfigRoots: []string{resolveOrFail(t, e.DefaultConfigDir), resolveOrFail(t, e.MultiRepoConfigDir)},
 		SpoolRoot:   spoolRoot,
 		LogPath:     filepath.Join(logsDir, "sidecar.log"),
+		// THE SAME STATE ROOT EMACS HANDS THE DAEMON. `StartEmacs' exports
+		// `AGENT_REPL_STATE_DIR=e.StateDir', so every shim the daemon spawns
+		// writes its identity records under it; a sidecar told any other root
+		// would book a `/clear'-rotated transcript under a second id, which
+		// the store refuses. Empty is refused by `startSidecar' rather than
+		// defaulted, because the default is the developer's own
+		// ~/.claude-emacs.
+		StateDir: e.StateDir,
 	})
 
 	// Registered LAST, so LIFO runs it FIRST: it observes what died on its
