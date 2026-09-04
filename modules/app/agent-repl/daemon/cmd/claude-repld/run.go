@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"claude-repld/internal/boot"
@@ -297,9 +298,25 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	// The background loops start only now, for the same reason: each of them
 	// can push, and pushing into a surface that does not exist is a drop.
+	//
+	// AND THE EXIT JOINS THEM, for the same reason the watchers and the merge
+	// drain are joined above. A loop's iteration reads and writes the state
+	// client off its OWN goroutine: the drain sweep's hibernation releases the
+	// lease and then tells the prompt queue, and a SIGTERM landing inside that
+	// step left `daemon.promptqueue.lease_changed: could not read the standing
+	// holds — sql: database is closed` in the log of an ORDERLY exit
+	// (reproduced at -count=10 -parallel 8). This defer is registered LAST, so
+	// it runs FIRST of every teardown: no loop is still running when the merge
+	// drain, the watchers or the state client are torn down.
+	var loops sync.WaitGroup
 	for _, loop := range built.Background {
-		go loop.run(serving, log)
+		loops.Add(1)
+		go func(loop backgroundLoop) {
+			defer loops.Done()
+			loop.run(serving, log)
+		}(loop)
 	}
+	defer joinBackgroundLoops(&loops, loopJoinBound, log)
 
 	log.Debug("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
@@ -361,3 +378,29 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 // shutdownGrace is how long in-flight requests have to finish before the
 // standing streams are closed underneath them.
 const shutdownGrace = 2 * time.Second
+
+// loopJoinBound is how long the exit waits for the background loops to leave
+// after their serving context ended. Every loop is a ticker whose iteration is
+// itself bounded, so this is not a shutdown budget: it covers one in-flight
+// iteration finishing. A loop still running after it is a FAULT to report —
+// the teardown that follows will run under it — never something to keep
+// waiting on, because an unbounded wait is a daemon that does not exit.
+const loopJoinBound = 2 * time.Second
+
+// joinBackgroundLoops waits, bounded, for every background loop to leave, and
+// says so loudly when one does not.
+func joinBackgroundLoops(loops *sync.WaitGroup, bound time.Duration, log dlog.Logger) {
+	left := make(chan struct{})
+	go func() {
+		loops.Wait()
+		close(left)
+	}()
+	select {
+	case <-left:
+		log.Debug("daemon.cmd.serve", "every background loop left before the teardown", nil)
+	case <-time.After(bound):
+		log.Error("daemon.cmd.serve", "a background loop outlived its serving context; tearing down under it", dlog.Context{
+			"bound_ms": bound.Milliseconds(),
+		})
+	}
+}

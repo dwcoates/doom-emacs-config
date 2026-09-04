@@ -8,9 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"claude-repld/internal/daemonaddr"
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/server"
 )
@@ -225,4 +228,61 @@ func TestTheStateRootLayoutIsCreated(t *testing.T) {
 			t.Fatalf("the layout's %s directory was not created: %v", dir, err)
 		}
 	}
+}
+
+// --- the exit joins the background loops ----------------------------------
+//
+// A loop's iteration reads and writes the state client off its own goroutine.
+// Nothing waited for them, so a SIGTERM landing inside one left an ERROR in the
+// log of an ORDERLY exit: `daemon.promptqueue.lease_changed: could not read the
+// standing holds — sql: database is closed`, from the drain sweep telling the
+// prompt queue about the lease its hibernation had just released.
+
+func TestJoinBackgroundLoopsReturnsWhenEveryLoopHasLeft(t *testing.T) {
+	// Arrange: a loop that has already ended.
+	var loops sync.WaitGroup
+	log := dlog.NewTestLogger()
+	loops.Add(1)
+	loops.Done()
+
+	// Act.
+	joinBackgroundLoops(&loops, loopJoinBound, log)
+
+	// Assert.
+	if !holdsRecord(log.Records(), "debug", "every background loop left before the teardown") {
+		t.Fatalf("records = %+v, want the loops joined", log.Records())
+	}
+}
+
+func TestJoinBackgroundLoopsReportsALoopThatOutlivesTheBound(t *testing.T) {
+	// Arrange: a loop that is still running, released only at cleanup, so the
+	// wait ends on the bound rather than on the loop.
+	var loops sync.WaitGroup
+	log := dlog.NewTestLogger()
+	release := make(chan struct{})
+	loops.Add(1)
+	go func() {
+		defer loops.Done()
+		<-release
+	}()
+	t.Cleanup(func() { close(release); loops.Wait() })
+
+	// Act.
+	joinBackgroundLoops(&loops, 10*time.Millisecond, log)
+
+	// Assert: reported, never waited on forever.
+	if !holdsRecord(log.Records(), "error", "a background loop outlived its serving context; tearing down under it") {
+		t.Fatalf("records = %+v, want the overrun reported", log.Records())
+	}
+}
+
+// holdsRecord reports whether a captured record set names that level and
+// message.
+func holdsRecord(records []dlog.Record, level, message string) bool {
+	for _, r := range records {
+		if r.Level == level && r.Message == message {
+			return true
+		}
+	}
+	return false
 }
