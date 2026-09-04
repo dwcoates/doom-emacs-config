@@ -343,11 +343,11 @@ func TestAnswerColdGatePayReopensTheConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnswerColdGate: %v", err)
 	}
-	if len(f.shim.resumes) != 1 || f.shim.resumes[0].VendorSessionID != "vendor-1" {
-		t.Fatalf("resumes = %+v, want one of vendor-1", f.shim.resumes)
+	if len(f.fleet.resumes) != 1 || f.fleet.resumes[0].VendorSessionID != "vendor-1" {
+		t.Fatalf("resumes = %+v, want one of vendor-1", f.fleet.resumes)
 	}
-	if f.shim.resumes[0].Remediation.GetPay() == nil {
-		t.Fatalf("remediation = %v, want the pay arm", f.shim.resumes[0].Remediation)
+	if f.fleet.resumes[0].Remediation.GetPay() == nil {
+		t.Fatalf("remediation = %v, want the pay arm", f.fleet.resumes[0].Remediation)
 	}
 }
 
@@ -367,8 +367,8 @@ func TestAnswerColdGateClearReopensWithTheClearRemediation(t *testing.T) {
 	}
 
 	// Assert.
-	if f.shim.resumes[0].Remediation.GetClear() == nil {
-		t.Fatalf("remediation = %v, want the clear arm", f.shim.resumes[0].Remediation)
+	if f.fleet.resumes[0].Remediation.GetClear() == nil {
+		t.Fatalf("remediation = %v, want the clear arm", f.fleet.resumes[0].Remediation)
 	}
 }
 
@@ -392,7 +392,7 @@ func TestAnswerColdGateCompactCarriesTheModelAndScope(t *testing.T) {
 	}
 
 	// Assert.
-	compact := f.shim.resumes[0].Remediation.GetCompact()
+	compact := f.fleet.resumes[0].Remediation.GetCompact()
 	if compact.GetModel().GetName() != "opus" ||
 		compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL {
 		t.Fatalf("compact remediation = %v, want opus over the ALL scope", compact)

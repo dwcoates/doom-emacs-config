@@ -315,13 +315,12 @@ type Shim interface {
 	Answer(ctx context.Context, agent *conversationv1.AgentId, answer *conversationv1.AgentAnswer) error
 	// KillSession ends the session, forced when the caller says so.
 	KillSession(ctx context.Context, force bool) error
-	// StartSession re-opens the session, which is what an answered cold gate
-	// does: it resumes carrying the chosen remediation.
-	StartSession(ctx context.Context, resume ColdResume) error
 }
 
 // ColdResume is the resume a cold-gate answer re-opens with: the conversation
-// to resume and the remediation the user chose.
+// to resume and the remediation the user chose. It is what Sessions.ResumeCold
+// takes, because the re-open is a SESSION BRING-UP and not a bare shim call:
+// the same watcher, facts and host view a cold start installs are owed here.
 type ColdResume struct {
 	// VendorSessionID is the conversation being resumed.
 	VendorSessionID string
@@ -427,6 +426,13 @@ type Sessions interface {
 	Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error
 	// Live reports whether the workspace currently has a live session.
 	Live(ws ids.WorkspaceID) bool
+	// ResumeCold re-opens a session parked behind a standing cold gate,
+	// carrying the chosen remediation, and completes the SAME bring-up a cold
+	// start does: the session facts recorded, the session watcher installed,
+	// and the host view republished as live. An answered gate that stopped at
+	// the shim call left the workspace with no watcher at all, so the very
+	// next prompt was refused `no_session`.
+	ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error
 }
 
 // New builds the verbs. Every collaborator a verb reaches is required: a verb
