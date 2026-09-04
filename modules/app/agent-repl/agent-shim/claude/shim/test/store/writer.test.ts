@@ -122,6 +122,39 @@ describe("writeDurable", () => {
       kind: "store_unavailable",
     });
   });
+
+  it("makes ONE attempt at an unreachable store, leaving the schedule to the retry buffer", async () => {
+    // Arrange. The caller of a durable write holds an RPC open, and the retry
+    // schedule is longer than the deadline that RPC is held under.
+    const { store: fake, persistence: plane } = await persistence("durable-one-attempt");
+    fake.failWrites("the store is down");
+
+    // Act.
+    await expect(plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")])).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+
+    // Assert.
+    expect(fake.writes()).toHaveLength(1);
+  });
+
+  it("refuses without attempting at all while a degraded window is already open", async () => {
+    // Arrange. The outage is already known, so there is nothing to learn from
+    // one more inline attempt and nothing to wait for behind the drain.
+    const { store: fake, persistence: plane } = await persistence("durable-already-degraded");
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+    const attempted = fake.writes().length;
+
+    // Act.
+    await expect(plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")])).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+
+    // Assert.
+    expect(fake.writes()).toHaveLength(attempted);
+  });
 });
 
 describe("the bounded retry buffer", () => {
