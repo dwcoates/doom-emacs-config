@@ -354,8 +354,9 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 		"SHIM_BUILD_SHA=test",
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	captured := captureChild(t, "the mocked vendor (log: "+tree.LogPath+")")
+	cmd.Stdout = captured
+	cmd.Stderr = captured
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("spawn the mocked vendor: %v", err)
 	}

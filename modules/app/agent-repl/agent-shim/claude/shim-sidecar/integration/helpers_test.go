@@ -18,6 +18,7 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -589,6 +590,72 @@ func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) s
 	}
 }
 
+// ---------------------------------------------------------------------------
+// A child process's own output, kept with the subject that started it.
+// ---------------------------------------------------------------------------
+
+// childOutputCap bounds what one child's captured output may hold, so a process
+// that loops on an error cannot grow the harness without bound. Everything past
+// it is dropped and the drop is STATED, never silently swallowed.
+const childOutputCap = 256 << 10
+
+// childOutput collects one child process's stdout and stderr and hands them to
+// the subject that started it — and only to that subject, only when it FAILED.
+//
+// Every one of these children (the sidecar, the real store, the mocked vendor)
+// used to write straight to the test binary's own os.Stderr. Serially that read
+// as a transcript; in parallel it is a dozen processes interleaving on one fd,
+// which buries the evidence a failing subject actually needs and, worse,
+// garbles `go test -json`: stray writes are attributed to whichever test the
+// parser thinks is current, and a subject's own PASS line can be lost that way.
+//
+// The evidence is not discarded — each child also writes its own log file, and
+// this buffer is printed through t.Logf on failure, where it belongs.
+type childOutput struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	dropped  int
+	overflow bool
+}
+
+func (c *childOutput) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if room := childOutputCap - c.buf.Len(); room < len(p) {
+		if room > 0 {
+			c.buf.Write(p[:room])
+		}
+		c.dropped += len(p) - max(room, 0)
+		c.overflow = true
+		return len(p), nil
+	}
+	return c.buf.Write(p)
+}
+
+// captureChild answers the writer a child's stdout and stderr are pointed at,
+// and registers the cleanup that prints it if the subject failed.
+func captureChild(t *testing.T, what string) *childOutput {
+	t.Helper()
+	c := &childOutput{}
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.buf.Len() == 0 {
+			return
+		}
+		if c.overflow {
+			t.Logf("%s wrote this to its stdout/stderr (%d further byte(s) dropped at the %d-byte cap):\n%s",
+				what, c.dropped, childOutputCap, c.buf.String())
+			return
+		}
+		t.Logf("%s wrote this to its stdout/stderr:\n%s", what, c.buf.String())
+	})
+	return c
+}
+
 type sidecarProc struct {
 	t       *testing.T
 	cmd     *exec.Cmd
@@ -631,8 +698,9 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
 	cmd.Env = append(cmd.Env, opts.ExtraEnv...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	captured := captureChild(t, "the sidecar (log: "+opts.LogPath+")")
+	cmd.Stdout = captured
+	cmd.Stderr = captured
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}
@@ -751,8 +819,9 @@ func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	captured := captureChild(t, "the real store (log: "+logPath+")")
+	cmd.Stdout = captured
+	cmd.Stderr = captured
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start store: %v", err)
 	}
