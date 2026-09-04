@@ -17,6 +17,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -142,6 +143,10 @@ type fleetFixture struct {
 	links      *recordingLinkSink
 	probeState sessionlock.State
 	probeErr   error
+	// socketState and socketErr script the shim-socket listener probe, which
+	// decides adopt-versus-spawn beside the lock.
+	socketState shimsocket.State
+	socketErr   error
 }
 
 // recordingLinkSink answers the three view sinks' OnLink and nothing else: the
@@ -192,6 +197,8 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		watcher:    &fakeWatcher{},
 		links:      &recordingLinkSink{},
 		probeState: sessionlock.StateFree,
+
+		socketState: shimsocket.StateAbsent,
 	}
 	f.supervisor = &fakeSupervisor{client: f.client}
 
@@ -206,6 +213,9 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		SocketPath: func(ws ids.WorkspaceID) string { return "/sock/" + string(ws) + ".sock" },
 		LockDir:    t.TempDir(),
 		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		SocketProbe: func(string) (shimsocket.State, error) {
+			return f.socketState, f.socketErr
+		},
 		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
 			return f.watcher, nil
 		},
