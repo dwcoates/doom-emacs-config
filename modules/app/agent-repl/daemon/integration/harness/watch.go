@@ -64,6 +64,23 @@ func (s *Stream[T]) Err() error {
 // Close ends the stream.
 func (s *Stream[T]) Close() { s.cancel() }
 
+// Drain reads and DISCARDS every push for the rest of the stream's life.
+//
+// It exists for the streams a test opens for their SERVER-SIDE EFFECT rather
+// than for their pushes — a participant hold is the whole example. Nothing
+// reads such a stream, so the pump's buffered channel fills, the pump wedges
+// on the send, and the daemon's own writer blocks behind it. Draining keeps
+// the stream genuinely open for as long as its context lives.
+//
+// A drained stream's C must not also be read by the caller: the two would
+// race for the same pushes.
+func (s *Stream[T]) Drain() {
+	go func() {
+		for range s.C {
+		}
+	}()
+}
+
 // AwaitView reads pushes until one satisfies the predicate, and answers it.
 // The wait is bounded by the daemon's context; nothing sleeps.
 func AwaitView[T any](t *testing.T, ctx context.Context, s *Stream[T], what string, pred func(T) bool) T {
@@ -184,10 +201,28 @@ func (d *Daemon) WatchRosterOn(client interface {
 		func(r *agentreplv1.WatchWorkspaceRosterResponse) *frontendv1.WorkspaceRoster { return r.GetRoster() })
 }
 
-// WatchHost opens the workspace's host stream (Emacs's view).
+// WatchHost opens the workspace's host stream (Emacs's view) on the daemon's
+// own context, which DefaultTimeout bounds.
 func (d *Daemon) WatchHost(ws *workspacev1.WorkspaceRef) *Stream[*agentreplv1.WatchHostWorkspaceResponse] {
 	d.t.Helper()
-	return runStream(d.t, d.ctx,
+	return d.WatchHostFor(d.ctx, ws)
+}
+
+// WatchHostFor opens the workspace's host stream on a context THE CALLER OWNS.
+//
+// d.ctx expires at DefaultTimeout, which is right for a wait and wrong for a
+// HOLD: the footer's connectivity truth is the pair of participant streams
+// (internal/resolve/footer/status.go, `!s.hostStream || !s.webStream`), so a
+// host hold that expires mid-test drops the footer to `disconnected` under a
+// test that is still running — and a real webapp then closes its composer
+// gate and silently swallows every later submission. A hold therefore runs on
+// the bound of the thing it is holding FOR, never on the harness's wait bound.
+func (d *Daemon) WatchHostFor(
+	ctx context.Context,
+	ws *workspacev1.WorkspaceRef,
+) *Stream[*agentreplv1.WatchHostWorkspaceResponse] {
+	d.t.Helper()
+	return runStream(d.t, ctx,
 		func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse], error) {
 			return d.Client().WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ws}))
 		},
