@@ -12,9 +12,17 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { LOCK_DIR_ENV, lockDir } from "../src/locks.js";
+import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
   DEFAULT_STATE_DIR_NAME,
+  EXIT_QUIET_BUDGET_MS,
+  FAKE_EXIT_QUIET_BUDGET_ENV,
   FAKE_KEEPALIVE_INTERVAL_ENV,
+  FAKE_STORE_BACKOFF_ENV,
+  FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
+  resolveExitQuietBudgetMs,
+  resolveRetryPolicy,
+  resolveWatcherConclusionBudgetMs,
   logCorrelation,
   queryFactory,
   resolveKeepaliveIntervalMs,
@@ -576,6 +584,166 @@ describe("the keep-alive interval override", () => {
 
   it("refuses a value that is not a number at all", () => {
     expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "soon" }, true)).toBeUndefined();
+  });
+});
+
+describe("the quiet-drain budget override", () => {
+  it("answers the production budget when the environment names none", () => {
+    expect(resolveExitQuietBudgetMs({}, true)).toBe(EXIT_QUIET_BUDGET_MS);
+  });
+
+  it("answers the production budget for an empty value", () => {
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "" }, true)).toBe(
+      EXIT_QUIET_BUDGET_MS,
+    );
+  });
+
+  it("is honored under --fake", () => {
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "150" }, true)).toBe(150);
+  });
+
+  it("is REFUSED for a real session", () => {
+    // A production shim told to exit instantly would destroy the socket out
+    // from under a response still on it.
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "150" }, false)).toBe(
+      EXIT_QUIET_BUDGET_MS,
+    );
+  });
+
+  it("refuses a value that is not a whole number", () => {
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "1.5" }, true)).toBe(
+      EXIT_QUIET_BUDGET_MS,
+    );
+  });
+
+  it("refuses a value that is not positive", () => {
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "0" }, true)).toBe(
+      EXIT_QUIET_BUDGET_MS,
+    );
+  });
+
+  it("refuses a value that is not a number at all", () => {
+    expect(resolveExitQuietBudgetMs({ [FAKE_EXIT_QUIET_BUDGET_ENV]: "soon" }, true)).toBe(
+      EXIT_QUIET_BUDGET_MS,
+    );
+  });
+});
+
+describe("the watcher-conclusion budget override", () => {
+  it("is unset when the environment names none", () => {
+    expect(resolveWatcherConclusionBudgetMs({}, true)).toBeUndefined();
+  });
+
+  it("is unset for an empty value", () => {
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "" }, true),
+    ).toBeUndefined();
+  });
+
+  it("is honored under --fake", () => {
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "250" }, true),
+    ).toBe(250);
+  });
+
+  it("is REFUSED for a real session", () => {
+    // A production shim told to give up on a tail immediately would cut
+    // streams exactly where a terminal was owed.
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "250" }, false),
+    ).toBeUndefined();
+  });
+
+  it("refuses a value that is not a whole number", () => {
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "1.5" }, true),
+    ).toBeUndefined();
+  });
+
+  it("refuses a value that is not positive", () => {
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "0" }, true),
+    ).toBeUndefined();
+  });
+
+  it("refuses a value that is not a number at all", () => {
+    expect(
+      resolveWatcherConclusionBudgetMs({ [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "soon" }, true),
+    ).toBeUndefined();
+  });
+});
+
+describe("the store retry backoff override", () => {
+  it("answers the production policy when the environment names none", () => {
+    expect(resolveRetryPolicy({}, true)).toEqual(DEFAULT_RETRY_POLICY);
+  });
+
+  it("answers the production policy for an empty value", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "" }, true)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
+  });
+
+  it("is honored under --fake", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,2,3,4" }, true).backoffMs).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
+  it("tolerates whitespace around each delay", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: " 1 , 2 " }, true).backoffMs).toEqual([
+      1, 2,
+    ]);
+  });
+
+  it("accepts a zero delay, which is a schedule that never waits", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "0" }, true).backoffMs).toEqual([0]);
+  });
+
+  it("leaves the ATTEMPT COUNT at the production value", () => {
+    // Only the waiting is overridable: an override that could shorten the
+    // attempt count would weaken the exhaustion assertions this exists to keep.
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1" }, true).maxAttempts).toBe(
+      DEFAULT_RETRY_POLICY.maxAttempts,
+    );
+  });
+
+  it("leaves the BUFFER DEPTH at the production value", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1" }, true).bufferCapacity).toBe(
+      DEFAULT_RETRY_POLICY.bufferCapacity,
+    );
+  });
+
+  it("is REFUSED for a real session", () => {
+    // A production shim told to retry with no backoff would hammer a store
+    // that is merely restarting.
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,2" }, false)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
+  });
+
+  it("refuses a schedule with a negative delay", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,-2" }, true)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
+  });
+
+  it("refuses a schedule with a fractional delay", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1.5" }, true)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
+  });
+
+  it("refuses a schedule with a non-numeric delay", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,soon" }, true)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
+  });
+
+  it("refuses a schedule with an empty slot", () => {
+    expect(resolveRetryPolicy({ [FAKE_STORE_BACKOFF_ENV]: "1,,2" }, true)).toEqual(
+      DEFAULT_RETRY_POLICY,
+    );
   });
 });
 
