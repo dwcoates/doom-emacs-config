@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  FeedSubagentLostSchema,
   FeedSubagentSchema,
   FeedSubagentSettledSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -9,6 +10,7 @@ import { InterruptResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/e
 import { INTERRUPT_ERROR_ARMS } from "../../../src/interrupt-error.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  SUBAGENT_LOST_CAUSE_ARMS,
   SUBAGENT_SETTLED_ARMS,
   drawFeedSubagent,
 } from "../../../src/feed/rows/subagent.js";
@@ -171,6 +173,41 @@ describe("drawFeedSubagent: the settled arms", () => {
     expect(lost.querySelector(".subagent-outcome")?.textContent).not.toBe(
       failed.querySelector(".subagent-outcome")?.textContent,
     );
+  });
+
+  it('says "file vanished" as the lost cause when the file went away', () => {
+    const { el } = drawRow(
+      subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost", lostHow: "fileVanished" } }),
+    );
+    expect(el.querySelector(".subagent-outcome")?.textContent).toBe("lost sight of: file vanished");
+  });
+
+  it('says "went silent" as the lost cause when the run produced nothing', () => {
+    const { el } = drawRow(
+      subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost", lostHow: "wentSilent" } }),
+    );
+    expect(el.querySelector(".subagent-outcome")?.textContent).toBe("lost sight of: went silent");
+  });
+
+  it('says "swept up at boot" as the lost cause when a boot sweep closed it', () => {
+    const { el } = drawRow(
+      subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost", lostHow: "sweptUp" } }),
+    );
+    expect(el.querySelector(".subagent-outcome")?.textContent).toBe(
+      "lost sight of: swept up at boot",
+    );
+  });
+
+  it("says the plain word when an older daemon ruled no cause", () => {
+    const { el } = drawRow(subagentRow("b1", { settled: { endedAtMs: 1n, outcome: "lost" } }));
+    expect(el.querySelector(".subagent-outcome")?.textContent).toBe("lost sight of");
+  });
+
+  it("words every lost cause the schema declares", () => {
+    const schemaArms = FeedSubagentLostSchema.oneofs
+      .filter((oneof) => oneof.name === "how")
+      .flatMap((oneof) => oneof.fields.map((field) => field.localName));
+    expect([...SUBAGENT_LOST_CAUSE_ARMS].sort()).toEqual([...schemaArms].sort());
   });
 
   it("gives `lost` its own dot, not the error hue", () => {
