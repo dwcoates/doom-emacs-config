@@ -1128,6 +1128,51 @@ describe("DetachForeground on a live foreground unit", () => {
   });
 });
 
+describe("DetachForeground on a live foreground subagent", () => {
+  // A subagent spawned by Task/Agent is addressed on the wire by its
+  // tool_use id, exactly like a bash call -- `AgentActivity.item.case` is
+  // "subagent" rather than "bash", and both are DETACHABLE_KINDS.
+  const detach = (unit: string): shimv1.DetachForegroundRequest =>
+    create(shimv1.DetachForegroundRequestSchema, {
+      unit: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+    });
+
+  it("refuses unsupported: a live foreground subagent is detachable in kind, but the pinned SDK offers no verb to INITIATE a detachment", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.foreground.note("toolu_agent", "subagent", false);
+    h.query.backgroundTaskAnswer = false;
+
+    const response = await h.turns.detachForeground(detach("toolu_agent"));
+
+    expect(failureKind(response)).toBe("unsupported");
+  });
+
+  it("CONFIRMS a live foreground subagent the vendor already holds live background work for", async () => {
+    // `backgroundTasks(unit) === true` is the observation of a detachment the
+    // vendor made on its own; it applies to a subagent's tool_use id exactly
+    // as it does to a bash's.
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.foreground.note("toolu_agent", "subagent", false);
+    h.query.backgroundTaskAnswer = true;
+
+    const response = await h.turns.detachForeground(detach("toolu_agent"));
+
+    expect(response.result.case).toBe("success");
+  });
+
+  it("refuses unknown_unit for a stale subagent tool_use id the foreground table never saw", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.query.backgroundTaskAnswer = false;
+
+    const response = await h.turns.detachForeground(detach("toolu_agent_stale"));
+
+    expect(failureKind(response)).toBe("unknownUnit");
+  });
+});
+
 /**
  * watchBash's own standing predicate -- the shim's answer to "where does this
  * run stand", used to turn a store refusal into a race worth waiting out
