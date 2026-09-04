@@ -211,6 +211,10 @@ func TestQueryEofEndsTheTurnAsQueryDied(t *testing.T) {
 	if errored.GetQueryDied() == nil {
 		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
 	}
+	// Landing 10 gave the arm a cause; an EOF is the agent binary vanishing.
+	if errored.GetQueryDied().GetUnexpectedEof() == nil {
+		t.Errorf("query_died cause = %v, want unexpected_eof", errored.GetQueryDied())
+	}
 	if errored.GetHeadline().GetText() == "" {
 		t.Errorf("turn error headline = %q, want the daemon's composed sentence (FeedTurnErrorHeadline)", errored.GetHeadline().GetText())
 	}
@@ -252,12 +256,11 @@ func TestQueryDiedBlocksTheFooter(t *testing.T) {
 // REJECTING rather than ending, "the producer died rather than finished"
 // (lifecycle.ts), whose arm is SessionQueryDied.cause=iterator_failure.
 //
-// The CAUSE distinguishes the two deaths on conversation/v1's wire only:
-// feed.proto models the turn's end with ONE arm, FeedTurnErrorQueryDied
-// ("Empty: the arm is the cause" is not said of it, but it carries no cause
-// field), so this test asserts that same arm and, separately from
-// TestQueryEofEndsTheTurnAsQueryDied, that a REJECTION reaches it too —
-// which is the fact a converter that only handled EOF would break.
+// The CAUSE was once observable on conversation/v1's wire alone; landing 10
+// gave FeedTurnErrorQueryDied its own `cause` oneof mirroring
+// SessionQueryDied's, so the distinction the writer noted as unobservable now
+// is one — and this test pins the iterator-failure half of it, separately
+// from TestQueryEofEndsTheTurnAsQueryDied's EOF.
 func TestQueryFailEndsTheTurnAsQueryDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -276,6 +279,9 @@ func TestQueryFailEndsTheTurnAsQueryDied(t *testing.T) {
 	}
 	if errored.GetQueryDied() == nil {
 		t.Fatalf("turn error = %v, want feed.proto's query_died arm", errored)
+	}
+	if errored.GetQueryDied().GetIteratorFailure() == nil {
+		t.Errorf("query_died cause = %v, want iterator_failure (the SDK's iterator threw)", errored.GetQueryDied())
 	}
 }
 
@@ -608,18 +614,25 @@ func TestTokensReminderDrawsNoRow(t *testing.T) {
 	}
 }
 
-// TestContextWindowExceededIsDrawnAsRequestTooLarge drives
-// `!context-window`. It is the odd one in this group: not bookkeeping at
-// all, but a TERMINAL — its arms line is "AgentResponseFailure.reason=
-// context_window_exceeded and AgentFailure.prompt_too_long", and
-// turnended.go maps AgentFailure.prompt_too_long onto feed.proto's
-// FeedTurnErrorRequestTooLarge with the composed headline "the prompt was
-// too long to send — the context must be cut first".
+// TestContextWindowExceededIsDrawnAsTurnFailed drives `!context-window`. It
+// is the odd one in this group: not bookkeeping at all, but a TERMINAL — its
+// arms line is "AgentResponseFailure.reason=context_window_exceeded and
+// AgentFailure.prompt_too_long".
+//
+// THE PROTO RULES THE ARM, and this test formerly asserted request_too_large
+// against a daemon that no longer draws it. feed.proto confines
+// FeedTurnErrorRequestTooLarge to "413 — the request exceeded the size
+// limit", an API status, while AgentFailure.prompt_too_long is a PRODUCER
+// terminal that never carried an API status. Its home is therefore
+// FailureVendorTurnFailed — "every other unclassified abnormal end;
+// `stop_reason` names the vendor's own word" — with the stop reason
+// `prompt_too_long`. Ruled and implemented in 3617b4aaa; the test is
+// corrected to the contract rather than the daemon to the test.
 //
 // The headline is asserted as a stated sentence rather than a pinned string:
 // FeedTurnErrorHeadline is contracted only as "The sentence, drawn
 // verbatim".
-func TestContextWindowExceededIsDrawnAsRequestTooLarge(t *testing.T) {
+func TestContextWindowExceededIsDrawnAsTurnFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -637,8 +650,15 @@ func TestContextWindowExceededIsDrawnAsRequestTooLarge(t *testing.T) {
 	if errored == nil {
 		t.Fatalf("turn ended = %v, want the errored arm", ended)
 	}
-	if errored.GetRequestTooLarge() == nil {
-		t.Fatalf("turn error = %v, want request_too_large (turnended.go's arm for AgentFailure.prompt_too_long)", errored)
+	failed := errored.GetTurnFailed()
+	if failed == nil {
+		t.Fatalf("turn error = %v, want turn_failed (feed.proto's arm for a producer terminal with no drawn counterpart)", errored)
+	}
+	if got := failed.GetStopReason(); got != "prompt_too_long" {
+		t.Errorf("turn_failed stop_reason = %q, want %q (the producer's own word)", got, "prompt_too_long")
+	}
+	if errored.GetRequestTooLarge() != nil {
+		t.Errorf("turn error drew request_too_large, which feed.proto confines to the vendor's 413")
 	}
 	if errored.GetHeadline().GetText() == "" {
 		t.Errorf("turn error headline = %q, want the daemon's composed sentence", errored.GetHeadline().GetText())

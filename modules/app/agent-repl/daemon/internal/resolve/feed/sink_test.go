@@ -274,3 +274,37 @@ func (h *harness) activityRow(unit string) *frontendv1.FeedRow {
 	h.t.Fatalf("no row for unit %q", unit)
 	return nil
 }
+
+// TestARowOwedByADeadTurnKeepsThatTurnsStamp covers the rows a query death
+// OWES: the gate's stand-down denies every pending permission ask, and those
+// denials are drawn AFTER the death's terminal row. They belong to the turn
+// that was running -- a reader scoped to that turn must see them -- so a
+// DEATH keeps the stamp standing where an ordinary terminal clears it
+// (TestTheTurnStampIsClearedByItsTerminal is the other half).
+func TestARowOwedByADeadTurnKeepsThatTurnsStamp(t *testing.T) {
+	// Arrange: a turn whose query then dies.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.resolver.OnSessionUpdate(testWorkspace, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{
+			Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+				UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+			},
+		}},
+	})
+
+	// Act: the stand-down's denial arrives after the terminal.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionFailure{})
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetPermission() == nil {
+			continue
+		}
+		if got := row.GetTurn().GetValue(); got != "turn-1" {
+			t.Fatalf("denied ask's turn = %q, want turn-1", got)
+		}
+		return
+	}
+	t.Fatalf("rows = %+v, want the denied ask's row", h.rows(rootFeed()))
+}

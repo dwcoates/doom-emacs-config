@@ -105,6 +105,21 @@ export function attachmentActivityId(recordUuid: string): conversationv1.AgentAc
 }
 
 /**
+ * A model refusal's unit: the refusal record's own uuid, verbatim.
+ *
+ * A refusal that ended the response is a UNIT — it is the response, settled as
+ * a failure — but the vendor writes it as its own `system` record rather than
+ * as an assistant block, so there is no api message id to index into and no
+ * tool-use id to borrow. The record uuid is the only identity it has, and it is
+ * stable, which is all an activity id has to be.
+ */
+export function refusalActivityId(recordUuid: string): conversationv1.AgentActivityId {
+  return create(conversationv1.AgentActivityIdSchema, {
+    value: requireVendorValue(recordUuid, "the model refusal record uuid"),
+  });
+}
+
+/**
  * A hook firing's unit: the vendor's `hook_id`, verbatim.
  *
  * A hook is an activity unit like any other — it starts and it settles — but it
