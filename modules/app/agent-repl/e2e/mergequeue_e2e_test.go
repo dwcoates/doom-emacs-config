@@ -134,7 +134,6 @@ func mqCreateTopLevelChild(t *testing.T, w *World, repoRef *workspacev1.Reposito
 	if ws.GetId() == "" {
 		t.Fatalf("CreateWorkspace(%s) = %v, want a success carrying a workspace ref", name, resp.Msg)
 	}
-	w.WatchWorkspaceLogs(ws.GetDir())
 	return ws
 }
 
@@ -764,7 +763,6 @@ func TestFanWideCancel(t *testing.T) {
 	repo := harness.NewRepo(t)
 	w := NewWorld(t, WorldOpts{})
 	ws := harness.Register(t, w.Daemon, repo.Dir)
-	w.WatchWorkspaceLogs(repo.Dir)
 	if _, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
 		t.Fatalf("OpenWorkspace = error %v, want a success", err)
 	}
