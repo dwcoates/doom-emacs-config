@@ -33,56 +33,84 @@ const LOGGER = bindLog({ component: "shim-convert-terminals", operation: "shim.c
 // ---------------------------------------------------------------------------
 
 /**
+ * WHAT THE VENDOR SAID ABOUT THE FAILED REQUEST, as the fold remembered it.
+ *
+ * The result record carries the HTTP STATUS ALONE, and the status does not
+ * separate `billing_error` from an unmodelled 402, `oauth_org_not_allowed` from
+ * an ordinary 403, or `max_output_tokens` from a status-less failure. The CLASS
+ * is stated on the vendor's own error records — `api_retry.error` and an
+ * assistant message's `error`, both typed `SDKAssistantMessageError` — so the
+ * fold remembers the last one of the turn and the terminal reads it here.
+ *
+ * The retry delay travels the same way: the vendor states it on `api_retry`
+ * (`retry_delay_ms`), and `ApiRateLimited.retry_after_ms` is the field the
+ * client counts down from, so the join IS made rather than dropped.
+ */
+export interface VendorApiError {
+  /** The vendor's own error class, when one was stated this turn. */
+  readonly errorClass?: string;
+  /** The wait the vendor stated, in millis, when it stated one. */
+  readonly retryAfterMs?: number;
+}
+
+/**
  * The vendor API's recorded failure, in its own declared taxonomy.
  *
  * THE KIND IS THE VENDOR'S, NOT A CLASSIFICATION: nothing here says whether
  * waiting helps — that judgement is the daemon's and reaches a client already
- * resolved. `retry_after_ms` is UNSET from a result record: the vendor states a
- * retry delay only on its `api_retry` message, which is a different record, and
- * carrying one across would be a join the fold does not make.
+ * resolved.
  */
 function apiRequestFailed(
   message: string,
   httpStatus: number | undefined,
-  vendorError: string | undefined,
+  vendorError: VendorApiError,
 ): conversationv1.ApiRequestFailed {
   const kind = apiFailureKind(httpStatus, vendorError);
   return create(conversationv1.ApiRequestFailedSchema, { message, kind });
 }
 
-/** Which arm of the taxonomy a status or a vendor error string names. */
+/**
+ * Which arm of the taxonomy this failure is.
+ *
+ * THREE FACTS, IN THE ORDER OF WHAT EACH CAN SETTLE.
+ *
+ *  1. The three classes NO STATUS CAN NAME. `billing_error` shares 402 with
+ *     anything else the vendor charges for, `oauth_org_not_allowed` is a 403
+ *     like every other refused credential, and `max_output_tokens` arrives with
+ *     no status at all. Each is its own arm in the proto precisely because the
+ *     remedy differs, so the vendor's stated class wins over the status here.
+ *  2. The HTTP STATUS, which is the finer fact for every remaining arm — the
+ *     vendor spells both a 403 and a 413 `invalid_request`, and trusting the
+ *     class there would collapse two arms into one.
+ *  3. The CLASS AGAIN, as the fallback for a failure that stated no status.
+ *
+ * A CLASS THE VENDOR ADDED LATER falls out of all three and is kept BY NAME as
+ * `unmodeled` rather than being silently mishandled.
+ */
 function apiFailureKind(
   httpStatus: number | undefined,
-  vendorError: string | undefined,
+  vendor: VendorApiError,
 ): conversationv1.ApiRequestFailed["kind"] {
+  const vendorError = vendor.errorClass;
+  // UNSET IS NOT ZERO: the vendor said nothing about the wait unless it did,
+  // and "retry now" is a different claim from silence.
+  const wait =
+    vendor.retryAfterMs === undefined ? {} : { retryAfterMs: BigInt(vendor.retryAfterMs) };
+
   switch (vendorError) {
-    case "authentication_failed":
-      return {
-        case: "authenticationFailed",
-        value: create(conversationv1.ApiAuthenticationFailedSchema, {}),
-      };
+    case "billing_error":
+      return { case: "billingError", value: create(conversationv1.ApiBillingErrorSchema, {}) };
     case "oauth_org_not_allowed":
       return {
         case: "oauthOrgNotAllowed",
         value: create(conversationv1.ApiOauthOrgNotAllowedSchema, {}),
       };
-    case "billing_error":
-      return { case: "billingError", value: create(conversationv1.ApiBillingErrorSchema, {}) };
-    case "rate_limit":
-      return { case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, {}) };
-    case "overloaded":
-      return { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) };
-    case "invalid_request":
-      return { case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) };
-    case "model_not_found":
-      return { case: "notFound", value: create(conversationv1.ApiNotFoundSchema, {}) };
-    case "server_error":
-      return { case: "internal", value: create(conversationv1.ApiInternalSchema, {}) };
     case "max_output_tokens":
       return { case: "maxOutputTokens", value: create(conversationv1.ApiMaxOutputTokensSchema, {}) };
     default:
       break;
   }
+
   switch (httpStatus) {
     case 400:
       return { case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) };
@@ -91,21 +119,44 @@ function apiFailureKind(
         case: "authenticationFailed",
         value: create(conversationv1.ApiAuthenticationFailedSchema, {}),
       };
+    case 402:
+      return { case: "billingError", value: create(conversationv1.ApiBillingErrorSchema, {}) };
     case 403:
-      return { case: "permissionDenied", value: create(conversationv1.ApiPermissionDeniedSchema, {}) };
+      return {
+        case: "permissionDenied",
+        value: create(conversationv1.ApiPermissionDeniedSchema, {}),
+      };
     case 404:
       return { case: "notFound", value: create(conversationv1.ApiNotFoundSchema, {}) };
     case 413:
       return { case: "requestTooLarge", value: create(conversationv1.ApiRequestTooLargeSchema, {}) };
     case 429:
-      return { case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, {}) };
+      return { case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, wait) };
     case 500:
       return { case: "internal", value: create(conversationv1.ApiInternalSchema, {}) };
     case 529:
-      return { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) };
+      return { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, wait) };
     default:
-      // A CLASS THE VENDOR ADDED LATER arrives here by name rather than as a
-      // silently mishandled value.
+      break;
+  }
+
+  switch (vendorError) {
+    case "authentication_failed":
+      return {
+        case: "authenticationFailed",
+        value: create(conversationv1.ApiAuthenticationFailedSchema, {}),
+      };
+    case "rate_limit":
+      return { case: "rateLimited", value: create(conversationv1.ApiRateLimitedSchema, wait) };
+    case "overloaded":
+      return { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, wait) };
+    case "invalid_request":
+      return { case: "invalidRequest", value: create(conversationv1.ApiInvalidRequestSchema, {}) };
+    case "model_not_found":
+      return { case: "notFound", value: create(conversationv1.ApiNotFoundSchema, {}) };
+    case "server_error":
+      return { case: "internal", value: create(conversationv1.ApiInternalSchema, {}) };
+    default:
       return {
         case: "unmodeled",
         value: create(conversationv1.ApiUnmodeledErrorSchema, {
@@ -220,6 +271,7 @@ export function convertResult(
   message: Extract<SdkMessage, { type: "result" }>,
   context: FoldContext,
   lastAnswer: conversationv1.AgentActivityId | undefined,
+  vendorApiError: VendorApiError = {},
 ): FoldOutput {
   const raw = message as unknown as RawResult;
   const reason = raw.terminal_reason;
@@ -287,7 +339,13 @@ export function convertResult(
   if (reason === "api_error") {
     const status = typeof raw.api_error_status === "number" ? raw.api_error_status : undefined;
     LOGGER.log(
-      { level: "warn", turn: context.turnId?.value, http_status: status },
+      {
+        level: "warn",
+        turn: context.turnId?.value,
+        http_status: status,
+        vendor_error: vendorApiError.errorClass,
+        retry_after_ms: vendorApiError.retryAfterMs,
+      },
       "the turn ended on a recorded API failure",
     );
     const result: conversationv1.AgentFrame["result"] = {
@@ -296,7 +354,11 @@ export function convertResult(
         errors,
         failure: {
           case: "apiRequestFailed",
-          value: apiRequestFailed(errors[errors.length - 1] ?? "the vendor API failed the request", status, undefined),
+          value: apiRequestFailed(
+            errors[errors.length - 1] ?? "the vendor API failed the request",
+            status,
+            vendorApiError,
+          ),
         },
       }),
     };
