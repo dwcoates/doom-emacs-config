@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -168,6 +169,12 @@ type Emacs struct {
 
 	stopHeartbeat context.CancelFunc
 
+	// reap are the paths whose appearance in a process's argv marks that
+	// process as this scenario's, so reapStrays can hunt down the daemon
+	// and shims Emacs detached from itself. See reapStrays.
+	reapMu sync.Mutex
+	reap   []string
+
 	// heartbeatMax is the longest probe this Emacs has answered, in
 	// nanoseconds. It is what MEASURES HeartbeatBound: the bound is a small
 	// multiple of this number across healthy runs, never a guess. Reported
@@ -275,6 +282,15 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
 	}
+	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
+	// it belongs to this scenario and to nothing else.
+	e.reap = []string{root}
+
+	// REGISTERED FIRST, so t.Cleanup's LIFO unwind runs it LAST: the reaper
+	// must observe what is STILL alive after Emacs, its daemon and the
+	// sidecar have all been stopped on purpose, otherwise it would report
+	// processes that were about to exit anyway.
+	t.Cleanup(e.reapStrays)
 
 	e.writeSettings(opts)
 	staged := time.Now()
@@ -1108,4 +1124,173 @@ func (e *Emacs) DaemonAddr() string {
 		e.t.Fatalf("read the daemon address Emacs's launcher published: %v", err)
 	}
 	return strings.TrimSpace(string(body))
+}
+
+// ===========================================================================
+// STRAY REAPING
+// ===========================================================================
+
+// THE LEAK THIS EXISTS FOR, MEASURED.
+//
+// After eight scenarios in one container, `ps` still showed a live shim
+// (`node .../shim-dist/main.js --listen /tmp/emacs-e2e-*/...`, 95 MiB
+// resident), two `shim-lock` holders and two `dbus-launch` daemons that no
+// test owned any more. Over a full 45-scenario run the container's memory
+// climbed monotonically from 0.5 GiB to 3.1 GiB, and that climb is what made
+// a second concurrent sandbox OOM-kill the first on a 5.8 GiB VM.
+//
+// The cause is not in this harness and is not fixed here: Emacs is stopped
+// through its own `agent-repl-frontend-daemon-stop`, per daemon.el's "EMACS
+// NEVER KILLS A DAEMON", and a daemon that exits without reaping the shims it
+// spawned -- or a WEDGED Emacs, which skips the polite stop entirely -- leaves
+// them running. That belongs to the daemon.
+//
+// What belongs HERE is the scenario's own resource footprint: a test that
+// leaves a 95 MiB process behind has not finished. So every stray is hunted
+// down by the path it was started with, killed, and REPORTED -- the leak is
+// bounded and visible, never bounded and silent.
+
+// strayTermBound is how long a stray gets to honor SIGTERM before it is
+// killed outright.
+//
+// MEASURED: every stray observed exited within one poll of SIGTERM (50ms).
+// The bound is 2s -- forty times the observation -- because the failure it
+// guards is a process ignoring the signal, and the reaper must never become
+// the slowest part of a teardown.
+const strayTermBound = 2 * time.Second
+
+// strayKillBound is how long a stray gets to disappear after SIGKILL.
+//
+// MEASURED: same observation, same poll. SIGKILL is not refusable, so
+// anything still present after this is a process stuck in the kernel, which
+// is reported rather than waited on.
+const strayKillBound = 2 * time.Second
+
+// strayPollInterval is how often the reaper re-reads /proc while waiting.
+const strayPollInterval = 50 * time.Millisecond
+
+// reapStrays kills every process whose argv names one of this Emacs's own
+// paths and is still alive after the test's own teardown.
+//
+// Matching is by ARGV, not by process tree: the daemon and the shims are
+// deliberately detached from Emacs, so a tree walk would not find them, while
+// every one of them carries this test's scratch paths on its command line
+// (`--listen <root>/state/sock/...`, `<scratch>/locks/...`). The paths are
+// unique per test -- `os.MkdirTemp` mints them -- so the match cannot reach a
+// process belonging to another test, another suite, or the host.
+func (e *Emacs) reapStrays() {
+	strays := e.findStrays()
+	if len(strays) == 0 {
+		return
+	}
+	for _, s := range strays {
+		e.t.Logf("emacs teardown: reaping a stray this scenario left behind: pid %d %s", s.pid, s.argv)
+		_ = syscall.Kill(s.pid, syscall.SIGTERM)
+	}
+	if left := e.awaitStraysGone(strayTermBound); len(left) > 0 {
+		for _, s := range left {
+			e.t.Logf("emacs teardown: pid %d ignored SIGTERM; killing it: %s", s.pid, s.argv)
+			_ = syscall.Kill(s.pid, syscall.SIGKILL)
+		}
+		if stuck := e.awaitStraysGone(strayKillBound); len(stuck) > 0 {
+			for _, s := range stuck {
+				e.t.Errorf("emacs teardown: pid %d survived SIGKILL and is still holding this scenario's resources: %s",
+					s.pid, s.argv)
+			}
+		}
+	}
+}
+
+// stray is one leaked process.
+type stray struct {
+	pid  int
+	argv string
+}
+
+// awaitStraysGone polls until no stray remains or the bound expires,
+// answering whatever is left.
+func (e *Emacs) awaitStraysGone(bound time.Duration) []stray {
+	deadline := time.Now().Add(bound)
+	for {
+		left := e.findStrays()
+		if len(left) == 0 || time.Now().After(deadline) {
+			return left
+		}
+		time.Sleep(strayPollInterval)
+	}
+}
+
+// findStrays reads /proc and answers every live process whose argv OR
+// ENVIRONMENT contains one of this Emacs's reap paths.
+//
+// /proc is read directly rather than shelling out to `ps`: the container's
+// procps is not a dependency this layer wants on a teardown path, and the
+// argv is exactly what /proc/<pid>/cmdline holds.
+//
+// THE ENVIRONMENT IS NOT A BELT-AND-BRACES SECOND CHANCE, it is the only
+// thing that finds the largest stray of all. Emacs is started as plain
+// `emacs` -- every path it works from travels in its environment -- so its
+// argv names nothing, and a first revision of this reaper that matched only
+// on argv left a 206 MiB Emacs resident after each scenario whose `script`
+// parent it had killed. `HOME=<root>` in /proc/<pid>/environ is what
+// identifies it, and the same read catches the daemon and anything else that
+// took its paths from the environment rather than a flag.
+func (e *Emacs) findStrays() []stray {
+	paths := e.reapPaths()
+	if len(paths) == 0 {
+		return nil
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		// Not fatal, and not silent: without /proc the reaper cannot run,
+		// and a reader must know the footprint was not bounded.
+		e.t.Logf("emacs teardown: cannot read /proc, so strays were not reaped: %v", err)
+		return nil
+	}
+	self := os.Getpid()
+	var out []stray
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil || pid == self {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if readErr != nil || len(raw) == 0 {
+			// The process exited between the ReadDir and the read, or it is
+			// a kernel thread. Neither is a stray.
+			continue
+		}
+		argv := strings.TrimRight(strings.ReplaceAll(string(raw), "\x00", " "), " ")
+		// An unreadable environ is not an error here: the process may have
+		// exited, and a process owned by another uid is not this scenario's
+		// to reap in any case.
+		env, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+		haystack := argv + "\x00" + string(env)
+		for _, p := range paths {
+			if strings.Contains(haystack, p) {
+				out = append(out, stray{pid: pid, argv: argv})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// reapPaths are the unique paths a stray of this scenario must name. They are
+// read under the lock because NewEmacsWorld adds to them after StartEmacs has
+// already registered the reaper.
+func (e *Emacs) reapPaths() []string {
+	e.reapMu.Lock()
+	defer e.reapMu.Unlock()
+	return append([]string(nil), e.reap...)
+}
+
+// AddReapPath declares one more path whose appearance in a process's argv
+// marks that process as this scenario's to reap. `NewEmacsWorld` uses it for
+// the world-level directories Emacs itself does not own -- the kernel-lock
+// directory the shims claim in, and the fake SDK's spool root.
+func (e *Emacs) AddReapPath(p string) {
+	e.reapMu.Lock()
+	defer e.reapMu.Unlock()
+	e.reap = append(e.reap, p)
 }
