@@ -644,6 +644,53 @@ RUN set -eux; \
     done; \
     rm -rf /sandbox/go-prime
 
+# --- prime the Go BUILD cache, so no run recompiles the dependency graph ---
+#
+# The module cache above holds SOURCES; the build cache holds compiled
+# packages, and it is a different directory with a different lifetime. It
+# lives under HOME, HOME is a fresh tmpfs in every container, so every run
+# started from an empty one and recompiled everything -- measured at ~18s
+# before the first test could run.
+#
+# Compiling here ships it instead. `go build ./...` compiles every package and
+# every dependency of the daemon, the store, the sidecar, the lock helper and
+# the generated protos; `go test -c -o /dev/null` per package then compiles
+# AND LINKS each test binary, which is precisely the work a run repeats.
+#
+# `go test -c`, not `go vet` and not `go test -run ^$`: vet compiles the test
+# files but its actions key differently from the test build's, and priming
+# with it left the real compile at 9.6s out of 9.6s. `-run ^$` would cache the
+# right things but it RUNS each binary, and the e2e module's own TestMain
+# builds binaries and starts services -- that must not happen during an image
+# build. `-c -o /dev/null` builds the binary and never executes it.
+#
+# THIS CANNOT GO STALE INCORRECTLY, which is why it needs no digest check
+# unlike the node_modules above. Go's build cache is content-addressed: an
+# entry compiled from different source bytes is not found at all. A checkout
+# ahead of the image simply misses and compiles, exactly as it does today.
+# THE PRIME RUNS AT THE PATH THE TESTS WILL RUN AT, and that is the whole
+# trick. Go's build cache key includes the compiler's arguments, and without
+# `-trimpath` those carry the package's ABSOLUTE directory (it goes into the
+# object's debug info). Priming in a scratch directory therefore produced a
+# 331 MiB cache that the real run missed almost entirely: compiling the test
+# binary still took 9.6s. Staged at /work/repo/modules/app/agent-repl -- the
+# exact path the entrypoint materializes the working copy at -- the entries
+# match. The tree is deleted afterwards, and /work is a tmpfs at run time
+# anyway, so nothing of it survives into a container.
+COPY --chown=sandbox:sandbox go-sources/ /work/repo/modules/app/agent-repl/
+COPY --chown=sandbox:sandbox go-manifests/ /work/repo/modules/app/agent-repl/
+RUN set -eux; \
+    export GOCACHE=/sandbox/cache/go-build; \
+    find /work/repo/modules/app/agent-repl -name go.mod -printf '%h\n' | sort -u | while read -r d; do \
+      ( cd "$d" && go build ./... \
+          && go list ./... | while read -r pkg; do go test -c -o /dev/null "$pkg" || true; done ) \
+        || echo "sandbox: WARNING: the build-cache prime did not complete in $d; runs there will compile from cold" >&2; \
+    done; \
+    rm -rf /work/repo; \
+    du -sh /sandbox/cache/go-build; \
+    test -d /sandbox/cache/go-build \
+      || { echo "sandbox: the Go build cache prime produced nothing" >&2; exit 1; }
+
 # Offline from here on: every dependency above is already in the image, and
 # the run script also drops the network entirely.
 ENV GOFLAGS=-mod=mod \

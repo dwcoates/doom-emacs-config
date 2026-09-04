@@ -82,6 +82,29 @@ stage_context() {
      "$repo_root/$MODULE_REL/webapp/package-lock.json" \
      "$ctx/npm-lockfiles/webapp/"
 
+  # THE GO SOURCES, for the build-cache prime.
+  #
+  # The Go BUILD cache (as opposed to the module cache) is empty in every
+  # container, because it lives under HOME and HOME is a fresh tmpfs -- so
+  # every run recompiled the whole dependency graph from scratch, measured at
+  # ~18s before the first test ran. Compiling once at build time and shipping
+  # the cache removes that.
+  #
+  # It is SAFE in a way the other staged artifacts are not, and that is worth
+  # stating: Go's build cache is content-addressed, so an entry produced from
+  # different source bytes simply is not found. A stale primed cache cannot
+  # produce a stale binary; the worst it can do is miss and compile.
+  #
+  # `.go` files, plus the embedded testdata and the vocab JSON the Go side
+  # embeds, at their real relative paths so every `replace` and every
+  # `//go:embed` resolves the same way it will at run time.
+  local src rel
+  while IFS= read -r src; do
+    rel=${src#"$repo_root/$MODULE_REL/"}
+    mkdir -p "$ctx/go-sources/$(dirname "$rel")"
+    cp "$src" "$ctx/go-sources/$rel"
+  done < <(find "$repo_root/$MODULE_REL" -name '*.go' -not -path '*/node_modules/*' -not -path '*/dist/*')
+
   # Every go.mod/go.sum under the module, at its own relative path, so the
   # replace directives between them still resolve during the cache prime.
   local mod rel
