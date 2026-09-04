@@ -61,6 +61,7 @@ make_repo() {
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
+             "$root/agent-shim/shim-lock" \
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
@@ -68,7 +69,7 @@ make_repo() {
     git_c "$root" init -q
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
-             webapp daemon; do
+             agent-shim/shim-lock webapp daemon; do
         echo "rev0" > "$root/$d/file.txt"
         git_c "$root" add -A
         n=$((n + 1))
@@ -257,7 +258,7 @@ t_unknown_deployed_revision_errors_per_system() {
     if [ "$RC" -eq 0 ] \
        && [ "$(jq_get "$OUT" 'sysmap["webapp"]["commits_behind"]')" = "None" ] \
        && [ "$(jq_get "$OUT" '"not present in this checkout" in sysmap["webapp"]["error"]')" = "True" ] \
-       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "5" ]; then
+       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "6" ]; then
         pass "a stamp naming an unknown revision errors that system only, exit stays 0"
     else
         fail "a stamp naming an unknown revision errors that system only, exit stays 0" \
@@ -272,7 +273,11 @@ t_proto_commit_stales_every_system() {
     touch_system "$root" proto "proto regeneration"
     run_report "$root"
     local want; want="$(head_sha "$root")"
-    if [ "$(jq_get "$OUT" "len(set(s['source_sha'] for s in d['systems'])) == 1")" = "True" ] \
+    # shim-lock is excluded by NAME, not by oversight: its go.mod requires only
+    # agentrepl/logging, it speaks no wire at all, and so a proto regeneration
+    # genuinely cannot stale it. Listing proto among its paths to make this
+    # assertion uniform would report it behind over a change it never reads.
+    if [ "$(jq_get "$OUT" "len(set(s['source_sha'] for s in d['systems'] if s['name'] != 'shim-lock')) == 1")" = "True" ] \
        && [ "$(jq_get "$OUT" 'sysmap["shim"]["source_sha"]')" = "$want" ]; then
         pass "a proto commit becomes the source revision of every Go/TS system"
     else
