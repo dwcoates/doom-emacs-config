@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1341,5 +1342,64 @@ func TestAFileWatchedWithNoBackgroundedLaunchStaysForeground(t *testing.T) {
 	// Assert.
 	if ctx.SpawnBackgrounded {
 		t.Fatal("a foreground spawn was refreshed into a backgrounded one")
+	}
+}
+
+// TestSignalUnwedgesTheCycleFromAnInFlightWrite asserts the shutdown promptness
+// this cycle owes: a sidecar blocked inside WriteBatch used to see the signal
+// only once rpcTimeout (30s) expired, because the cycle awaited the rpc on a
+// context the signal did not reach. The signal now cancels that context.
+func TestSignalUnwedgesTheCycleFromAnInFlightWrite(t *testing.T) {
+	tests := []struct {
+		name       string
+		wedged     bool
+		wantRecord bool
+	}{
+		{name: "a wedged write is cancelled and its replay stated", wedged: true, wantRecord: true},
+		{name: "an idle cycle shuts down with no replay record", wedged: false, wantRecord: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := &fakeStore{writeWedged: tc.wedged, entered: make(chan struct{})}
+			entered := store.entered
+			h := newHarness(t, store)
+			h.transcript(t, "sess-1", promptLine)
+			h.sc.options.PollInterval = time.Millisecond
+			if err := h.sc.beginCycle(); err != nil {
+				t.Fatalf("beginCycle: %v", err)
+			}
+			stop := make(chan os.Signal, 1)
+			returned := make(chan error, 1)
+
+			// Act.
+			go func() { returned <- h.sc.Run(stop) }()
+			if tc.wedged {
+				select {
+				case <-entered:
+				case <-time.After(2 * time.Second):
+					t.Fatal("the store was never asked to write, so nothing is wedged to interrupt")
+				}
+			}
+			start := time.Now()
+			stop <- syscall.SIGTERM
+
+			// Assert: the signal must not wait out rpcTimeout.
+			select {
+			case err := <-returned:
+				if err != nil {
+					t.Fatalf("Run returned %v, want a clean shutdown", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("Run did not return within 2s of the signal (rpcTimeout is %s)", rpcTimeout)
+			}
+			if elapsed := time.Since(start); elapsed >= rpcTimeout {
+				t.Fatalf("shutdown took %s, want well under rpcTimeout %s", elapsed, rpcTimeout)
+			}
+			const record = "shutdown interrupted a write; it will replay"
+			if got := strings.Contains(h.logText(), record); got != tc.wantRecord {
+				t.Fatalf("log contains %q = %v, want %v; log: %s", record, got, tc.wantRecord, h.logText())
+			}
+		})
 	}
 }
