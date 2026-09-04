@@ -80,6 +80,7 @@ import {
   createBlockState,
   convertAssistantMessage,
   convertStreamEvent,
+  convertModelRefusal,
   convertThinkingTokens,
   type BlockState,
 } from "./stream-events.js";
@@ -317,6 +318,8 @@ function convertSystemMessage(
       return convertHookResponse(message, context, state.hooks);
     case "thinking_tokens":
       return convertThinkingTokens(message, context, state.blocks);
+    case "model_refusal_no_fallback":
+      return convertModelRefusal(message, context);
     case "api_retry":
       // NO ROW — `convertSessionMessage` states why — but the record IS the
       // vendor's own account of WHICH class failed and HOW LONG it said to
