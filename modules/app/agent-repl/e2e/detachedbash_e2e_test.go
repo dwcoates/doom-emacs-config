@@ -311,24 +311,28 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 }
 
 // ===========================================================================
-// #34 — CtrlBDetachOfForegroundSubagent.
+// #34 — VendorBackgroundedSubagent.
 //
-// Same ruling as #33 applies: docs/overhaul/PROTO-CHANGES.md, "Landing 8",
-// RULED-no-proto paragraph — "Ctrl-b detach of foreground work has no
-// daemon verb; out of scope for the overhaul, recorded as a follow-up; the
-// two e2e tests stay skipped pointing here." Compounded here by a second,
-// golden-specific gap: grepping agent-shim/claude/shim/src/fake/scenarios/
-// subagents.ts finds no ctrl-b-shaped scenario at all for a subagent (only
+// DetachForeground (shim.v1, proto/src/shim/v1/service.proto:107) confirms a
+// vendor-side backgrounding of foreground work, and no caller-facing
+// agentrepl.v1 rpc or daemon-internal trigger for that call exists on this
+// branch (confirmed: daemon/internal/sessionwatcher/fakes_test.go:268's
+// fake client PANICS on it — "sessionwatcher must not call
+// DetachForeground" — and proto/src/agentrepl/v1/endpoint_interrupt.proto
+// is STOP-only), so this test cannot drive that confirm path from this
+// layer. Compounded here by a second, golden-specific gap: grepping
+// agent-shim/claude/shim/src/fake/scenarios/subagents.ts finds no
+// vendor-backgrounded-shaped scenario at all for a subagent (only
 // `subagent`, `subagent-detached`, `subagent-detached-live`,
 // `subagent-detached-utterance`, `subagent-failed`, `cancel-all`,
-// `usage-historical`) — shell.ts's CTRL_B backgrounds a BASH call, not a
-// subagent spawn.
+// `usage-historical`) — shell.ts's VENDOR_BACKGROUNDED backgrounds a BASH
+// call, not a subagent spawn.
 //
 // This test drives the reachable half (an ordinary live subagent spawn) and
-// then skips, per the ruling above.
+// then skips: no fake-SDK scenario exists to complete the shape it names.
 // ===========================================================================
 
-func TestCtrlBDetachOfForegroundSubagent(t *testing.T) {
+func TestVendorBackgroundedSubagent(t *testing.T) {
 	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
 	ws := dbWorkspace(t, w)
@@ -352,7 +356,7 @@ func TestCtrlBDetachOfForegroundSubagent(t *testing.T) {
 		return row.GetActivity().GetSubagent() != nil
 	})
 
-	t.Skip("RULED out of scope (docs/overhaul/PROTO-CHANGES.md, Landing 8, RULED-no-proto: \"Ctrl-b detach of foreground work has no daemon verb; out of scope for the overhaul, recorded as a follow-up; the two e2e tests stay skipped pointing here\"), plus no fake-SDK scenario backgrounds a subagent the way shell.ts's CTRL_B backgrounds a Bash call — see this test's header comment")
+	t.Skip("DetachForeground has no caller-facing agentrepl.v1 trigger on this branch, and no fake-SDK scenario backgrounds a subagent the way shell.ts's VENDOR_BACKGROUNDED backgrounds a Bash call — see this test's header comment")
 }
 
 // ===========================================================================
