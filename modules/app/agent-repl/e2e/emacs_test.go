@@ -715,8 +715,14 @@ func (e *Emacs) awaitDoom() {
 		}
 		select {
 		case <-ctx.Done():
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s); pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.proc.Output())
+			// The kernel's account comes with it, because a boot that
+			// misses this bound writes NOTHING to the pty -- so the pty
+			// output alone reports an empty string and explains nothing.
+			// The Emacs has no readiness stamp and therefore no pid the Go
+			// side knows, but the reaper finds it the same way it always
+			// does: by this scenario's own paths in its environment.
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s; pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(), e.proc.Output())
 		case <-ticker.C:
 		}
 	}
@@ -780,6 +786,20 @@ const heartbeatProbe = `(if-let* ((win (active-minibuffer-window)))
                             (with-current-buffer (window-buffer win)
                               (concat "PROMPT " (or (minibuffer-prompt) "<no prompt text>")))
                           "")`
+
+// bootBreadcrumb answers how far the boot got, from the file the sandbox
+// profile appends a line to at each stage. It is the only witness a boot that
+// never publishes a stamp leaves: the frame is graphical, so Emacs's own
+// messages never reach the pty, and no server exists yet to be asked.
+func (e *Emacs) bootBreadcrumb() string {
+	body, err := os.ReadFile(e.ReadyStamp + ".progress")
+	if err != nil {
+		return fmt.Sprintf("\n  the boot left no breadcrumb at all (%v), so it died before %s was loaded",
+			err, filepath.Join(e.EmacsDir, "init.el"))
+	}
+	return "\n  the boot got as far as:\n    " +
+		strings.ReplaceAll(strings.TrimSpace(string(body)), "\n", "\n    ")
+}
 
 // armHeartbeat starts the wedge detector. It runs for the WHOLE life of the
 // process, teardown included, because the recursion defect this exists to

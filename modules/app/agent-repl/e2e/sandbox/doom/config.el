@@ -39,6 +39,8 @@
 ;; Everything here is gated on AGENT_REPL_E2E_EMACS, which only the Go layer
 ;; sets: an interactive `e2e-sandbox.sh shell' Emacs is unaffected.
 
+(agent-repl-e2e--breadcrumb "config.el reached")
+
 (defun agent-repl-e2e--eval (in out)
   "Evaluate the form in file IN and write a JSON result to file OUT.
 The result object carries an \"ok\" boolean plus either a \"value\" or an
@@ -125,6 +127,7 @@ call answers only what has happened since the first."
 Runs after Doom has finished initializing, which is the earliest moment at
 which `map!' bindings, popup rules and every module's `config.el' are all in
 effect."
+  (agent-repl-e2e--breadcrumb "boot hook entered")
   (require 'server)
   (let ((ready (getenv "AGENT_REPL_E2E_READY"))
         (socket (getenv "AGENT_REPL_E2E_SERVER")))
@@ -149,9 +152,11 @@ effect."
           ;; persp-mode that was never loaded would not have served them
           ;; anyway.
           (require 'persp-mode)
+          (agent-repl-e2e--breadcrumb "persp-mode loaded")
           (tab-bar-mode 1)
           (setq server-name socket)
           (server-start)
+          (agent-repl-e2e--breadcrumb "server started")
           (when ready
             (agent-repl-e2e--write-stamp
              ready
