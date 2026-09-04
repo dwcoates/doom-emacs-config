@@ -49,6 +49,14 @@ export class ScriptedQuery implements QueryLike {
   backgroundTaskAnswer = false;
   setModelRejects: Error | undefined;
   setPermissionModeRejects: Error | undefined;
+  /**
+   * `close()` records the call but leaves the stream standing.
+   *
+   * The vendor's own end-of-stream is a courtesy, not a guarantee: a query
+   * whose iterator never completes after a close is exactly what wedges a
+   * teardown that waits on its message loop.
+   */
+  closeLeavesStreamOpen = false;
 
   emit(message: SdkMessage): void {
     if (this.waiting !== undefined) {
@@ -146,6 +154,7 @@ export class ScriptedQuery implements QueryLike {
   }
   close(): void {
     this.calls.push("close");
+    if (this.closeLeavesStreamOpen) return;
     this.end();
   }
 }
@@ -203,6 +212,10 @@ export class RecordingPersistence implements Persistence {
   bashFrames: conversationv1.AgentBash[] = [];
   live: storev1.GetLiveWorkSuccess = create(storev1.GetLiveWorkSuccessSchema, {});
   openError: PersistenceError | undefined;
+  /** `openAgentPage` never answers, the way an unreachable store's call does not. */
+  openHangs = false;
+  /** The opened page's tail stands rather than ending, the way a real tail does. */
+  standingTail = false;
   readError: PersistenceError | undefined;
   liveWorkError: PersistenceError | undefined;
   closedPages = 0;
@@ -240,14 +253,17 @@ export class RecordingPersistence implements Persistence {
     known?: () => boolean,
   ): Promise<AgentPageSession> {
     this.lastKnownAgent = known;
+    if (this.openHangs) return new Promise<AgentPageSession>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     const entries = this.tail;
     const self = this;
+    const standing = this.standingTail;
     return Promise.resolve({
       page: this.page,
       tail: {
         async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.HistoryEntryAt> {
           for (const entry of entries) yield entry;
+          if (standing) await new Promise<void>(() => undefined);
         },
       },
       concludeThrough: (through) => {

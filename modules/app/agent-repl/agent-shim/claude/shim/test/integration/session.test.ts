@@ -985,6 +985,30 @@ describe("Hibernate", () => {
       ),
     ).toBe(true);
   });
+
+  test("KillSession after a hibernation still tears the session down and exits", async () => {
+    // THE HANG THIS GUARDS. The daemon's idle cutoff calls Hibernate and then
+    // KillSession. Hibernate runs a throwaway compaction query; the teardown
+    // must still be able to settle every promise it awaits, or KillSession
+    // never returns and the shim outlives the session it was standing down.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    const stream = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await stream.next();
+    hibernateAcked(await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})));
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: false }),
+    );
+    const exit = await shim.exited;
+
+    expect(sessionKilled(response).how.case).toBe("idle");
+    expect(exit.code).toBe(0);
+    stream.close();
+  });
 });
 
 describe("KillSession", () => {

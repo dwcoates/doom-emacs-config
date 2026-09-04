@@ -93,6 +93,10 @@ function harness(
     mcp?: McpServerStatusLike[];
     /** What the scripted query answers the account-usage control verb with. */
     accountUsage?: AccountUsageLike;
+    /** The teardown's per-wait budget, so a hang suite does not sit out five seconds. */
+    watcherConclusionBudgetMs?: number;
+    /** Leave every scripted query's stream standing after `close()`. */
+    closeLeavesStreamOpen?: boolean;
   } = {},
 ): Harness {
   const stateDir = scratch();
@@ -118,6 +122,7 @@ function harness(
       }
       if (options.mcp !== undefined) query.mcp = options.mcp;
       if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
+      if (options.closeLeavesStreamOpen === true) query.closeLeavesStreamOpen = true;
       queries.push({ spec, query });
       return Promise.resolve(query);
     },
@@ -128,6 +133,9 @@ function harness(
     ...(options.keepaliveIntervalMs === undefined
       ? {}
       : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
+    ...(options.watcherConclusionBudgetMs === undefined
+      ? {}
+      : { watcherConclusionBudgetMs: options.watcherConclusionBudgetMs }),
     acquireLock: (sessionId) => {
       if (options.lockThrows === true) throw new Error("locked by another shim");
       locks.push(sessionId);
@@ -1277,6 +1285,61 @@ describe("Hibernate", () => {
     const error = response.result.case === "error" ? response.result.value : undefined;
     expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
       "there is no transcript to compact",
+    );
+  });
+
+  it("lets KillSession finish after a hibernation compacted the session", async () => {
+    // THE HANG THIS GUARDS. Hibernate runs a throwaway compaction query and
+    // closes it; the teardown then awaited `loop`, which by then was the
+    // THROWAWAY's loop and not the live query's -- a promise nothing the
+    // teardown does can settle, so KillSession never returned.
+    const h = harness();
+    await started(h);
+    const first = await untilQuery(h, 0);
+    const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+    writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
+    const hibernating = h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const throwaway = await untilQuery(h, 1);
+    throwaway.query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
+    await hibernating;
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+});
+
+describe("the teardown's waits are bounded", () => {
+  it("finishes KillSession when the vendor's message loop never ends after the close", async () => {
+    // THE HANG THIS GUARDS. `close()` is the vendor's end-of-stream signal, not
+    // a guarantee: a loop still parked in the iterator afterwards must not be
+    // the reason a stand-down never returns.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("finishes KillSession when the store never answers the head read a watcher's conclusion needs", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 5 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
+      [Symbol.asyncIterator]();
+    await watching.next();
+    h.persistence.openHangs = true;
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
     );
   });
 });
