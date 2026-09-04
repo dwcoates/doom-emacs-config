@@ -1185,10 +1185,19 @@ calibration guard passing on all three.
 
 | probe | measured | baseline set | gate (x1.5) |
 |---|---|---|---|
-| loopback: one `DaemonHealth` round trip, mean of 100 | 213, 216, 222, 225, 228 µs across five runs at load 4.3-10.6 | **230 µs** | 345 µs |
+| loopback: the **p50** of 100 `DaemonHealth` round trips | 199.5, 199.5, 210.6, 315.3 µs across four probes at load 8.5 | **230 µs** | 345 µs |
 | cpu: the fixed 20M-iteration integer loop | **42.0 ms**, the minimum of 25 samples at load 3.9 | **42 ms** | 63 ms |
 
-Two things this cost, both worth recording:
+**The loopback probe is a p50, not the mean §D2 implies, and that cost a whole
+baseline run to learn.** A mean over a hundred calls is one stall away from
+anything: a single probe read 600 µs because one of its hundred calls took tens
+of milliseconds, declined the phase, and — being sticky at the time — took the
+next two and a half minutes of a `-count=3` run with it, every assertion of
+which came back at its quiet figures. The percentile rule with no interpolation
+is what §D1 already requires of every other number in this phase; the probe had
+no business being the exception.
+
+Two more things this cost, both worth recording:
 
 - **The CPU baseline was first GUESSED at 12 ms and was wrong by 3.5x**, so
   every run DECLINED. A threshold in this suite is a measurement; the guess
@@ -1303,17 +1312,23 @@ one to reuse.
     against 1.5 ms — and **both probes read normal throughout** (loopback 216 µs,
     cpu 42.5 ms). Two causes, one mitigated here and one open:
 
-    - *Mitigated:* §D2 has the guard run once, before any assertion, so load
-      arriving DURING a phase is invisible to it. The loopback probe is now
-      re-taken before each assertion and the phase's single verdict is the worst
-      reading, sticky once declined (~22 ms per assertion).
-    - *Open, for the owner:* neither probe discriminates well on a 16-core host.
-      The CPU loop is single-threaded and does not degrade while free cores
-      remain; the loopback probe moved 213→228 µs (7%) across load averages
-      4.3-10.6, while the measured hops moved 2-4x. A probe that would work is
-      the host's own load average against its core count, which is what a human
-      checks and what this work checked by hand before every measurement run.
-      That is a change to §D2's design, so it is proposed rather than made.
+    - *Mitigated, and it is a DELIBERATE DEVIATION FROM §D2's "once per phase".*
+      A reading taken once at the start cannot see load that arrives during the
+      phase, and on a shared box that is the normal case. But a phase-wide
+      STICKY verdict is worse: one spike then declines every assertion after it,
+      observed twice. The loopback probe is therefore re-taken before each
+      assertion (~20 ms each) and DECLINES THAT ASSERTION; the phase summary
+      still carries a DECLINED line if any assertion was declined, so §D2's
+      actual requirement — a green run that measured nothing cannot pass for a
+      green run that measured something — is met.
+    - *Open, for the owner:* the CPU probe does not discriminate at all on a
+      16-core host (single-threaded, so it does not degrade while free cores
+      remain), and the loopback probe, while it does move with load, still read
+      normal through runs whose measured hops were 2x their quiet figures. A
+      probe that would work is the host's own load average against its core
+      count, which is what a human checks and what this work checked by hand
+      before every measurement run. That is a change to §D2's design, so it is
+      proposed rather than made.
 
 14. **A red repetition could rewrite the baselines. FIXED.** §D3's rule is that
     "a baseline a red run can rewrite is not a baseline", and the first
@@ -1360,3 +1375,32 @@ one to reuse.
     MutationObserver batch, and §G proposal P2's real-clock escape is the only
     harness change it needed — taken exactly where `mountApp` already takes it
     for `yieldToIo`.
+
+17. **§D3's flat >20% regression check is inside this host's own noise for
+    three rows, so it REPORTS rather than fails by default.** The check is built
+    exactly as §D3 specifies — one committed file per assertion under
+    `e2e/perf-baselines/`, p50 and p95 and the tip they were measured at, a
+    core-count guard, and rewriting only by `make -C e2e perf-baseline` — and
+    the evidence that it cannot yet be enforced here is three measurements:
+
+    - a baseline recorded over THREE runs put `perf-response-bubble`'s p95 at
+      1.539 ms; the next run measured 2.036 ms (32% over) against a BUDGET of
+      5 ms it never came near;
+    - widened to FIVE runs, the next run put `perf-prompt-bubble`'s p95 60% over
+      its baseline, again nowhere near its 20 ms budget;
+    - the row's honest spread across every run taken here is 5.5-17.3 ms, about
+      3x, on a host shared with sibling agent suites.
+
+    No observation window short enough to be a make target captures a spread
+    that wide, and widening the tolerance until it fits would leave a check that
+    detects nothing. So the drift is REPORTED — loudly, naming the percentile,
+    the baseline, the drift and this finding — while the ABSOLUTE budgets fail
+    hard on every run as normal. `make -C e2e perf-enforce` (or
+    `AGENT_REPL_E2E_PERF_BASELINE=enforce`) turns the failure on, and is the
+    right invocation on a quiet or dedicated host.
+
+    **This is not a fallback the phase chose for itself; it is finding 13 in a
+    different costume.** A regression check can only be as tight as the
+    calibration guard is strong, because "the box was busy" and "the code got
+    slower" look identical to it. Ruling on 13's proposed load-average probe is
+    what unblocks enforcing 17.

@@ -7,7 +7,7 @@
 GOTEST_PARALLEL ?= 8
 GOTEST_TIMEOUT ?= 45m
 
-.PHONY: test coverage perf perf-only perf-baseline
+.PHONY: test coverage perf perf-only perf-enforce perf-baseline
 
 # TMPDIR=/tmp IS REQUIRED on macOS -- the suite's unix socket paths do not fit
 # the 103-byte cap beneath the default per-user temp root.
@@ -40,6 +40,10 @@ coverage:
 perf: test perf-only
 
 # The perf phase alone, for a re-measurement on an already-green tree.
+#
+# The baseline drift check REPORTS here rather than failing; see PERF-SPEC.md
+# section I5 finding 17 for the measurement that settled that, and use
+# `perf-enforce` on a host quiet enough to hold it.
 perf-only:
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
@@ -48,11 +52,23 @@ perf-only:
 # name, and never reachable from a failing run: a baseline a red run can
 # rewrite is not a baseline (PERF-SPEC.md section D3).
 #
-# -count=3, and the recorded number is the HIGH-WATER p50/p95 across the three:
-# run-to-run spread is real and unequal between rows (measured over three runs,
-# one row's p95 varied 6% and another's 75%), so a baseline from a single
-# repetition would put the 20% regression check inside the noise.
+# -count=5, and the recorded number is the HIGH-WATER p50/p95 across the five:
+# run-to-run spread is real and unequal between rows (measured, one row's p95
+# varied 6% across runs and another's 75%), so a baseline from a single
+# repetition puts the 20% regression check inside the noise. THREE WAS NOT
+# ENOUGH — a baseline recorded over three runs put perf-response-bubble's
+# p95 at 1.539ms and the very next run measured 2.036ms, a false 32%
+# regression against a row whose real spread is 1.4-2.0ms. See PERF-SPEC.md
+# section I5 finding 17.
 perf-baseline:
 	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=write \
-		go test ./... -tags perf -run 'TestPerf' -count=3 \
+		go test ./... -tags perf -run 'TestPerf' -count=5 \
+		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
+
+# The perf phase with the >20% baseline regression check FAILING rather than
+# reporting. For a quiet or dedicated host; on a box shared with other suites
+# it fails on load, not on regressions.
+perf-enforce:
+	TMPDIR=/tmp AGENT_REPL_E2E_PERF=1 AGENT_REPL_E2E_PERF_BASELINE=enforce \
+		go test ./... -tags perf -run 'TestPerf' -count=1 \
 		-timeout $(GOTEST_TIMEOUT) -parallel 1 -v
