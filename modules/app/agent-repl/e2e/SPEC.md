@@ -796,16 +796,18 @@ docs. File-per-area grouping is given in section E.
     shape is a fake-SDK invention (no vendor capture ever calls the poll
     tool — see the shim manifest's own note) mirrored from the deleted
     suite's `bashTaskOutcome`, not a golden-grounded assertion.
-33. **CtrlBDetachOfForegroundWork** — `ctrl-b-detach-of-foreground-work` —
-    `daemon.md` detached-work section — a LIVE foreground turn converted
-    in place to detached, not a start-detached-from-scratch shape (the
-    coverage report's item 5, "the harder and more valuable half of this
-    family").
-34. **CtrlBDetachOfForegroundSubagent** — `ctrl-b-detach-of-foreground-subagent`
-    — same mechanism, applied to a foreground subagent instead of the main
-    turn.
+33. **REMOVED — owner ruling, 2026-09-04** (`docs/overhaul/PROTO-CHANGES.md`,
+    "Landing 8"): detach of in-flight foreground work (formerly named for
+    the Ctrl-B key chord; no client verb today) is dropped from the
+    inventory and may be added back later. The golden this item drove,
+    `ctrl-b-detach-of-foreground-work`, stays reachable-only with no e2e
+    test; see `testdata/captures/MANIFEST.md`.
+34. **VendorBackgroundedSubagent** — `ctrl-b-detach-of-foreground-subagent`
+    — a vendor-side backgrounding of foreground work (the DetachForeground
+    verb's confirm path), applied to a foreground subagent instead of the
+    main turn.
 35. **BashForegroundCompleted** — `bash-foreground-completed` — ordinary,
-    non-detached Bash round-trip, for contrast with #31/#33.
+    non-detached Bash round-trip, for contrast with #31.
 36. **BashNonzeroExit** — `bash-nonzero-exit` — the tool unit's failure/exit
     code path.
 37. **BashImageOutput** — `bash-image-output` — an image-bearing tool result
@@ -1133,7 +1135,7 @@ reported as such rather than papered over.
 | 13 | context-usage | `!context-usage-drift` | #59 | no |
 | 14 | cron-create-list-delete | `!cron` | #75 | no |
 | 15 | ctrl-b-detach-of-foreground-subagent | `!subagent` (reachable-only) | #34 | no |
-| 16 | ctrl-b-detach-of-foreground-work | `!ctrl-b` (reachable-only) | #33 | no |
+| 16 | ctrl-b-detach-of-foreground-work | `!vendor-backgrounded` (reachable-only) | #33 REMOVED (owner ruling, 2026-09-04) | no |
 | 17 | diagnostics | (none; default `""` scenario) | #76 | no |
 | 18 | edit | `!edit` | #66 | no |
 | 19 | fan-wide-cancel | `!cancel-all` | #43 | no (see F: possible production spool defect) |

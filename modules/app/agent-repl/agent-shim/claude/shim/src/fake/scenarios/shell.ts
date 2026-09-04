@@ -18,8 +18,8 @@
  * # Backgrounding causes come from the TOOL RESULT
  *
  * `timedOutAfterMs` and `backgroundedByUser` are fields of `BashOutput`, never
- * of the task stream. The timeout and Ctrl-B scenarios set exactly those, which
- * is what makes the two causes distinguishable downstream.
+ * of the task stream. The timeout and vendor-backgrounded scenarios set exactly
+ * those, which is what makes the two causes distinguishable downstream.
  */
 import { bashResult, conclude, scenario } from "./support.js";
 
@@ -385,26 +385,26 @@ const BASH_DETACH_LIVE = scenario({
   },
 });
 
-const CTRL_B = scenario({
-  name: "ctrl-b",
-  prompt: "!ctrl-b",
+const VENDOR_BACKGROUNDED = scenario({
+  name: "vendor-backgrounded",
+  prompt: "!vendor-backgrounded",
   emits:
-    "a FOREGROUND `Bash` the user detaches mid-flight: the scenario parks, `backgroundTasks(toolUseId)` marks it " +
+    "a FOREGROUND `Bash` the vendor detaches mid-flight: the scenario parks, `backgroundTasks(toolUseId)` marks it " +
     "`is_backgrounded`, and the foreground result then reports `backgroundedByUser: true`",
   writes: "the tool_use line, the tool_result line carrying `backgroundedByUser`, an unterminated spool",
-  arms: "AgentBackgrounded — the user-requested detach of foreground work",
+  arms: "AgentBackgrounded — a vendor-backgrounded foreground unit",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ctrl-b" }, "fake Ctrl-B detach turn");
+    ctx.log({ turn: ctx.turn, branch: "vendor-backgrounded" }, "fake vendor-backgrounded turn");
     const call = ctx.toolUse("Bash", { command: "tail -f /var/log/system.log" });
     const taskId = ctx.mintShellTaskId();
     // Announced as a task BEFORE the detach so `backgroundTasks(toolUseId)` has
     // something to find: the vendor tracks a foreground shell as a task the
-    // moment it starts, which is what makes Ctrl-B addressable at all.
+    // moment it starts, which is what makes it addressable at all.
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "tail -f" });
     ctx.announceLiveTasks();
     ctx.files.spool(taskId).appendLine("first line before the detach");
-    // PARK UNTIL THE USER ACTUALLY DETACHES. The scenario cannot decide when
-    // Ctrl-B happens — a caller's DetachForeground does — and emitting the
+    // PARK UNTIL THE VENDOR ACTUALLY DETACHES. The scenario cannot decide when
+    // that happens — a caller's DetachForeground does — and emitting the
     // backgrounded result on a timer instead would make the test's ordering a
     // race it has to sleep around.
     const detached = await ctx.awaitBackgrounded(call.toolUseId);
@@ -421,7 +421,7 @@ const CTRL_B = scenario({
     conclude(ctx, "Moved the command to the background.");
     // Acknowledged only now: `backgroundTasks` answers the caller AFTER the
     // vendor's own detachment record is on the stream, which is the order a
-    // real Ctrl-B has.
+    // real vendor-side backgrounding has.
     detached();
   },
 });
@@ -437,5 +437,5 @@ export const SHELL_SCENARIOS = [
   BASH_DETACH_POLL,
   BASH_DETACH_FAIL,
   BASH_DETACH_LIVE,
-  CTRL_B,
+  VENDOR_BACKGROUNDED,
 ];

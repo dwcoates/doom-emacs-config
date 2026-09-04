@@ -996,15 +996,15 @@ describe("subagents", () => {
 
 describe("DetachForeground", () => {
   test("a vendor-backgrounded unit is CONFIRMED and announced", async () => {
-    // Ctrl-B cannot be INITIATED on the pinned SDK: `!ctrl-b` is the VENDOR
-    // performing the detachment (`backgroundTasks(toolUseId)` marks the call,
-    // and the foreground result reports `backgroundedByUser`), and
-    // DetachForeground confirms it so the consumer's obligation is stated by the
-    // same verb either way.
+    // A vendor-side detach cannot be INITIATED on the pinned SDK: `!vendor-
+    // backgrounded` is the VENDOR performing the detachment
+    // (`backgroundTasks(toolUseId)` marks the call, and the foreground result
+    // reports `backgroundedByUser`), and DetachForeground confirms it so the
+    // consumer's obligation is stated by the same verb either way.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!ctrl-b" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!vendor-backgrounded" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1032,14 +1032,14 @@ describe("DetachForeground", () => {
     expect(announced.work?.value).toBe(unit);
     // UNCONDITIONAL: a guarded assertion passes when the origin is some OTHER
     // arm, which is exactly the regression worth catching — the whole claim is
-    // that a confirmed Ctrl-B is announced as detached BY THE USER.
+    // that a confirmed vendor-side detach is announced as detached BY THE USER.
     if (announced.origin.case !== "detached") {
       throw new Error("the confirmed detachment was not announced with a detached origin");
     }
     expect(announced.origin.value.cause.case).toBe("byUser");
     // AND THE TURN ITSELF COMPLETES. `AgentSuccess.backgrounded` is the
     // WHOLE-TURN arm — the vendor's `background_requested` terminal reason,
-    // where the agent's own run moved to the background — and Ctrl-B is not
+    // where the agent's own run moved to the background — and this is not
     // that: one CALL left the turn and the agent kept working, which is why the
     // detachment is stated on the announcement above and the terminal is an
     // ordinary completion. Asserting `backgrounded` here would demand the mock

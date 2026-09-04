@@ -246,9 +246,9 @@ homes for behavior already ruled:
   structured_output_retry_exhausted / stop_hook_prevented had NO wire path to
   any frontend stream.
 
-RULED, no proto: context_budget_warning gets no feed row (footer only). Ctrl-b
-detach of foreground work has no daemon verb; out of scope for the overhaul,
-recorded as a follow-up; the two e2e tests stay skipped pointing here.
+RULED, no proto: context_budget_warning gets no feed row (footer only).
+Ctrl-b was removed from the inventory on 2026-09-04 by owner ruling and may
+be added back later.
 
 ## Landing 10 — overhaul/integration (2026-09-04; USER-APPROVED)
 
