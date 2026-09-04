@@ -93,9 +93,10 @@ configuration no user runs.
 Three mechanisms make the Doom boot work, and two of them live in
 `sandbox/doom/`, which this layer reads but does not own:
 
-1. **How Emacs finds Doom: `HOME`, not a flag.** Emacs 28.2 has no
-   `--init-directory` (Emacs 29), so `HOME` is the only way to aim an Emacs
-   at an init tree. `HOME` is the per-test scratch root and `~/.emacs.d`
+1. **How Emacs finds Doom: `HOME`, not a flag.** This began as a version
+   constraint (the image's Emacs was 28.2, and `--init-directory` landed in
+   29); the image now carries 30.2, and `HOME` is still the mechanism for a
+   reason that does not expire. `HOME` is the per-test scratch root and `~/.emacs.d`
    under it is *staged* from the image's `EMACSDIR`: Doom's sources are
    symlinked (they are only ever loaded), and its `.local` tree is copied in
    minus `straight/`, which is symlinked for size. That is necessary because
@@ -389,23 +390,31 @@ Quoting preflight verbatim is the sandbox README's own requirement -- "The
 harness must turn a non-zero exit into a loud skip that quotes this output
 verbatim -- never a silent pass, and never a fallback to an unsandboxed run."
 
-### Emacs in the image is 28.2, not 30
+### Emacs in the image is 30.2, built from source (RESOLVED)
 
-The image installs Debian **bookworm**'s `emacs-nox`, which is **Emacs
-28.2**. This corrects an "Emacs 30-era" expectation, and it is a standing
-constraint on every future scenario, not a one-time correction:
+An earlier revision of this document recorded the image's Emacs as bookworm's
+`emacs-nox`, i.e. **28.2**, and wrote a ceiling around it ("no scenario may
+assume Emacs 29+ anything"). That is withdrawn: `sandbox/Dockerfile` now
+COMPILES Emacs from a pinned upstream commit, and the ceiling is gone.
 
-- **`--init-directory` is unavailable.** It landed in **Emacs 29**. That is
-  why this layer aims Emacs at its Doom tree through `HOME` plus a staged
-  `~/.emacs.d`, which every Emacs supports, rather than through the flag.
-- **No scenario may assume Emacs 29+ anything** — not the flag, not
-  `setopt`, not 29's `treesit`, not 30's `completion-preview-mode`, not
-  `use-package` being built in. A scenario that needs one of those is
-  asserting something the image cannot run, and the bar to raise the image's
-  Emacs is a Dockerfile change with its own justification.
-- `HasEmacs()` requires **27 or later**, for `tab-bar-tabs`, and 28.2
-  satisfies it. The floor is 27 and the ceiling is 28.2; write to that
-  window.
+- **Emacs is 30.2 at commit `636f166cfc86`** — the commit the developer's own
+  Emacs is built from, pinned as `SANDBOX_EMACS_REF` exactly like every other
+  identifier. Verified from inside the image: `emacs-version` is `30.2` and
+  `emacs-repository-version` is `636f166cfc86aa90d63f592fd99f3fdd9ef95ebd`.
+- **`--init-directory` now exists** (it landed in 29). The layer nevertheless
+  keeps aiming Emacs through `HOME` plus a staged `~/.emacs.d`, and that is
+  no longer a version workaround: the container is `--read-only` and
+  `/sandbox/emacs.d` is not a tmpfs, so Doom's `.local` tree cannot be
+  written in place wherever init points.
+- **`HasEmacs()`'s floor of 27 is unchanged** and the ceiling is simply
+  gone. A scenario may use 29's `treesit` or 30's own features; what it may
+  not do is assume anything the image does not carry, which is now a question
+  about the Dockerfile's configure line rather than about a distro package.
+- **xwidgets and native compilation are both compiled in and live**
+  (`(featurep 'xwidget-internal)` and `(native-comp-available-p)` are each
+  `t`), because the webapp panel IS an `xwidget-webkit` webview and no distro
+  Emacs is built with it. `bin/e2e-sandbox.sh build` FAILS if either is
+  absent, so a degraded image cannot exist.
 
 ### The tty frame needs a real terminal type (VERIFIED in-container)
 
@@ -437,41 +446,44 @@ empty) and it carries `Eterm*`, `ansi`, `cons25*`, `cygwin`, `dumb`, `hurd`,
 from that set because it is also the terminal a user of this module actually
 runs Emacs in, so the frame the scenarios inspect is the frame a user sees.
 
-### BLOCKED: the image's Emacs 28.2 cannot boot interactive Doom
+### UNBLOCKED: interactive Doom boots, and the stamp proves it
 
-With the terminal fixed, Emacs starts, allocates a tty frame and reaches
-Doom -- and Doom refuses, in `early-init.el`:
+The previous revision recorded this layer as BLOCKED: bookworm's Emacs 28.2
+could not start interactive Doom at all, because the then-pinned Doom's
+`early-init.el` refuses an interactive session below 29.1 and a `-nw` frame
+IS interactive. `early-init.el` aborting meant `doom!` never ran, no module
+`config.el` loaded, and the readiness stamp never landed.
 
-```
-Warning (initialization): An error occurred while loading
-  '<HOME>/.emacs.d/early-init.el':
-: Detected Emacs 28.2, but interactive Doom needs >=29.1
-```
+That is resolved, and `sandbox/bin/doom-boot-probe.sh` is the standing proof.
+It boots this profile the way StartEmacs does — staged `~/.emacs.d` under a
+scratch HOME, a pty from `script(1)`, `TERM=xterm-256color` — and reports the
+stamp `sandbox/doom/config.el` writes:
 
-The gate is unconditional, in the pinned Doom's own `lisp/doom.el`:
-
-```elisp
-;; Doom's CLI supports Emacs 27.1+ for the long haul, but lisp/doom-emacs.el and
-;; module libraries require 29.1+.
-(let ((supported (if noninteractive 27 29)))
-  (when (< emacs-major-version supported)
-    (user-error "Detected Emacs %s, but %sinteractive Doom needs >=%d.1" ...)))
+```json
+{"ok":true,"emacs_version":"30.2","doom":true,"doom_version":"2.1.0",
+ "map_bang":true,"popup_rule":true,"agent_repl":true}
 ```
 
-`noninteractive` is nil for a `-nw` frame, so the floor is 29, not 27. The
-"floor is 27 and the ceiling is 28.2" window stated above is therefore only
-true for BATCH Emacs; this layer is interactive by construction, and has no
-window at all on 28.2. `early-init.el` aborting means `doom!` never runs,
-no module `config.el` loads, and the readiness stamp is never written, so
-`awaitDoom` fails at `doomBootBound` with the warning buffer on the pty.
+Every field `awaitDoom` asserts is true: Doom is loaded, `map!` expanded,
+`set-popup-rule!` is bound, and `:app agent-repl` loaded. Two things had to be
+fixed on the way there, and both are worth knowing because neither announced
+itself:
 
-The image offers no alternative: `/usr/bin/emacs` and `/usr/bin/emacs-nox`
-are both 28.2 and there is no `emacs29`/`emacs30`. Unblocking is a
-`sandbox/Dockerfile` change owned by the sandbox layer -- an Emacs 29.1+
-build (bookworm-backports, a third-party apt source, or a source build)
--- or, failing that, a `DOOM_REF` old enough to admit 28, which trades the
-problem for a Doom that no longer matches what users run. Until then the
-bounds below cannot be measured, because no healthy run exists to measure.
+- **`DOOM_REF` must be the host's Doom, not master.** Upstream master has
+  moved the module library out of the doomemacs repository into a separate
+  `sources/doom+` collection. On a master pin, `doom sync` SUCCEEDS and the
+  `doom!` block resolves no modules at all; the only symptom is
+  `"popup_rule": false` in the stamp. The pin is now v2.1.0
+  (`4f4911fed96739aebbb6d1dbadf0cadbd418fb9a`), and the Dockerfile asserts
+  the module directories exist so this cannot recur silently.
+- **persp-mode must be loaded before `tab-bar-mode`.** Doom's
+  `:ui workspaces` puts a tab-bar hook on that calls `safe-persp-name`, and
+  persp-mode is deferred to an edge a headless boot never reaches, so the
+  boot hook died with `(void-function safe-persp-name)`.
+
+**Still unmeasured:** the boot bounds below. A healthy boot now exists to
+measure, but no timing has been collected from a suite run, and no e2e or ERT
+suite has yet been RUN inside the sandbox.
 
 ## What this layer does not cover, deliberately
 
@@ -728,19 +740,24 @@ returned.
 `sandbox/bin/e2e-sandbox.sh run --dir e2e go test . -run TestEmacsProofOfLife`:
 the image builds; the dependency stage lands 2244 files; the store starts and
 serves; `script` behaves as `StartPTY` assumes and Emacs takes a tty frame
-(once `TERM` stopped being `dumb`). Still unobserved, and blocked behind the
-Emacs 28.2 gate above: that Doom boots from a staged `~/.emacs.d` under a
-scratch `HOME`; that the copy set in `stageEmacsDir` is
-exactly the set Doom writes to at startup; that `doom-after-init-hook` exists
-in the `DOOM_REF` a build picks; that `script` behaves as `StartPTY` assumes;
-that `assertHostIsolation`'s four probes hold against the run script's actual
-flags; and every one of `HeartbeatBound`, `emacsBootBound`, `doomBootBound`
-and `doomStageBound`, which remain **PROVISIONAL**.
+(once `TERM` stopped being `dumb`). Observed since, via
+`sandbox/bin/doom-boot-probe.sh`, which boots this profile exactly as
+StartEmacs does: Doom DOES boot from a staged `~/.emacs.d` under a scratch
+`HOME`; the copy set in `stageEmacsDir` is sufficient (nothing Doom writes at
+startup hit a read-only path); `doom-after-init-hook` DOES exist in the
+pinned `DOOM_REF`; and the server starts, so `map!`, `set-popup-rule!` and
+`:app agent-repl` are all real. Still unobserved: that
+`assertHostIsolation`'s four probes hold against the run script's actual
+flags, and every one of `HeartbeatBound`, `emacsBootBound`, `doomBootBound`
+and `doomStageBound`, which remain **PROVISIONAL** because no suite has yet
+been run to completion in the sandbox.
 
 ### The bounds are still unmeasured, and why
 
-Measurement needs a healthy run, and the Emacs 28.2 gate above means there
-has never been one. What the blocked run does establish:
+Measurement needs a healthy suite run, and there has not been one yet: the
+Emacs 28.2 gate is lifted and `doom-boot-probe.sh` shows a healthy BOOT, but
+no scenario has run end to end since. The table below is therefore what the
+old, blocked run established, kept until a passing run replaces it.
 
 | Bound | Value today | Status against the real run |
 | --- | --- | --- |
@@ -750,8 +767,10 @@ has never been one. What the blocked run does establish:
 | `doomBootBound` | `2 * emacsBootBound` = 30s | **Exhausted, and correctly so.** The observed failure is a Doom that never initializes at all, not a slow one, so this says nothing about a healthy boot's duration. |
 | `doomStageBound` | 60s | **Comfortable.** Staging plus the store coming up fit inside the 31.18s the whole failing test took, of which 30s was the `doomBootBound` wait -- so the copy set finished in roughly a second, three orders below the bound. Left as-is: it exists to catch a copy that cannot finish, and it is not the tight-bound kind. |
 
-Each `PROVISIONAL` marker stays until an Emacs 29.1+ image produces a
-passing run to measure.
+Each `PROVISIONAL` marker stays until a passing suite run produces numbers
+to measure against. The image is no longer what stands in the way — it is
+Emacs 30.2 with a Doom that boots — so the next step is a scenario run, not
+another Dockerfile change.
 
 ## Registration
 

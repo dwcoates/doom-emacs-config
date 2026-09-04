@@ -63,10 +63,11 @@ network and because it removes the one remaining way a run could reach out.
 modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh build
 ```
 
-That is the whole command: the four identifiers the Dockerfile cannot resolve
+That is the whole command: the identifiers the Dockerfile cannot resolve
 from a checkout are **recorded in `pins.env`** — the base image digest, the
-per-architecture Node and Go tarball checksums, the Doom commit SHA and the
-snapshot stamp — so no `--allow-unpinned` is needed.
+per-architecture Node and Go tarball checksums, the **upstream Emacs commit**,
+the Doom commit SHA and the snapshot stamp — so no `--allow-unpinned` is
+needed.
 
 The gate is unchanged. `build` still **refuses to run** if an identifier is
 pinned neither in `pins.env` nor in the environment, and an environment
@@ -89,10 +90,104 @@ has, and apt then refuses the install as held broken packages. Bump the stamp
 whenever the base digest is bumped.
 
 Every build ends in a verification step, so a build cannot report success
-without a working image: the image must exist, carry
-`emacs`/`node`/`npm`/`go`/`git`/`rsync`/`script`/`doom` on a **login** shell's
-PATH, and have `doom sync` baked (the profile's `.local`). Any of those
-missing fails the build loudly.
+without a working image. The image must exist, carry
+`emacs`/`node`/`npm`/`go`/`git`/`rsync`/`script`/`doom`/`Xvfb` on a **login**
+shell's PATH, have `doom sync` baked (the profile's `.local`), and its Emacs
+must
+
+- report version **30.2** (the host build),
+- have **xwidgets** compiled in (`(featurep 'xwidget-internal)`),
+- have **native compilation** actually available (`(native-comp-available-p)`,
+  which is a stronger claim than "configure said yes" — it needs `libgccjit`
+  and `gcc` present at run time).
+
+Any of those missing fails the build loudly. The same three are asserted in
+the Dockerfile; they are re-asserted in `verify_image` so the property
+belongs to the *image*, not to one build path.
+
+## Emacs is built FROM SOURCE, not installed from apt
+
+**The webapp panel is an `xwidget-webkit` webview, and no distro Emacs is
+built with xwidgets.** Debian's `emacs-nox` has no GUI at all, and even
+`emacs-gtk` is built `--without-xwidgets`. On a distro package the panel
+simply does not work, so a suite that drives it could not exist. The image
+therefore compiles **the same Emacs the user runs**: `SANDBOX_EMACS_REF`
+pins the upstream commit their Emacs was built from (Emacs 30.2,
+*"Development version 636f166cfc86 on HEAD branch"*), gated exactly like
+every other pin — an empty `EMACS_REF` fails the build.
+
+That also settles a version floor which had made a distro package unusable
+anyway: the pinned Doom refuses to start an **interactive** session below
+Emacs 29.1, and a `-nw` frame is interactive, so bookworm's 28.2 aborted in
+`early-init.el` with *"Detected Emacs 28.2, but interactive Doom needs
+>=29.1"* — `doom!` never ran and no module `config.el` was ever loaded.
+
+The base is Debian **trixie** because it carries the GTK 3 / WebKitGTK 4.1
+and gcc-14 / libgccjit-14 this build wants. The source build happens in a
+**separate stage**, so the ~1.5GB of `-dev` packages and the Emacs checkout
+never reach the finished image; only the installed tree is copied in,
+alongside the runtime halves of those libraries (plus `gcc`, `binutils` and
+`libgccjit0`, which a native-compiled Emacs genuinely needs at *run* time —
+it shells out to the assembler and linker whenever `doom sync` compiles a
+`.el` that is not already in its eln cache).
+
+### The configure line, and every departure from the host's
+
+The host (darwin) configures with
+
+```
+--with-native-compilation=aot --with-tree-sitter --with-modules --with-gnutls
+--with-xml2 --with-ns --with-xwidgets --disable-gc-mark-trace
+CFLAGS='-O3 -march=native -DFD_SETSIZE=10000 -DDARWIN_UNLIMITED_SELECT'
+```
+
+Everything there is kept, except where it means nothing on linux:
+
+- `--with-ns` → **`--with-pgtk`**. `--with-ns` is NeXTstep/Cocoa: darwin-only,
+  and `configure` on linux rejects it. On linux the window system that carries
+  xwidgets is GTK 3 + WebKitGTK, as either `--with-pgtk` (pure GTK, one
+  drawing path for X11 and Wayland) or `--with-x-toolkit=gtk3`. pgtk is used,
+  and that it carries xwidgets in this version is **verified, not assumed**:
+  the build greps `configure`'s own summary for xwidgets support and then asks
+  the finished binary for `xwidget-internal`. Either check failing stops the
+  build — there is no quiet fallback to an Emacs without the feature.
+- `-march=native` → **dropped**. A container image must not be compiled for
+  whichever machine happened to build it; that flag bakes the build host's
+  instruction set in and the image would then `SIGILL` on an older CPU.
+- `-DDARWIN_UNLIMITED_SELECT` → **dropped**. Pure darwin: it opts into the
+  macOS `select()` that is not capped at `FD_SETSIZE`. On linux the define
+  names nothing.
+- `-DFD_SETSIZE=10000` → **kept**. glibc's `select()` honors `FD_SETSIZE` at
+  compile time, and harmless where unused.
+- `-O3` → **kept**; generic and architecture-neutral.
+- `--with-native-compilation=aot`, `--with-tree-sitter`, `--with-modules`,
+  `--with-gnutls`, `--with-xml2`, `--with-xwidgets`,
+  `--disable-gc-mark-trace` → **kept verbatim**; none is platform-specific.
+
+`--with-native-compilation=aot` natively compiles the whole of `lisp/` at
+build time. **That is why this image is slow to build and large** — the cost
+is paid once per image and never by a test run. Real numbers are in
+*Build cost*, below.
+
+### Giving a scenario a GUI frame
+
+An `xwidget-webkit` webview cannot exist on a tty frame: it needs a
+*graphical* frame, which needs a display, and `--network none` rules out a
+remote one. The image therefore carries **`Xvfb`** (and `xauth`). A GUI
+scenario runs
+
+```bash
+Xvfb :99 -screen 0 1280x1024x24 &
+export DISPLAY=:99
+export GDK_BACKEND=x11   # this Emacs is pgtk and would otherwise want Wayland
+```
+
+and then starts Emacs with a graphical frame instead of `-nw`.
+
+**The Emacs layer's current tty-frame boot is unchanged** and needs none of
+this — `e2e/emacs*.go` is another owner's file and was not touched. What a
+GUI/xwidget scenario will need *from the harness* is listed under
+*Limitations*.
 
 ## Run
 
@@ -117,6 +212,9 @@ $S run doom sync
 
 # a unit suite of another submodule with its own go.mod, e.g. the daemon
 $S run --dir daemon go test ./...
+
+# does INTERACTIVE Doom actually come up in this image? (see below)
+$S run --dir e2e/sandbox bin/doom-boot-probe.sh
 
 # poke around
 $S shell
@@ -153,9 +251,11 @@ artifacts (`world_test.go`'s `ArtifactsEnv`) land on the host.
 Baked into the image at **build** time, so no test pays for it and no run
 needs the network:
 
-- Debian packages (`emacs-nox`, `git`, `curl`, `rsync`, `ca-certificates`,
+- Debian **trixie** packages (`git`, `curl`, `rsync`, `ca-certificates`,
   `xz-utils`, and `bsdutils` + `util-linux` for `script(1)`) from a fixed
   `snapshot.debian.org` archive.
+- **Emacs 30.2, compiled from source** at the pinned upstream commit, with
+  xwidgets, native compilation (AOT), tree-sitter and modules.
 - Node 22.14.0 and Go 1.24.6, from upstream release tarballs.
 - Doom Emacs, cloned and checked out at an exact SHA, into `/sandbox/emacs.d`.
 - The minimal Doom profile (`doom/`), and `doom install` + **`doom sync`**.
@@ -193,18 +293,26 @@ Two omissions worth restating:
   `history.el` only compares a stored `:frontend` symbol against `'vterm`.
   Omitting it also spares the image vterm's native build chain.
 
-- **Emacs is the headless `emacs-nox` build — no GUI, no xwidget.** Every
-  `(require 'xwidget)` in `frontend.el` is inside a function body, so loading
-  the module never reaches one. A test that actually *drives* the xwidget
-  webview cannot run in this sandbox; that is a real limitation, not an
-  oversight.
+- **Emacs HAS xwidgets, but nothing drives them yet.** The binary is built
+  `--with-xwidgets` and the image carries `Xvfb`, so an xwidget-webkit
+  webview *can* exist here — which it could not on any distro Emacs. What is
+  missing is on the harness side, and needs its owner:
+    - a scenario that starts `Xvfb` and exports `DISPLAY`/`GDK_BACKEND`
+      before Emacs (the entrypoint deliberately does not, so the tty path
+      pays nothing);
+    - a graphical-frame boot in the Emacs client layer — today it allocates a
+      pty via `script(1)` and runs `emacs -nw`, on which no webview can be
+      created;
+    - readiness for the webview itself, not just for Doom: the existing
+      readiness stamp says "Doom is up AND emacsclient answers", which says
+      nothing about whether a webkit widget has loaded.
 
 ## `script(1)` is a guarantee, not an inference
 
 The Emacs client layer allocates its own pty with `script -q -c CMD
 /dev/null`, because Emacs needs a tty for a real frame and the run script
 only passes `-t` when its own stdout is a terminal — which under `go test` it
-is not. `script` lives in `bsdutils` on bookworm, a Debian `required`
+is not. `script` lives in `bsdutils` on trixie, a Debian `required`
 package, so it was already there; **`bsdutils` and `util-linux` are now in
 the apt list by name anyway**, so it is pinned to `SNAPSHOT_STAMP` like every
 other package and a reshuffle of the binary between those two packages cannot
@@ -228,12 +336,13 @@ environment variables the Go layer sets:
   `$AGENT_REPL_E2E_READY` **last** — so the stamp means "Doom is up AND
   emacsclient answers". A boot failure writes the same file with
   `"ok": false` and the elisp error.
-- **Emacs is 28.2** (bookworm's `emacs-nox`), so `--init-directory` (Emacs
-  29) does not exist. The layer aims Emacs at a per-test `~/.emacs.d` through
-  `HOME` instead, staged from `/sandbox/emacs.d`: sources symlinked, the
-  `.local` tree copied minus `straight/`. That staging exists because the
-  container is `--read-only` and `/sandbox/emacs.d` is not a tmpfs, so Doom's
-  local tree cannot be written in place.
+- **Emacs is 30.2** (the source build above). The layer still aims Emacs at a
+  per-test `~/.emacs.d` through `HOME` rather than `--init-directory`,
+  staged from `/sandbox/emacs.d`: sources symlinked, the `.local` tree copied
+  minus `straight/`. That staging is not a version workaround and does not go
+  away on a newer Emacs — the container is `--read-only` and
+  `/sandbox/emacs.d` is not a tmpfs, so Doom's local tree cannot be written
+  in place wherever init is pointed.
 
 `$S shell` and `$S run doom sync` are unaffected: none of the environment
 variables above is set there.
@@ -283,37 +392,64 @@ should be a drop-in. Three podman-specific notes:
    so that is fine, but it is why the directive is a comment and not a
    requirement.
 
-## What is unverified
+## What is verified, and what is not
 
-Explicitly, so nothing here reads as a tested claim:
+Verified by building and running the image on 2026-09-04 (arm64, Docker
+Desktop). Everything below was OBSERVED, not reasoned about:
 
-- **The image has never been built.** No `docker build` or `podman build` has
-  run. Apt package availability at `SNAPSHOT_STAMP`, the Node/Go tarball
-  URLs, the Doom clone, `doom install`, `doom sync` under this minimal
-  profile, and both cache primes are all *unexecuted*.
-- **No test has run inside the sandbox.** Whether the e2e suite and the ERT
-  suites actually pass under `emacs-nox` on Linux is unknown.
-- **The offline claim is untested.** `npm ci --offline` and `GOPROXY=off`
-  succeeding purely from the baked caches is a design intent that a build
-  would confirm or refute. If `go mod download` (build list only) turns out
-  to miss something a `go test` needs, the run will fail loudly under
-  `--network none` — which is the correct failure, and the fix is to widen
-  the prime.
-- **`doom install --no-config --no-env --no-fonts --no-hooks` flag names**
-  are from Doom's documented CLI, not from a run of this Doom SHA.
-- **Nothing about the Emacs client layer's Doom boot has been observed.**
-  That Doom boots from a staged `~/.emacs.d` under a scratch `HOME`; that the
-  copy set the staging uses is exactly the set Doom writes at startup (a
-  read-only path Doom insists on writing would fail the boot, loudly, with
-  the pty output); that `doom-after-init-hook` exists in whichever `DOOM_REF`
-  a build picks (the profile falls back to `emacs-startup-hook`); and that
-  `apt-get install bsdutils util-linux` resolves at `SNAPSHOT_STAMP` — all
-  unexecuted.
-- **Base image digest, tarball checksums and the Doom SHA cannot be resolved
-  without a registry or a download** — so they are resolved once from a real
-  build and recorded in `pins.env`, which `build` reads. The gate is
-  unchanged: anything pinned in neither `pins.env` nor the environment is
-  still a refusal to build.
+- **`bin/e2e-sandbox.sh build` succeeds and `verify_image` passes.** Apt at
+  `SNAPSHOT_STAMP`, the Emacs source build, both tarball checksums, the Doom
+  clone, `doom install`, `doom sync`, and both cache primes all ran.
+- **Emacs is the host's own build.** From inside the image:
+
+  ```
+  GNU Emacs 30.2
+  emacs-version: 30.2
+  repo-version: 636f166cfc86aa90d63f592fd99f3fdd9ef95ebd
+  (featurep 'xwidget-internal)  => t
+  (native-comp-available-p)     => t
+  system-configuration-options:
+    --prefix=/usr/local --with-native-compilation=aot --with-tree-sitter
+    --with-modules --with-gnutls --with-xml2 --with-pgtk --with-xwidgets
+    --disable-gc-mark-trace 'CFLAGS=-O3 -DFD_SETSIZE=10000'
+  ```
+
+  `configure`'s own summary reported "Does Emacs support Xwidgets? yes" and
+  "Does Emacs have native lisp compiler? yes", and the runtime WebKitGTK is
+  2.40.5 — under Emacs's `< 2.41.92` ceiling, which is the whole reason for
+  the September-2023 snapshot.
+- **INTERACTIVE Doom boots and publishes its readiness stamp.**
+  `bin/doom-boot-probe.sh` replicates what `e2e/emacs_test.go` StartEmacs does
+  — staged `~/.emacs.d` under a scratch HOME, a pty from `script(1)`,
+  `TERM=xterm-256color` — and reports the stamp:
+
+  ```json
+  {"ok":true,"emacs_version":"30.2","doom":true,"doom_version":"2.1.0",
+   "map_bang":true,"popup_rule":true,"agent_repl":true}
+  ```
+
+  Every field `awaitDoom` asserts is true, which is what lifts the Emacs-28.2
+  block recorded in `e2e/EMACS-LAYER-SPEC.md`. The probe exits non-zero and
+  dumps the pty when the stamp is missing or reports a failed boot; it is how
+  both bugs above were found.
+- **The offline claim holds for the entrypoint's own work.** `npm ci
+  --offline` resolved both lockfiles from the baked cache under
+  `--network none`.
+
+Still unverified, stated plainly:
+
+- **No e2e or ERT suite has been RUN inside the sandbox.** Whether
+  `go test ./...` and the ERT suites pass under this Emacs on Linux is
+  unknown; only the boot they depend on is established.
+- **`GOPROXY=off` has not been exercised by an actual build.** The module
+  cache was primed successfully, but no `go build`/`go test` has consumed it
+  offline, so a gap between `go mod download`'s build list and what a test
+  actually needs would still surface at run time.
+- **The xwidget webview has not been created.** The binary supports it and
+  `Xvfb` is present; nothing has yet started a display and a graphical frame
+  (see *Limitations*).
+- **Only arm64 has been built.** The amd64 checksums in `pins.env` are
+  recorded but unexercised.
 
 Verified on the authoring machine:
 
