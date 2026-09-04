@@ -69,6 +69,70 @@ func TestRunRecordsEveryInvocation(t *testing.T) {
 	}
 }
 
+func TestRunRecordsWhatAnAnsweredCommandPrinted(t *testing.T) {
+	// Arrange.
+	s, _, dir := world(t)
+
+	// Act.
+	Run(s, "/tmp", []string{"-C", dir, "rev-parse", "--show-toplevel"})
+
+	// Assert.
+	if len(s.Calls) != 1 {
+		t.Fatalf("recorded calls = %+v, want one", s.Calls)
+	}
+	if got, want := s.Calls[0].Stdout, Canon(dir)+"\n"; got != want {
+		t.Fatalf("recorded stdout = %q, want %q", got, want)
+	}
+	if s.Calls[0].Exit != 0 {
+		t.Fatalf("recorded exit = %d, want 0", s.Calls[0].Exit)
+	}
+}
+
+func TestRunRecordsWhyARefusedCommandFailed(t *testing.T) {
+	// Arrange.
+	s, _, _ := world(t)
+	absent := t.TempDir()
+
+	// Act.
+	Run(s, "/tmp", []string{"-C", absent, "rev-parse", "--show-toplevel"})
+
+	// Assert.
+	if len(s.Calls) != 1 {
+		t.Fatalf("recorded calls = %+v, want one", s.Calls)
+	}
+	if s.Calls[0].Exit != 128 || !strings.Contains(s.Calls[0].Stderr, "not a git repository") {
+		t.Fatalf("recorded answer = exit %d stderr %q, want a loud 128",
+			s.Calls[0].Exit, s.Calls[0].Stderr)
+	}
+}
+
+func TestClipRecordedBoundsAnAnswerTooLongToKeep(t *testing.T) {
+	// Arrange.
+	long := strings.Repeat("x", recordedOutputLimit+1)
+
+	// Act.
+	got := clipRecorded(long)
+
+	// Assert.
+	if want := strings.Repeat("x", recordedOutputLimit) + "...(clipped)"; got != want {
+		t.Fatalf("clipRecorded of an over-long answer = %q, want it clipped at %d with the marker",
+			got, recordedOutputLimit)
+	}
+}
+
+func TestClipRecordedKeepsAnAnswerThatFits(t *testing.T) {
+	// Arrange.
+	short := strings.Repeat("x", recordedOutputLimit)
+
+	// Act.
+	got := clipRecorded(short)
+
+	// Assert.
+	if got != short {
+		t.Fatalf("clipRecorded of an answer at the limit = %d bytes, want it kept whole", len(got))
+	}
+}
+
 func TestSymbolicRefIsUnsetWithoutAnOriginHead(t *testing.T) {
 	// Arrange.
 	s, _, dir := world(t)
