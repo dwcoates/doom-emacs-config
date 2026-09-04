@@ -544,8 +544,15 @@ func (r *resolver) chips(s *wsState) *frontendv1.FooterLiveWorkChips {
 	if n := len(s.monitors); n > 0 {
 		out.Monitors = &frontendv1.FooterChipMonitors{Count: uint32(n)}
 	}
-	if n := len(s.crons); n > 0 {
-		out.Crons = &frontendv1.FooterChipCrons{Count: uint32(n)}
+	// THE ⏱ CHIP COUNTS EVERY SCHEDULED JOB, not just the crons: footer.proto
+	// words it as "live scheduled jobs (cron/wakeup schedules)", and a pending
+	// self-scheduled wakeup is one of them. It retires only once both are gone.
+	scheduled := len(s.crons)
+	if s.wakeup != nil {
+		scheduled++
+	}
+	if scheduled > 0 {
+		out.Crons = &frontendv1.FooterChipCrons{Count: uint32(scheduled)}
 	}
 	return out
 }
