@@ -453,6 +453,23 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		// needs a live session — which is the only thing NoFake is for.
 		env = append(env, "AGENT_REPL_FAKE_SHIMS=1")
 	}
+	// COVERAGE, WHEN THE RUN ASKED FOR IT. GOCOVERDIR is this daemon's own
+	// counter directory; NODE_V8_COVERAGE is inherited by every shim the
+	// daemon spawns (shimclient.spawnEnv copies the daemon's environment
+	// forward verbatim outside its fixed override set). Both are absent
+	// entirely on an ordinary run.
+	if root := CoverageRoot(); root != "" {
+		daemonCov, err := CoverageEnv(root, "claude-repld")
+		if err != nil {
+			t.Fatalf("harness: %v", err)
+		}
+		nodeCov, err := NodeCoverageEnv(root)
+		if err != nil {
+			t.Fatalf("harness: %v", err)
+		}
+		env = append(env, daemonCov...)
+		env = append(env, nodeCov...)
+	}
 	env = append(env, opts.ExtraEnv...)
 
 	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
@@ -492,6 +509,14 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	}
 	d.cmd = cmd
 	t.Cleanup(func() {
+		// A COVERAGE RUN ASKS FOR A GRACEFUL EXIT FIRST. The Go runtime
+		// writes an instrumented binary's counters as it leaves through
+		// main; a SIGKILLed daemon writes nothing, so the cleanup kill
+		// below would discard every counter the run just earned. This adds
+		// a bounded SIGTERM ahead of the kill and never replaces it: a
+		// daemon that ignores the signal, or one the test already killed,
+		// still gets the unconditional Kill/ReapStrays underneath.
+		d.gracefulStopForCoverage()
 		d.Kill()
 		// The daemon's group is gone; its shims are in groups of their own and
 		// would otherwise outlive the test.
@@ -719,6 +744,20 @@ func (d *Daemon) Stop() {
 	}
 	d.t.Errorf("harness: the daemon did not exit within %s of SIGTERM; killing it", DefaultTimeout)
 	d.Kill()
+}
+
+// gracefulStopForCoverage sends SIGTERM and waits, bounded, for the daemon to
+// leave — but ONLY on a coverage run, and it reports nothing: it is a
+// best-effort flush of the daemon's coverage counters ahead of the cleanup
+// kill, not a shutdown assertion. Daemon.Stop remains the assertion.
+func (d *Daemon) gracefulStopForCoverage() {
+	if !CoverageEnabled() || d.cmd == nil || d.cmd.Process == nil || d.reaped() {
+		return
+	}
+	if err := d.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return
+	}
+	d.awaitReapWithin(DefaultTimeout)
 }
 
 // Kill ends the process group without warning, for crash simulation and for

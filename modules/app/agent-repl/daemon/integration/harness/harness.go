@@ -112,7 +112,12 @@ func MainAt(m *testing.M, module string) int {
 		{fakeshimBinary, "./integration/fakeshim"},
 		{gitBinary, "./integration/fakegit/git"},
 	} {
-		cmd := exec.Command("go", "build", "-o", b.out, b.pkg)
+		// An instrumented build when coverage is on; the plain build
+		// otherwise. `-cover` changes only what the binary WRITES, never
+		// what it does.
+		buildArgs := append([]string{"build"}, CoverageBuildArgs(CoverageRoot())...)
+		buildArgs = append(buildArgs, "-o", b.out, b.pkg)
+		cmd := exec.Command("go", buildArgs...)
 		cmd.Dir = module
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stderr
