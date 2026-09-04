@@ -1131,6 +1131,28 @@ unary rpc can produce, which the contract never collapses into one."
       (should (= 1 (seq-count (lambda (call) (equal (car call) "AdoptHostWorkspace"))
                               agent-repl-test-host--calls))))))
 
+(ert-deftest agent-repl-test-host-transferred-latches-every-waiting-workspace ()
+  "A stand-down transfers EVERY free workspace, so every one must latch.
+Each latch is its own self-removing closure on the shared acceptance
+hook, and `add-hook' compares candidates against what already hangs
+there — so two workspaces waiting at once is the arrangement that proves
+neither the dedup nor the self-reference swallows the second one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending t)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--subscribe
+     "ws-2" nil (agent-repl-test-host--ref "id-2" "/tmp/ws-2"))
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    (agent-repl-test-host--push "ws-2" (list :arm :transferred :value nil))
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      ;; Act
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (= 2 (seq-count (lambda (call) (equal (car call) "AdoptHostWorkspace"))
+                              agent-repl-test-host--calls))))))
+
 (ert-deftest agent-repl-test-host-transferred-prefers-a-standing-successor-over-the-wait ()
   "An accepted successor is adopted onto AT ONCE; the wait is only for the pending case."
   (agent-repl-test-host--with-harness
