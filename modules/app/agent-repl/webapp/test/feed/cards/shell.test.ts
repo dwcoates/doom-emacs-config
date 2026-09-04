@@ -8,6 +8,7 @@ import {
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import {
   FeedRowSchema,
+  FeedShellLostSchema,
   FeedShellSchema,
   type FeedShell,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -15,6 +16,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedShell,
   PROMPT_CHROME,
+  SHELL_LOST_CAUSE_ARMS,
   SHELL_SETTLED_ARMS,
   STOP_OUTCOME_MS,
 } from "../../../src/feed/cards/shell.js";
@@ -54,6 +56,7 @@ function shell(
     settled?: {
       endedAtMs: bigint;
       outcome: "completed" | "cancelled" | "lost";
+      lostHow?: "fileVanished" | "wentSilent" | "sweptUp";
       exit?: number;
     };
   } = {},
@@ -82,7 +85,10 @@ function shell(
             value: {
               endedAtMs: opts.settled.endedAtMs,
               exit: opts.settled.exit === undefined ? undefined : { code: opts.settled.exit },
-              outcome: { case: opts.settled.outcome, value: {} },
+              outcome:
+                opts.settled.outcome === "lost" && opts.settled.lostHow !== undefined
+                  ? { case: "lost", value: { how: { case: opts.settled.lostHow, value: {} } } }
+                  : { case: opts.settled.outcome, value: {} },
             },
           },
   });
@@ -249,6 +255,42 @@ describe("drawFeedShell settled", () => {
       expect(el.querySelector(".agent-dot")?.classList.contains(c.dot)).toBe(true);
     });
   }
+
+  it('says "file vanished" as the lost cause when the file went away', () => {
+    const el = drawFeedShell(
+      shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "fileVanished" } }),
+      ctxFor().rc,
+    );
+    expect(el.querySelector(".shell-outcome")?.textContent).toBe("lost sight of: file vanished");
+  });
+
+  it('says "went silent" as the lost cause when the run produced nothing', () => {
+    const el = drawFeedShell(
+      shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "wentSilent" } }),
+      ctxFor().rc,
+    );
+    expect(el.querySelector(".shell-outcome")?.textContent).toBe("lost sight of: went silent");
+  });
+
+  it('says "swept up at boot" as the lost cause when a boot sweep closed it', () => {
+    const el = drawFeedShell(
+      shell({ settled: { endedAtMs: 1n, outcome: "lost", lostHow: "sweptUp" } }),
+      ctxFor().rc,
+    );
+    expect(el.querySelector(".shell-outcome")?.textContent).toBe("lost sight of: swept up at boot");
+  });
+
+  it("says the plain word when an older daemon ruled no cause", () => {
+    const el = drawFeedShell(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
+    expect(el.querySelector(".shell-outcome")?.textContent).toBe("lost sight of");
+  });
+
+  it("words every lost cause the schema declares", () => {
+    const schemaArms = FeedShellLostSchema.oneofs
+      .filter((oneof) => oneof.name === "how")
+      .flatMap((oneof) => oneof.fields.map((field) => field.localName));
+    expect([...SHELL_LOST_CAUSE_ARMS].sort()).toEqual([...schemaArms].sort());
+  });
 
   it("never draws a lost shell in the error register", () => {
     const el = drawFeedShell(shell({ settled: { endedAtMs: 1n, outcome: "lost" } }), ctxFor().rc);
