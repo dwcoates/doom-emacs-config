@@ -259,7 +259,7 @@ func TestEveryVerdictHasItsOwnTreatment(t *testing.T) {
 					Undecidable: &conversationv1.AgentPermissionDeniedForWantOfDecider{},
 				},
 			},
-			want: "denied_by_policy",
+			want: "denied_undecidable",
 		},
 	}
 	for _, tc := range tests {
@@ -301,6 +301,8 @@ func verdictWord(answered *frontendv1.FeedPermissionAnswered) string {
 		return "denied_by_user"
 	case *frontendv1.FeedPermissionAnswered_DeniedByPolicy:
 		return "denied_by_policy"
+	case *frontendv1.FeedPermissionAnswered_DeniedUndecidable:
+		return "denied_undecidable"
 	}
 	return "unset"
 }
@@ -324,7 +326,7 @@ func TestAnUndecidableDenialNeverReadsAsTheUsersActOrAsARule(t *testing.T) {
 	})
 
 	// Assert: it is the only denial retrying may resolve, and it says so.
-	text := h.permissionCard().GetAnswered().GetDeniedByPolicy().GetText()
+	text := h.permissionCard().GetAnswered().GetDeniedUndecidable().GetText()
 	if !contains(text, "denied for want of a decider") || !contains(text, detail) {
 		t.Fatalf("text = %q, want the want-of-a-decider wording", text)
 	}
@@ -461,5 +463,30 @@ func TestAPermissionFrameWithNoAskIdentityIsRefusedLoudly(t *testing.T) {
 	// Assert.
 	if !h.hasRecord("error", "daemon.feed.permission_without_identity") {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.permission_without_identity", h.records())
+	}
+}
+
+func TestAnUndecidableDenialWithNoDetailStillNamesTheMissingDecider(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: the shim stated no detail of its own.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{Denied: &conversationv1.AgentPermissionDenied{
+			By: &conversationv1.AgentPermissionDenied_Undecidable{
+				Undecidable: &conversationv1.AgentPermissionDeniedForWantOfDecider{},
+			},
+		}},
+	})
+
+	// Assert: the composed wording stands alone rather than trailing an empty
+	// detail.
+	got := h.permissionCard().GetAnswered().GetDeniedUndecidable().GetText()
+	if got != "denied for want of a decider — the deciding machinery could not be reached" {
+		t.Fatalf("text = %q, want the bare want-of-a-decider wording", got)
 	}
 }
