@@ -680,8 +680,8 @@ func TestPermissionDeniedForWantOfDecider(t *testing.T) {
 	}
 	// The vendor's own account rides along as the detail clause, which is
 	// what makes the composed line say WHAT could not decide.
-	if got := answered.GetDeniedByPolicy().GetText(); !strings.Contains(got, "could not reach a verdict") {
-		t.Errorf("denied_by_policy text = %q, want the scenario's own detail (%q) appended as the reason clause",
+	if got := answered.GetDeniedUndecidable().GetText(); !strings.Contains(got, "could not reach a verdict") {
+		t.Errorf("denied_undecidable text = %q, want the scenario's own detail (%q) appended as the reason clause",
 			got, "could not reach a verdict")
 	}
 

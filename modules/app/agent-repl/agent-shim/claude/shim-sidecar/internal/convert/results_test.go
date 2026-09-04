@@ -998,3 +998,28 @@ func TestBashExitCodeIgnoresAStatusNamedMidLine(t *testing.T) {
 		t.Fatalf("bashExitCode = %d, want nil for a status named mid-line", *got)
 	}
 }
+
+func TestReadSuccessLeavesTheExtentUnsetForAnImageRead(t *testing.T) {
+	// Arrange: an image read. AgentReadSuccess retired the image extent this
+	// wave, so no arm can state how much came back — and `whole` with empty
+	// contents would claim an empty file that was never read.
+	call := openCall{input: map[string]any{"file_path": "/p/shot.png"}}
+	result := map[string]any{"type": "image", "file": map[string]any{
+		"filePath": "/p/shot.png",
+		"type":     "image/png",
+	}}
+
+	// Act
+	got := readSuccess(call, result, 1000)
+
+	// Assert
+	if got.GetExtent() != nil {
+		t.Fatalf("Extent = %T, want unset for a non-text read", got.GetExtent())
+	}
+	if got.GetPath().GetPath() != "/p/shot.png" {
+		t.Fatalf("Path = %q, want the read's path stated even with no extent", got.GetPath().GetPath())
+	}
+	if got.GetSettledAt() == nil {
+		t.Fatal("SettledAt = nil, want the settle instant: the read did finish")
+	}
+}

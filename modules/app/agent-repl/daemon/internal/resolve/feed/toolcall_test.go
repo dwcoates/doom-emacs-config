@@ -831,3 +831,27 @@ func TestAnActivityWithNoUnitIdentityIsRefusedLoudly(t *testing.T) {
 
 // unusedFrontend keeps the frontend import honest.
 var _ = (*frontendv1.FeedRow)(nil)
+
+// TestAReadWithNoExtentDrawsTheNoneArm pins the retired-extent read: a read
+// that settled with its extent oneof unset (an image this wave) has nothing to
+// draw below the divider, and feed.proto's FeedToolCallReturned.output is a
+// PRESENCE contract — the `none` arm, never an unset oneof and never an empty
+// text.
+func TestAReadWithNoExtentDrawsTheNoneArm(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path: &conversationv1.ReadPath{Path: "shot.png"},
+		}},
+	}))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetSucceeded() == nil {
+		t.Fatalf("returned = %v, want the succeeded verdict", returned)
+	}
+	if returned.GetNone() == nil {
+		t.Fatalf("output form = %v, want the `none` arm", returned.GetForm())
+	}
+}
