@@ -26,6 +26,15 @@ func (c *Converter) skillSettled(call openCall, markdown string, ts int64) *conv
 	}})
 }
 
+// skillFailed settles an invocation the producer answered with an error: no
+// document will ever land for a skill that did not resolve, so the error result
+// IS this unit's terminal.
+func (c *Converter) skillFailed(failure *conversationv1.AgentToolFailure) *conversationv1.AgentActivity {
+	return item(&conversationv1.AgentActivity_SkillUse{SkillUse: &conversationv1.AgentSkillUse{
+		Result: &conversationv1.AgentSkillUse_Failure{Failure: &conversationv1.AgentSkillUseFailure{Error: failure}},
+	}})
+}
+
 func skillName(call openCall) string {
 	return str(pick(call.input, "skill", "name", "command"))
 }

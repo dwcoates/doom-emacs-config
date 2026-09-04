@@ -80,6 +80,15 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 	case kindSubagent:
 		return c.subagentSettled(call, result, failed, failure, ts, at)
 	case kindSkill:
+		// A VENDOR-STATED ERROR IS THE UNIT'S END. Nothing further arrives for a
+		// skill that did not resolve — no document will ever land — so an error
+		// result settles the invocation as a failure here, exactly as the shim's
+		// own converter does (convert/tools/skill-use.ts settle). Swallowing it
+		// left this plane's START row as the last word on the unit, which
+		// overwrote the stream plane's failed card back to running.
+		if failed {
+			return c.skillFailed(failure)
+		}
 		// A SKILL'S OWN RETURN IS WORTHLESS TO DRAW: the producer answers with a
 		// bare acknowledgement restating the name. The unit settles when the
 		// DOCUMENT lands, as a separate injected-context record linked back to
