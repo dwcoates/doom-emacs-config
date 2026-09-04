@@ -829,6 +829,13 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
 
 - No shim.v1 / store.v1 / conversation.v1 change in landing 8 (frontend.v1 only).
 
+## Landing 10 relay (2026-09-04)
+
+- No shim change: every landing-10 shape is a frontend/agentrepl relay of a
+  fact the shim already states (AgentSendMessageSuccess arms,
+  AgentPermissionDenied.undecidable, SessionQueryDied.cause,
+  SetSessionModelFailure.cold).
+
 ## Landing 9 relay (2026-09-03)
 
 - No shim.v1 change (the daemon relays the existing StartSessionFailure arm).

@@ -250,6 +250,27 @@ RULED, no proto: context_budget_warning gets no feed row (footer only). Ctrl-b
 detach of foreground work has no daemon verb; out of scope for the overhaul,
 recorded as a follow-up; the two e2e tests stay skipped pointing here.
 
+## Landing 10 — overhaul/integration (2026-09-04; USER-APPROVED)
+
+Four forgotten plain-data shapes the rebuilt e2e coverage exposed (tests
+written to the proto found no arm to assert). Fast mode was explicitly NOT
+given a frontend surface (owner ruling: "no fast mode").
+
+- frontend.v1 FeedAgentPrompt.delivery oneof (tags 3-4):
+  FeedAgentPromptQueuedToLive | FeedAgentPromptResumedRecipient — mirrors
+  conversation.v1 AgentSendMessageSuccess's queued_to_live / resumed_recipient
+  arms on the SENDER's row; UNSET on the recipient's copy.
+- frontend.v1 FeedPermissionAnswered.denied_undecidable (tag 6) =
+  FeedPermissionDeniedUndecidable{text} — the shim's
+  AgentPermissionDenied.undecidable relayed as its own arm instead of being
+  folded onto denied_by_policy.
+- frontend.v1 FeedTurnErrorQueryDied.cause oneof (tags 1-2):
+  FeedTurnErrorQueryUnexpectedEof | FeedTurnErrorQueryIteratorFailure —
+  mirrors conversation.v1 SessionQueryDied.
+- agentrepl.v1 SetModelError.cold (tag 8) = SetModelCold{} — the shim's
+  SetSessionModelFailure.cold relayed by name; the remediation menu is the
+  cold gate row's (AnswerColdGate). Closes the ERROR-ARMS row.
+
 ## Landing 9 — overhaul/integration (2026-09-03; USER-APPROVED)
 
 - agentrepl.v1 OpenWorkspaceError.vendor_start_failed (tag 8) =

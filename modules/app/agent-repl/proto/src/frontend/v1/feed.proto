@@ -978,7 +978,17 @@ message FeedTurnErrorVendorUnmodeled {
 }
 message FeedTurnErrorMaxTokens {}
 message FeedTurnErrorRefusal {}
-message FeedTurnErrorQueryDied {}
+// The vendor query died under the turn (landing 10 carries the cause).
+message FeedTurnErrorQueryDied {
+  oneof cause {
+    // The agent binary's stream ended without a close.
+    FeedTurnErrorQueryUnexpectedEof unexpected_eof = 1;
+    // The SDK's iterator threw.
+    FeedTurnErrorQueryIteratorFailure iterator_failure = 2;
+  }
+}
+message FeedTurnErrorQueryUnexpectedEof {}
+message FeedTurnErrorQueryIteratorFailure {}
 
 // The user stopped the turn — directly, or by a prompt that interrupted.
 // An accusation with evidence: stated only on the acknowledged stop.
@@ -1238,7 +1248,16 @@ message FeedPermissionAnswered {
     // Policy said no with NO open ask (a rule, dontAsk); worded so it never
     // reads as the user's act.
     FeedPermissionDeniedByPolicy denied_by_policy = 5;
+    // Nobody could decide: the classifier reached no verdict and no rule
+    // applied, so the call was denied for want of a decider (landing 10).
+    // Distinct from a rule's deny, and never the user's act.
+    FeedPermissionDeniedUndecidable denied_undecidable = 6;
   }
+}
+// The undecidable denial's composed wording.
+message FeedPermissionDeniedUndecidable {
+  // The reason, drawn verbatim ("denied for want of a decider").
+  string text = 1;
 }
 message FeedPermissionAllowedOnce {}
 message FeedPermissionAllowedStanding {}
@@ -1431,7 +1450,19 @@ message FeedAgentPrompt {
   // block vocabulary. Long bodies fold/cap as client presentation, like
   // any long prompt.
   FeedAgentPromptBody body = 2;
+  // How the send was delivered, when the producer stated it (landing 10).
+  // UNSET on the recipient's copy and when the producer observed nothing;
+  // the row's presence already says the attempt happened.
+  oneof delivery {
+    // The recipient was already running; the message queued for it.
+    FeedAgentPromptQueuedToLive queued_to_live = 3;
+    // The recipient was not running and WAS RESUMED to receive it — the
+    // cause of that agent's renewed activity and renewed cost.
+    FeedAgentPromptResumedRecipient resumed_recipient = 4;
+  }
 }
+message FeedAgentPromptQueuedToLive {}
+message FeedAgentPromptResumedRecipient {}
 // The address element.
 message FeedAgentPromptAddress {
   // The composed line, drawn verbatim.
