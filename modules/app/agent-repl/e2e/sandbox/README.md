@@ -184,10 +184,12 @@ export GDK_BACKEND=x11   # this Emacs is pgtk and would otherwise want Wayland
 
 and then starts Emacs with a graphical frame instead of `-nw`.
 
-**The Emacs layer's current tty-frame boot is unchanged** and needs none of
-this — `e2e/emacs*.go` is another owner's file and was not touched. What a
-GUI/xwidget scenario will need *from the harness* is listed under
-*Limitations*.
+**The Emacs layer now does exactly this.** `e2e/emacs_display_test.go`
+starts one Xvfb per test with `-displayfd`, so the *server* picks a free
+display and reporting it is the same edge as it being ready, and
+`StartEmacs` boots plain `emacs` — no `-nw` — with `DISPLAY` and
+`GDK_BACKEND=x11`. The tty-frame boot is withdrawn: the panel is an
+xwidget-webkit webview, so on a tty frame it could not be created at all.
 
 ## Run
 
@@ -293,19 +295,23 @@ Two omissions worth restating:
   `history.el` only compares a stored `:frontend` symbol against `'vterm`.
   Omitting it also spares the image vterm's native build chain.
 
-- **Emacs HAS xwidgets, but nothing drives them yet.** The binary is built
-  `--with-xwidgets` and the image carries `Xvfb`, so an xwidget-webkit
-  webview *can* exist here — which it could not on any distro Emacs. What is
-  missing is on the harness side, and needs its owner:
-    - a scenario that starts `Xvfb` and exports `DISPLAY`/`GDK_BACKEND`
-      before Emacs (the entrypoint deliberately does not, so the tty path
-      pays nothing);
-    - a graphical-frame boot in the Emacs client layer — today it allocates a
-      pty via `script(1)` and runs `emacs -nw`, on which no webview can be
-      created;
-    - readiness for the webview itself, not just for Doom: the existing
-      readiness stamp says "Doom is up AND emacsclient answers", which says
-      nothing about whether a webkit widget has loaded.
+- **Emacs has xwidgets, and the Emacs layer now drives them.** The binary is
+  built `--with-xwidgets` and the image carries `Xvfb`, and
+  `e2e/emacs_display_test.go` starts one per test while `StartEmacs` takes a
+  graphical frame on it. `TestEmacsProofOfLife` asserts the live WKWebView
+  and reads back the daemon origin it navigated to. The entrypoint still
+  starts no display of its own, deliberately: the layer that needs one owns
+  its lifetime, so a non-GUI run pays nothing.
+    - Readiness for the webview is asserted where it belongs — in the
+      scenario, by reading the workspace's own webview buffer — rather than
+      folded into the Doom readiness stamp, which correctly says only "Doom
+      is up AND emacsclient answers".
+    - **A real shim still cannot start a session on Linux.** The shim's
+      session lock is `open(2)`'s `O_EXLOCK`, which is macOS/BSD only, and
+      on Linux it refuses to start rather than risk a duplicate. Every
+      sandbox scenario that needs a turn is behind that; see
+      `e2e/EMACS-LAYER-SPEC.md`, "What the proof-of-life test reaches
+      today".
 
 ## `script(1)` is a guarantee, not an inference
 
@@ -445,9 +451,9 @@ Still unverified, stated plainly:
   cache was primed successfully, but no `go build`/`go test` has consumed it
   offline, so a gap between `go mod download`'s build list and what a test
   actually needs would still surface at run time.
-- **The xwidget webview has not been created.** The binary supports it and
-  `Xvfb` is present; nothing has yet started a display and a graphical frame
-  (see *Limitations*).
+- **The xwidget webview HAS been created** — observed, on the Xvfb the Emacs
+  layer starts: the panel's live WKWebView answers with the daemon's own
+  origin (see *Limitations*).
 - **Only arm64 has been built.** The amd64 checksums in `pins.env` are
   recorded but unexercised.
 
