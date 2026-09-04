@@ -32,6 +32,7 @@ package integration
 
 import (
 	"context"
+	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -173,6 +174,124 @@ func runIn(dir, name string, args ...string) (string, error) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+// ---------------------------------------------------------------------------
+// The ONE store the mocked vendor's own stream-plane writes go to.
+// ---------------------------------------------------------------------------
+
+// WHY THIS FIXTURE IS SHARED AND THE OTHERS ARE NOT.
+//
+// A scenario starts four real processes. Three of them are READ BACK by that
+// scenario — the sidecar under test, the store it writes to, and the proxy that
+// records the wire — so each must be private or one scenario's records would
+// answer another's assertions. This fourth one is read back by NOBODY: it
+// exists solely so the shim's stream-plane rows have somewhere to go instead of
+// contaminating the store this suite asserts on.
+//
+// A store nobody reads cannot leak one scenario's records into another's
+// assertions, so booting 133 of them was 133 process boots bought for nothing.
+// One serves the whole test binary and is stood down in runSuite.
+//
+// Its lifetime is the TEST BINARY's, not a subject's, so it is built without a
+// *testing.T: a t.Cleanup would stop it after whichever subject happened to
+// need it first.
+var (
+	vendorStoreOnce   sync.Once
+	vendorStoreSocket string
+	vendorStoreStop   func()
+	vendorStoreErr    error
+)
+
+// sharedVendorStoreSocket answers the shared store's socket, starting it on
+// first use. A machine whose store does not build or start fails exactly the
+// subjects that compose the two systems, and says why.
+func sharedVendorStoreSocket(t *testing.T) string {
+	t.Helper()
+	vendorStoreOnce.Do(func() {
+		vendorStoreSocket, vendorStoreStop, vendorStoreErr = startVendorStore()
+	})
+	if vendorStoreErr != nil {
+		t.Fatalf("the mocked vendor needs a store for its own stream-plane writes, and it would not start: %v", vendorStoreErr)
+	}
+	return vendorStoreSocket
+}
+
+// stopSharedVendorStore stands the store down if it was ever started. runSuite
+// calls it; nothing else may.
+func stopSharedVendorStore() {
+	if vendorStoreStop != nil {
+		vendorStoreStop()
+	}
+}
+
+func startVendorStore() (string, func(), error) {
+	bin, err := storeBinaryPath()
+	if err != nil {
+		return "", nil, fmt.Errorf("building the store: %w", err)
+	}
+	dir, err := os.MkdirTemp("", "ar-vendor-store-")
+	if err != nil {
+		return "", nil, fmt.Errorf("temp dir: %w", err)
+	}
+	suffix := make([]byte, 4)
+	if _, err := crand.Read(suffix); err != nil {
+		os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("random socket suffix: %w", err)
+	}
+	socket := filepath.Join(os.TempDir(), "ar-vendorstore-"+hex.EncodeToString(suffix)+".sock")
+	logPath := filepath.Join(dir, "store.log")
+	cmd := exec.Command(bin, "--socket", socket, "--db", filepath.Join(dir, "store.db"), "--log", logPath)
+	cmd.Env = append(os.Environ(),
+		"AGENT_REPL_STORE_SOCKET="+socket,
+		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+	)
+	// Its output is kept, not printed: no subject owns it, and interleaving it
+	// with 133 scenarios' output would be noise. A failure to START is reported
+	// through the error above, and the log file survives in the temp dir until
+	// the stand-down removes it.
+	var sink childOutput
+	cmd.Stdout = &sink
+	cmd.Stderr = &sink
+	if err := cmd.Start(); err != nil {
+		os.RemoveAll(dir)
+		return "", nil, fmt.Errorf("start: %w", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	stop := func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		}
+		select {
+		case <-done:
+		case <-time.After(waitBudget):
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			<-done
+		}
+		os.Remove(socket)
+		os.RemoveAll(dir)
+	}
+
+	// READY IS AN ANSWERED RPC, never a duration.
+	ctx, cancel := context.WithTimeout(context.Background(), waitBudget)
+	defer cancel()
+	client := storeClient(socket)
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		if _, err := client.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{})); err == nil {
+			return socket, stop, nil
+		}
+		select {
+		case <-ctx.Done():
+			stop()
+			return "", nil, fmt.Errorf("it never answered GetSidecarCursors within %s; its output was:\n%s", waitBudget, sink.buf.String())
+		case <-tick.C:
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -324,10 +443,12 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	// discovered path would fail on macOS, where /var is a symlink.
 	tree.Cwd = resolved(tree.Cwd)
 
-	// The shim's OWN store: a throwaway. The shim writes the stream plane, and
-	// mixing those rows into the store this suite reads back would mean a
-	// sidecar assertion could pass on a row the SHIM wrote.
-	vendorStore := startRealStore(t)
+	// The shim's OWN store: a throwaway, and SHARED by every scenario. The shim
+	// writes the stream plane, and mixing those rows into the store this suite
+	// reads back would mean a sidecar assertion could pass on a row the SHIM
+	// wrote — which is why it is a separate store, and why nobody reads it,
+	// which is in turn why one serves them all. See sharedVendorStoreSocket.
+	vendorStoreSocket := sharedVendorStoreSocket(t)
 
 	logFile, err := os.Create(tree.LogPath)
 	if err != nil {
@@ -338,7 +459,7 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	socket := shortSocketPath(t, "fakeshim")
 	cmd := exec.Command("node", entry,
 		"--listen", socket,
-		"--store-socket", vendorStore.Socket,
+		"--store-socket", vendorStoreSocket,
 		"--log-fd", "3",
 		"--fake",
 	)
@@ -349,7 +470,7 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 		"AGENT_REPL_FAKE_SPOOL_ROOT="+tree.FakeSpool,
 		"AGENT_REPL_STATE_DIR="+filepath.Join(base, "state"),
 		"AGENT_REPL_LOCK_DIR="+filepath.Join(base, "lock"),
-		"AGENT_REPL_STORE_SOCKET="+vendorStore.Socket,
+		"AGENT_REPL_STORE_SOCKET="+vendorStoreSocket,
 		"AGENT_REPL_OWNED=1",
 		"SHIM_BUILD_SHA=test",
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
