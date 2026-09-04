@@ -24,6 +24,7 @@ import (
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
 	"claude-repld/internal/wsm"
 )
 
@@ -41,6 +42,19 @@ const LockDirEnv = "AGENT_REPL_LOCK_DIR"
 // test drive the spawn-versus-adopt decision without a real shim holding a real
 // flock.
 type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
+
+// SocketProbeFunc probes ONE workspace's shim socket path for a listener. It
+// is a SECOND kernel fact beside the lock: the lock says a conversation is
+// owned, and only the socket says the owner is reachable.
+type SocketProbeFunc func(socketPath string) (shimsocket.State, error)
+
+// probeShimSocket builds the production socket probe over log.
+func probeShimSocket(log dlog.Logger) SocketProbeFunc {
+	log = log.With(dlog.Context{"component": "daemon.workspace.probe_shim_socket"})
+	return func(socketPath string) (shimsocket.State, error) {
+		return shimsocket.ProbeWithLog(log, socketPath)
+	}
+}
 
 // probeWorkspaceLock builds the production probe over log. Every probe result
 // — held, free, and could-not-tell — lands a record, because a lock probe is a
@@ -97,6 +111,9 @@ type FleetDeps struct {
 	LockDir string
 	// Probe probes the workspace lock; nil means sessionlock.Probe.
 	Probe ProbeFunc
+	// SocketProbe probes a workspace's shim socket for a listener; nil means
+	// shimsocket.Probe. It is injected for the same reason Probe is.
+	SocketProbe SocketProbeFunc
 	// StartWatcher opens one workspace's watch fleet; nil means
 	// sessionwatcher.Start. It is a function for the same reason Probe is: the
 	// fleet's decisions are exercised without a shim process behind them.
@@ -128,10 +145,11 @@ type live struct {
 // place, and it is what Deps.Sessions, Deps.Shim and Deps.Freeness are wired
 // from, so the four answers cannot disagree about one workspace.
 type Fleet struct {
-	deps  FleetDeps
-	probe ProbeFunc
-	watch WatcherStarter
-	now   func() time.Time
+	deps        FleetDeps
+	probe       ProbeFunc
+	socketProbe SocketProbeFunc
+	watch       WatcherStarter
+	now         func() time.Time
 
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
@@ -168,6 +186,10 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if probe == nil {
 		probe = probeWorkspaceLock(deps.Log.Global())
 	}
+	socketProbe := deps.SocketProbe
+	if socketProbe == nil {
+		socketProbe = probeShimSocket(deps.Log.Global())
+	}
 	watch := deps.StartWatcher
 	if watch == nil {
 		watch = sessionwatcher.Start
@@ -177,15 +199,16 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		now = time.Now
 	}
 	return &Fleet{
-		deps:       deps,
-		probe:      probe,
-		watch:      watch,
-		now:        now,
-		sessions:   map[ids.WorkspaceID]*live{},
-		coldGates:  map[ids.WorkspaceID]ServedColdGate{},
-		lastCold:   map[ids.WorkspaceID]*conversationv1.SessionCold{},
-		generation: map[ids.WorkspaceID]int{},
-		buildSHA:   map[ids.WorkspaceID]string{},
+		deps:        deps,
+		probe:       probe,
+		socketProbe: socketProbe,
+		watch:       watch,
+		now:         now,
+		sessions:    map[ids.WorkspaceID]*live{},
+		coldGates:   map[ids.WorkspaceID]ServedColdGate{},
+		lastCold:    map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		generation:  map[ids.WorkspaceID]int{},
+		buildSHA:    map[ids.WorkspaceID]string{},
 	}, nil
 }
 
@@ -524,6 +547,26 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bool, error) {
 	lockPath := f.lockDir()
 	state, err := f.probe(lockPath, dir)
+	// THE SOCKET IS THE SECOND KERNEL FACT. The lock says whether this
+	// conversation is OWNED; only the socket says whether its owner is
+	// REACHABLE, and a bring-up that spawned on the lock alone put a second
+	// shim onto a path the survivor still held — the newcomer could not bind
+	// and died, this daemon dialed the path and reached the SURVIVOR, and the
+	// answer was StartSession{already_started} over a turn already running.
+	socket, socketErr := f.socketProbe(udsPath)
+	if state == sessionlock.StateFree && socket == shimsocket.StateLive {
+		log.Warn(opBringUp, "the workspace lock reads free but a shim is listening; adopting the survivor",
+			dlog.Context{"lock": lockPath, "socket": udsPath, "lock_state": state.String()})
+		state = sessionlock.StateHeld
+	}
+	// A SOCKET THAT COULD NOT BE PROBED IS NEVER SPAWNED ONTO, for the same
+	// reason an unreadable lock is never read as free.
+	if state == sessionlock.StateFree && socket == shimsocket.StateUndetermined {
+		log.Error(opBringUp, "the shim socket probe could not tell", dlog.Context{
+			"socket": udsPath, "cause": errText(socketErr),
+		})
+		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, udsPath, socketErr)
+	}
 	switch state {
 	case sessionlock.StateHeld:
 		log.Debug(opBringUp, "a surviving shim holds the workspace lock; adopting it", dlog.Context{"lock": lockPath})
@@ -540,6 +583,19 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		// comes up FRESH with its own fault rather than being refused. There
 		// is nothing left for a spawn-side guard to test.
 		log.Debug(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{"lock": lockPath})
+		// A DEAD SHIM'S SOCKET FILE OUTLIVES IT: an AF_UNIX path is not
+		// reclaimed on process death the way a flock is, so the spawn's bind
+		// would fail for a reason that no longer exists. Clearing re-probes
+		// before it unlinks, so a listener that appeared in the meantime is
+		// refused rather than stranded, and a clear that fails refuses the
+		// spawn LOUDLY instead of handing the shim a path it cannot bind.
+		if clearErr := shimsocket.ClearStale(log, udsPath); clearErr != nil {
+			log.Error(opBringUp, "the shim socket path could not be cleared for a spawn", dlog.Context{
+				"socket": udsPath, "cause": clearErr.Error(),
+			})
+			f.noteStartFailed(ctx, log, ws, clearErr)
+			return nil, false, refuse(log, "OpenWorkspace", ArmSpawnFailed, clearErr.Error(), false)
+		}
 		sink, err := f.deps.Log.ShimSink(dir)
 		if err != nil {
 			log.Error(opBringUp, "could not borrow the shim log sink", dlog.Context{"cause": err.Error()})
