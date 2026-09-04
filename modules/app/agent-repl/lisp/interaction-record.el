@@ -79,6 +79,16 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--fatal "core")
+(declare-function agent-repl--global-state-file "core")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-rfc3339-timestamp "core")
+(declare-function agent-repl--warn "core")
+
 (require 'cl-lib)
 (require 'subr-x)
 

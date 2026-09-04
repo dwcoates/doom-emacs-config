@@ -19,6 +19,37 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl-wire--check-keys "wire-common")
+(declare-function agent-repl-wire--decode-bool "wire-common")
+(declare-function agent-repl-wire--decode-empty "wire-common")
+(declare-function agent-repl-wire--decode-int64 "wire-common")
+(declare-function agent-repl-wire--decode-message "wire-common")
+(declare-function agent-repl-wire--decode-oneof "wire-common")
+(declare-function agent-repl-wire--decode-optional-string "wire-common")
+(declare-function agent-repl-wire--decode-optional-uint32 "wire-common")
+(declare-function agent-repl-wire--decode-repeated "wire-common")
+(declare-function agent-repl-wire--decode-string "wire-common")
+(declare-function agent-repl-wire--decoded "wire-common")
+(declare-function agent-repl-wire--encode-empty "wire-common")
+(declare-function agent-repl-wire--encode-string "wire-common")
+(declare-function agent-repl-wire--encoded "wire-common")
+(declare-function agent-repl-wire--fail "wire-common")
+(declare-function agent-repl-wire--object "wire-common")
+(declare-function agent-repl-wire-decode-drain-reason "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-bounce-died "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-bounce-unknown "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-link-severed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-resume-failed "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-shim-died "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-shim-reported "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-shim-start-failed "wire-common")
+(declare-function agent-repl-wire-decode-workspace-ref "wire-common")
+(declare-function agent-repl-wire-encode-workspace-ref "wire-common")
+
 ;; wire-common.el is loaded immediately before this file by config.el's
 ;; module list; that ordering is the dependency, as it is everywhere else in
 ;; this module (no file here `require's a sibling).
