@@ -751,3 +751,69 @@ func TestInterruptAllAgentsStillFailsOnARefusalThatIsNotStaleness(t *testing.T) 
 	// Assert.
 	asRefusal(t, err, ArmShimNoSession)
 }
+
+// TestInterruptDetachedResolvesTheSubagentBubbleRow pins the row form the feed
+// ACTUALLY serves for a subagent bubble. resolve/feed/subagent.go mints it as
+// RowKey{Kind: activity, ID: <spawn unit>, Sub: <agent id>} — nothing mints
+// `detached_subagent` — and endpoint_interrupt.proto's detached target takes
+// "the bubble row's FeedId exactly as the feed served it", so that form must
+// resolve to the subagent's stop rather than be refused as no detached work.
+func TestInterruptDetachedResolvesTheSubagentBubbleRow(t *testing.T) {
+	tests := []struct {
+		name string
+		row  feedid.RowKey
+		want string
+	}{
+		{
+			name: "the bubble row the feed serves",
+			row:  feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-unit-1", Sub: "agent-7"},
+			want: "agent-7",
+		},
+		{
+			name: "the detached_subagent kind, whose id IS the agent",
+			row:  feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-9"},
+			want: "agent-9",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			ref := feedid.Ref{WS: "w1", Row: tc.row}
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt(detached) = error %v, want a success", err)
+			}
+			if outcome.DetachedCount != 1 {
+				t.Fatalf("stopped count = %d, want 1", outcome.DetachedCount)
+			}
+			if len(f.shim.stoppedAgents) != 1 || f.shim.stoppedAgents[0] != tc.want {
+				t.Fatalf("stopped agents = %v, want [%s]", f.shim.stoppedAgents, tc.want)
+			}
+		})
+	}
+}
+
+// TestInterruptDetachedRefusesAnActivityRowWithNoSubagent guards the resolution's
+// edge: a Sub on an activity row is what names a subagent, so a plain activity
+// row — a tool call, not a bubble — still addresses no detached work.
+func TestInterruptDetachedRefusesAnActivityRowWithNoSubagent(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "act-1"}}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmUnservedAnswer)
+	if len(f.shim.stoppedAgents) != 0 {
+		t.Fatalf("stopped agents = %v, want none", f.shim.stoppedAgents)
+	}
+}
