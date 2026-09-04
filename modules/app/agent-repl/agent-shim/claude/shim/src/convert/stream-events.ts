@@ -36,7 +36,7 @@ import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, type FrameOrigin } from "./entries.js";
 import { subagentBook, type FoldContext } from "./fold-context.js";
-import { blockActivityId } from "./ids.js";
+import { blockActivityId, refusalActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
 
@@ -647,6 +647,66 @@ export function convertAssistantMessage(
   }
 
   return entries;
+}
+
+/**
+ * A MODEL REFUSAL WITH NO FALLBACK: the response, settled as a refusal.
+ *
+ * The vendor states this ending in a `system` record of its own rather than on
+ * an assistant block — the transcript corpus carries the record ALONE, with no
+ * accompanying assistant message whose `stop_reason` is `refusal` — so this is
+ * the only place the fact is stated, and without a converter it reached no
+ * conversation.v1 arm at all. `AgentResponseRefused.explanation` has no other
+ * source either: the vendor's wording rides this record and nothing else.
+ *
+ * `model_refusal_fallback` is deliberately NOT folded here: there the vendor
+ * fell back to another model and the response continued, so nothing ended.
+ */
+export function convertModelRefusal(
+  message: Extract<SdkMessage, { type: "system"; subtype: "model_refusal_no_fallback" }>,
+  context: FoldContext,
+): readonly PersistEntry[] {
+  const stated = message.api_refusal_explanation;
+  const explanation =
+    typeof stated === "string" && stated !== ""
+      ? create(conversationv1.AgentResponseRefusalExplanationSchema, { text: stated })
+      : undefined;
+  LOGGER.log(
+    { level: "warn", uuid: message.uuid, explained: explanation !== undefined },
+    "the model REFUSED and no fallback is configured; settling the response as a refusal",
+  );
+  return [
+    activityEntry(
+      context,
+      {
+        agentId: context.mainAgentId,
+        vendorUuid: message.uuid,
+        discriminator: "activity.response.failure.refused",
+      },
+      agentActivity(refusalActivityId(message.uuid), {
+        case: "response",
+        value: create(conversationv1.AgentResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(conversationv1.AgentResponseFailureSchema, {
+              // The vendor sends `content: ""` with a refusal; the prose is
+              // carried anyway, because a refusal that DID say something must
+              // still show it.
+              prose: prose(message.content),
+              reason: create(conversationv1.AgentResponseFailureReasonSchema, {
+                reason: {
+                  case: "refused",
+                  value: create(conversationv1.AgentResponseRefusedSchema, {
+                    ...(explanation === undefined ? {} : { explanation }),
+                  }),
+                },
+              }),
+            }),
+          },
+        }),
+      }),
+    ),
+  ];
 }
 
 /**
