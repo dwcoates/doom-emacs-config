@@ -1200,7 +1200,65 @@ func alreadyStartedResponse() *shimv1.StartSessionResponse {
 	}
 }
 
+func TestStartSendsNoStartSessionToAnAdoptedShim(t *testing.T) {
+	// Arrange: a held lock selects the adopt path, and the surviving shim on
+	// the other side of it already serves its one session.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+	f.client.response = alreadyStartedResponse()
 
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(f.client.requests) != 0 {
+		t.Fatalf("StartSession requests = %d, want none on an adopted shim", len(f.client.requests))
+	}
+}
+
+func TestStartRemembersTheAdoptedShimAsLive(t *testing.T) {
+	// Arrange: mounting a parked workspace onto a surviving shim is a mount,
+	// so the session it attaches to is live afterwards.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !f.fleet.Live(ws.ID) {
+		t.Fatal("Live() = false after adopting a surviving shim, want the mounted session live")
+	}
+}
+
+func TestStartOpensTheAdoptedSessionsWatches(t *testing.T) {
+	// Arrange: the adopted session's facts arrive on the watch's landing-7
+	// re-announcement, so a watch that never opens leaves the daemon blind.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	exists, serving := f.fleet.Health(ws.ID)
+	if !exists || !serving {
+		t.Fatalf("Health() = %v, %v; want an adopted session whose watch is serving", exists, serving)
+	}
+}
 
 func TestStartRefusesAnAlreadyStartedShimUnderItsOwnArm(t *testing.T) {
 	// Arrange: a SPAWNED shim that answers already_started is a named state,
