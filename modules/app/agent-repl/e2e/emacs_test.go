@@ -438,6 +438,30 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// only thing switched off is a lookup that was always going to fail.
 		"NO_AT_BRIDGE=1",
 		"GTK_A11Y=none",
+		// AND THE AUTOLAUNCH ITSELF, which the two above do not stop.
+		//
+		// `NO_AT_BRIDGE'/`GTK_A11Y' switch off the accessibility CLIENT;
+		// they do not tell libdbus there is no session bus. With
+		// DBUS_SESSION_BUS_ADDRESS unset, the first thing in the process to
+		// want a session bus -- the a11y lookup, GIO, or WebKitGTK, which
+		// the panel's webview starts -- makes libdbus run `dbus-launch
+		// --autolaunch', and that is still observed on every scenario: a
+		// `dbus-launch' and a `dbus-daemon --session' in each teardown's
+		// stray list, on the shipped layer with both variables already set.
+		//
+		// The autolaunch is not merely a wasted fork. It arbitrates through
+		// a PROPERTY ON THE X ROOT WINDOW, taking a server grab to do it, so
+		// two Emacsen booting at once on their own displays still queue --
+		// and boots that took that path are the ones that miss
+		// `doomBootBound' by a factor of six while the pty stays empty,
+		// because nothing about the wait is Emacs's to report.
+		//
+		// `disabled:' is not a bus this layer runs; it is an address libdbus
+		// cannot parse, which is what makes the connection fail AT ONCE
+		// instead of autolaunching. Nothing is given up: there is no session
+		// bus in this container to reach, and no assertion in this layer
+		// touches D-Bus.
+		"DBUS_SESSION_BUS_ADDRESS=disabled:",
 	}, display.Env()...)
 	env = append(env, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
