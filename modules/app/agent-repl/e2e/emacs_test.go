@@ -106,6 +106,9 @@ type Emacs struct {
 	// Root is the scratch subtree this Emacs owns. Every path below is
 	// under it, so a swept scratch leaves nothing behind.
 	Root string
+	// Display is the Xvfb this Emacs draws its GUI frame on. The frame has
+	// to be graphical because the panel is an xwidget-webkit webview.
+	Display *xdisplay
 	// ServerSocket is the `server-name` emacsclient dials.
 	ServerSocket string
 	// EmacsDir is the per-test `~/.emacs.d` this Emacs boots Doom from. It
@@ -162,6 +165,14 @@ type EmacsOpts struct {
 	// DaemonBinary is the `claude-repld` the launcher will spawn. It is the
 	// binary the Go side already built; Emacs composes the argv around it.
 	DaemonBinary string
+	// DaemonArgs are stated on `agent-repl-daemon-command` after the binary,
+	// which is where a test states a fact the daemon reads from ITS OWN
+	// argv rather than from the environment -- the built shim bundle and the
+	// built webapp dist being the two. They do NOT touch the launcher's own
+	// contribution: `agent-repl-daemon--argv` appends the account-root flags
+	// to whatever this command is, so the flags this layer exists to cover
+	// are still composed by the launcher and only by it.
+	DaemonArgs []string
 	// StoreSocket is handed to the daemon through the spawn environment.
 	StoreSocket string
 	// ExtraEnv is added to the Emacs process's environment, and therefore
@@ -205,6 +216,14 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	e.writeSettings(opts)
 	e.stageEmacsDir()
 
+	// THE DISPLAY COMES FIRST. The panel is an `xwidget-webkit` webview, so
+	// Emacs must take a GRAPHICAL frame, which needs an X display that
+	// already exists when it starts. Starting it here also gets the teardown
+	// order right for free: t.Cleanup unwinds LIFO, so the Emacs stop
+	// registered below runs BEFORE the display is torn down.
+	display := startXvfb(t, box, filepath.Join(root, "display"))
+	e.Display = display
+
 	// HOME is the per-test scratch root, and `~/.emacs.d` under it is the
 	// staged Doom. The image's Emacs 30.2 does have `--init-directory`
 	// (Emacs 29+), but HOME is used instead of it: the container runs
@@ -232,16 +251,23 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// it is the terminal a user of this module actually runs Emacs on, so
 		// the frame the scenarios inspect is the frame a user would see.
 		"TERM=xterm-256color",
-	}, opts.ExtraEnv...)
+	}, display.Env()...)
+	env = append(env, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
 		env = append(env, "AGENT_REPL_STORE_SOCKET="+opts.StoreSocket)
 	}
 
 	// No `-Q` and no `-l`: the image's Doom profile is the init path, and
-	// `sandbox/doom/init.el` picks the settings file up itself. `-nw` is a
-	// tty frame, which is what makes `window-list`, `tab-bar-tabs` and
-	// `mode-line-format` behave as they do for a user.
-	argv := append(envPrefix(env), "emacs", "-nw")
+	// `sandbox/doom/init.el` picks the settings file up itself.
+	//
+	// And no `-nw` either, which is the one thing that changed here. A tty
+	// frame is a real frame for `window-list`, `tab-bar-tabs` and
+	// `mode-line-format` -- but it is not a frame an xwidget can live on:
+	// `make-xwidget` signals "GTK has not been initialized" on one, so the
+	// panel this module opens could never be created. With DISPLAY set,
+	// plain `emacs` takes a GRAPHICAL frame on the Xvfb above, and every
+	// property the tty frame had is still true of it.
+	argv := append(envPrefix(env), "emacs")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -321,7 +347,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
-(setq agent-repl-daemon-command (list %q)
+(setq agent-repl-daemon-command (list %s)
       agent-repl-daemon-build-script %q
       agent-repl-daemon-default-config-dir %q
       agent-repl-daemon-multi-repo-config-dir %q
@@ -330,7 +356,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 (provide 'agent-repl-e2e-settings)
 ;;; e2e-settings.el ends here
 `,
-		opts.DaemonBinary,
+		elispStringList(append([]string{opts.DaemonBinary}, opts.DaemonArgs...)),
 		buildScript,
 		e.DefaultConfigDir,
 		e.MultiRepoConfigDir,
@@ -586,7 +612,10 @@ func (e *Emacs) dumpArtifacts() {
 	// The scripted git's fixture file carries every call made against it,
 	// and the state root carries the daemon's own logs: a prompt Emacs is
 	// stuck on is usually explained by one of the two.
-	for _, extra := range append([]string{e.StateDir}, e.ArtifactPaths...) {
+	// The Xvfb log is always preserved, not only when a scenario asked for
+	// it: a GUI frame that never appears -- or a webview that never loads --
+	// is usually explained there and nowhere else.
+	for _, extra := range append([]string{e.StateDir, e.Display.LogPath}, e.ArtifactPaths...) {
 		if extra == "" {
 			continue
 		}
@@ -615,6 +644,14 @@ func copyTree(src, dest string) error {
 		return copyTree(target, dest)
 	}
 	if !info.IsDir() {
+		// ONLY REGULAR FILES ARE COPYABLE. The state root holds the daemon's
+		// live unix sockets, and opening one to read it fails with ENXIO --
+		// which used to abort the whole artifact sweep at whichever socket it
+		// reached first, losing every log after it. A socket carries no
+		// diagnosis anyway; its presence is already visible in the tree.
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		body, err := os.ReadFile(src)
 		if err != nil {
 			return err
