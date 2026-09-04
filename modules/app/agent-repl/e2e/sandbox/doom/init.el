@@ -27,6 +27,33 @@
 ;;
 ;;; Code:
 
+;; NATIVE COMPILATION IS AVAILABLE AND USED; JIT COMPILATION IS NOT.
+;;
+;; The image's Emacs is a native-comp build (the Dockerfile and
+;; e2e-sandbox.sh both assert `native-comp-available-p'), and Doom's packages
+;; are compiled AHEAD OF TIME into the image by `doom sync --aot'. What is
+;; turned off here is the JIT half: the asynchronous compilation Emacs starts
+;; for elisp it loads that has no `.eln' yet.
+;;
+;; MEASURED, and this is why. Every scenario gets a FRESH `~/.emacs.d' staged
+;; out of the image, so the `.eln' files a JIT run produces are thrown away
+;; the moment the test ends -- and then produced again by the next scenario,
+;; forty-five times a run, for exactly the same sources. With scenarios
+;; running concurrently that dead work is not merely waste: `ps` inside the
+;; container showed several `emacs -no-comp-spawn --batch ... async-comp'
+;; children per scenario competing for the four CPUs the VM has, and Doom's
+;; own boot then missed its measured 3.5s bound in tests that had nothing to
+;; do with compilation.
+;;
+;; Nothing observable is given up. No assertion in the layer reads a `.eln',
+;; and elisp behaves identically interpreted, byte-compiled or natively
+;; compiled -- the only difference is speed, and this is the setting that
+;; makes it faster here rather than slower.
+(setq native-comp-jit-compilation nil
+      ;; The Emacs 29 spelling, kept so the profile does not silently stop
+      ;; working on an older Emacs than the image's 30.2.
+      native-comp-deferred-compilation nil)
+
 (doom! :ui
        ;; `config.el' installs a notes popup rule via `set-popup-rule!', and
        ;; `sibling-popup.el' / `close-panels-on-open.el' / `popup.el' all

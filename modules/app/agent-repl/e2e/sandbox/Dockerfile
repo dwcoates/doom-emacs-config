@@ -579,9 +579,21 @@ COPY --chown=sandbox:sandbox module-loader-files/ /sandbox/doom/modules/app/agen
 # image sets its own environment), and `--no-install` leaves package
 # installation to the explicit `doom sync` that follows, which is the step
 # whose result the image is actually baking.
+# `--aot` ON THE SYNC is what makes native compilation an IMAGE artifact.
+#
+# Without it the image ships zero `.eln` files, and every scenario's Emacs
+# starts Doom's asynchronous JIT compiler to produce the same ones again --
+# into a per-test `~/.emacs.d` that is thrown away seconds later. `ps` inside
+# a container showed several `emacs -no-comp-spawn --batch ... async-comp`
+# children per scenario competing for the VM's four CPUs, and Doom's own boot
+# then missed its measured bound in unrelated tests. Compiling ahead of time
+# here pays that cost ONCE, at build, for every container that ever runs.
 RUN set -eux; \
     doom install --no-config --no-env --no-install; \
-    doom sync
+    doom sync --aot; \
+    elns=$(find "${EMACSDIR}/.local" -name '*.eln' | wc -l); \
+    echo "sandbox: doom sync --aot produced ${elns} .eln files"; \
+    [ "${elns}" -gt 0 ] || { echo "sandbox: doom sync --aot produced NO native code; every test would JIT-compile it again" >&2; exit 1; }
 
 # --- BAKE the node dependency trees, and prime the npm cache behind them ---
 #
