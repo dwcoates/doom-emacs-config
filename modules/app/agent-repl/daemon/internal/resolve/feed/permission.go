@@ -172,7 +172,7 @@ func decisionArm(success *conversationv1.AgentPermissionSuccess) permissionAnswe
 			if by.Undecidable.Detail != nil && by.Undecidable.GetDetail() != "" {
 				text = text + ": " + by.Undecidable.GetDetail()
 			}
-			return deniedByPolicyAnswer(text)
+			return deniedUndecidableAnswer(text)
 		}
 	}
 	return deniedByPolicyAnswer("denied")
@@ -183,8 +183,8 @@ func decisionArm(success *conversationv1.AgentPermissionSuccess) permissionAnswe
 // from here.
 type permissionAnswer func(*frontendv1.FeedPermissionAnswered)
 
-// allowedOnce, allowedStanding, deniedByUser and deniedByPolicy are the four
-// verdict setters, spelled once each.
+// allowedOnce, allowedStanding, deniedByUser, deniedByPolicy and
+// deniedUndecidable are the five verdict setters, spelled once each.
 func allowedOnceAnswer() permissionAnswer {
 	return func(a *frontendv1.FeedPermissionAnswered) {
 		a.Answer = &frontendv1.FeedPermissionAnswered_AllowedOnce{
@@ -218,6 +218,18 @@ func deniedByPolicyAnswer(text string) permissionAnswer {
 	return func(a *frontendv1.FeedPermissionAnswered) {
 		a.Answer = &frontendv1.FeedPermissionAnswered_DeniedByPolicy{
 			DeniedByPolicy: &frontendv1.FeedPermissionDeniedByPolicy{Text: text},
+		}
+	}
+}
+
+// deniedUndecidableAnswer is the denial NOBODY reached: the classifier came to
+// no verdict and no rule applied, so the call was denied for want of a decider.
+// Its own arm (landing 10) rather than policy's, which would imply a rule that
+// does not exist.
+func deniedUndecidableAnswer(text string) permissionAnswer {
+	return func(a *frontendv1.FeedPermissionAnswered) {
+		a.Answer = &frontendv1.FeedPermissionAnswered_DeniedUndecidable{
+			DeniedUndecidable: &frontendv1.FeedPermissionDeniedUndecidable{Text: text},
 		}
 	}
 }

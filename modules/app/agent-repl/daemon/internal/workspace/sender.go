@@ -137,9 +137,10 @@ func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool) erro
 // conversation a user would ever change the model of. The daemon used to send
 // the field unset, so the shim read zero, and a model the daemon itself had
 // just served in the topbar's own catalog came back refused. The refusal then
-// had no `SetModelError` arm to land on (ERROR-ARMS.md records the gap) and
-// left the rpc as a transport error, so the topbar's model cell read as an
-// unreachable daemon rather than as the model the user picked.
+// then had no `SetModelError` arm to land on and left the rpc as a transport
+// error, so the topbar's model cell read as an unreachable daemon rather than
+// as the model the user picked. `SetModelError.cold` (landing 10) is that arm,
+// and the refusal now relays by name.
 //
 // THE PICK IS THE CONSENT. The cold gate exists so a cold context is never
 // paid UNASKED — the resume path pays it with nobody having chosen it. A model
@@ -148,7 +149,8 @@ func (s *sender) KillTurn(ctx context.Context, turn ids.TurnID, force bool) erro
 // remediation menu (pay | clear | compact) has no answering path from this verb
 // to choose between. So the policy this verb states is `coldThresholdPolicy`:
 // no context is above it, the switch is paid, and the shim's own `cold` arm
-// stays relayed if the shim ever raises it for a reason of its own.
+// relays onto `SetModelError.cold` if the shim ever raises it for a reason of
+// its own — answered with AnswerColdGate, then set the model again.
 func (s *sender) SetModel(ctx context.Context, model string) error {
 	response, err := s.client.SetSessionModel(ctx, &shimv1.SetSessionModelRequest{
 		Model:               &conversationv1.AgentModel{Name: model},
