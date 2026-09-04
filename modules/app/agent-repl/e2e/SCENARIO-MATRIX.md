@@ -388,11 +388,15 @@ arm off `!bash-detach-live`, whose spool never carries an `EXIT=` terminator:
   over it (`Sidecar.Restart`), since `Tracker.BootSweep` runs once per
   PROCESS and boot time is read from the kernel rather than from a flag.
 
-REMAINING GAP, recorded rather than absorbed: `FeedShellLost` and
-`FeedSubagentLost` are EMPTY messages, so the frontend proto carries no
-cause — WHICH arm was concluded is not observable at the feed at all. These
-tests pin the arm on the sidecar's own `lost-terminal` `reason` key (the same
-word the wire's `DetachedLost` arm carries), which is the only statement of
-the arm an e2e test — speaking `agentrepl.v1` and never reading a store row —
-can reach. The SUBAGENT lost arms (`AgentSubagentFailure.cause.lost`,
-`FeedSubagentLost`) remain undriven by any e2e test.
+CLOSED TOO, as of Landing 11: `FeedShellLost` and `FeedSubagentLost` carry
+`oneof how {file_vanished | went_silent | swept_up}`, mirroring `DetachedLost`
+one-to-one, and the daemon relays the arm by name. All three tests now pin the
+arm AT THE FEED (`FeedShellSettled.outcome.lost.how`) as well as on the
+sidecar's own `lost-terminal` `reason` key. The two remain distinct claims:
+the reason is the conclusion the sidecar reached, the `how` is the arm the
+daemon relayed onward, and only asserting both catches a relay that renames or
+drops the arm.
+
+REMAINING GAP, recorded rather than absorbed: the SUBAGENT lost arms
+(`AgentSubagentFailure.cause.lost`, `FeedSubagentLost`) remain undriven by any
+e2e test.
