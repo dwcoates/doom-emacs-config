@@ -381,13 +381,98 @@ func TestBackoffIsBoundedAndClimbs(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange, Act.
-			got := nextBackoff(tc.from)
+			got := nextBackoff(tc.from, recoverBackoffMin, recoverBackoffMax)
 
 			// Assert.
 			if got != tc.want {
 				t.Fatalf("nextBackoff(%s) = %s, want %s", tc.from, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBackoffClimbsFromAConfiguredFloor asserts the ladder's first rung is the
+// floor it was CONFIGURED with, not the package default.
+func TestBackoffClimbsFromAConfiguredFloor(t *testing.T) {
+	// Arrange, Act.
+	got := nextBackoff(0, 5*time.Millisecond, time.Second)
+
+	// Assert.
+	if got != 5*time.Millisecond {
+		t.Fatalf("nextBackoff(0, 5ms, 1s) = %s, want the configured floor 5ms", got)
+	}
+}
+
+// TestBackoffHoldsAConfiguredCeiling asserts the doubling stops at the ceiling
+// it was CONFIGURED with, not the package default.
+func TestBackoffHoldsAConfiguredCeiling(t *testing.T) {
+	// Arrange, Act.
+	got := nextBackoff(30*time.Millisecond, 5*time.Millisecond, 40*time.Millisecond)
+
+	// Assert.
+	if got != 40*time.Millisecond {
+		t.Fatalf("nextBackoff(30ms, 5ms, 40ms) = %s, want the configured ceiling 40ms", got)
+	}
+}
+
+// TestAnUnsetLadderKeepsThePackageDefaults asserts zero means "unset" for both
+// rungs, which is the only meaning zero has anywhere in this process's options.
+func TestAnUnsetLadderKeepsThePackageDefaults(t *testing.T) {
+	// Arrange, Act.
+	min, max := resolveBackoff(0, 0)
+
+	// Assert.
+	if min != recoverBackoffMin || max != recoverBackoffMax {
+		t.Fatalf("resolveBackoff(0, 0) = (%s, %s), want the package defaults (%s, %s)",
+			min, max, recoverBackoffMin, recoverBackoffMax)
+	}
+}
+
+// TestAConfiguredFloorKeepsTheDefaultCeiling asserts the two rungs are resolved
+// independently: setting one must not silently reset the other.
+func TestAConfiguredFloorKeepsTheDefaultCeiling(t *testing.T) {
+	// Arrange, Act.
+	min, max := resolveBackoff(5*time.Millisecond, 0)
+
+	// Assert.
+	if min != 5*time.Millisecond || max != recoverBackoffMax {
+		t.Fatalf("resolveBackoff(5ms, 0) = (%s, %s), want (5ms, %s)", min, max, recoverBackoffMax)
+	}
+}
+
+// TestALadderBuiltWithACeilingBelowItsFloorCannotDescend asserts the clamp that
+// keeps a ladder assembled in code (main refuses this combination at bootstrap)
+// from climbing DOWN from its own first rung.
+func TestALadderBuiltWithACeilingBelowItsFloorCannotDescend(t *testing.T) {
+	// Arrange, Act.
+	min, max := resolveBackoff(time.Second, time.Millisecond)
+
+	// Assert.
+	if min != time.Second || max != time.Second {
+		t.Fatalf("resolveBackoff(1s, 1ms) = (%s, %s), want the ceiling raised to the floor (1s, 1s)", min, max)
+	}
+}
+
+// TestTheConfiguredRecoveryLadderReachesTheCycle asserts the same wiring for the
+// store-recovery ladder: the resolution happens ONCE, at construction, so
+// nothing downstream has to know what zero means.
+func TestTheConfiguredRecoveryLadderReachesTheCycle(t *testing.T) {
+	// Arrange.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	options := Options{
+		StoreSocket:       filepath.Join(os.TempDir(), "ar-unused.sock"),
+		RecoverBackoffMin: 3 * time.Millisecond,
+		RecoverBackoffMax: 7 * time.Millisecond,
+	}
+
+	// Act.
+	sc := newSidecar(options, log)
+
+	// Assert.
+	if sc.backoffMin != options.RecoverBackoffMin || sc.backoffMax != options.RecoverBackoffMax {
+		t.Fatalf("the cycle's ladder is (%s, %s), want the configured (%s, %s)",
+			sc.backoffMin, sc.backoffMax, options.RecoverBackoffMin, options.RecoverBackoffMax)
 	}
 }
 

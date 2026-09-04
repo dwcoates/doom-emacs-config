@@ -53,6 +53,13 @@ import (
 // ceiling the ladder holds FOREVER. There is no attempt budget and no terminal
 // state — production that is suspended is production that is being recovered,
 // for as long as the store stays unreachable.
+//
+// BOTH RUNGS ARE OVERRIDABLE, exactly as every other window in this process is
+// (--poll-interval, --rescan-interval, --unowned-spool-window, the four
+// --stale-* windows). They were the only ones that were not, which meant the
+// outage subjects — which run a REAL sidecar process, so the injected clock the
+// unit tests drive does not reach them — had no way to exercise the ladder
+// except by waiting out real rungs of it.
 const (
 	recoverBackoffMin = 250 * time.Millisecond
 	recoverBackoffMax = 10 * time.Second
@@ -164,6 +171,12 @@ type sidecar struct {
 	// makes and which therefore used to leave a boot outage entirely silent.
 	suspensionStated bool
 
+	// backoffMin and backoffMax are the recovery ladder's floor and ceiling,
+	// resolved once at construction from Options so nothing downstream has to
+	// know that zero means "the package default".
+	backoffMin time.Duration
+	backoffMax time.Duration
+
 	// now and jitter are the cycle's clock and its backoff spread, injectable so
 	// the ladder is tested by advancing a fake clock rather than by waiting.
 	now    func() time.Time
@@ -190,6 +203,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		jitter:     jitterBackoff,
 		bootTimeMs: bootTimeMillis,
 	}
+	s.backoffMin, s.backoffMax = resolveBackoff(options.RecoverBackoffMin, options.RecoverBackoffMax)
 	s.owners = newOwnerIndex(log.With(logging.Context{Component: "owner"}))
 	s.held = newHeldSpools(options.UnownedSpoolWindow, log.With(logging.Context{Component: "held"}))
 	s.suspendedSince = s.now()
@@ -263,7 +277,7 @@ func (s *sidecar) attempt() {
 	defer func() { s.attempting = false }()
 	if err := s.beginCycle(); err != nil {
 		s.attempts++
-		s.backoff = nextBackoff(s.backoff)
+		s.backoff = nextBackoff(s.backoff, s.backoffMin, s.backoffMax)
 		delay := s.jitter(s.backoff)
 		// A process whose FIRST cycle never began is a suspended process, and
 		// its outage is opened here: nothing else has a transition to report.
@@ -902,15 +916,33 @@ func jitterBackoff(d time.Duration) time.Duration {
 	return time.Duration(float64(d) - spread + 2*spread*rand.Float64())
 }
 
-// nextBackoff doubles d from recoverBackoffMin up to the recoverBackoffMax
-// ceiling.
-func nextBackoff(d time.Duration) time.Duration {
+// resolveBackoff answers the ladder's effective floor and ceiling. ZERO IS HOW
+// THE CALLER SAYS "UNSET", exactly as it is for every other window this process
+// takes, and the default is filled in here so there is one place that knows it.
+// A ceiling below the floor is not a configuration this function repairs: main
+// refuses it at bootstrap, and the clamp below only keeps a ladder built any
+// other way from climbing past its own floor.
+func resolveBackoff(min, max time.Duration) (time.Duration, time.Duration) {
+	if min <= 0 {
+		min = recoverBackoffMin
+	}
+	if max <= 0 {
+		max = recoverBackoffMax
+	}
+	if max < min {
+		max = min
+	}
+	return min, max
+}
+
+// nextBackoff doubles d from the ladder's floor up to its ceiling.
+func nextBackoff(d, min, max time.Duration) time.Duration {
 	if d == 0 {
-		return recoverBackoffMin
+		return min
 	}
 	d *= 2
-	if d > recoverBackoffMax {
-		return recoverBackoffMax
+	if d > max {
+		return max
 	}
 	return d
 }

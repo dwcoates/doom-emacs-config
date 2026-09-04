@@ -546,6 +546,12 @@ type sidecarOptions struct {
 	StaleAgentSilence    time.Duration
 	StaleWorkflowSilence time.Duration
 	UnownedSpoolWindow   time.Duration
+
+	// The store-recovery ladder's floor and ceiling. Zero is not passed, so the
+	// production ladder (250ms doubling to 10s) stands for every subject that
+	// is not about an outage.
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
 }
 
 func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
@@ -562,6 +568,16 @@ func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) s
 		// simply time out inside it. Subjects that ARE about the hold set their
 		// own window.
 		UnownedSpoolWindow: 200 * time.Millisecond,
+		// THE RECOVERY LADDER IS REAL WALL TIME IN THIS PACKAGE. These subjects
+		// run a REAL sidecar process, so the injected clock the unit tests
+		// advance (sidecar.now / sidecar.jitter) does not reach it: an outage
+		// subject waits out production's own rungs, 250ms doubling to 10s. The
+		// suite runs the ladder at 5ms/20ms — the SAME ladder, with the same
+		// doubling and the same ceiling-held-forever behavior, at a scale the
+		// suite can observe rather than sit through. The shape is what these
+		// subjects assert; the durations are production's business.
+		RecoverBackoffMin: 5 * time.Millisecond,
+		RecoverBackoffMax: 20 * time.Millisecond,
 	}
 }
 
@@ -593,6 +609,8 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		{"--stale-agent-silence", opts.StaleAgentSilence},
 		{"--stale-workflow-silence", opts.StaleWorkflowSilence},
 		{"--unowned-spool-window", opts.UnownedSpoolWindow},
+		{"--recover-backoff-min", opts.RecoverBackoffMin},
+		{"--recover-backoff-max", opts.RecoverBackoffMax},
 	} {
 		if window.value == 0 {
 			continue
