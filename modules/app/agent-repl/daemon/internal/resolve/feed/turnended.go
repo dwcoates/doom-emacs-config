@@ -68,6 +68,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	}
 
 	delete(s.turnEvidence, string(*turn))
+	delete(s.turnRefusals, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
 		s.turnInFlight = nil
 	}
@@ -139,7 +140,7 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 		vendorMessage = api.ApiRequestFailed.GetMessage()
 		sentence = apiErrorArm(errored, api.ApiRequestFailed)
 	} else {
-		sentence = producerErrorArm(errored, failure)
+		sentence = producerErrorArm(errored, failure, s.turnRefusals[turn])
 		vendorMessage = strings.Join(failure.GetErrors(), "; ")
 	}
 
@@ -235,34 +236,45 @@ func apiErrorArm(errored *frontendv1.FeedTurnEndedErrored, failed *conversationv
 // arm leads somewhere different, which is why the headline is per-arm: some
 // are waited out, some are the user's to raise, some are a fault to report.
 //
-// An arm with no drawn counterpart is kept BY NAME under vendor_unmodeled
-// rather than being flattened into a generic failure — a reader must be able
-// to tell which of these happened.
-func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *conversationv1.AgentFailure) string {
+// A PRODUCER TERMINAL WITH NO DRAWN COUNTERPART IS `turn_failed`, never
+// `vendor_unmodeled`: feed.proto confines vendor_unmodeled to "an API error
+// class this schema does not model", while turn_failed carries "every other
+// unclassified abnormal end" with `stop_reason` naming the vendor's own word.
+// The reader still learns which of these happened — from the stop reason.
+func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *conversationv1.AgentFailure, refused bool) string {
 	if cause := lostCauseOfAgentFailure(failure); cause != lostNone {
 		errored.Error = unmodeledArm("lost:" + cause.String())
 		return lostSentence(cause)
 	}
 	switch failure.GetFailure().(type) {
 	case *conversationv1.AgentFailure_PromptTooLong:
-		errored.Error = &frontendv1.FeedTurnEndedErrored_RequestTooLarge{
-			RequestTooLarge: &frontendv1.FeedTurnErrorRequestTooLarge{},
-		}
+		// NOT request_too_large: that arm is the vendor's 413, an API status
+		// this producer terminal never carried.
+		errored.Error = turnFailedArm("prompt_too_long")
 		return "the prompt was too long to send — the context must be cut first"
 	case *conversationv1.AgentFailure_BlockingLimit:
-		errored.Error = unmodeledArm("blocking_limit")
+		errored.Error = turnFailedArm("blocking_limit")
 		return "an account-level block stopped the run"
 	case *conversationv1.AgentFailure_RapidRefillBreaker:
-		errored.Error = unmodeledArm("rapid_refill_breaker")
+		errored.Error = turnFailedArm("rapid_refill_breaker")
 		return "the account's refill-rate breaker tripped — this is a wait, not a fault"
 	case *conversationv1.AgentFailure_ImageError:
-		errored.Error = unmodeledArm("image_error")
+		errored.Error = turnFailedArm("image_error")
 		return "an image in the request could not be processed"
 	case *conversationv1.AgentFailure_ModelError:
-		errored.Error = unmodeledArm("model_error")
+		// THE REFUSAL'S ONLY WITNESS is the response frame this turn already
+		// drew: AgentModelError is empty, so a refusal and an unclassified
+		// model error arrive as the same terminal.
+		if refused {
+			errored.Error = &frontendv1.FeedTurnEndedErrored_Refusal{
+				Refusal: &frontendv1.FeedTurnErrorRefusal{},
+			}
+			return "the model refused to continue — there is no answer"
+		}
+		errored.Error = turnFailedArm("model_error")
 		return "the model errored in a way the API did not classify"
 	case *conversationv1.AgentFailure_MalformedToolUseExhausted:
-		errored.Error = unmodeledArm("malformed_tool_use_exhausted")
+		errored.Error = turnFailedArm("malformed_tool_use_exhausted")
 		return "the model's tool calls could not be parsed and the attempts ran out"
 	case *conversationv1.AgentFailure_StopHookPrevented:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_StopHookPrevented{
@@ -270,13 +282,13 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 		}
 		return "a Stop hook ended the run"
 	case *conversationv1.AgentFailure_HookStopped:
-		errored.Error = unmodeledArm("hook_stopped")
+		errored.Error = turnFailedArm("hook_stopped")
 		return "a hook ended the run"
 	case *conversationv1.AgentFailure_ToolDeferred:
-		errored.Error = unmodeledArm("tool_deferred")
+		errored.Error = turnFailedArm("tool_deferred")
 		return "the run ended waiting on a deferred tool call"
 	case *conversationv1.AgentFailure_ToolDeferredUnavailable:
-		errored.Error = unmodeledArm("tool_deferred_unavailable")
+		errored.Error = turnFailedArm("tool_deferred_unavailable")
 		return "the run ended on a tool call deferred to something unavailable"
 	case *conversationv1.AgentFailure_MaxTurns:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxTurns{
@@ -289,17 +301,10 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 		}
 		return "stopped at the budget"
 	case *conversationv1.AgentFailure_StructuredOutputRetryExhausted:
-		// The vendor's OWN word for an end it did not classify further is the
-		// arm name it arrived under; turn_failed exists to carry exactly that.
-		errored.Error = &frontendv1.FeedTurnEndedErrored_TurnFailed{
-			TurnFailed: &frontendv1.FailureVendorTurnFailed{
-				Vendor:     vendorFailureContext(),
-				StopReason: "structured_output_retry_exhausted",
-			},
-		}
+		errored.Error = turnFailedArm("structured_output_retry_exhausted")
 		return "the run ended: structured_output_retry_exhausted"
 	case *conversationv1.AgentFailure_TurnSetupFailed:
-		errored.Error = unmodeledArm("turn_setup_failed")
+		errored.Error = turnFailedArm("turn_setup_failed")
 		return "the run could not be set up and never reached the model"
 	case *conversationv1.AgentFailure_ExecutionError:
 		errored.Error = &frontendv1.FeedTurnEndedErrored_ExecutionError{
@@ -307,11 +312,23 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 		}
 		return "the run broke while executing"
 	case *conversationv1.AgentFailure_ContinuationPrevented:
-		errored.Error = unmodeledArm("continuation_prevented")
+		errored.Error = turnFailedArm("continuation_prevented")
 		return "a producer notice ended the run"
 	}
-	errored.Error = unmodeledArm("unset")
+	errored.Error = turnFailedArm("unset")
 	return "the run ended on a failure with no stated cause"
+}
+
+// turnFailedArm keeps an unclassified producer terminal BY ITS VENDOR WORD
+// under turn_failed, which is the arm feed.proto gives every abnormal end it
+// draws no dedicated arm for.
+func turnFailedArm(reason string) *frontendv1.FeedTurnEndedErrored_TurnFailed {
+	return &frontendv1.FeedTurnEndedErrored_TurnFailed{
+		TurnFailed: &frontendv1.FailureVendorTurnFailed{
+			Vendor:     vendorFailureContext(),
+			StopReason: reason,
+		},
+	}
 }
 
 // vendorFailureContext is the vendor correlation the run's own terminals carry.
