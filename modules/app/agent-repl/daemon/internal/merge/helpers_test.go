@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,6 +66,11 @@ type fakeDB struct {
 	dropped        []string
 	// enqueueErr, when set, fails the next EnqueueMerge.
 	enqueueErr error
+	// shut stands for the state client the daemon's orderly exit has already
+	// closed: every write refuses, exactly as a write against a closed
+	// handle does. A test sets it after the drain, so any durable work a run
+	// attempts on the way out is a visible failure rather than a silent one.
+	shut bool
 	// retired records the displaced turns whose mark was claimed, which is
 	// what "exactly once" is asserted against.
 	retired []wsm.TurnID
@@ -133,6 +139,9 @@ func (f *fakeDB) AcquireLeaseAs(_ context.Context, id ids.WorkspaceID, lease wsm
 func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
 	for id, held := range f.leases {
 		if held.ID == lease {
 			delete(f.leases, id)
@@ -159,6 +168,9 @@ func (f *fakeDB) SetLeasePolicy(_ context.Context, lease wsm.LeaseID, p wsm.Leas
 func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
 	f.mergedAt[id] = at
 	return nil
 }
@@ -166,6 +178,9 @@ func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time
 func (f *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
 	f.closed[id] = closed
 	return nil
 }
@@ -303,6 +318,9 @@ func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.Workspac
 func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.shut {
+		return errStateClientClosed
+	}
 	for i, entry := range f.queues[repo] {
 		if entry.Workspace == id {
 			f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
@@ -824,6 +842,9 @@ func (fakePainter) ParseANSI(text string) (paint.Spans, error) {
 func (fakePainter) Highlight(_, code string) (paint.Spans, error) {
 	return paint.Spans{{Text: code}}, nil
 }
+
+// errStateClientClosed is what a write against a closed state client answers.
+var errStateClientClosed = errors.New("wsm: begin transaction: sql: database is closed")
 
 // fakeRunner is the scripted test-all script. It answers from a queue of runs,
 // so a fixes loop's second round can differ from its first.

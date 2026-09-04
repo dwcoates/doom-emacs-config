@@ -842,3 +842,152 @@ func recordWith(h *harness, level, operation string) (dlog.Record, bool) {
 	}
 	return dlog.Record{}, false
 }
+
+// TestAMergeEndingAfterTheDrainWritesNothingToTheClosedStore is the OTHER side
+// of the drain's window. A merge left mid-phase does not stop when the drain
+// announces it: it stops later, when the orderly exit takes away the git and
+// the shim its phase was using — by which time the state client is closed and
+// nothing is waiting. Its give-back used to run anyway, and every write in it
+// failed against the closed handle.
+func TestAMergeEndingAfterTheDrainWritesNothingToTheClosedStore(t *testing.T) {
+	// Arrange: a merge held inside its test gate, so the drain finds it
+	// mid-phase and waits for nothing.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	inGate, release := make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+	h.o.Drain(context.Background())
+	// The orderly exit closes the state client the moment the drain returns.
+	h.db.mu.Lock()
+	h.db.shut = true
+	h.db.mu.Unlock()
+
+	// Act: the phase finishes after all of that.
+	close(release)
+	<-done
+
+	// Assert: nothing was written, so nothing failed.
+	if failures := recordsAtLevel(h, "error"); len(failures) > 0 {
+		t.Fatalf("the merge that ended after the drain produced %d error records, want none: %v", len(failures), failures)
+	}
+}
+
+// TestAMergeEndingAfterTheDrainNamesWhatItLeftToTheRecovery is the record that
+// replaces those failures: the give-back is not silent, it is stated once, at
+// INFO, naming the durable work the next boot's recovery owns.
+func TestAMergeEndingAfterTheDrainNamesWhatItLeftToTheRecovery(t *testing.T) {
+	// Arrange: as above — a merge held mid-gate across the drain.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	inGate, release := make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+	h.o.Drain(context.Background())
+	h.db.mu.Lock()
+	h.db.shut = true
+	h.db.mu.Unlock()
+
+	// Act.
+	close(release)
+	<-done
+
+	// Assert.
+	record, found := recordWith(h, "info", "daemon.merge.teardown")
+	if !found {
+		t.Fatal("the merge that ended after the drain wrote no INFO teardown record")
+	}
+	if record.Context["unstamped"] != terminalOwedLanded {
+		t.Fatalf("the teardown record names %v as unstamped, want %q", record.Context["unstamped"], terminalOwedLanded)
+	}
+}
+
+// TestAMergeEndingAfterTheDrainReleasesTheRepositoryLock covers what the
+// give-back must still do: everything that lives in THIS process is handed
+// back, so a successor's recovery is the only thing left to redo.
+func TestAMergeEndingAfterTheDrainReleasesTheRepositoryLock(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	inGate, release := make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+	h.o.Drain(context.Background())
+	h.db.mu.Lock()
+	h.db.shut = true
+	h.db.mu.Unlock()
+
+	// Act.
+	close(release)
+	<-done
+
+	// Assert: the run is off the orchestrator's books, so nothing thinks the
+	// repository is still busy.
+	h.o.mu.Lock()
+	running := h.o.running[h.repoKey()]
+	h.o.mu.Unlock()
+	if running != nil {
+		t.Fatal("the run is still registered as running after it ended past the drain")
+	}
+}
+
+// TestAMergeAbortingAfterTheDrainIsNotRecordedAsAFailure covers the cause: a
+// phase that broke because the daemon took its git away did not FAIL, and
+// recording an abort there claimed a fault the next boot contradicts.
+func TestAMergeAbortingAfterTheDrainIsNotRecordedAsAFailure(t *testing.T) {
+	// Arrange: a merge held mid-gate whose gate then errors outright, which
+	// is the abort path rather than the failed-verdict path.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.runner.runs = append(h.runner.runs, scriptedRun{Err: errStateClientClosed})
+	inGate, release := make(chan struct{}), make(chan struct{})
+	h.runner.before = func() {
+		close(inGate)
+		<-release
+	}
+	enqueue(t, h)
+	done := admitAsync(h, context.Background())
+	<-inGate
+	h.o.Drain(context.Background())
+	h.db.mu.Lock()
+	h.db.shut = true
+	h.db.mu.Unlock()
+
+	// Act.
+	close(release)
+	<-done
+
+	// Assert: no abort record, and the stop record names the daemon's exit.
+	if _, found := recordWith(h, "error", "daemon.merge.abort"); found {
+		t.Fatal("a merge that ended because the daemon exited was recorded as an abort, want no fault")
+	}
+	if _, found := recordWith(h, "info", "daemon.merge.stop"); !found {
+		t.Fatal("the merge that ended when the daemon exited wrote no INFO stop record")
+	}
+}

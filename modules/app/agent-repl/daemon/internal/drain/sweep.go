@@ -101,7 +101,9 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		}
 	}()
 
-	answer, err := c.deps.Stand.Hibernate(ctx, ws)
+	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
+	answer, err := c.deps.Stand.Hibernate(directive, ws)
+	cancelDirective()
 	if err != nil {
 		log.Error(opSweep, "the hibernate directive failed; deferring the hibernation",
 			withCause(fields, err))
@@ -119,7 +121,10 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		return false
 	}
 
-	if err := c.deps.Stand.KillSession(ctx, ws, false); err != nil {
+	standDown, cancelStandDown := context.WithTimeout(ctx, c.deps.StandBound)
+	err = c.deps.Stand.KillSession(standDown, ws, false)
+	cancelStandDown()
+	if err != nil {
 		log.Error(opSweep, "the graceful stand-down failed after the hibernate ack; deferring",
 			withCause(fields, err))
 		return false
