@@ -359,8 +359,26 @@ the narrower/alternate state**:
   gaps" section above is explicit: no capture carries a `context_tip`
   attachment of any kind (only `total_tokens_reminder` was observed).
   UNGROUNDED.
-- `!away-summary`, `!residue`, `!cold-seed` — declared vendor-residue /
-  bookkeeping producers; no capture recorded any of the three.
+- `!away-summary`, `!residue` — declared vendor-residue / bookkeeping
+  producers; no capture recorded either.
+- `!cold-seed` — GROUNDED BY SHAPE (2026-09-05): the cold-context gate is the
+  SHIM's own judgment, not a vendor response shape (`engine/cold.ts`'s
+  `readTranscriptFacts`/`judgeCold` reads an ORDINARY transcript's last
+  assistant line — `timestamp` and `message.usage` — and compares the age to
+  the cache TTL; the vendor emits nothing distinct for "cold"). So `!cold-seed`
+  needs no vendor capture of a `SessionCold` refusal; it needs its seeded
+  assistant transcript line to carry the same field shape any ordinary
+  assistant line does. Verified field-by-field against the last assistant
+  line of three captures (`bash-foreground-completed`, `edit`,
+  `context-usage`): `timestamp` (ISO-8601, millisecond precision, `Z`
+  suffix) matches; `message.model` is a string field in both; every
+  `message.usage` key the gate reads — `input_tokens`,
+  `cache_creation_input_tokens`, `cache_read_input_tokens`,
+  `cache_creation.ephemeral_1h_input_tokens`,
+  `cache_creation.ephemeral_5m_input_tokens` — and the adjacent
+  `output_tokens`/`service_tier` keys are all present with matching types in
+  the scenario's `fakeUsage()` (`src/fake/index.ts`) and in all three
+  captures. No divergence found; no fake code change was needed.
 - `!md` — a webapp markdown-rendering demo, not a vendor shape at all; no
   capture could ground it.
 
@@ -407,83 +425,28 @@ the narrower/alternate state**:
   is whatever the SDK's async iterator does at that moment"). Whichever
   shim arm answers `query_died`/`query_eof` must therefore treat vendor
   child death as a THROW to catch, never a result to interpret.
-- `cold-resume` — NOT CAPTURED (two Haiku attempts, 2026-09-03, both via
-  the harness's own `--only cold-resume`, its built-in `resume: true` turn):
-  BOTH attempts threw `Error: Operation aborted` from the SDK on the
-  resume-turn's `query()` call, before any turn-2 prompt was answered. The
-  `_failed` transcript shows the resumed query DOES start correctly
-  (`SessionStart:resume` hook fires, the same vendor `session_id` is kept)
-  but the query itself aborts moments later — this looks like the capture
-  harness's own resume path reusing an already-fired `AbortController`
-  rather than a vendor-side cold-cache problem, since this is the WARM-resume
-  path (same process run), not the TTL-lapsed cold one the scenario's manual
-  note describes. Bailed per cost discipline after the second attempt;
-  reported as a harness-side finding rather than a vendor shape, since
-  neither run got far enough to observe one.
+- `cold-resume` — CLOSED, no longer needed for grounding. `!cold-seed`
+  grounds through FIELD SHAPE against ordinary captures instead (see the
+  reconciliation note above): the cold-context gate is the shim's own
+  judgment on an ordinary transcript, not a distinct vendor response shape,
+  so no capture of an actual vendor `SessionCold` refusal is required. The
+  earlier attempt to CAPTURE one by resuming a cache-lapsed session (two
+  Haiku attempts, 2026-09-03; the harness fix and `resume_capture` lever
+  built 2026-09-04) is therefore abandoned as unnecessary rather than merely
+  blocked. `resume_capture` (`worlds.mjs`, plus `readCapturedSession` and
+  `seedResumableSession` in `capture.mjs`, all unit tested) stays in the
+  harness as tooling for a future capture that does need a cache-lapsed
+  resume; the "needs an owner-supplied credential token" note that had
+  parked `cold-resume` no longer gates anything and is not a pending item.
 
-  STILL NOT CAPTURED (2026-09-04). The harness's warm-resume path is fixed
-  (a fresh `AbortController` per open), but a WARM resume cannot trip the
-  cold-context gate by construction: it reopens the session moments after the
-  first turn, inside the same process, with the vendor's prompt cache still
-  live. The gate needs a LAPSED cache, and the only way to get one without
-  waiting out the TTL is to resume a session captured on an EARLIER RUN —
-  which the harness cannot express. It has `--config-root` and a
-  `resume: true` TURN, but no way to name an already-committed capture's
-  vendor session as the session to open against. The lever that would close
-  this is spelled out here so the next attempt does not re-derive it:
-
-  - a scenario field naming a committed capture (e.g.
-    `"resume_capture": "prose-streamed"`), whose session is as cold as its
-    commit date;
-  - the capture's own cwd read from its transcript (the transcript records
-    `cwd` verbatim on its own lines) rather than inverted from the project
-    slug — the slug flattens both `/` and `_` to `-`, so inverting it is
-    ambiguous and would resume in the wrong directory, where the vendor
-    would silently start a FRESH session instead;
-  - the transcript copied back under `<account root>/projects/<slug>/` and
-    that cwd recreated, so `resume: <session id>` resolves;
-  - the first query opened with `resume`, rather than a later turn.
-
-  That lever is now BUILT — `resume_capture` in `worlds.mjs`, plus
-  `readCapturedSession` and `seedResumableSession` in `capture.mjs`, all unit
-  tested — and `cold-resume` names `prose-streamed` as the session it resumes.
-  It has still NOT RUN, and the blocker is AUTHENTICATION rather than the
-  lever:
-
-  - Seeding a synthetic transcript into the operator's real `~/.claude` is
-    REFUSED: that root is bind-mounted and shared, and a stray write there has
-    damaged this project before. `seedResumableSession` throws on
-    `AUTH_CONFIG_ROOT` rather than trusting an operator to remember, so the
-    "scratch only" rule is structural and not a note.
-  - That leaves the two account roots the harness throws away.
-    `--seed-credentials` is IMPOSSIBLE on this machine: the vendor keeps OAuth
-    credentials in the macOS Keychain and leaves `~/.claude/.credentials.json`
-    zero bytes, so there is nothing to seed and the preflight refuses. Copying
-    the root elsewhere does not help either — the CLI keys its Keychain entry
-    on `CLAUDE_CONFIG_DIR`, so a root at any other path reads as a different,
-    logged-out account.
-  - The inherited-token mode (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`)
-    WOULD work and does give a throwaway root, but neither variable is
-    exported here, and a capture agent must not extract the owner's credential
-    from the Keychain to manufacture one.
-
-  So this needs the OWNER to supply a token for the run. Nothing about the
-  vendor's cold-resume shape has been observed yet, so `!cold-seed` stays
-  UNGROUNDED and must NOT be adjusted from guesswork — no `SessionCold`
-  refusal has ever been recorded.
-
-  NOTE, from `prose-streamed`'s meta: a committed capture already carries
-  everything the lever needs — `vendor_session_id`, `cwd_slug`, and a single
-  `files/projects/<slug>/<session id>.jsonl`.
-
-  SEPARATE HYGIENE BUG, found while checking this and NOT fixed here: under
+  SEPARATE HYGIENE BUG, found while working this and NOT fixed here: under
   `--config-root` the per-scenario reclaim and the sweep-end `lateReclaimAll`
-  do not fully clean up. `~/.claude/projects/` currently holds seven
+  do not fully clean up. `~/.claude/projects/` held seven
   `*agent-repl-capture-*` directories — from the 2026-09-03 runs and from
   2026-09-04's — each with one file the vendor late-flushed after the reclaim
-  pass had already run. They are unambiguously capture residue rather than the
-  operator's own projects, but the harness claims to "LEAVE THE ACCOUNT AS
-  FOUND" and does not.
+  pass had already run. They are unambiguously capture residue rather than
+  the operator's own projects, but the harness claims to "LEAVE THE ACCOUNT
+  AS FOUND" and does not.
 
 This reconciliation is now COMPLETE and AUTHORITATIVE: every one of the 69
 goldens above names its registered scenario(s), every registered scenario
