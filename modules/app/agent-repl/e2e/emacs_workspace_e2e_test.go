@@ -3,7 +3,8 @@
 //
 // Every test here drives the REAL module through a REAL Doom in a REAL tty
 // frame, and reads Emacs's own state back AS DATA — `agent-repl--workspaces',
-// `agent-repl-host--by-name', `agent-repl-roster--tab-order', `tab-bar-tabs',
+// `agent-repl-host--by-name', `agent-repl-roster--tab-order',
+// `agent-repl--ws-tabline-names',
 // `agent-repl--prompt-queue' — never the drawn sidebar, never a rendered tab
 // string. The workspace verbs are the module's OWN leader bindings, which
 // EMACS-LAYER-SPEC.md's "Which scenarios should assert a binding" section
@@ -137,12 +138,22 @@ func (f *emacsWorkspaceFixture) awaitRefID() string {
 	return f.Emacs.EvalString(`(plist-get (agent-repl-host-ref ` + elispString(f.Name) + `) :id)`)
 }
 
-// tabNames reads the tab bar's tabs as DATA — the `name' cell of each tab's
-// own alist, never the rendered tab-bar string.
+// emacsWSTablineNamesForm reads the names the tab bar DRAWS, in roster order.
+//
+// NOT `tab-bar-tabs`: `status.el` paints the bar from `tab-bar-format`, so
+// Emacs's built-in tabs are window configurations named after whatever buffer
+// they hold (a `*magit: ...*` status buffer once a project switch has run, or
+// `*agent-panel-input-repo*` once the panel is open) and carry no workspace
+// name at all. `agent-repl--ws-tabline-names` is the enumeration the renderer
+// itself walks — the drawn names, in roster order — so it is what "the tab
+// bar's names" means in this module.
+const emacsWSTablineNamesForm = `(agent-repl--ws-tabline-names)`
+
+// tabNames reads the DRAWN tab names as DATA, never the rendered tab-bar
+// string.
 func (f *emacsWorkspaceFixture) tabNames() []string {
 	f.Emacs.t.Helper()
-	return f.Emacs.EvalStrings(
-		`(mapcar (lambda (tab) (format "%s" (cdr (assq 'name (cdr tab))))) (tab-bar-tabs))`)
+	return f.Emacs.EvalStrings(emacsWSTablineNamesForm)
 }
 
 // rosterTabOrder reads `agent-repl-roster--tab-order', the roster walk order
@@ -315,7 +326,7 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // TestEmacsCreateWorkspaceAppearsOnTheRoster is scenario 7: the DAEMON minted
 // the identity and Emacs only reacted — a new row in
 // `agent-repl-roster--rows-by-id', and the name in BOTH
-// `agent-repl-roster--tab-order' and `tab-bar-tabs'.
+// `agent-repl-roster--tab-order' and `agent-repl--ws-tabline-names'.
 //
 // `SPC TAB n' prompts three times (repository, initial prompt, name, base
 // ref), so the binding is asserted as a LOOKUP and the command is then run
@@ -363,7 +374,7 @@ func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
 	tabs := f.tabNames()
 	for _, name := range order {
 		if !containsString(tabs, name) {
-			t.Fatalf("tab-bar-tabs = %v, want a tab for the roster-ordered workspace %q", tabs, name)
+			t.Fatalf("agent-repl--ws-tabline-names = %v, want a tab for the roster-ordered workspace %q", tabs, name)
 		}
 	}
 }
@@ -457,7 +468,7 @@ func TestEmacsCloseWorkspaceIsAViewAct(t *testing.T) {
 	e.Leader("j d")
 
 	e.AwaitEvalFor(emacsVerbBound, "the closed workspace's tab to go away",
-		`(mapcar (lambda (tab) (format "%s" (cdr (assq 'name (cdr tab))))) (tab-bar-tabs))`,
+		emacsWSTablineNamesForm,
 		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), f.Name) })
 
 	// The DAEMON-side session is untouched: its roster still carries the row.
@@ -515,7 +526,7 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
 	if tabs := f.tabNames(); !containsString(tabs, f.Name) {
-		t.Fatalf("tab-bar-tabs = %v, want %q still present: a blocked close draws no dialog and leaves the tab in place", tabs, f.Name)
+		t.Fatalf("agent-repl--ws-tabline-names = %v, want %q still present: a blocked close draws no dialog and leaves the tab in place", tabs, f.Name)
 	}
 	if n := e.EvalInt(`(length (gethash ` + elispString(f.Name) + ` agent-repl--prompt-queue))`); n < 1 {
 		t.Fatalf("agent-repl--prompt-queue holds %d entries for %q, want the held prompt still there: undelivered intent is never silently discarded", n, f.Name)
@@ -544,7 +555,7 @@ func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
 	e.Leader("j x")
 
 	e.AwaitEvalFor(emacsVerbBound, "the killed workspace's tab to go away",
-		`(mapcar (lambda (tab) (format "%s" (cdr (assq 'name (cdr tab))))) (tab-bar-tabs))`,
+		emacsWSTablineNamesForm,
 		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), f.Name) })
 
 	// NO refusal path was taken. The blocked-close message is the one this
