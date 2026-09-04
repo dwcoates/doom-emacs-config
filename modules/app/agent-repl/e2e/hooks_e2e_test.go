@@ -121,6 +121,7 @@ func hookRow(rows []*frontendv1.FeedRow) *frontendv1.FeedHook {
 // "!hook-succeeded" instead would silently fall through to the default
 // prose scenario and never touch hook code at all.
 func TestHookSucceeded(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, repo, ws := newHookWorld(t)
 
@@ -166,6 +167,7 @@ func TestHookSucceeded(t *testing.T) {
 // sentence is a durable-transcript fact the sidecar/store own; it never
 // reaches this wire. This test asserts the wire text, not the attachment's.
 func TestHookBlocked(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, _, ws := newHookWorld(t)
 
@@ -196,6 +198,7 @@ func TestHookBlocked(t *testing.T) {
 // TestHookFailed is #79 (golden hook-failed): the fake SDK's non-blocking
 // failing SessionStart hook (exit 1 on stderr, no gated tool call at all).
 func TestHookFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, _, ws := newHookWorld(t)
 
@@ -230,6 +233,7 @@ func TestHookFailed(t *testing.T) {
 // PostToolUse hook around an Edit call the hook did NOT block — the edit
 // stands, and the turn ends ordinarily.
 func TestHookCancelled(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w, repo, ws := newHookWorld(t)
 

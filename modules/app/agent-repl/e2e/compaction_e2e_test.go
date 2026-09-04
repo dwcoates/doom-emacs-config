@@ -190,6 +190,7 @@ func cpDriveObservingInProgress(t *testing.T, w *World, ws *workspacev1.Workspac
 // ---------------------------------------------------------------------------
 
 func TestCompactionDirected(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := cpNewWorkspace(t, w)
@@ -236,6 +237,7 @@ func TestCompactionDirected(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := cpNewWorkspace(t, w)
@@ -275,6 +277,7 @@ func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCompactionAuto(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := cpNewWorkspace(t, w)
@@ -334,6 +337,7 @@ func TestCompactionAuto(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCompactionFailed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := cpNewWorkspace(t, w)
@@ -390,6 +394,7 @@ func TestCompactionFailed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestContextBudgetWarning(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws, configDir := cpNewWorkspace(t, w)

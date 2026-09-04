@@ -388,6 +388,7 @@ func assertSessionProceeds(t *testing.T, g *coldGate) {
 // ---------------------------------------------------------------------------
 
 func TestColdGate(t *testing.T) {
+	t.Parallel()
 	t.Run("Pay", func(t *testing.T) {
 		// Arrange
 		g := raiseColdGate(t)
