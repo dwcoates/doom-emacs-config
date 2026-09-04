@@ -212,7 +212,6 @@ type Daemon struct {
 	http       *http.Client
 
 	mu            sync.Mutex
-	workspaceDirs []string
 	exited        bool
 	exitErr       error
 	waitOnce      sync.Once

@@ -98,6 +98,11 @@ type gitFixture struct {
 	// open-for-write returns exactly when the child has opened its end, so the
 	// test knows the process is live before it cancels.
 	BlockOnFifo string `json:"block_on_fifo"`
+	// KillSelfWith, when non-zero, is the signal the fake sends ITSELF instead
+	// of answering. It models the one death this client cannot cause and must
+	// still classify: a git ended by somebody else while the daemon's context
+	// is perfectly alive.
+	KillSelfWith int `json:"kill_self_with"`
 }
 
 // ok is a fixture that succeeds with that stdout.
@@ -108,6 +113,12 @@ func ok(stdout string, match ...string) gitFixture {
 // fails is a fixture that exits nonzero with that stderr.
 func fails(exit int, stderr string, match ...string) gitFixture {
 	return gitFixture{Match: match, Stderr: stderr, Exit: exit}
+}
+
+// killedBy is a fixture whose git is killed by that signal, with the caller's
+// context untouched — the wrong-victim death, not a cancellation.
+func killedBy(sig syscall.Signal, match ...string) gitFixture {
+	return gitFixture{Match: match, KillSelfWith: int(sig)}
 }
 
 // blocks is a fixture that hangs on that named pipe until the process is
@@ -355,6 +366,17 @@ func fakeGitMain() {
 				fmt.Fprintf(os.Stderr, "fake git: reading %s: %v\n", fixture.BlockOnFifo, err)
 				os.Exit(120)
 			}
+		}
+		if fixture.KillSelfWith != 0 {
+			if err := syscall.Kill(os.Getpid(), syscall.Signal(fixture.KillSelfWith)); err != nil {
+				fmt.Fprintf(os.Stderr, "fake git: killing itself with %d: %v\n", fixture.KillSelfWith, err)
+				os.Exit(120)
+			}
+			// SIGKILL cannot be caught, so this is unreachable for the signal
+			// the tests use; a catchable one would fall through, and saying so
+			// is better than pretending the fixture answered.
+			fmt.Fprintf(os.Stderr, "fake git: survived signal %d\n", fixture.KillSelfWith)
+			os.Exit(120)
 		}
 		if fixture.RemovePath != "" {
 			if err := os.RemoveAll(fixture.RemovePath); err != nil {

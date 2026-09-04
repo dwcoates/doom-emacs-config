@@ -69,3 +69,62 @@ func TestAKilledDaemonLeavesNoLogTargetOutsideItsStateDir(t *testing.T) {
 		}
 	}
 }
+
+// TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept proves the warning sweep
+// survives the one event that used to blind it: the worktree's removal.
+//
+// A landed merge takes the source worktree with `git worktree remove`, and
+// `<workspace>/.claude/emacs/daemon.log` — the sweep's ONLY reader for that
+// workspace — is a symlink inside it. Reading through the link answered "no
+// records" from then on, so every warning a merged workspace produced went
+// unswept, in exactly the tests whose subject is the merge. The sweep reads the
+// state root's own target instead, which the removal cannot reach.
+func TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept(t *testing.T) {
+	t.Parallel()
+	// Arrange: a workspace on a worktree, so its removal is a real merge's
+	// removal and not the repository's.
+	f := newOpenedWorktree(t, harness.Opts{}, "merged")
+	link := harness.WorkspaceLogPath(f.ws.GetDir(), "daemon")
+	if err := os.RemoveAll(f.ws.GetDir()); err != nil {
+		t.Fatalf("removing the worktree: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("Lstat %s after the removal = %v, want it gone; the arrangement would prove nothing", link, err)
+	}
+
+	// Act: the shim dies, which the daemon records as WARNINGS on that
+	// workspace's own sink — the sink whose canonical link no longer exists.
+	f.shim.Exit(1, "simulated crash")
+	record := f.d.AwaitWorkspaceLogRecordInState("the exit the daemon recorded for a workspace whose worktree is gone",
+		func(r harness.LogRecord) bool { return r.Operation == "daemon.shimclient.exit" })
+
+	// Assert: the sweep's own material carries it.
+	if record.Level != "warn" && record.Level != "error" {
+		t.Fatalf("the shim's exit was recorded at %q, want a warning the sweep would catch", record.Level)
+	}
+	// THE OLD READER IS BLIND, and saying so is what makes this a regression
+	// test rather than a restatement: reading the same sink through the
+	// workspace's canonical link answers nothing at all now.
+	if through := f.d.WorkspaceLog(f.ws.GetDir(), "daemon"); len(through) != 0 {
+		t.Fatalf("reading %s answered %d records, want none; the removal did not take the link", link, len(through))
+	}
+	if !holdsOperation(f.d.UnexpectedWarnings(), "daemon.shimclient.exit") {
+		t.Fatalf("UnexpectedWarnings() = %v, want the post-removal shim exit among them", f.d.UnexpectedWarnings())
+	}
+	// Declared LAST, so the assertion above reads the undeclared sweep and the
+	// cleanup sweep reads the declared one.
+	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.reopen", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.link_fault",
+		"daemon.health.open_fault", "daemon.health.session")
+}
+
+// holdsOperation reports whether a swept record set names that operation.
+func holdsOperation(records []harness.LogRecord, operation string) bool {
+	for _, r := range records {
+		if r.Operation == operation {
+			return true
+		}
+	}
+	return false
+}

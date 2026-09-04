@@ -148,6 +148,26 @@ func (d *Daemon) ExpectWarnings(operations ...string) {
 	d.mu.Unlock()
 }
 
+// UnexpectedWarnings is the sweep's own material: every WARN or worse this
+// daemon recorded whose operation no ExpectWarnings declared. The cleanup sweep
+// fails the test on it; a test ABOUT the sweep reads it.
+func (d *Daemon) UnexpectedWarnings() []LogRecord {
+	d.mu.Lock()
+	expected := make(map[string]bool, len(d.expected))
+	for k, v := range d.expected {
+		expected[k] = v
+	}
+	d.mu.Unlock()
+	return d.unexpectedWarnings(expected)
+}
+
+// unexpectedWarnings sweeps the run log and every per-workspace daemon sink
+// this daemon wrote.
+func (d *Daemon) unexpectedWarnings(expected map[string]bool) []LogRecord {
+	return append(unexpectedWarnings(d.RunLog(), expected),
+		unexpectedWarnings(d.WorkspaceLogRecords(), expected)...)
+}
+
 func (d *Daemon) assertNoUnexpectedWarnings() {
 	d.mu.Lock()
 	expected := make(map[string]bool, len(d.expected))
@@ -156,10 +176,7 @@ func (d *Daemon) assertNoUnexpectedWarnings() {
 	}
 	d.mu.Unlock()
 
-	unexpected := unexpectedWarnings(d.RunLog(), expected)
-	for _, dir := range d.watchedWorkspaceDirs() {
-		unexpected = append(unexpected, unexpectedWarnings(d.WorkspaceLog(dir, "daemon"), expected)...)
-	}
+	unexpected := d.unexpectedWarnings(expected)
 	if len(unexpected) == 0 {
 		return
 	}
@@ -170,19 +187,67 @@ func (d *Daemon) assertNoUnexpectedWarnings() {
 	d.t.Errorf("the daemon produced %d unexpected warning records; declare them with ExpectWarnings if they are intended:%s", len(unexpected), b.String())
 }
 
-// WatchWorkspaceLogs adds a workspace's own log sink to the warning sweep.
-func (d *Daemon) WatchWorkspaceLogs(dir string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.workspaceDirs = append(d.workspaceDirs, dir)
+// WorkspaceLogTargets are the per-workspace daemon sinks minted under THIS
+// run's state root — `<state>/logs/agent-repl-<workspace>-daemon-*.log`, the
+// names dlog's createTarget gives them.
+//
+// THE SWEEP READS THEM RATHER THAN THE WORKSPACES' OWN daemon.log, and that is
+// not an optimization. `<workspace>/.claude/emacs/daemon.log` is a SYMLINK, and
+// a merge takes the worktree — symlink and all — with `git worktree remove`. A
+// sweep that read through the link found nothing for exactly the workspaces
+// whose merge is the subject, so every warning a merged workspace logged went
+// unswept. The target under the state root outlives the worktree, because the
+// state root owns the daemon's durable logs.
+func (d *Daemon) WorkspaceLogTargets() []string {
+	d.t.Helper()
+	pattern := filepath.Join(d.StateDir, "logs", "agent-repl-*-daemon-*.log")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		d.t.Fatalf("harness: glob %s: %v", pattern, err)
+	}
+	sort.Strings(matches)
+	return matches
 }
 
-func (d *Daemon) watchedWorkspaceDirs() []string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	out := make([]string, len(d.workspaceDirs))
-	copy(out, d.workspaceDirs)
+// WorkspaceLogRecords is every record THIS daemon wrote to a per-workspace
+// daemon sink.
+//
+// The pid filter is what keeps one state root's targets attributable: a
+// restart, a successor and an incumbent share the root and each mints its own
+// targets, and a successor must not be failed for the records its predecessor
+// wrote (whose ExpectWarnings were declared on a different Daemon).
+func (d *Daemon) WorkspaceLogRecords() []LogRecord {
+	d.t.Helper()
+	var out []LogRecord
+	for _, target := range d.WorkspaceLogTargets() {
+		for _, r := range readLog(d.t, target) {
+			if r.PID == d.PID() {
+				out = append(out, r)
+			}
+		}
+	}
 	return out
+}
+
+// AwaitWorkspaceLogRecordInState waits for one of this daemon's per-workspace
+// records, read from the state root's targets. It is what a test whose
+// workspace directory is GONE — a merged one — waits on.
+func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		for _, r := range d.WorkspaceLogRecords() {
+			if pred(r) {
+				return r
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, d.ctx.Err())
+		}
+	}
 }
 
 // ShimLoggedRequest recovers the LAST request the fake shim recorded for a verb

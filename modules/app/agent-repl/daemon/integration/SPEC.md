@@ -652,3 +652,16 @@ assertion; `ExpectWarnings` only WIDENS that set. There is no escape hatch --
 the `"*"` allow-all was deliberately deleted so every list stays exact -- and a
 record on a GREEN path is a daemon defect to fix, never something to declare
 away.
+
+IT SWEEPS THE STATE ROOT'S OWN TARGETS, NOT THE WORKSPACES' SYMLINKS, and it
+sweeps EVERY workspace this daemon wrote for rather than an opted-in list.
+`<workspace>/.claude/emacs/daemon.log` is a symlink, and a landed merge takes
+the worktree — link and all — with `git worktree remove`; a sweep that read
+through it found nothing for exactly the workspaces whose merge was the
+subject. The sweep therefore globs
+`<state>/logs/agent-repl-*-daemon-*.log` (dlog's own target names) and keeps
+the records whose `pid` is this daemon's, which is what keeps an incumbent's
+and a successor's records attributable over one shared state root.
+`TestAWarningLoggedAfterTheWorktreeIsGoneIsStillSwept` pins it, and the old
+opt-in `WatchWorkspaceLogs` is gone: nothing declares which workspaces are
+swept, so nothing can forget to.
