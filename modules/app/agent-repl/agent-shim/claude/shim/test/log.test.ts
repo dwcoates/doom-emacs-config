@@ -48,6 +48,11 @@ describe("shim runtime logging", () => {
     expect(persisted()[0]).toMatchObject({ workspace_dir: "/canonical/workspace", workspace_id: "cdb4ebd1", agent_repl_session_id: "agent-session-1", request_id: "request-1" });
   });
 
+  it("refuses an empty request id rather than stamping a blank field", async () => {
+    const log = await configured();
+    expect(() => log.setRequestId("")).toThrow(/request id is required/);
+  });
+
   it("derives identity without resolving cwd and propagates learned Claude identity", async () => {
     const log = await freshLog();
     log.configureLog({ fd: 3, cwd: "/workspace/link-is-intentional", agentReplSessionId: "a" });

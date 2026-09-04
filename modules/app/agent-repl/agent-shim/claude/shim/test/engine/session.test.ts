@@ -7,14 +7,15 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
 import { cwdSlug } from "../../src/engine/cold.js";
+import { bindLog, clearRequestId } from "../../src/log.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { agentIdPath } from "../../src/engine/identity.js";
 import { workspaceLockKey } from "../../src/locks.js";
@@ -2900,5 +2901,62 @@ describe("the last write or edit unit the fold context carries", () => {
     } as never);
 
     expect(h.fold.contexts.at(-1)?.lastWriteOrEditUnit?.value).toBe("toolu_edit");
+  });
+});
+
+describe("the vendor request the turn runs under", () => {
+  /** An assistant message, with or without the vendor's request identity. */
+  const assistant = (requestId?: string): never =>
+    ({
+      type: "assistant",
+      uuid: "u-request-id",
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "claude-opus-5", content: [] },
+      ...(requestId === undefined ? {} : { request_id: requestId }),
+    }) as never;
+
+  /** The request_id the logger stamps right now, undefined when it stamps none. */
+  function stampedRequestId(): string | undefined {
+    const before = vi.mocked(writeSync).mock.calls.length;
+    bindLog({ operation: "shim.test.request-id" }).log({}, "probe");
+    const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+    const [, bytes, offset, length] = calls[before]!;
+    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
+    return record.request_id;
+  }
+
+  beforeEach(() => {
+    // The logger is one process-wide singleton, so a previous turn's stamp is
+    // dropped the way the end of that turn drops it.
+    clearRequestId();
+  });
+
+  it("stamps the request the assistant message revealed", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage(assistant("req_revealed"));
+
+    expect(stampedRequestId()).toBe("req_revealed");
+  });
+
+  it("stamps nothing when the assistant message names no request", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage(assistant());
+
+    expect(stampedRequestId()).toBeUndefined();
+  });
+
+  it("drops the request id at the end of the turn that revealed it", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistant("req_ends_with_the_turn"));
+
+    await h.engine.onSdkMessage(resultMessage());
+
+    expect(stampedRequestId()).toBeUndefined();
   });
 });

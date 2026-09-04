@@ -26,7 +26,7 @@
  * needs.
  */
 import { create } from "@bufbuild/protobuf";
-import { bindLog, onLogSinkPoisoned, setClaudeSessionId } from "../log.js";
+import { bindLog, clearRequestId, onLogSinkPoisoned, setClaudeSessionId, setRequestId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../locks.js";
 import type { LockRelease } from "../locks.js";
@@ -1077,6 +1077,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     if (message.type === "assistant") {
+      // THE ASSISTANT MESSAGE IS THE ONLY PLACE THE VENDOR NAMES ITS REQUEST.
+      // Stamping it here puts request_id on every record of the rest of this
+      // turn, which is what joins a shim record to the vendor call it came
+      // from. A message that carries none leaves the standing stamp alone: an
+      // absent field is the vendor not saying, never a new request.
+      const requestId = (message as { request_id?: unknown }).request_id;
+      if (typeof requestId === "string" && requestId !== "") setRequestId(requestId);
       // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
       // so this message is the only evidence the swap happened.
       noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
@@ -1243,6 +1250,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function closeTurn(): Promise<void> {
     const ended = open;
     open = undefined;
+    // THE REQUEST ID DIES WITH ITS TURN. It named the vendor call this turn ran
+    // under; carrying it past the end would attribute idle records and the next
+    // turn to a request that is already answered.
+    clearRequestId();
     if (ended === undefined) return;
     if (ended.keepalive) rewind.noteKeepaliveTurn();
     cadence?.resume();

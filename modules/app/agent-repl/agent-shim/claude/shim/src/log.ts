@@ -26,6 +26,7 @@ interface RuntimeContext {
   workspace_id: string;
   agent_repl_session_id: string;
   claude_session_id?: string;
+  request_id?: string;
   write: (fd: number, bytes: Buffer, offset: number, length: number) => number;
   poisoned?: Error;
 }
@@ -140,6 +141,28 @@ export function setClaudeSessionId(claudeSessionId: string): void {
   requireContext().claude_session_id = claudeSessionId;
 }
 
+/**
+ * Stamp the vendor request the CURRENT TURN is running under.
+ *
+ * The SDK names it only on its assistant messages, so it is learned mid-turn
+ * and holds until the turn ends. It is cleared there rather than left standing:
+ * a request id outliving its turn would attribute the next turn's records --
+ * and every idle record between turns -- to a request that is already answered.
+ */
+export function setRequestId(requestId: string): void {
+  if (typeof requestId !== "string" || requestId.length === 0) {
+    throw new Error("shim request id is required");
+  }
+  requireContext().request_id = requestId;
+}
+
+/** Drop the turn's request id at the end of the turn that revealed it. */
+export function clearRequestId(): void {
+  const runtime = runtimeContext;
+  if (runtime === undefined) return;
+  delete runtime.request_id;
+}
+
 function logLevel(fields: LogFields, verbosity: ShimLogRecord["verbosity"]): LogLevel {
   const value = fields.level;
   if (value === undefined) return verbosity === "verbose" ? "debug" : "info";
@@ -173,6 +196,7 @@ function buildRecord(verbosity: ShimLogRecord["verbosity"], fields: LogFields, m
     workspace_dir: runtime.workspace_dir, workspace_id: runtime.workspace_id,
     agent_repl_session_id: runtime.agent_repl_session_id,
     ...(runtime.claude_session_id === undefined ? {} : { claude_session_id: runtime.claude_session_id }),
+    ...(runtime.request_id === undefined ? {} : { request_id: runtime.request_id }),
   };
   if (fields.request_id !== undefined) record.request_id = requireString(fields, "request_id");
   if (fields.claude_session_id !== undefined) record.claude_session_id = requireString(fields, "claude_session_id");
