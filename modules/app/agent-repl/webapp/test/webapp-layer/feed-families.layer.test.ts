@@ -28,7 +28,16 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { BOOT_BUDGET_MS, TURN_TEST_MS, bootLayer, driveTurn, rows, textOf } from "./drive";
+import {
+  BOOT_BUDGET_MS,
+  TURN_TEST_MS,
+  awaitDrawn,
+  bootLayer,
+  driveTurn,
+  rows,
+  submit,
+  textOf,
+} from "./drive";
 
 let app: MountedApp;
 
@@ -398,6 +407,51 @@ it(
     // Assert — the delivery arm is stated, and it is the resumption.
     expect(row.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe(
       "resumedRecipient",
+    );
+  },
+  TURN_TEST_MS,
+);
+
+/** Drive a scenario whose turn dies, and read the terminal row it added. */
+async function died(scenario: string): Promise<HTMLElement> {
+  const before = rows(app, "turnEnded").length;
+  await submit(app, `!${scenario}`);
+  await awaitDrawn(
+    app,
+    `the terminal row for !${scenario}`,
+    () => rows(app, "turnEnded").length > before,
+  );
+  const drawn = rows(app, "turnEnded");
+  return drawn[drawn.length - 1] as HTMLElement;
+}
+
+// §F2 — landing 10: the turn-error line NAMES which way the query died.
+it(
+  "names an unexpected eof on the turn-error line",
+  async () => {
+    // Arrange / Act — `!query-eof` ends the agent's stream without a close.
+    const row = await died("query-eof");
+
+    // Assert
+    expect(row.querySelector("[data-turn-error]")?.getAttribute("data-turn-error")).toBe(
+      "queryDied",
+    );
+    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
+      "unexpectedEof",
+    );
+  },
+  TURN_TEST_MS,
+);
+
+it(
+  "names an iterator failure on the turn-error line",
+  async () => {
+    // Arrange / Act — `!query-fail` throws out of the sdk's iterator.
+    const row = await died("query-fail");
+
+    // Assert
+    expect(row.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
+      "iteratorFailure",
     );
   },
   TURN_TEST_MS,
