@@ -311,55 +311,6 @@ func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1
 }
 
 // ===========================================================================
-// #34 — VendorBackgroundedSubagent.
-//
-// DetachForeground (shim.v1, proto/src/shim/v1/service.proto:107) confirms a
-// vendor-side backgrounding of foreground work, and no caller-facing
-// agentrepl.v1 rpc or daemon-internal trigger for that call exists on this
-// branch (confirmed: daemon/internal/sessionwatcher/fakes_test.go:268's
-// fake client PANICS on it — "sessionwatcher must not call
-// DetachForeground" — and proto/src/agentrepl/v1/endpoint_interrupt.proto
-// is STOP-only), so this test cannot drive that confirm path from this
-// layer. Compounded here by a second, golden-specific gap: grepping
-// agent-shim/claude/shim/src/fake/scenarios/subagents.ts finds no
-// vendor-backgrounded-shaped scenario at all for a subagent (only
-// `subagent`, `subagent-detached`, `subagent-detached-live`,
-// `subagent-detached-utterance`, `subagent-failed`, `cancel-all`,
-// `usage-historical`) — shell.ts's VENDOR_BACKGROUNDED backgrounds a BASH
-// call, not a subagent spawn.
-//
-// This test drives the reachable half (an ordinary live subagent spawn) and
-// then skips: no fake-SDK scenario exists to complete the shape it names.
-// ===========================================================================
-
-func TestVendorBackgroundedSubagent(t *testing.T) {
-	t.Parallel()
-	w := NewWorld(t, WorldOpts{})
-	ws := dbWorkspace(t, w)
-
-	initial, stream := dbOpenRootFeed(t, w, ws)
-	defer stream.Close()
-
-	// "!subagent" (subagents.ts's SUBAGENT) spawns an ordinary, awaited
-	// subagent — the closest reachable analogue to "a live foreground
-	// subagent", since no scenario backgrounds one on its own.
-	SubmitPrompt(t, w, ws, "!subagent")
-
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	harness.AwaitView(t, ctx, stream, "a live subagent bubble", func(row *frontendv1.FeedRow) bool {
-		for _, r := range initial {
-			if r.GetActivity().GetSubagent() != nil {
-				return true
-			}
-		}
-		return row.GetActivity().GetSubagent() != nil
-	})
-
-	t.Skip("DetachForeground has no caller-facing agentrepl.v1 trigger on this branch, and no fake-SDK scenario backgrounds a subagent the way shell.ts's VENDOR_BACKGROUNDED backgrounds a Bash call — see this test's header comment")
-}
-
-// ===========================================================================
 // #35 — BashForegroundCompleted.
 //
 // Golden "bash-foreground-completed" -> prompt "!bash" (shell.ts's BASH,
