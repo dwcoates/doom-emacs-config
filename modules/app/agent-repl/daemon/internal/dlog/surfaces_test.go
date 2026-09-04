@@ -776,3 +776,31 @@ func TestAWorkspaceSinkTargetLivesUnderTheStateRootsLogsDirectory(t *testing.T) 
 		t.Fatalf("daemon.log target = %q, want it under the state root's %q", target, logsDir)
 	}
 }
+
+// TestWorkspaceKeepsItsSinkAfterTheDirectoryIsRemoved covers the merged
+// workspace: the daemon removes a landed merge's worktree itself, and every
+// later per-workspace rpc on that workspace still has to resolve the sink it
+// already opened rather than fail on the directory the daemon just deleted.
+func TestWorkspaceKeepsItsSinkAfterTheDirectoryIsRemoved(t *testing.T) {
+	// Arrange: a workspace whose sink is already open.
+	s, _ := testSurfaces(t)
+	dir := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act: the worktree goes away, as a landed merge's teardown removes it.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	log, err := s.Workspace(dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Workspace after the directory was removed = error %v, want the already-open sink", err)
+	}
+	log.Info("daemon.workspace.after_removal", "recorded", nil)
+}
