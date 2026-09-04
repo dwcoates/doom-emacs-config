@@ -802,10 +802,19 @@ docs. File-per-area grouping is given in section E.
     inventory and may be added back later. The golden this item drove,
     `ctrl-b-detach-of-foreground-work`, stays reachable-only with no e2e
     test; see `testdata/captures/MANIFEST.md`.
-34. **VendorBackgroundedSubagent** — `ctrl-b-detach-of-foreground-subagent`
-    — a vendor-side backgrounding of foreground work (the DetachForeground
-    verb's confirm path), applied to a foreground subagent instead of the
-    main turn.
+34. **REMOVED — project-lead ruling, 2026-09-04**: `TestVendorBackgroundedSubagent`
+    was a perpetual skip (its drivable half ran, then it always skipped —
+    `DetachForeground` has no `agentrepl.v1` caller and no fake-SDK scenario
+    backgrounds a subagent) and is deleted rather than kept as noise. The
+    golden this item drove, `ctrl-b-detach-of-foreground-subagent`, stays
+    reachable-only with no e2e test. `DetachForeground`'s confirm/refusal
+    arms (`unknownUnit`, `alreadyConcluded`, `unsupported`, success) are
+    covered at the unit level only, generically over `AgentActivityId`
+    (not subagent-specific): `agent-shim/claude/shim/test/engine/turn.test.ts`
+    (`describe("DetachForeground", ...)` and
+    `describe("DetachForeground on a live foreground unit", ...)`) and
+    `agent-shim/claude/shim/test/engine/session.test.ts`. See
+    SCENARIO-MATRIX.md's "Arms without an e2e lever" section.
 35. **BashForegroundCompleted** — `bash-foreground-completed` — ordinary,
     non-detached Bash round-trip, for contrast with #31.
 36. **BashNonzeroExit** — `bash-nonzero-exit` — the tool unit's failure/exit
@@ -917,8 +926,18 @@ docs. File-per-area grouping is given in section E.
     if the fake SDK has a scripted failure-start path; otherwise this is an
     unreachable-without-fabrication arm — flag in F if so, do not fabricate
     the failure to force it.
-55. **KillTurnNotTheOpenTurn** — `KillTurnFailure.cause.not_the_open_turn` —
-    a `KillTurn` naming a turn id that is not the currently-open one.
+55. **REMOVED — project-lead ruling, 2026-09-04**: `TestKillTurnNotTheOpenTurn`
+    was a perpetual skip (`KillTurnFailure.cause.not_the_open_turn` is an
+    internal daemon/shim race with no client-observable trigger and no
+    documented scenario or env lever) and is deleted rather than kept as
+    noise. The arm is covered at the unit level only:
+    `agent-shim/claude/shim/test/service/failures.test.ts`
+    (`describe("killTurnFailure", ...)`, the `notTheOpenTurn` case),
+    `agent-shim/claude/shim/test/engine/turn.test.ts` (asserts
+    `failureKind(response)` is `"notTheOpenTurn"`), and
+    `agent-shim/claude/shim/test/integration/turn.test.ts` ("a TurnId that
+    is not the open turn is refused not_the_open_turn"). See
+    SCENARIO-MATRIX.md's "Arms without an e2e lever" section.
 
 ### Degraded state (`degradedstate_e2e_test.go`)
 
@@ -1134,7 +1153,7 @@ reported as such rather than papered over.
 | 12 | context-injected-skills | `!skills-injected` | #74 | no |
 | 13 | context-usage | `!context-usage-drift` | #59 | no |
 | 14 | cron-create-list-delete | `!cron` | #75 | no |
-| 15 | ctrl-b-detach-of-foreground-subagent | `!subagent` (reachable-only) | #34 | no |
+| 15 | ctrl-b-detach-of-foreground-subagent | `!subagent` (reachable-only) | #34 REMOVED (project-lead ruling, 2026-09-04) | no |
 | 16 | ctrl-b-detach-of-foreground-work | `!vendor-backgrounded` (reachable-only) | #33 REMOVED (owner ruling, 2026-09-04) | no |
 | 17 | diagnostics | (none; default `""` scenario) | #76 | no |
 | 18 | edit | `!edit` | #66 | no |

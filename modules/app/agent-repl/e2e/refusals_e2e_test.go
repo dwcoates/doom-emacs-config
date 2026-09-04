@@ -1,4 +1,4 @@
-// refusals_e2e_test.go — SPEC.md section C, "Refusal arms" (#51-55).
+// refusals_e2e_test.go — SPEC.md section C, "Refusal arms" (#51-54).
 //
 // Every test here proves a REFUSAL crossed the real wire, driven either by a
 // named fake-SDK scenario through the real shim, or — for the one arm the
@@ -439,47 +439,4 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 	if row.GetTurnEnded() == nil {
 		t.Fatalf("the recovered session's turn ended row = %v, want a terminal", row)
 	}
-}
-
-// ===========================================================================
-// #55 — KillTurnNotTheOpenTurn: FLAGGED, NOT FABRICATED.
-//
-// shim.v1 KillTurnFailure.cause.not_the_open_turn
-// (proto/src/shim/v1/endpoint_kill_turn.proto): "The named turn is not the
-// open one." KillTurn is a shim.v1-only rpc (daemon <-> shim); no
-// client-facing agentrepl.v1 rpc lets a caller name a TurnId to kill
-// (confirmed: `grep -rn "conversation.v1.TurnId" proto/src/agentrepl/`
-// finds it only on SubmitPromptRequest's workspace-scoped echo and
-// UpdateHeldPrompt, never on anything that addresses a kill). The daemon's
-// own Interrupt{target: turn} carries NO turn id at all — it always means
-// "whichever turn is open now" — so the daemon must always pass ITS OWN
-// currently-tracked open turn id to shim.v1 KillTurn; a client cannot choose
-// a turn id at all, let alone a stale one.
-//
-// The only way this arm could fire for real is an internal TOCTOU race
-// between the daemon deciding which turn is open and the shim's own turn
-// state moving on (e.g. a held prompt's promotion) before the KillTurn RPC
-// lands — not a wire fact any documented scenario or env lever can select,
-// and not one this suite's harness exposes a synchronization primitive for
-// (no "pause the daemon between its open-turn read and its KillTurn call"
-// hook exists). Provoking it would require either fabricating the race with
-// concurrent goroutines and NO deterministic interleaving guarantee (this
-// project's own no-sleep, no-flaky-synchronization rule forbids shipping
-// that as a real assertion) or a new harness seam this brief expressly
-// forbids inventing.
-//
-// Per SPEC.md section F's own disposition menu for exactly this shape of
-// question (ruling 1's "flag rather than fabricate" precedent, and ruling 3's
-// original text before its env-lever resolution was found): this is left
-// OPEN rather than guessed at. Skipped, not deleted, so it stays visible in
-// `go test -list` and in coverage tallies as a known gap for the project
-// lead to rule on, instead of silently absent.
-// ===========================================================================
-
-func TestKillTurnNotTheOpenTurn(t *testing.T) {
-	t.Parallel()
-	t.Skip("e2e: KillTurnFailure.not_the_open_turn is driven by an internal " +
-		"daemon/shim race with no client-observable trigger and no documented " +
-		"scenario or env lever (see this test's own header comment); flagged " +
-		"as an open question for the project lead rather than fabricated")
 }
