@@ -16,6 +16,7 @@ import (
 // TestAFailedBatchDoesNotAdvanceTheCursor asserts the store's refusal is
 // honored: the same position is re-offered rather than moved past.
 func TestAFailedBatchDoesNotAdvanceTheCursor(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -59,6 +60,7 @@ const refusalsBeforeRecovery = 3
 // TestARefusedBatchIsReplayedIdentically asserts the re-sent records carry the
 // SAME write_ids, so the store can absorb them once it recovers.
 func TestARefusedBatchIsReplayedIdentically(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -108,6 +110,7 @@ func TestARefusedBatchIsReplayedIdentically(t *testing.T) {
 // TestAStoreOutageSuspendsProductionOfEveryFile asserts a refusal suspends ALL
 // production, not just the file that was refused.
 func TestAStoreOutageSuspendsProductionOfEveryFile(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -176,6 +179,7 @@ func requireNoWriteResumesWithoutACursorRead(t *testing.T, calls []string) {
 // invariant: production resumes with cursor-then-rescan, so a GetSidecarCursors
 // precedes the next WriteBatch.
 func TestRecoveryReadsCursorsBeforeWritingAgain(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -218,6 +222,7 @@ func TestRecoveryReadsCursorsBeforeWritingAgain(t *testing.T) {
 // sidecar makes is GetSidecarCursors — never a write from a position the store
 // did not hand it.
 func TestEveryProductionCycleBeginsWithACursorRead(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -243,6 +248,7 @@ func TestEveryProductionCycleBeginsWithACursorRead(t *testing.T) {
 // TestAFailedCursorReadProducesNothing asserts a refused cursor read suspends
 // production just as a refused write does.
 func TestAFailedCursorReadProducesNothing(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

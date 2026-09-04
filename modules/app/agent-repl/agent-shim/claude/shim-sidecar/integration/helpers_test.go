@@ -18,6 +18,7 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -66,12 +67,20 @@ const (
 	spoolUID = "501"
 
 	// waitBudget bounds every "wait until the store shows X" helper. Exceeding
-	// it is a test failure, never a retry. 50s is ~3x the observed healthy max
-	// across this package (a real vendor+sidecar+store scenario, -race,
-	// go test -v ./... baseline): the heaviest legitimate scenario
-	// (TestMockScenarios/!subagent) took ~16.6s; nearly everything else
-	// finishes in well under a second.
-	waitBudget = 50 * time.Second
+	// it is a test failure, never a retry.
+	//
+	// 10s is ~3x the observed healthy max of the slowest WHOLE subject in this
+	// package (2.82s, TestMockKeepAliveTurnsNeverReachAPage, measured on a
+	// green `go test ./integration/ -count=1 -json` run at the package's own
+	// parallelism on a contended machine; 0.92s measured alone). A whole
+	// subject's wall time is an upper bound on any single wait inside it, so
+	// the budget has that margin over every individual wait several times over.
+	//
+	// It was 50s, on a stated basis of a ~16.6s healthy max for
+	// TestMockScenarios/!subagent. That scenario measures 0.33s and no subtest
+	// in the package exceeds 0.87s, so the number was ~50x its own premise and
+	// a single red burned 50s of the suite's wall time proving nothing.
+	waitBudget = 10 * time.Second
 
 	// snapshotBudget bounds watchBashRun's read of an UNFINISHED run. The
 	// endpoint follows until the terminal, so a snapshot of a live run has no
@@ -188,6 +197,9 @@ func runSuite(m *testing.M) int {
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	// The mocked vendor's shared throwaway store outlives every subject, so
+	// nothing else can stand it down. It is a no-op when nothing started it.
+	defer stopSharedVendorStore()
 	return m.Run()
 }
 
@@ -556,6 +568,12 @@ type sidecarOptions struct {
 	StaleAgentSilence    time.Duration
 	StaleWorkflowSilence time.Duration
 	UnownedSpoolWindow   time.Duration
+
+	// The store-recovery ladder's floor and ceiling. Zero is not passed, so the
+	// production ladder (250ms doubling to 10s) stands for every subject that
+	// is not about an outage.
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
 }
 
 func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
@@ -572,7 +590,83 @@ func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) s
 		// simply time out inside it. Subjects that ARE about the hold set their
 		// own window.
 		UnownedSpoolWindow: 200 * time.Millisecond,
+		// THE RECOVERY LADDER IS REAL WALL TIME IN THIS PACKAGE. These subjects
+		// run a REAL sidecar process, so the injected clock the unit tests
+		// advance (sidecar.now / sidecar.jitter) does not reach it: an outage
+		// subject waits out production's own rungs, 250ms doubling to 10s. The
+		// suite runs the ladder at 5ms/20ms — the SAME ladder, with the same
+		// doubling and the same ceiling-held-forever behavior, at a scale the
+		// suite can observe rather than sit through. The shape is what these
+		// subjects assert; the durations are production's business.
+		RecoverBackoffMin: 5 * time.Millisecond,
+		RecoverBackoffMax: 20 * time.Millisecond,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// A child process's own output, kept with the subject that started it.
+// ---------------------------------------------------------------------------
+
+// childOutputCap bounds what one child's captured output may hold, so a process
+// that loops on an error cannot grow the harness without bound. Everything past
+// it is dropped and the drop is STATED, never silently swallowed.
+const childOutputCap = 256 << 10
+
+// childOutput collects one child process's stdout and stderr and hands them to
+// the subject that started it — and only to that subject, only when it FAILED.
+//
+// Every one of these children (the sidecar, the real store, the mocked vendor)
+// used to write straight to the test binary's own os.Stderr. Serially that read
+// as a transcript; in parallel it is a dozen processes interleaving on one fd,
+// which buries the evidence a failing subject actually needs and, worse,
+// garbles `go test -json`: stray writes are attributed to whichever test the
+// parser thinks is current, and a subject's own PASS line can be lost that way.
+//
+// The evidence is not discarded — each child also writes its own log file, and
+// this buffer is printed through t.Logf on failure, where it belongs.
+type childOutput struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	dropped  int
+	overflow bool
+}
+
+func (c *childOutput) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if room := childOutputCap - c.buf.Len(); room < len(p) {
+		if room > 0 {
+			c.buf.Write(p[:room])
+		}
+		c.dropped += len(p) - max(room, 0)
+		c.overflow = true
+		return len(p), nil
+	}
+	return c.buf.Write(p)
+}
+
+// captureChild answers the writer a child's stdout and stderr are pointed at,
+// and registers the cleanup that prints it if the subject failed.
+func captureChild(t *testing.T, what string) *childOutput {
+	t.Helper()
+	c := &childOutput{}
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.buf.Len() == 0 {
+			return
+		}
+		if c.overflow {
+			t.Logf("%s wrote this to its stdout/stderr (%d further byte(s) dropped at the %d-byte cap):\n%s",
+				what, c.dropped, childOutputCap, c.buf.String())
+			return
+		}
+		t.Logf("%s wrote this to its stdout/stderr:\n%s", what, c.buf.String())
+	})
+	return c
 }
 
 type sidecarProc struct {
@@ -603,6 +697,8 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		{"--stale-agent-silence", opts.StaleAgentSilence},
 		{"--stale-workflow-silence", opts.StaleWorkflowSilence},
 		{"--unowned-spool-window", opts.UnownedSpoolWindow},
+		{"--recover-backoff-min", opts.RecoverBackoffMin},
+		{"--recover-backoff-max", opts.RecoverBackoffMax},
 	} {
 		if window.value == 0 {
 			continue
@@ -615,8 +711,9 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
 	cmd.Env = append(cmd.Env, opts.ExtraEnv...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	captured := captureChild(t, "the sidecar (log: "+opts.LogPath+")")
+	cmd.Stdout = captured
+	cmd.Stderr = captured
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start sidecar: %v", err)
 	}
@@ -646,6 +743,26 @@ func (p *sidecarProc) Stop() {
 		<-p.done
 		p.t.Fatalf("sidecar did not exit within %s of SIGTERM", waitBudget)
 	}
+}
+
+// Kill ENDS the process where it stands, with no chance to shut down.
+//
+// It exists for the subjects that stop a sidecar while it is FROZEN inside a
+// withheld store write (see writeGate). SIGTERM would not reach such a process
+// until its own rpc timeout expired, and releasing the write first would let it
+// take one more poll — which is precisely the poll those subjects exist to cut
+// it off before. A kill is also the harsher precondition: the restarted reader
+// gets no orderly shutdown's help, only what the store already made durable.
+func (p *sidecarProc) Kill() {
+	p.t.Helper()
+	if p.stopped {
+		return
+	}
+	p.stopped = true
+	if p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+	<-p.done
 }
 
 // ---------------------------------------------------------------------------
@@ -686,13 +803,23 @@ type realStore struct {
 // systems, and says why.
 func storeBinary(t *testing.T) string {
 	t.Helper()
+	path, err := storeBinaryPath()
+	if err != nil {
+		t.Fatalf("this subject runs against the REAL store, which does not build: %v", err)
+	}
+	return path
+}
+
+// storeBinaryPath is storeBinary without a *testing.T, for the fixtures whose
+// lifetime is the TEST BINARY's rather than one subject's.
+func storeBinaryPath() (string, error) {
 	storeBinOnce.Do(func() {
 		storeBinErr = goBuild(repo.storeDir, storeBinPath)
 	})
 	if storeBinErr != nil {
-		t.Fatalf("this subject runs against the REAL store, which does not build: %v", storeBinErr)
+		return "", storeBinErr
 	}
-	return storeBinPath
+	return storeBinPath, nil
 }
 
 // lockBinary builds the shim's lock holder on first use and answers its path.
@@ -731,8 +858,9 @@ func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	captured := captureChild(t, "the real store (log: "+logPath+")")
+	cmd.Stdout = captured
+	cmd.Stderr = captured
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start store: %v", err)
 	}
@@ -1085,6 +1213,9 @@ type fakeStore struct {
 	// rejections holds every batch the fake refused on its OWN validation, so a
 	// subject can state what the store objected to.
 	rejections []string
+	// gate, when armed, WITHHOLDS the response to the first batch that matches
+	// it. See writeGate.
+	gate *writeGate
 
 	batchC chan *storev1.WriteBatchRequest
 	callC  chan string
@@ -1353,10 +1484,94 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	f.mu.Lock()
 	f.acked = append(f.acked, recorded)
 	f.recordBashRows(recorded)
+	gate := f.gate
 	f.mu.Unlock()
+	// The batch is DURABLE here and only the ANSWER is withheld, so a subject
+	// waiting on the gate sees the same store state the producer just wrote.
+	gate.hold(recorded)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
+}
+
+// ---------------------------------------------------------------------------
+// The write gate: STOPPING THE PRODUCER, rather than out-running it.
+// ---------------------------------------------------------------------------
+
+// writeGate withholds the answer to ONE batch, chosen by a predicate.
+//
+// WHY A GATE AND NOT A LONGER TIMER. Several subjects have to act between two
+// things the sidecar does back to back — append a summary after a boundary was
+// held but before its forced redelivery, or stop the process while a cursor is
+// still parked. The way that used to be arranged was to stretch the sidecar's
+// poll interval (500ms here, 5s in the restart subject) so the second event was
+// far enough away for the test to win the race. That is a race the test usually
+// wins, not a race it cannot lose, and it made the hold subjects the slowest in
+// the package.
+//
+// The store is the interlock the system already has. Every batch is written
+// SYNCHRONOUSLY inside the cycle and the cursor only advances on a durable
+// success, so a store that has not answered is a cycle that has not moved on.
+// Holding the answer to the batch that states the hold therefore freezes the
+// sidecar at exactly the instant the subject needs, for as long as it needs,
+// at whatever poll interval production uses.
+type writeGate struct {
+	match    func(*storev1.WriteBatchRequest) bool
+	reached  chan struct{} // closed when a matching batch is inside the gate
+	released chan struct{} // closed by release(), letting the answer out
+
+	reachedOnce  sync.Once
+	releasedOnce sync.Once
+}
+
+// hold blocks a matching batch's answer until the gate is released. A nil gate
+// (nothing armed) is the ordinary case and blocks nothing.
+func (g *writeGate) hold(req *storev1.WriteBatchRequest) {
+	if g == nil || !g.match(req) {
+		return
+	}
+	g.reachedOnce.Do(func() { close(g.reached) })
+	<-g.released
+}
+
+// await blocks until the producer is INSIDE the gated write, and fails the
+// subject rather than hanging if it never gets there.
+func (g *writeGate) await(ctx context.Context, t *testing.T, what string) {
+	t.Helper()
+	select {
+	case <-g.reached:
+	case <-ctx.Done():
+		t.Fatalf("%s never reached the store within the deadline, so the producer was never stopped where the subject needs it", what)
+	}
+}
+
+// release lets the withheld answer out. It is idempotent so a subject can call
+// it explicitly AND register it as a cleanup, and a failed subject can never
+// leave a producer wedged.
+func (g *writeGate) release() {
+	g.releasedOnce.Do(func() { close(g.released) })
+}
+
+// gateOnBatch arms the one-shot gate. The gate is released at cleanup whatever
+// the subject does, so a t.Fatalf between arming and releasing cannot leave the
+// sidecar blocked in a write for the rest of the run.
+func (f *fakeStore) gateOnBatch(t *testing.T, match func(*storev1.WriteBatchRequest) bool) *writeGate {
+	t.Helper()
+	g := &writeGate{match: match, reached: make(chan struct{}), released: make(chan struct{})}
+	f.mu.Lock()
+	f.gate = g
+	f.mu.Unlock()
+	t.Cleanup(g.release)
+	return g
+}
+
+// cursorParkedAt matches the batch that offers a cursor for a path standing at
+// exactly an offset — the hold's own observable event.
+func cursorParkedAt(path string, offset int64) func(*storev1.WriteBatchRequest) bool {
+	return func(req *storev1.WriteBatchRequest) bool {
+		cs := req.GetBatch().GetCursorAdvance()
+		return cs != nil && samePath(cs.GetPath(), path) && cs.GetOffset() == offset
+	}
 }
 
 // recordBashRows keeps every bash row a durable batch carried. Caller holds mu.
@@ -1583,7 +1798,18 @@ func (f *fakeStore) awaitEntry(ctx context.Context, t *testing.T, what string, m
 // read path that dies partway through a replay is precisely what these subjects
 // exist to catch, and returning the rows it managed to send first would let it
 // pass every assertion that only looked at those.
-func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) ([]*conversationv1.AgentBash, bool) {
+//
+// WHAT ENDS THE SNAPSHOT IS A COUNT THE CALLER READ OFF THE WIRE, not the
+// budget. The producer's rows are already durable by the time these subjects
+// read a run back — every one of them waited for the cursor covering the writes
+// first — so the store replays them from one snapshot taken at stream open,
+// back to back. wantRows is what the caller counted in the batches the producer
+// sent, so reaching it means the replay is complete AND that the read verb
+// agrees with the wire about how many rows there are. A run with FEWER rows
+// than the wire carried, or an unfinished run whose caller wants whatever is
+// there (wantRows 0), still ends on snapshotBudget, which is a failure bound
+// again rather than an unconditional cost paid on every healthy call.
+func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string, wantRows int) ([]*conversationv1.AgentBash, bool) {
 	t.Helper()
 	snapshot, cancel := context.WithTimeout(ctx, snapshotBudget)
 	defer cancel()
@@ -1593,7 +1819,17 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 	if err != nil {
 		return nil, false
 	}
-	defer stream.Close()
+	defer func() {
+		// THE STREAM IS ENDED BY CANCELLING ITS CONTEXT, NEVER BY CLOSING IT
+		// FIRST. A server-streaming Close waits for the server to finish the
+		// call, and this server finishes only when the run terminates or the
+		// deadline expires — so a caller that already had every row it came for
+		// still paid the WHOLE snapshotBudget on the way out, on every healthy
+		// call. Defers run last-registered-first, so this one has to do both in
+		// the right order rather than leave it to two separate defers.
+		cancel()
+		_ = stream.Close()
+	}()
 	var out []*conversationv1.AgentBash
 	for stream.Receive() {
 		row := stream.Msg().GetRow()
@@ -1602,6 +1838,9 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 		}
 		out = append(out, row.GetFrame())
 		if isTerminalFrame(row.GetFrame()) {
+			return out, true
+		}
+		if wantRows > 0 && len(out) >= wantRows {
 			return out, true
 		}
 	}
@@ -2283,6 +2522,34 @@ func awaitCursorInBatches(ctx context.Context, t *testing.T, f *fakeStore, path 
 	}
 }
 
+// awaitCursorSettledAt waits until the sidecar's DURABLE cursor for a path
+// stands at EXACTLY an offset.
+//
+// It is the counterpart to awaitCursorInBatches (at-or-past) and
+// awaitCursorAtMost (at-or-below): a subject whose whole claim is "the reader
+// came back to the file's new length" cannot express itself as an inequality,
+// because every intermediate position a legitimate re-read passes through
+// satisfies one side or the other.
+func awaitCursorSettledAt(ctx context.Context, t *testing.T, f *fakeStore, path string, offset int64) *storev1.CursorState {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		// The LAST cursor offered, not the highest: a truncation moves the
+		// position BACKWARD, so latestCursorFor's maximum would keep answering
+		// the pre-truncation offset forever.
+		if cs := lastCursorOfferedFor(f.AckedBatches(), path); cs != nil && cs.GetOffset() == offset {
+			return cs
+		}
+		select {
+		case <-ctx.Done():
+			cs := lastCursorOfferedFor(f.AckedBatches(), path)
+			t.Fatalf("the sidecar's durable cursor for %s never settled at %d (last: %v) within the deadline", path, offset, cs)
+		case <-tick.C:
+		}
+	}
+}
+
 // latestCursorFor answers the newest cursor advance a producer offered for a
 // path, or nil when it offered none.
 func latestCursorFor(batches []*storev1.WriteBatchRequest, path string) *storev1.CursorState {
@@ -2377,6 +2644,7 @@ func awaitCursorPast(ctx context.Context, t *testing.T, f *fakeStore, path strin
 // TestCwdSlugMatchesTheCapturedProjectDirectory asserts the harness spells a
 // project directory exactly as the vendor did in the checked-in capture.
 func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	captured := loadCapturedSession(t)
 	cwd := "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj"
@@ -2394,6 +2662,7 @@ func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
 // the example that distinguishes it from the narrower "/ and . only" reading:
 // the underscore collapses onto '-' like every other non-alphanumeric byte.
 func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	cwd := "/private/var/folders/_m/x"
 
@@ -2409,6 +2678,7 @@ func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
 // TestCwdSlugPreservesCase asserts the mapping touches only the bytes outside
 // [A-Za-z0-9]; a capital stays capital.
 func TestCwdSlugPreservesCase(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	cwd := "/Users/DodgeCoates/Repo9"
 
@@ -2425,6 +2695,7 @@ func TestCwdSlugPreservesCase(t *testing.T) {
 // transcript subject asserts against: a re-capture that changed them must fail
 // here, loudly, rather than as a mystifying page-order failure.
 func TestTheCapturedTranscriptStillCarriesItsExpectedUnits(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	captured := loadCapturedSession(t)
 	joined := strings.Join(captured.Lines, "\n")
@@ -2444,6 +2715,7 @@ func TestTheCapturedTranscriptStillCarriesItsExpectedUnits(t *testing.T) {
 // TestGrowingFileReportsTheOffsetEachRecordStartedAt asserts the harness's own
 // offset accounting, which every cursor assertion rests on.
 func TestGrowingFileReportsTheOffsetEachRecordStartedAt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	g := newGrowingFile(t, filepath.Join(t.TempDir(), "grow.jsonl"))
 
@@ -2496,6 +2768,7 @@ func setMessageID(t *testing.T, obj map[string]any, id string) map[string]any {
 // --spool-root is the PARENT of claude-<uid>, so the real tree is
 // /tmp/claude-<uid>/<project>/<session>/tasks/.
 func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
 	slug := cwdSlug("/Users/dodgecoates/layout-probe")
@@ -2542,6 +2815,7 @@ func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
 // is easy to get wrong: --spool-root does NOT include claude-<uid>; the sidecar
 // resolves that segment itself.
 func TestTheSpoolRootIsTheParentOfTheUidSegment(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	tree := newVendorTree(t)
 	slug := cwdSlug("/Users/dodgecoates/spool-root-probe")

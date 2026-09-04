@@ -23,6 +23,7 @@ const divergentSessionID = "d1ffe4e4-d1ff-4d1f-8d1f-d1ffd1ffd1ff"
 // the diverging record's unit is a line in the FILE's book, and no book named by
 // the record's own value exists at all.
 func TestARecordWhoseSessionIdDivergesStillLandsInTheFilesBook(t *testing.T) {
+	t.Parallel()
 	// Arrange: the captured transcript, with the assistant record carrying the
 	// Bash call re-stamped with a sessionId that names no file here.
 	ctx, cancel := testContext(t)

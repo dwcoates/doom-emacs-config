@@ -25,6 +25,7 @@ import (
 // vendor keeps writing, starts it again over the same database, and asserts the
 // book holds every unit of the file exactly once.
 func TestAStoreBounceMidIngestLeavesNoGapAndNoRepeat(t *testing.T) {
+	t.Parallel()
 	// Arrange: a store whose socket and database outlive the process holding
 	// them, so the second one is genuinely the same store.
 	ctx, cancel := testContext(t)
@@ -77,6 +78,7 @@ func TestAStoreBounceMidIngestLeavesNoGapAndNoRepeat(t *testing.T) {
 // file, at the length the vendor actually wrote — so nothing between the outage
 // and the recovery was skipped, and the file was not re-keyed as a second one.
 func TestAStoreBounceLeavesOneCursorRowAtTheFilesFullLength(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

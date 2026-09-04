@@ -22,6 +22,7 @@ import (
 // the conclusion is reached under the AGENT silence window, and it reaches the
 // wire as AgentSubagentFailure.cause.lost naming `went_silent`.
 func TestASilentAgentSpoolSettlesItsSpawnUnitLostOnTheWire(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

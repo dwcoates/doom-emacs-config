@@ -29,6 +29,13 @@
 //	--stale-agent-silence     $AGENT_REPL_STALE_AGENT_SILENCE     (60m)
 //	--stale-workflow-silence  $AGENT_REPL_STALE_WORKFLOW_SILENCE  (60m)
 //	--unowned-spool-window    $AGENT_REPL_UNOWNED_SPOOL_WINDOW    (60s)
+//	--recover-backoff-min     $AGENT_REPL_RECOVER_BACKOFF_MIN     (250ms)
+//	--recover-backoff-max     $AGENT_REPL_RECOVER_BACKOFF_MAX     (10s)
+//
+// The last two are the store-recovery ladder's floor and ceiling. They were
+// the only windows in this process with no override, which left the outage
+// subjects — which run a real sidecar, so the cycle's injected clock does not
+// reach them — waiting out real rungs of production's ladder.
 //
 // UNSET KEEPS THE PACKAGE DEFAULT; A MALFORMED VALUE IS REFUSED. A window that
 // does not parse, or that is negative, is a bootstrap error: the process states
@@ -80,6 +87,12 @@ const (
 	// its bytes are ingested as residue. It sits with the LOST windows because
 	// it is the other wall-clock wait the file plane makes a caller sit through.
 	UnownedSpoolWindowEnv = "AGENT_REPL_UNOWNED_SPOOL_WINDOW"
+
+	// RecoverBackoffMinEnv and RecoverBackoffMaxEnv name the store-recovery
+	// ladder's floor and ceiling — the delay before the first retry of a
+	// suspended cycle, and the ceiling the doubling holds forever.
+	RecoverBackoffMinEnv = "AGENT_REPL_RECOVER_BACKOFF_MIN"
+	RecoverBackoffMaxEnv = "AGENT_REPL_RECOVER_BACKOFF_MAX"
 )
 
 func main() {
@@ -104,19 +117,25 @@ func main() {
 		"how long a workflow journal may stop growing before it is LOST (Go duration; default $"+StaleWorkflowSilenceEnv+", else 60m)")
 	unownedSpoolWindow := flag.String("unowned-spool-window", "",
 		"how long an unclaimed spool is held before its bytes are ingested as residue (Go duration; default $"+UnownedSpoolWindowEnv+", else 60s)")
+	recoverBackoffMinFlag := flag.String("recover-backoff-min", "",
+		"delay before the first retry of a suspended cycle (Go duration; default $"+RecoverBackoffMinEnv+", else 250ms)")
+	recoverBackoffMaxFlag := flag.String("recover-backoff-max", "",
+		"ceiling the store-recovery ladder's doubling holds forever (Go duration; default $"+RecoverBackoffMaxEnv+", else 10s)")
 	flag.Parse()
 
-	unowned, err := durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow}.resolve()
-	if err != nil {
-		reportFatal(err, os.Stderr)
-		os.Exit(1)
-	}
-
-	staleOptions, err := resolveStaleOptions(
+	// ONE RESOLUTION, ONE REFUSAL. Every window is resolved by a single tested
+	// function and every way of getting one wrong leaves the process through
+	// the same two lines. Three separate call-and-check pairs here would put
+	// three copies of the refusal inside main, which is the one function in
+	// this file no test can enter.
+	w, err := resolveWindows(
+		durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow},
 		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: *staleGrace},
 		durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: *staleShellSilence},
 		durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: *staleAgentSilence},
 		durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: *staleWorkflowSilence},
+		durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: *recoverBackoffMinFlag},
+		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: *recoverBackoffMaxFlag},
 	)
 	if err != nil {
 		reportFatal(err, os.Stderr)
@@ -129,8 +148,10 @@ func main() {
 		SpoolRoot:          *spoolRoot,
 		PollInterval:       *pollInterval,
 		RescanInterval:     *rescanInterval,
-		Stale:              staleOptions,
-		UnownedSpoolWindow: unowned,
+		Stale:              w.Stale,
+		UnownedSpoolWindow: w.UnownedSpool,
+		RecoverBackoffMin:  w.RecoverBackoffMin,
+		RecoverBackoffMax:  w.RecoverBackoffMax,
 	}
 	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
@@ -151,6 +172,11 @@ type Options struct {
 	// UnownedSpoolWindow is how long an unclaimed spool is held before its bytes
 	// are ingested as residue. Zero keeps held.go's UnownedSpoolWindow.
 	UnownedSpoolWindow time.Duration
+	// RecoverBackoffMin and RecoverBackoffMax are the store-recovery ladder's
+	// floor and ceiling. Zero keeps cycle.go's recoverBackoffMin /
+	// recoverBackoffMax.
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
 }
 
 // durationSource is one duration option's two spellings: the flag value the
@@ -208,6 +234,71 @@ func resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence dura
 		*field.into = resolved
 	}
 	return out, nil
+}
+
+// windows is every duration option this process takes, resolved.
+type windows struct {
+	Stale             stale.Options
+	UnownedSpool      time.Duration
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
+}
+
+// resolveWindows resolves all seven duration options and answers the FIRST
+// refusal, applying nothing when there is one: a bootstrap that was refused
+// configures no window at all, rather than half of them.
+func resolveWindows(unowned, grace, shellSilence, agentSilence, workflowSilence, backoffMin, backoffMax durationSource) (windows, error) {
+	resolvedUnowned, err := unowned.resolve()
+	if err != nil {
+		return windows{}, err
+	}
+	staleOptions, err := resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence)
+	if err != nil {
+		return windows{}, err
+	}
+	min, max, err := resolveBackoffOptions(backoffMin, backoffMax)
+	if err != nil {
+		return windows{}, err
+	}
+	return windows{
+		Stale:             staleOptions,
+		UnownedSpool:      resolvedUnowned,
+		RecoverBackoffMin: min,
+		RecoverBackoffMax: max,
+	}, nil
+}
+
+// resolveBackoffOptions answers the store-recovery ladder's floor and ceiling.
+//
+// Zero means "keep the package default", exactly as it does for every other
+// window. A CEILING BELOW THE FLOOR IS REFUSED rather than quietly clamped: it
+// describes a ladder that cannot climb, which is not a policy anyone chose, and
+// a process that started with it would retry forever at a delay the operator
+// never asked for. Both spellings are named in the refusal, because the two
+// values only conflict together and the operator may have supplied one of them
+// through the environment.
+func resolveBackoffOptions(min, max durationSource) (time.Duration, time.Duration, error) {
+	resolvedMin, err := min.resolve()
+	if err != nil {
+		return 0, 0, err
+	}
+	resolvedMax, err := max.resolve()
+	if err != nil {
+		return 0, 0, err
+	}
+	effectiveMin, effectiveMax := resolvedMin, resolvedMax
+	if effectiveMin == 0 {
+		effectiveMin = recoverBackoffMin
+	}
+	if effectiveMax == 0 {
+		effectiveMax = recoverBackoffMax
+	}
+	if effectiveMax < effectiveMin {
+		return 0, 0, bootstrapError{fmt.Errorf(
+			"--%s/%s resolves to %s and --%s/%s to %s: a recovery ladder whose ceiling is below its floor cannot climb",
+			min.flagName, min.envName, effectiveMin, max.flagName, max.envName, effectiveMax)}
+	}
+	return resolvedMin, resolvedMax, nil
 }
 
 // defaultStoreSocket resolves the store socket's default: the shared env var

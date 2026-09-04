@@ -21,6 +21,7 @@ import (
 // reported at error and its transcript is held, never tailed under a
 // locator-derived identity.
 func TestAMalformedMetaHoldsTheTranscriptLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -33,9 +34,15 @@ func TestAMalformedMetaHoldsTheTranscriptLoudly(t *testing.T) {
 
 	// Act: the REAL meta fixture, cut off mid-object — the shape a reader sees
 	// when it looks between the vendor's write and its rename.
-	startSidecar(t, opts)
 	g := writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
 	writeTruncatedSubagentMeta(t, tree, slug, session, corpusSubagentID)
+	// THE WHOLE FIXTURE IS ON DISK BEFORE THE READER IS: the subject is a
+	// meta that is PRESENT and unusable, and starting the sidecar first
+	// leaves a window in which it scans between the transcript's write
+	// and the meta's — the ABSENT-meta case, which is a WARNING and is a
+	// different subject. Writing both first closes the window with an
+	// ordering rather than with a hope about scheduling.
+	startSidecar(t, opts)
 	rec := awaitLog(ctx, t, opts.LogPath, "the unparsable-meta refusal", func(r logRecord) bool {
 		return r.Operation == "discover-meta" && samePathAny(r.Context["path"], g.Path())
 	})

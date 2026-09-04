@@ -20,6 +20,7 @@ import (
 // TestATaskStopOnAnAgentTaskCancelsItsSpawnUnit asserts the agent arm of the
 // carve-out, with the vendor's own `local_agent` task type.
 func TestATaskStopOnAnAgentTaskCancelsItsSpawnUnit(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -71,6 +72,7 @@ func TestATaskStopOnAnAgentTaskCancelsItsSpawnUnit(t *testing.T) {
 // edge: an unlaunched task's stop is kept whole rather than keyed on a guess,
 // and is never quietly dropped into the LOST policy's hands.
 func TestATaskStopForATaskNoLaunchOpenedIsStoredWholeAndLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

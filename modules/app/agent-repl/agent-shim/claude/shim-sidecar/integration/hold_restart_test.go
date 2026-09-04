@@ -3,7 +3,6 @@ package integration
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -27,39 +26,60 @@ import (
 // boundary is held, writes the summary that settles it, and asserts the restarted
 // process converts it — exactly once, with the summary.
 func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
 	store := startRealStore(t)
+	// THE HOLD IS BOUNDED TO ONE REDELIVERY, and the redelivery is the NEXT
+	// poll of this file — so the subject has to cut the reader off between the
+	// two, and at the production poll interval that is one 50ms window. It used
+	// to be arranged by stretching the interval to 5s, which made this the
+	// slowest subject in the package and still only meant the test USUALLY won
+	// the race.
+	//
+	// The store is the interlock the system already has: the batch that parks
+	// the cursor is written synchronously inside the cycle, and the cycle does
+	// not move on until the store answers. A recording proxy in front of the
+	// real store COMMITS that batch upstream and then withholds the answer, so
+	// the reader is frozen with the boundary in hand, the cursor durably parked
+	// short of it, and no next poll possible — for as long as this subject
+	// needs, at production's own interval.
+	proxy := startProxyStore(t, store.Socket)
 	tree := newVendorTree(t)
 	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-restart-probe",
 		"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1")
-	opts := defaultSidecarOptions(t, store.Socket, tree)
-	// THE HOLD IS BOUNDED TO ONE REDELIVERY, and the redelivery is the NEXT
-	// poll of this file — so a suite-default 50ms poll interval force-converts
-	// the boundary before any restart could be arranged, and the subject would
-	// be testing the forced conversion instead. A long poll interval moves the
-	// competing timer far out of the way; the synchronization is still the
-	// store's own cursor, observed below, and never a wait on this duration.
-	opts.PollInterval = 5 * time.Second
+	opts := defaultSidecarOptions(t, proxy.Socket, tree)
 	summaryText := "Previously: the reader was stopped with a boundary in hand."
 
 	// Act: stop with the boundary held and the cursor parked short of it.
+	gate := proxy.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
 	first := startSidecar(t, opts)
+	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
 	awaitBookLines(ctx, t, store.Client, fx.Session, 1)
 	cs := awaitCursorAtLeast(ctx, t, store.Client, fx.File.Path(), 1)
 	if cs.GetOffset() > fx.BoundaryOffset {
 		t.Fatalf("the cursor stood at %d, past the held boundary at %d, before the restart even happened",
 			cs.GetOffset(), fx.BoundaryOffset)
 	}
-	first.Stop()
+	// KILLED WHERE IT STANDS, not asked to leave: a process frozen inside a
+	// withheld write does not see SIGTERM until its own rpc timeout expires,
+	// and letting the write finish first would hand it the very poll this
+	// subject exists to cut it off before.
+	first.Kill()
+	gate.release()
 
 	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
 		"f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1abcd", fx.BoundaryUUID, summaryText))
 	restarted := opts
 	restarted.LogPath = filepath.Join(t.TempDir(), "sidecar-restarted.log")
 	startSidecar(t, restarted)
-	lines := awaitBookLines(ctx, t, store.Client, fx.Session, 2)
+	// The restarted reader's OWN statement that it converted the frame it was
+	// stopped holding: the cursor only moves past the boundary once the frame
+	// parked short of it has been written. A wait for "at least two lines"
+	// would be satisfied by any second line at all.
+	awaitCursorAtLeast(ctx, t, store.Client, fx.File.Path(), fx.BoundaryOffset+1)
+	lines := bookLines(ctx, t, store.Client, fx.Session, 500)
 
 	// Assert: exactly one context cut, carrying the summary that settled it.
 	var cuts []*storev1.StorePageLine
@@ -84,6 +104,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 // itself is withheld while the bit is set: a compaction inside a keep-alive turn
 // is not a user-visible separation, because the turn was never the user's.
 func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -130,6 +151,7 @@ func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
 // cleared by the compaction: assistant work written AFTER the cut is still
 // withheld, because only a non-keepalive user prompt closes the turn.
 func TestAKeepAliveBitSurvivesACompactionForTheWorkAfterIt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

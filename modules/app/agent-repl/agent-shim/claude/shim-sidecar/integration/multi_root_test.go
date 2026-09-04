@@ -14,6 +14,7 @@ import (
 // TestBothConfigRootsAreDiscovered asserts a transcript under each root is
 // ingested.
 func TestBothConfigRootsAreDiscovered(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -50,6 +51,7 @@ func TestBothConfigRootsAreDiscovered(t *testing.T) {
 // TestAFileOutsideEveryRootIsIgnored asserts discovery is bounded by the roots
 // it was given.
 func TestAFileOutsideEveryRootIsIgnored(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
