@@ -11,11 +11,27 @@
   around it (see blockers).
 
 ## Blockers / decisions owed (surfaced at reconciliation)
-- AGENT-ID MINTING FROM A TRANSCRIPT: nothing tells a file reader how to
-  mint an AgentId from a Claude transcript — the design record's identity
-  entries (shim-minted main_agent_id, vendor agent_id for subagents,
-  meta.json for workflow agents) are the spec; the sidecar needs the shim's
-  minting discipline or a shared rule. LEAD-LEVEL: cross-produces with shim.
+- AGENT-ID MINTING FROM A TRANSCRIPT — RESOLVED (2026-09-04). The reader
+  does not mint: it READS the identity the shim minted. The shim persists
+  `<state>/shim/<workspace-key>/agent-id.json`
+  (`original_vendor_session_id`, `workspace_key`, `minted_at_ms`) and, on a
+  `/clear` or fork, the pointer file the vendor's transcripts do not carry —
+  `vendor-id/<vendor-session-id>.json`
+  (`vendor_session_id`, `original_vendor_session_id`, `linked_at_ms`).
+  `internal/identity` is their file-only reader: a rotated id answers from
+  its link file, an id an `agent-id.json` names answers itself, and an id no
+  record names keeps its own book (R9's resume rule). The state root arrives
+  as `--state-dir` (`$AGENT_REPL_STATE_DIR`, else `~/.claude-emacs` — the
+  daemon's own precedence), and the workspace key is never derived: the
+  reader holds only the vendor's lossy cwd slug, so it ENUMERATES
+  `<state>/shim/*` and takes the key from the records themselves.
+  The book is re-resolved every rescan, because discovery order is not causal
+  order — a link that lands after the transcript was first seen moves the
+  watched file's book, and un-parks it when the refusal that parked it was
+  that very book move. Nothing is duplicated: a record's write and upsert
+  identities are digested from a file position that did not move.
+  Subagent and workflow-agent books are unaffected — they are keyed by the
+  spawning call's `tool_use_id` from `meta.json`, which no rotation touches.
 - LOAD-BEARING: the sidecar currently CANNOT hold its store link up — the
   beat timer tears down on the always-failing health probe. The port must
   either give it a real probe route or remove probing (streams+transport own
