@@ -2102,6 +2102,138 @@ caught and surfaced as a message — the rollover must not block startup."
   (let ((git (expand-file-name ".git" d)))
     (or (file-directory-p git) (file-regular-p git))))
 
+;;;; ---- Thread-safe process teardown and waiting ----
+;;
+;; `delete-process' — and `kill-buffer' on a buffer that still owns a live
+;; process, which calls it implicitly — can trigger a REDISPLAY
+;; (`delete-process' -> status update -> `redisplay_preserve_echo_area' ->
+;; `gui_consider_frame_title').  On the macOS NS build redisplay calls into
+;; AppKit (`-[NSWindow setTitle:]'), which is main-thread-only: from a
+;; worker thread it raises an uncaught ObjC exception, which `abort's Emacs
+;; into its fatal-signal handler.  The worker then sits suspended in that
+;; handler STILL HOLDING the global Lisp lock, and the main thread
+;; deadlocks forever on the next form it evaluates.
+;;
+;; The same family reaches Emacs through `accept-process-output', which on
+;; macOS routes into `ns_select_1' + `[NSApp run]' — also main-thread-only.
+;; So a worker thread may neither busy-wait on a process nor tear one down
+;; directly; both go through the wrappers below.
+
+(defun agent-repl--defer-to-main-thread (thunk)
+  "Schedule zero-arg THUNK to run on the main thread on the next event-loop tick.
+Safe to call from any thread, including the main thread itself.
+
+A tick of delay even when already on the main thread is intentional: it
+keeps the call semantics uniform across contexts, so a regression caused
+by a direct call from a worker cannot hide behind \"works on the main
+thread, fails on a worker\"."
+  (run-at-time 0 nil thunk))
+
+(defun agent-repl--kill-process-safely (proc)
+  "Delete PROC on the MAIN thread, whatever thread this is called from.
+See this section's preamble: `delete-process' can redisplay, and redisplay
+off the main thread aborts Emacs on macOS.  A no-op for a nil or already
+dead PROC.  Returns non-nil when a deletion was performed or scheduled."
+  (when (process-live-p proc)
+    (if (eq (current-thread) main-thread)
+        (progn (delete-process proc) t)
+      (agent-repl--log nil
+                       "kill-process-safely: deferring delete-process %s to main thread"
+                       (ignore-errors (process-name proc)))
+      (agent-repl--defer-to-main-thread
+       (lambda () (when (process-live-p proc) (delete-process proc))))
+      t)))
+
+(defun agent-repl--wait-for-process-exit--main (proc timeout-seconds log-tag log-ws)
+  "Main-thread wait for PROC, bounded by TIMEOUT-SECONDS.
+Busy-waits via `accept-process-output', which is legal on the main thread.
+LOG-TAG and LOG-WS, when both non-nil, name the completion log line."
+  (let* ((started-at (float-time))
+         (deadline (+ started-at timeout-seconds))
+         (timed-out nil))
+    (while (and (process-live-p proc) (not timed-out))
+      (accept-process-output proc 0.2 nil t)
+      (when (> (float-time) deadline)
+        (setq timed-out t)
+        (agent-repl--kill-process-safely proc)))
+    (let ((status (if timed-out 'timeout (process-exit-status proc))))
+      (when (and log-tag log-ws)
+        (agent-repl--log log-ws
+                         "%s: process exited status=%S elapsed=%.1fs (main-thread wait)"
+                         log-tag status (- (float-time) started-at)))
+      status)))
+
+(defun agent-repl--wait-for-process-exit--worker (proc timeout-seconds log-tag log-ws)
+  "Worker-thread wait for PROC, bounded by TIMEOUT-SECONDS.
+Blocks on a condition variable signalled by a process sentinel and by a
+timeout timer.  Does NOT call `accept-process-output', which would route
+through `ns_select_1' and trap the worker in main-thread-only AppKit code
+on macOS.  LOG-TAG and LOG-WS, when both non-nil, name the completion log
+line."
+  (let* ((started-at (float-time))
+         (mutex (make-mutex
+                 (format "agent-repl-await-%s"
+                         (or (ignore-errors (process-name proc)) "proc"))))
+         (condvar (make-condition-variable mutex))
+         (done nil)
+         (status nil)
+         (timeout-timer nil))
+    (set-process-sentinel
+     proc
+     (lambda (p _event)
+       (when (memq (process-status p) '(exit signal))
+         (with-mutex mutex
+           (unless done
+             (setq done t)
+             (setq status (process-exit-status p))
+             (condition-notify condvar))))))
+    ;; Close the install race: a fast child can exit BEFORE the sentinel
+    ;; above is installed, in which case Emacs has already consumed the
+    ;; status-change notification and the sentinel never fires — the wait
+    ;; would then burn the full TIMEOUT-SECONDS for a long-dead process.
+    ;; Sample the status once after installing the sentinel; the `done'
+    ;; guard keeps a concurrently-firing sentinel from double-completing.
+    (when (memq (process-status proc) '(exit signal))
+      (with-mutex mutex
+        (unless done
+          (setq done t)
+          (setq status (process-exit-status proc)))))
+    (unless done
+      (setq timeout-timer
+            (run-at-time
+             timeout-seconds nil
+             (lambda ()
+               (with-mutex mutex
+                 (unless done
+                   (setq done t)
+                   (setq status 'timeout)
+                   (ignore-errors (agent-repl--kill-process-safely proc))
+                   (condition-notify condvar)))))))
+    (unwind-protect
+        (with-mutex mutex
+          (while (not done)
+            (condition-wait condvar)))
+      (when (timerp timeout-timer) (cancel-timer timeout-timer)))
+    (when (and log-tag log-ws)
+      (agent-repl--log log-ws
+                       "%s: process exited status=%S elapsed=%.1fs (worker-thread wait)"
+                       log-tag status (- (float-time) started-at)))
+    status))
+
+(defun agent-repl--wait-for-process-exit (proc timeout-seconds &optional log-tag log-ws)
+  "Synchronously block until PROC exits or TIMEOUT-SECONDS elapses.
+Returns the process exit status (an integer) on clean exit, or the symbol
+`timeout' when the deadline elapses — on which PROC is deleted as a side
+effect.
+
+Dispatches by calling thread to avoid the macOS worker-thread hazard
+described in this section's preamble.  LOG-TAG and LOG-WS, when both
+non-nil, are used to emit a single completion log line at the end of the
+wait."
+  (if (eq (current-thread) main-thread)
+      (agent-repl--wait-for-process-exit--main proc timeout-seconds log-tag log-ws)
+    (agent-repl--wait-for-process-exit--worker proc timeout-seconds log-tag log-ws)))
+
 (defun agent-repl--capture-process-output (program args &optional suppress-stderr timeout)
   "Run PROGRAM with ARGS, capture stdout, return its trimmed contents.
 Internal helper used by the per-binary capturing wrappers below
