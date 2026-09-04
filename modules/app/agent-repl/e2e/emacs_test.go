@@ -1230,18 +1230,24 @@ func (e *Emacs) DaemonAddr() string {
 // strayTermBound is how long a stray gets to honor SIGTERM before it is
 // killed outright.
 //
-// MEASURED: every stray observed exited within one poll of SIGTERM (50ms).
-// The bound is 2s -- forty times the observation -- because the failure it
-// guards is a process ignoring the signal, and the reaper must never become
-// the slowest part of a teardown.
-const strayTermBound = 2 * time.Second
+// MEASURED: every stray that honors SIGTERM at all exited within one poll of
+// it (50ms); the ones that do not honor it never do, so waiting longer buys
+// nothing. 500ms is ten times the observation.
+//
+// It was 2s, and that was too generous in a way that COSTS: this runs while
+// the scenario still holds its parallelism slot, so every second spent
+// waiting on a process that was never going to answer is a second no other
+// scenario can start in. Nothing depends on a stray's graceful exit -- the
+// test that owned it has already finished asserting.
+const strayTermBound = 500 * time.Millisecond
 
 // strayKillBound is how long a stray gets to disappear after SIGKILL.
 //
 // MEASURED: same observation, same poll. SIGKILL is not refusable, so
 // anything still present after this is a process stuck in the kernel, which
-// is reported rather than waited on.
-const strayKillBound = 2 * time.Second
+// is reported rather than waited on -- and reporting it sooner is strictly
+// better, for the same slot-holding reason.
+const strayKillBound = 500 * time.Millisecond
 
 // strayPollInterval is how often the reaper re-reads /proc while waiting.
 const strayPollInterval = 50 * time.Millisecond
