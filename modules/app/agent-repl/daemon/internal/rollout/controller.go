@@ -114,6 +114,10 @@ type entry struct {
 	// reloaded page — not a surviving stream — is the web participant.
 	hostCalled bool
 	webCalled  bool
+	// headlessClaimed records that a manifest read has taken responsibility for
+	// adopting this headless workspace, so a later read does not adopt it a
+	// second time.
+	headlessClaimed bool
 	// adopted records that the workspace is owned, so a later call succeeds
 	// immediately rather than re-adopting.
 	adopted bool

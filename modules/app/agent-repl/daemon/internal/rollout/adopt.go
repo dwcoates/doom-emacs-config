@@ -93,11 +93,21 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	headless, armed := c.armSessions(m.Sessions)
+	armed := c.armSessions(m.Sessions)
+	// THE HEADLESS SET IS TAKEN FROM THE LEDGER, NOT FROM THIS READ. Arming is
+	// additive, so a workspace armed by an EARLIER read — a participant's own
+	// adopt call re-reads the manifest before this poll gets to it — adds
+	// nothing here. It still has to be adopted: a headless workspace has no
+	// participant to adopt it and the incumbent would otherwise wait out the
+	// whole adoption window for it. claimHeadless hands back every armed
+	// headless workspace this daemon has not already claimed, so exactly one
+	// read adopts each of them.
+	headless := c.claimHeadless()
 
 	c.log.Info(opJoin, "armed the adopt rendezvous from the intent manifest", dlog.Context{
 		"outgoing_daemon": string(m.Daemon),
 		"workspaces":      armed,
+		"armed_total":     c.rendezvousSize(),
 		"headless":        len(headless),
 	})
 
@@ -107,14 +117,17 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 			// failure, not the join's: the rest still transfer.
 			c.log.Error(opJoin, "a headless workspace could not be adopted",
 				withCause(dlog.Context{"workspace": string(ws)}, err))
+			// THE CLAIM IS RELEASED ON FAILURE so a later manifest read can
+			// try this workspace again; an adoption that never happened must
+			// not look like one that did.
+			c.releaseHeadless(ws)
 		}
 	}
 	return true, nil
 }
 
 // armSessions arms the rendezvous for every manifest session NOT already
-// armed, and reports the newly armed headless workspaces alongside how many
-// entries it added.
+// armed, and reports how many entries it added.
 //
 // THE RENDEZVOUS IS ONE-SHOT PER HANDOVER. An entry a participant has already
 // called on — or that has already completed its adoption — keeps its ledger:
@@ -124,8 +137,7 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 // than once by design (a successor boots before the incumbent writes it, and
 // both the awaiting poll and a participant's own call re-read it), so every
 // read must be additive.
-func (c *controller) armSessions(sessions []ManifestSession) ([]ids.WorkspaceID, int) {
-	headless := make([]ids.WorkspaceID, 0, len(sessions))
+func (c *controller) armSessions(sessions []ManifestSession) int {
 	added := 0
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -143,11 +155,34 @@ func (c *controller) armSessions(sessions []ManifestSession) ([]ids.WorkspaceID,
 		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
 		c.joining[session.Workspace] = true
 		added++
-		if expected.Count() == 0 {
-			headless = append(headless, session.Workspace)
-		}
 	}
-	return headless, added
+	return added
+}
+
+// claimHeadless takes ownership of every armed headless workspace — zero
+// expected participants — that has not been claimed or adopted already, and
+// reports them. A workspace comes back from it AT MOST ONCE, so two manifest
+// reads adopt it once between them, and the caller is the sole adopter of what
+// it is handed.
+func (c *controller) claimHeadless() []ids.WorkspaceID {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	claimed := make([]ids.WorkspaceID, 0, len(c.rendezvous))
+	for ws, e := range c.rendezvous {
+		if e.expected.Count() != 0 || e.adopted || e.headlessClaimed {
+			continue
+		}
+		e.headlessClaimed = true
+		claimed = append(claimed, ws)
+	}
+	return claimed
+}
+
+// rendezvousSize reports how many workspaces are armed in total.
+func (c *controller) rendezvousSize() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.rendezvous)
 }
 
 // armFromManifest arms the rendezvous from the intent manifest as it stands
@@ -157,7 +192,7 @@ func (c *controller) armFromManifest() error {
 	if err != nil || !found {
 		return err
 	}
-	_, added := c.armSessions(m.Sessions)
+	added := c.armSessions(m.Sessions)
 	if added > 0 {
 		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
 			dlog.Context{"workspaces": added})
@@ -395,4 +430,13 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 			}
 		}
 	}()
+}
+
+// releaseHeadless undoes a headless claim whose adoption failed.
+func (c *controller) releaseHeadless(ws ids.WorkspaceID) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.rendezvous[ws]; ok {
+		e.headlessClaimed = false
+	}
 }
