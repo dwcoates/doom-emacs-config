@@ -47,6 +47,7 @@ import {
   drawUnreadableRefusal,
   type SentenceTable,
 } from "../rpc/refuse.js";
+import { revealNode } from "../scroll.js";
 import { asAnchor } from "./strip.js";
 
 /** What the button says when the daemon reports no selection. */
@@ -92,12 +93,74 @@ export function offerableOptions(options: readonly ModelOption[]): ModelOption[]
   });
 }
 
+/**
+ * What a cold refusal says, and where it points.
+ *
+ * `SetModelError.cold` is NOT a machinery failure: the shim raised the cold
+ * gate rather than discarding a warm cache, and the remediation menu is the
+ * GATE ROW's (pay | clear | compact), not this picker's. So the refusal names
+ * the gate and the attention goes there — "the daemon could not be reached"
+ * would send the reader looking for a fault that does not exist.
+ */
+export const COLD_REFUSAL_SENTENCE =
+  "the context is cold: answer the cold gate, then set the model again";
+
+/** The attribute the routed-to gate card is marked with. */
+export const COLD_ATTENTION_ATTRIBUTE = "data-attention";
+
+/** The value that attribute carries when the model picker routed here. */
+export const COLD_ATTENTION_VALUE = "coldGate";
+
+/** The footer notice's own hook, drawn only when no gate card is on the page. */
+export const COLD_NOTICE_ATTRIBUTE = "data-footer-notice";
+
 /** The causes only SetModel can answer with. */
 export const SET_MODEL_CAUSES = {
   noSession: () => "this workspace has no session to set a model on",
   notInCatalog: () => "that model is not in the served catalog",
   vendorRefused: (value: { detail: string }) => `the vendor refused: ${value.detail}`,
+  cold: () => COLD_REFUSAL_SENTENCE,
 } as unknown as SentenceTable;
+
+/**
+ * Send the reader to the cold gate.
+ *
+ * THE GATE ROW IS THE REMEDIATION, so the first choice is always the card
+ * itself: it is brought into view through the ONE reveal primitive the feed's
+ * other jumps use, and marked so the eye lands on it. A page whose feed has
+ * not drawn the gate (a history page scrolled elsewhere, a gate the daemon has
+ * not pushed yet) gets a footer notice NAMING the gate instead, which is a
+ * different fact and says so, rather than a silent no-op.
+ */
+export function routeToColdGate(doc: Document): "gate" | "notice" {
+  const gate = doc.querySelector<HTMLElement>(`[data-unit="${COLD_ATTENTION_VALUE}"]`);
+  if (gate !== null) {
+    gate.setAttribute(COLD_ATTENTION_ATTRIBUTE, COLD_ATTENTION_VALUE);
+    revealNode(gate, "start");
+    log("info", "routed the reader to the cold gate row", {
+      operation: "topbar.model-cold-gate",
+      context: { routed_to: "gate" },
+    });
+    return "gate";
+  }
+  const footer = doc.querySelector<HTMLElement>('[data-component="footer"]');
+  if (footer === null) {
+    // The shell resolves the footer's mount by id at boot, so its absence here
+    // is this page having no footer at all, not a missing notice.
+    throw new Error("the page has neither a cold gate row nor a footer to notice on");
+  }
+  for (const stale of footer.querySelectorAll(`[${COLD_NOTICE_ATTRIBUTE}]`)) stale.remove();
+  const notice = document.createElement("div");
+  notice.className = "footer-notice";
+  notice.setAttribute(COLD_NOTICE_ATTRIBUTE, COLD_ATTENTION_VALUE);
+  notice.textContent = COLD_REFUSAL_SENTENCE;
+  footer.append(notice);
+  log("info", "no cold gate row is drawn; noticed the gate on the footer", {
+    operation: "topbar.model-cold-gate",
+    context: { routed_to: "notice" },
+  });
+  return "notice";
+}
 
 /**
  * The selector: the button that names the selection and the reveal that offers
@@ -284,10 +347,20 @@ export async function pickModel(
         // reveal closes, because the reader's question has been answered.
         tc.reveals.close();
         return;
-      case "error":
-        drawTypedRefusal(wrap, "SetModelError.cause", "SetModel", result.value.cause, SET_MODEL_CAUSES);
+      case "error": {
+        const arm = drawTypedRefusal(
+          wrap,
+          "SetModelError.cause",
+          "SetModel",
+          result.value.cause,
+          SET_MODEL_CAUSES,
+        );
+        // The cold refusal is the only arm whose remediation lives on ANOTHER
+        // surface, so it is the only one that moves the page.
+        if (arm === "cold") routeToColdGate(wrap.ownerDocument);
         button.disabled = false;
         return;
+      }
       default: {
         const other: { case: string } = result;
         return unreachableArm("SetModelResponse.result", other.case);

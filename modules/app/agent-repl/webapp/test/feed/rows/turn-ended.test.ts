@@ -8,6 +8,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
+  QUERY_CAUSE_WORDS,
   TURN_ERROR_WAIT_ARMS,
   drawFeedTurnEnded,
   drawFeedTurnEndedErrored,
@@ -232,6 +233,84 @@ describe("drawFeedTurnEnded: every error arm", () => {
       contextWithRow(null),
     );
     expect(el.querySelector(".turn-ended-vendor")).toBeNull();
+  });
+
+  it("names an unexpected eof as the cause the query died of", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the query died" },
+          error: {
+            case: "queryDied",
+            value: { cause: { case: "unexpectedEof", value: {} } },
+          },
+        }),
+      }),
+      contextWithRow(null),
+    );
+
+    // Assert
+    expect(el.querySelector("[data-query-cause]")?.getAttribute("data-query-cause")).toBe(
+      "unexpectedEof",
+    );
+  });
+
+  it("names an iterator failure as the cause the query died of", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the query died" },
+          error: {
+            case: "queryDied",
+            value: { cause: { case: "iteratorFailure", value: {} } },
+          },
+        }),
+      }),
+      contextWithRow(null),
+    );
+
+    // Assert
+    expect(el.querySelector("[data-query-cause]")?.textContent).toBe(
+      QUERY_CAUSE_WORDS.iteratorFailure,
+    );
+  });
+
+  it("keeps the line as it was when the query death names no cause", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the query died" },
+          error: { case: "queryDied", value: {} },
+        }),
+      }),
+      contextWithRow(null),
+    );
+
+    // Assert
+    expect(el.querySelector("[data-query-cause]")).toBeNull();
+  });
+
+  it("refuses a query-died cause this build does not know", () => {
+    // Arrange — set after construction: the fixture builder drops an arm the
+    // schema does not carry, and the case under test is exactly such an arm
+    // reaching the renderer.
+    const errored = create(FeedTurnEndedErroredSchema, {
+      headline: { text: "the query died" },
+      error: { case: "queryDied", value: {} },
+    });
+    const died = errored.error.value as { cause: { case: string; value: unknown } };
+    died.cause = { case: "invented", value: {} };
+
+    // Act / Assert
+    expect(() =>
+      drawFeedTurnEnded(ended({ case: "errored", value: errored }), contextWithRow(null)),
+    ).toThrow(MalformedView);
   });
 
   it("distinguishes the cut response from the refused request by headline", () => {

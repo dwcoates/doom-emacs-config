@@ -295,3 +295,30 @@ it(
   },
   TURN_TEST_MS,
 );
+
+// §F4 — landing 10: the undecidable denial is its OWN verdict, not the policy
+// one. `!perm-undecidable` is a gated call in auto mode whose classifier
+// reaches no verdict, so nobody — no rule, no user — refused it.
+it(
+  "draws an undecidable denial under its own verdict value",
+  async () => {
+    // Arrange
+    const before = rows(app, "permission").length;
+
+    // Act
+    await submit(app, "!perm-undecidable");
+
+    // Assert
+    await awaitDrawn(
+      app,
+      "the undecidable permission verdict",
+      () => rows(app, "permission").length > before,
+    );
+    const drawn = rows(app, "permission");
+    const card = drawn[drawn.length - 1] as HTMLElement;
+    expect(
+      card.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict"),
+    ).toBe("deniedUndecidable");
+  },
+  TURN_TEST_MS,
+);

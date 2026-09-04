@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   SetModelErrorSchema,
@@ -13,11 +13,16 @@ import {
 import { TopbarModelSelectorSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  COLD_ATTENTION_ATTRIBUTE,
+  COLD_ATTENTION_VALUE,
+  COLD_NOTICE_ATTRIBUTE,
+  COLD_REFUSAL_SENTENCE,
   MODEL_PLACEHOLDER,
   drawModelCapabilities,
   drawTopbarModelSelector,
   effortLevelName,
   offerableOptions,
+  routeToColdGate,
   syntheticMarkerLiteral,
 } from "../../src/topbar/model.js";
 import { oneofArms } from "../arms.js";
@@ -169,6 +174,11 @@ describe("the pick", () => {
   ): Promise<HTMLElement> {
     const ctx = appContext({ setModel });
     const { host, tc } = topbarContext(ctx);
+    // The footer is the cold refusal's fallback surface, and `topbarContext`
+    // owns the body — so it goes in after the context, not before it.
+    const footer = document.createElement("div");
+    footer.setAttribute("data-component", "footer");
+    document.body.append(footer);
     const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     openPanel(host)!
@@ -213,6 +223,14 @@ describe("the pick", () => {
     expect(openPanel(host)).toBeNull();
   });
 
+  // JSDOM HAS NO LAYOUT and so no `scrollIntoView`; the cold routing reveals
+  // the gate through the shared primitive, which needs the method to exist.
+  beforeEach(() => {
+    if (typeof Element.prototype.scrollIntoView !== "function") {
+      Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+    }
+  });
+
   const causes: Readonly<Record<string, unknown>> = {
     unknownWorkspace: {},
     workspaceRefMismatch: { registryDir: "/elsewhere" },
@@ -221,6 +239,7 @@ describe("the pick", () => {
     noSession: {},
     notInCatalog: {},
     vendorRefused: { detail: "no" },
+    cold: {},
   };
 
   // ENUMERATED FROM THE SCHEMA: an arm added to the proto fails this test
@@ -314,5 +333,83 @@ describe("the pick", () => {
     // refusal with no words: it is reported through the failure sink, and no
     // sentence is invented at the control (src/rpc/refuse.ts).
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("routeToColdGate", () => {
+  beforeEach(() => {
+    if (typeof Element.prototype.scrollIntoView !== "function") {
+      Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+    }
+  });
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("marks the drawn gate card rather than noticing it on the footer", () => {
+    // Arrange
+    const gate = document.createElement("div");
+    gate.setAttribute("data-unit", "coldGate");
+    document.body.append(gate);
+
+    // Act
+    const routed = routeToColdGate(document);
+
+    // Assert
+    expect(routed).toBe("gate");
+    expect(gate.getAttribute(COLD_ATTENTION_ATTRIBUTE)).toBe(COLD_ATTENTION_VALUE);
+  });
+
+  it("brings the drawn gate card into view", () => {
+    // Arrange
+    const gate = document.createElement("div");
+    gate.setAttribute("data-unit", "coldGate");
+    const blocks: string[] = [];
+    gate.scrollIntoView = (arg: unknown) => {
+      blocks.push((arg as { block: string }).block);
+    };
+    document.body.append(gate);
+
+    // Act
+    routeToColdGate(document);
+
+    // Assert
+    expect(blocks).toEqual(["start"]);
+  });
+
+  it("notices the gate on the footer when no gate card is drawn", () => {
+    // Arrange
+    const footer = document.createElement("div");
+    footer.setAttribute("data-component", "footer");
+    document.body.append(footer);
+
+    // Act
+    const routed = routeToColdGate(document);
+
+    // Assert
+    expect(routed).toBe("notice");
+    expect(footer.querySelector(`[${COLD_NOTICE_ATTRIBUTE}]`)?.textContent).toBe(
+      COLD_REFUSAL_SENTENCE,
+    );
+  });
+
+  it("leaves one notice behind when the picker is refused twice", () => {
+    // Arrange
+    const footer = document.createElement("div");
+    footer.setAttribute("data-component", "footer");
+    document.body.append(footer);
+
+    // Act
+    routeToColdGate(document);
+    routeToColdGate(document);
+
+    // Assert
+    expect(footer.querySelectorAll(`[${COLD_NOTICE_ATTRIBUTE}]`)).toHaveLength(1);
+  });
+
+  it("refuses a page with neither a gate card nor a footer", () => {
+    // Arrange / Act / Assert
+    expect(() => routeToColdGate(document)).toThrow();
   });
 });
