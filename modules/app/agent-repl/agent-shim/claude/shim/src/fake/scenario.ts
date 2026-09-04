@@ -35,6 +35,16 @@ export interface AssistantOptions {
   readonly messageId?: string;
   /** `stop_reason` on the message and its `message_delta`. */
   readonly stopReason?: string | null;
+  /**
+   * The vendor's own error CLASS on the message (`SDKAssistantMessageError`).
+   *
+   * THE ONLY STREAM CARRIER OF A CLASS THE STATUS CANNOT NAME. `api_retry`
+   * states it while the vendor is still retrying; for a class it gives up on
+   * immediately — `billing_error`, `oauth_org_not_allowed`, `max_output_tokens`
+   * — the failed assistant message is where the vendor states it, and without
+   * it 402, a second 403 and a status-less failure are indistinguishable.
+   */
+  readonly error?: string;
   /** `stop_details`, for the refusal shapes that carry one. */
   readonly stopDetails?: Record<string, unknown> | null;
   /** Mark the message as interrupt-truncated (`aborted: true`). */
