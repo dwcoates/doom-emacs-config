@@ -554,10 +554,21 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	// and died, this daemon dialed the path and reached the SURVIVOR, and the
 	// answer was StartSession{already_started} over a turn already running.
 	socket, socketErr := f.socketProbe(udsPath)
+	// A LISTENER IS NOT A SESSION. The shim takes its two conversation locks
+	// INSIDE StartSession (shim.md), so an INERT shim — spawned, serving, no
+	// session — is listening while holding NEITHER lock. That is exactly the
+	// shim left behind by a StartSession that REFUSED (vendor_start_failed
+	// rolls the locks back and the process keeps serving), and the rollout's
+	// prelaunched shim. Such a survivor is ATTACHED TO rather than spawned
+	// over — a second shim could not bind the path anyway — but it is then
+	// STARTED, because nothing on this conversation has a session yet. Only a
+	// HELD lock says the conversation is already owned and must not be
+	// started a second time.
+	inert := false
 	if state == sessionlock.StateFree && socket == shimsocket.StateLive {
-		log.Warn(opBringUp, "the workspace lock reads free but a shim is listening; adopting the survivor",
+		log.Warn(opBringUp, "the workspace lock reads free but a shim is listening; attaching to the inert survivor and starting its session",
 			dlog.Context{"lock": lockPath, "socket": udsPath, "lock_state": state.String()})
-		state = sessionlock.StateHeld
+		inert = true
 	}
 	// A SOCKET THAT COULD NOT BE PROBED IS NEVER SPAWNED ONTO, for the same
 	// reason an unreadable lock is never read as free.
@@ -566,6 +577,14 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			"socket": udsPath, "cause": errText(socketErr),
 		})
 		return nil, false, fmt.Errorf("start session for %q: the shim socket at %q could not be probed: %w", ws, udsPath, socketErr)
+	}
+	if inert {
+		client, err := f.deps.Supervisor.Adopt(ctx, ws, dir, udsPath)
+		if err != nil {
+			log.Error(opBringUp, "could not attach to the inert survivor", dlog.Context{"cause": err.Error()})
+			return nil, false, fmt.Errorf("start session for %q: adopt: %w", ws, err)
+		}
+		return client, false, nil
 	}
 	switch state {
 	case sessionlock.StateHeld:
