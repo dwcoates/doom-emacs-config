@@ -1000,3 +1000,32 @@ Re-selection is idempotent, which is what keeps this from looping."
                         logs)))))
 
 ;;; test-roster.el ends here
+
+;;;; ---- Tests: move-tab-to-back ----
+
+(ert-deftest agent-repl-test-roster-move-tab-to-back-puts-ws-last ()
+  "The deprio shuffle moves WS to the last slot of the roster tab order."
+  ;; Arrange
+  (let ((agent-repl-roster--tab-order '("a" "b" "c")))
+    ;; Act
+    (agent-repl-roster-move-tab-to-back "a")
+    ;; Assert
+    (should (equal agent-repl-roster--tab-order '("b" "c" "a")))))
+
+(ert-deftest agent-repl-test-roster-move-tab-to-back-returns-the-new-order ()
+  "The shuffle returns the order it installed, so the caller can mirror it."
+  ;; Arrange
+  (let ((agent-repl-roster--tab-order '("a" "b" "c")))
+    ;; Act
+    (let ((got (agent-repl-roster-move-tab-to-back "b")))
+      ;; Assert
+      (should (equal got '("a" "c" "b"))))))
+
+(ert-deftest agent-repl-test-roster-move-tab-to-back-unknown-ws-is-nil ()
+  "A workspace with no tab returns nil and leaves the order alone."
+  ;; Arrange
+  (let ((agent-repl-roster--tab-order '("a" "b")))
+    ;; Act
+    (let ((got (agent-repl-roster-move-tab-to-back "nope")))
+      ;; Assert
+      (should (and (null got) (equal agent-repl-roster--tab-order '("a" "b")))))))

@@ -18,6 +18,8 @@
 (declare-function agent-repl-host--apply-naming "host" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
+(declare-function agent-repl-roster-tab-order "roster" ())
+(declare-function agent-repl-roster-move-tab-to-back "roster" (ws))
 
 (defun agent-repl--foreign-perspective-p (ws)
   "Return non-nil when WS is a persp-mode perspective agent-repl never touched.
@@ -642,6 +644,45 @@ did."
                                   (agent-repl--restore-fullscreen-config ws)
                                   (agent-repl--hide-panels)))))
 
+(defun agent-repl-workspace-push-to-back (&optional keep-focus)
+  "Push the current workspace's tab to the BACK of the tab order.
+The back is the LAST slot: a deprioritized workspace must stop being the
+next tab the user lands on, and any slot short of last would leave it
+ahead of some other workspace it was just ranked below.
+
+The roster owns the order, so the shuffle goes through
+`agent-repl-roster-move-tab-to-back' and the persp-mode names cache is
+then set to the SAME list — the two must agree, or the tab bar renders
+one order while every roster-driven lookup uses another.
+
+By default focus moves to the workspace that now occupies the vacated
+slot, which is the point of the deprio gesture: the user said they are done
+here and want to move on.  With KEEP-FOCUS non-nil focus stays on the moved
+workspace.
+
+No-op when there is no current workspace, or when it holds no tab."
+  (interactive)
+  (let* ((current (agent-repl--ws-current-name))
+         (order (agent-repl-roster-tab-order))
+         (old-index (and current (cl-position current order :test #'string=))))
+    (if (null old-index)
+        (agent-repl--log current
+                         "workspace-push-to-back: ws=%s branch=no-tab" current)
+      (let* ((without (remove current order))
+             (reordered (agent-repl-roster-move-tab-to-back current))
+             (next (and without
+                        (nth (min old-index (1- (length without))) without))))
+        (agent-repl--log current
+                         "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
+                         current old-index next keep-focus)
+        (agent-repl--ws-update-names-cache reordered)
+        (agent-repl--force-tab-bar-redraw)
+        (if (and next (not keep-focus))
+            (progn
+              (agent-repl--ws-switch next)
+              (message "Pushed '%s' to the back; switched to '%s'." current next))
+          (message "Pushed '%s' to the back." current))))))
+
 (defun agent-repl--on-close (&optional ws)
   "Full close: restore the pre-panel layout, hide the panels, save the tab index.
 Writes no state, exactly like the simple-close path — a closed workspace
@@ -649,7 +690,7 @@ stays listed, and only the roster takes a workspace off the tab bar.
 Restores the pre-panel layout via
 `agent-repl--restore-fullscreen-config' before hiding so the
 frame-filling panels go away cleanly (same contract as
-`agent-repl--on-simple-close').  Then hides panels and pushes WS to the second-to-last tab position via
+`agent-repl--on-simple-close').  Then hides panels and pushes WS to the LAST tab position via
 `agent-repl-workspace-push-to-back', snapshotting the tab index
 first via `agent-repl--save-tab-index' so a future reopen can
 restore the position.
@@ -673,7 +714,7 @@ hides panels but skips the bookkeeping write and the tab shuffle."
        (agent-repl--hide-panels)))
     (when (and ws (equal ws (agent-repl--ws-current-name)))
       (agent-repl--save-tab-index ws)
-      (agent-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
+      (agent-repl--log ws "on-close: pushing ws=%s to the back" ws)
       (agent-repl-workspace-push-to-back))))
 
 ;;;; Window synchronization
