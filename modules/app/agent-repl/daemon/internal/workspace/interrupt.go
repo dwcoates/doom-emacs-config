@@ -209,14 +209,24 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	return stopped, nil
 }
 
-// interruptDetached stops ONE detached bubble. The row's kind decides which
-// stop verb it is: a subagent bubble stops through UpdateAgent, a shell bubble
-// through StopBash, and any other kind is not a detached item at all.
+// interruptDetached stops ONE detached bubble. The row decides which stop verb
+// it is: a subagent bubble stops through UpdateAgent, a shell bubble through
+// StopBash, and any other row is not a detached item at all.
+//
+// A SUBAGENT BUBBLE IS SERVED AS AN ACTIVITY ROW. The feed mints it as
+// RowKey{Kind: activity, ID: <spawn unit>, Sub: <created agent id>} — feedid's
+// own RowKey doc says exactly that, and resolve/feed/subagent.go is the one
+// site that mints it; `detached_subagent` is a kind no resolver produces at
+// all. endpoint_interrupt.proto addresses the detached target "by the bubble
+// row's FeedId exactly as the feed served it", so the activity-with-a-subagent
+// form is the form that actually arrives, and the agent to stop is the row's
+// Sub.
 func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, ref feedid.Ref) (InterruptOutcome, error) {
 	fields := dlog.Context{"row_kind": string(ref.Row.Kind), "row_id": ref.Row.ID}
-	switch ref.Row.Kind {
-	case feedid.KindDetachedSubagent:
-		agent := &conversationv1.AgentId{Value: ref.Row.ID}
+	switch {
+	case ref.Row.Kind == feedid.KindDetachedSubagent || subagentBubble(ref.Row):
+		agent := &conversationv1.AgentId{Value: subagentOf(ref.Row)}
+		fields["agent"] = agent.GetValue()
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
 				return outcome, refusal
@@ -226,7 +236,7 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		}
 		log.Info(opInterrupt, "stopped a detached agent", fields)
 		return InterruptOutcome{DetachedCount: 1}, nil
-	case feedid.KindDetachedShell:
+	case ref.Row.Kind == feedid.KindDetachedShell:
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
 			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
@@ -268,6 +278,23 @@ func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.
 	}
 	log.Info(opInterrupt, "stopped every live detached item", dlog.Context{"count": stopped})
 	return InterruptOutcome{DetachedCount: stopped}, nil
+}
+
+// subagentBubble reports whether a row is a subagent bubble: the feed mints one
+// as an activity row whose secondary key is the created agent's id, so a Sub on
+// an activity row is exactly what names a subagent.
+func subagentBubble(row feedid.RowKey) bool {
+	return row.Kind == feedid.KindActivity && row.Sub != ""
+}
+
+// subagentOf answers the agent id a subagent-addressing row names: the bubble's
+// Sub when it has one, and the row's own id for the `detached_subagent` kind,
+// whose primary key IS the agent.
+func subagentOf(row feedid.RowKey) string {
+	if row.Sub != "" {
+		return row.Sub
+	}
+	return row.ID
 }
 
 // withCause adds a failure's cause to a record's context without mutating the
