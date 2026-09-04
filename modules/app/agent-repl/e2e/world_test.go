@@ -129,6 +129,57 @@ type World struct {
 // by a scenario prompt.
 type WorldOpts struct {
 	DaemonOpts harness.Opts
+
+	// SidecarStaleness tightens the sidecar's OWN LOST-policy windows for a
+	// test that is ABOUT one of them. UNSET (the zero value) leaves every
+	// window at the sidecar's production default, which is what every test
+	// that is not about the policy wants: a 30s grace and a 30m shell
+	// silence simply cannot be reached inside this suite's budget, so an
+	// ordinary world never concludes a run LOST by accident. Set it through
+	// NewWorldWithSidecarStaleness rather than by hand, so the reason a
+	// world runs with a short window is stated at its construction site.
+	SidecarStaleness SidecarStaleness
+}
+
+// SidecarStaleness is the sidecar's LOST-policy window set, as this suite
+// hands it over (`--stale-grace`, `--stale-shell-silence`,
+// `--stale-agent-silence`, `--stale-workflow-silence`,
+// `--unowned-spool-window`; agent-shim/claude/shim-sidecar/AGENTS.md, "The
+// LOST policy"). A ZERO FIELD IS "LEAVE IT ALONE": the flag is not passed at
+// all, and the sidecar keeps its own production default — never a zero
+// window, which the sidecar refuses at bootstrap anyway.
+//
+// SHORTEN ONLY THE WINDOW A TEST IS ABOUT. The other windows are what stop
+// some OTHER arm reaching a conclusion first and stealing the subject, which
+// is the same rule the sidecar's own integration suite states for its
+// `lostOptions` helper (shim-sidecar/integration/lost_policy_test.go).
+type SidecarStaleness struct {
+	// Grace is how long a VANISHED file is given before its disappearance is
+	// concluded rather than treated as a rename race (file_vanished).
+	Grace time.Duration
+	// ShellSilence is how long a present-but-unchanged SHELL SPOOL may stay
+	// quiet before it is concluded went_silent.
+	ShellSilence time.Duration
+	// AgentSilence is the same window for an agent-kind file.
+	AgentSilence time.Duration
+	// WorkflowSilence is the same window for a workflow journal.
+	WorkflowSilence time.Duration
+	// UnownedSpool is the hold an unclaimed spool sits in before it is tailed
+	// at all. Zero leaves this suite's own default (unownedSpoolWindow),
+	// which NewWorld already applies to every world.
+	UnownedSpool time.Duration
+}
+
+// NewWorldWithSidecarStaleness builds a world whose sidecar runs with the
+// given LOST-policy windows. It is the ONLY intended way to shorten them:
+// the sidecar's production windows (30s grace, 30m shell silence) cannot
+// elapse inside this suite's budget, so the three DetachedLost arms are
+// unreachable without it — and a test that reaches them must say, at its
+// construction site, which window it is buying.
+func NewWorldWithSidecarStaleness(t *testing.T, opts WorldOpts, staleness SidecarStaleness) *World {
+	t.Helper()
+	opts.SidecarStaleness = staleness
+	return NewWorld(t, opts)
 }
 
 // NewWorld builds one test's stack: the real store, the real sidecar, and a
@@ -217,6 +268,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		SpoolRoot:   spoolRoot,
 		LogPath:     filepath.Join(logsDir, "sidecar.log"),
 		StateDir:    stateRoot,
+		Staleness:   opts.SidecarStaleness,
 	})
 
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
@@ -744,9 +796,13 @@ type Sidecar struct {
 	// daemon hands its shims, rather than trusting the two call sites to
 	// keep quoting the same variable.
 	SpoolRoot string
-	cmd       *exec.Cmd
-	exit      *processExit
-	stopped   bool
+	// bin and args are exactly what this sidecar was launched with, kept so a
+	// Restart relaunches the same process rather than a re-derived one.
+	bin     string
+	args    []string
+	cmd     *exec.Cmd
+	exit    *processExit
+	stopped bool
 }
 
 // assertOneSpoolRoot fails the world's construction unless the spool root
@@ -787,6 +843,9 @@ type sidecarOpts struct {
 	// other root would book a rotated transcript under a second id, which the
 	// store refuses.
 	StateDir string
+	// Staleness is the LOST-policy window set. Zero fields are omitted from
+	// the argv entirely, leaving the sidecar's own production defaults.
+	Staleness SidecarStaleness
 }
 
 // startSidecar launches the sidecar against the daemon's own two account
@@ -817,6 +876,25 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 		// integration suite's own precedent (UnownedSpoolWindow: 200ms).
 		"--unowned-spool-window", unownedSpoolWindow.String(),
 	}
+	// The LOST-policy windows, appended LAST so a test that bought one wins
+	// over the default above (the sidecar's own flag parse takes the last
+	// occurrence). A ZERO field appends nothing at all: the sidecar refuses a
+	// zero window at bootstrap, and "unset" here means "keep the production
+	// default", never "pass a zero".
+	for _, w := range []struct {
+		flag  string
+		value time.Duration
+	}{
+		{"--stale-grace", opts.Staleness.Grace},
+		{"--stale-shell-silence", opts.Staleness.ShellSilence},
+		{"--stale-agent-silence", opts.Staleness.AgentSilence},
+		{"--stale-workflow-silence", opts.Staleness.WorkflowSilence},
+		{"--unowned-spool-window", opts.Staleness.UnownedSpool},
+	} {
+		if w.value > 0 {
+			args = append(args, w.flag, w.value.String())
+		}
+	}
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(),
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
@@ -831,9 +909,54 @@ func startSidecar(t *testing.T, bin string, opts sidecarOpts) *Sidecar {
 	// Same reasoning as startStore's: --log puts the state root in this
 	// process's argv, and the sidecar is the test's own, never a daemon stray.
 	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
-	s := &Sidecar{t: t, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
+	s := &Sidecar{t: t, bin: bin, args: args, LogPath: opts.LogPath, SpoolRoot: opts.SpoolRoot, cmd: cmd, exit: watchProcess(cmd)}
 	t.Cleanup(s.Stop)
 	return s
+}
+
+// Restart stops this sidecar and launches a new one on EXACTLY the argv the
+// world built — same store socket, same config roots, same spool root, same
+// windows. It is the lever for the sidecar's BOOT sweep (cycle.go's
+// `bootSwept` gate runs `Tracker.BootSweep` once per PROCESS), which is the
+// only way an e2e test can reach the `swept_up` arm: a leftover spool on disk
+// is re-discovered by the new process and judged against the machine's boot
+// time.
+//
+// Cursor recovery makes this safe to do mid-test: the new process recovers
+// its read positions from the store before it reads a byte (cycle.go's
+// beginCycle), so nothing already ingested is ingested twice.
+func (s *Sidecar) Restart(t *testing.T) {
+	t.Helper()
+	s.Stop()
+	cmd := exec.Command(s.bin, s.args...)
+	cmd.Env = append(os.Environ(),
+		"AGENT_REPL_STORE_SOCKET="+storeSocketOf(s.args),
+		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
+	)
+	cmd.Env = append(cmd.Env, coverageEnv(t, "shim-claude-sidecar")...)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("e2e: restart sidecar: %v", err)
+	}
+	// A restart is a NEW pid; the exemption is per-pid.
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+	s.cmd = cmd
+	// The new process is the one the end-of-test guarantee now judges, and it
+	// has not been stopped.
+	s.stopped = false
+	s.exit = watchProcess(cmd)
+}
+
+// storeSocketOf reads the socket back out of a sidecar's own argv, so a
+// restart cannot drift from the arguments the world actually launched with.
+func storeSocketOf(args []string) string {
+	for i, a := range args {
+		if a == "--store-socket" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // Stop sends SIGTERM and waits for the sidecar to leave.
