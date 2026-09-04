@@ -517,8 +517,12 @@ func TestRouteQueryDied(t *testing.T) {
 	// OnTurnEnded comes LAST: it is handed over off the lock (the queue
 	// delivers the next prompt from it, which opens a turn back on this
 	// watcher), while the view sinks are told inside it.
+	// feed.OnTurnOpened precedes feed.OnSessionUpdate: the feed draws the
+	// death's terminal against the turn it believes is running, and this
+	// watcher may be its only source for which turn that is.
 	assertNames(t, got, []string{
-		"footer.OnSessionUpdate", "feed.OnSessionUpdate", "sidebar.OnSessionUpdate",
+		"footer.OnSessionUpdate", "feed.OnTurnOpened", "feed.OnSessionUpdate",
+		"sidebar.OnSessionUpdate",
 		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged", "lifecycle.OnTurnEnded",
 	})
 	if !h.w.Free() {
