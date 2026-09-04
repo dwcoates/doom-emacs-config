@@ -1748,6 +1748,14 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	killed := &shimv1.KillSessionRequest{}
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
 	f.shim.AwaitGone()
+	// THE PARK IS NOT DONE UNTIL THE DAEMON SAYS SO. The shim's exit is the
+	// sweep's means, not its completion: until the daemon has recorded the
+	// hibernation the workspace still reads as OPEN to it, and an OpenWorkspace
+	// arriving in that window is answered as the idempotent no-op it looks like
+	// — success, no second mount, no StartSession at all.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
 
 	// Act: OpenWorkspace re-mounts the parked session directly.
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {

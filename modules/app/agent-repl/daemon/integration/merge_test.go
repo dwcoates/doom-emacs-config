@@ -484,9 +484,18 @@ func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testin
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
+	//
+	// daemon.shimclient.redial belongs to that same kill: the fake answers
+	// KillSession by EXITING, so its socket can break before the reaper has
+	// decided the death, and the monitor then reports the break and its one
+	// failed redial exactly as it should. Which side of that race a run lands
+	// on is a matter of scheduling, so the record is declared here for the
+	// same reason the sibling teardown tests declare it, not because it is
+	// unimportant.
 	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
 		"daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault",
+		"daemon.shimclient.redial",
 		"daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
 	root := behind.watchRootFeed()
 
@@ -761,8 +770,20 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	}
 	goneBeforePush := make(chan struct{})
 	stopPolling := make(chan struct{})
-	defer close(stopPolling)
+	// THE POLLER IS JOINED, not merely signalled. It reads the fake-git
+	// fixture file, which lives under the test's own t.TempDir() and is
+	// deleted by that directory's cleanup — so a poller still between its tick
+	// and its next select when the test returns reads a fixture that is no
+	// longer there, and reports "not a fake repository" from a goroutine the
+	// test is no longer watching. Closing the channel only ASKS it to stop;
+	// waiting for pollerDone is what makes it have stopped.
+	pollerDone := make(chan struct{})
+	defer func() {
+		close(stopPolling)
+		<-pollerDone
+	}()
 	go func() {
+		defer close(pollerDone)
 		ticker := time.NewTicker(5 * time.Millisecond)
 		defer ticker.Stop()
 		for {
