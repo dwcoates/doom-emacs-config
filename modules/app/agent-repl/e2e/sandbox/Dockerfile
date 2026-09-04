@@ -370,6 +370,16 @@ ARG TARGETARCH
 # satisfies `dconf-service` without ever considering `dbus-user-session` (and
 # therefore `systemd`) at all — it depends on plain `dbus-daemon` +
 # `dbus-bin`, both already required here.
+#
+# `gdb` is here for ONE reason: an Emacs that stops answering its server
+# socket, its nested evals, `debug-on-event''s SIGUSR2 and a plain SIGINT is
+# by definition looping in C with no QUIT check, and every witness the Go
+# harness has is a lisp witness. A native backtrace of all threads, taken
+# from outside the process, is then the only account of the stall there is.
+# The harness attaches it on a wedge (`nativeBacktrace` in e2e/emacs_test.go)
+# and files it with the failure artifacts. Emacs is compiled here without
+# `-g`, so the frames carry function names from the symbol table rather than
+# source lines -- enough to name the loop, which is what the wedge needs.
 COPY --from=emacs-builder /emacs-runtime-pkgs.txt /tmp/emacs-runtime-pkgs.txt
 RUN set -eux; \
     apt-get -o Acquire::Check-Valid-Until=false update; \
@@ -379,6 +389,7 @@ RUN set -eux; \
         curl \
         dbus-x11 \
         gcc \
+        gdb \
         git \
         rsync \
         util-linux \
@@ -392,6 +403,7 @@ RUN set -eux; \
     command -v git; \
     command -v rsync; \
     command -v gcc; \
+    command -v gdb; \
     command -v Xvfb; \
     if dpkg -s systemd >/dev/null 2>&1; then \
       echo "sandbox: systemd got pulled in after all; dbus-x11 no longer heads off the dconf/dbus-user-session chain" >&2; \

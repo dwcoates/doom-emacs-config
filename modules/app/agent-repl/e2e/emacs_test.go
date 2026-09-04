@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -250,6 +251,15 @@ type Emacs struct {
 	// multiple of this number across healthy runs, never a guess. Reported
 	// once per test by reportPhases.
 	heartbeatMax atomic.Int64
+	// nativeOnce guards the gdb capture. ONE capture per Emacs: gdb attaching
+	// STOPS the inferior for the duration, so a second attach would describe
+	// a process the first one already perturbed, and the stall this exists
+	// for is a permanent loop whose first sample is its whole story.
+	nativeOnce sync.Once
+	// nativeStack is what that one capture said, so both the wedge report and
+	// a stuck eval can quote it without racing to take it.
+	nativeStack string
+
 	// phases are the boot durations this Emacs observed, in the order they
 	// happened. They MEASURE emacsBootBound, doomBootBound and
 	// doomStageBound the same way.
@@ -869,7 +879,14 @@ func (e *Emacs) declareWedged(cause string) {
 	e.wedgeOnce.Do(func() {
 		e.wedgeCause.Store(&cause)
 		close(e.wedged)
-		e.t.Errorf("EMACS WEDGED: %s%s", cause, e.processSnapshot())
+		// THE NATIVE STACK IS TAKEN FIRST, and it is taken before anything
+		// that could end the stall. `processSnapshot` reads /proc and costs
+		// microseconds; the gdb attach after it is the only witness that
+		// survives an Emacs answering nothing at all, and it is worthless
+		// once `breakStall` has unwound the loop it exists to name.
+		snapshot := e.processSnapshot()
+		native := e.nativeBacktrace()
+		e.t.Errorf("EMACS WEDGED: %s%s%s", cause, snapshot, native)
 		e.dumpArtifacts()
 		// LAST, because it waits for Emacs to come back. A wedged Emacs
 		// answers nothing at all -- not the server socket, not a nested eval,
@@ -1073,7 +1090,12 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		// the other order would describe the machine a second and a half
 		// after the moment being diagnosed.
 		snapshot := e.processSnapshot()
-		return zero, fmt.Errorf("emacsclient: %w%s%s%s", err, snapshot, e.stackWhenStuck(), e.profileWhenStuck())
+		// The NATIVE stack comes before the two lisp witnesses: both of those
+		// are round trips a stalled Emacs cannot answer, and the second one
+		// deliberately breaks the stall to get its answer, which destroys the
+		// very loop the debugger would otherwise have named.
+		native := e.nativeBacktrace()
+		return zero, fmt.Errorf("emacsclient: %w%s%s%s%s", err, snapshot, native, e.stackWhenStuck(), e.profileWhenStuck())
 	}
 
 	body, readErr := os.ReadFile(out)
@@ -1085,6 +1107,111 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("decode the eval response %q: %w", string(body), err)
 	}
 	return res, nil
+}
+
+// nativeBacktraceBound is how long gdb is given to attach, unwind every
+// thread and detach. It is not a healthy-phase measurement: the process it
+// attaches to is by then already reported as failed, and this is the budget
+// for the evidence about it. Measured on a healthy Emacs in this image, the
+// whole capture takes about a second; the bound is a small multiple.
+const nativeBacktraceBound = 20 * time.Second
+
+// nativeBacktraceFile is where the full capture lands in the failure
+// artifacts. The error message carries a trimmed head; the file carries every
+// frame of every thread.
+const nativeBacktraceFile = "emacs.native-backtrace.txt"
+
+// nativeBacktraceHeadFrames is how much of the capture the failure message
+// quotes inline. Enough to name the loop without burying the failure.
+const nativeBacktraceHeadFrames = 40
+
+// nativeBacktrace is the LAST witness this layer has.
+//
+// An Emacs looping in C answers nothing a lisp witness can reach: not the
+// server socket, not a nested eval, not `debug-on-event”s SIGUSR2, not a
+// plain SIGINT. Every one of those needs Emacs to reach a QUIT check, and a C
+// loop without one never does. What is still true is that the kernel holds
+// the process's registers and stack, so a debugger attaching from OUTSIDE can
+// say exactly which C function is spinning -- which is the one fact a stall
+// like that turns on.
+//
+// It is taken WHILE THE STALL IS LIVE, which is why it is called from
+// `declareWedged` before anything that waits for Emacs to come back.
+func (e *Emacs) nativeBacktrace() string {
+	e.nativeOnce.Do(func() { e.nativeStack = e.captureNativeBacktrace() })
+	return e.nativeStack
+}
+
+// captureNativeBacktrace runs the debugger once. It never fails a test on its
+// own: it is evidence about a failure that has already been reported, so
+// every way it can come up empty is REPORTED IN PLACE OF the backtrace rather
+// than swallowed.
+func (e *Emacs) captureNativeBacktrace() string {
+	if e.Doom.PID == 0 {
+		return "\n  (no native backtrace: the readiness stamp carried no pid)"
+	}
+	gdb, err := exec.LookPath("gdb")
+	if err != nil {
+		return fmt.Sprintf("\n  (no native backtrace: gdb is not on PATH here: %v)", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nativeBacktraceBound)
+	defer cancel()
+	// `-batch` runs the -ex list and quits; `-nx` keeps a stray ~/.gdbinit
+	// out of it. `detach` before `quit` is explicit rather than relied upon:
+	// gdb kills only inferiors IT started and detaches the ones it attached
+	// to, but this one must never be the thing that ends the process the
+	// test is still tearing down.
+	cmd := exec.CommandContext(ctx, gdb,
+		"-nx", "-batch",
+		"-ex", "set pagination off",
+		"-ex", "set confirm off",
+		"-ex", "info threads",
+		"-ex", "thread apply all bt",
+		"-ex", "detach",
+		"-ex", "quit",
+		"-p", strconv.Itoa(e.Doom.PID))
+	out, runErr := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if runErr != nil && text == "" {
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d failed: %v)", e.Doom.PID, runErr)
+	}
+	if text == "" {
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d said nothing)", e.Doom.PID)
+	}
+	// gdb's own exit status is reported alongside the output rather than
+	// instead of it: a partial unwind still names the frame that matters.
+	if runErr != nil {
+		text += fmt.Sprintf("\n(gdb exited with: %v)", runErr)
+	}
+	e.writeNativeBacktrace(text)
+	lines := strings.Split(text, "\n")
+	head := lines
+	if len(head) > nativeBacktraceHeadFrames {
+		head = append(head[:nativeBacktraceHeadFrames:nativeBacktraceHeadFrames],
+			fmt.Sprintf("... %d more lines in %s", len(lines)-nativeBacktraceHeadFrames, nativeBacktraceFile))
+	}
+	return "\n  emacs's native stack, from outside the process:\n    " +
+		strings.Join(head, "\n    ")
+}
+
+// writeNativeBacktrace files the full capture with the failure artifacts,
+// where dumpArtifacts's other evidence for the same test already lands.
+func (e *Emacs) writeNativeBacktrace(text string) {
+	dir := os.Getenv(ArtifactsEnv)
+	if dir == "" {
+		return
+	}
+	out := filepath.Join(dir, artifactDirName(e.t.Name()))
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		e.t.Logf("preserve the native backtrace under %s: %v", out, err)
+		return
+	}
+	path := filepath.Join(out, nativeBacktraceFile)
+	if err := os.WriteFile(path, []byte(text+"\n"), 0o644); err != nil {
+		e.t.Logf("write %s: %v", path, err)
+		return
+	}
+	e.t.Logf("emacs native backtrace preserved at %s", path)
 }
 
 // stackWhenStuck answers what Emacs is standing in, formatted for an error
