@@ -16,6 +16,7 @@ import (
 // the store yields exactly one production-resumed record, at info and at no
 // other level.
 func TestRecoveryClosesTheOutageWithExactlyOneInfoRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

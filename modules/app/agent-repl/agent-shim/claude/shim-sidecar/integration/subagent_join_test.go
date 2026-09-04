@@ -41,6 +41,7 @@ func seedAgentSpawn(t *testing.T, tree *vendorTree, cwd, session string) *growin
 // TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes asserts the join: the
 // spawn unit's created_agent_id is the id the sidechain's book is keyed by.
 func TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -96,6 +97,7 @@ func TestAnAsyncSpawnNamesTheSameAgentTheSidechainsMetaDoes(t *testing.T) {
 // level; naming the agent by its filename instead would mint a SECOND book for
 // one agent that no consumer could reconcile.
 func TestAMetaThatParsesButNamesNoToolUseIdIsRefusedLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -108,9 +110,15 @@ func TestAMetaThatParsesButNamesNoToolUseIdIsRefusedLoudly(t *testing.T) {
 
 	// Act: a meta the vendor could have written, minus the one field that IS
 	// the agent's identity.
-	startSidecar(t, opts)
 	g := writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
 	writeSubagentMetaWithout(t, tree, slug, session, corpusSubagentID, "toolUseId")
+	// THE WHOLE FIXTURE IS ON DISK BEFORE THE READER IS: the subject is a
+	// meta that is PRESENT and unusable, and starting the sidecar first
+	// leaves a window in which it scans between the transcript's write
+	// and the meta's — the ABSENT-meta case, which is a WARNING and is a
+	// different subject. Writing both first closes the window with an
+	// ordering rather than with a hope about scheduling.
+	startSidecar(t, opts)
 	rec := awaitLog(ctx, t, opts.LogPath, "the unusable-meta refusal", func(r logRecord) bool {
 		return r.Operation == "discover-meta" && samePathAny(r.Context["path"], g.Path())
 	})
@@ -152,6 +160,7 @@ func writeSubagentMetaWithout(t *testing.T, tree *vendorTree, slug, session, age
 // rule end to end: the vendor's own `agentId` from the launch result reaches no
 // book and no unit identity.
 func TestASubagentsBookNamesNoVendorLocator(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

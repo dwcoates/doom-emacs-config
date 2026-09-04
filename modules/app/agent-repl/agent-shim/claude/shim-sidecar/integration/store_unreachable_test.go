@@ -14,6 +14,7 @@ import (
 // TestNoStoreAtBootProducesNothing asserts the sidecar writes nothing at all
 // while there is no socket to write to.
 func TestNoStoreAtBootProducesNothing(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -41,6 +42,7 @@ func TestNoStoreAtBootProducesNothing(t *testing.T) {
 // TestTheSuspensionIsStatedOnceRatherThanPerRetry asserts the outage is one
 // WARNING, with the per-retry noise held at verbose.
 func TestTheSuspensionIsStatedOnceRatherThanPerRetry(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -84,6 +86,7 @@ func TestTheSuspensionIsStatedOnceRatherThanPerRetry(t *testing.T) {
 // cursor-first: the sidecar never builds a tailer from a position the store did
 // not hand it.
 func TestTheFirstRpcAfterTheStoreAppearsIsACursorRead(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -116,6 +119,7 @@ func TestTheFirstRpcAfterTheStoreAppearsIsACursorRead(t *testing.T) {
 // TestProductionResumesOnceTheStoreAppears asserts the outage is recovered from
 // rather than merely survived.
 func TestProductionResumesOnceTheStoreAppears(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

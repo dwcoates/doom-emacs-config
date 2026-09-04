@@ -29,6 +29,7 @@ import (
 // TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot drives both halves
 // of the detection through one sidecar.
 func TestAClearEnvelopeLandsAsAClearedCutAndAQuotedClearDoesNot(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

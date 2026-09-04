@@ -52,6 +52,7 @@ func writeCapturedTranscript(t *testing.T, tree *vendorTree, captured capturedSe
 // TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid asserts the R9
 // identity rule: the main agent's AgentId is the transcript FILE's session uuid.
 func TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -62,7 +63,12 @@ func TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid(t *testing.T
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 4)
+	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
+		// writes more page lines than these four, so "at least four lines"
+		// is satisfied by a book that holds four of the OTHERS and none of
+		// the units every assertion below reads.
+		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert.
 	for _, at := range lines {
@@ -76,6 +82,7 @@ func TestCapturedTranscriptMainAgentBookIsKeyedByTheFileSessionUuid(t *testing.T
 // units the two responses produce, and that nothing collapsed them into a row
 // per message.
 func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -86,7 +93,12 @@ func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 4)
+	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
+		// writes more page lines than these four, so "at least four lines"
+		// is satisfied by a book that holds four of the OTHERS and none of
+		// the units every assertion below reads.
+		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert.
 	held := map[string]bool{}
@@ -106,6 +118,7 @@ func TestCapturedTranscriptGivesEveryAssistantBlockItsOwnUnit(t *testing.T) {
 // back in reverse file order — the store's page is newest first, ordered by
 // first insert.
 func TestCapturedTranscriptOrdersItsPageNewestFirst(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -116,7 +129,12 @@ func TestCapturedTranscriptOrdersItsPageNewestFirst(t *testing.T) {
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 4)
+	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
+		// writes more page lines than these four, so "at least four lines"
+		// is satisfied by a book that holds four of the OTHERS and none of
+		// the units every assertion below reads.
+		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert.
 	want := []string{capturedBashCall2, capturedThinking2, capturedBashCall1, capturedThinking1}
@@ -148,6 +166,7 @@ func TestCapturedTranscriptOrdersItsPageNewestFirst(t *testing.T) {
 // rule: the FIRST content block's unit carries it and every other unit of that
 // response leaves it unset.
 func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -158,7 +177,12 @@ func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 4)
+	lines := awaitBookUnits(ctx, t, store.Client, captured.Session,
+		// THE WAIT IS ON THE UNITS, NEVER ON A COUNT. The captured session
+		// writes more page lines than these four, so "at least four lines"
+		// is satisfied by a book that holds four of the OTHERS and none of
+		// the units every assertion below reads.
+		capturedThinking1, capturedBashCall1, capturedThinking2, capturedBashCall2)
 
 	// Assert.
 	carriers := map[string]bool{}
@@ -188,6 +212,7 @@ func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
 // re-emits its unit's settled state under the SAME upsert_key, so the book
 // holds one line for the call and the write stream holds two entries for it.
 func TestToolResultUpsertsItsCallRatherThanAddingARow(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -229,6 +254,7 @@ func TestToolResultUpsertsItsCallRatherThanAddingARow(t *testing.T) {
 // TestCapturedTranscriptLandsNothingAsUnparsed is the golden-corpus contract in
 // its executable form: a real capture must convert whole.
 func TestCapturedTranscriptLandsNothingAsUnparsed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -255,6 +281,7 @@ func TestCapturedTranscriptLandsNothingAsUnparsed(t *testing.T) {
 // context cuts and api errors have carriers now, so no discriminator may reach
 // the `unknown` arm.
 func TestCapturedTranscriptLandsNothingAsUnknown(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -280,6 +307,7 @@ func TestCapturedTranscriptLandsNothingAsUnknown(t *testing.T) {
 // TestEveryWriteCarriesTheFilePlaneEnvelope asserts the producer's envelope
 // duties on every entry of a real capture.
 func TestEveryWriteCarriesTheFilePlaneEnvelope(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -306,6 +334,7 @@ func TestEveryWriteCarriesTheFilePlaneEnvelope(t *testing.T) {
 // TestWriteIdsAreUniqueAcrossOneIngest asserts a deterministic write_id is also
 // a DISTINCT one: two entries minted from one record differ by discriminator.
 func TestWriteIdsAreUniqueAcrossOneIngest(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -334,6 +363,7 @@ func TestWriteIdsAreUniqueAcrossOneIngest(t *testing.T) {
 // TestKeepAliveTurnsNeverReachAPage asserts a keep-alive-marked turn's records
 // land as unserved keepalive items and never as page lines.
 func TestKeepAliveTurnsNeverReachAPage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -375,6 +405,7 @@ func TestKeepAliveTurnsNeverReachAPage(t *testing.T) {
 // TestKeepAliveEndsAtTheNextOrdinaryPrompt asserts the bit is cleared by the
 // next non-keepalive user prompt, so work after it is served again.
 func TestKeepAliveEndsAtTheNextOrdinaryPrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -416,6 +447,7 @@ func TestKeepAliveEndsAtTheNextOrdinaryPrompt(t *testing.T) {
 // TestWithheldMachineryNeverReachesAPage asserts the CLI's bookkeeping lines
 // are classified at ingest into vendor_specific rather than becoming feed rows.
 func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -447,6 +479,7 @@ func TestWithheldMachineryNeverReachesAPage(t *testing.T) {
 // with prose is never a page line, because TurnId and PromptOrigin are the
 // daemon's to mint.
 func TestFilePlaneUserPromptIsWithheldRatherThanServed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -496,6 +529,7 @@ func keysOf(m map[string]bool) []string {
 // consumer waits on, so the file plane's writes are watchable, not merely
 // pollable.
 func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -540,6 +574,7 @@ func TestAPageLineReachesAWatcherAsItIsWritten(t *testing.T) {
 // message written over three lines yields ordinals 0, 1 and 2, and the tool_use
 // block consumes one without being named by it.
 func TestBlockOrdinalsCountAcrossTheLinesOfOneMessage(t *testing.T) {
+	t.Parallel()
 	// Arrange: one API message split over three real fixture lines —
 	// thinking (ordinal 0), prose (ordinal 1), a tool call (ordinal 2).
 	ctx, cancel := testContext(t)
@@ -586,6 +621,7 @@ func TestBlockOrdinalsCountAcrossTheLinesOfOneMessage(t *testing.T) {
 // TestUsageRidesOrdinalZeroOfAMultiLineMessage asserts the carrier is the
 // message's FIRST block, wherever the vendor split the message.
 func TestUsageRidesOrdinalZeroOfAMultiLineMessage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -630,6 +666,7 @@ func TestUsageRidesOrdinalZeroOfAMultiLineMessage(t *testing.T) {
 // TestNoTwoUnitsOfOneMessageShareAnActivityId asserts the ordinal actually
 // discriminates: every block of one API message is a distinct unit.
 func TestNoTwoUnitsOfOneMessageShareAnActivityId(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -680,6 +717,7 @@ func TestNoTwoUnitsOfOneMessageShareAnActivityId(t *testing.T) {
 // TestOrdinalsResetWhenTheMessageIdChanges asserts the ordinal is scoped to one
 // API message: the next message starts again at zero.
 func TestOrdinalsResetWhenTheMessageIdChanges(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -718,6 +756,7 @@ func TestOrdinalsResetWhenTheMessageIdChanges(t *testing.T) {
 // disposition of a parsed-but-unmodeled attachment: vendor_specific with kind
 // "attachment/<type>", never the `unknown` arm.
 func TestUnmodeledAttachmentsAreWithheldAsVendorSpecific(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

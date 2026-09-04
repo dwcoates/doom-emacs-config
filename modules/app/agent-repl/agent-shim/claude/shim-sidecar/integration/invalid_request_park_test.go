@@ -54,6 +54,7 @@ func seedContestedUpsertKey(ctx context.Context, t *testing.T, cwd, session stri
 // ONE error record the parking owes: the store's field, the write ids of the
 // whole refused batch, and the file position they were read at.
 func TestAnInvalidRequestFromTheRealStoreParksTheFileAndStatesTheDefect(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -85,6 +86,7 @@ func TestAnInvalidRequestFromTheRealStoreParksTheFileAndStatesTheDefect(t *testi
 // defect is stated ONCE rather than on every re-read, and the file's cursor never
 // moves again.
 func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -131,6 +133,7 @@ func TestAParkedFileIsStatedOnceAndReadNoFurther(t *testing.T) {
 // separates a producer defect from an outage: the store is reachable and
 // answering, so every OTHER file keeps being read.
 func TestAnInvalidRequestDoesNotSuspendTheOtherFiles(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

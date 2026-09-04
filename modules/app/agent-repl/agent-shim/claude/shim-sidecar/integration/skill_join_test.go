@@ -24,6 +24,7 @@ import (
 // TestASkillDocumentSettlesItsOwnCallNotTheNextSkillCall opens two Skill calls
 // and then lands the FIRST one's document.
 func TestASkillDocumentSettlesItsOwnCallNotTheNextSkillCall(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

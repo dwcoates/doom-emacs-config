@@ -28,6 +28,7 @@ import (
 //     bytes are ingested attributed to the residue path, with a WARNING, and the
 //     file keeps being tailed — so a cursor appears exactly then and not before.
 func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -86,6 +87,7 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 // a stated degradation rather than a silent reclassification: the bytes stop
 // being a shell run's output and become residue, and that is worth saying once.
 func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -117,6 +119,7 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 // is the point of holding rather than reading it: the run's whole output lands
 // under the call's identity, with no prefix of it stranded as residue.
 func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -168,6 +171,7 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 // TestAnUnclassifiableSpoolPrefixIsRefusedLoudly asserts a task id with no
 // known kind prefix is an ERROR — a total-ingestion violation stated out loud.
 func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -194,6 +198,7 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 // TestAnUnclassifiableSpoolStillLandsAsResidue asserts the refusal does not
 // drop the bytes: nothing on disk is ever lost.
 func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -237,6 +242,7 @@ func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
 // /private/tmp normalization: a spool root reached through a symlink and the
 // owner's resolved output path must not read as two files.
 func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -309,6 +315,7 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 // names /tmp while a mock harness names /tmp/claude-<uid>, and the same file must
 // be discovered either way. The fixture does not move — only the flag's level.
 func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -335,6 +342,7 @@ func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
 // TestResidueCarriesNoTopLevel asserts residue names no agent: an unparsed
 // record may belong to nothing, and top_level is UNSET rather than guessed.
 func TestResidueCarriesNoTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

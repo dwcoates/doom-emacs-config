@@ -71,8 +71,17 @@ type mockScenario struct {
 
 // TestMockScenarios drives every scenario the mocked vendor declares.
 func TestMockScenarios(t *testing.T) {
+	t.Parallel()
 	for _, tc := range mockScenarios {
 		t.Run(tc.Prompt, func(t *testing.T) {
+			// EACH ROW IS ITS OWN FOUR PROCESSES OVER ITS OWN t.TempDir()
+			// trees and its own randomly-named sockets, so no row can observe
+			// another's records and the table is safe to run concurrently.
+			// takeMockDriveSlot is what keeps "concurrently" from meaning
+			// "all 133 at once".
+			t.Parallel()
+			takeMockDriveSlot(t)
+
 			tree := generateMock(t, tc.Prompt, tc.Wait)
 			in := ingestMock(t, tree)
 			entries := in.Entries()
@@ -326,6 +335,7 @@ const mockBlockedCancelAll = "the mocked vendor writes `EXIT=143` into the AGENT
 // sidecar sees in production — and the turn's every record must land on
 // `unserved_item.keepalive`, structurally unable to reach a page.
 func TestMockKeepAliveTurnsNeverReachAPage(t *testing.T) {
+	t.Parallel()
 	tree := generateMock(t, keepaliveMarker+" say something short", waitTerminal)
 	in := ingestMock(t, tree)
 	entries := in.Entries()

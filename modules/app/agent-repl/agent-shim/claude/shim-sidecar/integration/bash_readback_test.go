@@ -23,6 +23,7 @@ const exitMarker = "EXIT=0\n"
 // on one stream and the boundary between them is crossed under the subject's
 // control.
 func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -72,6 +73,7 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 // run is settled: the terminal is the last row and the endpoint closes rather
 // than holding a finished run's consumer open forever.
 func TestABashRunsStreamEndsAfterItsTerminalRow(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

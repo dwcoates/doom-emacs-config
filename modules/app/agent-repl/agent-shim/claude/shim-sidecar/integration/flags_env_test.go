@@ -26,6 +26,7 @@ import (
 // TestAMalformedDurationFlagRefusesToStart asserts the exit status and the
 // stderr record of a window the operator spelled wrong.
 func TestAMalformedDurationFlagRefusesToStart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -62,6 +63,7 @@ func TestAMalformedDurationFlagRefusesToStart(t *testing.T) {
 // TestAMalformedDurationFlagCreatesNoLogFile asserts the other half: the refusal
 // happens before the log file is opened, so none is left behind.
 func TestAMalformedDurationFlagCreatesNoLogFile(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -86,6 +88,7 @@ func TestAMalformedDurationFlagCreatesNoLogFile(t *testing.T) {
 // TestANegativeDurationEnvValueRefusesToStart asserts the env spelling is held
 // to the same rule as the flag: a negative window is refused, not defaulted.
 func TestANegativeDurationEnvValueRefusesToStart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -116,6 +119,7 @@ func TestANegativeDurationEnvValueRefusesToStart(t *testing.T) {
 // flag where getting it wrong points the whole file plane at the wrong store:
 // two stores exist, the flag names A, the env names B, and B hears NOTHING.
 func TestTheStoreSocketFlagBeatsItsEnvVar(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -143,6 +147,7 @@ func TestTheStoreSocketFlagBeatsItsEnvVar(t *testing.T) {
 // TestTheStoreSocketEnvVarIsUsedWhenNoFlagIsPassed asserts the other side of the
 // same rule: the env var is the flag's DEFAULT, not dead configuration.
 func TestTheStoreSocketEnvVarIsUsedWhenNoFlagIsPassed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

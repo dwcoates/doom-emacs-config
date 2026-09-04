@@ -25,6 +25,7 @@ import (
 // keep-alive turn, appends the rest of the turn's assistant work, restarts, and
 // asserts every record of the turn is still an unserved keep-alive item.
 func TestAKeepAliveTurnInProgressAtRestartStaysWithheld(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

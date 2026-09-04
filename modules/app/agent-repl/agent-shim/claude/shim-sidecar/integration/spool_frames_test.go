@@ -18,6 +18,7 @@ import (
 // every page line an a* spool produces names the backgrounded subagent as its
 // top level, not the session's main agent.
 func TestABackgroundedAgentSpoolsFramesNameTheSubagentAsTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -66,6 +67,7 @@ func TestABackgroundedAgentSpoolsFramesNameTheSubagentAsTopLevel(t *testing.T) {
 // spool_exit_marker_test.go, where the marker is constructed rather than
 // captured.
 func TestTheMidOutputCorpusSpoolIsNeverSettled(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

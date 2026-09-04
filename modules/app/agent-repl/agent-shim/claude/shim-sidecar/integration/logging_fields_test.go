@@ -95,6 +95,7 @@ var greenPathSiteClasses = []siteClass{
 // TestEverySiteClassCarriesTheKeysItOwes drives one clean ingest and checks the
 // whole table against it.
 func TestEverySiteClassCarriesTheKeysItOwes(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -118,6 +119,7 @@ func TestEverySiteClassCarriesTheKeysItOwes(t *testing.T) {
 // the store's rows are written under, on every record that names one. A record
 // naming a different producer would join a reader onto the wrong system's rows.
 func TestEveryProducerKeyNamesTheSidecar(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -141,6 +143,7 @@ func TestEveryProducerKeyNamesTheSidecar(t *testing.T) {
 // TestNoRecordCarriesARetiredOrEmptyKey asserts PRESENCE, NEVER SENTINELS: a
 // key the site does not own is absent, not present as an empty string.
 func TestNoRecordCarriesAnEmptyCorrelationKey(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -159,6 +162,7 @@ func TestNoRecordCarriesAnEmptyCorrelationKey(t *testing.T) {
 // ROW, and a row nobody can trace back to the byte it was read from is a row
 // nobody can debug. So the key never travels without the file and the offset.
 func TestEveryRowAnnouncementNamesThePositionItWasReadAt(t *testing.T) {
+	t.Parallel()
 	// Arrange + Act.
 	records := ingestGreenPath(t)
 
@@ -183,6 +187,7 @@ func TestEveryRowAnnouncementNamesThePositionItWasReadAt(t *testing.T) {
 // a defect restated every poll would bury every other reader's records in a loop
 // that says the same thing forever.
 func TestAnInvalidRequestRefusalIsStatedExactlyOnce(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -238,6 +243,7 @@ func TestAnInvalidRequestRefusalIsStatedExactlyOnce(t *testing.T) {
 // the log. Each retry is recorded at VERBOSE instead, carrying the attempt
 // ordinal and the delay it armed, so the progress is still filterable.
 func TestAStoreOutageStatesOneSuspensionHoweverManyAttemptsFail(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -305,6 +311,7 @@ func TestAStoreOutageStatesOneSuspensionHoweverManyAttemptsFail(t *testing.T) {
 // retry. So the client owes exactly one record PER ATTEMPT, no more: what the
 // rule forbids is the same attempt narrated twice.
 func TestARefusedCursorReadConvergesOnOneRecordPerLayer(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
