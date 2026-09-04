@@ -43,6 +43,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,6 +80,48 @@ var (
 	mockShimMain string
 	mockShimErr  error
 )
+
+// ---------------------------------------------------------------------------
+// The bound on how many mocked-vendor drives run at once.
+// ---------------------------------------------------------------------------
+
+// ONE SCENARIO IS FOUR REAL PROCESSES: a throwaway shim-store for the shim's own
+// stream plane, the node shim itself, a second shim-store for the file plane,
+// and the sidecar. The scenario table has 133 rows, and every subject in this
+// package now runs in parallel — so without a bound the table would land 133
+// node processes and 266 stores on the machine at once, which is not a faster
+// suite, it is a thrashed one.
+//
+// THE BOUND IS STRUCTURAL, NOT AN INVOCATION FLAG. `-parallel` governs how many
+// test functions Go lets run, and a suite whose safety depended on the caller
+// passing the right number would be unsafe under the default. This semaphore
+// holds regardless of how the suite is invoked; `-parallel` only decides how
+// much of the REST of the package overlaps with it.
+//
+// The width is half the machine's usable parallelism, floored at 2 and capped
+// at 8: each slot is ~4 processes, so 8 slots is ~32 processes, and beyond that
+// the drives contend for CPU with the sidecars whose polling they are waiting
+// on.
+var mockDriveSlots = make(chan struct{}, mockDriveConcurrency())
+
+func mockDriveConcurrency() int {
+	n := runtime.GOMAXPROCS(0) / 2
+	if n < 2 {
+		n = 2
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n
+}
+
+// takeMockDriveSlot blocks until this scenario may run, and gives the slot back
+// when the test (and every cleanup it registered) is done.
+func takeMockDriveSlot(t *testing.T) {
+	t.Helper()
+	mockDriveSlots <- struct{}{}
+	t.Cleanup(func() { <-mockDriveSlots })
+}
 
 // mockShimDir is the shim package's root — READ-ONLY to this suite. Nothing
 // here ever writes under it except the `npm ci` / `npm run build` the shim's

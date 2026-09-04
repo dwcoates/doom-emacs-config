@@ -23,6 +23,7 @@ import (
 // its terminator in SEPARATE appends — the ordinary shape for a command that
 // finishes between two polls — and asserts one terminal row.
 func TestASpoolMarkerOnItsOwnReadEndsTheRunExactlyOnce(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -61,6 +62,7 @@ func TestASpoolMarkerOnItsOwnReadEndsTheRunExactlyOnce(t *testing.T) {
 // observed; the staleness policy owns the outcome instead. The bytes themselves
 // are never lost — they reach the consumer as ordinary deltas.
 func TestASpoolMarkerCutMidTokenIsNotMatched(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

@@ -44,6 +44,7 @@ type apiErrorCase struct {
 // TestApiErrorTaxonomyTable walks every GROUNDED api_error shape the corpus
 // holds through the sidecar and asserts the kind arm it lands on.
 func TestApiErrorTaxonomyTable(t *testing.T) {
+	t.Parallel()
 	cases := []apiErrorCase{
 		{
 			name:    "a connection failure has no vendor type and is named rather than guessed",

@@ -27,6 +27,7 @@ import (
 // boundary is held, writes the summary that settles it, and asserts the restarted
 // process converts it — exactly once, with the summary.
 func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -84,6 +85,7 @@ func TestAHeldBoundaryIsConvertedOnceAfterARestart(t *testing.T) {
 // itself is withheld while the bit is set: a compaction inside a keep-alive turn
 // is not a user-visible separation, because the turn was never the user's.
 func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -130,6 +132,7 @@ func TestAKeepAliveTurnSpanningACompactionStillWithholdsTheCut(t *testing.T) {
 // cleared by the compaction: assistant work written AFTER the cut is still
 // withheld, because only a non-keepalive user prompt closes the turn.
 func TestAKeepAliveBitSurvivesACompactionForTheWorkAfterIt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

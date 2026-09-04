@@ -32,6 +32,7 @@ func splitInThree(t *testing.T, line string) (string, string, string) {
 // record in three pieces, waiting for the reader to observe each, and asserts
 // the record produced exactly one entry and no residue.
 func TestATranscriptLineSplitAcrossThreePollsConvertsOnceAndWhole(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -69,6 +70,7 @@ func TestATranscriptLineSplitAcrossThreePollsConvertsOnceAndWhole(t *testing.T) 
 // other half: no entry is produced from a PREFIX of the record. The first two
 // appends move the cursor and write nothing at all.
 func TestATranscriptLineSplitAcrossThreePollsIsNeverPartiallyConverted(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -110,6 +112,7 @@ func TestATranscriptLineSplitAcrossThreePollsIsNeverPartiallyConverted(t *testin
 // store's cursor — and its carry — exactly where the store put it. That is the
 // only state in which a seeded carry is observable at all.
 func TestASeededCarryIsResumedFromTheStoreOnBoot(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

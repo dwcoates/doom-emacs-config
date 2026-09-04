@@ -17,6 +17,7 @@ import (
 // TestUsageRidesATooluseFirstBlock asserts a response whose first block is a
 // tool_use carries its usage on that call's unit.
 func TestUsageRidesATooluseFirstBlock(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -65,6 +66,7 @@ func TestUsageRidesATooluseFirstBlock(t *testing.T) {
 // TestUsageIsCarriedByExactlyOneUnitWhenTheFirstBlockIsATooluse asserts the
 // other half — one response, one carrier — with a tool_use in front.
 func TestUsageIsCarriedByExactlyOneUnitWhenTheFirstBlockIsATooluse(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

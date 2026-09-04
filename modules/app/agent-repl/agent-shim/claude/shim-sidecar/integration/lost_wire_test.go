@@ -45,6 +45,7 @@ func awaitLostTerminalOnTheWire(ctx context.Context, t *testing.T, f *fakeStore,
 // rather than either alone: an arm that disagreed with the record that produced
 // it would be worse than a missing arm, because it would look authoritative.
 func TestALostTerminalNamesHowItWasConcludedOnTheWire(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		// arm is the DetachedLost arm the wire must carry, and it is the same
@@ -135,6 +136,7 @@ func sessionUUIDFor(arm string) string {
 // window can expire, because a went_silent verdict reaching the wire first
 // would satisfy a laxer subject while proving nothing about swept_up.
 func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -155,7 +157,18 @@ func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
 	opts := lostOptions(t, fake.Socket, tree)
 	// EVERY silence window stays long, so went_silent cannot reach a verdict
 	// first and steal the subject. Only the boot sweep can conclude here.
-	opts.UnownedSpoolWindow = time.Millisecond
+	//
+	// THE UNOWNED WINDOW IS LONG FOR THE SAME REASON, and it used to be 1ms.
+	// This spool is CLAIMED — its launch pair is in the transcript — so the
+	// hold is released the moment the reader observes that claim and the
+	// window is never reached on the healthy path. At 1ms it WAS reached:
+	// discovery does not promise to read the transcript before it resolves the
+	// spool, so a rescan that saw the spool first demoted it to residue, and a
+	// residue spool names no run and is owed no terminal. The subject then
+	// waited out its whole budget for a settle that could no longer happen. A
+	// long window costs nothing when the claim arrives and fails loudly when it
+	// does not, instead of silently switching the subject to a different one.
+	opts.UnownedSpoolWindow = longWindow
 
 	// Act.
 	startSidecar(t, opts)
@@ -186,6 +199,7 @@ func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
 // genuinely printed nothing observable: the sweep still concludes from its
 // TIMESTAMP, and no batch ever reaches the handler.
 func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -228,6 +242,7 @@ func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 // exited run's having no conclusion is a DECISION rather than a sweep that
 // simply never ran.
 func TestAnExitedRunIsNeverRestatedLost(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -280,6 +295,7 @@ func TestAnExitedRunIsNeverRestatedLost(t *testing.T) {
 // everything it said afterwards. (file_vanished is the opposite case and drops
 // its tailer, because a file that is gone will not say anything more.)
 func TestBytesAppendedAfterAWentSilentVerdictStillLand(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
