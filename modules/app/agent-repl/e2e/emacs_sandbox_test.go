@@ -59,10 +59,19 @@ type sandbox interface {
 	// readback and every heartbeat probe.
 	Exec(ctx context.Context, argv ...string) (string, error)
 
-	// StartPTY launches a long-lived process attached to a pty. Emacs needs
-	// one to have a real tty frame, which is what makes `window-list`,
-	// `tab-bar-tabs` and `mode-line-format` behave as they do for a user.
+	// StartPTY launches a long-lived process attached to a pty. Emacs is
+	// started this way so it keeps a controlling terminal for its stdin and
+	// so everything it writes outside its GUI frame -- GTK diagnostics, an
+	// early elisp backtrace, the reason a boot died -- lands in one buffer
+	// the failure artifacts can carry.
 	StartPTY(ctx context.Context, argv ...string) (sandboxProc, error)
+
+	// StartProcess launches a long-lived process with NO terminal, routing
+	// its stdout and stderr to the two files given. Xvfb is started this
+	// way: it needs no tty, and its two output streams have to stay apart
+	// because `-displayfd 1` reports the bound display on stdout while
+	// every diagnostic goes to stderr.
+	StartProcess(ctx context.Context, stdout, stderr *os.File, argv ...string) (sandboxProc, error)
 }
 
 // sandboxProc is a process running inside the sandbox.
@@ -112,6 +121,15 @@ func requireSandbox(t *testing.T) sandbox {
 	// StartPTY.
 	if _, err := exec.LookPath("script"); err != nil {
 		t.Skipf("emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it): %v", err)
+	}
+	// Xvfb is what makes a GRAPHICAL frame possible, and the panel this
+	// layer opens is an `xwidget-webkit` webview, which cannot exist without
+	// one. The Dockerfile installs it by name and its build asserts it, so
+	// this is a backstop against an older image rather than the guarantee --
+	// but without it every scenario would fail at `make-xwidget` with "GTK
+	// has not been initialized", which names nothing that is actually wrong.
+	if _, err := exec.LookPath("Xvfb"); err != nil {
+		t.Skipf("emacs client layer needs 'Xvfb' for a GUI frame (the panel is an xwidget-webkit webview; the Dockerfile installs xvfb for it): %v", err)
 	}
 	assertHostIsolation(t)
 	return s
@@ -358,6 +376,31 @@ func (s *localSandbox) StartPTY(ctx context.Context, argv ...string) (sandboxPro
 	cmd.Stderr = &p.out
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %q on a pty: %w", argv[0], err)
+	}
+	p.cmd = cmd
+	go func() {
+		_ = cmd.Wait()
+		close(p.done)
+	}()
+	return p, nil
+}
+
+// StartProcess runs argv directly, with its two streams routed to files.
+//
+// Unlike StartPTY it allocates no pty, so the started process's Output() is
+// empty by construction: everything it says is in the files the caller
+// opened, which is what makes an Xvfb log preservable as its own artifact.
+func (s *localSandbox) StartProcess(ctx context.Context, stdout, stderr *os.File, argv ...string) (sandboxProc, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("startprocess: no command given")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	p := &localProc{done: make(chan struct{})}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start %q: %w", argv[0], err)
 	}
 	p.cmd = cmd
 	go func() {
