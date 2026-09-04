@@ -129,8 +129,13 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("web-fetch", "activity", "simpleToolCall");
-    // Assert — the links output form, not a text blob.
-    expect(row.querySelector(".tool-head")).not.toBeNull();
+    // Assert — the LINKS output form, not a text blob. src/feed/cards/
+    // tool-call.ts's drawFeedToolCallLinksOutput gives the list
+    // `.tool-links` and each result its own `.tool-link-row`, so those
+    // selectors are what distinguish this form from the generic text one a
+    // `.tool-head` check would have passed for equally.
+    expect(row.querySelector(".tool-links")).not.toBeNull();
+    expect(row.querySelectorAll(".tool-link-row").length).toBeGreaterThan(0);
     expect(textOf(row)).not.toBe("");
   },
   TURN_TEST_MS,
@@ -158,9 +163,12 @@ it(
     // Assert — the card states its outcome arm (src/feed/cards/skill.ts sets
     // `data-state` to the outcome's oneof case), so a cold repaint of the row
     // alone renders the same state.
+    // The arm is `failed` SPECIFICALLY: `!skill-fail` names a skill that does
+    // not resolve, and any of `running`/`loaded`/`denied` would have satisfied
+    // a mere presence check.
     const card = row.querySelector<HTMLElement>("[data-state]");
     expect(card).not.toBeNull();
-    expect(card?.dataset.state).not.toBe("");
+    expect(card?.dataset.state).toBe("failed");
   },
   TURN_TEST_MS,
 );
@@ -173,9 +181,15 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("hook-blocked", "activity", "hook");
-    // Assert
+    // Assert — the BLOCKED arm specifically. src/feed/cards/hook.ts sets
+    // `data-state` to the outcome's oneof case and gives only the blocked arm
+    // the loud `.tool-hook-blocked` treatment, and the daemon composes the
+    // headline ("hook blocked: <name> (<event>)") into `.tool-head`.
     expect(row.dataset.unit).toBe("hook");
-    expect(textOf(row)).not.toBe("");
+    const card = row.querySelector<HTMLElement>("[data-state]");
+    expect(card?.dataset.state).toBe("blocked");
+    expect(card?.classList.contains("tool-hook-blocked")).toBe(true);
+    expect(textOf(row.querySelector<HTMLElement>(".tool-head"))).not.toBe("");
   },
   TURN_TEST_MS,
 );
@@ -185,8 +199,13 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("hook-failed", "activity", "hook");
-    // Assert
+    // Assert — the FAILED arm specifically, and NOT the blocked arm's loud
+    // treatment: the two are different facts and hook.ts draws them
+    // differently.
     expect(row.dataset.unit).toBe("hook");
+    const card = row.querySelector<HTMLElement>("[data-state]");
+    expect(card?.dataset.state).toBe("failed");
+    expect(card?.classList.contains("tool-hook-blocked")).toBe(false);
   },
   TURN_TEST_MS,
 );
@@ -340,8 +359,16 @@ it(
   async () => {
     // Arrange / Act
     const row = await family("rotate", "separation");
-    // Assert
+    // Assert — the CLEARED arm specifically. `!rotate` is the `/clear`
+    // scenario ("SessionIdentityRotated + AgentUpdate.context_cut(
+    // ContextCleared)", session.ts), and src/feed/rows/separation.ts stamps
+    // the arm onto `data-arm`/`data-state` and picks its rule accent from the
+    // same case — so the compacted and worktree arms, which the row-kind check
+    // alone could not tell apart from this one, are excluded.
     expect(row.dataset.rowKind).toBe("separation");
+    const divider = row.querySelector<HTMLElement>(".separation");
+    expect(divider?.dataset.arm).toBe("cleared");
+    expect(divider?.querySelector(".sep-accent-cleared")).not.toBeNull();
     expect(textOf(row)).not.toBe("");
   },
   TURN_TEST_MS,
