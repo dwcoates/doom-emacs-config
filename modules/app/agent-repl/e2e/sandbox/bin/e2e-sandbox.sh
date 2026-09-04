@@ -82,6 +82,29 @@ stage_context() {
      "$repo_root/$MODULE_REL/webapp/package-lock.json" \
      "$ctx/npm-lockfiles/webapp/"
 
+  # THE GO SOURCES, for the build-cache prime.
+  #
+  # The Go BUILD cache (as opposed to the module cache) is empty in every
+  # container, because it lives under HOME and HOME is a fresh tmpfs -- so
+  # every run recompiled the whole dependency graph from scratch, measured at
+  # ~18s before the first test ran. Compiling once at build time and shipping
+  # the cache removes that.
+  #
+  # It is SAFE in a way the other staged artifacts are not, and that is worth
+  # stating: Go's build cache is content-addressed, so an entry produced from
+  # different source bytes simply is not found. A stale primed cache cannot
+  # produce a stale binary; the worst it can do is miss and compile.
+  #
+  # `.go` files, plus the embedded testdata and the vocab JSON the Go side
+  # embeds, at their real relative paths so every `replace` and every
+  # `//go:embed` resolves the same way it will at run time.
+  local src rel
+  while IFS= read -r src; do
+    rel=${src#"$repo_root/$MODULE_REL/"}
+    mkdir -p "$ctx/go-sources/$(dirname "$rel")"
+    cp "$src" "$ctx/go-sources/$rel"
+  done < <(find "$repo_root/$MODULE_REL" -name '*.go' -not -path '*/node_modules/*' -not -path '*/dist/*')
+
   # Every go.mod/go.sum under the module, at its own relative path, so the
   # replace directives between them still resolve during the cache prime.
   local mod rel
@@ -253,6 +276,20 @@ if [ ! -d "$EMACSDIR/.local" ]; then
   echo "MISSING: $EMACSDIR/.local (doom sync was not baked into the image)" >&2
   fail=1
 fi
+# The node dependency trees must be baked too, WITH the lockfile digest the
+# entrypoint checks the checkout against. Without them every run reinstalls
+# them onto a tmpfs -- seven seconds and ~730 MiB of the container's memory
+# budget, which is what made two concurrent sandboxes OOM the VM.
+for d in shim webapp; do
+  if [ ! -d "/sandbox/deps/$d/node_modules" ]; then
+    echo "MISSING: /sandbox/deps/$d/node_modules (the node deps were not baked into the image)" >&2
+    fail=1
+  fi
+  if [ ! -s "/sandbox/deps/$d/.lock-sha256" ]; then
+    echo "MISSING: /sandbox/deps/$d/.lock-sha256 (no lockfile digest, so staleness could not be checked)" >&2
+    fail=1
+  fi
+done
 exit "$fail"
 PROBE
 )
@@ -261,7 +298,191 @@ PROBE
   # that only works for non-login shells is caught here.
   "$rt" run --rm --network none --entrypoint /bin/bash "$IMAGE" -lc "$probe" \
     || die "image '$IMAGE' is missing required contents (see above)"
-  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom + a baked doom sync"
+  log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom, a baked doom sync and baked node deps"
+}
+
+# --- the concurrency gate -------------------------------------------------
+#
+# WHY A GATE AT ALL. One sandbox is a real Emacs with a GUI frame, an Xvfb, a
+# daemon, a Node shim, a store and a sidecar, three of those at a time inside
+# the container. Measured, that container peaks at 1.58 GiB. The Docker VM it
+# runs in has 5.79 GiB total and is SHARED -- on the machine this was measured
+# on, unrelated containers were already holding 1.82 GiB of it. Two sandboxes
+# started at once did not run slowly, they OOM-killed each other: `npm ci`
+# exited 137 and Emacs was SIGKILLed mid-scenario, which then read as a test
+# failure with nothing wrong in it.
+#
+# So a second `run` WAITS, out loud, instead of overcommitting. The default is
+# ONE container; more are allowed only when the VM's free memory actually
+# covers them, computed from `docker info` and what the running containers are
+# using rather than assumed.
+#
+# The slots are directories, claimed with `mkdir` -- the one filesystem
+# operation that is atomic and fails if the name exists, so two runs cannot
+# both believe they hold the same slot. A slot whose holder died is reclaimed:
+# the reaper reads the recorded pid, checks it is gone, and `mv`s the
+# directory away, which means a slot only ever becomes claimable by
+# disappearing. It is never simply deleted out from under a live holder.
+
+# sandboxSlotDir is where the slots live: a fixed host path, so runs from
+# DIFFERENT worktrees of this repo gate against each other. It is not under
+# $TMPDIR, which on macOS is per-process and would give every caller a private
+# set of slots and no gate at all.
+SLOT_DIR=${AGENT_REPL_SANDBOX_SLOT_DIR:-/tmp/agent-repl-e2e-sandbox.slots}
+
+# SANDBOX_MEM_BUDGET_MB is what one container is assumed to need.
+#
+# MEASURED: the full Emacs layer at its own parallelism bound peaks at
+# 1.58 GiB of container memory; the whole Go e2e suite is smaller. 2048 MiB is
+# that peak plus a quarter, because a budget that is merely equal to the
+# observed peak has no room for the run that is slightly worse than the one
+# that was measured -- and the failure mode of getting this wrong is an
+# OOM-kill, not a slowdown.
+SANDBOX_MEM_BUDGET_MB=${AGENT_REPL_SANDBOX_MEM_BUDGET_MB:-2048}
+
+# SANDBOX_MEM_HEADROOM_MB is what is left to the VM itself and to whatever
+# starts while a run is in flight. MEASURED only in the sense that 1 GiB is
+# what the VM was observed to hold in page cache, daemons and slack with no
+# sandbox running at all.
+SANDBOX_MEM_HEADROOM_MB=${AGENT_REPL_SANDBOX_MEM_HEADROOM_MB:-1024}
+
+# SANDBOX_MAX_SLOTS caps the computed answer regardless of memory: past a
+# handful of containers the four CPUs are the binding constraint, not the RAM.
+SANDBOX_MAX_SLOTS=${AGENT_REPL_SANDBOX_MAX_SLOTS:-4}
+
+# slot_budget RUNTIME — how many containers this VM can afford right now.
+#
+# Answers 1 whenever it cannot tell, which is the safe direction: the gate's
+# purpose is to stop overcommitment, and a gate that opens wide because it
+# could not read `docker info` would be worse than no gate, since it would
+# LOOK like it was protecting something.
+slot_budget() {
+  local rt=$1 total_bytes total_mb used_mb avail_mb n
+
+  total_bytes=$("$rt" info --format '{{.MemTotal}}' 2>/dev/null || echo 0)
+  [[ $total_bytes =~ ^[0-9]+$ ]] && (( total_bytes > 0 )) || { printf '1\n'; return 0; }
+  total_mb=$(( total_bytes / 1024 / 1024 ))
+
+  # What the currently running containers hold. `docker stats` reports
+  # human-readable sizes ("583.6MiB / 5.787GiB"), so only the first field of
+  # each line is read and its unit converted. A container that vanishes
+  # mid-read simply contributes nothing.
+  used_mb=$("$rt" stats --no-stream --format '{{.MemUsage}}' 2>/dev/null \
+    | awk -F' */ *' '{print $1}' \
+    | awk '
+        /GiB/ { gsub(/GiB/,""); s += $1 * 1024; next }
+        /MiB/ { gsub(/MiB/,""); s += $1; next }
+        /KiB/ { gsub(/KiB/,""); s += $1 / 1024; next }
+        /B/   { gsub(/B/,"");   s += $1 / 1024 / 1024; next }
+        END { printf "%d\n", s }' || echo 0)
+  [[ $used_mb =~ ^[0-9]+$ ]] || used_mb=0
+
+  avail_mb=$(( total_mb - used_mb - SANDBOX_MEM_HEADROOM_MB ))
+  n=$(( avail_mb / SANDBOX_MEM_BUDGET_MB ))
+  (( n < 1 )) && n=1
+  (( n > SANDBOX_MAX_SLOTS )) && n=SANDBOX_MAX_SLOTS
+  log "memory budget: VM ${total_mb}MiB, containers using ${used_mb}MiB, headroom ${SANDBOX_MEM_HEADROOM_MB}MiB, ${SANDBOX_MEM_BUDGET_MB}MiB per sandbox => ${n} concurrent sandbox(es)"
+  printf '%s\n' "$n"
+}
+
+# reap_dead_slots frees slots whose holder is gone.
+#
+# The order is what makes it safe: the pid is read from a slot that EXISTS, so
+# no one else can be claiming it at that moment (a claim is `mkdir`, which
+# fails on an existing name); only then is the directory moved aside. A slot
+# therefore becomes claimable only by ceasing to exist, never by being emptied
+# while someone holds it.
+reap_dead_slots() {
+  local slot pid
+  for slot in "$SLOT_DIR"/slot-*; do
+    [[ -d $slot ]] || continue
+    pid=$(cat "$slot/pid" 2>/dev/null || echo "")
+    if [[ -z $pid ]]; then
+      # A slot mid-claim (created, pid not yet written). Leave it: the
+      # claimer writes the pid immediately, and reclaiming it here would
+      # race a live run.
+      continue
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+      continue
+    fi
+    log "reclaiming slot $(basename "$slot") from dead pid $pid"
+    mv "$slot" "$slot.dead.$$" 2>/dev/null && rm -rf "$slot.dead.$$"
+  done
+}
+
+# SANDBOX_SLOT is the slot this process holds, released by the EXIT trap. Not
+# `local`: the trap runs after the acquiring function's frame is gone.
+SANDBOX_SLOT=""
+
+release_slot() {
+  [[ -n ${SANDBOX_SLOT:-} ]] || return 0
+  rm -rf "$SANDBOX_SLOT"
+  SANDBOX_SLOT=""
+}
+
+# acquire_slot RUNTIME — block until one of the VM's sandbox slots is free.
+acquire_slot() {
+  local rt=$1
+  if [[ ${AGENT_REPL_SANDBOX_NO_GATE:-0} == 1 ]]; then
+    log "AGENT_REPL_SANDBOX_NO_GATE=1: running WITHOUT the concurrency gate; concurrent sandboxes can OOM-kill each other"
+    return 0
+  fi
+
+  mkdir -p "$SLOT_DIR"
+  local slots i waited=0 announced=0
+  slots=$(slot_budget "$rt")
+
+  while true; do
+    reap_dead_slots
+    for (( i = 1; i <= slots; i++ )); do
+      if mkdir "$SLOT_DIR/slot-$i" 2>/dev/null; then
+        SANDBOX_SLOT="$SLOT_DIR/slot-$i"
+        printf '%s\n' "$$" > "$SANDBOX_SLOT/pid"
+        trap release_slot EXIT
+        (( waited > 0 )) && log "slot $i acquired after ${waited}s"
+        return 0
+      fi
+    done
+    if (( announced == 0 )); then
+      log "WAITING: all $slots sandbox slot(s) are in use by another run."
+      log "  This is the memory gate, not a hang: $SLOT_DIR holds a directory per running sandbox."
+      log "  Concurrent sandboxes OOM-kill each other on this VM; set AGENT_REPL_SANDBOX_NO_GATE=1 to override deliberately."
+      announced=1
+    elif (( waited % 30 == 0 )); then
+      log "still waiting for a sandbox slot (${waited}s)"
+    fi
+    sleep 2
+    waited=$(( waited + 2 ))
+  done
+}
+
+# --- host-staged build artifacts ------------------------------------------
+
+# stage_webapp_dist builds the webapp dist ON THE HOST when it is stale, so
+# the container never has to.
+#
+# The Emacs client layer serves the REAL webapp to a real webview, so it
+# needs a real dist. Building it inside the container -- which is what used
+# to happen, once per run -- meant `tsc --noEmit && vite build` running on a
+# tmpfs inside a 5.8 GiB VM: about six seconds and roughly a gigabyte of
+# resident memory for tsc alone, immediately before a real Emacs started.
+# That was the single biggest reason two sandboxes could not run at once.
+#
+# The staleness rule is bin/webapp-dist.sh's, and it is ONE rule: this runs
+# `ensure` (check, and build through bin/build-frontend.sh when stale), and
+# the harness inside the container runs `check` from the SAME script before
+# it hands the dist to the daemon. A stale dist can therefore never be
+# silently served -- it is rebuilt here, or refused there.
+#
+# AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1 skips the host build. It does NOT skip
+# the container's check, so the only thing it can buy is a louder failure.
+stage_webapp_dist() {
+  if [[ ${AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD:-0} == 1 ]]; then
+    log "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1: not building the webapp dist; the container will refuse a stale one"
+    return 0
+  fi
+  "$here/webapp-dist.sh" ensure
 }
 
 # --- run -------------------------------------------------------------------
@@ -272,8 +493,14 @@ do_run() {
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
   preflight >&2 || die "preflight failed; see the message above"
 
+  # BEFORE anything is built or started. The gate is what keeps two runs from
+  # OOM-killing each other on a 5.8 GiB VM.
+  acquire_slot "$rt"
+
   local sha
   sha=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)
+
+  stage_webapp_dist
 
   local args=(
     run --rm --init

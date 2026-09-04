@@ -803,6 +803,10 @@ healthy boots of this layer inside the sandbox — two `-count=5` runs of
 `TestEmacsProofOfLife` — and a third `-count=5` that held the bounds derived
 from them.
 
+**Re-measured** over a `-count=2` of the whole layer (91 boots) after the image
+began carrying Doom's native code and the scenarios became parallel; the
+"today" column is that run. Two phases moved and one bound is new.
+
 The harness measures itself. `Emacs.record` times each boot phase and
 `reportPhases` logs every one on **every** run, passing or failing, so
 `go test -v` always prints the numbers a future revision must re-derive its
@@ -814,9 +818,63 @@ bounds from. A bound here cannot quietly drift back into a guess.
 | `heartbeatInterval` | — | 250ms | — | Already *below* the observed probe latency, so the detector samples as fast as the command loop can answer. A shorter interval buys only queued probes. |
 | `emacsBootBound` | 49ms | 500ms | ~10x | Larger than 3x deliberately: three times a number this small is not a bound, it is a race with the scheduler. |
 | `daemonLinkBound` | 265ms | 1s | ~4x | **New.** `EnsureDaemon` was sharing `emacsBootBound` — one name over two unrelated events, so neither could be measured against its own phase. They differ by a factor of five. |
-| `doomBootBound` | 1.162s | 3.5s | ~3x | Narrow spread (0.98s-1.16s). No longer a multiple of `emacsBootBound`: it exceeds it twentyfold, and tying them together would let a change in one silently move the other. |
-| `doomStageBound` | 7ms | 5s | — | Down from 60s. There is no slow-copy regime to bound at all: staging the whole tree takes single-digit milliseconds, so this exists only to catch a copy that cannot finish, and it fails inside the test rather than at the suite's timeout. |
+| `doomBootBound` | 1.162s → **967ms mean, 1.70s max today** | 3.5s | ~2x today | Native code is baked into the image now (`doom sync --aot`), which cut the mean from 1437ms to ~840ms serially; running two scenarios at once puts the worst back at 1.70s. NOT raised to keep a 3x ratio — loosening a product bound to accommodate the harness's own concurrency would be the harness marking its own homework. |
+| `doomStageBound` | 7ms → **45ms mean, 93ms max today** | 5s | — | Down from 60s. The staged `.local/cache` carries 591 `.eln` files (58 MiB) now rather than 228 KiB, so the copy is no longer free — but there is still no slow-copy regime to bound: this exists to catch a copy that cannot finish, and it fails inside the test rather than at the suite's timeout. |
+| `evalBound` | **409ms** | 1.25s | ~3x | **New.** A scenario's own `emacsclient --eval` was bounded by `HeartbeatBound` — the same conflation `daemonLinkBound` was split out of `emacsBootBound` to fix. The heartbeat probe is `(emacs-pid)` and does nothing; a scenario's form opens panels and creates an xwidget webview. It lands on the same number today by coincidence of two similar measurements, not by sharing one. |
 | `xvfbReadyBound` | 121ms | 1s | ~8x | **New.** The 121ms is always the FIRST Xvfb in a fresh container, which pays once for creating `/tmp/.X11-unix`; the steady state is 21-62ms, and the multiple is taken against the slow first start. |
+
+### The parallelism bound, measured
+
+Every scenario is `t.Parallel()`. The isolation that permits it is per-test by
+construction, not by convention: `requireSandbox` mints a fresh
+`os.MkdirTemp` scratch, so the Emacs `HOME`, its Doom tree, the state root,
+both account roots, the store database, the kernel-lock directory and the fake
+SDK's spool root are per-test paths; every socket carries four random bytes;
+each Emacs draws on its **own** Xvfb started with `-displayfd 1`, so the X
+server picks a free display under its own lock rather than one this layer
+guesses; and there is no `t.Setenv` anywhere in the layer.
+
+The machine is the constraint, so **the layer bounds itself** rather than
+trusting `-parallel` to be passed correctly: `NewEmacsWorld` takes a slot
+before the per-run builds and returns it after the teardown, and `StartEmacs`
+refuses to run outside the gate. `AGENT_REPL_E2E_EMACS_PARALLEL` overrides the
+count, and exists so the bound can be re-measured the same way it was measured
+— not so a caller can turn it off.
+
+Measured on the 4-CPU / 5.8 GiB Docker VM, one `-count=1` pass of the whole
+layer at each setting:
+
+| Slots | Wall | Peak container memory | Worst Doom boot (bound 3.5s) | Verdict |
+| --- | --- | --- | --- | --- |
+| 1 | 172s | 1.35 GiB | 1.50s | |
+| **2** | **107s** | **1.52 GiB** | **1.58s** | **chosen** |
+| 3 | 81s | 1.58 GiB | 1.78s | rejected: under sustained load (`-count=2`) three Emacsen on four CPUs pushed Doom's boot past 3.5s and failed three unrelated scenarios |
+| 4 | 90s | 1.81 GiB | 2.94s | slower *and* visibly contended |
+
+The bound is not the number that goes fastest on one lucky pass; it is the
+largest number whose worst measured boot still fits the budget the product is
+held to.
+
+Those numbers were taken before the AT-SPI fix (`NO_AT_BRIDGE`), which turned
+out to be the real source of the boot outliers the table blames on contention.
+On the shipped layer, at two slots: a `-count=1` runs in **78s** with a
+**1.14 GiB** peak, and two consecutive `-count=2` runs did **183 boots with
+zero boot-bound misses**, worst 1.10s against a mean of 796ms.
+
+### The container's memory budget
+
+| Consumer | Before | Today |
+| --- | --- | --- |
+| `node_modules` on the working-copy tmpfs (`npm ci` twice per run) | 729 MiB | 0 — image-baked, linked |
+| primed npm cache copied into HOME | 196 MiB | 0 — only copied on a lockfile mismatch |
+| Go build cache | 331 MiB, compiled from cold every run | 479 MiB, copied from the image |
+| webapp `dist` built in-container (`tsc` alone ~1 GiB peak) | ~1 GiB transient | 0 — host-staged |
+| leaked Emacs / shim / shim-lock processes | grew to ~1.7 GiB over a run | 0 — reaped and reported |
+| **whole-run peak** | **3.08 GiB** | **1.22 GiB** |
+
+Peak RSS by process, inside one container: Emacs with its GUI frame 206 MiB,
+the Node shim 95 MiB, Xvfb / daemon / store / sidecar / `shim-lock` single-digit
+to low-tens of MiB each.
 
 ### What the proof-of-life test reaches today, and what blocks it
 

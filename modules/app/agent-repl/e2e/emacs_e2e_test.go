@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,6 +62,21 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	for _, option := range options {
 		option(&cfg)
 	}
+
+	// THE SLOT COMES FIRST, BEFORE THE PER-RUN BUILDS AND BEFORE THE STORE.
+	//
+	// Every scenario is parallel and the machine is not unbounded; see
+	// emacsParallelSlots. Taking the slot HERE rather than inside StartEmacs
+	// matters for two measured reasons:
+	//
+	//   * The first scenarios of a run also do this suite's one-time builds
+	//     -- the esbuild shim bundle and four Go binaries. Under the old
+	//     placement those ran BESIDE two booting Emacsen instead of counting
+	//     against the budget, and the boots they starved missed Doom's own
+	//     3500ms bound in scenarios that had nothing to do with them.
+	//   * A scenario blocked on a slot would otherwise already be holding a
+	//     running store and sidecar, paying for a world it cannot yet use.
+	takeEmacsSlot(t)
 
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
@@ -162,6 +178,16 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		ExtraEnv:    extraEnv,
 	})
 
+	// THE WORLD-LEVEL PATHS A STRAY CAN NAME. The reaper StartEmacs armed
+	// matches an argv against this scenario's own paths, and the Emacs root
+	// alone does not cover every one of them: a leaked `shim-lock` names the
+	// kernel-lock directory, and a leaked fake SDK names the spool root.
+	// Both are unique per test, so neither can match another scenario's
+	// process. Without them the strays this reaper exists for -- measured at
+	// 95 MiB for one leaked shim -- stay resident for the rest of the run.
+	e.AddReapPath(lockDir)
+	e.AddReapPath(spoolRoot)
+
 	// The sidecar watches the SAME two account roots the launcher was given.
 	// SPEC.md §B's "One string per config root" invariant applies here
 	// unchanged: the sidecar records cursors under the path it WALKED, which
@@ -194,50 +220,77 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
 }
 
-// webappDistOnce builds the webapp at most once per test binary.
+// webappDistOnce checks the staged webapp dist at most once per test binary.
 var (
 	webappDistOnce sync.Once
 	webappDistPath string
 	webappDistErr  error
 )
 
-// requireWebappDist builds the REAL webapp from source and answers the dist
-// directory the daemon serves.
+// webappDistCheckBound bounds the staleness check.
+//
+// MEASURED: the check is a `stat` walk of webapp/src plus the generated proto
+// TypeScript -- about 1,100 files -- and finished in 60ms at its slowest
+// inside the container. 30s is three orders above that on purpose: what this
+// bound exists to catch is a check that cannot finish AT ALL, and it must
+// fail in the test rather than at the suite's own timeout.
+const webappDistCheckBound = 30 * time.Second
+
+// requireWebappDist answers the REAL webapp dist the daemon serves, and
+// refuses a stale one.
 //
 // The Go layers hand the daemon a STUB dist (harness.NewFakeWebappDist) and
 // that is right for them: no Connect client ever loads the page. This layer
 // does. The panel is an `xwidget-webkit` webview pointed at the daemon's own
-// origin, so the bytes it renders are the bytes this build produces -- a stub
-// would mean every present and future webview assertion inspected a
-// placeholder while reporting on the product.
+// origin, so the bytes it renders are the bytes of this dist -- a stub would
+// mean every present and future webview assertion inspected a placeholder
+// while reporting on the product.
 //
-// The build is the module's OWN `npm run build` (typecheck plus `vite
-// build`), never a second spelling of it. Its pre-script is skipped
-// deliberately: `prebuild` is `ensure-deps`, which reaches for `npm ci` when
-// it is unhappy, and the sandbox runs with `--network none`. The dependency
-// gate below is what that script would have been for, made explicit.
+// THE DIST IS HOST-STAGED, NOT BUILT HERE. It used to be built by this
+// function, inside the container, on the first test of every run: `npm run
+// build` is `tsc --noEmit && vite build`, which cost ~6s and about a
+// gigabyte of resident memory for tsc alone -- inside a 5.8 GiB Docker VM,
+// on a tmpfs, with a real Emacs about to start. `e2e-sandbox.sh run` builds
+// it on the host now (bin/webapp-dist.sh `ensure`) and the entrypoint stages
+// it in with the working copy, exactly as the shim bundle's build identity
+// is staged rather than recomputed.
+//
+// STALENESS STAYS HONEST, and by the SAME RULE the host used: this runs
+// `bin/webapp-dist.sh check`, the one implementation of that rule, against
+// the staged sources. A dist older than any source it is built from is a
+// FAILURE naming the command to run, never a silently served older bundle.
 func requireWebappDist(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(repo.repoDir, "webapp")
-	if _, err := os.Stat(filepath.Join(dir, "node_modules")); err != nil {
-		t.Skipf("e2e: webapp deps not installed (%s/node_modules missing): run `npm ci` in %s", dir, dir)
-	}
 	webappDistOnce.Do(func() {
-		started := time.Now()
-		cmd := exec.Command("npm", "run", "build", "--ignore-scripts")
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			webappDistErr = fmt.Errorf("build the webapp in %s: %w\n%s", dir, err, out)
+		script := filepath.Join(repo.repoDir, "e2e", "sandbox", "bin", "webapp-dist.sh")
+		if _, err := os.Stat(script); err != nil {
+			webappDistErr = fmt.Errorf("the webapp dist staleness rule is missing at %s: %w", script, err)
 			return
 		}
-		dist := filepath.Join(dir, "dist")
+		started := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), webappDistCheckBound)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, script, "check")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			webappDistErr = fmt.Errorf(
+				"the staged webapp dist is STALE or absent, and this layer serves it to a REAL webview, "+
+					"so it will not run against one:\n%s\n"+
+					"Build it on the HOST (the container has no network and must not run tsc/vite):\n"+
+					"    modules/app/agent-repl/e2e/sandbox/bin/webapp-dist.sh ensure\n"+
+					"`e2e-sandbox.sh run` does this for you unless AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1",
+				strings.TrimRight(string(out), "\n"))
+			return
+		}
+		dist := filepath.Join(repo.repoDir, "webapp", "dist")
 		entry := filepath.Join(dist, "index.html")
 		if _, err := os.Stat(entry); err != nil {
-			webappDistErr = fmt.Errorf("the webapp build produced no entry point at %s: %w", entry, err)
+			webappDistErr = fmt.Errorf("the staleness rule passed but there is no entry point at %s: %w", entry, err)
 			return
 		}
 		webappDistPath = dist
-		t.Logf("e2e: built the webapp dist in %s (%s)", time.Since(started).Round(time.Millisecond), dist)
+		t.Logf("e2e: the staged webapp dist is fresh (checked in %s): %s",
+			time.Since(started).Round(time.Millisecond), dist)
 	})
 	if webappDistErr != nil {
 		t.Fatalf("e2e: %v", webappDistErr)
@@ -266,6 +319,7 @@ func resolveOrFail(t *testing.T, dir string) string {
 // commands, and hands state back as data — so the remaining 43 scenarios are
 // a matter of writing scenarios rather than of building machinery.
 func TestEmacsProofOfLife(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box)
 	e := w.Emacs

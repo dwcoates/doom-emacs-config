@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -69,6 +70,45 @@ import (
 // sentinel/kill-buffer recursion.
 const HeartbeatBound = 1250 * time.Millisecond
 
+// evalBound is how long ONE `emacsclient --eval` of a SCENARIO'S OWN FORM may
+// take before the running test fails.
+//
+// It used to be HeartbeatBound, which was wrong in kind rather than in size --
+// the same defect daemonLinkBound was split out of emacsBootBound to fix. The
+// heartbeat probe is `(emacs-pid)`: it does nothing, and its cost is purely
+// how long the command loop takes to reach it. A scenario's form is arbitrary
+// elisp that does real work -- `agent-repl-add-project-workspace` registers a
+// workspace, opens the panels and creates an xwidget webview -- so one bound
+// covering both could only ever be too tight for one of them, and it was: the
+// workspace-creating evals were killed at 1.25s under nothing worse than a
+// second scenario running beside them.
+//
+// LENGTHENING IT GIVES UP NO HANG DETECTION, which is the only reason it is
+// allowed to be longer. A wedged Emacs is caught by the HEARTBEAT, which rides
+// the same socket, samples every 250ms and closes `wedged` -- and every wait
+// loop in this layer, this one included, short-circuits on `wedged` rather
+// than running out its own bound. This bound catches an eval that is slow;
+// the heartbeat catches an Emacs that is gone, and it is still the faster of
+// the two.
+//
+// MEASURED, over 92 scenarios of a `-count=2` run at the layer's own
+// parallelism bound: the slowest healthy eval was 409ms and the spread is
+// tight (the top eight were 409, 408, 406, 403, 384, 383, 381ms). 3x that.
+//
+// The one observation above it in that run was 5.001s, and it is NOT a slow
+// eval: it is `agent-repl-add-project-workspace` blocking Emacs's command
+// loop, which the heartbeat catches as EMACS WEDGED at 1.25s while the eval
+// sits there. Deriving a bound from it would enshrine that defect as the
+// expectation.
+//
+// It lands on the same number HeartbeatBound carries, which is a coincidence
+// of two similar measurements and not a reason to fuse them again: they bound
+// different phenomena and will move apart the moment either one does.
+//
+// `go test -v` prints `emacs phase eval-max` for every scenario, which is the
+// number a future revision must re-derive this from.
+const evalBound = 1250 * time.Millisecond
+
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
 // and therefore measures the command loop's real responsiveness rather than
@@ -102,21 +142,41 @@ const daemonLinkBound = 1 * time.Second
 // doomBootBound is how long Emacs may take to finish Doom's own
 // initialization and publish the readiness stamp.
 //
-// MEASURED: the longest healthy boot was 1.162s, and the spread is narrow
-// (1.041s-1.162s). 3x that. It is no longer expressed as a multiple of
-// emacsBootBound: the two phases turned out to differ by a factor of twenty,
-// so tying them together would let a change in one silently move the other.
+// RE-MEASURED after the image began carrying Doom's native code (the
+// Dockerfile's `doom sync --aot`) and after the scenarios became parallel,
+// because both moved this phase:
+//
+//	serial, JIT-compiling per test (the old regime)  mean 1437ms  max 1482ms
+//	serial, image-baked native code                  mean  836ms  max 1501ms
+//	at the layer's parallelism bound of 3 slots      mean  990ms  max 1780ms
+//
+// The bound STAYS at 3500ms. It is no longer 3x the worst healthy boot -- at
+// three slots that would be 5.3s -- and it is not raised to keep that ratio,
+// because a bound is a promise about the product and loosening it to
+// accommodate the harness's own concurrency would be the harness marking its
+// own homework. 3500ms is twice the worst boot observed under the bound the
+// layer actually runs at, and a scenario that misses it is telling the truth:
+// this machine is too loaded to run three Emacsen.
+//
+// It is not expressed as a multiple of emacsBootBound: the two phases differ
+// by a factor of twenty, so tying them together would let a change in one
+// silently move the other.
 const doomBootBound = 3500 * time.Millisecond
 
 // doomStageBound bounds each `cp -a` that stages one entry of Doom's
 // `.local` tree into the test's scratch.
 //
-// MEASURED, and the measurement is the reason it stays generous: the WHOLE
-// staging -- every entry, not one `cp` -- finished in 4ms at its slowest, so
-// there is no "slow copy" regime to bound. What it exists to catch is a copy
-// that cannot finish AT ALL, and five seconds is three orders above the
-// observation while still failing a hang in the same test rather than at the
-// suite's own timeout.
+// RE-MEASURED since the image began baking Doom's native code: `.local/cache`
+// carries 591 `.eln` files (58 MiB) now rather than 228 KiB, so this copy is
+// no longer free. The whole staging -- every entry, not one `cp` -- took
+// 310ms at its slowest serially and 1.039s at its slowest with four scenarios
+// contending for the VM's four CPUs, against 4ms before.
+//
+// Five seconds still stands, and the reason is unchanged rather than
+// stretched: what this exists to catch is a copy that cannot finish AT ALL,
+// and five seconds remains a large multiple of the worst observation while
+// still failing a hang in the test that caused it rather than at the suite's
+// own timeout.
 const doomStageBound = 5 * time.Second
 
 // Emacs is one sandboxed Emacs process, its server socket, and its
@@ -168,6 +228,16 @@ type Emacs struct {
 
 	stopHeartbeat context.CancelFunc
 
+	// reap are the paths whose appearance in a process's argv marks that
+	// process as this scenario's, so reapStrays can hunt down the daemon
+	// and shims Emacs detached from itself. See reapStrays.
+	reapMu sync.Mutex
+	reap   []string
+
+	// evalMax is the longest scenario eval this Emacs has answered, in
+	// nanoseconds. It is what MEASURES evalBound, the same way heartbeatMax
+	// measures HeartbeatBound. Reported once per test by reportPhases.
+	evalMax atomic.Int64
 	// heartbeatMax is the longest probe this Emacs has answered, in
 	// nanoseconds. It is what MEASURES HeartbeatBound: the bound is a small
 	// multiple of this number across healthy runs, never a guess. Reported
@@ -201,6 +271,10 @@ func (e *Emacs) reportPhases() {
 	defer e.phasesMu.Unlock()
 	for _, p := range e.phases {
 		e.t.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
+	}
+	if max := e.evalMax.Load(); max > 0 {
+		e.t.Logf("emacs phase eval-max took %s (bound %s)",
+			time.Duration(max).Round(time.Millisecond), evalBound)
 	}
 	if max := e.heartbeatMax.Load(); max > 0 {
 		e.t.Logf("emacs phase heartbeat-probe-max took %s (bound %s)",
@@ -252,6 +326,13 @@ type EmacsOpts struct {
 func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	t.Helper()
 
+	// The parallelism slot is NewEmacsWorld's to take, and it takes it before
+	// the per-run builds rather than here -- see the comment there. This is
+	// asserted rather than assumed, because the only thing standing between
+	// this layer and an unbounded number of concurrent Emacsen is that every
+	// caller goes through NewEmacsWorld.
+	requireEmacsSlot(t)
+
 	root := filepath.Join(box.Scratch(), "emacs")
 	// 0o700 before anything else creates it: this root is the Emacs HOME,
 	// and Emacs 30 refuses an init tree "accessible by others" -- Doom's
@@ -275,6 +356,15 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
 		wedged:             make(chan struct{}),
 	}
+	// The scratch root is unique per test (os.MkdirTemp), so an argv naming
+	// it belongs to this scenario and to nothing else.
+	e.reap = []string{root}
+
+	// REGISTERED FIRST, so t.Cleanup's LIFO unwind runs it LAST: the reaper
+	// must observe what is STILL alive after Emacs, its daemon and the
+	// sidecar have all been stopped on purpose, otherwise it would report
+	// processes that were about to exit anyway.
+	t.Cleanup(e.reapStrays)
 
 	e.writeSettings(opts)
 	staged := time.Now()
@@ -318,6 +408,29 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// it is the terminal a user of this module actually runs Emacs on, so
 		// the frame the scenarios inspect is the frame a user would see.
 		"TERM=xterm-256color",
+		// NO ACCESSIBILITY BRIDGE, AND THEREFORE NO D-BUS.
+		//
+		// MEASURED, and it is a boot bound's worth: a graphical GTK Emacs
+		// asks D-Bus for the accessibility bus on startup, and this
+		// container has no session bus, so GTK autolaunches one --
+		// `dbus-launch --autolaunch <machine-id>` plus a `dbus-daemon
+		// --session`, both of which showed up as strays -- and then fails
+		// the lookup anyway with
+		//
+		//   AT-SPI: Error retrieving accessibility bus address:
+		//   org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus
+		//   was not provided by any .service files
+		//
+		// The failure is harmless; the WAIT is not. Boots that took that
+		// path were the only ones to miss doomBootBound -- 3.5s against a
+		// mean of 792ms -- and they did it in three unrelated scenarios per
+		// `-count=2` run, which is exactly the shape of a flake.
+		//
+		// Nothing is given up. There is no screen reader in a container and
+		// no assertion in this layer touches accessibility or D-Bus; the
+		// only thing switched off is a lookup that was always going to fail.
+		"NO_AT_BRIDGE=1",
+		"GTK_A11Y=none",
 	}, display.Env()...)
 	env = append(env, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
@@ -825,16 +938,19 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("write the eval request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
+	ctx, cancel := context.WithTimeout(context.Background(), evalBound)
 	defer cancel()
 	call := fmt.Sprintf("(agent-repl-e2e--eval %q %q)", in, out)
-	if _, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call); err != nil {
+	started := time.Now()
+	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call)
+	e.recordEvalMax(time.Since(started))
+	if err != nil {
 		return zero, fmt.Errorf("emacsclient: %w", err)
 	}
 
-	body, err := os.ReadFile(out)
-	if err != nil {
-		return zero, fmt.Errorf("read the eval response: %w", err)
+	body, readErr := os.ReadFile(out)
+	if readErr != nil {
+		return zero, fmt.Errorf("read the eval response: %w", readErr)
 	}
 	var res evalResult
 	if err := json.Unmarshal(body, &res); err != nil {
@@ -1108,4 +1224,303 @@ func (e *Emacs) DaemonAddr() string {
 		e.t.Fatalf("read the daemon address Emacs's launcher published: %v", err)
 	}
 	return strings.TrimSpace(string(body))
+}
+
+// ===========================================================================
+// STRAY REAPING
+// ===========================================================================
+
+// THE LEAK THIS EXISTS FOR, MEASURED.
+//
+// After eight scenarios in one container, `ps` still showed a live shim
+// (`node .../shim-dist/main.js --listen /tmp/emacs-e2e-*/...`, 95 MiB
+// resident), two `shim-lock` holders and two `dbus-launch` daemons that no
+// test owned any more. Over a full 45-scenario run the container's memory
+// climbed monotonically from 0.5 GiB to 3.1 GiB, and that climb is what made
+// a second concurrent sandbox OOM-kill the first on a 5.8 GiB VM.
+//
+// The cause is not in this harness and is not fixed here: Emacs is stopped
+// through its own `agent-repl-frontend-daemon-stop`, per daemon.el's "EMACS
+// NEVER KILLS A DAEMON", and a daemon that exits without reaping the shims it
+// spawned -- or a WEDGED Emacs, which skips the polite stop entirely -- leaves
+// them running. That belongs to the daemon.
+//
+// What belongs HERE is the scenario's own resource footprint: a test that
+// leaves a 95 MiB process behind has not finished. So every stray is hunted
+// down by the path it was started with, killed, and REPORTED -- the leak is
+// bounded and visible, never bounded and silent.
+
+// strayTermBound is how long a stray gets to honor SIGTERM before it is
+// killed outright.
+//
+// MEASURED: every stray that honors SIGTERM at all exited within one poll of
+// it (50ms); the ones that do not honor it never do, so waiting longer buys
+// nothing. 500ms is ten times the observation.
+//
+// It was 2s, and that was too generous in a way that COSTS: this runs while
+// the scenario still holds its parallelism slot, so every second spent
+// waiting on a process that was never going to answer is a second no other
+// scenario can start in. Nothing depends on a stray's graceful exit -- the
+// test that owned it has already finished asserting.
+const strayTermBound = 500 * time.Millisecond
+
+// strayKillBound is how long a stray gets to disappear after SIGKILL.
+//
+// MEASURED: same observation, same poll. SIGKILL is not refusable, so
+// anything still present after this is a process stuck in the kernel, which
+// is reported rather than waited on -- and reporting it sooner is strictly
+// better, for the same slot-holding reason.
+const strayKillBound = 500 * time.Millisecond
+
+// strayPollInterval is how often the reaper re-reads /proc while waiting.
+const strayPollInterval = 50 * time.Millisecond
+
+// reapStrays kills every process whose argv names one of this Emacs's own
+// paths and is still alive after the test's own teardown.
+//
+// Matching is by ARGV, not by process tree: the daemon and the shims are
+// deliberately detached from Emacs, so a tree walk would not find them, while
+// every one of them carries this test's scratch paths on its command line
+// (`--listen <root>/state/sock/...`, `<scratch>/locks/...`). The paths are
+// unique per test -- `os.MkdirTemp` mints them -- so the match cannot reach a
+// process belonging to another test, another suite, or the host.
+func (e *Emacs) reapStrays() {
+	strays := e.findStrays()
+	if len(strays) == 0 {
+		return
+	}
+	for _, s := range strays {
+		e.t.Logf("emacs teardown: reaping a stray this scenario left behind: pid %d %s", s.pid, s.argv)
+		_ = syscall.Kill(s.pid, syscall.SIGTERM)
+	}
+	if left := e.awaitStraysGone(strayTermBound); len(left) > 0 {
+		for _, s := range left {
+			e.t.Logf("emacs teardown: pid %d ignored SIGTERM; killing it: %s", s.pid, s.argv)
+			_ = syscall.Kill(s.pid, syscall.SIGKILL)
+		}
+		if stuck := e.awaitStraysGone(strayKillBound); len(stuck) > 0 {
+			for _, s := range stuck {
+				e.t.Errorf("emacs teardown: pid %d survived SIGKILL and is still holding this scenario's resources: %s",
+					s.pid, s.argv)
+			}
+		}
+	}
+}
+
+// stray is one leaked process.
+type stray struct {
+	pid  int
+	argv string
+}
+
+// awaitStraysGone polls until no stray remains or the bound expires,
+// answering whatever is left.
+func (e *Emacs) awaitStraysGone(bound time.Duration) []stray {
+	deadline := time.Now().Add(bound)
+	for {
+		left := e.findStrays()
+		if len(left) == 0 || time.Now().After(deadline) {
+			return left
+		}
+		time.Sleep(strayPollInterval)
+	}
+}
+
+// findStrays reads /proc and answers every live process whose argv OR
+// ENVIRONMENT contains one of this Emacs's reap paths.
+//
+// /proc is read directly rather than shelling out to `ps`: the container's
+// procps is not a dependency this layer wants on a teardown path, and the
+// argv is exactly what /proc/<pid>/cmdline holds.
+//
+// THE ENVIRONMENT IS NOT A BELT-AND-BRACES SECOND CHANCE, it is the only
+// thing that finds the largest stray of all. Emacs is started as plain
+// `emacs` -- every path it works from travels in its environment -- so its
+// argv names nothing, and a first revision of this reaper that matched only
+// on argv left a 206 MiB Emacs resident after each scenario whose `script`
+// parent it had killed. `HOME=<root>` in /proc/<pid>/environ is what
+// identifies it, and the same read catches the daemon and anything else that
+// took its paths from the environment rather than a flag.
+func (e *Emacs) findStrays() []stray {
+	paths := e.reapPaths()
+	if len(paths) == 0 {
+		return nil
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		// Not fatal, and not silent: without /proc the reaper cannot run,
+		// and a reader must know the footprint was not bounded.
+		e.t.Logf("emacs teardown: cannot read /proc, so strays were not reaped: %v", err)
+		return nil
+	}
+	self := os.Getpid()
+	var out []stray
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil || pid == self {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if readErr != nil || len(raw) == 0 {
+			// The process exited between the ReadDir and the read, or it is
+			// a kernel thread. Neither is a stray.
+			continue
+		}
+		argv := strings.TrimRight(strings.ReplaceAll(string(raw), "\x00", " "), " ")
+		// An unreadable environ is not an error here: the process may have
+		// exited, and a process owned by another uid is not this scenario's
+		// to reap in any case.
+		env, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+		haystack := argv + "\x00" + string(env)
+		for _, p := range paths {
+			if strings.Contains(haystack, p) {
+				out = append(out, stray{pid: pid, argv: argv})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// reapPaths are the unique paths a stray of this scenario must name. They are
+// read under the lock because NewEmacsWorld adds to them after StartEmacs has
+// already registered the reaper.
+func (e *Emacs) reapPaths() []string {
+	e.reapMu.Lock()
+	defer e.reapMu.Unlock()
+	return append([]string(nil), e.reap...)
+}
+
+// AddReapPath declares one more path whose appearance in a process's argv
+// marks that process as this scenario's to reap. `NewEmacsWorld` uses it for
+// the world-level directories Emacs itself does not own -- the kernel-lock
+// directory the shims claim in, and the fake SDK's spool root.
+func (e *Emacs) AddReapPath(p string) {
+	e.reapMu.Lock()
+	defer e.reapMu.Unlock()
+	e.reap = append(e.reap, p)
+}
+
+// ===========================================================================
+// THE PARALLELISM BOUND
+// ===========================================================================
+
+// Every scenario in this layer is `t.Parallel()`, and it is isolated well
+// enough to be: `requireSandbox` mints a fresh `os.MkdirTemp` scratch per
+// test, so the Emacs HOME, its Doom tree, the state root, the two account
+// roots, the store database, the kernel-lock directory and the fake SDK's
+// spool root are all per-test paths; every socket is `shortSocketPath`, which
+// carries four random bytes; and each Emacs draws on its OWN Xvfb, started
+// with `-displayfd 1` so the X server picks a free display number under its
+// own `/tmp/.X<n>-lock` rather than one this layer guesses. Nothing in the
+// layer reads or writes a process-wide variable -- there is no `t.Setenv`
+// anywhere in it -- and the per-run artifacts (the daemon, the shim bundle,
+// the store and sidecar binaries, the staged webapp dist) are all built or
+// checked under a `sync.Once`.
+//
+// WHAT IS NOT UNBOUNDED IS THE MACHINE. One scenario is a real Emacs with a
+// GUI frame (206 MiB resident), an Xvfb, a daemon, a shim under Node
+// (95 MiB), a store and a sidecar; the Docker VM this layer runs in has
+// 4 CPUs and 5.8 GiB, and it is shared with whatever else is running on the
+// host. So the layer bounds ITSELF rather than trusting `-parallel` to be
+// passed correctly: a scenario takes a slot before it starts an Emacs and
+// gives it back after its teardown, so a caller who runs `go test` with no
+// flags at all still gets the measured degree of concurrency and no more.
+
+// emacsParallelSlots is how many scenarios may hold an Emacs at once.
+//
+// MEASURED, on the 4-CPU/5.8 GiB Docker VM this layer runs in. See
+// EMACS-LAYER-SPEC.md, "The parallelism bound, measured", for the run at each
+// setting: wall time, peak container memory, worst Doom boot, and whether the
+// pass set held.
+//
+// TWO, NOT THREE, AND THE DIFFERENCE IS NOT THE WALL CLOCK. Three slots is
+// faster over one pass (81s against 107s) and its peak memory is fine
+// (1.58 GiB). It is rejected because under SUSTAINED load -- a `-count=2` of
+// the whole layer, which is how this bound has to be proven -- three Emacsen
+// on four CPUs pushed Doom's boot past its own 3500ms bound and failed three
+// scenarios that had nothing to do with each other. The bound is not the
+// number that goes fastest on one lucky pass; it is the largest number whose
+// worst measured boot still fits in the budget the product is held to. At two
+// slots the worst Doom boot over 91 boots was 1360ms, 39% of that budget.
+const emacsParallelSlots = 2
+
+// emacsParallelEnv overrides the slot count. It exists so the bound above can
+// be RE-MEASURED on a different machine the same way it was measured on this
+// one -- `go test` at each setting, reading the wall and the peak -- and not
+// so a caller can quietly turn the bound off: a value the machine cannot
+// afford does not fail here, it OOM-kills an Emacs mid-scenario.
+const emacsParallelEnv = "AGENT_REPL_E2E_EMACS_PARALLEL"
+
+var (
+	emacsSlotsOnce sync.Once
+	emacsSlots     chan struct{}
+)
+
+// emacsSlotGate answers the semaphore, sized once per test binary.
+func emacsSlotGate(t *testing.T) chan struct{} {
+	emacsSlotsOnce.Do(func() {
+		n := emacsParallelSlots
+		if raw := os.Getenv(emacsParallelEnv); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 {
+				// A misspelled override must not silently fall back to the
+				// default: the whole point of setting it is to measure a
+				// specific number, and measuring the wrong one is worse
+				// than not measuring.
+				t.Fatalf("e2e: %s=%q is not a positive integer", emacsParallelEnv, raw)
+			}
+			n = parsed
+		}
+		emacsSlots = make(chan struct{}, n)
+	})
+	return emacsSlots
+}
+
+// emacsSlotHolders records which scenarios hold a slot, so StartEmacs can
+// REFUSE to start an Emacs outside the gate rather than quietly exceed it.
+var emacsSlotHolders sync.Map // *testing.T -> struct{}
+
+// takeEmacsSlot blocks until this scenario may start an Emacs, and returns it
+// on the test's way out.
+func takeEmacsSlot(t *testing.T) {
+	t.Helper()
+	gate := emacsSlotGate(t)
+	// Registered BEFORE the slot is taken, so t.Cleanup's LIFO unwind
+	// returns it LAST -- after the stray reaper, after Emacs and its daemon
+	// are gone. A slot handed back while this scenario's processes are still
+	// resident would let the next one start against a budget that is not
+	// actually free.
+	t.Cleanup(func() {
+		emacsSlotHolders.Delete(t)
+		<-gate
+	})
+	gate <- struct{}{}
+	emacsSlotHolders.Store(t, struct{}{})
+}
+
+// requireEmacsSlot fails the test unless it is inside the gate.
+//
+// The bound is only real if EVERY Emacs is started under it, and the one
+// thing that could break that is a future scenario calling StartEmacs
+// directly. This makes that a loud failure at the moment it happens rather
+// than an OOM in some other test.
+func requireEmacsSlot(t *testing.T) {
+	t.Helper()
+	if _, ok := emacsSlotHolders.Load(t); !ok {
+		t.Fatalf("StartEmacs was called outside the parallelism gate: take a slot first "+
+			"(NewEmacsWorld does). Starting an Emacs outside it means more than %d "+
+			"concurrent editors on a machine measured to hold that many.", emacsParallelSlots)
+	}
+}
+
+// recordEvalMax keeps the longest eval this Emacs has answered, so evalBound
+// is derived from observation rather than guessed.
+func (e *Emacs) recordEvalMax(took time.Duration) {
+	for {
+		prev := e.evalMax.Load()
+		if int64(took) <= prev || e.evalMax.CompareAndSwap(prev, int64(took)) {
+			return
+		}
+	}
 }
