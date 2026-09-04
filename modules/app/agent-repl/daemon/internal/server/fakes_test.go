@@ -105,6 +105,9 @@ type fakeDB struct {
 	leases map[ids.WorkspaceID]wsm.Lease
 	// leaseErr fails every lease read.
 	leaseErr error
+	// workspaceErr fails every registry read, standing in for the closed
+	// state client an exiting daemon leaves behind.
+	workspaceErr error
 }
 
 func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
@@ -124,6 +127,9 @@ func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, 
 }
 
 func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	if f.workspaceErr != nil {
+		return wsm.Workspace{}, f.workspaceErr
+	}
 	record, ok := f.workspaces[id]
 	if !ok {
 		return wsm.Workspace{}, wsm.ErrNotFound
