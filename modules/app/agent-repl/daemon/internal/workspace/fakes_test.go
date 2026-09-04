@@ -641,6 +641,10 @@ type fakeSessions struct {
 	startErr error
 	stopped  []stopCall
 	stopErr  error
+	// resumes are the cold-gate re-opens the fleet was asked for, and resumeErr
+	// is the refusal it answers with instead.
+	resumes   []ColdResume
+	resumeErr error
 }
 
 type stopCall struct {
@@ -672,6 +676,15 @@ func (s *fakeSessions) Stop(_ context.Context, ws ids.WorkspaceID, force bool) e
 
 func (s *fakeSessions) Live(ws ids.WorkspaceID) bool { return s.live[ws] }
 
+func (s *fakeSessions) ResumeCold(_ context.Context, ws ids.WorkspaceID, resume ColdResume) error {
+	if s.resumeErr != nil {
+		return s.resumeErr
+	}
+	s.resumes = append(s.resumes, resume)
+	s.live[ws] = true
+	return nil
+}
+
 // fakeShim is the narrow Shim surface.
 type fakeShim struct {
 	killedTurns    []killedTurn
@@ -684,8 +697,6 @@ type fakeShim struct {
 	answerErr      error
 	killedSession  []bool
 	killSessionErr error
-	resumes        []ColdResume
-	resumeErr      error
 }
 
 type killedTurn struct {
@@ -735,14 +746,6 @@ func (s *fakeShim) KillSession(_ context.Context, force bool) error {
 		return s.killSessionErr
 	}
 	s.killedSession = append(s.killedSession, force)
-	return nil
-}
-
-func (s *fakeShim) StartSession(_ context.Context, resume ColdResume) error {
-	if s.resumeErr != nil {
-		return s.resumeErr
-	}
-	s.resumes = append(s.resumes, resume)
 	return nil
 }
 
