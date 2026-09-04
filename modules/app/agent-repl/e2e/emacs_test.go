@@ -204,9 +204,11 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	e.stageEmacsDir()
 
 	// HOME is the per-test scratch root, and `~/.emacs.d` under it is the
-	// staged Doom. Emacs 28 has no `--init-directory` (that landed in 29),
-	// so HOME is the ONLY way to point an Emacs at a different init tree --
-	// which is also why the staging exists rather than a flag.
+	// staged Doom. The image's Emacs 30.2 does have `--init-directory`
+	// (Emacs 29+), but HOME is used instead of it: the container runs
+	// `--read-only` and the staged `/sandbox/emacs.d` is not a tmpfs mount,
+	// so a flag alone could not make Doom's local tree writable per test --
+	// which is also why the staging exists.
 	env := append([]string{
 		"HOME=" + root,
 		"EMACSDIR=" + e.EmacsDir,
@@ -350,11 +352,12 @@ const doomReadOnlySubdir = "straight"
 
 // stageEmacsDir builds this test's `~/.emacs.d` out of the image's.
 //
-// Two constraints collide here, and the staging is what resolves them:
-//   - Emacs 28.2 has no `--init-directory`, so HOME is the only way to aim
-//     an Emacs at an init tree, and HOME must be per-test.
-//   - the container runs `--read-only`, and `/sandbox/emacs.d` is NOT one of
-//     its tmpfs mounts, so Doom's own local tree cannot be written in place.
+// The image's Emacs 30.2 has `--init-directory` (Emacs 29+), but that alone
+// would not be enough, and the staging is what resolves the real constraint:
+// the container runs `--read-only`, and `/sandbox/emacs.d` is NOT one of its
+// tmpfs mounts, so Doom's own local tree cannot be written in place no
+// matter how init is pointed at it. HOME is used to aim Emacs at a per-test
+// init tree instead, which needs the tree staged into writable scratch.
 //
 // So Doom's sources are symlinked (read-only is fine; they are only loaded)
 // and its `.local` tree is copied into the scratch, minus `straight/`, which
