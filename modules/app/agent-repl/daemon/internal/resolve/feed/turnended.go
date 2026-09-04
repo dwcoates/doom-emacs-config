@@ -72,6 +72,9 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
 		s.turnInFlight = nil
 	}
+	if s.turnStamp != nil && *s.turnStamp == *turn {
+		s.turnStamp = nil
+	}
 }
 
 // terminalArm names a terminal's arm for a log record.

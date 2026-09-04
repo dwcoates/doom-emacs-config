@@ -119,6 +119,14 @@ type wsState struct {
 	// turnInFlight is the turn the session is running, learned from the rows
 	// it stamps. It is what a session-scoped death (query_died) terminates.
 	turnInFlight *ids.TurnID
+	// turnStamp is the turn ROWS ARE ATTRIBUTED TO. It tracks turnInFlight
+	// except across a QUERY DEATH, which is the one ending that still OWES
+	// rows: the gate's stand-down denies every permission ask left pending,
+	// and those denials arrive after the death's terminal row. They belong to
+	// the turn that was running — feed.proto leaves `turn` unset only "for a
+	// row that belongs to no turn" — so the death keeps the stamp standing
+	// while an ordinary terminal clears it.
+	turnStamp *ids.TurnID
 	// answerRows maps a response activity id to the row it drew, so the turn's
 	// conclusion can name its answering row.
 	answerRows map[string]*frontendv1.FeedId
