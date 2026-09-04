@@ -39,16 +39,16 @@
 //     that it took the typed arm — the same wait signal
 //     accounting_e2e_test.go uses for account usage.
 //
-//  2. `!rate-limit-seven-day` CANNOT DRAW ITS ALLOWANCE. The scenario's
-//     utilization is 0.61 (session.ts RATE_LIMIT_SEVEN_DAY) and the footer
-//     only draws the rate line when an allowance reaches
-//     DefaultRateLimitNewsworthyThreshold = 0.8
+//  2. `!rate-limit-seven-day` NOW DRAWS ITS ALLOWANCE. The scenario's
+//     utilization was 0.61 while the footer only draws the rate line when
+//     an allowance reaches DefaultRateLimitNewsworthyThreshold = 0.8
 //     (daemon/internal/resolve/footer/api.go; activity.go's rateLine: "at
 //     least one allowance is newsworthy: an unremarkable allowance is not
-//     news"). `!rate-limit-five-hour` (0.82) is above it and IS asserted on
-//     the drawn FooterAllowance below. A fake whose seven-day figure were
-//     >= 0.8 would make the weekly cell assertable the same way; changing
-//     the mock is outside this file's scope.
+//     news"), which made the WEEKLY cell unreachable from this mock. The
+//     mock's figure is now 0.91 (session.ts RATE_LIMIT_SEVEN_DAY) — no
+//     capture in the corpus carries a seven-day window or a utilization of
+//     any kind, so there was no real figure to prefer — and the weekly cell
+//     is asserted on the drawn shape below.
 //
 //  3. THE ACCOUNT-USAGE OUTCOME ARMS REACH NO DRAWN SHAPE. The only
 //     consumer of SessionAccountUsage is the footer's `observeAccountUsage`,
@@ -342,29 +342,57 @@ func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
 
 // ===========================================================================
 // The seven-day rate-limit window — `!rate-limit-seven-day` (the same
-// scenario factory naming the `seven_day` window at utilization 0.61).
+// scenario factory naming the `seven_day` window at utilization 0.91).
 //
-// DISPUTE 2 (see the file header): 0.61 never reaches
-// DefaultRateLimitNewsworthyThreshold (0.8), and the footer draws no rate
-// line at all unless one allowance is newsworthy, so the WEEKLY allowance
-// cell footer.proto declares cannot be reached from this mock. What is
-// asserted here is the hop that exists: the event's window is filed by the
-// footer resolver (observeRateLimitStatus maps seven_day and its per-model
-// aliases onto the weekly allowance), evidenced by a fresh
-// rate_limit_status arm, plus the scenario's own exact prose.
+// The figure clears the footer's newsworthiness gate (0.8), so this window
+// is asserted on the DRAWN shape: footer.proto's WEEKLY allowance cell,
+// which observeRateLimitStatus fills from seven_day and its per-model
+// aliases. Both hops are asserted — the drawn cell and the session-arm
+// record behind it — because the cell alone would not say the event's own
+// window reached the store.
+//
+// The footer watch opens BEFORE the prompt for the same reason as the
+// five-hour test: the turn's close reprobes account usage with figures
+// below the gate, so the drawn line stands only between the rate-limit
+// event and that close, and publish.Topic's subscription guarantee makes
+// catching it a certainty rather than a race.
 // ===========================================================================
 
-func TestRateLimitSevenDayWindowIsFiled(t *testing.T) {
+func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, workspaceDir := sfNewWorkspace(t)
 	before := sfSessionArmRecords(t, w, workspaceDir, "rate_limit_status")
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "rate-limit-seven-day")
+	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 91% used.")
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	view := harness.AwaitView(t, ctx, footer.Stream, "the seven-day allowance's drawn rate-limit line", func(v *frontendv1.FooterView) bool {
+		return sfRateLimited(v).GetWeekly() != nil
+	})
 
 	// Assert
-	sfAwaitConclusion(t, w, ws, turn, "The seven_day window is 61% used.")
+	weekly := sfRateLimited(view).GetWeekly()
+	if got := weekly.GetUtilization(); got < 0.905 || got > 0.915 {
+		t.Errorf("FooterAllowance(weekly).utilization = %v, want the event's 0.91 as a 0..1 fraction", got)
+	}
+	if !weekly.GetNewsworthy() {
+		t.Errorf("FooterAllowance(weekly).newsworthy = false at utilization %v, want true (the drawn line exists only because it is)", weekly.GetUtilization())
+	}
+	if weekly.GetAllowedWarning() == nil {
+		t.Errorf("FooterAllowance(weekly).status = %v, want the allowed_warning arm the event carried", weekly.GetStatus())
+	}
+	if weekly.GetAllowed() != nil || weekly.GetRejected() != nil {
+		t.Errorf("FooterAllowance(weekly) carries a second status arm: %v", weekly.GetStatus())
+	}
+	if weekly.GetResetsAtS() == 0 {
+		t.Errorf("FooterAllowance(weekly).resets_at_s = 0, want the event's reset instant in epoch SECONDS")
+	}
 	sfAwaitSessionArmRecords(t, w, workspaceDir, "rate_limit_status", before+1)
 }
 
