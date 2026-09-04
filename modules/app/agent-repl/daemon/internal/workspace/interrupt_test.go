@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -560,4 +561,104 @@ func TestInterruptTurnAnswersShimRefusedForAFailureWithNoArm(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmShimRefused)
+}
+
+// runningShells adds n detached shells to the fixture's live-work set, on top
+// of whatever runningTurn already put there.
+func runningShells(f *fixture, shells int) {
+	for i := 0; i < shells; i++ {
+		f.running.LiveWork.Shells = append(f.running.LiveWork.Shells,
+			&conversationv1.DetachedWorkId{Value: fmt.Sprintf("work-%d", i)})
+	}
+}
+
+// TestInterruptAllAgentsStopsEveryLiveDetachedItem pins the fan-wide stop's
+// REACH: agentrepl.v1.Interrupt's all_agents target is "the fan-wide stop", and
+// a sweep that walked past a live detached SHELL would leave the live set
+// non-empty — the one thing the caller asked it to empty.
+func TestInterruptAllAgentsStopsEveryLiveDetachedItem(t *testing.T) {
+	tests := []struct {
+		name        string
+		agents      int
+		shells      int
+		wantCount   int
+		wantAgents  int
+		wantShells  int
+		wantNothing bool
+	}{
+		{name: "agents and a shell", agents: 2, shells: 1, wantCount: 3, wantAgents: 2, wantShells: 1},
+		{name: "shells alone", agents: 0, shells: 2, wantCount: 2, wantAgents: 0, wantShells: 2},
+		{name: "agents alone", agents: 3, shells: 0, wantCount: 3, wantAgents: 3, wantShells: 0},
+		{name: "an empty live set", agents: 0, shells: 0, wantNothing: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			runningTurn(f, tc.agents)
+			runningShells(f, tc.shells)
+
+			// Act.
+			outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Interrupt: %v", err)
+			}
+			if outcome.NothingRunning != tc.wantNothing {
+				t.Fatalf("outcome = %+v, want nothing_running=%v", outcome, tc.wantNothing)
+			}
+			if outcome.DetachedCount != tc.wantCount {
+				t.Fatalf("stopped count = %d, want %d", outcome.DetachedCount, tc.wantCount)
+			}
+			if len(f.shim.stoppedAgents) != tc.wantAgents {
+				t.Fatalf("stopped agents = %v, want %d", f.shim.stoppedAgents, tc.wantAgents)
+			}
+			if len(f.shim.stoppedShells) != tc.wantShells {
+				t.Fatalf("stopped shells = %v, want %d", f.shim.stoppedShells, tc.wantShells)
+			}
+		})
+	}
+}
+
+// TestInterruptAllAgentsSkipsAShellThatAlreadyFinished is the shell's half of
+// the benign-refusal rule the agents already have: a shell that ended on its
+// own mid-sweep is the state the caller asked for, so it is skipped rather than
+// counted or surfaced as a failure.
+func TestInterruptAllAgentsSkipsAShellThatAlreadyFinished(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 1)
+	runningShells(f, 1)
+	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimAlreadyEnded}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if outcome.DetachedCount != 1 {
+		t.Fatalf("stopped count = %d, want 1 (the agent alone; the shell had already ended)", outcome.DetachedCount)
+	}
+}
+
+// TestInterruptAllAgentsPropagatesAShellRefusal pins that a NON-benign shell
+// refusal fails the fan-wide stop by name, exactly as an agent's does.
+func TestInterruptAllAgentsPropagatesAShellRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	runningShells(f, 1)
+	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimUnknownWork)
 }
