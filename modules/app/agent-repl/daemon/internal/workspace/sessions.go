@@ -439,6 +439,26 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// the daemon never re-attached leaves the evidence standing.
 	f.closeLinkFaults(ctx, log, ws)
 
+	// AN ADOPTED SHIM IS ATTACHED TO, NEVER STARTED. The lock probe selected
+	// the adopt path precisely because a shim is still alive on this
+	// conversation, and a live shim has ALREADY started its one session:
+	// shim.v1 answers a second StartSession with `already_started`, so sending
+	// one turns a perfectly good mount into a failed rpc. The session facts
+	// come from the shim's own re-announcement of SessionStarted on the watch
+	// this install opens (landing 7) — the same attach-only path the
+	// handover's successor and the boot adoption take.
+	if adopted {
+		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+		if err := f.Install(ctx, ws, client); err != nil {
+			log.Error(opBringUp, "the adopted shim could not be installed", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("start session for %q: install the adopted shim: %w", ws, err)
+		}
+		log.Info(opBringUp, "attached to a surviving shim without starting a session", dlog.Context{
+			"adopted": true, "shim_pid": client.PID(),
+		})
+		return nil
+	}
+
 	started, err := f.startSession(ctx, log, ws, client, src, session)
 	if err != nil {
 		return err
@@ -489,7 +509,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
-		"adopted": adopted, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
+		"adopted": false, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
 	})
 	// A SESSION NOW EXISTS where none did: the host view's whole session arm
 	// changed, and nothing the server can see says so.
@@ -733,8 +753,21 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
 				map[string]any{"detail": failure.GetDetail()})
 		}
+		if failure.GetAlreadyStarted() != nil {
+			// THE SHIM ALREADY SERVES A SESSION. One shim serves exactly one,
+			// so this is a StartSession the daemon should never have sent: the
+			// bring-up dialed a shim that is already live. It is a NAMED state
+			// with its own remediation (attach, do not start), and an untyped
+			// `internal` on a contract path hides it from every client.
+			return nil, refuse(log, "OpenWorkspace", ArmAlreadyStarted,
+				fmt.Sprintf("the shim serving workspace %q already started its session: %s", ws, failure.GetDetail()), false)
+		}
+		// THE CAUSE ONEOF IS UNSET — illegal on the wire. It is surfaced under
+		// its own arm rather than guessed at or collapsed into an untyped
+		// error, exactly as SetSessionModelFailure's unset cause is.
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
-		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())
+		return nil, refuse(log, "OpenWorkspace", ArmStartSessionUnspecified,
+			fmt.Sprintf("the shim refused to start workspace %q's session with no cause set: %s", ws, failure.GetDetail()), false)
 	}
 	return response.GetSuccess().GetSession(), nil
 }
