@@ -27,7 +27,7 @@ import {
   workId,
 } from "../integration-support/client.js";
 import { sessionStarted, sessionUpdate, watchAgentPage } from "../integration-support/expect.js";
-import { rawBody, rawStreamOpenH1, rawStreamOpenH2 } from "../integration-support/raw.js";
+import { rawBody, rawHeadH1, rawStreamOpenH2 } from "../integration-support/raw.js";
 
 afterEach(cleanupShims);
 
@@ -204,11 +204,20 @@ describe("acceptance is observable before the first frame", () => {
   // surfaces only at the first Receive" does not make bring-up ambiguous. The
   // raw dial is the only place the head and the first body byte are separately
   // observable — a Connect client hands back an iterable and hides the head.
-  test("WatchSession's head arrives before any body byte over HTTP/1.1", async () => {
+  //
+  // WHICH HALF EACH TRANSPORT WITNESSES. Over h2c the head is its own HEADERS
+  // frame, so the ORDERING claim is directly observable and is asserted below.
+  // Over HTTP/1.1 the head and the first frame share one byte stream and can
+  // arrive in a single read, so ordering is not an observable there at all —
+  // the h1 tests instead assert what the rule actually needs from h1: the
+  // response head ALONE decides acceptance, arriving complete and parseable
+  // with no frame consulted.
+  test("WatchSession's acceptance is decidable from the HTTP/1.1 head alone", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
-    const observed = await rawStreamOpenH1(
+    // Resolving at all is half the claim: the helper never reads a body byte.
+    const head = await rawHeadH1(
       shim.dirs.listen,
       "/shim.v1.Shim/WatchSession",
       rawBody(
@@ -217,9 +226,8 @@ describe("acceptance is observable before the first frame", () => {
       ),
     );
 
-    expect(observed.status).toBe(200);
-    expect(observed.contentType).toContain("connect");
-    expect(observed.bodyBeforeHeaders).toBe(false);
+    expect(head.status).toBe(200);
+    expect(head.contentType).toContain("connect");
   });
 
   test("WatchSession's response headers precede the first data frame over h2c", async () => {
@@ -240,25 +248,25 @@ describe("acceptance is observable before the first frame", () => {
     expect(observed.firstByteAt).not.toBeNull();
   });
 
-  test("WatchAgent's head arrives before its opening page", async () => {
+  test("WatchAgent's acceptance is decidable from the HTTP/1.1 head alone", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
-    const observed = await rawStreamOpenH1(
+    const head = await rawHeadH1(
       shim.dirs.listen,
       "/shim.v1.Shim/WatchAgent",
       rawBody(shimv1.WatchAgentRequestSchema, watchAgentRequest()),
     );
 
-    expect(observed.status).toBe(200);
-    expect(observed.bodyBeforeHeaders).toBe(false);
+    expect(head.status).toBe(200);
+    expect(head.contentType).toContain("connect");
   });
 
-  test("WatchBash's head arrives before its start frame", async () => {
+  test("WatchBash's acceptance is decidable from the HTTP/1.1 head alone", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
-    const observed = await rawStreamOpenH1(
+    const head = await rawHeadH1(
       shim.dirs.listen,
       "/shim.v1.Shim/WatchBash",
       rawBody(
@@ -267,10 +275,11 @@ describe("acceptance is observable before the first frame", () => {
       ),
     );
 
-    // Even a REFUSED open flushes its head: the refusal rides the stream's own
-    // end-of-stream frame, so the head cannot be waiting on the verdict.
-    expect(observed.status).toBe(200);
-    expect(observed.bodyBeforeHeaders).toBe(false);
+    // Even a REFUSED open answers from its head: the refusal rides the stream's
+    // own end-of-stream frame, so the head is a 200 that says "accepted as a
+    // stream" without the verdict being in it.
+    expect(head.status).toBe(200);
+    expect(head.contentType).toContain("connect");
   });
 });
 
