@@ -257,7 +257,7 @@ chain and recording which row arms the real daemon resolved:
 |---|---|---|
 | `user_prompt`, `turn_ended` | any | every area |
 | `activity.response` | `md`, prose (no prefix) | turn lifecycle |
-| `activity.simple_tool_call` | `bash`, `edit`, `read`, `web-fetch` | file tools, detached bash, web |
+| `activity.simple_tool_call` | `bash`, `edit`, `read`, `web-search` | file tools, detached bash, web |
 | `activity.skill` | `skill`, `skill-fail` | skills |
 | `activity.hook` | `hook-blocked`, `hook-failed` | hooks |
 | `activity.plan` | `plan` | remainder |
