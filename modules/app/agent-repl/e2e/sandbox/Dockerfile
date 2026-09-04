@@ -579,23 +579,57 @@ COPY --chown=sandbox:sandbox module-loader-files/ /sandbox/doom/modules/app/agen
 # image sets its own environment), and `--no-install` leaves package
 # installation to the explicit `doom sync` that follows, which is the step
 # whose result the image is actually baking.
+# `--aot` ON THE SYNC is what makes native compilation an IMAGE artifact.
+#
+# Without it the image ships zero `.eln` files, and every scenario's Emacs
+# starts Doom's asynchronous JIT compiler to produce the same ones again --
+# into a per-test `~/.emacs.d` that is thrown away seconds later. `ps` inside
+# a container showed several `emacs -no-comp-spawn --batch ... async-comp`
+# children per scenario competing for the VM's four CPUs, and Doom's own boot
+# then missed its measured bound in unrelated tests. Compiling ahead of time
+# here pays that cost ONCE, at build, for every container that ever runs.
 RUN set -eux; \
     doom install --no-config --no-env --no-install; \
-    doom sync
+    doom sync --aot; \
+    elns=$(find "${EMACSDIR}/.local" -name '*.eln' | wc -l); \
+    echo "sandbox: doom sync --aot produced ${elns} .eln files"; \
+    [ "${elns}" -gt 0 ] || { echo "sandbox: doom sync --aot produced NO native code; every test would JIT-compile it again" >&2; exit 1; }
 
-# --- prime the npm caches so `npm ci` runs OFFLINE at test time ------------
+# --- BAKE the node dependency trees, and prime the npm cache behind them ---
 #
-# Only the lockfiles are copied: `npm ci` in a throwaway directory populates
-# ~/.npm with every tarball the lockfile names, and the throwaway tree is
-# then deleted. At run time the entrypoint's `npm ci --offline` in the
-# writable working copy resolves entirely from this cache.
-COPY --chown=sandbox:sandbox npm-lockfiles/shim/   /sandbox/npm-prime/shim/
-COPY --chown=sandbox:sandbox npm-lockfiles/webapp/ /sandbox/npm-prime/webapp/
+# THE INSTALL IS AN IMAGE ARTIFACT, NOT A PER-RUN STEP. The predecessor kept
+# only the npm CACHE here and left the entrypoint to run `npm ci --offline`
+# twice in every container. That cost each run about seven seconds and, far
+# worse, about 730 MiB of the container's memory budget: the working copy
+# lives on a tmpfs, so `node_modules` (621 MiB for the shim, 108 MiB for the
+# webapp) was 730 MiB of RAM re-materialized on every single run. Two
+# concurrent sandboxes then exceeded the Docker VM outright and the kernel
+# OOM-killed `npm ci` (exit 137) and Emacs.
+#
+# Installed HERE, the same trees are an ordinary read-only image layer that
+# every container shares and none of them pays for. The entrypoint links the
+# working copy's `node_modules` at these, after checking the lockfile the
+# image installed from is byte-for-byte the lockfile the checkout carries --
+# which is what keeps the shortcut honest: a checkout whose lockfile has
+# moved on does NOT silently run against the image's older dependency tree,
+# it says so and falls back to a real `npm ci --offline` from the cache the
+# same install primed.
+#
+# The flags are the entrypoint's own (`--no-audit --no-fund`, scripts NOT
+# ignored), so the baked tree is exactly the tree the per-run install used to
+# produce -- a package whose `postinstall` builds something still gets to
+# build it.
+COPY --chown=sandbox:sandbox npm-lockfiles/shim/   /sandbox/deps/shim/
+COPY --chown=sandbox:sandbox npm-lockfiles/webapp/ /sandbox/deps/webapp/
 RUN set -eux; \
-    for d in /sandbox/npm-prime/shim /sandbox/npm-prime/webapp; do \
-      (cd "$d" && npm ci --ignore-scripts); \
+    for d in /sandbox/deps/shim /sandbox/deps/webapp; do \
+      (cd "$d" && npm ci --no-audit --no-fund); \
+      test -d "$d/node_modules" || { echo "sandbox: npm ci produced no node_modules in $d" >&2; exit 1; }; \
+      sha256sum "$d/package-lock.json" | cut -d" " -f1 > "$d/.lock-sha256"; \
+      test -s "$d/.lock-sha256"; \
     done; \
-    rm -rf /sandbox/npm-prime
+    test -f /sandbox/deps/shim/node_modules/@anthropic-ai/claude-agent-sdk/package.json \
+      || { echo "sandbox: the baked shim deps do not carry the vendor SDK the bundle resolves from beside itself" >&2; exit 1; }
 
 # --- prime the Go module cache so `go build`/`go test` run OFFLINE --------
 #
@@ -609,6 +643,53 @@ RUN set -eux; \
       (cd "$d" && go mod download) || { echo "sandbox: go mod download failed in $d" >&2; exit 1; }; \
     done; \
     rm -rf /sandbox/go-prime
+
+# --- prime the Go BUILD cache, so no run recompiles the dependency graph ---
+#
+# The module cache above holds SOURCES; the build cache holds compiled
+# packages, and it is a different directory with a different lifetime. It
+# lives under HOME, HOME is a fresh tmpfs in every container, so every run
+# started from an empty one and recompiled everything -- measured at ~18s
+# before the first test could run.
+#
+# Compiling here ships it instead. `go build ./...` compiles every package and
+# every dependency of the daemon, the store, the sidecar, the lock helper and
+# the generated protos; `go test -c -o /dev/null` per package then compiles
+# AND LINKS each test binary, which is precisely the work a run repeats.
+#
+# `go test -c`, not `go vet` and not `go test -run ^$`: vet compiles the test
+# files but its actions key differently from the test build's, and priming
+# with it left the real compile at 9.6s out of 9.6s. `-run ^$` would cache the
+# right things but it RUNS each binary, and the e2e module's own TestMain
+# builds binaries and starts services -- that must not happen during an image
+# build. `-c -o /dev/null` builds the binary and never executes it.
+#
+# THIS CANNOT GO STALE INCORRECTLY, which is why it needs no digest check
+# unlike the node_modules above. Go's build cache is content-addressed: an
+# entry compiled from different source bytes is not found at all. A checkout
+# ahead of the image simply misses and compiles, exactly as it does today.
+# THE PRIME RUNS AT THE PATH THE TESTS WILL RUN AT, and that is the whole
+# trick. Go's build cache key includes the compiler's arguments, and without
+# `-trimpath` those carry the package's ABSOLUTE directory (it goes into the
+# object's debug info). Priming in a scratch directory therefore produced a
+# 331 MiB cache that the real run missed almost entirely: compiling the test
+# binary still took 9.6s. Staged at /work/repo/modules/app/agent-repl -- the
+# exact path the entrypoint materializes the working copy at -- the entries
+# match. The tree is deleted afterwards, and /work is a tmpfs at run time
+# anyway, so nothing of it survives into a container.
+COPY --chown=sandbox:sandbox go-sources/ /work/repo/modules/app/agent-repl/
+COPY --chown=sandbox:sandbox go-manifests/ /work/repo/modules/app/agent-repl/
+RUN set -eux; \
+    export GOCACHE=/sandbox/cache/go-build; \
+    find /work/repo/modules/app/agent-repl -name go.mod -printf '%h\n' | sort -u | while read -r d; do \
+      ( cd "$d" && go build ./... \
+          && go list ./... | while read -r pkg; do go test -c -o /dev/null "$pkg" || true; done ) \
+        || echo "sandbox: WARNING: the build-cache prime did not complete in $d; runs there will compile from cold" >&2; \
+    done; \
+    rm -rf /work/repo; \
+    du -sh /sandbox/cache/go-build; \
+    test -d /sandbox/cache/go-build \
+      || { echo "sandbox: the Go build cache prime produced nothing" >&2; exit 1; }
 
 # Offline from here on: every dependency above is already in the image, and
 # the run script also drops the network entirely.
