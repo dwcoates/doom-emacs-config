@@ -250,6 +250,14 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 	// Teardown is registered BEFORE the boot wait, so an Emacs that comes
 	// up and then wedges during load is still reaped.
 	t.Cleanup(e.stop)
+	// Any failure, not only a wedge, preserves the Emacs artifacts: a
+	// refused eval or an unmet await leaves its cause in the pty and the
+	// state root, which stop discards.
+	t.Cleanup(func() {
+		if t.Failed() && !e.isWedged() {
+			e.dumpArtifacts()
+		}
+	})
 
 	e.awaitDoom()
 	e.awaitServer()
