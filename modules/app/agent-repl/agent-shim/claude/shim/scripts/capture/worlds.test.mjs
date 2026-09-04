@@ -11,6 +11,7 @@ import {
   isPromptDriven,
   planWorlds,
   promptTurnsOf,
+  resumeCaptureOf,
   resumeTurnIndexes,
   worldOf,
 } from "./worlds.mjs";
@@ -154,5 +155,42 @@ describe("resumeTurnIndexes", () => {
         prompts: [{ text: "a", resume: true }, "b", { text: "c", resume: true }],
       }),
     ).toEqual([0, 2]);
+  });
+});
+
+describe("resumeCaptureOf", () => {
+  it("is null for an ordinary scenario", () => {
+    expect(resumeCaptureOf({ name: "s", prompt: "hi" })).toBe(null);
+  });
+
+  it("names the capture whose session is resumed", () => {
+    expect(resumeCaptureOf({ name: "cold", resume_capture: "prose-streamed" })).toBe(
+      "prose-streamed",
+    );
+  });
+
+  it("rejects an empty capture name", () => {
+    expect(() => resumeCaptureOf({ name: "cold", resume_capture: "" })).toThrow(
+      /non-empty capture directory name/,
+    );
+  });
+
+  it("rejects a non-string capture name", () => {
+    expect(() => resumeCaptureOf({ name: "cold", resume_capture: 7 })).toThrow(
+      /non-empty capture directory name/,
+    );
+  });
+
+  it("refuses to pair a resumed session with a shared world", () => {
+    // A resumed session brings the ORIGINAL capture's cwd with it, which is the
+    // whole reason the resume resolves; a world supplies a cwd of its own, so
+    // the two cannot both hold.
+    expect(() =>
+      resumeCaptureOf({
+        name: "cold",
+        resume_capture: "prose-streamed",
+        config_root: `${WORLD_PREFIX}conversation-history`,
+      }),
+    ).toThrow(/cannot share one/);
   });
 });
