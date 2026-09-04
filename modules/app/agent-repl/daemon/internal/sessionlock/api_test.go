@@ -54,11 +54,13 @@ func TestResolveRunDirDefaultsUnderHome(t *testing.T) {
 }
 
 // TestWorkspaceLockPathSpelling asserts the derived name is exactly
-// workspace-<md5hex(clean abs dir)[:8]>.lock.
+// workspace-<md5hex(symlink-resolved abs dir)[:8]>.lock. The dir is chosen
+// with no symlink anywhere in it so this case states the SPELLING and nothing
+// else; the resolution itself is pinned separately below.
 func TestWorkspaceLockPathSpelling(t *testing.T) {
 	// Arrange.
 	runDir := t.TempDir()
-	wsDir := "/tmp/some/workspace"
+	wsDir := "/no/such/root/some/workspace"
 	sum := md5.Sum([]byte(wsDir))
 	want := filepath.Join(runDir, "workspace-"+hex.EncodeToString(sum[:])[:8]+".lock")
 
@@ -307,5 +309,69 @@ func TestProbeWithLogRecordsTheFailureBranch(t *testing.T) {
 	}
 	if msg, _ := records[0].Context["error"].(string); !strings.Contains(msg, "sessionlock: create the run directory") {
 		t.Fatalf("context error = %q, want the run-directory failure", msg)
+	}
+}
+
+// TestWorkspaceLockPathResolvesSymlinksSoTheKeyMatchesTheShimsCwd pins the
+// agreement the whole probe rests on: the daemon chdirs the shim into the
+// worktree and the shim keys its lock off the KERNEL's cwd, which is always
+// fully resolved. A daemon that hashed WSM's spelling instead probed a
+// different file for every workspace reached through a symlink — every macOS
+// path under /var/folders — read it free, and spawned a second shim onto a
+// conversation a live one was serving.
+func TestWorkspaceLockPathResolvesSymlinksSoTheKeyMatchesTheShimsCwd(t *testing.T) {
+	// Arrange.
+	runDir := t.TempDir()
+	real := filepath.Join(t.TempDir(), "worktree")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", real, err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink %q -> %q: %v", link, real, err)
+	}
+
+	// Act.
+	viaLink, linkErr := WorkspaceLockPath(runDir, link)
+	viaReal, realErr := WorkspaceLockPath(runDir, real)
+
+	// Assert.
+	if linkErr != nil || realErr != nil {
+		t.Fatalf("WorkspaceLockPath errors = %v, %v", linkErr, realErr)
+	}
+	if viaLink != viaReal {
+		t.Fatalf("WorkspaceLockPath(link) = %q, WorkspaceLockPath(real) = %q; one workspace must have one lock",
+			viaLink, viaReal)
+	}
+}
+
+// TestWorkspaceLockPathOfADeletedWorktreeKeepsItsKey pins the deleted-worktree
+// case: a shim may still be serving a worktree that has been removed, and its
+// lock must stay probeable under the key it took.
+func TestWorkspaceLockPathOfADeletedWorktreeKeepsItsKey(t *testing.T) {
+	// Arrange.
+	runDir := t.TempDir()
+	parent := t.TempDir()
+	gone := filepath.Join(parent, "worktree")
+	if err := os.MkdirAll(gone, 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", gone, err)
+	}
+	before, err := WorkspaceLockPath(runDir, gone)
+	if err != nil {
+		t.Fatalf("WorkspaceLockPath before the delete: %v", err)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatalf("remove %q: %v", gone, err)
+	}
+
+	// Act.
+	after, err := WorkspaceLockPath(runDir, gone)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WorkspaceLockPath after the delete: %v", err)
+	}
+	if after != before {
+		t.Fatalf("WorkspaceLockPath after the delete = %q, want the key it took, %q", after, before)
 	}
 }
