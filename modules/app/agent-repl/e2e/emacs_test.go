@@ -227,6 +227,14 @@ type Emacs struct {
 	wedgeCause atomic.Pointer[string]
 
 	stopHeartbeat context.CancelFunc
+	// heartbeatDone closes when the detector's goroutine has returned. `stop`
+	// WAITS on it before killing Emacs, because a probe that loses the race
+	// with teardown would otherwise report a killed Emacs as a wedge -- and
+	// `t.Errorf` from a goroutine the test no longer owns is a PANIC, not a
+	// failure, which takes the whole test binary down and loses every result
+	// after it. Cancelling is not enough on its own: the goroutine can
+	// already be past its cancellation check when the cancel lands.
+	heartbeatDone chan struct{}
 
 	// reap are the paths whose appearance in a process's argv marks that
 	// process as this scenario's, so reapStrays can hunt down the daemon
@@ -735,7 +743,9 @@ func (e *Emacs) awaitServer() {
 func (e *Emacs) armHeartbeat() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.stopHeartbeat = cancel
+	e.heartbeatDone = make(chan struct{})
 	go func() {
+		defer close(e.heartbeatDone)
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
 		for {
@@ -867,6 +877,7 @@ func copyTree(src, dest string) error {
 func (e *Emacs) stop() {
 	if e.stopHeartbeat != nil {
 		e.stopHeartbeat()
+		<-e.heartbeatDone
 	}
 	if e.proc.Exited() {
 		return

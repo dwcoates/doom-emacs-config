@@ -65,6 +65,53 @@ The result object carries an \"ok\" boolean plus either a \"value\" or an
       (insert (json-encode payload))))
   t)
 
+(defun agent-repl-e2e--stack ()
+  "Answer the CURRENT elisp stack as a one-line chain of function names.
+
+WHY THIS EXISTS. When a scenario's own eval runs past `evalBound' the Go
+side kills its `emacsclient' and reports \"signal: killed\", which names
+neither what Emacs was doing nor where.  Emacs is single-threaded and
+serves `emacsclient --eval' from a process filter, so a probe sent WHILE
+the slow form is still running is evaluated NESTED INSIDE it -- and its
+own backtrace therefore carries the stuck form's frames underneath.  That
+makes a second, ordinary eval a complete diagnosis of the first, with no
+signal, no debugger and no `debug-on-event' frame to interpret.
+
+Frames are reported innermost first, as bare function names: what is
+wanted is which call is standing, and printing the arguments of a frame
+holding a whole roster would bury it."
+  (require 'backtrace)
+  (mapconcat (lambda (frame)
+               (let ((fun (backtrace-frame-fun frame)))
+                 (if (symbolp fun) (symbol-name fun) "<lambda>")))
+             (backtrace-get-frames)
+             " <- "))
+
+(defun agent-repl-e2e--cpu-profile (n)
+  "Answer the N hottest sampled call chains, one per line, hottest first.
+
+Read from `profiler-cpu-log' rather than rendered through
+`profiler-report': the report buffer is a collapsed interactive tree, and
+what a failing run needs is the flat text of where the samples landed.
+
+Each line is a sample count and the chain innermost-first.  Calling this
+takes the accumulated log and leaves the profiler running, so a second
+call answers only what has happened since the first."
+  (require 'profiler)
+  (let (entries)
+    (maphash (lambda (chain count) (push (cons count chain) entries))
+             (profiler-cpu-log))
+    (setq entries (sort entries (lambda (a b) (> (car a) (car b)))))
+    (mapconcat
+     (lambda (entry)
+       (format "%6d  %s"
+               (car entry)
+               (mapconcat (lambda (frame) (format "%s" frame))
+                          (seq-remove #'null (append (cdr entry) nil))
+                          " <- ")))
+     (seq-take entries n)
+     "\n")))
+
 (defun agent-repl-e2e--write-stamp (path payload)
   "Write PAYLOAD as JSON to PATH, atomically via a rename."
   (require 'json)
@@ -105,6 +152,16 @@ effect."
           (tab-bar-mode 1)
           (setq server-name socket)
           (server-start)
+          ;; THE SAMPLING PROFILER, ARMED FOR THE WHOLE SCENARIO. A wedge in
+          ;; this layer is a command loop burning CPU (`state=R' in the Go
+          ;; side's kernel snapshot), and while it burns Emacs answers
+          ;; NOTHING -- not the server socket, not a nested eval, not the
+          ;; debugger. Nothing can be ASKED of a wedged Emacs; what can be
+          ;; done is to have it already recording, and read the recording out
+          ;; afterwards. Sampling is timer-driven and its cost does not scale
+          ;; with what the scenario does.
+          (require 'profiler)
+          (profiler-start 'cpu)
           (when ready
             (agent-repl-e2e--write-stamp
              ready
