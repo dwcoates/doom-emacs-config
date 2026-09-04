@@ -1413,12 +1413,10 @@ pre-creation that ever reaches it is the defect these tests cover."
   (agent-repl-test--with-frontend-ws "wsr"
       (append '(:open-fenced t) agent-repl-test--restored-ws-plist)
     (agent-repl-test--with-precreate-boundaries _displayed
-      (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                 (lambda (_key) '(:sessionId "s_1"))))
-        ;; Act
-        (should (null (agent-repl--frontend-precreate-webview "wsr")))
-        ;; Assert
-        (should (null agent-repl-test--precreate-urls))))))
+      ;; Act
+      (should (null (agent-repl--frontend-precreate-webview "wsr")))
+      ;; Assert
+      (should (null agent-repl-test--precreate-urls)))))
 
 
 ;;;; ---- Adopting a mounted webview ----
