@@ -85,6 +85,18 @@ export function promptUpsertKey(turn: conversationv1.TurnId): string {
   return `prompt:${requireValue(turn.value, "the turn id")}`;
 }
 
+/**
+ * HOOK ROWS: this key is the ONE served hook row (ruling 2026-09-04).
+ *
+ * Same shape of ruling as the prompt row above, for the same reason. A hook is
+ * recorded on both planes, but the vendor hands them DISJOINT identity
+ * material — a `hook_id` here, a `toolUseID` in the transcript attachment, and
+ * differing record uuids — so nothing downstream can join the two. The stream
+ * owns the row (it is the plane that sees the firing's START, so it is the only
+ * one that carries the hook's name and event and a turn), and the sidecar
+ * classifies its transcript hook attachments as unserved items.
+ */
+
 /** An open question to the user (the AskUserQuestion call's own tool_use_id). */
 export function questionUpsertKey(question: conversationv1.AgentQuestionId): string {
   return `question:${requireValue(question.value, "the question id")}`;
