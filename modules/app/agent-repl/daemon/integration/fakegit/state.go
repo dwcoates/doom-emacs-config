@@ -56,6 +56,9 @@ type Worktree struct {
 	Conflicted []string `json:"conflicted"`
 	// Dirty makes `status --porcelain` report content.
 	Dirty bool `json:"dirty"`
+	// Files are the tracked paths, relative to Dir, that `ls-files` answers.
+	// Emacs's projectile and magit list a worktree the moment it is visited.
+	Files []string `json:"files"`
 }
 
 // Repo is one fake repository: a common dir every one of its worktrees reports.
