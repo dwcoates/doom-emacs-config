@@ -263,8 +263,19 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
 
-	// Act: the session starts on the five-server catalog (fake/index.ts's
-	// mcpArm defaults to "all"); this narrows it to the connected one.
+	// Arrange: STATE the five-server catalog on the daemon first. The shim
+	// probes mcpServerStatus() at StartSession too, but those start-time
+	// pushes predate this test's daemon subscription, so the only catalog
+	// this test can rely on the daemon having taken is one a turn CLOSE
+	// pushed (engine/session.ts reprobeSessionFacts). `!mcp-all` is that
+	// turn, and it is what makes the narrowing below a NARROWING rather than
+	// the first catalog the daemon ever saw.
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-all")
+	awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
+		return v != nil && len(v.GetRows()) == 5
+	})
+
+	// Act: narrow the catalog to the connected server alone.
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-healthy")
 	panel := awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
 		return v != nil && len(v.GetRows()) == 5
