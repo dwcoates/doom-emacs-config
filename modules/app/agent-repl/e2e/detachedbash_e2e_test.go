@@ -583,3 +583,281 @@ func TestBashPartialOutputWithSpill(t *testing.T) {
 		t.Errorf("returned text = %q, want it to contain the daemon's composed truncation summary (\"bytes more not shown\") — never the 241MB spill file itself", got)
 	}
 }
+
+// ===========================================================================
+// Coverage extension — `!bash-detach-fail`: a detached shell ending non-zero.
+// ===========================================================================
+
+// TestBashDetachedNonzeroExit drives "!bash-detach-fail" (shell.ts's
+// BASH_DETACH_FAIL): a backgrounded `echo error && exit 3` whose spool is
+// terminated by `EXIT=3` and whose vendor `task_updated`/`task_notification`
+// both say `status: "failed"`.
+//
+// THE PROTO SETTLES WHAT THAT MEANS, and it is NOT a failure arm.
+// feed.proto's FeedShellSettled.outcome spells the completed arm as "The
+// process exited on its own; the exit chip says how it went — a non-zero exit
+// still COMPLETED, and 'failure' is the reader's judgment of the code, never
+// an arm", and the oneof's only other arms are `cancelled` (stopped by hand)
+// and `lost` (we stopped being able to see it). So the guarantee here is
+// two-sided: the outcome arm is `completed`, and the fact that the run went
+// badly rides ENTIRELY on FeedShellExit.code == 3 — the same shape #36 pins
+// for the foreground non-zero case.
+func TestBashDetachedNonzeroExit(t *testing.T) {
+	t.Parallel()
+	w := NewWorld(t, WorldOpts{})
+	// Detached work outliving its turn opens a health fault, as in #31/#32.
+	w.ExpectWarnings("daemon.health.open_fault")
+	ws := dbWorkspace(t, w)
+
+	initial, stream := dbOpenRootFeed(t, w, ws)
+	defer stream.Close()
+
+	turn := SubmitPrompt(t, w, ws, "!bash-detach-fail")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+
+	shell, _ := dbAwaitDetachedShell(t, ctx, initial, stream, "exit 3", func(s *frontendv1.FeedShellSettled) bool {
+		return s.GetOutcome() != nil
+	})
+	if shell == nil {
+		t.Fatalf("no detached shell for the failing command settled within %s", DefaultTimeout)
+	}
+	if shell.GetSettled().GetCompleted() == nil {
+		t.Errorf("settled outcome = %v, want completed: a non-zero exit is still a COMPLETED run "+
+			"(feed.proto, FeedShellSettled.outcome) — never the cancelled or lost arm",
+			shell.GetSettled().GetOutcome())
+	}
+	if shell.GetSettled().GetExit() == nil {
+		t.Fatalf("settled exit = UNSET, want the code the spool's `EXIT=3` terminator carried")
+	}
+	if got := shell.GetSettled().GetExit().GetCode(); got != 3 {
+		t.Errorf("settled exit code = %d, want 3 (the scenario's own `EXIT=3` terminator)", got)
+	}
+	if got := shell.GetSpool().GetText(); !strings.Contains(got, "error") {
+		t.Errorf("settled shell spool = %q, want the scenario's one appended line (%q)", got, "error")
+	}
+}
+
+// ===========================================================================
+// Coverage extension — `!bash-detach-live`: a detached shell left running.
+// ===========================================================================
+
+// TestBashDetachedLiveNeverSettles drives "!bash-detach-live" (shell.ts's
+// BASH_DETACH_LIVE): a backgrounded `sleep 100000` whose spool gets one line
+// and NO `EXIT=` terminator, and for which the vendor sends no terminal
+// notification at all.
+//
+// # WHAT IS AND IS NOT ASSERTED HERE
+//
+// The matrix names this scenario the lever for the sidecar's staleness arms
+// (conversation/v1/agent_activity.proto's DetachedLost{file_vanished |
+// went_silent | swept_up}, drawn as feed.proto's FeedShellLost — "We stopped
+// being able to see it — spool gone or silent past the shim's ruling; not
+// known to have failed"). Reaching a LOST settle requires the sidecar's own
+// staleness ruling to elapse or its sweep to run, neither of which this
+// suite can provoke without either sleeping (forbidden) or reaching into
+// production configuration (out of scope for an e2e writer). So this test
+// pins the state that PRECEDES every one of those arms and that the registry
+// must hold indefinitely: the shell stays LIVE with its unterminated
+// spool's text, and settles into NOTHING — not completed, not lost — for as
+// long as nothing stops it.
+//
+// GAP RECORDED, not silently absorbed: the three DetachedLost arms remain
+// undriven by any e2e layer after this test.
+func TestBashDetachedLiveNeverSettles(t *testing.T) {
+	t.Parallel()
+	w := NewWorld(t, WorldOpts{})
+	// A detached run that outlives its turn AND never ends: the open fault
+	// this provokes is the whole point of the scenario.
+	w.ExpectWarnings("daemon.health.open_fault")
+	ws := dbWorkspace(t, w)
+
+	initial, stream := dbOpenRootFeed(t, w, ws)
+	defer stream.Close()
+
+	turn := SubmitPrompt(t, w, ws, "!bash-detach-live")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+
+	// Assert: the bubble is drawn LIVE, carrying the unterminated spool's line.
+	live := dbAwaitLiveDetachedShell(t, ctx, initial, stream, "sleep 100000", "partial output with no terminator")
+	if live.GetLive() == nil {
+		t.Fatalf("detached shell state = %v, want live", live.GetState())
+	}
+
+	// Assert: it never settles. A claim of absence necessarily waits out a
+	// bound rather than an event (harness.ProbeWindow, this suite's own
+	// convention for a designed negative window).
+	dbExpectShellNeverSettles(t, stream, "sleep 100000")
+}
+
+// dbAwaitLiveDetachedShell is dbAwaitDetachedShell's live counterpart: it
+// answers the first detached_shell row whose command matches and whose spool
+// already carries `spoolSubstring`, WITHOUT requiring a settled state — the
+// shape a run that never terminates can only ever reach.
+func dbAwaitLiveDetachedShell(
+	t *testing.T,
+	ctx context.Context,
+	initial []*frontendv1.FeedRow,
+	stream *harness.Stream[*frontendv1.FeedRow],
+	commandSubstring, spoolSubstring string,
+) *frontendv1.FeedShell {
+	t.Helper()
+	var found *frontendv1.FeedShell
+	check := func(row *frontendv1.FeedRow) bool {
+		sh := row.GetDetachedShell().GetShell()
+		if sh == nil || !strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+			return false
+		}
+		if !strings.Contains(sh.GetSpool().GetText(), spoolSubstring) {
+			return false
+		}
+		found = sh
+		return true
+	}
+	for _, row := range initial {
+		if check(row) {
+			return found
+		}
+	}
+	harness.AwaitView(t, ctx, stream, "a live detached shell for "+commandSubstring+" carrying "+spoolSubstring, check)
+	if found == nil {
+		t.Fatalf("no live detached shell for %q observed within %s", commandSubstring, DefaultTimeout)
+	}
+	return found
+}
+
+// dbExpectShellNeverSettles drains the feed for one probe window and fails if
+// the named detached shell ever pushes a settled state.
+func dbExpectShellNeverSettles(t *testing.T, stream *harness.Stream[*frontendv1.FeedRow], commandSubstring string) {
+	t.Helper()
+	timer := time.NewTimer(harness.ProbeWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case row, ok := <-stream.C:
+			if !ok {
+				return
+			}
+			sh := row.GetDetachedShell().GetShell()
+			if sh == nil || !strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+				continue
+			}
+			if s := sh.GetSettled(); s != nil {
+				t.Fatalf("the never-ending detached shell settled with %v, want it to stay live: nothing "+
+					"terminated its spool and no notification ever reported it done", s.GetOutcome())
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
+
+// ===========================================================================
+// Coverage extension — `!bash-hold`: a LIVE FOREGROUND shell.
+// ===========================================================================
+
+// TestBashHoldStaysForegroundUntilInterrupted drives "!bash-hold" (shell.ts's
+// BASH_HOLD), the scenario minted specifically as "the lever for
+// DetachForeground's `unsupported` refusal, which needs a GENUINELY LIVE
+// foreground unit to refuse".
+//
+// # THE REFUSAL ITSELF IS NOT REACHABLE FROM THIS LAYER — GAP RECORDED
+//
+// DetachForeground is a shim.v1 verb (proto/src/shim/v1/service.proto:107,
+// endpoint_detach_foreground.proto's DetachForegroundFailure.unsupported).
+// NOTHING in agentrepl/v1 exposes it: the same ruling #33 above cites
+// (docs/overhaul/PROTO-CHANGES.md "Landing 8", RULED-no-proto — "Ctrl-b
+// detach of foreground work has no daemon verb; out of scope for the
+// overhaul") means an e2e test, which speaks only the daemon's caller-facing
+// API, has no way to issue the call whose refusal it would assert. This test
+// does NOT reach into the shim to fake one up; the `unsupported` arm stays
+// uncovered and that is recorded here rather than papered over.
+//
+// What IS reachable, and what this test pins, is the precondition the
+// scenario exists to establish and which no other scenario provides: a Bash
+// unit that is live, FOREGROUND (no detached_shell row is ever drawn for it —
+// BASH_HOLD passes neither `run_in_background` nor startTask, deliberately),
+// and stays that way until a real daemon Interrupt ends the turn.
+func TestBashHoldStaysForegroundUntilInterrupted(t *testing.T) {
+	t.Parallel()
+	w := NewWorld(t, WorldOpts{})
+	ws := dbWorkspace(t, w)
+
+	initial, stream := dbOpenRootFeed(t, w, ws)
+	defer stream.Close()
+
+	turn := SubmitPrompt(t, w, ws, "!bash-hold")
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+
+	// Assert: the held unit is drawn as a live FOREGROUND tool call.
+	held := func(row *frontendv1.FeedRow) bool {
+		call := row.GetActivity().GetSimpleToolCall()
+		return call.GetName().GetText() == "Bash" &&
+			strings.Contains(call.GetInput().GetText(), "tail -f /var/log/system.log") &&
+			call.GetRunning() != nil
+	}
+	sawHeld := false
+	for _, row := range initial {
+		if held(row) {
+			sawHeld = true
+		}
+	}
+	if !sawHeld {
+		harness.AwaitView(t, ctx, stream, "the live FOREGROUND Bash unit BASH_HOLD parks on", held)
+	}
+
+	// Assert: it is foreground — the detachable-in-kind unit was never drawn
+	// as detached work, because the pinned SDK offers no verb to detach it
+	// (BASH_HOLD's own comment) and the daemon never issued one.
+	dbExpectNoDetachedShell(t, stream, "tail -f /var/log/system.log")
+
+	// Act: end it the one way this layer can — a real daemon Interrupt.
+	resp, err := w.Client().Interrupt(w.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: ws,
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+	if err != nil {
+		t.Fatalf("Interrupt(turn): %v", err)
+	}
+	if resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("Interrupt(turn) = %v, want success.interrupted_turn", resp.Msg)
+	}
+
+	// Assert: the held turn's ONLY reachable terminal is the interrupted arm
+	// (BASH_HOLD emits no result and no explicit terminal of its own).
+	ended := AwaitTurnEnded(t, w, ws, turn).GetTurnEnded()
+	if ended.GetInterrupted() == nil {
+		t.Fatalf("turn ended = %v, want turn_ended.interrupted: a held foreground bash concludes on nothing else", ended)
+	}
+}
+
+// dbExpectNoDetachedShell drains the feed for one probe window and fails if a
+// detached_shell row is ever drawn for the named command. The negative that
+// makes "foreground" a claim rather than an assumption.
+func dbExpectNoDetachedShell(t *testing.T, stream *harness.Stream[*frontendv1.FeedRow], commandSubstring string) {
+	t.Helper()
+	timer := time.NewTimer(harness.ProbeWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case row, ok := <-stream.C:
+			if !ok {
+				return
+			}
+			sh := row.GetDetachedShell().GetShell()
+			if sh != nil && strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+				t.Fatalf("a detached_shell row was drawn for the HELD FOREGROUND command %q: nothing detached "+
+					"it, and no daemon verb for DetachForeground exists on this branch", commandSubstring)
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
