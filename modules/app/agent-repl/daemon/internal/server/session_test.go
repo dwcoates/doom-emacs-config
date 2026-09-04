@@ -219,6 +219,11 @@ func TestSetModelRelaysAShimRefusalByName(t *testing.T) {
 			want: func(e *agentreplv1.SetModelError) bool { return e.GetVendorRefused() != nil },
 		},
 		{
+			name: "the shim raised the cold gate on the switch",
+			arm:  workspace.ArmShimCold,
+			want: func(e *agentreplv1.SetModelError) bool { return e.GetCold() != nil },
+		},
+		{
 			name: "no session to set a model on",
 			arm:  workspace.ArmShimNoSession,
 			want: func(e *agentreplv1.SetModelError) bool { return e.GetNoSession() != nil },

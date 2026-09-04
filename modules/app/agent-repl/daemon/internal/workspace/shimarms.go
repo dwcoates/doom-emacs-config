@@ -54,9 +54,10 @@ const (
 	// spelling answer as an unlanded arm.
 	ArmShimModelNotInCatalog = "model_not_in_catalog"
 	// ArmShimCold is SetSessionModelFailure.cold: the switch would discard a
-	// warm cache above the threshold the daemon stated. `SetModelError` has NO
-	// arm for it (ERROR-ARMS.md holds the row), so it answers as an unlanded
-	// arm; the daemon's own policy keeps it from arising (see sender.SetModel).
+	// warm cache above the threshold the daemon stated. `SetModelError` spells
+	// it with the SAME name (landing 10), so it relays by name; the daemon's
+	// own policy keeps it from arising (see sender.SetModel), and the
+	// remediation menu (pay | clear | compact) is the cold gate row's.
 	ArmShimCold = "cold"
 	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
 	// illegal on the wire and is surfaced rather than guessed at.
