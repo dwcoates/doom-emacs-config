@@ -1088,7 +1088,21 @@ message FeedSubagentSettled {
 message FeedSubagentSucceeded {}
 message FeedSubagentFailed {}
 message FeedSubagentCancelled {}
-message FeedSubagentLost {}
+// Why the run was lost — the sidecar's own staleness ruling, relayed by name
+// from conversation.v1 DetachedLost so the client can say WHICH lost it was.
+message FeedSubagentLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    FeedSubagentLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    FeedSubagentLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    FeedSubagentLostSweptUp swept_up = 3;
+  }
+}
+message FeedSubagentLostFileVanished {}
+message FeedSubagentLostWentSilent {}
+message FeedSubagentLostSweptUp {}
 
 // A SHELL BUBBLE: a background command and its spool. NOT a feed — a shell
 // has no rows, only output — so the body rides the row itself: the spool's
@@ -1171,7 +1185,21 @@ message FeedShellExit {
 }
 message FeedShellCompleted {}
 message FeedShellCancelled {}
-message FeedShellLost {}
+// Why the run was lost — the sidecar's own staleness ruling, relayed by name
+// from conversation.v1 DetachedLost so the client can say WHICH lost it was.
+message FeedShellLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    FeedShellLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    FeedShellLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    FeedShellLostSweptUp swept_up = 3;
+  }
+}
+message FeedShellLostFileVanished {}
+message FeedShellLostWentSilent {}
+message FeedShellLostSweptUp {}
 
 // ==========================================================================
 // BLOCKING THE TURN ON THE USER — consent, and a choice. Bodies re-derived
