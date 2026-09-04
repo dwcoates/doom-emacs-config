@@ -616,7 +616,7 @@ func TestPermissionAskOffersNoStanding(t *testing.T) {
 // (permissions.ts's PERM_UNDECIDABLE) for real, rather than merely naming it
 // in a comment as TestPermissionDeniedByPolicy does.
 //
-// # THE DISCRIMINATOR GAP, RECORDED
+// # THE DISCRIMINATOR, ARM BY ARM
 //
 // permission.proto declares THREE denial arms and gives `undecidable` its own
 // (AgentPermissionDenied.undecidable, field 3): "NOBODY REFUSED ... Drawn as a
@@ -626,18 +626,13 @@ func TestPermissionAskOffersNoStanding(t *testing.T) {
 // `decision_reason_type: "classifier"` (its UNDECIDED_DECIDER constant) onto
 // the undecidable arm, and every other discriminator onto `policy`.
 //
-// BUT THE FRONTEND CONTRACT HAS NO SUCH ARM. feed.proto's
-// FeedPermissionAnswered.answer oneof declares exactly four verdicts —
-// allowed_once, allowed_standing, denied_by_user, denied_by_policy — and no
-// undecidable one, so daemon/internal/resolve/feed/permission.go's
-// decisionArm folds the undecidable arm onto denied_by_policy, carrying the
-// distinction in the composed REASON TEXT instead of in the arm.
-//
-// Per the matrix's instruction, this test therefore asserts the arm the
-// daemon DOES produce (denied_by_policy) and pins the one thing that still
-// separates it from an ordinary policy deny at this surface: the composed
-// wording "denied for want of a decider", which permission.go spells only for
-// the undecidable arm and never for a real policy denial.
+// The frontend contract now honors it too: feed.proto's
+// FeedPermissionAnswered.denied_undecidable (landing 10) is the undecidable
+// denial's own arm, so daemon/internal/resolve/feed/permission.go's
+// decisionArm no longer folds it onto denied_by_policy. This test asserts that
+// arm and pins the composed wording it carries ("denied for want of a
+// decider"), which permission.go spells only here and never for a real policy
+// denial.
 func TestPermissionDeniedForWantOfDecider(t *testing.T) {
 	t.Parallel()
 	// Arrange: watch from BEFORE the prompt — like a policy denial, this one
@@ -674,15 +669,14 @@ func TestPermissionDeniedForWantOfDecider(t *testing.T) {
 		t.Errorf("an undecidable denial showed an open ask; want none ever — the classifier denied without " +
 			"reaching the callback, exactly as a policy denial does")
 	}
-	if answered.GetDeniedByPolicy() == nil {
-		t.Fatalf("answered permission = %v, want denied_by_policy: frontend/v1/feed.proto's "+
-			"FeedPermissionAnswered.answer oneof declares no undecidable arm, so the daemon folds the "+
-			"conversation layer's AgentPermissionDenied.undecidable onto this one", answered)
+	if answered.GetDeniedUndecidable() == nil {
+		t.Fatalf("answered permission = %v, want denied_undecidable: frontend/v1/feed.proto's "+
+			"FeedPermissionAnswered carries the conversation layer's AgentPermissionDenied.undecidable "+
+			"as its own arm (landing 10), never folded onto denied_by_policy", answered)
 	}
-	if got := answered.GetDeniedByPolicy().GetText(); !strings.Contains(got, "denied for want of a decider") {
-		t.Errorf("denied_by_policy text = %q, want it to carry the undecidable wording %q — the ONLY thing "+
-			"separating this from an ordinary policy deny at the frontend surface (see this test's header)",
-			got, "denied for want of a decider")
+	if got := answered.GetDeniedUndecidable().GetText(); !strings.Contains(got, "denied for want of a decider") {
+		t.Errorf("denied_undecidable text = %q, want the want-of-a-decider wording %q", got,
+			"denied for want of a decider")
 	}
 	// The vendor's own account rides along as the detail clause, which is
 	// what makes the composed line say WHAT could not decide.
