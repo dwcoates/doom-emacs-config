@@ -121,6 +121,7 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		"an activity row was upserted",
 		dlog.Context{"unit": unit, "agent": agent.GetValue(), "row": row.GetId().GetValue()})
 	r.upsert(s, at, row, true)
+	r.applyHeldDetachment(s, at, unit)
 }
 
 // stampTurn puts the turn a row belongs to on it. A separation belongs to no

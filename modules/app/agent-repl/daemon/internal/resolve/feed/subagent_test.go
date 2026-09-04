@@ -140,7 +140,7 @@ func TestASubagentsOwnRowsLandOnItsSubFeed(t *testing.T) {
 
 	// Assert: on the bubble's feed, never carried on the parent's row.
 	rows := h.rows(feedid.Feed{Agent: created})
-	if len(rows) != 1 || rows[0].GetActivity().GetResponse() == nil {
+	if last(rows).GetActivity().GetResponse() == nil {
 		t.Fatalf("sub-feed rows = %+v, want the subagent's prose", rows)
 	}
 }
@@ -355,15 +355,16 @@ func TestDetachingMovesTheSameBubbleIntoItsPlacementWrapper(t *testing.T) {
 	}
 }
 
-func TestWorkDetachedFromAUnitWeNeverDrewIsWarned(t *testing.T) {
-	// Arrange, Act.
+func TestWorkDetachedFromAUnitWeNeverDrewIsWarnedWhenTheTurnEnds(t *testing.T) {
+	// Arrange: a detachment naming a unit nothing ever draws.
 	h := newHarness(t)
-	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
-		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
-		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
-			DetachedFromId: &conversationv1.AgentActivityId{Value: "never-seen"},
-		}},
-	}, noAddress())
+	h.detachWork("work-1", "never-seen")
+
+	// Act: the turn ends, which is the last moment the mark could have been
+	// claimed.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
 
 	// Assert.
 	if !h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
@@ -903,5 +904,162 @@ func TestAFreshStartIsLive(t *testing.T) {
 	bubble := bubbleOf(h.bubbleRow("spawn-1", created))
 	if bubble.GetLive() == nil {
 		t.Fatalf("state = %T, want live", bubble.GetState())
+	}
+}
+
+// last answers a feed's newest row, for assertions whose subject is WHERE a
+// row landed rather than what else the feed carries.
+func last(rows []*frontendv1.FeedRow) *frontendv1.FeedRow {
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows[len(rows)-1]
+}
+
+// detachWork announces one detachment of a unit.
+func (h *harness) detachWork(work, unit string) {
+	h.t.Helper()
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause: &conversationv1.DetachedWorkDetached_Requested{
+				Requested: &conversationv1.DetachedCauseRequested{},
+			},
+		}},
+	}, noAddress())
+}
+
+// commissionRow finds a spawn's commission row on the created agent's feed.
+func (h *harness) commissionRow(unit string, created *conversationv1.AgentId) *frontendv1.FeedRow {
+	h.t.Helper()
+	want := testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: feedid.Feed{Agent: created},
+		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: unit, Sub: "commission"},
+	}).GetValue()
+	for _, row := range h.rows(feedid.Feed{Agent: created}) {
+		if row.GetId().GetValue() == want {
+			return row
+		}
+	}
+	return nil
+}
+
+// ---- THE COMMISSION: the instruction, in the bubble's BODY ----
+
+func TestASpawnsCommissionDrawsOnTheSubagentsOwnFeed(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert: the instruction is a row on the bubble's own feed.
+	row := h.commissionRow("spawn-1", created)
+	if row == nil {
+		t.Fatalf("sub-feed rows = %+v, want the commission", h.rows(feedid.Feed{Agent: created}))
+	}
+	blocks := row.GetAgentPrompt().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != "go and look" {
+		t.Fatalf("commission body = %+v, want the instruction verbatim", blocks)
+	}
+}
+
+func TestACommissionNamesTheFeedThatSentIt(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert: the recipient's address line, exactly as an agent prompt draws it.
+	row := h.commissionRow("spawn-1", created)
+	if got := row.GetAgentPrompt().GetAddress().GetText(); got != "from the main agent" {
+		t.Fatalf("address = %q, want the sender's feed named", got)
+	}
+}
+
+func TestACommissionDrawsNoSecondRowOnTheCallersFeed(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert: the caller's end IS the bubble; the head is not doubled.
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetAgentPrompt() != nil {
+			t.Fatalf("root feed carried an agent_prompt row %+v; the bubble is the sender's end", row)
+		}
+	}
+}
+
+func TestASpawnWithNoInstructionDrawsNoCommission(t *testing.T) {
+	// Arrange, Act: a spawn whose commission carries no text.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{},
+				StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}},
+		}},
+	})
+
+	// Assert: never an empty body.
+	if row := h.commissionRow("spawn-1", created); row != nil {
+		t.Fatalf("commission = %+v, want none for a spawn that stated no instruction", row)
+	}
+}
+
+func TestARestatedCommissionDoesNotRepublishItsRow(t *testing.T) {
+	// Arrange: every frame of a spawn restates the commission.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+	before := len(h.rows(feedid.Feed{Agent: created}))
+
+	// Act.
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Assert: one commission row, not one per frame.
+	if got := len(h.rows(feedid.Feed{Agent: created})); got != before {
+		t.Fatalf("sub-feed rows = %d, want the same %d (the commission is one row)", got, before)
+	}
+}
+
+// ---- ORDER INDEPENDENCE: a detachment announced before its unit drew ----
+
+func TestADetachmentAnnouncedBeforeItsSpawnStillDrawsTheWrapper(t *testing.T) {
+	// Arrange: the detachment arrives first, as a store replay delivers it —
+	// the unit's row replays at its LAST upsert, after the announcement.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.detachWork("spawn-1", "spawn-1")
+
+	// Act.
+	row := h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Assert: the bubble rides the detached wrapper, not the sync arm.
+	if row.GetDetachedSubagent() == nil {
+		t.Fatalf("row = %T, want the detached wrapper", row.GetRow())
+	}
+}
+
+func TestAClaimedDetachmentIsNotReportedAsUnknownWhenTheTurnEnds(t *testing.T) {
+	// Arrange: the detachment arrives before its spawn, and the spawn draws.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.detachWork("spawn-1", "spawn-1")
+	h.spawnSubagent("spawn-1", created, "Explore", "map the daemon")
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
+		t.Fatalf("records = %+v, want no unknown-unit warning for a claimed detachment", h.records())
 	}
 }

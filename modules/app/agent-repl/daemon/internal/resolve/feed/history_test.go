@@ -151,7 +151,7 @@ func TestAFrameIsAttributedByItsOwnAgentIdAndNotThePagesAgent(t *testing.T) {
 
 	// Assert: on the subagent's sub-feed.
 	rows := h.rows(feedid.Feed{Agent: created})
-	if len(rows) != 1 || rows[0].GetActivity().GetResponse() == nil {
+	if last(rows).GetActivity().GetResponse() == nil {
 		t.Fatalf("sub-feed rows = %+v, want the subagent's prose", rows)
 	}
 }

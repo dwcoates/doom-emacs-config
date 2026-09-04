@@ -84,6 +84,14 @@ type wsState struct {
 	planEpisodes map[string]uint64
 	// shells is the detached-shell accumulation, keyed by detached work id.
 	shells map[string]*shellState
+	// detachedUnits are the units a detachment announced BEFORE this resolver
+	// had drawn them, kept so the placement survives the order the frames
+	// arrive in. A store replay is the ordinary case: a unit's row replays at
+	// the position of its LAST upsert — its terminal — which is after the
+	// detachment that was announced while it was still running, so a resolver
+	// that could only apply a detachment to an already-drawn unit redrew the
+	// work as if it had never left the turn.
+	detachedUnits map[string]string
 	// subagents is the bubble accumulation, keyed by the SPAWN unit's id.
 	subagents map[string]*subagentState
 	// standing holds each permission row's offered standing token, DAEMON-SIDE.
@@ -263,6 +271,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		plans:          map[string]*planState{},
 		planEpisodes:   map[string]uint64{},
 		shells:         map[string]*shellState{},
+		detachedUnits:  map[string]string{},
 		subagents:      map[string]*subagentState{},
 		standing:       map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows: map[string]*permissionState{},
