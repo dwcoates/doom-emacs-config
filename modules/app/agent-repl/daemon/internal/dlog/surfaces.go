@@ -225,13 +225,6 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	info, err := os.Stat(clean)
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
-	}
-	if !info.IsDir() {
-		return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -239,6 +232,22 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	}
 	ws, ok := s.workspaces[clean]
 	if !ok {
+		// THE DIRECTORY IS STAT-ED ONCE, ON THE FIRST RESOLVE, AND NEVER
+		// AGAIN. A workspace already carrying open sinks keeps them: the
+		// records live in logsDir and the workspace holds only a symlink to
+		// them, so a directory that goes away underneath an open sink costs
+		// nothing. The daemon REMOVES that directory itself when a merge
+		// lands, and re-stat-ing here made every later per-workspace rpc on
+		// the merged workspace -- the footer and the feed its own roster
+		// still lists under recently_merged -- fail with "no such file or
+		// directory" and record an ERROR for a teardown the daemon ordered.
+		info, err := os.Stat(clean)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: %w", clean, err)
+		}
+		if !info.IsDir() {
+			return nil, nil, fmt.Errorf("resolve workspace %q for its log sink: not a directory", clean)
+		}
 		id, err := LogWorkspaceID(clean)
 		if err != nil {
 			return nil, nil, err

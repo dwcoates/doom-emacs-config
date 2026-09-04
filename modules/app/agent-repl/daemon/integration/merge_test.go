@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -761,59 +760,28 @@ func TestATestGateFailureIsNeverAutomaticallyRerun(t *testing.T) {
 // rollout trigger.
 // ---------------------------------------------------------------------------
 
-func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTerminalPush(t *testing.T) {
+func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktree(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f, d, repo, script := mergeCleanRepo(t)
+	f, d, _, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 	dir := f.ws.GetDir()
-
-	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
-	// merged workspace's worktree down, and the feed resolves its log sink by
-	// stat-ing that directory -- so a subscription opened after the enqueue
-	// races the teardown and intermittently finds no such workspace to watch.
-	// Opening first is the rendezvous the assertion actually needs.
 	root := f.watchRootFeed()
 
-	// Act: race a poller watching for the worktree's disappearance against
-	// awaiting the terminal push, so the ordering is proven across two
-	// independent timelines rather than sampled once right after the other —
-	// a poll started only AFTER the await returns could simply be too late to
-	// ever observe a too-early removal.
+	// THE TEARDOWN'S ORDER IS NOT ASSERTED FROM HERE. Publishing the terminal
+	// row and removing the worktree are both the daemon's, in that order, and
+	// internal/merge's TestTerminalIsPublishedBeforeTheWorktreeIsRemoved holds
+	// that ordering deterministically against the feed and git the run itself
+	// drives. What a CLIENT sees is the row's arrival, which is a stream
+	// delivery this test cannot order against a teardown that spawns git: a
+	// poller racing the arrival measures how fast the push reached this
+	// process, not what the daemon did first, and lost that race under load.
+
+	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	goneBeforePush := make(chan struct{})
-	stopPolling := make(chan struct{})
-	// THE POLLER IS JOINED, not merely signalled. It reads the fake-git
-	// fixture file, which lives under the test's own t.TempDir() and is
-	// deleted by that directory's cleanup — so a poller still between its tick
-	// and its next select when the test returns reads a fixture that is no
-	// longer there, and reports "not a fake repository" from a goroutine the
-	// test is no longer watching. Closing the channel only ASKS it to stop;
-	// waiting for pollerDone is what makes it have stopped.
-	pollerDone := make(chan struct{})
-	defer func() {
-		close(stopPolling)
-		<-pollerDone
-	}()
-	go func() {
-		defer close(pollerDone)
-		ticker := time.NewTicker(5 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-stopPolling:
-				return
-			case <-ticker.C:
-				if !repo.HasWorktree(dir) {
-					close(goneBeforePush)
-					return
-				}
-			}
-		}
-	}()
 
 	// Assert: FeedMergeSuccess{commit}.
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
@@ -821,14 +789,6 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	})
 	if mergeRow.GetActivity().GetMerge().GetSuccess().GetCommit() == "" {
 		t.Fatalf("FeedMergeSuccess = %v, want a landed commit", mergeRow.GetActivity().GetMerge().GetSuccess())
-	}
-
-	// Assert: the poller never won the race — the worktree was not gone
-	// before the terminal push arrived (removal happens only AFTER it).
-	select {
-	case <-goneBeforePush:
-		t.Fatalf("the worktree %s was removed before the terminal push arrived, want removal only after it", dir)
-	default:
 	}
 
 	// Assert: footer merged, roster merged + recently_merged.
@@ -879,11 +839,13 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	})
 
 	// Assert: the fake deploy script was invoked. The self-reload trigger
-	// fires after the terminal push as part of teardown, so wait for its own
-	// log record rather than racing the push.
-	d.AwaitRunLogOperation("daemon.merge.self_reload")
-	// The deploy chain runs BEYOND the trigger call, so its own record is the
-	// synchronization point; the trigger's record only says it was asked for.
+	// fires after the terminal push as part of teardown, so wait for a log
+	// record rather than racing the push. THE TRIGGER'S OWN RECORD IS NOT
+	// AVAILABLE HERE: it is workspace-scoped, and a landed merge's workspace
+	// sink is reached through a symlink in the worktree the same teardown has
+	// already removed. The deploy chain runs BEYOND the trigger call anyway,
+	// so its global record is the synchronization point; the trigger's would
+	// only have said it was asked for.
 	d.AwaitRunLogOperation("daemon.rollout.deploy")
 	if got := len(d.Deploy.Invocations()); got != 1 {
 		t.Fatalf("deploy script invocations = %d, want EXACTLY 1 from the self-repo landing's rollout trigger (no double-fire)", got)

@@ -647,9 +647,18 @@ func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the long task", "k-running", origin)
 	f.shim.ExpectStartTurn()
+	holds := f.d.WatchHolds(f.ws)
+	// THE INTERJECT'S KILL IS GATED, AND THE GATE IS WHAT MAKES THE VERDICT
+	// ADDRESSABLE AT ALL. The fake ends a killed turn on the agent stream, and
+	// that end DELIVERS the held prompt and retires its hold — so an ungated
+	// run races its own arrangement: the interject verdict the tray shows is
+	// gone by the time the accept reaches the queue, and the refusal this test
+	// is about is answered `no_such_hold` instead of `accept_not_applicable`.
+	// Hanging the fake holds KillTurn inside the fake's own entry gate, after
+	// the request is recorded, which is exactly the window the accept needs.
+	f.shim.Hang()
 	resp2 := f.submit("stop and rebase instead", "k-interject-accept", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	holds := f.d.WatchHolds(f.ws)
 	awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.DaemonHoldTray) bool {
 		p := promptHeldEntry(tray, turn2)
 		return p != nil && p.GetInterject() != nil
@@ -675,6 +684,13 @@ func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
 	// The queue's own Accept logs this refusal at WARNING regardless of the
 	// arm being landed at the wire (internal/promptqueue/holdactions.go).
 	f.d.ExpectWarnings("daemon.promptqueue.accept")
+
+	// The gate comes off so the interject finishes the way it would have: the
+	// kill lands, the turn ends and the held prompt is delivered as its own
+	// turn. Leaving the fake hung would tear the session down mid-call and put
+	// link faults in the log the sweep would then have to be told to ignore.
+	f.shim.Unhang()
+	f.shim.ExpectStartTurn()
 }
 
 // ---------------------------------------------------------------------------
