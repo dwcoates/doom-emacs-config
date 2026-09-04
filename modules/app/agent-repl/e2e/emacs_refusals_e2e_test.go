@@ -59,7 +59,7 @@ func TestEmacsSubmitWithNoDaemonIsRefusedLoudly(t *testing.T) {
                  t)`)
 
 	e.Eval(`(agent-repl-frontend-daemon-stop)`)
-	e.AwaitEvalFor(emacsBootBound, "the link to go down when the daemon exits",
+	e.AwaitEvalFor(daemonStopBound, "the link to go down when the daemon exits",
 		`(if (agent-repl-link-up-p) nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
@@ -120,7 +120,14 @@ func TestEmacsNoWorkspacesRegisteredRefusesThePicker(t *testing.T) {
 
 // emGHIWorkspaceCountForm counts the workspace registry, for the assertions
 // that care about emptiness rather than about names.
-const emGHIWorkspaceCountForm = `(hash-table-count agent-repl--workspaces)`
+// Only entries carrying `:project-dir` are workspaces: persp-mode's own
+// bookkeeping puts stub entries into the same table (the boot writes a
+// `ws=none` stub for `:panels-were-visible`), and counting those would read
+// a fresh Emacs as already holding a workspace.
+const emGHIWorkspaceCountForm = `(let ((n 0))
+   (maphash (lambda (_k v) (when (plist-get v :project-dir) (setq n (1+ n))))
+            agent-repl--workspaces)
+   n)`
 
 // TestEmacsNukeConfirmsBeforeDestroying is scenario 44.
 //
