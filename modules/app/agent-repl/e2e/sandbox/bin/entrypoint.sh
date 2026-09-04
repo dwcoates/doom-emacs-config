@@ -118,6 +118,19 @@ stage_excludes=(
   --exclude '.claude/'
   --exclude '.agents-sandbox/'
   --exclude 'node_modules/'
+  # THE WEBAPP DIST IS STAGED, and it is the one `dist/` that is. The Emacs
+  # layer's panel is a real webview on the daemon's own origin, so it needs
+  # the REAL built webapp; the predecessor let the container build it, which
+  # cost every run ~6s and about a gigabyte of resident memory for `tsc`
+  # alone. The host builds it now (see bin/webapp-dist.sh, which
+  # e2e-sandbox.sh runs before the container starts) and it travels in with
+  # the working copy. rsync takes the FIRST matching filter rule, so this
+  # include has to precede the blanket `dist/` exclude below.
+  #
+  # `-t` on the rsync means mtimes survive the copy, which is what lets the
+  # harness re-check staleness INSIDE the container with the same rule the
+  # host used, against the same sources.
+  --include '/webapp/dist/***'
   --exclude 'dist/'
   --exclude '.worktree'
   --exclude 'worktrees/'
