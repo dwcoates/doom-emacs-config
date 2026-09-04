@@ -194,12 +194,26 @@ it(
 it(
   "draws no hook row for a hook that succeeded",
   async () => {
-    // Arrange — count the hook rows standing before a succeeding hook runs.
-    const before = rows(app, "activity", "hook").length;
-    // Act
-    await family("hook-success", "activity", "simpleToolCall");
-    // Assert — quiet automation stayed quiet.
-    expect(rows(app, "activity", "hook").length).toBe(before);
+    // Act — the succeeding hook guards a Read, so the turn's own drawn row is
+    // that tool call, and the row carries the turn it belongs to.
+    const call = await family("hook-success", "activity", "simpleToolCall");
+    const turn = call.dataset.turn;
+    expect(turn, "the drawn tool call names no turn").toBeTruthy();
+
+    // Assert — quiet automation stayed quiet: THIS TURN drew no hook row.
+    //
+    // SCOPED TO THE TURN, NOT COUNTED OVER THE PAGE. One page accumulates
+    // every turn this file drives, and a hook row of an EARLIER turn can still
+    // be arriving while this one runs — the whole feed is one live stream, and
+    // nothing orders another turn's row against this turn's end. A before/after
+    // total therefore reads any late neighbour as this scenario's row and fails
+    // on a schedule rather than on the contract. The contract itself is
+    // per-hook ("a succeeded hook draws NOTHING", daemon bubbles.go drawHook
+    // over frontend/v1 FeedTurnActivity.hook), and the turn stamp on every row
+    // (feed-view.ts's data-turn) says exactly which hook rows are this
+    // scenario's — of which there must be none.
+    const mine = rows(app, "activity", "hook").filter((row) => row.dataset.turn === turn);
+    expect(mine.map((row) => row.dataset.feedRow ?? "")).toEqual([]);
   },
   TURN_TEST_MS,
 );
