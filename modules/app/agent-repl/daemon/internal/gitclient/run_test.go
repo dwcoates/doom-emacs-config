@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -398,6 +399,79 @@ func TestOrdinaryPathIsLoggedAtDebug(t *testing.T) {
 	// Assert.
 	if _, ok := recordFor(surfaces.records(), "debug", "daemon.gitclient.current_branch"); !ok {
 		t.Fatalf("no debug record for daemon.gitclient.current_branch; every branch logs")
+	}
+}
+
+// --- a git somebody else killed -------------------------------------------
+//
+// A git ended by a signal with the caller's context ALIVE is neither an exit
+// status nor our own cancellation: ExitCode() answers -1 and the child wrote
+// no stderr, so a record that reports it as "git exited nonzero, exit -1" with
+// an empty stderr names no cause at all. Observed as exactly that under an
+// overloaded integration run.
+
+func TestAGitKilledByASignalIsAFailureNotAJudgeableExitCode(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, killedBy(syscall.SIGKILL))
+
+	// Act.
+	_, err := git.IsClean(context.Background(), "/repo")
+
+	// Assert: a failure, so no caller can read the -1 as "dirty".
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("IsClean error = %v (%T), want a *gitclient.Error", err, err)
+	}
+}
+
+func TestAGitKilledByASignalCarriesTheSignalAsEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, killedBy(syscall.SIGKILL))
+
+	// Act.
+	_, err := git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("CurrentBranch error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if failure.Signal != syscall.SIGKILL.String() {
+		t.Fatalf("Error.Signal = %q, want %q", failure.Signal, syscall.SIGKILL.String())
+	}
+}
+
+func TestAGitKilledByASignalIsNotReadAsACancellation(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, killedBy(syscall.SIGKILL))
+
+	// Act: the context is never cancelled, so the daemon asked for nothing.
+	_, err := git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert.
+	if IsCancelled(err) {
+		t.Fatalf("a signalled git reported %v, want a failure rather than a cancellation", err)
+	}
+}
+
+func TestAGitKilledByASignalIsRecordedWithTheSignal(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, killedBy(syscall.SIGKILL))
+
+	// Act.
+	_, _ = git.CurrentBranch(context.Background(), "/repo")
+
+	// Assert.
+	record, ok := recordFor(surfaces.records(), "error", "daemon.gitclient.current_branch")
+	if !ok {
+		t.Fatalf("no error record for a killed git in %+v", surfaces.records())
+	}
+	if got := record.Context["signal"]; got != syscall.SIGKILL.String() {
+		t.Fatalf("the record's signal = %v, want %q", got, syscall.SIGKILL.String())
 	}
 }
 
