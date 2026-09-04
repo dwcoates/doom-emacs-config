@@ -477,3 +477,109 @@ func TestARecoveryFloorAboveTheDefaultCeilingStopsBootstrap(t *testing.T) {
 		t.Fatalf("a floor above the default ceiling resolved to %v, want a bootstrap refusal", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Resolving every window at once.
+// ---------------------------------------------------------------------------
+
+// allWindows spells the seven sources the way main does, from raw values.
+func allWindows(unowned, grace, shell, agent, workflow, min, max string) (durationSource, durationSource, durationSource, durationSource, durationSource, durationSource, durationSource) {
+	backoffMin, backoffMax := backoffSources(min, max)
+	return durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: unowned},
+		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: grace},
+		durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: shell},
+		durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: agent},
+		durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: workflow},
+		backoffMin, backoffMax
+}
+
+func TestEveryResolvedWindowLandsOnItsOwnFieldOfTheWholeSet(t *testing.T) {
+	// Arrange: seven distinct values, so a crossed wire is visible.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "3ms", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveWindows: %v", err)
+	}
+	want := windows{
+		Stale: stale.Options{
+			Grace:           2 * time.Millisecond,
+			ShellSilence:    3 * time.Millisecond,
+			AgentSilence:    4 * time.Millisecond,
+			WorkflowSilence: 5 * time.Millisecond,
+		},
+		UnownedSpool:      time.Millisecond,
+		RecoverBackoffMin: 6 * time.Millisecond,
+		RecoverBackoffMax: 7 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("resolveWindows = %+v, want %+v", got, want)
+	}
+}
+
+func TestAnUnusableUnownedSpoolWindowStopsTheWholeResolution(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("nonsense", "2ms", "3ms", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnusableStaleWindowStopsTheWholeResolution(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "nonsense", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnusableRecoveryLadderStopsTheWholeResolution(t *testing.T) {
+	// Arrange: a ceiling below its floor.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "3ms", "4ms", "5ms", "40ms", "6ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnsetWholeSetResolvesToZerosSoEveryPackageDefaultStands(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("", "", "", "", "", "", "")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveWindows: %v", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows with nothing set = %+v, want every field zero", got)
+	}
+}

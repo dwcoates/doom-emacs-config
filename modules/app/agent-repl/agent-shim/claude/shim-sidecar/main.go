@@ -123,26 +123,19 @@ func main() {
 		"ceiling the store-recovery ladder's doubling holds forever (Go duration; default $"+RecoverBackoffMaxEnv+", else 10s)")
 	flag.Parse()
 
-	unowned, err := durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow}.resolve()
-	if err != nil {
-		reportFatal(err, os.Stderr)
-		os.Exit(1)
-	}
-
-	backoffMin, backoffMax, err := resolveBackoffOptions(
-		durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: *recoverBackoffMinFlag},
-		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: *recoverBackoffMaxFlag},
-	)
-	if err != nil {
-		reportFatal(err, os.Stderr)
-		os.Exit(1)
-	}
-
-	staleOptions, err := resolveStaleOptions(
+	// ONE RESOLUTION, ONE REFUSAL. Every window is resolved by a single tested
+	// function and every way of getting one wrong leaves the process through
+	// the same two lines. Three separate call-and-check pairs here would put
+	// three copies of the refusal inside main, which is the one function in
+	// this file no test can enter.
+	w, err := resolveWindows(
+		durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow},
 		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: *staleGrace},
 		durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: *staleShellSilence},
 		durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: *staleAgentSilence},
 		durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: *staleWorkflowSilence},
+		durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: *recoverBackoffMinFlag},
+		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: *recoverBackoffMaxFlag},
 	)
 	if err != nil {
 		reportFatal(err, os.Stderr)
@@ -155,10 +148,10 @@ func main() {
 		SpoolRoot:          *spoolRoot,
 		PollInterval:       *pollInterval,
 		RescanInterval:     *rescanInterval,
-		Stale:              staleOptions,
-		UnownedSpoolWindow: unowned,
-		RecoverBackoffMin:  backoffMin,
-		RecoverBackoffMax:  backoffMax,
+		Stale:              w.Stale,
+		UnownedSpoolWindow: w.UnownedSpool,
+		RecoverBackoffMin:  w.RecoverBackoffMin,
+		RecoverBackoffMax:  w.RecoverBackoffMax,
 	}
 	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
@@ -241,6 +234,38 @@ func resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence dura
 		*field.into = resolved
 	}
 	return out, nil
+}
+
+// windows is every duration option this process takes, resolved.
+type windows struct {
+	Stale             stale.Options
+	UnownedSpool      time.Duration
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
+}
+
+// resolveWindows resolves all seven duration options and answers the FIRST
+// refusal, applying nothing when there is one: a bootstrap that was refused
+// configures no window at all, rather than half of them.
+func resolveWindows(unowned, grace, shellSilence, agentSilence, workflowSilence, backoffMin, backoffMax durationSource) (windows, error) {
+	resolvedUnowned, err := unowned.resolve()
+	if err != nil {
+		return windows{}, err
+	}
+	staleOptions, err := resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence)
+	if err != nil {
+		return windows{}, err
+	}
+	min, max, err := resolveBackoffOptions(backoffMin, backoffMax)
+	if err != nil {
+		return windows{}, err
+	}
+	return windows{
+		Stale:             staleOptions,
+		UnownedSpool:      resolvedUnowned,
+		RecoverBackoffMin: min,
+		RecoverBackoffMax: max,
+	}, nil
 }
 
 // resolveBackoffOptions answers the store-recovery ladder's floor and ceiling.
