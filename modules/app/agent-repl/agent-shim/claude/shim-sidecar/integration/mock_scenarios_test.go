@@ -168,7 +168,7 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!bash-detach", Wait: waitTerminal, BashRun: true, ExitCode: true},
 	{Prompt: "!bash-detach-fail", Wait: waitTerminal, BashRun: true, ExitCode: true},
 	{Prompt: "!bash-detach-live", Wait: waitTerminal, BashRun: true},
-	{Prompt: "!ctrl-b", Wait: waitDetach},
+	{Prompt: "!vendor-backgrounded", Wait: waitDetach},
 	{Prompt: "!web-fetch", Wait: waitTerminal},
 	{Prompt: "!web-fetch-redirect", Wait: waitTerminal},
 	{Prompt: "!web-search", Wait: waitTerminal},
