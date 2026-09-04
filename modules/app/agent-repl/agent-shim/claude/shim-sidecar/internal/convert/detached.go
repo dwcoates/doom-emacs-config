@@ -13,6 +13,16 @@ package convert
 // LOST arm is named in the log. Folding it into a failure would have this system
 // assert something it never observed: that the work died.
 
+// THE COMMAND LINE IS NOT KNOWN HERE, SO IT IS LEFT UNSET. A spool terminal is
+// minted from bytes on disk and a run handle; the command that produced them is
+// not in the spool, and shim-store's detached_work row holds THE JOIN AND
+// NOTHING ELSE (handle, kind, origin unit, owner, terminals) — never the line.
+// AgentBashSuccess.command is a RESTATEMENT of what was run, so filling it with
+// the vendor TASK id would have this producer assert a command nobody ran. The
+// field is optional precisely for this case: the origin unit's own call carries
+// the true line, and the daemon fills a blank terminal from it rather than the
+// reverse.
+
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -73,7 +83,6 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
 				Output: spoolOutput(output, omitted),
 				Termination: &conversationv1.AgentBashTermination{
@@ -108,7 +117,6 @@ func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64,
 func BashLostEntry(at Attribution, run, output string, omitted uint64, reason LostReason, observed bool) *storev1.StoreEntry {
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
 				// A run concluded from the ABSENCE of a file states
 				// not_observed: we do not know what it printed, and "it printed
@@ -132,7 +140,6 @@ func (c *Converter) BashCancelled(at Attribution, run, output string, omitted ui
 		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed=%t carrying %d byte(s)", observed, len(output))
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-			Command:   &conversationv1.AgentBashCommand{Line: at.TaskID},
 			SettledAt: settledAt(settledAtMs),
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
 				// A stop for a run whose spool was never readable states
