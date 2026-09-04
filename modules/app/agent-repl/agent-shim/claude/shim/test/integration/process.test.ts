@@ -25,6 +25,7 @@ import { Code } from "@connectrpc/connect";
 import {
   cleanupShims,
   ITEST_BUILD_SHA,
+  SHIM_LOCK_BINARY,
   makeDirectories,
   runShim,
   spawnShim,
@@ -52,6 +53,7 @@ function servingEnv(dirs: ReturnType<typeof makeDirectories>): Record<string, st
     AGENT_REPL_OWNED: "1",
     AGENT_REPL_STATE_DIR: dirs.stateDir,
     AGENT_REPL_LOCK_DIR: dirs.lockDir,
+    AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY,
     SHIM_BUILD_SHA: ITEST_BUILD_SHA,
     AGENT_REPL_STORE_SOCKET: dirs.storeSocket,
   };

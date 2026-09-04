@@ -52,6 +52,16 @@ export const PACKAGE_ROOT = path.resolve(here, "..", "..");
 /** The bundle the daemon spawns, and the one every test here spawns. */
 export const SHIM_BUNDLE = path.join(PACKAGE_ROOT, "dist", "main.js");
 
+/**
+ * The REAL `shim-lock` binary, built beside the bundle by `pretest:integration`.
+ *
+ * The kernel claim is a child process (agent-shim/shim-lock) because Node
+ * cannot take a flock, so a spawned shim here takes REAL locks with the REAL
+ * holder — the override exists so it is the binary this checkout just built
+ * rather than whatever is deployed on the machine.
+ */
+export const SHIM_LOCK_BINARY = path.join(PACKAGE_ROOT, "dist", "shim-lock");
+
 /** The build identity every spawned shim reports on `SessionStarted`. */
 export const ITEST_BUILD_SHA = "itest";
 
@@ -200,6 +210,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     AGENT_REPL_OWNED: "1",
     AGENT_REPL_STATE_DIR: dirs.stateDir,
     AGENT_REPL_LOCK_DIR: dirs.lockDir,
+    AGENT_REPL_SHIM_LOCK_BIN: SHIM_LOCK_BINARY,
     AGENT_REPL_FAKE_SPOOL_ROOT: dirs.spoolRoot,
     SHIM_BUILD_SHA: ITEST_BUILD_SHA,
     AGENT_REPL_SESSION_ID: `host-itest-${++spawnCounter}`,

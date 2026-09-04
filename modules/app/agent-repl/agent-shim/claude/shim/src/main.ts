@@ -53,7 +53,7 @@ import os from "node:os";
 import path from "node:path";
 import { configureLog } from "./log.js";
 import { logMainLifecycle, reportFatal } from "./fatal.js";
-import { lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
+import { lockBinaryPath, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
@@ -525,6 +525,12 @@ export async function main(): Promise<void> {
       claude_config_dir: environment.claudeConfigDir,
       lock_dir: lockDir(),
       lock_dir_overridden: (process.env[LOCK_DIR_ENV] ?? "") !== "",
+      // WHICH HOLDER WILL TAKE THE CLAIM. The kernel lock lives in a child
+      // process (agent-shim/shim-lock), and a shim pointed at a binary that is
+      // not there refuses every session — so the path is stated at startup,
+      // where it is readable before the first StartSession rather than only in
+      // the failure.
+      lock_binary: lockBinaryPath(),
       shim_build_sha: identity.shimBuildSha,
       sdk_version: identity.sdkVersion,
       agent_binary_version: identity.agentBinaryVersion ?? "",
