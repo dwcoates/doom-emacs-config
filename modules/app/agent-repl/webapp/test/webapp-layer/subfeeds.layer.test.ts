@@ -165,11 +165,13 @@ it(
 );
 
 /**
- * The commission the fake gives every spawned agent, sync and detached alike
- * (`agent-shim/claude/shim/src/fake/scenarios/subagents.ts`), read verbatim so
- * the assertion pins the INSTRUCTION and not a paraphrase of it.
+ * The commissions the fake gives its spawned agents, read verbatim from
+ * `agent-shim/claude/shim/src/fake/scenarios/subagents.ts` so each assertion
+ * pins the INSTRUCTION and not a paraphrase of it. The sync and detached
+ * scenarios commission different work, so they carry different text.
  */
-const COMMISSION = "Do the sweep and report.";
+const SYNC_COMMISSION = "Read the module's AGENTS.md and report the test command.";
+const DETACHED_COMMISSION = "Do the sweep and report.";
 
 /**
  * Expand a spawn bubble and answer the `agent_prompt` row drawn inside its own
@@ -204,7 +206,7 @@ it(
     const commission = await commissionRow(await subagentBubble());
 
     // Assert — the instruction verbatim, under an address naming the sender.
-    expect(textOf(commission)).toContain(COMMISSION);
+    expect(textOf(commission)).toContain(SYNC_COMMISSION);
     expect(textOf(commission.querySelector(".prompt-address"))).toContain("from ");
   },
   TURN_TEST_MS,
@@ -220,7 +222,7 @@ it(
     const commission = await commissionRow(row);
 
     // Assert
-    expect(textOf(commission)).toContain(COMMISSION);
+    expect(textOf(commission)).toContain(DETACHED_COMMISSION);
     expect(textOf(commission.querySelector(".prompt-address"))).toContain("from ");
   },
   TURN_TEST_MS,

@@ -204,10 +204,20 @@ func TestGrepContentFilesCount(t *testing.T) {
 // SPEC.md §C #69 ReadWholeHeadRange. AgentReadSuccess.extent is a three-way
 // oneof (whole/head/range); each row below drives one arm.
 //
-// FeedToolCallCodeOutput.omitted is present "iff truncated" and, per
-// feed.proto's own comment, is ALWAYS a head cut, never a middle slice —
-// so a whole read and a range read both carry no omitted line, and only
-// the head read does.
+// FeedToolCallCodeOutput.omitted is present "iff truncated", so only a
+// WHOLE read carries none: it is the one extent that says "nothing further
+// can be fetched" (agent_activity.proto, AgentReadWhole). Both a head and a
+// range are short of the file, and both must say so. For the range,
+// agent_activity.proto pins the sentence and its purpose on
+// AgentReadRange.total_lines: "What the whole file holds, so a consumer
+// states \"lines 400-499 of 4,312\" without arithmetic and without a second
+// request" — the omitted line is the only element of
+// FeedToolCallCodeOutput that can carry that statement, so a range read
+// carries one. feed.proto's "always a HEAD of the file, never a middle
+// slice" qualifies the CODE the spans paint (a highlighter needs context
+// from offset zero, the same rationale AgentReadHead.contents gives) and
+// predates the range arm, which was added at tag 10 after the extents at
+// tags 2-8; it does not license dropping a middle slice's extent line.
 func TestReadWholeHeadRange(t *testing.T) {
 	// Arrange
 	w, ws := newFileToolsWorkspace(t)
@@ -219,7 +229,7 @@ func TestReadWholeHeadRange(t *testing.T) {
 	}{
 		{name: "whole", scenario: "read", wantOmitted: false},
 		{name: "head", scenario: "read-head", wantOmitted: true},
-		{name: "range", scenario: "read-range", wantOmitted: false},
+		{name: "range", scenario: "read-range", wantOmitted: true},
 	}
 
 	for _, tc := range cases {
