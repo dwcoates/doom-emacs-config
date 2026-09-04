@@ -853,8 +853,13 @@ layer at each setting:
 
 The bound is not the number that goes fastest on one lucky pass; it is the
 largest number whose worst measured boot still fits the budget the product is
-held to. At two slots, a `-count=2` of the whole layer took 176s for 90
-scenarios with **91 boots and no boot-bound miss**, worst 1.70s.
+held to.
+
+Those numbers were taken before the AT-SPI fix (`NO_AT_BRIDGE`), which turned
+out to be the real source of the boot outliers the table blames on contention.
+On the shipped layer, at two slots: a `-count=1` runs in **78s** with a
+**1.14 GiB** peak, and two consecutive `-count=2` runs did **183 boots with
+zero boot-bound misses**, worst 1.10s against a mean of 796ms.
 
 ### The container's memory budget
 
