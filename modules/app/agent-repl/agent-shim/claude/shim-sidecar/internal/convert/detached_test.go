@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 )
 
 func TestBashDeltaFromOffsetIsAGapDetector(t *testing.T) {
@@ -458,5 +459,54 @@ func TestALostSubagentVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
 	// Assert.
 	if first.GetWriteId() != second.GetWriteId() {
 		t.Fatalf("write ids differ: %q vs %q", first.GetWriteId(), second.GetWriteId())
+	}
+}
+
+func TestASpoolTerminalLeavesTheCommandUnsetRatherThanRestatingTheTaskID(t *testing.T) {
+	// Arrange. AgentBashSuccess.command is a RESTATEMENT of what was run, and a
+	// spool terminal is minted from bytes on disk plus a run handle — the line
+	// is in neither, nor in shim-store's detached_work row, which holds the join
+	// and nothing else. Filling the field with the vendor TASK id would have
+	// this producer assert a command nobody ran, so every spool-minted terminal
+	// leaves it unset and lets the origin unit's own call supply the true line.
+	tests := []struct {
+		name     string
+		terminal func(*Converter, Attribution) *storev1.StoreEntry
+	}{
+		{
+			name: "exited",
+			terminal: func(c *Converter, at Attribution) *storev1.StoreEntry {
+				return c.BashExited(at, "toolu_run", "out", 0, 0)
+			},
+		},
+		{
+			name: "lost",
+			terminal: func(c *Converter, at Attribution) *storev1.StoreEntry {
+				return c.BashLost(at, "toolu_run", "out", 0, LostWentSilent, true)
+			},
+		},
+		{
+			name: "cancelled",
+			terminal: func(c *Converter, at Attribution) *storev1.StoreEntry {
+				return c.BashCancelled(at, "toolu_run", "out", 0, 1700000000000, true)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := newTestConverter(t)
+			at := testAttribution(0)
+			at.TaskID = "b1"
+
+			// Act.
+			entry := test.terminal(c, at)
+
+			// Assert.
+			success := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess()
+			if command := success.GetCommand(); command != nil {
+				t.Fatalf("command = %v; a spool terminal does not know the line and must leave it unset rather than restating the task id", command)
+			}
+		})
 	}
 }
