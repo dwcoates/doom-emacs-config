@@ -51,7 +51,14 @@ The result object carries an \"ok\" boolean plus either a \"value\" or an
                                         (insert-file-contents in)
                                         (buffer-string))))
                                 t)))
-               (list (cons "ok" t) (cons "value" value)))
+               ;; A value JSON cannot carry (a process, a buffer, a marker)
+               ;; is handed over PRINTED rather than signalled: the form ran,
+               ;; and a signal here would look to the Go side exactly like a
+               ;; hung Emacs -- emacsclient never returns.
+               (list (cons "ok" t)
+                     (cons "value" (condition-case nil
+                                       (progn (json-encode value) value)
+                                     (error (format "%S" value))))))
            (error (list (cons "ok" :json-false)
                         (cons "error" (error-message-string err)))))))
     (with-temp-file out
