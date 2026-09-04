@@ -306,6 +306,11 @@ type source struct {
 	Fresh bool
 	// VendorSessionID is the conversation a resume names.
 	VendorSessionID string
+	// ColdRemediation is the answered cold gate's choice, carried on the
+	// resume so the shim pays, clears or compacts instead of refusing the read
+	// again. It is nil on every path but Fleet.ResumeCold: a bring-up names no
+	// remediation, which is exactly what makes the shim state the cost.
+	ColdRemediation *conversationv1.SessionColdRemediation
 }
 
 // classifySource makes the FRESH-CONVERSATION decision, and it is the ONE
@@ -499,11 +504,35 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
 		f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
 		f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-		f.remember(ws, &live{client: client})
+		// THE PARKED SESSION KEEPS ITS HOST IDENTITY. The gate's answer re-opens
+		// through this very entry, and a resume that had to mint a second
+		// identity would report a NEW session for a conversation that never
+		// ended.
+		f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
 		f.publishHost(ws)
 		return nil
 	}
 
+	return f.sessionUp(ctx, log, ws, client, started, session, configDir, hostSessionID)
+}
+
+// sessionUp is EVERYTHING a started session still needs, and it is the ONE
+// place that does it: the watcher that opens the session's watches, the facts
+// the session record keeps, and the host view's statement that a session now
+// exists. Both paths that can produce a SessionStarted run through it — the
+// cold start (Fleet.Start) and the remediated re-open an answered cold gate
+// performs (Fleet.ResumeCold) — because a second copy is how the re-open came
+// to install no watcher and never report live, which refused the very next
+// prompt with `no_session`.
+func (f *Fleet) sessionUp(
+	ctx context.Context,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	client shimclient.Client,
+	started *conversationv1.SessionStarted,
+	previous wsm.Session,
+	configDir, hostSessionID string,
+) error {
 	// The watcher is handed the opening LEVEL: the turn in flight and every
 	// live detached item are what it opens its watches for, and nothing else
 	// states them.
@@ -528,7 +557,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID})
 
-	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, client.PID()); err != nil {
+	if err := f.recordFacts(ctx, log, ws, previous, started, configDir, hostSessionID, client.PID()); err != nil {
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
@@ -538,6 +567,82 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// changed, and nothing the server can see says so.
 	f.publishHost(ws)
 	return nil
+}
+
+// ResumeCold re-opens a session parked behind a standing cold gate, carrying
+// the remediation the user chose, and completes the SAME bring-up the cold
+// start performs. It is what an answered cold gate spends: daemon.md's "The
+// daemon reopens naming a remediation — pay | clear | compact — chosen by the
+// user (AnswerColdGate)".
+//
+// The shim it re-opens through is the one the park left serving: a parked
+// session's client stays up precisely so the answer has somewhere to go, and a
+// workspace with no live client has no gate to answer.
+//
+// THE FACTS ARE RE-DERIVED, never carried over from the refused attempt: the
+// account routing is decided at every start (daemon.md 10a) and the record is
+// what the resume must be filed against, so both are read here exactly as
+// Fleet.Start reads them.
+func (f *Fleet) ResumeCold(ctx context.Context, ws ids.WorkspaceID, resume ColdResume) error {
+	f.mu.RLock()
+	session, ok := f.sessions[ws]
+	f.mu.RUnlock()
+	if !ok {
+		return refuse(f.deps.Log.Global(), "AnswerColdGate", ArmNoSession,
+			fmt.Sprintf("workspace %q has no live session to re-open", ws), false)
+	}
+	// A REAPED CLIENT IS NO SESSION, read the same way Fleet.Shim reads it: the
+	// map entry outlives the process, and re-opening over a dead connection
+	// answers a raw transport error where the contract spells no_session.
+	if _, reaped := session.client.Reaped(); reaped {
+		return refuse(f.deps.Log.Global(), "AnswerColdGate", ArmNoSession,
+			fmt.Sprintf("workspace %q has no live session to re-open", ws), false)
+	}
+
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		return fmt.Errorf("re-open session for %q: %w", ws, err)
+	}
+	log, err := f.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		return fmt.Errorf("re-open session for %q: resolve log sink: %w", ws, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(ws)})
+
+	previous, _, err := f.deps.DB.Session(ctx, ws)
+	if err != nil {
+		log.Error(opColdGate, "could not read the session record", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("re-open session for %q: read the session record: %w", ws, err)
+	}
+
+	// THE PARK'S HOST IDENTITY IS KEPT. The remediated re-open resumes the same
+	// conversation the refused attempt named, so it is the same session and
+	// Emacs correlates its fault windows against exactly this id.
+	hostSessionID := session.hostSessionID
+	if hostSessionID == "" {
+		hostSessionID = previous.HostSessionID
+	}
+	if hostSessionID == "" {
+		hostSessionID = wsm.NewHostSessionID()
+	}
+
+	started, err := f.startSession(ctx, log, ws, session.client, source{
+		VendorSessionID: resume.VendorSessionID,
+		ColdRemediation: resume.Remediation,
+	}, previous)
+	if err != nil {
+		return err
+	}
+	if started == nil {
+		// THE SHIM REFUSED THE REMEDIATED RESUME AS COLD AGAIN. startSession has
+		// already raised a fresh gate from that refusal, so the session is parked
+		// once more rather than up — and saying so is what keeps the caller from
+		// reporting a re-opened session that does not exist.
+		return refuse(log, "AnswerColdGate", ArmNoSession,
+			fmt.Sprintf("the shim refused the remediated resume of %q as cold again", ws), false)
+	}
+	configDir := f.deps.Accounts.ConfigDirFor(record.Dir)
+	return f.sessionUp(ctx, log, ws, session.client, started, previous, configDir, hostSessionID)
 }
 
 // bringUpClient probes the workspace lock and either ADOPTS the surviving shim
@@ -781,6 +886,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	} else {
 		req.Source = &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
 			VendorSessionId: src.VendorSessionID,
+			ColdRemediation: src.ColdRemediation,
 		}}
 	}
 
@@ -1131,22 +1237,6 @@ func (a *shimAdapter) KillSession(ctx context.Context, force bool) error {
 	}
 	if failure := response.GetFailure(); failure != nil {
 		return &ShimRefusal{Verb: "KillSession", Arm: killSessionArm(failure), Detail: failure.GetDetail()}
-	}
-	return nil
-}
-
-func (a *shimAdapter) StartSession(ctx context.Context, resume ColdResume) error {
-	response, err := a.client.StartSession(ctx, &shimv1.StartSessionRequest{
-		Source: &shimv1.StartSessionRequest_Resume{Resume: &shimv1.StartSessionResume{
-			VendorSessionId: resume.VendorSessionID,
-			ColdRemediation: resume.Remediation,
-		}},
-	})
-	if err != nil {
-		return err
-	}
-	if failure := response.GetFailure(); failure != nil {
-		return fmt.Errorf("re-open the session: %s", failure.GetDetail())
 	}
 	return nil
 }
