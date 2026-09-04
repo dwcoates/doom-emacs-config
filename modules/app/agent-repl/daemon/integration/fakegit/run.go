@@ -17,6 +17,9 @@ type Result struct {
 // fieldSep and the format tokens mirror the git leaf's `--format` template.
 const fieldSep = "\x1f"
 
+// fakeGitVersion is what `git version` answers, in real git's exact shape.
+const fakeGitVersion = "git version 2.39.5"
+
 // Run applies one `git` argument vector against the world and answers what the
 // real binary would have printed. It is a pure function of the state plus the
 // filesystem effects a worktree command has, so it is unit-testable without a
@@ -34,6 +37,12 @@ func Run(s *State, cwd string, args []string) Result {
 	}
 	if f := s.takeFailure(dir, subject); f != nil {
 		return Result{Stderr: f.Stderr, Exit: f.Exit}
+	}
+	// `git version` needs no repository: Emacs's vc-git and magit probe it
+	// on the first project switch and feed the answer to version-to-list,
+	// which signals on a missing one.
+	if subject[0] == "version" || subject[0] == "--version" {
+		return Result{Stdout: fakeGitVersion + "\n"}
 	}
 
 	repo, wt := s.FindWorktree(dir)
