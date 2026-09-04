@@ -74,6 +74,10 @@ type Deps struct {
 	// Stand is how the controller reaches a workspace's shim. It is the only
 	// shim contact the controller has.
 	Stand Stand
+	// StandBound is how long ONE of those shim round trips has to answer
+	// before the sweep gives that workspace up and moves on. Zero takes
+	// DefaultStandBound.
+	StandBound time.Duration
 	// Freeness answers, and waits for, a workspace's freeness. Teardown never
 	// interrupts: the wait is the whole mechanism.
 	Freeness Freeness
@@ -129,6 +133,19 @@ type Announcer interface {
 	ShutdownAnnounced(push *agentreplv1.DaemonShutdownAnnounced)
 }
 
+// DefaultStandBound is how long the idle sweep gives ONE shim round trip --
+// the Hibernate directive, or the graceful KillSession that follows its ack --
+// before it gives that workspace up for this pass.
+//
+// THE SWEEP RUNS ON THE DRAIN LOOP'S OWN GOROUTINE, so an unbounded call there
+// is not one wedged workspace, it is the whole controller: no later pass, no
+// other workspace, and no standing schedule ever fires again. It is the same
+// bound, for the same reason, as shimclient's kill grace -- a shim that has
+// been told to stand down and does not answer is exactly the wedged shim that
+// grace exists for -- and a healthy round trip here is single-digit
+// milliseconds, so five seconds is three orders of magnitude of headroom.
+const DefaultStandBound = 5 * time.Second
+
 // ExitFunc performs the daemon's orderly exit: flush the in-flight writes and
 // go. It returns only if the exit could not be started.
 type ExitFunc func(ctx context.Context) error
@@ -167,6 +184,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.RefusalWindow <= 0 {
 		deps.RefusalWindow = DefaultRefusalWindow
+	}
+	if deps.StandBound <= 0 {
+		deps.StandBound = DefaultStandBound
 	}
 	cutoff, err := ResolveIdleCutoff(deps.IdleCutoff)
 	if err != nil {
