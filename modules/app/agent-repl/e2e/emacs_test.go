@@ -70,6 +70,32 @@ import (
 // sentinel/kill-buffer recursion.
 const HeartbeatBound = 1250 * time.Millisecond
 
+// evalBound is how long ONE `emacsclient --eval` of a SCENARIO'S OWN FORM may
+// take before the running test fails.
+//
+// It used to be HeartbeatBound, which was wrong in kind rather than in size --
+// the same defect daemonLinkBound was split out of emacsBootBound to fix. The
+// heartbeat probe is `(emacs-pid)`: it does nothing, and its cost is purely
+// how long the command loop takes to reach it. A scenario's form is arbitrary
+// elisp that does real work -- `agent-repl-add-project-workspace` registers a
+// workspace, opens the panels and creates an xwidget webview -- so one bound
+// covering both could only ever be too tight for one of them, and it was: the
+// workspace-creating evals were killed at 1.25s under nothing worse than a
+// second scenario running beside them.
+//
+// LENGTHENING IT GIVES UP NO HANG DETECTION, which is the only reason it is
+// allowed to be longer. A wedged Emacs is caught by the HEARTBEAT, which rides
+// the same socket, samples every 250ms and closes `wedged` -- and every wait
+// loop in this layer, this one included, short-circuits on `wedged` rather
+// than running out its own bound. This bound catches an eval that is slow;
+// the heartbeat catches an Emacs that is gone, and it is still the faster of
+// the two.
+//
+// MEASURED: see EMACS-LAYER-SPEC.md, "The bounds, measured". `go test -v`
+// prints `emacs phase eval-max` for every scenario, which is the number a
+// future revision must re-derive this from.
+const evalBound = 5 * time.Second
+
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
 // and therefore measures the command loop's real responsiveness rather than
@@ -195,6 +221,10 @@ type Emacs struct {
 	reapMu sync.Mutex
 	reap   []string
 
+	// evalMax is the longest scenario eval this Emacs has answered, in
+	// nanoseconds. It is what MEASURES evalBound, the same way heartbeatMax
+	// measures HeartbeatBound. Reported once per test by reportPhases.
+	evalMax atomic.Int64
 	// heartbeatMax is the longest probe this Emacs has answered, in
 	// nanoseconds. It is what MEASURES HeartbeatBound: the bound is a small
 	// multiple of this number across healthy runs, never a guess. Reported
@@ -228,6 +258,10 @@ func (e *Emacs) reportPhases() {
 	defer e.phasesMu.Unlock()
 	for _, p := range e.phases {
 		e.t.Logf("emacs phase %s took %s", p.name, p.took.Round(time.Millisecond))
+	}
+	if max := e.evalMax.Load(); max > 0 {
+		e.t.Logf("emacs phase eval-max took %s (bound %s)",
+			time.Duration(max).Round(time.Millisecond), evalBound)
 	}
 	if max := e.heartbeatMax.Load(); max > 0 {
 		e.t.Logf("emacs phase heartbeat-probe-max took %s (bound %s)",
@@ -865,16 +899,19 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("write the eval request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
+	ctx, cancel := context.WithTimeout(context.Background(), evalBound)
 	defer cancel()
 	call := fmt.Sprintf("(agent-repl-e2e--eval %q %q)", in, out)
-	if _, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call); err != nil {
+	started := time.Now()
+	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call)
+	e.recordEvalMax(time.Since(started))
+	if err != nil {
 		return zero, fmt.Errorf("emacsclient: %w", err)
 	}
 
-	body, err := os.ReadFile(out)
-	if err != nil {
-		return zero, fmt.Errorf("read the eval response: %w", err)
+	body, readErr := os.ReadFile(out)
+	if readErr != nil {
+		return zero, fmt.Errorf("read the eval response: %w", readErr)
 	}
 	var res evalResult
 	if err := json.Unmarshal(body, &res); err != nil {
@@ -1349,8 +1386,19 @@ func (e *Emacs) AddReapPath(p string) {
 //
 // MEASURED, on the 4-CPU/5.8 GiB Docker VM this layer runs in. See
 // EMACS-LAYER-SPEC.md, "The parallelism bound, measured", for the run at each
-// setting: wall time, peak container memory, and whether the pass set held.
-const emacsParallelSlots = 3
+// setting: wall time, peak container memory, worst Doom boot, and whether the
+// pass set held.
+//
+// TWO, NOT THREE, AND THE DIFFERENCE IS NOT THE WALL CLOCK. Three slots is
+// faster over one pass (81s against 107s) and its peak memory is fine
+// (1.58 GiB). It is rejected because under SUSTAINED load -- a `-count=2` of
+// the whole layer, which is how this bound has to be proven -- three Emacsen
+// on four CPUs pushed Doom's boot past its own 3500ms bound and failed three
+// scenarios that had nothing to do with each other. The bound is not the
+// number that goes fastest on one lucky pass; it is the largest number whose
+// worst measured boot still fits in the budget the product is held to. At two
+// slots the worst Doom boot over 91 boots was 1360ms, 39% of that budget.
+const emacsParallelSlots = 2
 
 // emacsParallelEnv overrides the slot count. It exists so the bound above can
 // be RE-MEASURED on a different machine the same way it was measured on this
@@ -1396,4 +1444,15 @@ func takeEmacsSlot(t *testing.T) {
 	// actually free.
 	t.Cleanup(func() { <-gate })
 	gate <- struct{}{}
+}
+
+// recordEvalMax keeps the longest eval this Emacs has answered, so evalBound
+// is derived from observation rather than guessed.
+func (e *Emacs) recordEvalMax(took time.Duration) {
+	for {
+		prev := e.evalMax.Load()
+		if int64(took) <= prev || e.evalMax.CompareAndSwap(prev, int64(took)) {
+			return
+		}
+	}
 }

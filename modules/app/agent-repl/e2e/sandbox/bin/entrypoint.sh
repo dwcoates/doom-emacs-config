@@ -193,7 +193,29 @@ log "doom module :app agent-repl -> $REPO/$MODULE_REL"
 # cache stays where the image put it (/sandbox/cache/go/pkg/mod, read-only) —
 # a complete module cache is read-only-safe — but npm writes to its cache
 # even on an offline install, so that one is copied in.
-mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$GOCACHE"
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
+
+# THE GO BUILD CACHE, seeded from the image rather than compiled from cold.
+#
+# GOCACHE lives under HOME and HOME is a fresh tmpfs, so every run used to
+# start with an empty build cache and recompile the whole dependency graph --
+# measured at ~18s before the first test ran. The image primes one (see the
+# Dockerfile's "prime the Go BUILD cache"), and it is COPIED rather than
+# linked because `go` writes to its cache on every invocation, trimming and
+# adding entries, and the image layer is read-only.
+#
+# Seeding it can never be WRONG, only useless: Go's build cache is
+# content-addressed, so an entry compiled from different source bytes is not
+# found and the package is compiled as it would have been anyway.
+primed_gocache=${SANDBOX_CACHE:?SANDBOX_CACHE unset}/go-build
+if [[ -d $primed_gocache ]]; then
+  log "seeding the Go build cache from the image ($(du -sh "$primed_gocache" | cut -f1))"
+  mkdir -p "$(dirname "$GOCACHE")"
+  cp -a "$primed_gocache" "$GOCACHE"
+else
+  log "WARNING: no primed Go build cache at $primed_gocache; every package will compile from cold"
+  mkdir -p "$GOCACHE"
+fi
 [[ -s ${GIT_CONFIG_GLOBAL:-} ]] || die "no git identity at ${GIT_CONFIG_GLOBAL:-<unset>}; the image did not bake one"
 
 # --- node dependencies: LINKED from the image, never installed per run -----
