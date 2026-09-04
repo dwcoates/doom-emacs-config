@@ -218,10 +218,10 @@ func TestAnAgentsOwnRowsFollowItsSubFeedOnceItsSpawnIsSeen(t *testing.T) {
 	// Assert: THE CONNECTION IS THE PLACEMENT — the card is on the bubble's own
 	// feed, and it carries no parent naming the bubble.
 	rows := h.rows(feedid.Feed{Agent: created})
-	if len(rows) != 1 || rows[0].GetQuestion() == nil {
+	if last(rows).GetQuestion() == nil {
 		t.Fatalf("sub-feed rows = %+v, want the subagent's question", rows)
 	}
-	if rows[0].GetParent() != nil {
+	if last(rows).GetParent() != nil {
 		t.Fatal("a subagent's row named a parent; its rows arrive on the bubble's own feed")
 	}
 }

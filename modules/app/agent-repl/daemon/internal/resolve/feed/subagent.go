@@ -88,6 +88,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// makes an expand's OpenFeed resolve and a page's crumbs draw.
 	if state.created.GetValue() != "" {
 		r.mintSubFeed(s, id, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
+		r.drawCommission(s, at, unitID, state, commissionOf(spawn))
 	}
 
 	row := &frontendv1.FeedRow{Id: id}
@@ -116,6 +117,67 @@ func applyPrompt(bubble *frontendv1.FeedSubagent, prompt *conversationv1.AgentSu
 	if prompt.Description != nil && prompt.GetDescription() != "" {
 		bubble.Description = &frontendv1.FeedSubagentDescription{Text: prompt.GetDescription()}
 	}
+}
+
+// commissionOf answers the commission carried on whichever arm this frame is.
+// EVERY frame of a spawn restates it (agent_activity.proto: "Carried on every
+// frame of the spawn, so each frame stands alone"), so the body redraws from
+// the frame in hand rather than from a remembered one.
+func commissionOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentSubagentPrompt {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		return frame.Start.GetPrompt()
+	case *conversationv1.AgentSubagent_Update:
+		return frame.Update.GetPrompt()
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetPrompt()
+	}
+	return nil
+}
+
+// drawCommission draws THE INSTRUCTION the subagent was given, on the
+// subagent's OWN feed.
+//
+// WHERE THE PROTO PUTS IT. AgentSubagentPrompt.text is "the full instruction
+// the subagent was given. Drawn only where there is room for it — A BUBBLE'S
+// BODY, NOT ITS HEAD" (conversation/v1/agent_activity.proto), and a bubble's
+// body IS its sub-feed (frontend/v1/feed.proto: "THE BUBBLE IS A FEED: its
+// rows are never carried here"). So the commission is a row on the created
+// agent's feed, drawn with the ONE kind the contract has for what an agent
+// addressed to another agent — FeedAgentPrompt, on the recipient's end, whose
+// address line is "from <sender>".
+//
+// The SENDER'S END IS THE BUBBLE ITSELF, which is why no second row is drawn
+// on the caller's feed: the head already carries the label and the
+// description, and the contract reserves the head for exactly those.
+func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state *subagentState, prompt *conversationv1.AgentSubagentPrompt) {
+	if prompt.GetText() == "" {
+		// A COMMISSION WITH NO INSTRUCTION DRAWS NOTHING rather than an empty
+		// bubble body: the field is the whole row, and a blank one would say
+		// the caller asked for nothing.
+		return
+	}
+	sub := feedid.Feed{Agent: state.created}
+	row := &frontendv1.FeedRow{
+		Id: r.rowID(s.id, sub, feedid.RowKey{
+			Kind: feedid.KindPrompt, ID: unitID, Sub: "commission",
+		}),
+		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
+			Address: &frontendv1.FeedAgentPromptAddress{
+				Text: "from " + feedLabel(s, r.feedKey(s.id, at.feed)),
+			},
+			Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
+				Block: &frontendv1.FeedAgentPromptBlock_Text{
+					Text: &frontendv1.FeedTextBlock{Text: prompt.GetText()},
+				},
+			}}},
+		}},
+	}
+	r.stampTurn(s, row, nil)
+	r.logger(s.id).Debug("daemon.feed.subagent_commission",
+		"a spawn's commission was drawn on the subagent's own feed",
+		dlog.Context{"unit": unitID, "agent": state.created.GetValue()})
+	r.upsert(s, placement{feed: sub}, row, true)
 }
 
 // applyTotals folds a settled run's token sum onto the head. The two usage
