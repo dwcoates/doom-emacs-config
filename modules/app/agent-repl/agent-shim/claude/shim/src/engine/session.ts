@@ -29,6 +29,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog, onLogSinkPoisoned, setClaudeSessionId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../locks.js";
+import type { LockRelease } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
@@ -134,7 +135,7 @@ interface EngineDeps {
   /** Injected so a suite substitutes a temp directory without a state dir. */
   readonly identityStore?: AgentIdentityStore;
   /** Injected so a suite can take no kernel lock. */
-  readonly acquireLock?: (sessionId: string) => () => void;
+  readonly acquireLock?: (sessionId: string) => LockRelease | Promise<LockRelease>;
   /**
    * Injected so a suite can take no kernel workspace lock.
    *
@@ -147,7 +148,7 @@ interface EngineDeps {
    * once a session exists, so the daemon's probe semantics are unchanged: a
    * HELD workspace lock still means a live shim owns the conversation.
    */
-  readonly acquireWorkspaceLock?: (cwd: string) => () => void;
+  readonly acquireWorkspaceLock?: (cwd: string) => LockRelease | Promise<LockRelease>;
   /** How long StartSession waits for the vendor's own `system:init`. */
   readonly initTimeoutMs?: number;
   /**
@@ -281,8 +282,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const rewind = new KeepaliveRewind();
 
   let identity: SessionIdentity | undefined;
-  let releaseLock: (() => void) | undefined;
-  let releaseWorkspaceLock: (() => void) | undefined;
+  let releaseLock: LockRelease | undefined;
+  let releaseWorkspaceLock: LockRelease | undefined;
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
   let prompts: PromptQueue | undefined;
@@ -1500,7 +1501,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const inForce = clearedTo ?? vendorSessionId;
     try {
-      releaseLock = acquireLock(inForce);
+      releaseLock = await acquireLock(inForce);
     } catch (err) {
       LOGGER.log(
         { level: "warn", vendor_session_id: inForce, cause: err instanceof Error ? err.message : String(err) },
@@ -1517,9 +1518,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // HERE rather than at process start because an inert shim owns no
     // conversation and must not exclude the live one it will replace.
     try {
-      releaseWorkspaceLock = acquireWorkspace(deps.env.cwd);
+      releaseWorkspaceLock = await acquireWorkspace(deps.env.cwd);
     } catch (err) {
-      releaseLock?.();
+      await releaseLock?.();
       releaseLock = undefined;
       LOGGER.log(
         {
@@ -1575,9 +1576,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // NOTHING WAS WRITTEN UNDER THE NAME YET: the held cuts are written after
       // this block precisely so that stays true, and `clearProducer` refuses
       // outright if it ever stops being.
-      releaseLock?.();
+      await releaseLock?.();
       releaseLock = undefined;
-      releaseWorkspaceLock?.();
+      await releaseWorkspaceLock?.();
       releaseWorkspaceLock = undefined;
       deps.persistence.clearProducer();
       if (!identityWasPersisted) await identityStore.forget();
@@ -2540,9 +2541,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     await concludeWatchers();
     await concludeBashWatchers();
     pushes.standDown();
-    releaseLock?.();
+    await releaseLock?.();
     releaseLock = undefined;
-    releaseWorkspaceLock?.();
+    await releaseWorkspaceLock?.();
     releaseWorkspaceLock = undefined;
   }
 

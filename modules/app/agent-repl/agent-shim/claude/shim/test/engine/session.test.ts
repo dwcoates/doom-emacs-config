@@ -131,7 +131,9 @@ function harness(
     acquireLock: (sessionId) => {
       if (options.lockThrows === true) throw new Error("locked by another shim");
       locks.push(sessionId);
-      return () => released.push(sessionId);
+      return () => {
+        released.push(sessionId);
+      };
     },
     // STUBBED LIKE THE SESSION CLAIM. The workspace lock moved into
     // StartSession, so a unit test that left it real would take a kernel lock
@@ -139,7 +141,9 @@ function harness(
     acquireWorkspaceLock: (dir) => {
       if (options.workspaceLockThrows === true) throw new Error("locked by another shim");
       workspaceLocks.push(dir);
-      return () => released.push(`workspace:${dir}`);
+      return () => {
+        released.push(`workspace:${dir}`);
+      };
     },
   });
   return {
@@ -411,11 +415,15 @@ describe("StartSession, fresh", () => {
       scheduler: h.scheduler,
       acquireLock: (id) => {
         h.locks.push(id);
-        return () => h.released.push(id);
+        return () => {
+          h.released.push(id);
+        };
       },
       acquireWorkspaceLock: (dir) => {
         h.workspaceLocks.push(dir);
-        return () => h.released.push(`workspace:${dir}`);
+        return () => {
+          h.released.push(`workspace:${dir}`);
+        };
       },
     });
     await engine.startSession(freshRequest());

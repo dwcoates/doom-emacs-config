@@ -37,6 +37,7 @@ make_tree() {
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
              "$root/agent-shim/shim-store" \
+             "$root/agent-shim/shim-lock" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/webapp/src" "$root/webapp/dist" \
@@ -50,6 +51,7 @@ make_tree() {
     echo "package main" > "$root/daemon/cmd/claude-repld/main.go"
     echo "package main" > "$root/agent-shim/shim-store/main.go"
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
+    echo "package main" > "$root/agent-shim/shim-lock/main.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
@@ -57,6 +59,7 @@ make_tree() {
     echo "module x" > "$root/daemon/go.mod"
     echo "module store" > "$root/agent-shim/shim-store/go.mod"
     echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
+    echo "module lock" > "$root/agent-shim/shim-lock/go.mod"
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
 
@@ -91,13 +94,15 @@ make_fresh_artifacts() {
     mkdir -p "$root/home/.cache/agent-repl/bin"
     echo built > "$root/home/.cache/agent-repl/bin/shim-store"
     echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
+    echo built > "$root/home/.cache/agent-repl/bin/shim-lock"
     # Bump artifact mtimes strictly past the sources.
     sleep 1
     touch "$root/agent-shim/claude/shim/dist/main.js" \
           "$root/webapp/dist/index.html" \
           "$root/daemon/bin/claude-repld" \
           "$root/home/.cache/agent-repl/bin/shim-store" \
-          "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
+          "$root/home/.cache/agent-repl/bin/shim-claude-sidecar" \
+          "$root/home/.cache/agent-repl/bin/shim-lock"
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -872,6 +877,42 @@ t_webapp_build_id_missing_entry_fails_loudly() {
     rm -rf "$root"
 }
 t_webapp_build_id_missing_entry_fails_loudly
+
+# --- shim-lock -------------------------------------------------------------
+# The shim spawns shim-lock for every kernel claim and refuses to start a
+# session without it, which is why `lock` is in the DEFAULT target set while the
+# two launchd services are not. Both halves are asserted: that a default run
+# builds it, and that it installs beside shim-store.
+t_lock_is_in_the_default_target_set() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    sleep 1
+    touch "$root/agent-shim/shim-lock/main.go"
+    run_script "$root" >/dev/null
+    if grep -q "shim-lock" "$root/stub.log"; then
+        pass "lock: a default run rebuilds a stale shim-lock"
+    else
+        fail "lock: a default run rebuilds a stale shim-lock" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+t_lock_is_in_the_default_target_set
+
+t_lock_installs_beside_shim_store() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"
+    run_script "$root" lock >/dev/null
+    if [ -f "$root/home/.cache/agent-repl/bin/shim-lock" ]; then
+        pass "lock: installs into ~/.cache/agent-repl/bin, beside shim-store"
+    else
+        fail "lock: installs into ~/.cache/agent-repl/bin" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+t_lock_installs_beside_shim_store
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

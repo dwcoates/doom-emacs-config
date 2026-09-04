@@ -301,6 +301,9 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 		"AGENT_REPL_FAKE_SPOOL_ROOT="+tree.FakeSpool,
 		"AGENT_REPL_STATE_DIR="+filepath.Join(base, "state"),
 		"AGENT_REPL_LOCK_DIR="+filepath.Join(base, "lock"),
+		// The shim spawns this for each kernel claim; without it the mocked
+		// vendor refuses every session and generates no fixture at all.
+		"AGENT_REPL_SHIM_LOCK_BIN="+lockBinary(t),
 		"AGENT_REPL_STORE_SOCKET="+vendorStore.Socket,
 		"AGENT_REPL_OWNED=1",
 		"SHIM_BUILD_SHA=test",
