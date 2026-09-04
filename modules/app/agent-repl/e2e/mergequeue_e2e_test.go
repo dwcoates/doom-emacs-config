@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -653,15 +654,60 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	if n := d3.DisplacedTurnCount(); n != 0 {
 		t.Fatalf("turns marked displaced after a second bounce on a settled state root = %d, want none (nothing was owed)", n)
 	}
-	rootAfterSecondBoot, _ := mqOpenFeedRows(t, w, child, nil)
-	matchesAfterSecondBoot := 0
-	for _, row := range rootAfterSecondBoot {
-		if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
-			matchesAfterSecondBoot++
-		}
+	// THE FEED HAS NO SHIM-LESS READ PATH. This third daemon adopted nothing
+	// ("daemon.boot.adopt: no shim survives for this workspace" — the shim
+	// that served the resubmission exited with its session), and daemon.md's
+	// SPAWN ON MOUNT ruling is explicit: "mounting a parked workspace's
+	// frontend IS an implicit revival — the shim spawns and ReadHistory
+	// serves; there is no shim-less read path (the store isolation gate
+	// stands absolute)", which workspace/open.go's Open implements. So a bare
+	// OpenFeed here answers an empty page by contract, not by defect; the
+	// mount is what makes the transcript replay, and the mount is exactly
+	// what a frontend coming up against this daemon would do.
+	if _, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: child})); err != nil {
+		t.Fatalf("OpenWorkspace after the second bounce = error %v, want the parked workspace revived", err)
 	}
-	if matchesAfterSecondBoot != matches {
-		t.Fatalf("root feed rows carrying the displaced turn's words after a second bounce = %d, want unchanged at %d (never resubmitted twice)", matchesAfterSecondBoot, matches)
+
+	// Assert: the replay carries the displaced turn's words on exactly the
+	// same number of rows as before — no fewer (the wait below only ends when
+	// all of them have arrived) and no more (the probe window would see a
+	// third). Counting rather than matching turn ids is deliberate: the words
+	// are what "resubmitted twice" would duplicate.
+	afterSecondBoot := mqOpenFeedWatch(t, w, child, nil)
+	defer afterSecondBoot.Close()
+	mqDisplacedRows := func(rows []*frontendv1.FeedRow) int {
+		n := 0
+		for _, row := range rows {
+			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+				n++
+			}
+		}
+		return n
+	}
+	afterSecondBoot.AwaitRow("the replayed rows carrying the displaced turn's words", func(*frontendv1.FeedRow) bool {
+		return mqDisplacedRows(afterSecondBoot.Rows()) >= matches
+	})
+	if got := mqDisplacedRows(afterSecondBoot.Rows()); got != matches {
+		t.Fatalf("root feed rows carrying the displaced turn's words after a second bounce = %d, want unchanged at %d (never resubmitted twice)", got, matches)
+	}
+
+	// A resubmission the boot sweep made would arrive as one more such row.
+	// Nothing else can end this wait, so it necessarily waits out the probe.
+	deadline := time.NewTimer(harness.ProbeWindow)
+	defer deadline.Stop()
+	for done := false; !done; {
+		select {
+		case row, ok := <-afterSecondBoot.stream.C:
+			if !ok {
+				done = true
+				break
+			}
+			if row.GetUserPrompt() != nil && mqFeedRowText(row) == displacedText {
+				t.Fatalf("a further root feed row carries the displaced turn's words after a second bounce, want unchanged at %d (never resubmitted twice)", matches)
+			}
+		case <-deadline.C:
+			done = true
+		}
 	}
 }
 
