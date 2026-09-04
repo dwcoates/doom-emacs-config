@@ -120,6 +120,7 @@ func tlAssertHeadline(t *testing.T, errored *frontendv1.FeedTurnEndedErrored) {
 // PROSE's own documented invocation is "(any text with no `!scenario`
 // prefix)", not a bare "!"+name.
 func TestTurnStartToCompletion(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -162,6 +163,7 @@ func TestTurnStartToCompletion(t *testing.T) {
 // the fake-registry name behind the `turn-stop-max-turns` capture golden
 // named in SPEC.md's test list and MANIFEST.md's table.
 func TestTurnStopMaxTurns(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -191,6 +193,7 @@ func TestTurnStopMaxTurns(t *testing.T) {
 // `FailureVendorMaxBudget`). Scenario: `!fail-budget` (failures.ts's
 // FAIL_BUDGET) — the `turn-stop-max-budget-usd` golden's fake-registry name.
 func TestTurnStopMaxBudgetUsd(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -238,6 +241,7 @@ func TestTurnStopMaxBudgetUsd(t *testing.T) {
 // recording grounds — it is asserting the SHAPE the mock declares, not a
 // golden-verified fact, exactly as SPEC.md's test-list entry #4 describes.
 func TestTurnStopMaxStructuredOutputRetries(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -279,6 +283,7 @@ func TestTurnStopMaxStructuredOutputRetries(t *testing.T) {
 // reason spells instead of the unclassified arm), so this test drives a
 // declared-but-ungrounded shape, per SPEC.md's own instruction for this row.
 func TestTurnStopErrorDuringExecution(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -319,6 +324,7 @@ func TestTurnStopErrorDuringExecution(t *testing.T) {
 // the harness's documented surface would be exactly the kind of adaptation
 // this dispatch is told not to do.
 func TestTurnStopHookStop(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -369,6 +375,7 @@ func TestTurnStopHookStop(t *testing.T) {
 // frame, per this dispatch's instruction to note a documented gap and move on
 // rather than assert a shape the contract itself says has no producer.
 func TestModelChanged(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -408,6 +415,7 @@ func TestModelChanged(t *testing.T) {
 // and does not attempt the "fast-mode marker on the turn's record" half of
 // SPEC.md's test-list entry #8, per the same documented-gap rule as #7.
 func TestFastMode(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -450,6 +458,7 @@ func TestFastMode(t *testing.T) {
 // itself errored at the ceiling; this scenario is not that case, so the old
 // assertion could only ever have failed.
 func TestMaxTokens(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
@@ -510,6 +519,7 @@ func TestMaxTokens(t *testing.T) {
 // ONE response the terminal's Concluded.Answer names, rather than a
 // four-separate-bubble shape or a truncated one.
 func TestProseStreamedFourBlockShape(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
 	ws := tlNewWorkspace(t, w)
