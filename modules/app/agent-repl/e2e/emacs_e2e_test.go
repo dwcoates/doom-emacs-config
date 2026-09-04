@@ -163,6 +163,16 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		ExtraEnv:    extraEnv,
 	})
 
+	// THE WORLD-LEVEL PATHS A STRAY CAN NAME. The reaper StartEmacs armed
+	// matches an argv against this scenario's own paths, and the Emacs root
+	// alone does not cover every one of them: a leaked `shim-lock` names the
+	// kernel-lock directory, and a leaked fake SDK names the spool root.
+	// Both are unique per test, so neither can match another scenario's
+	// process. Without them the strays this reaper exists for -- measured at
+	// 95 MiB for one leaked shim -- stay resident for the rest of the run.
+	e.AddReapPath(lockDir)
+	e.AddReapPath(spoolRoot)
+
 	// The sidecar watches the SAME two account roots the launcher was given.
 	// SPEC.md §B's "One string per config root" invariant applies here
 	// unchanged: the sidecar records cursors under the path it WALKED, which
