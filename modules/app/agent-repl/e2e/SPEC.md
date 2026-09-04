@@ -1026,6 +1026,94 @@ Section D is the authoritative row-by-row mapping.
 
 ---
 
+## C2. Coverage — what this suite measures in the systems it spawns
+
+`go test -cover` on this package would measure nothing worth having: every
+system under test is a SEPARATE PROCESS. Coverage therefore comes from
+instrumented BUILDS plus per-process output directories, and one knob turns
+all of it on: `AGENT_REPL_E2E_COVERAGE=<dir>`.
+
+**The invocation**, from `modules/app/agent-repl`:
+
+```
+make -C e2e coverage                       # or: bin/report-nonlisp-coverage.sh e2e
+AGENT_REPL_E2E_COVERAGE_DIR=/tmp/cov make -C e2e coverage   # keep the profiles
+```
+
+It runs the suite at the documented `-parallel 8`, then merges and reports.
+`e2e` is an OPT-IN component of `bin/report-nonlisp-coverage.sh`: it is never
+part of that script's default sweep.
+
+**How each system is measured**
+
+| System | Instrumented by | Output |
+|---|---|---|
+| `claude-repld` | `go build -cover` (harness `MainAt`) | `GOCOVERDIR=<dir>/claude-repld`, set by `harness.StartDaemon` |
+| `shim-store` | `go build -cover` (`goBuildCovered`) | `GOCOVERDIR=<dir>/shim-store`, set at both spawn sites |
+| `shim-claude-sidecar` | `go build -cover` (`goBuildCovered`) | `GOCOVERDIR=<dir>/shim-claude-sidecar` |
+| the TypeScript shim | `NODE_V8_COVERAGE`, set on the DAEMON and inherited by every shim it spawns (`shimclient.spawnEnv` copies the daemon's environment forward verbatim outside its fixed override set) | `<dir>/shim`, remapped through the bundle's source map |
+
+Reporting: `go tool covdata textfmt` merges each binary's counters into a
+profile, `go tool cover -func` (run from that binary's own module directory,
+which is what lets it resolve the packages) reports it; the shim's v8
+profiles are rendered by `c8` and summed over `agent-shim/**` sources by
+`bin/e2e-shim-coverage-summary.mjs`.
+
+**COUNTERS ONLY LAND ON A GRACEFUL EXIT.** The Go runtime writes an
+instrumented binary's counters as it leaves through `main`; a SIGKILLed
+process writes nothing, and neither does a SIGKILLed `node`. All four systems
+install SIGTERM handlers and exit through their own `main`, so:
+
+- the store and the sidecar already leave through SIGTERM (`Store.Stop`,
+  `Sidecar.Stop`);
+- on a coverage run only, `harness.StartDaemon` registers a teardown that
+  SIGTERMs the daemon and then its shims before the usual kill. It is
+  registered AHEAD of the warning sweep, so `t.Cleanup`'s
+  last-registered-first unwind runs it AFTER that sweep: the sweep reads the
+  same log content with coverage as without, and the pass set does not move.
+  (Registered the other way round, the graceful shutdown's own error records
+  failed two merge-queue tests that pass on every ordinary run.)
+- a process a test deliberately SIGKILLs (the cold-gate crash simulation)
+  contributes nothing, by design.
+
+**Two things stay unmeasured.**
+
+- `shim-lock` — the SHIM spawns it, so nothing in the harness can hand it a
+  `GOCOVERDIR`, and an instrumented Go binary started without one writes a
+  warning onto a stderr the shim reads. It is built uninstrumented on purpose.
+- the webapp — `webapplayer_e2e_test.go` drives it through its own npm script;
+  its coverage belongs to `bin/report-nonlisp-coverage.sh webapp`.
+
+**One production touch, stated plainly:** `agent-shim/claude/shim/build.mjs`
+emits an external source map under `SHIM_BUILD_SOURCEMAP=1`, which ONLY the
+coverage build sets. Every other build — the deploy path included — is
+byte-for-byte what it was, so the bundle's build identity is unchanged.
+
+### Baseline — measured 2026-09-04, `make -C e2e coverage`, 16-core host
+
+| System | Statement coverage |
+|---|---|
+| `claude-repld` | **54.5%** |
+| `shim-store` | **60.2%** |
+| `shim-claude-sidecar` | **63.7%** |
+| shim TypeScript (`agent-shim/**` sources, 94 files) | **82.6%** (24926/30182) |
+
+The run: 138 `PASS` records, 59 `SKIP` (Emacs scenarios skip on a host with
+no batch Emacs; the webapp-layer tests skip without `webapp/node_modules`),
+`TestColdGate/Clear` failing as it is known to.
+
+A CONTROL run of the same suite WITHOUT coverage recorded the identical
+138/59 pass/skip counts and the same known `TestColdGate/Clear` failure, so
+coverage does not move the pass set. Each of the two full runs also carried
+one DIFFERENT extra failure under full-suite load —
+`TestHibernateOnIdleCutoff` (coverage run) and
+`TestRefusalOrderingDuringHandover` (control run) — each of which passes
+repeatedly in isolation both with and without coverage. That is pre-existing
+load-dependent flakiness in the suite, not a coverage effect, and it is
+reported as such rather than papered over.
+
+---
+
 ## D. Scenario mapping table — all 69 goldens
 
 | # | Golden scenario | Registered scenario(s) | Test(s) (§C) | New fake-SDK scenario needed? |

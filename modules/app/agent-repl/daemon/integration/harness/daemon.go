@@ -319,6 +319,22 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
+	// THE COVERAGE TEARDOWN IS REGISTERED FIRST, SO IT RUNS LAST. A coverage
+	// run has to let the daemon leave through SIGTERM — a SIGKILLed process
+	// writes no counters — and a graceful shutdown emits records an abruptly
+	// killed one never wrote. Registered here, ahead of the warning sweep, it
+	// runs AFTER that sweep (t.Cleanup unwinds last-registered-first), so the
+	// sweep reads exactly the log content it reads without coverage and the
+	// suite's pass set is unchanged. The ordinary teardown below stands down
+	// while this one is armed, so the process is still killed exactly once.
+	if CoverageEnabled() {
+		t.Cleanup(func() {
+			d.gracefulStopForCoverage()
+			d.Kill()
+			d.standDownStraysForCoverage()
+			d.ReapStrays()
+		})
+	}
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
 	// end with an empty expected set, so a test that never calls ExpectWarnings
 	// still gets the assertion. ExpectWarnings only widens this set.
@@ -509,20 +525,12 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	}
 	d.cmd = cmd
 	t.Cleanup(func() {
-		// A COVERAGE RUN ASKS FOR A GRACEFUL EXIT FIRST. The Go runtime
-		// writes an instrumented binary's counters as it leaves through
-		// main; a SIGKILLed daemon writes nothing, so the cleanup kill
-		// below would discard every counter the run just earned. This adds
-		// a bounded SIGTERM ahead of the kill and never replaces it: a
-		// daemon that ignores the signal, or one the test already killed,
-		// still gets the unconditional Kill/ReapStrays underneath.
-		d.gracefulStopForCoverage()
+		// On a coverage run the teardown registered ahead of the warning
+		// sweep owns this and runs it after that sweep instead.
+		if CoverageEnabled() {
+			return
+		}
 		d.Kill()
-		// The shims are stood down gracefully first on a coverage run, for
-		// the same reason: a node process SIGKILLed by ReapStrays writes no
-		// NODE_V8_COVERAGE profile, while one that takes SIGTERM leaves
-		// through main.ts's stand-down and does.
-		d.standDownStraysForCoverage()
 		// The daemon's group is gone; its shims are in groups of their own and
 		// would otherwise outlive the test.
 		d.ReapStrays()
