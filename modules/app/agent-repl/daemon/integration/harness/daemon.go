@@ -648,21 +648,61 @@ func (d *Daemon) Ctx() context.Context { return d.ctx }
 // PID is the daemon process's id.
 func (d *Daemon) PID() int { return d.cmd.Process.Pid }
 
-// Stop sends SIGTERM and waits for the process to leave.
+// reapGrace bounds the wait for the kernel to reap a process group that has
+// already been sent SIGKILL. SIGKILL cannot be caught, blocked or ignored, so
+// this is not a shutdown budget: it covers only the scheduling of an already
+// doomed process, which every observed run completes in single-digit
+// milliseconds. A process still unreaped after this is a fault to REPORT, not
+// something to keep waiting on — an unbounded teardown wait costs the whole
+// suite its remaining budget, not just its own test.
+const reapGrace = 2 * time.Second
+
+// Stop sends SIGTERM and waits, BOUNDED, for the process to leave. A daemon
+// that ignores SIGTERM is escalated to SIGKILL and reported, never waited on
+// indefinitely.
 func (d *Daemon) Stop() {
 	d.t.Helper()
 	d.signal(syscall.SIGTERM)
-	d.Wait()
+	if d.awaitReapWithin(DefaultTimeout) {
+		return
+	}
+	d.t.Errorf("harness: the daemon did not exit within %s of SIGTERM; killing it", DefaultTimeout)
+	d.Kill()
 }
 
 // Kill ends the process group without warning, for crash simulation and for
 // the cleanup every test gets.
 func (d *Daemon) Kill() {
+	d.t.Helper()
 	if d.cmd == nil || d.cmd.Process == nil {
 		return
 	}
-	syscall.Kill(-d.cmd.Process.Pid, syscall.SIGKILL)
-	d.waitOnce.Do(d.wait)
+	// ESRCH is the benign race: the group left on its own between the caller's
+	// decision and this signal. Every other error is a real fault.
+	if err := syscall.Kill(-d.cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		d.t.Errorf("harness: SIGKILL process group %d: %v", d.cmd.Process.Pid, err)
+	}
+	if !d.awaitReapWithin(reapGrace) {
+		d.t.Errorf("harness: the daemon was still unreaped %s after SIGKILL", reapGrace)
+	}
+}
+
+// awaitReapWithin drives the process's one cmd.Wait to completion on a
+// background goroutine and reports whether it finished within budget. The
+// waitOnce still guarantees exactly one Wait per process; moving the blocking
+// call off the caller's goroutine is what makes the caller's wait bounded.
+func (d *Daemon) awaitReapWithin(budget time.Duration) bool {
+	reaped := make(chan struct{})
+	go func() {
+		d.waitOnce.Do(d.wait)
+		close(reaped)
+	}()
+	select {
+	case <-reaped:
+		return true
+	case <-time.After(budget):
+		return false
+	}
 }
 
 func (d *Daemon) signal(sig syscall.Signal) {
