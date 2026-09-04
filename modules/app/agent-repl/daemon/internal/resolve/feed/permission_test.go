@@ -490,3 +490,87 @@ func TestAnUndecidableDenialWithNoDetailStillNamesTheMissingDecider(t *testing.T
 		t.Fatalf("text = %q, want the bare want-of-a-decider wording", got)
 	}
 }
+
+// A GATE CAN SETTLE WITHOUT EVER ASKING. `!perm-undecidable` denies a call
+// whose classifier reached no verdict, and the vendor opens no ask for it, so
+// the consent card is composed from a `Success` frame alone -- with no `Start`
+// frame to carry the vendor's sentence. `FeedPermission.headline` is required
+// all the same, and a card published without one draws as an unreadable row
+// on the client rather than as the denial it is.
+func TestACardWhoseAskNeverOpenedStillCarriesAHeadline(t *testing.T) {
+	// Arrange -- the gated call is drawn, and then denied with no ask.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "./unknown-binary --flag"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_Undecidable{
+					Undecidable: &conversationv1.AgentPermissionDeniedForWantOfDecider{},
+				},
+			},
+		},
+	})
+
+	// Assert -- the tool's own name, which is what the vendor's title carries
+	// when the vendor composes none of its own.
+	if got := h.permissionCard().GetHeadline().GetText(); got != "Bash" {
+		t.Fatalf("headline = %q, want the gated tool's name", got)
+	}
+}
+
+// The gated call may be one the feed never drew. The card names no tool it
+// cannot identify, and still carries the required headline.
+func TestACardWhoseGatedCallIsUnknownStillCarriesAHeadline(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	h.ask("ask-1", "", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_Undecidable{
+					Undecidable: &conversationv1.AgentPermissionDeniedForWantOfDecider{},
+				},
+			},
+		},
+	})
+
+	// Assert.
+	if got := h.permissionCard().GetHeadline().GetText(); got != "a gated call" {
+		t.Fatalf("headline = %q, want the unnamed-call wording", got)
+	}
+}
+
+// An ask that DID open keeps the vendor's sentence: the fallback never
+// overwrites a headline the vendor actually stated.
+func TestAnOpenedAsksHeadlineSurvivesItsAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to read foo.txt"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act.
+	h.ask("ask-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_Undecidable{
+					Undecidable: &conversationv1.AgentPermissionDeniedForWantOfDecider{},
+				},
+			},
+		},
+	})
+
+	// Assert.
+	if got := h.permissionCard().GetHeadline().GetText(); got != "Claude wants to read foo.txt" {
+		t.Fatalf("headline = %q, want the vendor's own sentence", got)
+	}
+}
