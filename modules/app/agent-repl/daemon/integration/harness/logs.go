@@ -214,6 +214,31 @@ func ShimLoggedRequest(t *testing.T, workspaceDir, rpc string, into proto.Messag
 	return found
 }
 
+// AwaitShimLoggedRequestMatching waits for the LAST request the fake shim
+// recorded for a verb to satisfy the predicate, leaving it decoded in `into`.
+//
+// It exists for the verbs a workspace sees TWICE — a session started, parked,
+// and started again — where "a request was logged" is already true of the
+// EARLIER one, and only the request's own content tells the two apart. Waiting
+// on the durable log rather than on a live control socket is also what makes
+// such a wait survive a shim whose second life the daemon may end at any
+// moment.
+func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, into proto.Message, pred func() bool) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if ShimLoggedRequest(d.t, workspaceDir, rpc, into) && pred() {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, d.ctx.Err())
+		}
+	}
+}
+
 // AwaitShimLoggedRequest waits for the fake shim to have logged one request for
 // a verb, and decodes the last one.
 func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Message) {
