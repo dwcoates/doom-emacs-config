@@ -105,16 +105,30 @@ func sfAwaitConclusion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, tur
 	})
 }
 
-// sfSessionArmRecords counts the footer resolver's own records for one
-// SessionUpdate arm on the workspace's daemon sink. The footer resolver logs
-// every arm it takes, including the ones it deliberately draws nothing from
-// (resolver.go's sessionArm: "Every arm has a branch"), which is what makes
-// this countable.
-func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, arm string) int {
+// The two daemon records that name a SessionUpdate arm, one per resolver that
+// takes session facts.
+const (
+	sfFooterSessionUpdate = "daemon.footer.on_session_update"
+	sfTopbarSessionUpdate = "daemon.topbar.on_session_update"
+)
+
+// sfSessionArmRecords counts one resolver's own records for one SessionUpdate
+// arm on the workspace's daemon sink. Both the footer and the topbar log every
+// arm they take, including the ones they deliberately draw nothing from
+// (each resolver.go's sessionArm: "Every arm has a branch"), which is what
+// makes this countable.
+//
+// WHICH RESOLVER IS NOT A CHOICE. daemon/internal/sessionwatcher/route.go
+// routes each arm to the views that resolve from it, and the split is stated
+// there once: "session identity and health are the topbar's, accounting and
+// the rate-limit status are the footer's". So an arm's records stand on
+// exactly one of the two operations, and a test that greps the other one
+// would wait forever on a hop that never happens.
+func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm string) int {
 	t.Helper()
 	n := 0
 	for _, r := range w.WorkspaceLog(workspaceDir, "daemon") {
-		if r.Operation == "daemon.footer.on_session_update" && r.Context["arm"] == arm {
+		if r.Operation == operation && r.Context["arm"] == arm {
 			n++
 		}
 	}
@@ -123,21 +137,21 @@ func sfSessionArmRecords(t *testing.T, w *World, workspaceDir, arm string) int {
 
 // sfAwaitSessionArmRecords waits until at least want records for the arm
 // stand on the workspace's daemon sink.
-func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, arm string, want int) {
+func sfAwaitSessionArmRecords(t *testing.T, w *World, workspaceDir, operation, arm string, want int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		if got := sfSessionArmRecords(t, w, workspaceDir, arm); got >= want {
+		if got := sfSessionArmRecords(t, w, workspaceDir, operation, arm); got >= want {
 			return
 		}
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			t.Fatalf("e2e: waiting for %d %q session-update records on the workspace's daemon sink, saw %d",
-				want, arm, sfSessionArmRecords(t, w, workspaceDir, arm))
+			t.Fatalf("e2e: waiting for %d %q session-update records under %q on the workspace's daemon sink, saw %d",
+				want, arm, operation, sfSessionArmRecords(t, w, workspaceDir, operation, arm))
 			return
 		}
 	}
@@ -190,9 +204,12 @@ func sfRateLimited(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRat
 // three arms, so the drawn assertion this test would otherwise make cannot
 // be written against the frozen contract. Asserted instead: the scenario's
 // exact conclusion prose (which of the two states ran), and a FRESH
-// fast_mode arm reaching the daemon's footer resolver for this workspace —
+// fast_mode arm reaching the daemon's TOPBAR resolver for this workspace —
 // proof the typed SessionFastMode crossed the shim's converter and the
 // daemon's session-stream boundary, which is every hop that exists.
+//
+// The topbar is the one resolver the arm reaches: sessionwatcher/route.go
+// routes fast_mode to the topbar alone, so the footer never takes it.
 // ===========================================================================
 
 func TestFastModeOffAndCooldownStatesReachTheDaemon(t *testing.T) {
@@ -213,14 +230,14 @@ func TestFastModeOffAndCooldownStatesReachTheDaemon(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange: what the daemon had already taken before this
 			// scenario ran, so the wait below is for a NEW record.
-			before := sfSessionArmRecords(t, w, workspaceDir, "fast_mode")
+			before := sfSessionArmRecords(t, w, workspaceDir, sfTopbarSessionUpdate, "fast_mode")
 
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
 
 			// Assert
 			sfAwaitConclusion(t, w, ws, turn, tc.conclusion)
-			sfAwaitSessionArmRecords(t, w, workspaceDir, "fast_mode", before+1)
+			sfAwaitSessionArmRecords(t, w, workspaceDir, sfTopbarSessionUpdate, "fast_mode", before+1)
 		})
 	}
 }
@@ -246,8 +263,19 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 	// Arrange
 	w, ws, _ := sfNewWorkspace(t)
 
-	// Act: the session starts on the five-server catalog (fake/index.ts's
-	// mcpArm defaults to "all"); this narrows it to the connected one.
+	// Arrange: STATE the five-server catalog on the daemon first. The shim
+	// probes mcpServerStatus() at StartSession too, but those start-time
+	// pushes predate this test's daemon subscription, so the only catalog
+	// this test can rely on the daemon having taken is one a turn CLOSE
+	// pushed (engine/session.ts reprobeSessionFacts). `!mcp-all` is that
+	// turn, and it is what makes the narrowing below a NARROWING rather than
+	// the first catalog the daemon ever saw.
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-all")
+	awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
+		return v != nil && len(v.GetRows()) == 5
+	})
+
+	// Act: narrow the catalog to the connected server alone.
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "mcp-healthy")
 	panel := awaitMcpPanel(t, w, ws, func(v *frontendv1.McpPanelView) bool {
 		return v != nil && len(v.GetRows()) == 5
@@ -362,7 +390,7 @@ func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w, ws, workspaceDir := sfNewWorkspace(t)
-	before := sfSessionArmRecords(t, w, workspaceDir, "rate_limit_status")
+	before := sfSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status")
 	footer := w.WatchFooter(ws)
 	defer footer.Close()
 
@@ -393,7 +421,7 @@ func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
 	if weekly.GetResetsAtS() == 0 {
 		t.Errorf("FooterAllowance(weekly).resets_at_s = 0, want the event's reset instant in epoch SECONDS")
 	}
-	sfAwaitSessionArmRecords(t, w, workspaceDir, "rate_limit_status", before+1)
+	sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "rate_limit_status", before+1)
 }
 
 // ===========================================================================
@@ -496,7 +524,7 @@ func TestAccountUsageOutcomeArmsAreSampledAfterTheSwitch(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			before := sfSessionArmRecords(t, w, workspaceDir, "account_usage")
+			before := sfSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "account_usage")
 
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
@@ -505,7 +533,7 @@ func TestAccountUsageOutcomeArmsAreSampledAfterTheSwitch(t *testing.T) {
 			// conclusion (session.ts usageScenario composes it verbatim).
 			sfAwaitConclusion(t, w, ws, turn,
 				"The account-usage probe now answers with the "+tc.name+" shape.")
-			sfAwaitSessionArmRecords(t, w, workspaceDir, "account_usage", before+1)
+			sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "account_usage", before+1)
 		})
 	}
 }
