@@ -54,6 +54,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -178,23 +179,6 @@ func dbAwaitSimpleToolCall(
 	return row.GetActivity().GetSimpleToolCall().GetReturned()
 }
 
-// dbAwaitTopbarWarning drives the topbar stream until a warning matching pred
-// appears, and answers it.
-func dbAwaitTopbarWarning(t *testing.T, ctx context.Context, stream *harness.Stream[*frontendv1.TopbarView], pred func(*frontendv1.TopbarWarning) bool) *frontendv1.TopbarWarning {
-	t.Helper()
-	var found *frontendv1.TopbarWarning
-	harness.AwaitView(t, ctx, stream, "a matching topbar warning", func(v *frontendv1.TopbarView) bool {
-		for _, w := range v.GetWarnings().GetWarnings() {
-			if pred(w) {
-				found = w
-				return true
-			}
-		}
-		return false
-	})
-	return found
-}
-
 // ===========================================================================
 // #31 — BashDetachedStartAndComplete.
 //
@@ -253,12 +237,21 @@ func TestBashDetachedStartAndComplete(t *testing.T) {
 // tool_use/tool_result pairs are the mock's own invention, mirrored from the
 // deleted daemon/e2e harness's `bashTaskOutcome`.
 //
-// The scenario's own "arms" comment states the polls "reach no converter
-// arm — TaskOutput is unregistered and folds to AgentUnmodeled." Confirmed
-// against daemon/internal/resolve/topbar/warnings.go's unmodeledWarnings:
-// the composed line is "an unmodeled tool ran: <name>" and the detail arm is
-// unmodeled_tool with ToolName.Text == the raw tool name — so this test
-// asserts the topbar warning by that exact text, not a guess.
+// The scenario's own "arms" comment claims the polls "reach no converter
+// arm — TaskOutput is unregistered and folds to AgentUnmodeled." THAT CLAIM
+// IS WRONG AND THE PROTO WINS: docs/overhaul/shim.md's "What the shim DROPS"
+// paragraph names TaskOutput in the EXEMPT set — "dropped entirely, never
+// emitted as `AgentUnmodeled`, never tripping the unmodeled warning" — and
+// the converter implements exactly that (shim-sidecar/internal/convert/
+// exempt.go's exemptTools, covered by settle_test.go's
+// TestExemptToolCallProducesNoEntryAtAll). An exempt drop is a DECISION, not
+// a modelling gap, so filing it as unmodeled would pollute the very warning
+// built to surface real gaps.
+//
+// So the guarantee this test holds is the negative one, and it is stronger
+// than the arbitrary line-text assertion it replaces: an explicit poll of a
+// detached shell settles the shell and raises NO unmodeled-tool warning
+// naming TaskOutput.
 // ===========================================================================
 
 func TestBashDetachExplicitPoll(t *testing.T) {
@@ -289,16 +282,36 @@ func TestBashDetachExplicitPoll(t *testing.T) {
 		t.Errorf("settled shell spool = %q, want it to contain the scenario's last appended line %q", got, "done")
 	}
 
-	warningCtx, warningCancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer warningCancel()
-	warning := dbAwaitTopbarWarning(t, warningCtx, topbarStream, func(tw *frontendv1.TopbarWarning) bool {
-		return tw.GetUnmodeledTool().GetToolName().GetText() == "TaskOutput"
-	})
-	if warning == nil {
-		t.Fatalf("no topbar warning named the unmodeled TaskOutput tool within %s", DefaultTimeout)
-	}
-	if got := warning.GetLine().GetText(); got != "an unmodeled tool ran: TaskOutput" {
-		t.Errorf("warning line = %q, want the composed unmodeled-tool sentence", got)
+	// The settled shell above is ordered AFTER both polls were converted, so
+	// every topbar view the exempt drop could ever have provoked has already
+	// been published or is in flight; the probe window covers the in-flight
+	// tail. Every view seen — the initial one and any later push — must be
+	// free of a TaskOutput unmodeled warning.
+	dbExpectNoUnmodeledWarning(t, topbarStream, "TaskOutput")
+}
+
+// dbExpectNoUnmodeledWarning drains the topbar stream for one probe window and
+// fails if any view carries an unmodeled-tool warning naming the given tool.
+// Other warnings (the detached work's open fault) are expected and ignored.
+func dbExpectNoUnmodeledWarning(t *testing.T, stream *harness.Stream[*frontendv1.TopbarView], tool string) {
+	t.Helper()
+	timer := time.NewTimer(harness.ProbeWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case v, ok := <-stream.C:
+			if !ok {
+				return
+			}
+			for _, tw := range v.GetWarnings().GetWarnings() {
+				if tw.GetUnmodeledTool().GetToolName().GetText() == tool {
+					t.Fatalf("topbar carried an unmodeled-tool warning %q for the exempt tool %s, want none: the exempt set is dropped entirely, never filed as unmodeled",
+						tw.GetLine().GetText(), tool)
+				}
+			}
+		case <-timer.C:
+			return
+		}
 	}
 }
 
