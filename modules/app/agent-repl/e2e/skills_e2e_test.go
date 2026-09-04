@@ -189,3 +189,73 @@ func runSkillScenarioCase(t *testing.T, tc skillScenarioCase) {
 		t.Errorf("loaded skill card's allowances = nil, want the fake's declared allowedTools to have produced one")
 	}
 }
+
+// TestSkillFailed drives `!skill-fail` (skills.ts SKILL_FAIL: a `Skill` call
+// for a name that does not resolve, answered `isError: true` with no
+// document), and asserts the FAILED arm of the same card the two tests above
+// assert the loaded arm of.
+//
+// feed.proto names the arm and its content: FeedSkillFailed is "the failed
+// state" carrying "the daemon's composed reason, drawn verbatim". The daemon
+// composes that reason from the tool failure's own text blocks
+// (daemon/internal/resolve/feed/skill.go's skillFailureText -> failureText),
+// so the fake's error result crosses to the card unchanged and the exact
+// string is assertable. This was previously covered only at the webapp layer,
+// and only as "[data-state] is present and non-empty" — which the running and
+// loaded arms satisfy just as well.
+func TestSkillFailed(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "skill-fail")
+
+	// Assert: the card settles specifically into Failed — not Running, not
+	// Loaded, and not Denied (which is the permission card's story, a
+	// different arm entirely).
+	row := awaitSkillFailedRow(t, w, ws, turn)
+	card := row.GetActivity().GetSkill()
+	if card.GetLoaded() != nil {
+		t.Fatalf("failing skill card drew the loaded arm as well: %v", card)
+	}
+	if card.GetDenied() != nil {
+		t.Fatalf("failing skill card drew the denied arm, want failed: %v", card)
+	}
+	if got, want := card.GetFailed().GetText(), "Error: no such skill: absent-skill"; got != want {
+		t.Errorf("failed skill card's composed reason = %q, want %q", got, want)
+	}
+	// The invocation line still names what was attempted: a card that failed
+	// is the record of the attempt, so it must say which skill was asked for.
+	if inv := card.GetInvocation().GetText(); !strings.Contains(inv, "absent-skill") {
+		t.Errorf("failed skill card's invocation line = %q, want it to name the attempted skill %q", inv, "absent-skill")
+	}
+}
+
+// awaitSkillFailedRow is awaitSkillLoadedRow for the failed arm: the
+// already-materialized page first (driveScenarioToCompletion has already
+// waited for the turn's terminal), then the live tail.
+func awaitSkillFailedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) *frontendv1.FeedRow {
+	t.Helper()
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	isSkillFailed := func(row *frontendv1.FeedRow) bool {
+		return row.GetTurn().GetValue() == turn.GetValue() && row.GetActivity().GetSkill().GetFailed() != nil
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if isSkillFailed(row) {
+			return row
+		}
+	}
+	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
+	defer stream.Close()
+	return harness.AwaitView(t, w.Ctx(), stream, "the failed skill card for turn "+turn.GetValue(), isSkillFailed)
+}

@@ -392,6 +392,34 @@ func TestModelChanged(t *testing.T) {
 	if ended.GetConcluded() == nil {
 		t.Fatalf("FeedTurnEnded.Outcome = %v, want Concluded (the fallback turn still answers successfully)", ended)
 	}
+
+	// The fallback ITSELF, asserted on the shape the PROTO names for it.
+	// conversation/v1/session.proto:173-174 states, verbatim, "The effective
+	// model changed — by SetSessionModel, OR BY THE VENDOR. Stated here even
+	// when the consumer asked for it, so one place is authoritative." The
+	// drawn consequence is frontend/v1/topbar.proto:124-133's
+	// TopbarModelSelector.selected ("the current selection, WHOLE"), which
+	// daemon/internal/resolve/topbar/resolver.go fills from
+	// SessionUpdate.model_changed. The fake swaps a default-model session to
+	// `fake-sonnet-5` (session.ts MODEL_FALLBACK: `original === "fake-sonnet-5"
+	// ? "fake-haiku-4-5" : "fake-sonnet-5"`, and the fake's default is
+	// FAKE_DEFAULT_MODEL — fake/catalogs.ts), so the selection is exact.
+	//
+	// DISPUTE, reported rather than weakened: the shim engine mints
+	// `modelChanged` ONLY from SetSessionModel's own applyModel
+	// (engine/session.ts:1239, :2260); nothing folds the vendor's
+	// `system:model_refusal_fallback` line into one. The proto says the
+	// unsolicited case is stated here too, so this assertion is written to the
+	// proto and is expected to fail until the shim pushes it.
+	const wantFallbackModel = "fake-sonnet-5"
+	topbar := w.WatchTopbar(ws)
+	defer topbar.Close()
+	view := harness.AwaitView(t, w.Ctx(), topbar, "the topbar model selector to name the fallback model", func(v *frontendv1.TopbarView) bool {
+		return v.GetModelSelector().GetSelected().GetModel().GetName() == wantFallbackModel
+	})
+	if got := view.GetModelSelector().GetSelected().GetModel().GetName(); got != wantFallbackModel {
+		t.Errorf("TopbarModelSelector.Selected.Model.Name = %q, want %q (the vendor's unsolicited fallback)", got, wantFallbackModel)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +459,24 @@ func TestFastMode(t *testing.T) {
 	}
 	if ended.GetConcluded() == nil {
 		t.Fatalf("FeedTurnEnded.Outcome = %v, want Concluded (success.completed)", ended)
+	}
+
+	// DISPUTE, reported rather than papered over: frontend/v1 names NO
+	// fast-mode shape anywhere — not on the footer, not on the topbar (a
+	// full grep of proto/src/frontend/v1 for "fast" answers nothing). Fast
+	// mode exists only as conversation/v1's SessionFastMode
+	// (session.proto:328-347) and as ModelOption.supports_fast_mode
+	// (api.proto:175-176), neither of which is a drawn surface. So the proto
+	// itself, not merely the engine, is where the fast-mode state stops; the
+	// strongest frontend fact available is the answer the fake's fast-mode
+	// turn concludes with, which names the state the result reported
+	// (session.ts fastModeScenario: `const conclusion = ` + "`Fast mode is ${state}.`" + `,
+	// echoed by both the assistant block and result.result). That pins the
+	// `on` arm specifically, so `!fast-off`/`!fast-cooldown` could not pass
+	// this test.
+	const wantFastAnswer = "Fast mode is on."
+	if got := tlResponseMarkdown(t, tlOpenRows(t, w, ws), ended.GetConcluded().GetAnswer()); got != wantFastAnswer {
+		t.Errorf("settled response markdown = %q, want %q (the fast-mode ON state)", got, wantFastAnswer)
 	}
 }
 
