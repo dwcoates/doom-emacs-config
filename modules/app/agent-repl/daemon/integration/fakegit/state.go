@@ -243,10 +243,16 @@ func (s *State) Repo(dir string) *Repo {
 	return repo
 }
 
-// MintSHA answers the next deterministic commit sha.
+// MintSHA answers the next deterministic commit sha. The sequence number is
+// scrambled into the LEADING digits rather than the trailing ones, because
+// real git abbreviates a sha to the shortest unique prefix and magit prints
+// that: shas differing only in their last digit would each abbreviate to the
+// full forty characters, which no real repository ever shows.
 func (s *State) MintSHA() string {
 	s.Seq++
-	return fmt.Sprintf("%040x", s.Seq)
+	// Knuth's multiplicative constant, taken modulo 2^32 by the cast, keeps
+	// consecutive sequence numbers far apart in the leading digits.
+	return fmt.Sprintf("%08x%032x", uint32(s.Seq)*2654435761, s.Seq)
 }
 
 // AddCommit records a commit and points a branch at it.
