@@ -1785,9 +1785,22 @@ func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
 // ("hibernated"), decideSource (internal/workspace/sessions.go) treats
 // anything but "deleted" as resumable, so the mount resumes the vendor
 // session exactly as a revival does.
+//
+// THE 50ms CUTOFF BELONGS TO THE ARRANGEMENT AND NOTHING ELSE, and that split
+// is why this test runs two daemons. The park needs a compressed cutoff; the
+// ACT needs the daemon NOT to have one, because a re-mounted session is born
+// idle and a still-armed 50ms sweep parks it again — taking its control socket
+// with it — while OpenWorkspace is still bringing it up. Nothing in the
+// assertion could then say whether it observed the mount or the race, and the
+// suite lost a run to it. The hibernated terminal is DURABLE (wsm's session
+// row), so a successor on the same state root reads exactly the row this test
+// is about, with no sweep armed to disturb the mount. It is the same
+// stop-and-restart arrangement TestOpenWorkspaceOnATerminallyDeletedSession-
+// AnswersSessionDeleted uses to reach its own terminal row.
 func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	t.Parallel()
-	// Arrange: hibernate the session via the idle sweep.
+	// Arrange: hibernate the session via the idle sweep, then retire the
+	// daemon that had the cutoff armed.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
@@ -1806,21 +1819,31 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
 	})
+	f.d.Stop()
 
-	// Act: OpenWorkspace re-mounts the parked session directly.
-	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+	// Act: a successor with NO compressed cutoff re-mounts the parked session.
+	// THE ACCOUNT ROOTS COME WITH IT. StartDaemon mints fresh ones per daemon,
+	// and the resume's transcript was filed under the incumbent's — a
+	// successor given new roots finds no transcript for the vendor session it
+	// is resuming, which is a different subject than this test's.
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraArgs: []string{
+			"--default-config-dir", f.d.DefaultConfigDir,
+			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
+		},
+		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir},
+	})
+	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills.
+	successor.ExpectWarnings("daemon.workspace.bring_up")
+	if _, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
 	}
-	// THE RE-MOUNTED SESSION IS BORN IDLE, and this daemon's 50ms cutoff — the
-	// one the Arrange needed — is still armed, so the sweep parks the mount
-	// again and takes its control socket with it within a sweep. Dialing that
-	// socket is therefore a race the assertion can only sometimes win. The
-	// request is read instead from the fake's DURABLE log, which the mount
-	// writes on the way up (nothing can park a session before it has been
-	// started) and which outlives the second shim. The wait names the resume
-	// because the Arrange's own StartSession is already in that log.
+	// The request is read from the fake's DURABLE log, which spans both shims
+	// and both daemons; the wait names the RESUME because the Arrange's own
+	// fresh StartSession is already in that log.
 	req := &shimv1.StartSessionRequest{}
-	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+	successor.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
 		"a StartSession resuming the hibernated session", req,
 		func() bool { return req.GetResume() != nil })
 
