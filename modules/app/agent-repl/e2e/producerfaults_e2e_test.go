@@ -608,18 +608,25 @@ func TestTokensReminderDrawsNoRow(t *testing.T) {
 	}
 }
 
-// TestContextWindowExceededIsDrawnAsRequestTooLarge drives
-// `!context-window`. It is the odd one in this group: not bookkeeping at
-// all, but a TERMINAL — its arms line is "AgentResponseFailure.reason=
-// context_window_exceeded and AgentFailure.prompt_too_long", and
-// turnended.go maps AgentFailure.prompt_too_long onto feed.proto's
-// FeedTurnErrorRequestTooLarge with the composed headline "the prompt was
-// too long to send — the context must be cut first".
+// TestContextWindowExceededIsDrawnAsTurnFailed drives `!context-window`. It
+// is the odd one in this group: not bookkeeping at all, but a TERMINAL — its
+// arms line is "AgentResponseFailure.reason=context_window_exceeded and
+// AgentFailure.prompt_too_long".
+//
+// THE PROTO RULES THE ARM, and this test formerly asserted request_too_large
+// against a daemon that no longer draws it. feed.proto confines
+// FeedTurnErrorRequestTooLarge to "413 — the request exceeded the size
+// limit", an API status, while AgentFailure.prompt_too_long is a PRODUCER
+// terminal that never carried an API status. Its home is therefore
+// FailureVendorTurnFailed — "every other unclassified abnormal end;
+// `stop_reason` names the vendor's own word" — with the stop reason
+// `prompt_too_long`. Ruled and implemented in 3617b4aaa; the test is
+// corrected to the contract rather than the daemon to the test.
 //
 // The headline is asserted as a stated sentence rather than a pinned string:
 // FeedTurnErrorHeadline is contracted only as "The sentence, drawn
 // verbatim".
-func TestContextWindowExceededIsDrawnAsRequestTooLarge(t *testing.T) {
+func TestContextWindowExceededIsDrawnAsTurnFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -637,8 +644,15 @@ func TestContextWindowExceededIsDrawnAsRequestTooLarge(t *testing.T) {
 	if errored == nil {
 		t.Fatalf("turn ended = %v, want the errored arm", ended)
 	}
-	if errored.GetRequestTooLarge() == nil {
-		t.Fatalf("turn error = %v, want request_too_large (turnended.go's arm for AgentFailure.prompt_too_long)", errored)
+	failed := errored.GetTurnFailed()
+	if failed == nil {
+		t.Fatalf("turn error = %v, want turn_failed (feed.proto's arm for a producer terminal with no drawn counterpart)", errored)
+	}
+	if got := failed.GetStopReason(); got != "prompt_too_long" {
+		t.Errorf("turn_failed stop_reason = %q, want %q (the producer's own word)", got, "prompt_too_long")
+	}
+	if errored.GetRequestTooLarge() != nil {
+		t.Errorf("turn error drew request_too_large, which feed.proto confines to the vendor's 413")
 	}
 	if errored.GetHeadline().GetText() == "" {
 		t.Errorf("turn error headline = %q, want the daemon's composed sentence", errored.GetHeadline().GetText())
