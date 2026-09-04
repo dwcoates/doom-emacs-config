@@ -2494,11 +2494,13 @@ describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () =>
 /**
  * A gated call raised INSIDE a subagent (engine/session.ts's `agentFor`).
  *
- * The vendor mints `canUseTool`'s `agentID` from the spawning `tool_use_id`,
- * which is the key the LIVE detached-work table is addressable by -- and not a
- * key the announced-agent set holds, so before this every permission and
- * question raised under a subagent landed on the main agent's book with "the
- * vendor raised an ask under an agent this session never announced".
+ * `canUseTool`'s `agentID` is the agent TASK id, verbatim -- the same string
+ * `task_started.task_id` states for the `local_agent` task (the capture corpus
+ * settles it: testdata/captures/ctrl-b-detach-of-foreground-subagent). The
+ * session ANNOUNCES the subagent under the spawning call's `tool_use_id`
+ * instead, so before this every permission and question raised under a
+ * subagent landed on the main agent's book with "the vendor raised an ask
+ * under an agent this session never announced".
  */
 describe("an ask raised under a subagent's vendor agent id", () => {
   /** Announce a live detached agent task spawned by `toolu_spawn`. */
@@ -2528,7 +2530,27 @@ describe("an ask raised under a subagent's vendor agent id", () => {
     return undefined;
   };
 
-  it("books the ask under the live subagent", async () => {
+  it("books an ask named by the vendor task id under the live subagent", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "a01",
+      requestId: "req_1",
+    } as never);
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    expect(permissionBook(h)).toBe("toolu_spawn");
+  });
+
+  it("books an ask named by the spawning call under the live subagent", async () => {
     const h = harness();
     await started(h);
     await spawnSubagent(h);
@@ -2568,7 +2590,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
     const pending = spec.canUseTool("Bash", {}, {
       signal: new AbortController().signal,
       toolUseID: "toolu_inner",
-      agentID: "toolu_spawn",
+      agentID: "a01",
       requestId: "req_1",
     } as never);
     await Promise.resolve();
