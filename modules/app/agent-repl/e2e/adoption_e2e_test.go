@@ -150,15 +150,17 @@ const adTookSessionFactsMessage = "took the session facts from the shim's re-ann
 // SAME watch (an ordinary re-open after a link break, not a new watcher).
 const adIgnoredReannouncementMessage = "ignored a re-announced SessionStarted; the facts are already held"
 
-// adCountLogMessage counts a workspace's own daemon-log records matching an
-// exact operation and a message substring. The per-workspace log sink
-// (harness.WorkspaceLogPath) lives under the workspace directory itself,
-// never under a daemon's own restart-scoped state root, so it accumulates
-// across a crash + cold boot in ONE file — this reads the cumulative record.
+// adCountLogMessage counts a workspace's daemon-log records matching an exact
+// operation and a message substring, ACROSS EVERY DAEMON RUNTIME that wrote
+// the sink. The canonical <workspace>/.claude/emacs/daemon.log symlink is NOT
+// cumulative: internal/dlog/sink.go mints a fresh target per runtime ("A
+// restart never trusts the previous run's destination") and re-points the link
+// at it, so after a cold boot the link answers only the successor's own
+// records. harness.ReadCumulativeWorkspaceLog reads every runtime's target.
 func adCountLogMessage(t *testing.T, workspaceDir, op, substr string) int {
 	t.Helper()
 	n := 0
-	for _, r := range harness.ReadLog(t, harness.WorkspaceLogPath(workspaceDir, "daemon")) {
+	for _, r := range harness.ReadCumulativeWorkspaceLog(t, workspaceDir, "daemon") {
 		if r.Operation == op && strings.Contains(r.Message, substr) {
 			n++
 		}
@@ -201,14 +203,14 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 1 {
 		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want exactly 1 (its session watch, opened after StartSession, draws one)", got)
 	}
-	baseline := w.WorkspaceLogOperationCount(repo.Dir, adWatchSessionOp)
+	baseline := w.CumulativeWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp)
 
 	// Act: crash-adopt onto the SAME still-running real shim — PROTO-CHANGES.md
 	// Landing 7: the shim re-announces SessionStarted once per watch "so an
 	// adopting daemon (crash boot, handover) attaches purely."
 	successor := adColdBoot(t, w)
 	successor.WatchWorkspaceLogs(repo.Dir)
-	successor.AwaitWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
+	successor.AwaitCumulativeWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
 
 	// Assert: the exact cardinality (SPEC.md #48), not merely presence. The
 	// successor's fresh watcher — the first watch this session has seen
