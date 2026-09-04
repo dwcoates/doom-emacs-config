@@ -418,3 +418,73 @@ func TestASecondManifestReadKeepsAPartialRendezvousLedger(t *testing.T) {
 		t.Fatalf("rendezvous entry was re-armed (same=%v, host_called=%v), want the ledger kept", again == first, again.hostCalled)
 	}
 }
+
+// writeHeadlessManifest lays down an intent manifest naming one workspace that
+// nobody holds the streams of, WITHOUT joining from it.
+func writeHeadlessManifest(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	t.Helper()
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if err := h.c.writeManifest(context.Background(), Manifest{
+		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
+		Successor: "127.0.0.1:7788",
+		WrittenAt: instant,
+		Sessions: []ManifestSession{{
+			Workspace: ws, Dir: record.Dir, ShimPID: 4242,
+			VendorSessionID: "vendor-1", Intent: IntentPreserve,
+		}},
+	}); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+}
+
+// TestHeadlessWorkspaceArmedByAnEarlierReadIsStillAdopted pins the case that
+// stalled a handover: a participant's own adopt call re-reads the manifest and
+// arms every session in it, so the joining poll that follows adds nothing. A
+// headless workspace has NO participant to adopt it, so if the join skipped
+// what it did not itself arm, nobody ever adopted it and the outgoing daemon
+// waited out the entire adoption window.
+func TestHeadlessWorkspaceArmedByAnEarlierReadIsStillAdopted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHeadlessManifest(t, h, ws)
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+
+	// Act
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("adoptions = %v, want the headless workspace adopted despite the earlier arming", got)
+	}
+}
+
+// TestHeadlessWorkspaceIsAdoptedOnceAcrossTwoReads pins the other side: the
+// manifest is read more than once by design, and each read must not re-adopt
+// what an earlier one already took.
+func TestHeadlessWorkspaceIsAdoptedOnceAcrossTwoReads(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHeadlessManifest(t, h, ws)
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+
+	// Act
+	if _, err := h.c.joinFromManifest(context.Background()); err != nil {
+		t.Fatalf("joinFromManifest: %v", err)
+	}
+
+	// Assert
+	if got := h.fleet.Adoptions(); len(got) != 1 {
+		t.Fatalf("adoptions = %v, want exactly one across the two manifest reads", got)
+	}
+}
