@@ -52,6 +52,23 @@ describe("Read", () => {
     expect(file.startLine).toBe(2);
   });
 
+  it("marks the truncated read `truncatedByTokenCap`, the arm's only signal", async () => {
+    // Arrange + Act
+    const result = await firstResult("!read-truncated");
+
+    // Assert. Without this the fixture declares a token cap and yields a line
+    // cap: the converter reads this field and nothing else for that arm.
+    expect((result.file as { truncatedByTokenCap?: boolean }).truncatedByTokenCap).toBe(true);
+  });
+
+  it("leaves the LINE-capped head unmarked, which is what separates the two cuts", async () => {
+    // Arrange + Act
+    const result = await firstResult("!read-head");
+
+    // Assert
+    expect((result.file as { truncatedByTokenCap?: boolean }).truncatedByTokenCap).toBeUndefined();
+  });
+
   it("carries the truncation notice as an attachment naming the call", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!read-truncated"]);

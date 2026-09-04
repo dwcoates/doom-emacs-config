@@ -825,6 +825,16 @@ describe("the named rate-limit windows", () => {
     expect(rateLimitInfo(driven).utilization).toBe(0.82);
   });
 
+  it("states a seven-day utilization ABOVE the footer's newsworthy gate", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rate-limit-seven-day"]);
+
+    // Assert. Below the daemon's DefaultRateLimitNewsworthyThreshold (0.8) the
+    // weekly allowance is never drawn at all, so the arm this scenario exists
+    // for would be unreachable from it.
+    expect(rateLimitInfo(driven).utilization as number).toBeGreaterThan(0.8);
+  });
+
   it("states a reset instant in SECONDS, as the vendor does", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!rate-limit-seven-day"]);
