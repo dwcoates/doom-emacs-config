@@ -278,6 +278,34 @@ PROBE
   log "verified: image exists, carries emacs 30.2 (xwidgets + native-comp), Xvfb, node/go/script/doom, a baked doom sync and baked node deps"
 }
 
+# --- host-staged build artifacts ------------------------------------------
+
+# stage_webapp_dist builds the webapp dist ON THE HOST when it is stale, so
+# the container never has to.
+#
+# The Emacs client layer serves the REAL webapp to a real webview, so it
+# needs a real dist. Building it inside the container -- which is what used
+# to happen, once per run -- meant `tsc --noEmit && vite build` running on a
+# tmpfs inside a 5.8 GiB VM: about six seconds and roughly a gigabyte of
+# resident memory for tsc alone, immediately before a real Emacs started.
+# That was the single biggest reason two sandboxes could not run at once.
+#
+# The staleness rule is bin/webapp-dist.sh's, and it is ONE rule: this runs
+# `ensure` (check, and build through bin/build-frontend.sh when stale), and
+# the harness inside the container runs `check` from the SAME script before
+# it hands the dist to the daemon. A stale dist can therefore never be
+# silently served -- it is rebuilt here, or refused there.
+#
+# AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1 skips the host build. It does NOT skip
+# the container's check, so the only thing it can buy is a louder failure.
+stage_webapp_dist() {
+  if [[ ${AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD:-0} == 1 ]]; then
+    log "AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1: not building the webapp dist; the container will refuse a stale one"
+    return 0
+  fi
+  "$here/webapp-dist.sh" ensure
+}
+
 # --- run -------------------------------------------------------------------
 
 do_run() {
@@ -288,6 +316,8 @@ do_run() {
 
   local sha
   sha=$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo unknown)
+
+  stage_webapp_dist
 
   local args=(
     run --rm --init
