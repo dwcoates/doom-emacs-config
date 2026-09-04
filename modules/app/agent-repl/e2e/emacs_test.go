@@ -227,6 +227,13 @@ type Emacs struct {
 	wedgeCause atomic.Pointer[string]
 
 	stopHeartbeat context.CancelFunc
+	// heartbeatDone closes when the detector's goroutine has returned. `stop`
+	// WAITS on it before killing Emacs, because a probe that loses the race
+	// with teardown would otherwise report a killed Emacs as a wedge -- and
+	// `t.Errorf` from a goroutine the test no longer owns is a panic, not a
+	// failure. Cancelling is not enough on its own: the goroutine can already
+	// be past its cancellation check when the cancel lands.
+	heartbeatDone chan struct{}
 
 	// reap are the paths whose appearance in a process's argv marks that
 	// process as this scenario's, so reapStrays can hunt down the daemon
@@ -431,6 +438,30 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		// only thing switched off is a lookup that was always going to fail.
 		"NO_AT_BRIDGE=1",
 		"GTK_A11Y=none",
+		// AND THE AUTOLAUNCH ITSELF, which the two above do not stop.
+		//
+		// `NO_AT_BRIDGE'/`GTK_A11Y' switch off the accessibility CLIENT;
+		// they do not tell libdbus there is no session bus. With
+		// DBUS_SESSION_BUS_ADDRESS unset, the first thing in the process to
+		// want a session bus -- the a11y lookup, GIO, or WebKitGTK, which
+		// the panel's webview starts -- makes libdbus run `dbus-launch
+		// --autolaunch', and that is still observed on every scenario: a
+		// `dbus-launch' and a `dbus-daemon --session' in each teardown's
+		// stray list, on the shipped layer with both variables already set.
+		//
+		// The autolaunch is not merely a wasted fork. It arbitrates through
+		// a PROPERTY ON THE X ROOT WINDOW, taking a server grab to do it, so
+		// two Emacsen booting at once on their own displays still queue --
+		// and boots that took that path are the ones that miss
+		// `doomBootBound' by a factor of six while the pty stays empty,
+		// because nothing about the wait is Emacs's to report.
+		//
+		// `disabled:' is not a bus this layer runs; it is an address libdbus
+		// cannot parse, which is what makes the connection fail AT ONCE
+		// instead of autolaunching. Nothing is given up: there is no session
+		// bus in this container to reach, and no assertion in this layer
+		// touches D-Bus.
+		"DBUS_SESSION_BUS_ADDRESS=disabled:",
 	}, display.Env()...)
 	env = append(env, opts.ExtraEnv...)
 	if opts.StoreSocket != "" {
@@ -684,8 +715,14 @@ func (e *Emacs) awaitDoom() {
 		}
 		select {
 		case <-ctx.Done():
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s); pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.proc.Output())
+			// The kernel's account comes with it, because a boot that
+			// misses this bound writes NOTHING to the pty -- so the pty
+			// output alone reports an empty string and explains nothing.
+			// The Emacs has no readiness stamp and therefore no pid the Go
+			// side knows, but the reaper finds it the same way it always
+			// does: by this scenario's own paths in its environment.
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s; pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(), e.proc.Output())
 		case <-ticker.C:
 		}
 	}
@@ -729,15 +766,57 @@ func (e *Emacs) awaitServer() {
 	}
 }
 
+// heartbeatProbe is the form each probe evaluates.
+//
+// It is NOT `(emacs-pid)' any more, and the reason is a hang this layer used
+// to watch go by. A `y-or-n-p' or `completing-read' nobody can answer blocks
+// the COMMAND LOOP but not the SERVER: `emacsclient --eval' is answered from
+// a process filter, which Emacs still runs while it waits for the keystroke
+// the prompt is asking for. So a standing prompt kept answering `(emacs-pid)'
+// at full speed while the scenario's own eval sat unanswered until its bound
+// killed it -- reported as "emacsclient: signal: killed", which names neither
+// the prompt nor the form that raised it.
+//
+// The probe therefore reports the standing prompt as well as the pid. Nothing
+// in this layer ever types into a minibuffer -- every prompting command is
+// either resolved with `BindingFor' or has its reader stubbed for the
+// duration of the call -- so a prompt that is still up is a prompt that will
+// never come down.
+const heartbeatProbe = `(if-let* ((win (active-minibuffer-window)))
+                            (with-current-buffer (window-buffer win)
+                              (concat "PROMPT " (or (minibuffer-prompt) "<no prompt text>")))
+                          "")`
+
+// bootBreadcrumb answers how far the boot got, from the file the sandbox
+// profile appends a line to at each stage. It is the only witness a boot that
+// never publishes a stamp leaves: the frame is graphical, so Emacs's own
+// messages never reach the pty, and no server exists yet to be asked.
+func (e *Emacs) bootBreadcrumb() string {
+	body, err := os.ReadFile(e.ReadyStamp + ".progress")
+	if err != nil {
+		return fmt.Sprintf("\n  the boot left no breadcrumb at all (%v), so it died before %s was loaded",
+			err, filepath.Join(e.EmacsDir, "init.el"))
+	}
+	return "\n  the boot got as far as:\n    " +
+		strings.ReplaceAll(strings.TrimSpace(string(body)), "\n", "\n    ")
+}
+
 // armHeartbeat starts the wedge detector. It runs for the WHOLE life of the
 // process, teardown included, because the recursion defect this exists to
 // catch fired during close and kill.
 func (e *Emacs) armHeartbeat() {
 	ctx, cancel := context.WithCancel(context.Background())
 	e.stopHeartbeat = cancel
+	e.heartbeatDone = make(chan struct{})
 	go func() {
+		defer close(e.heartbeatDone)
 		ticker := time.NewTicker(heartbeatInterval)
 		defer ticker.Stop()
+		// The prompt seen by the PREVIOUS probe. A wedge is declared only
+		// once the SAME prompt has stood across two consecutive probes, so a
+		// reader a scenario is in the middle of answering through
+		// `execute-kbd-macro' cannot be mistaken for one nobody will.
+		var standing string
 		for {
 			select {
 			case <-ctx.Done():
@@ -746,12 +825,20 @@ func (e *Emacs) armHeartbeat() {
 			}
 			probe, probeCancel := context.WithTimeout(ctx, HeartbeatBound)
 			started := time.Now()
-			_, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", "(emacs-pid)")
+			out, err := e.box.Exec(probe, "emacsclient", "--socket-name", e.ServerSocket, "--eval", heartbeatProbe)
 			probeCancel()
 			if err == nil {
 				if took := int64(time.Since(started)); took > e.heartbeatMax.Load() {
 					e.heartbeatMax.Store(took)
 				}
+				prompt := heartbeatPrompt(out)
+				if prompt != "" && prompt == standing {
+					e.declareWedged(fmt.Sprintf(
+						"a minibuffer prompt nobody can answer has stood for %s: %s",
+						heartbeatInterval, prompt))
+					return
+				}
+				standing = prompt
 				continue
 			}
 			if ctx.Err() != nil || e.proc.Exited() {
@@ -763,6 +850,16 @@ func (e *Emacs) armHeartbeat() {
 	}()
 }
 
+// heartbeatPrompt reads the probe's answer, which emacsclient prints as an
+// elisp string literal, and answers the standing prompt or "" for none.
+func heartbeatPrompt(out string) string {
+	out = strings.TrimSpace(out)
+	if unquoted, err := strconv.Unquote(out); err == nil {
+		out = unquoted
+	}
+	return strings.TrimPrefix(out, "PROMPT ")
+}
+
 // declareWedged records the wedge once and fails the test.
 //
 // It never retries. A hang that clears itself is still the sentinel/
@@ -772,8 +869,14 @@ func (e *Emacs) declareWedged(cause string) {
 	e.wedgeOnce.Do(func() {
 		e.wedgeCause.Store(&cause)
 		close(e.wedged)
-		e.t.Errorf("EMACS WEDGED: %s", cause)
+		e.t.Errorf("EMACS WEDGED: %s%s", cause, e.processSnapshot())
 		e.dumpArtifacts()
+		// LAST, because it waits for Emacs to come back. A wedged Emacs
+		// answers nothing at all -- not the server socket, not a nested eval,
+		// and (measured) not `debug-on-event''s SIGUSR2 either -- so the only
+		// thing that can be recovered is what the profiler armed at boot
+		// already recorded, read out once the stall ends.
+		e.t.Logf("EMACS WEDGED, continued:%s", e.profileWhenStuck())
 	})
 }
 
@@ -867,6 +970,7 @@ func copyTree(src, dest string) error {
 func (e *Emacs) stop() {
 	if e.stopHeartbeat != nil {
 		e.stopHeartbeat()
+		<-e.heartbeatDone
 	}
 	if e.proc.Exited() {
 		return
@@ -877,13 +981,26 @@ func (e *Emacs) stop() {
 	// is exactly why the kill below is unconditional.
 	if !e.isWedged() {
 		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-		_, _ = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
 			"--eval", "(ignore-errors (agent-repl-frontend-daemon-stop))")
 		cancel()
+		if err != nil {
+			// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
+			// exit, and every daemon, shim and shim-lock the reaper then
+			// reports as a stray is downstream of it. Swallowing the error
+			// left the reap looking like an unexplained leak.
+			e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
+		}
 
 		ctx, cancel = context.WithTimeout(context.Background(), DefaultTimeout)
-		_, _ = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		// `kill-emacs' never answers by design -- Emacs exits with the client
+		// still waiting -- so only a TIMEOUT is worth reporting: it means
+		// Emacs neither answered nor died, and the reaper is about to find it.
+		_, err = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
 			"--eval", "(kill-emacs)")
+		if err != nil && ctx.Err() != nil {
+			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
+		}
 		cancel()
 	}
 	e.proc.Kill()
@@ -945,7 +1062,18 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 	_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", call)
 	e.recordEvalMax(time.Since(started))
 	if err != nil {
-		return zero, fmt.Errorf("emacsclient: %w", err)
+		// THE FORM IS STILL RUNNING. Killing emacsclient closes one socket;
+		// it does not unwind the elisp underneath, and Emacs answers a fresh
+		// probe from a process filter NESTED INSIDE the form that overran. So
+		// the stack is asked for right here, while the evidence still exists
+		// -- one round trip later it is gone.
+		// The kernel snapshot is taken FIRST and the stack second: reading
+		// /proc costs microseconds and cannot be refused, while the stack
+		// probe is a round trip that may itself have to time out. Asking in
+		// the other order would describe the machine a second and a half
+		// after the moment being diagnosed.
+		snapshot := e.processSnapshot()
+		return zero, fmt.Errorf("emacsclient: %w%s%s%s", err, snapshot, e.stackWhenStuck(), e.profileWhenStuck())
 	}
 
 	body, readErr := os.ReadFile(out)
@@ -957,6 +1085,108 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("decode the eval response %q: %w", string(body), err)
 	}
 	return res, nil
+}
+
+// stackWhenStuck answers what Emacs is standing in, formatted for an error
+// message, or "" if it cannot be asked. It never fails a test on its own: it
+// is evidence about a failure that has already happened.
+func (e *Emacs) stackWhenStuck() string {
+	ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
+	defer cancel()
+	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		"--eval", "(agent-repl-e2e--stack)")
+	if err != nil {
+		return fmt.Sprintf("\n  (emacs could not be asked what it was doing: %v)", err)
+	}
+	stack := strings.TrimSpace(out)
+	if unquoted, uerr := strconv.Unquote(stack); uerr == nil {
+		stack = unquoted
+	}
+	if stack == "" {
+		return ""
+	}
+	return "\n  emacs was standing in: " + stack
+}
+
+// stallProfileFrames is how many sampled call chains a stall report carries.
+// Enough that the hot path is not one line that could be a coincidence, few
+// enough that the failure output stays readable.
+const stallProfileFrames = 12
+
+// stallProfileBound is how long Emacs is given to come back and hand over its
+// profile. It is not a healthy-phase measurement: a stall is already a
+// reported failure by the time this runs, and this is the budget for the
+// evidence about it.
+const stallProfileBound = 10 * time.Second
+
+// profileWhenStuck answers where Emacs's CPU actually went.
+//
+// It RETRIES until Emacs answers, which is the whole point: a stalled Emacs
+// answers nothing while it stalls, so the profile can only be collected once
+// it is over. The sampling profiler was armed at boot precisely so that the
+// evidence survives the window in which nothing can be asked.
+func (e *Emacs) profileWhenStuck() string {
+	// The debugger's own buffer comes back with the profile when SIGUSR2
+	// managed to open it: it names the exact frame Emacs was standing in,
+	// which the sampled chains can only suggest.
+	form := fmt.Sprintf(`(concat (if-let* ((buf (get-buffer "*Backtrace*")))
+                                     (concat "debugger backtrace:\n"
+                                             (with-current-buffer buf (buffer-string))
+                                             "\n")
+                                   "")
+                                 (agent-repl-e2e--cpu-profile %d))`, stallProfileFrames)
+	deadline := time.Now().Add(stallProfileBound)
+	var last error
+	broken := false
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), HeartbeatBound)
+		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket, "--eval", form)
+		cancel()
+		if err != nil && !broken {
+			// A STALL THAT DOES NOT END ON ITS OWN still has to hand over its
+			// profile, and the profile can only be read from an Emacs that is
+			// answering again. So the loop is broken from outside, in the two
+			// ways Emacs itself documents: SIGUSR2 is `debug-on-event', which
+			// enters the debugger at the next safe point, and SIGINT is a
+			// plain quit, which unwinds a Lisp loop that checks for one.
+			// Neither kills Emacs, and both are sent only AFTER the wedge has
+			// already been reported as a failure.
+			broken = true
+			e.breakStall()
+			continue
+		}
+		if err == nil {
+			text := strings.TrimSpace(out)
+			if unquoted, uerr := strconv.Unquote(text); uerr == nil {
+				text = unquoted
+			}
+			if text == "" {
+				return "\n  (emacs recorded no cpu samples)"
+			}
+			return "\n  emacs's hottest sampled call chains:\n    " +
+				strings.ReplaceAll(text, "\n", "\n    ")
+		}
+		last = err
+		if time.Now().After(deadline) {
+			return fmt.Sprintf("\n  (emacs never came back to hand over its cpu profile within %s: %v)",
+				stallProfileBound, last)
+		}
+	}
+}
+
+// breakStall asks a stalled Emacs to stop, so that what it recorded can be
+// read out. Best-effort and loud about every failure: the test it belongs to
+// has already failed, and nothing here may replace that failure with another.
+func (e *Emacs) breakStall() {
+	if e.Doom.PID == 0 {
+		e.t.Logf("cannot interrupt the stall: the readiness stamp carried no pid")
+		return
+	}
+	for _, sig := range []syscall.Signal{syscall.SIGUSR2, syscall.SIGINT} {
+		if err := syscall.Kill(e.Doom.PID, sig); err != nil {
+			e.t.Logf("cannot send %v to emacs pid %d: %v", sig, e.Doom.PID, err)
+		}
+	}
 }
 
 func (e *Emacs) wedgeCauseString() string {
@@ -1311,6 +1541,14 @@ func (e *Emacs) reapStrays() {
 type stray struct {
 	pid  int
 	argv string
+	// state and wchan are read from /proc for the DIAGNOSTIC use of this
+	// walk rather than the reaping one: when Emacs stops answering its own
+	// server socket, the only witness left is the kernel's. `D`/`S` in
+	// `wait4` with a child of its own standing beside it is a different
+	// failure from `R` in redisplay, and neither is visible from inside a
+	// process that has stopped answering.
+	state string
+	wchan string
 }
 
 // awaitStraysGone polls until no stray remains or the bound expires,
@@ -1374,12 +1612,65 @@ func (e *Emacs) findStrays() []stray {
 		haystack := argv + "\x00" + string(env)
 		for _, p := range paths {
 			if strings.Contains(haystack, p) {
-				out = append(out, stray{pid: pid, argv: argv})
+				out = append(out, stray{
+					pid:   pid,
+					argv:  argv,
+					state: procField(entry.Name(), "stat"),
+					wchan: procField(entry.Name(), "wchan"),
+				})
 				break
 			}
 		}
 	}
 	return out
+}
+
+// procField reads one small /proc file for a pid, answering "" when it cannot
+// be read. `stat` is trimmed to the process state letter, which is the field
+// this layer wants out of it.
+func procField(pid, name string) string {
+	raw, err := os.ReadFile(filepath.Join("/proc", pid, name))
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(raw))
+	if name != "stat" {
+		return text
+	}
+	// The comm field is parenthesized and may itself contain spaces, so the
+	// state letter is the first field AFTER the last ")".
+	if idx := strings.LastIndex(text, ")"); idx >= 0 {
+		fields := strings.Fields(text[idx+1:])
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+// processSnapshot answers what the kernel says about every process of this
+// scenario, for a failure where Emacs itself can no longer be asked.
+func (e *Emacs) processSnapshot() string {
+	found := e.findStrays()
+	if len(found) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n  this scenario's processes, as the kernel sees them:")
+	for _, p := range found {
+		b.WriteString(fmt.Sprintf("\n    pid=%d state=%s wchan=%s %s",
+			p.pid, p.state, p.wchan, summarizeArgv(p.argv)))
+	}
+	return b.String()
+}
+
+// summarizeArgv keeps a process line readable.
+func summarizeArgv(argv string) string {
+	const limit = 120
+	if len(argv) <= limit {
+		return argv
+	}
+	return argv[:limit] + "..."
 }
 
 // reapPaths are the unique paths a stray of this scenario must name. They are
