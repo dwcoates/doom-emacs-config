@@ -260,20 +260,95 @@ needs the network:
   xwidgets, native compilation (AOT), tree-sitter and modules.
 - Node 22.14.0 and Go 1.24.6, from upstream release tarballs.
 - Doom Emacs, cloned and checked out at an exact SHA, into `/sandbox/emacs.d`.
-- The minimal Doom profile (`doom/`), and `doom install` + **`doom sync`**.
-- The npm package cache for both `agent-shim/claude/shim` and `webapp`,
-  primed by an `npm ci` from their lockfiles in a throwaway tree.
-- The Go module cache for all seven `go.mod` modules under the module,
-  primed by `go mod download`.
+- The minimal Doom profile (`doom/`), and `doom install` + **`doom sync --aot`**.
+  The `--aot` is not cosmetic: without it the image ships zero `.eln` files and
+  every scenario's Emacs starts Doom's asynchronous JIT compiler to produce the
+  same 591 of them again, into a per-test `~/.emacs.d` that is discarded
+  seconds later. The profile turns JIT compilation off for the same reason.
+- **The node dependency trees themselves** for `agent-shim/claude/shim` and
+  `webapp`, installed by `npm ci`, plus the sha256 of each lockfile they were
+  installed from — and the npm cache behind them, for the fallback below.
+- The Go module cache for all seven `go.mod` modules under the module, primed
+  by `go mod download`, **and the Go BUILD cache**, primed by `go build ./...`
+  plus `go test -c -o /dev/null` per package. The build prime runs at
+  `/work/repo/modules/app/agent-repl`, the exact path the entrypoint
+  materializes the working copy at, because Go's cache key carries the
+  package's absolute directory when `-trimpath` is absent.
 - A container-local git identity.
 
 Mounted / materialized at **run** time:
 
-- the repo source (read-only) and its writable `rsync` copy;
-- `npm ci --offline` in the working copy, resolving only from the baked
-  cache;
+- the repo source (read-only) and its writable `rsync` copy — which now
+  includes `webapp/dist`, the one `dist/` the allowlist admits (see
+  "The webapp dist" below);
+- `node_modules` **symlinked** at the image's baked trees, after checking the
+  checkout's lockfile hashes to the digest the image installed from. On a
+  mismatch the run says so, prints both digests, and falls back to a real
+  `npm ci --offline` — the shortcut can never silently test an older
+  dependency tree. `SANDBOX_NODE_MODULES=copy` gives a writable per-run copy
+  (vitest writes inside `node_modules`), `=install` forces the install;
+- the Go build cache, copied out of the image into `$GOCACHE` (`go` writes to
+  its cache on every invocation, and the image layer is read-only). Seeding it
+  cannot be *wrong*, only useless: the cache is content-addressed, so an entry
+  compiled from different bytes is simply not found;
 - the Doom module symlink pointing `:app agent-repl` at the checked-out
   source, replacing the build-time snapshot of the loader files.
+
+### The webapp dist
+
+The Emacs client layer's panel is a real `xwidget-webkit` webview on the
+daemon's own origin, so it needs the REAL built webapp, not a stub. That build
+used to happen inside the container on the first Emacs scenario of every run:
+`tsc --noEmit && vite build`, about six seconds and roughly a gigabyte of
+resident memory for `tsc` alone, on a tmpfs, inside a 5.8 GiB VM, immediately
+before a real Emacs started.
+
+It is host-staged now. `bin/webapp-dist.sh` holds the one staleness rule:
+
+- `e2e-sandbox.sh run` runs `webapp-dist.sh ensure` on the **host** before the
+  container starts — check, and rebuild through `bin/build-frontend.sh --force
+  webapp` when stale;
+- the entrypoint stages `webapp/dist` in with the working copy;
+- the harness inside the container runs `webapp-dist.sh check` — the same
+  script, the same rule — and **fails**, naming the command to run, rather than
+  serving an older bundle to the webview.
+
+The rule covers a superset of `bin/build-frontend.sh`'s source set: the
+generated protobuf TypeScript and vocab JSON that `webapp/src` imports from
+`../../proto/` are sources here too. `AGENT_REPL_SANDBOX_NO_WEBAPP_BUILD=1`
+skips the host build; it does not skip the container's check, so the only thing
+it can buy is a louder failure.
+
+### The concurrency gate
+
+One sandbox peaks at 1.22 GiB. The Docker VM has 5.79 GiB and is **shared** —
+unrelated containers were holding 1.82 GiB of it on the machine this was
+measured on. Two sandboxes started at once did not run slowly, they OOM-killed
+each other: `npm ci` exited 137 and Emacs was SIGKILLed mid-scenario, which
+then reads as a test failure with nothing wrong in it.
+
+So `e2e-sandbox.sh run` takes a slot before it builds or starts anything, and a
+second run **waits**, out loud, naming the gate and the override. The slot
+count is computed rather than assumed — VM `MemTotal` from `docker info`, minus
+what the running containers are actually using, minus headroom, divided by the
+per-sandbox budget — and it answers **1** whenever it cannot tell, because a
+gate that opens wide on a failed `docker info` would be worse than none.
+
+Slots are directories under `/tmp/agent-repl-e2e-sandbox.slots`, claimed with
+`mkdir`: the one filesystem operation that is atomic and fails if the name
+exists, so two runs cannot both believe they hold the same slot. Runs from
+different worktrees of this repo therefore gate against each other. A slot
+whose holder died is reclaimed by reading its recorded pid from a slot that
+still *exists* — nobody can be claiming it at that moment — and moving the
+directory aside: a slot becomes claimable only by disappearing.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `AGENT_REPL_SANDBOX_SLOT_DIR` | `/tmp/agent-repl-e2e-sandbox.slots` | where the slots live |
+| `AGENT_REPL_SANDBOX_MEM_BUDGET_MB` | 2048 | assumed memory per sandbox (measured peak 1.22-1.58 GiB, plus a quarter) |
+| `AGENT_REPL_SANDBOX_MEM_HEADROOM_MB` | 1024 | left to the VM itself |
+| `AGENT_REPL_SANDBOX_MAX_SLOTS` | 4 | cap regardless of memory; past a handful the 4 CPUs bind, not the RAM |
+| `AGENT_REPL_SANDBOX_NO_GATE` | unset | run without the gate, deliberately |
 
 `GOPROXY=off` and `npm_config_offline=true` are set in the image, so a
 dependency that was *not* baked fails loudly at run time rather than silently

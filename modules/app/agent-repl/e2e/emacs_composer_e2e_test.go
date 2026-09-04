@@ -232,6 +232,7 @@ func composerText(e *Emacs, buffer string) string {
 // forbids only post-submission rewriting — so the submitted text is what
 // carries it.
 func TestEmacsMetapromptIsComposedBeforeSubmission(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 	armSubmissionObserver(t, e)
@@ -276,6 +277,7 @@ func TestEmacsMetapromptIsComposedBeforeSubmission(t *testing.T) {
 // the two edge cases and a single test asserting both would hide which one
 // regressed.
 func TestEmacsPrefixAndPostfixSendVariants(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		// command is the ordinary interactive send site.
@@ -342,6 +344,7 @@ func TestEmacsPrefixAndPostfixSendVariants(t *testing.T) {
 // already be in the observer. The observer is proved live by every other
 // scenario in this file.
 func TestEmacsDiscardInputClearsTheComposer(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 	armSubmissionObserver(t, e)
@@ -371,6 +374,7 @@ func TestEmacsDiscardInputClearsTheComposer(t *testing.T) {
 // `agent-repl-queue-deferred-prompt' command. That is deterministic by
 // construction — there is no window in which the edge can be missed.
 func TestEmacsDeferredPromptDrainsOnTheFinishEdge(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 	armSubmissionObserver(t, e)
@@ -436,6 +440,7 @@ func TestEmacsDeferredPromptDrainsOnTheFinishEdge(t *testing.T) {
 // on the composer being cleared — which is the acceptance's own visible act —
 // rather than on a duration.
 func TestEmacsHistoryRecallRestoresTheLastPrompt(t *testing.T) {
+	t.Parallel()
 	s := newEmacsScenario(t)
 	e := s.E
 

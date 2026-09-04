@@ -333,6 +333,7 @@ func walkRosterRows(r *frontendv1.WorkspaceRoster, visit func(*frontendv1.Roster
 // with its readers bound for the duration of the one call — the standard ERT
 // way, which keeps the command's own argument-collection code path.
 func TestEmacsCreateWorkspaceAppearsOnTheRoster(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -400,6 +401,7 @@ func containsString(xs []string, want string) bool {
 // two workspace verbs, and everything else about the workspace the daemon
 // derives and pushes.
 func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 
@@ -426,6 +428,7 @@ func TestEmacsRegisterAnExistingDirectory(t *testing.T) {
 // `agent-repl-host-last-selected-id' — which host.el records ONLY ON THE ACK,
 // so its value is what the DAEMON stamped as current, never what Emacs hoped.
 func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -477,6 +480,7 @@ func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
 // AND the daemon still holds the workspace. "A view act" is exactly the
 // difference between the two, and only the second half can say it.
 func TestEmacsCloseWorkspaceIsAViewAct(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -516,6 +520,7 @@ func TestEmacsCloseWorkspaceIsAViewAct(t *testing.T) {
 // genuinely refused rather than merely slow: a deferred prompt is queued
 // against a turn that is actually in flight.
 func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -565,6 +570,7 @@ func TestEmacsCloseWithAHeldPromptDoesNotTearTheTabDown(t *testing.T) {
 // precisely so "even with work in flight" is a fact of the test rather than a
 // hope about its timing.
 func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
@@ -610,6 +616,7 @@ func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
 // the verbs have settled, so the test cannot pass by finishing before the
 // heartbeat noticed.
 func TestEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
+	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
