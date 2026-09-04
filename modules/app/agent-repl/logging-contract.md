@@ -73,6 +73,12 @@ Identity fields are included whenever the owning runtime knows them:
 - `claude_session_id`
 - `request_id`
 
+The store reads `request_id` from the inbound `X-Agent-Repl-Request-Id`
+header. No production client currently sends that header, so the field is
+absent from store records until one does; the reader stands because the header
+is the contract's declared way to carry a caller's request identity into the
+store.
+
 Identifiers belong in their dedicated fields, never only inside `message`.
 Dynamic values and error causes belong in `context`, never in an incompatible
 per-call text convention.
