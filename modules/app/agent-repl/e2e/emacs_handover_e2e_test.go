@@ -18,9 +18,47 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"claude-repld/integration/harness"
 )
+
+// daemonStopBound is how long the LINK may take to go down after the daemon
+// ACCEPTED an immediate shutdown. It is a different phase from every bound
+// in `emacs_test.go`: nothing about Emacs is being waited on, the wait is
+// the daemon flushing its writes and exiting, the kernel closing the socket,
+// curl seeing EOF and Emacs's process sentinel running.
+//
+// MEASURED: 2.021s and 2.023s across the two scenarios that make this wait,
+// remarkably stable. 3x that. The bound it replaced named an emacsclient
+// round trip at 500ms -- a quarter of this phase's real cost, so neither
+// scenario could ever pass.
+const daemonStopBound = 6 * time.Second
+
+// handoverAnnounceBound is how long the whole self-merge rollout may take to
+// reach Emacs as an announcement carrying a successor's address: the merge,
+// the classify, the deploy chain, the SUCCESSOR DAEMON'S OWN SPAWN AND BOOT,
+// and only then the push.
+//
+// MEASURED: 190ms from the daemon admitting the merge to Emacs logging
+// `elisp.link.handover-announced`. The multiple is 10x rather than 3x, for
+// the reason the boot bound states and one more: the observed number covers
+// a deploy script and a whole daemon process spawn, whose cost is the
+// machine's rather than this module's.
+const handoverAnnounceBound = 2 * time.Second
+
+// handoverPromoteBound is how long the attached successor may take to be
+// PROMOTED once attached -- the outgoing daemon transferring each workspace
+// and the last one reaching freeness.
+//
+// NOT YET MEASURED, deliberately: no healthy promotion has been observed.
+// The successor daemon never adopts (the outgoing daemon's
+// `daemon.rollout.adoption_window` expires and records the workspace's own
+// fault, and `daemon.server.transferred` is never published), so the only
+// promotion this scenario has produced is the 32s fault path. A bound taken
+// from that would enshrine the defect as the expectation. It stays generous
+// until the handover completes at freeness and a healthy number exists.
+const handoverPromoteBound = 60 * time.Second
 
 // emHOTabOrderForm reads the tab order as data — `agent-repl-roster--tab-order`
 // and the tab bar's own tab names, which EMACS-LAYER-SPEC.md's readback
@@ -29,7 +67,14 @@ const emHOTabOrderForm = `agent-repl-roster--tab-order`
 
 // emHOTabBarNamesForm reads the tab bar's own names, so a test can assert
 // the two agree rather than trusting the variable alone.
-const emHOTabBarNamesForm = `(mapcar (lambda (tab) (format "%s" (alist-get 'name tab))) (tab-bar-tabs))`
+//
+// NOT `tab-bar-tabs`: `status.el` paints the bar from `tab-bar-format`, so
+// Emacs's built-in tabs are window configurations named after whatever
+// buffer they hold (a `*magit: ...*` status buffer, once a project switch
+// has run) and carry no workspace name at all. `agent-repl--ws-tabline-names`
+// is the enumeration the renderer itself walks — the drawn names, in roster
+// order — so it is what "the tab bar's own names" means in this module.
+const emHOTabBarNamesForm = `(agent-repl--ws-tabline-names)`
 
 // emHODaemonPIDForm reads the pid of the process EMACS's launcher spawned.
 // A restart that reused the same process would satisfy every downstream
@@ -41,12 +86,12 @@ const emHODaemonPIDForm = `(if (and agent-repl--frontend-daemon-process
                              -1)`
 
 // emHOAwaitLinkUp waits until Emacs holds a live daemon link again. The
-// bound is `emacsBootBound`, which is the layer's named bound for "a daemon
+// bound is `daemonLinkBound`, which is the layer's named bound for "a daemon
 // Emacs launched became reachable" and is the same wait `EnsureDaemon`
 // makes.
 func emHOAwaitLinkUp(t *testing.T, e *Emacs, what string) {
 	t.Helper()
-	e.AwaitEvalFor(emacsBootBound, what, `(and (agent-repl-link-up-p) t)`,
+	e.AwaitEvalFor(daemonLinkBound, what, `(and (agent-repl-link-up-p) t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 }
 
@@ -54,7 +99,7 @@ func emHOAwaitLinkUp(t *testing.T, e *Emacs, what string) {
 // whose pid differs from BEFORE.
 func emHOAwaitNewDaemon(t *testing.T, e *Emacs, before int) {
 	t.Helper()
-	e.AwaitEvalFor(emacsBootBound, "a freshly spawned daemon process", emHODaemonPIDForm,
+	e.AwaitEvalFor(daemonLinkBound, "a freshly spawned daemon process", emHODaemonPIDForm,
 		func(raw json.RawMessage) bool {
 			var pid int
 			return json.Unmarshal(raw, &pid) == nil && pid > 0 && pid != before
@@ -208,13 +253,13 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 	// Assert: the outage SURFACES. The link drops without anyone telling
 	// Emacs to drop it, which is the transport-level detection the contract
 	// relies on.
-	e.AwaitEvalFor(emacsBootBound, "the link to go down when the daemon exits",
+	e.AwaitEvalFor(daemonStopBound, "the link to go down when the daemon exits",
 		`(if (agent-repl-link-up-p) nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
 	// Assert: the reconnect loop is ARMED. A dropped link with no timer is
 	// an outage silently absorbed, which is the failure this pins.
-	e.AwaitEvalFor(emacsBootBound, "the reconnect loop to be armed",
+	e.AwaitEvalFor(daemonStopBound, "the reconnect loop to be armed",
 		`(and (timerp agent-repl-link--reconnect-timer) t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
@@ -224,7 +269,7 @@ func TestEmacsDaemonDownSurfacesAndReconnects(t *testing.T) {
 	// Assert: the link comes back, and the reconnect loop stands down with
 	// it — a timer still armed on a live link would keep dialing forever.
 	emHOAwaitLinkUp(t, e, "the link to come back when a daemon returns")
-	e.AwaitEvalFor(emacsBootBound, "the reconnect loop to stand down once the link is up",
+	e.AwaitEvalFor(daemonLinkBound, "the reconnect loop to stand down once the link is up",
 		`(if (timerp agent-repl-link--reconnect-timer) nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 }
@@ -364,9 +409,16 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	gate := harness.NewTestAllScript(t, selfRepo.Dir)
 	gate.SetExitCode(0)
 	gate.SetStdout("e2e: passed in 1s\n")
+	// Arrange: the rollout's DEPLOY CHAIN. Without it the trigger resolves
+	// `bin/deploy-all.sh` relative to the daemon's own cwd, the exec fails,
+	// and the self-reload aborts BEFORE a successor is ever spawned -- so no
+	// announcement can carry an address and the handover cannot begin.
+	deploy := harness.NewFakeDeployScript(t, filepath.Join(selfRepo.Dir, "bin"))
+	deploy.SetExitCode(0)
 	w := NewEmacsWorld(t, box,
 		WithEmacsEnv("AGENT_REPL_SELF_REPO_DIR", selfRepo.Dir),
-		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path),
+		WithEmacsEnv("AGENT_REPL_DEPLOY_SCRIPT", deploy.Path))
 	e := w.Emacs
 	e.EnsureDaemon()
 
@@ -416,7 +468,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// the half no plain bounce can produce — a `shutdown_announced` without
 	// an address never reaches these hooks.
 	successor := ""
-	e.AwaitEvalFor(emacsBootBound, "a successor to be attached from the announcement",
+	e.AwaitEvalFor(handoverAnnounceBound, "a successor to be attached from the announcement",
 		`(or em-ho40-handover "")`,
 		func(raw json.RawMessage) bool {
 			var got string
@@ -431,7 +483,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// it was attached at. A promotion to some other address would be a
 	// reconnect wearing the handover's name.
 	promoted := ""
-	e.AwaitEvalFor(emacsBootBound, "the successor to be promoted at freeness",
+	e.AwaitEvalFor(handoverPromoteBound, "the successor to be promoted at freeness",
 		`(or em-ho40-promoted "")`,
 		func(raw json.RawMessage) bool {
 			var got string
@@ -449,7 +501,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// is empty and the primary is the successor's own connection. A primary
 	// left on the old daemon, or a successor still held, would be a handover
 	// that only half happened.
-	e.AwaitEvalFor(emacsBootBound, "the successor slot to be released by the promotion",
+	e.AwaitEvalFor(handoverPromoteBound, "the successor slot to be released by the promotion",
 		`(if agent-repl-link--successor nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 	if got := e.EvalString(`(or (agent-repl-connect-connection-address agent-repl-link--primary) "")`); got != successor {
@@ -460,7 +512,7 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	// armed — a handover is not an outage, and a timer still ticking would
 	// say Emacs had treated it as one.
 	emHOAwaitLinkUp(t, e, "the link to be up on the promoted successor")
-	e.AwaitEvalFor(emacsBootBound, "no reconnect loop to be armed after the handover",
+	e.AwaitEvalFor(handoverPromoteBound, "no reconnect loop to be armed after the handover",
 		`(if (timerp agent-repl-link--reconnect-timer) nil t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 
