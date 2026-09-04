@@ -185,12 +185,22 @@ it(
 
     // Assert — the banner is drawn from the pushed schedule, names the cause
     // the push carried, and repeats the operator's own note.
+    // WAIT ON THE CAUSE, NOT ON THE HOST BEING NON-EMPTY. Every notice this
+    // host draws wears `data-restarting` (lifecycle.ts's `notice()` sets it on
+    // all three), and only the RESTARTING notice carries `data-shutdown-cause`
+    // — the drain-scheduled notice wears `data-drain-scheduled` instead, and
+    // the moved notice `data-moved`. Since the daemon fires this schedule
+    // immediately (see the two-clocks note above), the notice this test is
+    // about is the restarting one, and a wait on `[data-restarting]` would
+    // stop at whichever notice happened to be standing first and then read a
+    // null cause. Waiting on the cause attribute makes the assertion
+    // order-independent.
     await awaitDrawn(
       app,
       "the drain banner",
-      () => app.$('[data-component="drain-banner"] [data-restarting]') !== null,
+      () => app.$('[data-component="drain-banner"] [data-shutdown-cause]') !== null,
     );
-    const banner = app.$('[data-component="drain-banner"] [data-restarting]');
+    const banner = app.$('[data-component="drain-banner"] [data-shutdown-cause]');
     expect(banner).not.toBeNull();
     expect(banner?.getAttribute("data-shutdown-cause")).toBe("scheduledDrain");
     // The operator's own note travelled the whole way — app -> daemon ->
