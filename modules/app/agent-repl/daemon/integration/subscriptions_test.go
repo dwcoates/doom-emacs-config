@@ -199,9 +199,11 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 }
 
 func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
+	t.Parallel()
 	for _, k := range harness.WatchKinds() {
 		k := k
 		t.Run(k.Name, func(t *testing.T) {
+			t.Parallel()
 			scenario, ok := subscriptionScenarioFor(k.Name)
 			if !ok {
 				t.Skipf("%s has no lightweight two-step driver in this suite (see subscriptionScenarioFor's doc comment)", k.Name)
@@ -266,9 +268,11 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 // assertion here is deliberately per-kind rather than one blanket
 // ExpectNoPush, per the sub-brief's own instruction.
 func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
+	t.Parallel()
 	for _, k := range harness.WatchKinds() {
 		k := k
 		t.Run(k.Name, func(t *testing.T) {
+			t.Parallel()
 			var d *harness.Daemon
 			var ws *workspacev1.WorkspaceRef
 			if k.PerWorkspace {
@@ -314,6 +318,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 // cancellation, never at boot, so a fresh daemon's WatchDaemon has genuinely
 // nothing to send.
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 
@@ -335,6 +340,7 @@ func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *t
 // empty tray as an ordinary first push. Asserting a blanket ExpectNoPush here
 // would be asserting a claim the source contradicts.
 func TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered, never opened.
 	f := newRegistered(t, harness.Opts{})
 
@@ -360,6 +366,7 @@ func TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray(t *testing.
 // at all."), this open ALWAYS has a view to send: host.none. As with holds
 // above, a blanket "no push is due" assertion would not match the source.
 func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotOpened(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered, never opened -- no session exists for it at all.
 	f := newRegistered(t, harness.Opts{})
 
@@ -384,6 +391,7 @@ func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotO
 // Topic.Publish, proto.Equal) applies here exactly as it does to the footer
 // (TestFooterPushesAreWholeViewsDeduplicated).
 func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -411,6 +419,7 @@ func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 // whether it was already accepted, so the second call succeeds as a no-op —
 // and the tray's whole-view dedup means it produces no second push.
 func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn running, and a follow-up held with the hold_for_turn_end
 	// verdict.
 	f := newOpened(t, harness.Opts{})
@@ -456,6 +465,7 @@ func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
 // workspace changed the republished view is identical, so an already-caught-up
 // witness receives no further push.
 func TestHostStreamIdenticalRepublishedViewProducesNoSecondPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	witness := f.d.WatchHost(f.ws)
@@ -540,9 +550,11 @@ func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause s
 // TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed covers an
 // id the registry does not hold, for every per-workspace Watch* rpc.
 func TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed(t *testing.T) {
+	t.Parallel()
 	for _, rpc := range transportClosedRPCs() {
 		rpc := rpc
 		t.Run(rpc.name, func(t *testing.T) {
+			t.Parallel()
 			// Arrange
 			d := newDaemon(t, harness.Opts{})
 			bogus := &workspacev1.WorkspaceRef{Id: "bogus-unregistered-workspace-id"}
@@ -563,9 +575,11 @@ func TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed(t *testing.
 // whose `dir` disagrees with the registry, for every per-workspace Watch*
 // rpc.
 func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T) {
+	t.Parallel()
 	for _, rpc := range transportClosedRPCs() {
 		rpc := rpc
 		t.Run(rpc.name, func(t *testing.T) {
+			t.Parallel()
 			// Arrange
 			f := newRegistered(t, harness.Opts{})
 			mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: f.ws.GetDir() + "-mismatched"}
@@ -595,6 +609,7 @@ func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T
 // sink" at ERROR on EVERY shutdown. The stream ends quietly instead, and this
 // test needs no ExpectWarnings declaration to pass.
 func TestAnOrderlyExitWithStandingWatchesRecordsNoServingErrors(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace already holds a standing host watch and a
 	// standing web watch; a footer watch is the second family under audit.
 	f := newOpened(t, harness.Opts{})

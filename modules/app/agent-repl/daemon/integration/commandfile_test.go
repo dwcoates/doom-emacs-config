@@ -56,6 +56,7 @@ func commandfileRowByName(r *frontendv1.WorkspaceRoster, name string) *frontendv
 }
 
 func TestACreateEntryMaterializesAWorkspaceExactlyLikeCreateWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -88,6 +89,7 @@ func TestACreateEntryMaterializesAWorkspaceExactlyLikeCreateWorkspace(t *testing
 }
 
 func TestAMergeEntryEnqueuesTheNamedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace with real layout facts, via CreateWorkspace (the
 	// merge_test.go helper — same package, same conventions).
 	repo := harness.NewRepo(t)
@@ -114,6 +116,7 @@ func TestAMergeEntryEnqueuesTheNamedWorkspace(t *testing.T) {
 }
 
 func TestAPromptEntrySubmitsToTheNamedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -133,6 +136,7 @@ func TestAPromptEntrySubmitsToTheNamedWorkspace(t *testing.T) {
 }
 
 func TestASendEntrySubmitsToTheNamedWorkspaceExactlyLikePrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange: "send" is prompt's older spelling and behaves identically.
 	f := newOpened(t, harness.Opts{})
 
@@ -151,6 +155,7 @@ func TestASendEntrySubmitsToTheNamedWorkspaceExactlyLikePrompt(t *testing.T) {
 }
 
 func TestACloseEntryClosesTheNamedWorkspaceOnTheRoster(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered but never opened, so it is quiet and closable.
 	d := harness.StartDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -172,6 +177,7 @@ func TestACloseEntryClosesTheNamedWorkspaceOnTheRoster(t *testing.T) {
 }
 
 func TestAnOpenEntrySpawnsTheShimForAClosedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered but never opened, so nothing has spawned a shim yet.
 	f := newRegistered(t, harness.Opts{})
 
@@ -189,6 +195,7 @@ func TestAnOpenEntrySpawnsTheShimForAClosedWorkspace(t *testing.T) {
 }
 
 func TestASwitchEntrySelectsTheNamedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
@@ -208,6 +215,7 @@ func TestASwitchEntrySelectsTheNamedWorkspace(t *testing.T) {
 }
 
 func TestATaskToggleDoneEntryChecksTheTaskSection(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "toggle via commandfile")
@@ -231,6 +239,7 @@ func TestATaskToggleDoneEntryChecksTheTaskSection(t *testing.T) {
 }
 
 func TestATaskAddWorkspaceEntryAssignsTheNamedWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	task := createTask(t, f, "assign via commandfile")
@@ -250,6 +259,7 @@ func TestATaskAddWorkspaceEntryAssignsTheNamedWorkspace(t *testing.T) {
 }
 
 func TestADirAddressedPromptEntryResolvesTheSameWorkspaceAsAnIdAddressedOne(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered directly on the repo root, so its dir is exactly
 	// repo.Dir — the shape the older dir-only producers write, resolved
 	// through wsm.DB.WorkspaceByDir rather than the verbs' ref resolution.
@@ -268,6 +278,7 @@ func TestADirAddressedPromptEntryResolvesTheSameWorkspaceAsAnIdAddressedOne(t *t
 }
 
 func TestAOneShotCreateEntryDecoratesThePromptLikeCreateWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -297,6 +308,7 @@ func TestAOneShotCreateEntryDecoratesThePromptLikeCreateWorkspace(t *testing.T) 
 }
 
 func TestACreateEntryHonorsAnExplicitBaseRef(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	repo := harness.NewRepo(t)
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -325,6 +337,7 @@ func TestACreateEntryHonorsAnExplicitBaseRef(t *testing.T) {
 }
 
 func TestAFileWithOneInvalidEntryAppliesNothing(t *testing.T) {
+	t.Parallel()
 	// Arrange: one valid entry (a task-create) followed by one invalid entry
 	// (a prompt missing its required prompt text) in the SAME array. Every
 	// entry is validated before any of them is applied, so this is one
@@ -365,6 +378,7 @@ func TestAFileWithOneInvalidEntryAppliesNothing(t *testing.T) {
 // file sitting in ClaimedDir. This test asserts the CONTRACT the critique
 // names; if the file never reaches quarantine, that is the gap to report.
 func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
+	t.Parallel()
 	// Arrange: registered directly, never created, so it carries no creation
 	// job — internal/merge's layoutFor refuses ANY merge of it
 	// (ArmNoLayoutFacts), which is as unmergeable as a workspace gets.
@@ -386,6 +400,7 @@ func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
 }
 
 func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{})
 	path := commandfileWrite(t, d, "workspace_commands_bad.json", `{not even an array`)
@@ -405,6 +420,7 @@ func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) 
 }
 
 func TestIngestionIsAtomicAHalfWrittenFileIsNotClaimedUntilComplete(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{})
 	partial := `[{"type":"task-cre`
