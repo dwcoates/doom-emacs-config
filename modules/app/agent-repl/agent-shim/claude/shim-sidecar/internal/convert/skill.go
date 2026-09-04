@@ -18,8 +18,8 @@ func (c *Converter) skillSettled(call openCall, markdown string, ts int64) *conv
 		Document:  &conversationv1.AgentSkillDocument{Markdown: markdown},
 		SettledAt: settledAt(ts),
 	}
-	if allowed := skillAllowedTools(call.input); allowed != nil {
-		success.AllowedTools = allowed
+	if call.retainedAllowedTools != nil {
+		success.AllowedTools = call.retainedAllowedTools
 	}
 	return item(&conversationv1.AgentActivity_SkillUse{SkillUse: &conversationv1.AgentSkillUse{
 		Result: &conversationv1.AgentSkillUse_Success{Success: success},
@@ -31,10 +31,12 @@ func skillName(call openCall) string {
 }
 
 // skillAllowedTools states what invoking the skill PERMITS — a fact about
-// consent rather than about the document's content. UNSET when the skill
-// declared no allowances, which is distinct from declaring an empty set.
-func skillAllowedTools(input map[string]any) *conversationv1.AgentSkillAllowedTools {
-	raw := pick(input, "allowedTools", "allowed_tools")
+// consent rather than about the document's content. Read from the
+// ACKNOWLEDGEMENT's own typed result, which is the only record that carries the
+// declared set. UNSET when the skill declared no allowances, which is distinct
+// from declaring an empty set.
+func skillAllowedTools(result map[string]any) *conversationv1.AgentSkillAllowedTools {
+	raw := pick(result, "allowedTools", "allowed_tools")
 	if raw == nil {
 		return nil
 	}
