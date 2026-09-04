@@ -376,3 +376,104 @@ func TestEveryResolvedWindowLandsOnItsOwnField(t *testing.T) {
 		t.Fatalf("resolved windows = %+v, want %+v", got, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The store-recovery ladder's two rungs.
+// ---------------------------------------------------------------------------
+
+// backoffSources spells the ladder's two options the way main does.
+func backoffSources(min, max string) (durationSource, durationSource) {
+	return durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: min},
+		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: max}
+}
+
+func TestAnUnsetRecoveryLadderResolvesToZeroSoThePackageDefaultStands(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("", "")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert: zero is how "unset" reaches Options; cycle.go fills the default.
+	if err != nil {
+		t.Fatalf("resolveBackoffOptions: %v", err)
+	}
+	if gotMin != 0 || gotMax != 0 {
+		t.Fatalf("resolveBackoffOptions with nothing set = (%s, %s), want (0s, 0s)", gotMin, gotMax)
+	}
+}
+
+func TestEachRecoveryRungLandsOnItsOwnField(t *testing.T) {
+	// Arrange: two distinct values, so a crossed wire is visible.
+	min, max := backoffSources("5ms", "40ms")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveBackoffOptions: %v", err)
+	}
+	if gotMin != 5*time.Millisecond || gotMax != 40*time.Millisecond {
+		t.Fatalf("resolveBackoffOptions = (%s, %s), want (5ms, 40ms)", gotMin, gotMax)
+	}
+}
+
+func TestAMalformedRecoveryFloorStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("nonsense", "40ms")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("a malformed recovery floor resolved to %v, want a bootstrap refusal", err)
+	}
+	if gotMin != 0 || gotMax != 0 {
+		t.Fatalf("a refused bootstrap returned (%s, %s); it must configure nothing", gotMin, gotMax)
+	}
+}
+
+func TestAMalformedRecoveryCeilingStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("5ms", "nonsense")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a malformed recovery ceiling resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+func TestARecoveryCeilingBelowItsFloorStopsBootstrap(t *testing.T) {
+	// Arrange: a ladder that cannot climb.
+	min, max := backoffSources("40ms", "5ms")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a ceiling below its floor resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+// TestARecoveryFloorAboveTheDEFAULTCeilingStopsBootstrap asserts the conflict is
+// judged against the EFFECTIVE ladder, not only against two values the operator
+// happened to spell together: a floor of a minute with the ceiling left unset
+// is still a ladder whose ceiling is below its floor.
+func TestARecoveryFloorAboveTheDefaultCeilingStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("60s", "")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a floor above the default ceiling resolved to %v, want a bootstrap refusal", err)
+	}
+}
