@@ -25,6 +25,7 @@ import (
 // the same agent's transcript through both paths and asserts the two writes
 // agree on key and top_level, and that the store holds one row per key.
 func TestABackgroundedAgentSeenAsSpoolAndSidechainIsOneBookWithOneTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange: a parent transcript whose Agent call is the SPAWNING CALL the
 	// sidechain's meta.json already names, launched async.
 	ctx, cancel := testContext(t)

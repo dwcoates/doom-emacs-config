@@ -23,6 +23,7 @@ import (
 // `system/local_command`, which the converter understands and deliberately does
 // not carry — and asserts the key is the record's uuid.
 func TestAWithheldRecordIsKeyedByTheVendorsOwnUuid(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -64,6 +65,7 @@ func TestAWithheldRecordIsKeyedByTheVendorsOwnUuid(t *testing.T) {
 // that cannot be READ has no uuid, so its key names the file and the offset the
 // bytes start at — in the reader's own discovery-normalized spelling of the path.
 func TestAnUnparsableLineIsKeyedByItsFileCoordinates(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -106,6 +108,7 @@ func TestAnUnparsableLineIsKeyedByItsFileCoordinates(t *testing.T) {
 // for: a file-keyed residue is always in its own `residue:file:` space, so no
 // path can ever be mistaken for a vendor uuid.
 func TestTheTwoResidueSpacesNeverCollide(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

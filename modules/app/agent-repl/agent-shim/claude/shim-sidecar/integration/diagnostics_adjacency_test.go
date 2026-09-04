@@ -39,6 +39,7 @@ func seedWriteChange(t *testing.T, tree *vendorTree, cwd, session string) (*grow
 // TestDiagnosticsJoinTheChangeUnitAcrossAPollBoundary asserts the remembered
 // change unit survives the poll that settled it.
 func TestDiagnosticsJoinTheChangeUnitAcrossAPollBoundary(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -79,6 +80,7 @@ func TestDiagnosticsJoinTheChangeUnitAcrossAPollBoundary(t *testing.T) {
 // refusal: with no remembered change unit the findings are stored, never pinned
 // onto a unit the reader guessed at.
 func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -118,6 +120,7 @@ func TestDiagnosticsWithNoObservedChangeAreKeptWholeRatherThanGuessed(t *testing
 // attachment: skills the vendor pulled in with NO tool call of their own land as
 // an AgentContextInjected activity in the agent's own book.
 func TestInjectedSkillsReachTheAgentsBook(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

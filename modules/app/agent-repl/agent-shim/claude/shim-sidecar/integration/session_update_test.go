@@ -19,6 +19,7 @@ import (
 // transcript together with the sole-producer attachment and the recorded
 // api_error, and asserts every entry landed on agent_update.
 func TestNoFilePlaneRecordEverProducesASessionUpdate(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -74,6 +75,7 @@ func TestNoFilePlaneRecordEverProducesASessionUpdate(t *testing.T) {
 // one record the old contract DID put on SessionUpdate: it is a page line of the
 // agent's own book, and the arm is the whole point of landing 4.
 func TestTheContextBudgetWarningIsAnAgentUpdateRatherThanASessionUpdate(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

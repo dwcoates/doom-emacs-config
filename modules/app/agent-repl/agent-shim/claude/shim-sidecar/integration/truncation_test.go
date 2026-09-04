@@ -28,6 +28,7 @@ import (
 // already been read, replaces its contents, and asserts the durable cursor
 // resets to the new length rather than staying past the file's end.
 func TestATruncatedSpoolIsReReadFromItsNewStart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -50,8 +51,17 @@ func TestATruncatedSpoolIsReReadFromItsNewStart(t *testing.T) {
 	// this is truncation, not rotation.
 	truncateInPlace(t, fx.SpoolPath, after)
 
-	// Assert: the durable cursor comes back to exactly the new length.
-	cs := awaitCursorAtMost(ctx, t, fake, fx.SpoolPath, int64(len(after)))
+	// Assert: the durable cursor comes back DOWN — the shrink was noticed...
+	awaitCursorAtMost(ctx, t, fake, fx.SpoolPath, int64(len(after)))
+	// ...and then SETTLES at exactly the new file's whole length.
+	//
+	// THE TWO WAITS ARE ONE STATEMENT AND NEITHER IS REDUNDANT. O_TRUNC and the
+	// write that follows it are two syscalls, so a poll can legitimately land
+	// between them and commit a cursor of 0 for a genuinely zero-byte file. That
+	// is a correct reset, and stopping at the first cursor at-or-below the new
+	// length would read it as the end state and assert against 0. The re-read is
+	// its own event, and the exact offset is the signal for it.
+	cs := awaitCursorSettledAt(ctx, t, fake, fx.SpoolPath, int64(len(after)))
 	if got := cs.GetOffset(); got != int64(len(after)) {
 		t.Errorf("the cursor settled at %d after truncation, wanted the new file's whole length %d", got, int64(len(after)))
 	}

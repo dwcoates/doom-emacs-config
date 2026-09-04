@@ -17,6 +17,7 @@ import (
 // at position 0 of the first text block classifies the turn, so none of its
 // records reaches a page.
 func TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -57,6 +58,7 @@ func TestAKeepAliveMarkerOpeningThePromptWithholdsTheWholeTurn(t *testing.T) {
 // their turn would erase their own question and every answer to it from their
 // feed, with no error anywhere to explain where it went.
 func TestAKeepAliveMarkerQuotedMidPromptIsServedNormally(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

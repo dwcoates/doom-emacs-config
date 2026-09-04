@@ -28,6 +28,7 @@ import (
 //     bytes are ingested attributed to the residue path, with a WARNING, and the
 //     file keeps being tailed — so a cursor appears exactly then and not before.
 func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -38,10 +39,12 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 	session := "10101010-1010-4010-8010-101010101010"
 	spoolPath := tree.spoolPath(slug, session, capturedSpoolTask1)
 	payload := "output written before anyone claimed it\n"
+	// The suite default (200ms). This used to be 2s so that "held but not yet
+	// lapsed" was a wide enough window for the assertion below to land inside;
+	// the assertion is an ORDERING now (see below) rather than a snapshot taken
+	// during a race, so the window buys nothing and the subject pays production
+	// nothing to wait it out.
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
-	// Long enough that the held state is observable, short enough that the
-	// lapse is too.
-	opts.UnownedSpoolWindow = 2 * time.Second
 
 	// Act: the spool exists and no transcript ever names it.
 	startSidecar(t, opts)
@@ -51,11 +54,6 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 		return r.Operation == "hold-spool" && samePathAny(r.Context["path"], spoolPath)
 	})
 
-	// Assert (the first half): held is not tailed, so nothing was read.
-	if cs := latestCursorFor(fake.Batches(), spoolPath); cs != nil {
-		t.Fatalf("a held spool was tailed: a cursor for %s was offered at %d while its owner was unknown", spoolPath, cs.GetOffset())
-	}
-
 	// Act (the second half): let the bounded wait lapse.
 	awaitLog(ctx, t, opts.LogPath, "the hold expiring", func(r logRecord) bool {
 		return r.Operation == "hold-expired" && samePathAny(r.Context["path"], spoolPath)
@@ -64,6 +62,36 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 		u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
 		return u != nil && samePath(u.GetSource(), spoolPath)
 	})
+
+	// Assert (the first half): HELD IS NOT TAILED, stated as an ordering on the
+	// wire rather than as a look taken while the hold happened to still stand.
+	// The write stream is in write order, so "no cursor for this spool was
+	// offered before the batch that carried its residue" says exactly what the
+	// design says — nothing was read until the wait lapsed — and says it
+	// whatever the window's length or the machine's load.
+	batches := fake.Batches()
+	residueAt := -1
+	for i, b := range batches {
+		for _, e := range b.GetBatch().GetEntries() {
+			u := e.GetAgentUpdate().GetUnservedItem().GetUnparsed()
+			if u != nil && samePath(u.GetSource(), spoolPath) {
+				residueAt = i
+				break
+			}
+		}
+		if residueAt >= 0 {
+			break
+		}
+	}
+	if residueAt < 0 {
+		t.Fatalf("no batch carried residue naming %s, so there is no lapse to order anything against", spoolPath)
+	}
+	for _, b := range batches[:residueAt] {
+		if cs := b.GetBatch().GetCursorAdvance(); cs != nil && samePath(cs.GetPath(), spoolPath) {
+			t.Fatalf("a held spool was tailed: a cursor for %s was offered at %d before its bytes were ingested as residue, while its owner was unknown",
+				spoolPath, cs.GetOffset())
+		}
+	}
 
 	// Assert (the second half): the bytes landed and the file is being read.
 	awaitAnyCursorFor(ctx, t, fake, spoolPath)
@@ -86,6 +114,7 @@ func TestAnUnownedSpoolIsHeldUntilItsWindowLapsesAndThenLandsAsResidue(t *testin
 // a stated degradation rather than a silent reclassification: the bytes stop
 // being a shell run's output and become residue, and that is worth saying once.
 func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -117,6 +146,7 @@ func TestTheHoldOfAnUnownedSpoolIsStatedAsAWarningWhenItLapses(t *testing.T) {
 // is the point of holding rather than reading it: the run's whole output lands
 // under the call's identity, with no prefix of it stranded as residue.
 func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -168,6 +198,7 @@ func TestAnUnownedSpoolIsAttributedOnceItsOwnerAppears(t *testing.T) {
 // TestAnUnclassifiableSpoolPrefixIsRefusedLoudly asserts a task id with no
 // known kind prefix is an ERROR — a total-ingestion violation stated out loud.
 func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -194,6 +225,7 @@ func TestAnUnclassifiableSpoolPrefixIsRefusedLoudly(t *testing.T) {
 // TestAnUnclassifiableSpoolStillLandsAsResidue asserts the refusal does not
 // drop the bytes: nothing on disk is ever lost.
 func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -237,6 +269,7 @@ func TestAnUnclassifiableSpoolStillLandsAsResidue(t *testing.T) {
 // /private/tmp normalization: a spool root reached through a symlink and the
 // owner's resolved output path must not read as two files.
 func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -309,6 +342,7 @@ func TestOneSpoolReachedByTwoPathSpellingsIsOneFile(t *testing.T) {
 // names /tmp while a mock harness names /tmp/claude-<uid>, and the same file must
 // be discovered either way. The fixture does not move — only the flag's level.
 func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -335,6 +369,7 @@ func TestTheSpoolRootIsAcceptedAtEitherLevel(t *testing.T) {
 // TestResidueCarriesNoTopLevel asserts residue names no agent: an unparsed
 // record may belong to nothing, and top_level is UNSET rather than guessed.
 func TestResidueCarriesNoTopLevel(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

@@ -46,6 +46,7 @@ func seedBackgroundedAgent(t *testing.T, tree *vendorTree, cwd, session string) 
 // routing: the spool's JSONL is read as the agent's own transcript, and its page
 // lines are the spawning call's book — the cross-plane minting rule's identity.
 func TestAnAgentSpoolConvertsAsATranscriptIntoItsSpawningCallsBook(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -79,6 +80,7 @@ func TestAnAgentSpoolConvertsAsATranscriptIntoItsSpawningCallsBook(t *testing.T)
 // contents as unparsed residue and still advance its cursor, which no assertion
 // about the book above would notice on its own.
 func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -108,6 +110,7 @@ func TestAnAgentSpoolIsNotIngestedAsRawResidue(t *testing.T) {
 // KICKED: the file is discovered and cursor-tailed like any other, its bytes
 // land whole, and nothing about it is converted as workflow.
 func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -143,6 +146,7 @@ func TestAWorkflowSpoolLandsAsResidueOnly(t *testing.T) {
 // TestAWorkflowSpoolReachesNoPage asserts the other half of "residue only": a
 // kicked kind is structurally unservable, so none of it reaches any book.
 func TestAWorkflowSpoolReachesNoPage(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

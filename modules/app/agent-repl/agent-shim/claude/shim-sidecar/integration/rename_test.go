@@ -23,6 +23,7 @@ import (
 // changes the lossy cwd-slug segment and nothing about the session's identity —
 // and asserts the cursor row followed the file rather than being re-minted.
 func TestARenamedTranscriptKeepsItsFileIdCursor(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -67,6 +68,7 @@ func TestARenamedTranscriptKeepsItsFileIdCursor(t *testing.T) {
 // under the harness's runtime-session segment — the segment discovery
 // deliberately never reads, so the file is the same run in a new location.
 func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -120,6 +122,7 @@ func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
 // a rename the reader is running through is a rotation it will meet again on its
 // next boot.
 func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -174,6 +177,7 @@ func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T
 // what the sidecar wrote, so every file would read as one the store holds
 // nothing for and the subject would pass on the defect.
 func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -223,6 +227,7 @@ func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
 // so the same inode may not buy a second bounded backward scan — and a second
 // scan is a second re-read of an in-progress turn.
 func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

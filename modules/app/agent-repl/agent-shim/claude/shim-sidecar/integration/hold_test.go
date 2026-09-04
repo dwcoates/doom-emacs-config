@@ -17,20 +17,26 @@ import (
 // of what was read — to the held frame's offset — so the next scan, and a
 // restart, both read it again. The hold is bounded to ONE redelivery.
 
-// holdOptions gives a hold subject a poll interval it can act INSIDE.
+// holdOptions gives a hold subject the PRODUCTION poll interval and the
+// interlock that makes it usable.
 //
-// THE HOLD IS BOUNDED TO ONE REDELIVERY, so a subject that must append the
-// summary between the first delivery and the second is racing the poll tick. At
-// the suite's ordinary 50ms that race is real: the forced redelivery can land
-// before the append does, and the subject then asserts the coalescing path
-// against a run that took the bounded-expiry path. A longer tick removes the
-// race outright, and the subjects still WAIT on the parked cursor rather than on
-// the tick — nothing here is timed, only unhurried.
+// THE HOLD IS BOUNDED TO ONE REDELIVERY, so a subject that must act between the
+// first delivery and the second — append a summary, or read the store while the
+// boundary is still held — is acting inside one poll interval. This used to be
+// arranged by stretching the interval to 500ms (and to 5s in the restart
+// subject) so the second event was far enough away that the test usually won;
+// that is a race the subject wins rather than one it cannot lose, and it made
+// this family the slowest in the package.
+//
+// The store is the interlock the system already has: a batch is written
+// synchronously inside the cycle and the cursor advances only on a durable
+// success, so a store that has not answered is a cycle that has not moved on.
+// Each subject below arms a writeGate on the batch that PARKS the cursor and
+// does its work while the producer is stopped inside that write. The interval
+// is then irrelevant to correctness, so it is production's.
 func holdOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
 	t.Helper()
-	opts := defaultSidecarOptions(t, storeSocket, tree)
-	opts.PollInterval = 500 * time.Millisecond
-	return opts
+	return defaultSidecarOptions(t, storeSocket, tree)
 }
 
 // awaitParkedCursor waits for the batch that carried the PARKED cursor — the one
@@ -93,6 +99,7 @@ func seedCompactionBoundary(t *testing.T, tree *vendorTree, cwd, session string)
 // TestABoundaryWithoutItsSummaryParksTheCursorShort asserts the cursor advances
 // only to the held frame's offset, so the boundary is read again.
 func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -101,8 +108,17 @@ func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
 	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-cursor-probe",
 		"70707070-7070-4070-8070-707070707070")
 
-	// Act.
+	// Act: the producer is STOPPED inside the write that parks the cursor, so
+	// the position asserted below is the one the hold produced and not whatever
+	// the forced redelivery left a moment later.
+	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
+	// THE PRODUCER IS LET GO WHEN THIS SUBJECT IS DONE WITH IT, before the
+	// harness stops it: a sidecar still inside a withheld write does not see
+	// SIGTERM until its own rpc timeout expires, so releasing the gate is part
+	// of the subject rather than left to a cleanup that runs after the stop.
+	defer gate.release()
 	startSidecar(t, holdOptions(t, fake.Socket, tree))
+	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
 	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
 
 	// Assert: the parked cursor is exactly the held frame's offset. Anything
@@ -120,6 +136,7 @@ func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
 // TestABoundaryWithoutItsSummaryWritesNothingForIt asserts the held record is
 // not converted on incomplete evidence.
 func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -128,9 +145,18 @@ func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
 	fx := seedCompactionBoundary(t, tree, "/Users/dodgecoates/hold-nothing-probe",
 		"80808080-8080-4080-8080-808080808080")
 
-	// Act.
+	// Act: the producer is STOPPED inside the write that parks the cursor, so
+	// "nothing was written for the boundary" is asserted while the hold still
+	// stands rather than in whatever window is left before the forced
+	// redelivery converts it.
+	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
+	// THE PRODUCER IS LET GO WHEN THIS SUBJECT IS DONE WITH IT, before the
+	// harness stops it: a sidecar still inside a withheld write does not see
+	// SIGTERM until its own rpc timeout expires, so releasing the gate is part
+	// of the subject rather than left to a cleanup that runs after the stop.
+	defer gate.release()
 	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
+	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
 
 	// Assert.
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
@@ -142,6 +168,7 @@ func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
 // TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord asserts the boundary and
 // the summary become ONE ContextCut page line of the main agent's book.
 func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -151,13 +178,16 @@ func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
 		"90909090-9090-4090-8090-909090909090")
 	summaryText := "Previously: the harness held a background probe alive."
 
-	// Act.
+	// Act: the summary is appended while the producer is STOPPED inside the
+	// write that parks the cursor. The park is the event that says the boundary
+	// was held; the gate is what guarantees the forced redelivery has not run
+	// yet, rather than hoping the append wins a poll interval.
+	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
 	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	// The summary is appended once the cursor is PARKED, which is the event that
-	// says the boundary was held and its forced redelivery has not run yet.
-	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
+	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
 	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
 		"90909090-9090-4090-8090-90909090abcd", fx.BoundaryUUID, summaryText))
+	gate.release()
 
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
 	fake.awaitEntry(ctx, t, "the coalesced context cut", func(e *storev1.StoreEntry) bool {
@@ -193,6 +223,7 @@ func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
 // BOUNDED: on the second delivery the handler converts it whether or not the
 // summary ever arrived, so nothing can be held forever.
 func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -266,6 +297,7 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 // TestABoundaryHeldOnceIsNotWrittenTwice asserts the redelivered record is
 // converted ONCE — the write_id absorbs a repeat rather than doubling the row.
 func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -275,11 +307,15 @@ func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
 		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0b0b0")
 	summaryText := "Previously: nothing much."
 
-	// Act.
+	// Act: the summary is appended while the producer is STOPPED inside the
+	// write that parks the cursor, so the redelivery that follows is guaranteed
+	// to be the one that reads it.
+	gate := fake.gateOnBatch(t, cursorParkedAt(fx.File.Path(), fx.BoundaryOffset))
 	startSidecar(t, holdOptions(t, fake.Socket, tree))
-	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
+	gate.await(ctx, t, "the batch parking the cursor at the held boundary")
 	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
 		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0abcd", fx.BoundaryUUID, summaryText))
+	gate.release()
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
 	fake.awaitEntry(ctx, t, "the coalesced context cut", func(e *storev1.StoreEntry) bool {
 		return e.GetUpsertKey() == wantKey

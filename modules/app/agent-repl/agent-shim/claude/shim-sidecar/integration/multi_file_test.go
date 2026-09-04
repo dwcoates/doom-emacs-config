@@ -48,6 +48,7 @@ func seedInterleavedTranscript(t *testing.T, tree *vendorTree, cwd, session, tag
 // TestTwoTranscriptsTailedAtOnceKeepTheirRowsApart grows two sessions turn by
 // turn and asserts each book holds only its own units.
 func TestTwoTranscriptsTailedAtOnceKeepTheirRowsApart(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -95,6 +96,7 @@ func TestTwoTranscriptsTailedAtOnceKeepTheirRowsApart(t *testing.T) {
 // TestTwoTranscriptsAdvanceTheirOwnCursorsByFileId asserts the position half:
 // each file's cursor names that file, by its own dev:inode identity.
 func TestTwoTranscriptsAdvanceTheirOwnCursorsByFileId(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

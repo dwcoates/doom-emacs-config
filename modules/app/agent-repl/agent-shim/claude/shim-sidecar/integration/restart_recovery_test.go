@@ -20,6 +20,7 @@ import (
 // TestARestartLeavesNoGapAndNoRepeat stops the sidecar mid-file, grows the file,
 // restarts, and asserts the book holds each unit exactly once.
 func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -67,6 +68,7 @@ func TestARestartLeavesNoGapAndNoRepeat(t *testing.T) {
 // TestARestartMintsIdenticalWriteIdsForReplayedRecords asserts a re-read yields
 // the identical write_id, which is what makes absorption possible at all.
 func TestARestartMintsIdenticalWriteIdsForReplayedRecords(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -117,6 +119,7 @@ func TestARestartMintsIdenticalWriteIdsForReplayedRecords(t *testing.T) {
 // queue-operation lines) ahead of the only user prompt in the file, which is
 // exactly that "before the turn" region.
 func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -249,6 +252,7 @@ func turnStartOffsetAtOrBefore(t *testing.T, lines []string, limit int64) int64 
 // TestAFreshStoreReadsEveryFileFromZero asserts an empty GetSidecarCursors
 // answer is the legitimate fresh-store answer, not a failure.
 func TestAFreshStoreReadsEveryFileFromZero(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -275,6 +279,7 @@ func TestAFreshStoreReadsEveryFileFromZero(t *testing.T) {
 // sidecar is stopped between a tool_use line and its tool_result, the result is
 // then appended, and the result UPSERTS its call rather than landing as residue.
 func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -289,14 +294,24 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 	for _, line := range captured.Lines[:9] { // through the Bash call, before its result
 		g.AppendLine(line)
 	}
-	awaitBookLines(ctx, t, store.Client, captured.Session, 1)
+	// THE WAIT IS ON THE CALL'S OWN UNIT, not on a line count. The subject's
+	// whole premise is that the reader was stopped with the CALL written and
+	// its result still to come; "at least one line" is satisfied by the user
+	// prompt that precedes it, which would stop the reader before the premise
+	// held.
+	awaitBookUnits(ctx, t, store.Client, captured.Session, capturedBashCall1)
 	first.Stop()
 
 	for _, line := range captured.Lines[9:11] { // the hook attachment and the tool_result
 		g.AppendLine(line)
 	}
 	startSidecar(t, opts)
-	lines := awaitBookLines(ctx, t, store.Client, captured.Session, 2)
+	// And the wait AFTER the restart is on the restarted reader's own durable
+	// statement that it read the appended bytes. "At least two lines" is
+	// already true of the book the FIRST reader left behind, so it waited for
+	// nothing at all and read back a book the result had not reached.
+	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), g.Offset())
+	lines := bookLines(ctx, t, store.Client, captured.Session, 500)
 
 	// Assert: the call's unit is settled in place, and nothing doubled.
 	var calls int
@@ -318,6 +333,7 @@ func TestARestartRewindsToTheInProgressTurnsFirstRecord(t *testing.T) {
 // TestARewindIsStatedInTheLog asserts the rewind is a stated decision, naming
 // the offset it rewound to, rather than a silent re-read.
 func TestARewindIsStatedInTheLog(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -333,7 +349,10 @@ func TestARewindIsStatedInTheLog(t *testing.T) {
 	for _, line := range captured.Lines[:9] {
 		g.AppendLine(line)
 	}
-	awaitBookLines(ctx, t, store.Client, captured.Session, 1)
+	// On the call's own unit, for the reason the subject above states: the
+	// rewind this asserts is the one a reader performs over an in-progress
+	// turn, which needs the turn to have been read.
+	awaitBookUnits(ctx, t, store.Client, captured.Session, capturedBashCall1)
 	first.Stop()
 
 	restarted := opts
@@ -381,6 +400,7 @@ func toSet(counts map[string]int) map[string]bool {
 // key (a digest of the file position, say) this would still have passed, which
 // is why the assertion also pins that the key is the record's uuid.
 func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
+	t.Parallel()
 	// Arrange.
 	ctx, cancel := testContext(t)
 	defer cancel()

@@ -82,6 +82,7 @@ func terminateMidIngest(ctx context.Context, t *testing.T, tag string) terminate
 // catches a batch whose entries were written without their cursor advance: every
 // unit the book holds lies wholly behind the committed cursor.
 func TestSigtermCommitsNoRecordItsCursorDoesNotCover(t *testing.T) {
+	t.Parallel()
 	// Arrange & Act.
 	ctx, cancel := testContext(t)
 	defer cancel()
@@ -103,6 +104,7 @@ func TestSigtermCommitsNoRecordItsCursorDoesNotCover(t *testing.T) {
 // TestSigtermCommitsNoCursorPastRecordsItDidNotStore asserts the other
 // direction: nothing the cursor claims to have read is missing from the book.
 func TestSigtermCommitsNoCursorPastRecordsItDidNotStore(t *testing.T) {
+	t.Parallel()
 	// Arrange & Act.
 	ctx, cancel := testContext(t)
 	defer cancel()
