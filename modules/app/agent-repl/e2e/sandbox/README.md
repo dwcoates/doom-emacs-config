@@ -306,12 +306,15 @@ Two omissions worth restating:
       scenario, by reading the workspace's own webview buffer — rather than
       folded into the Doom readiness stamp, which correctly says only "Doom
       is up AND emacsclient answers".
-    - **A real shim still cannot start a session on Linux.** The shim's
-      session lock is `open(2)`'s `O_EXLOCK`, which is macOS/BSD only, and
-      on Linux it refuses to start rather than risk a duplicate. Every
-      sandbox scenario that needs a turn is behind that; see
-      `e2e/EMACS-LAYER-SPEC.md`, "What the proof-of-life test reaches
-      today".
+    - **The shim's kernel claims work here.** They used to be
+      `open(2)`'s `O_EXLOCK`, which is macOS/BSD only, so on Linux the shim
+      refused to start ANY session and every sandbox scenario needing a turn
+      was stuck behind it. The claim is now a `shim-lock` child process
+      (`agent-shim/shim-lock`) taking a real `flock(2)` — one code path on
+      both platforms. The e2e harness builds it and hands the daemon
+      `AGENT_REPL_SHIM_LOCK_BIN`; it is a plain Go module with no
+      dependencies beyond `agentrepl/logging`, so the image's offline module
+      cache already covers it.
 
 ## `script(1)` is a guarantee, not an inference
 

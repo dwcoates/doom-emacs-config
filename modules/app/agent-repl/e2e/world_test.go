@@ -154,6 +154,7 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
 	sidecarBin := requireSidecarBinary(t)
+	lockBin := requireLockBinary(t)
 
 	// START ORDER: store, then sidecar, then daemon (which spawns the shim
 	// per session). Cleanups are registered in this same order, so
@@ -197,7 +198,10 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	// caller supplied: the shim's env is scanned front-to-back and the last
 	// assignment of a name is the effective one.
 	daemonOpts.ExtraEnv = append(append(append([]string{}, daemonOpts.ExtraEnv...), buildIdentityEnv()...),
-		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot)
+		"AGENT_REPL_FAKE_SPOOL_ROOT="+spoolRoot,
+		// The shim inherits this from the daemon and spawns it for every
+		// kernel claim; without it no session starts at all.
+		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
 
 	d := harness.StartDaemon(t, daemonOpts)
 	// Registered immediately after the daemon starts, so t.Cleanup's LIFO

@@ -1089,7 +1089,7 @@ stubbed too, which is the only external thing about this branch."
   "An artifact that is not there cannot be fresh."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
-    (agent-repl-test-daemon--mark-fresh "shim" "webapp")
+    (agent-repl-test-daemon--mark-fresh "shim" "webapp" "lock")
     ;; Act / Assert: `daemon' has no artifact mtime, so it alone is stale.
     (should (equal (agent-repl-daemon--stale-targets nil) '("daemon")))))
 

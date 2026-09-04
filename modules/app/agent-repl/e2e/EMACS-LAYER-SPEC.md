@@ -835,10 +835,11 @@ Steps 1-4 are **observed passing**, repeatedly:
 - Composer `RET` resolves to `agent-repl-send` through the real Doom `map!`,
   is pressed, and the daemon answers `SubmitPrompt` with a turn id.
 
-Step 5 — the roster row settling on a settled arm — is **blocked by a
-production constraint, not by this layer**. The shim's session lock is
-`open(2)`'s `O_EXLOCK` (`agent-shim/claude/shim/src/locks.ts`), which is
-macOS/BSD only; on Linux the shim refuses to start a session at all:
+Step 5 — the roster row settling on a settled arm — was **blocked by a
+production constraint, not by this layer**, and that constraint is now
+fixed. The shim's session and workspace claims were `open(2)`'s `O_EXLOCK`
+(`agent-shim/claude/shim/src/locks.ts`), which is macOS/BSD only; on Linux
+the shim refused to start a session at all:
 
 ```
 REFUSED StartSession: another shim holds this conversation's session lock
@@ -847,16 +848,18 @@ shim-session-lock: linux has no O_EXLOCK, so the shim cannot claim
   writing one transcript
 ```
 
-The daemon surfaces that as `OpenWorkspaceError.conversation_owned` and the
-row stays at `:none`. The refusal is deliberate and correct in itself — a
-silent no-op would hand the daemon a false "free" — but it means **no real
-shim can start a session inside the Linux sandbox**, which is where this
-whole suite runs. Every e2e scenario that needs a turn is behind it. The
-Go-side integration suites do not see it because their fake shim takes no
-lock.
+The daemon surfaced that as `OpenWorkspaceError.conversation_owned` and the
+row stayed at `:none`. The refusal was deliberate and correct in itself — a
+silent no-op would hand the daemon a false "free" — but it meant no real
+shim could start a session inside the Linux sandbox, which is where this
+whole suite runs.
 
-That is a production matter and is left to its owner; the harness side of
-the proof-of-life test is finished and waiting on it.
+Each claim is now a `shim-lock` CHILD PROCESS (`agent-shim/shim-lock`)
+taking the real `flock(2)` the daemon probes, on one code path for both
+platforms. `NewEmacsWorld` builds the binary and states it on the Emacs
+process's environment as `AGENT_REPL_SHIM_LOCK_BIN`, beside
+`AGENT_REPL_LOCK_DIR`, so the daemon Emacs starts hands it to every shim it
+spawns.
 
 ## Registration
 
