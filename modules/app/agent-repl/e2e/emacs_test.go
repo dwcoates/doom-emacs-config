@@ -98,8 +98,10 @@ const doomStageBound = 60 * time.Second
 // Emacs is one sandboxed Emacs process, its server socket, and its
 // heartbeat.
 type Emacs struct {
-	t   *testing.T
-	box sandbox
+	// ArtifactPaths are extra files or trees dumpArtifacts preserves on failure.
+	ArtifactPaths []string
+	t             *testing.T
+	box           sandbox
 
 	// Root is the scratch subtree this Emacs owns. Every path below is
 	// under it, so a swept scratch leaves nothing behind.
@@ -581,6 +583,57 @@ func (e *Emacs) dumpArtifacts() {
 		return
 	}
 	e.t.Logf("emacs pty output preserved at %s", path)
+	// The scripted git's fixture file carries every call made against it,
+	// and the state root carries the daemon's own logs: a prompt Emacs is
+	// stuck on is usually explained by one of the two.
+	for _, extra := range append([]string{e.StateDir}, e.ArtifactPaths...) {
+		if extra == "" {
+			continue
+		}
+		dest := filepath.Join(out, filepath.Base(extra))
+		if err := copyTree(extra, dest); err != nil {
+			e.t.Logf("preserve %s: %v", extra, err)
+		}
+	}
+}
+
+// copyTree copies a file or a directory tree; a missing source is not an
+// error, since a failure may predate the source's creation.
+func copyTree(src, dest string) error {
+	info, err := os.Lstat(src)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := filepath.EvalSymlinks(src)
+		if err != nil {
+			return err
+		}
+		return copyTree(target, dest)
+	}
+	if !info.IsDir() {
+		body, err := os.ReadFile(src)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(dest, body, 0o644)
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := copyTree(filepath.Join(src, entry.Name()), filepath.Join(dest, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // stop tears Emacs down. Registered via t.Cleanup, so it runs before the

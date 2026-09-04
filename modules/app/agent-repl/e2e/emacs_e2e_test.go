@@ -141,6 +141,7 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		}
 	})
 
+	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
 	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
 }
 
