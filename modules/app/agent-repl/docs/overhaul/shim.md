@@ -246,9 +246,10 @@ purpose).
     `StopWorkflow` (the run's only addressable act). WORKFLOW IS KICKED
     (ruled 2026-08-29): the workflow verbs and vocabulary stay in the
     contract but are NOT implemented in this wave — a future feature.
-  - `DetachForeground {AgentActivityId}`: Ctrl-B — moves in-flight turn work
-    onto its own stream; the turn announces the detachment and the consumer
-    opens the matching Watch.
+  - `DetachForeground {AgentActivityId}`: detach of in-flight foreground work
+    (no client verb today) — moves in-flight turn work onto its own stream;
+    the turn announces the detachment and the consumer opens the matching
+    Watch.
 - HISTORY:
   - `ReadHistory {optional target; page_size; first | after(HistoryPointer)}`:
     one page of one agent's durable past, newest first. A page is the
@@ -447,8 +448,8 @@ purpose).
   start instants at announcement.
 - Backgrounding causes for SHELLS are harvested from the BASH TOOL RESULT
   (`timedOutAfterMs`, `backgroundedByUser`), never from the task stream.
-  This rule does NOT cover a backgrounded AGENT (Ctrl-B on a foreground
-  subagent): there the candidate producer IS the task stream
+  This rule does NOT cover a backgrounded AGENT (detach of a foreground
+  subagent — no client verb today): there the candidate producer IS the task stream
   (`task_updated{patch.is_backgrounded}`) — an implementation-wave
   observation confirms or refutes it (no observed sequence exists yet).
 - KNOWN-OPEN, BEST-EFFORT ARMS (do not escalate; fill only if the wave finds
