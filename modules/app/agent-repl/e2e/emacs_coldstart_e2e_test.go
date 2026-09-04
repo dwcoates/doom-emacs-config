@@ -1,10 +1,10 @@
 package e2e
 
 import (
-	"strconv"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -72,18 +72,6 @@ func procFields(t *testing.T, pid int, file string) []string {
 		t.Fatalf("read /proc/%d/%s for the daemon Emacs spawned: %v", pid, file, err)
 	}
 	return strings.FieldsFunc(string(body), func(r rune) bool { return r == 0 })
-}
-
-func strconv.Itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	return string(digits)
 }
 
 // TestEmacsColdStartBuildsAndSpawnsTheDaemon is scenario 1.
