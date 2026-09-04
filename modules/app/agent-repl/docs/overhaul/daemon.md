@@ -1395,6 +1395,18 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   "a Stop hook ended the run"), message = the vendor's wording when recorded.
   The workspace resolves PURPLE per failure.proto for the four vendor arms.
 
+## Landing 10 relay (2026-09-04, project lead; user-approved)
+
+- FeedAgentPrompt.delivery: resolve/feed/sendmessage.go sets queued_to_live /
+  resumed_recipient on the sender's row from AgentSendMessageSuccess's arm.
+- FeedPermissionAnswered.denied_undecidable{text}: resolve/feed/permission.go
+  `decisionArm` draws the shim's AgentPermissionDenied.undecidable as its own
+  arm (today folded onto denied_by_policy).
+- FeedTurnErrorQueryDied.cause: resolve/feed/turnended.go carries
+  SessionQueryDied's arm through.
+- SetModelError.cold: workspace/sender.go relays SetSessionModelFailure.cold
+  as the typed arm; delete the ERROR-ARMS `SetModel | cold` row.
+
 ## Landing 9 relay (2026-09-03, project lead; user-approved)
 
 - OpenWorkspaceError.vendor_start_failed{detail}: replace the unlanded-arm

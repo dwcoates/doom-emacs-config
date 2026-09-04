@@ -214,6 +214,7 @@ type SetModelError struct {
 	//	*SetModelError_NoSession
 	//	*SetModelError_NotInCatalog
 	//	*SetModelError_VendorRefused
+	//	*SetModelError_Cold
 	Cause         isSetModelError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -319,6 +320,15 @@ func (x *SetModelError) GetVendorRefused() *SetModelVendorRefused {
 	return nil
 }
 
+func (x *SetModelError) GetCold() *SetModelCold {
+	if x != nil {
+		if x, ok := x.Cause.(*SetModelError_Cold); ok {
+			return x.Cold
+		}
+	}
+	return nil
+}
+
 type isSetModelError_Cause interface {
 	isSetModelError_Cause()
 }
@@ -358,6 +368,14 @@ type SetModelError_VendorRefused struct {
 	VendorRefused *SetModelVendorRefused `protobuf:"bytes,7,opt,name=vendor_refused,json=vendorRefused,proto3,oneof"`
 }
 
+type SetModelError_Cold struct {
+	// The switch would discard a warm cache above the threshold: the shim
+	// raised the cold gate instead (landing 10). The remediation menu
+	// (pay | clear | compact) is the gate row's; answer it with
+	// AnswerColdGate, then set the model again.
+	Cold *SetModelCold `protobuf:"bytes,8,opt,name=cold,proto3,oneof"`
+}
+
 func (*SetModelError_UnknownWorkspace) isSetModelError_Cause() {}
 
 func (*SetModelError_WorkspaceRefMismatch) isSetModelError_Cause() {}
@@ -372,6 +390,44 @@ func (*SetModelError_NotInCatalog) isSetModelError_Cause() {}
 
 func (*SetModelError_VendorRefused) isSetModelError_Cause() {}
 
+func (*SetModelError_Cold) isSetModelError_Cause() {}
+
+type SetModelCold struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetModelCold) Reset() {
+	*x = SetModelCold{}
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetModelCold) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetModelCold) ProtoMessage() {}
+
+func (x *SetModelCold) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetModelCold.ProtoReflect.Descriptor instead.
+func (*SetModelCold) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{4}
+}
+
 type SetModelUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -380,7 +436,7 @@ type SetModelUnknownWorkspace struct {
 
 func (x *SetModelUnknownWorkspace) Reset() {
 	*x = SetModelUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -392,7 +448,7 @@ func (x *SetModelUnknownWorkspace) String() string {
 func (*SetModelUnknownWorkspace) ProtoMessage() {}
 
 func (x *SetModelUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[4]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -405,7 +461,7 @@ func (x *SetModelUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*SetModelUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{4}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{5}
 }
 
 type SetModelWorkspaceRefMismatch struct {
@@ -418,7 +474,7 @@ type SetModelWorkspaceRefMismatch struct {
 
 func (x *SetModelWorkspaceRefMismatch) Reset() {
 	*x = SetModelWorkspaceRefMismatch{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +486,7 @@ func (x *SetModelWorkspaceRefMismatch) String() string {
 func (*SetModelWorkspaceRefMismatch) ProtoMessage() {}
 
 func (x *SetModelWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[5]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +499,7 @@ func (x *SetModelWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
 func (*SetModelWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{5}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SetModelWorkspaceRefMismatch) GetRegistryDir() string {
@@ -463,7 +519,7 @@ type SetModelTransferringAway struct {
 
 func (x *SetModelTransferringAway) Reset() {
 	*x = SetModelTransferringAway{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +531,7 @@ func (x *SetModelTransferringAway) String() string {
 func (*SetModelTransferringAway) ProtoMessage() {}
 
 func (x *SetModelTransferringAway) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[6]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,7 +544,7 @@ func (x *SetModelTransferringAway) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelTransferringAway.ProtoReflect.Descriptor instead.
 func (*SetModelTransferringAway) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{6}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SetModelTransferringAway) GetAddress() string {
@@ -506,7 +562,7 @@ type SetModelNotYetAdopted struct {
 
 func (x *SetModelNotYetAdopted) Reset() {
 	*x = SetModelNotYetAdopted{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -518,7 +574,7 @@ func (x *SetModelNotYetAdopted) String() string {
 func (*SetModelNotYetAdopted) ProtoMessage() {}
 
 func (x *SetModelNotYetAdopted) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[7]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -531,7 +587,7 @@ func (x *SetModelNotYetAdopted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelNotYetAdopted.ProtoReflect.Descriptor instead.
 func (*SetModelNotYetAdopted) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{7}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{8}
 }
 
 type SetModelNoSession struct {
@@ -542,7 +598,7 @@ type SetModelNoSession struct {
 
 func (x *SetModelNoSession) Reset() {
 	*x = SetModelNoSession{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -554,7 +610,7 @@ func (x *SetModelNoSession) String() string {
 func (*SetModelNoSession) ProtoMessage() {}
 
 func (x *SetModelNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[8]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -567,7 +623,7 @@ func (x *SetModelNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelNoSession.ProtoReflect.Descriptor instead.
 func (*SetModelNoSession) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{8}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{9}
 }
 
 type SetModelNotInCatalog struct {
@@ -578,7 +634,7 @@ type SetModelNotInCatalog struct {
 
 func (x *SetModelNotInCatalog) Reset() {
 	*x = SetModelNotInCatalog{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +646,7 @@ func (x *SetModelNotInCatalog) String() string {
 func (*SetModelNotInCatalog) ProtoMessage() {}
 
 func (x *SetModelNotInCatalog) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +659,7 @@ func (x *SetModelNotInCatalog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelNotInCatalog.ProtoReflect.Descriptor instead.
 func (*SetModelNotInCatalog) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{10}
 }
 
 type SetModelVendorRefused struct {
@@ -616,7 +672,7 @@ type SetModelVendorRefused struct {
 
 func (x *SetModelVendorRefused) Reset() {
 	*x = SetModelVendorRefused{}
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -628,7 +684,7 @@ func (x *SetModelVendorRefused) String() string {
 func (*SetModelVendorRefused) ProtoMessage() {}
 
 func (x *SetModelVendorRefused) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_set_model_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -641,7 +697,7 @@ func (x *SetModelVendorRefused) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetModelVendorRefused.ProtoReflect.Descriptor instead.
 func (*SetModelVendorRefused) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SetModelVendorRefused) GetDetail() string {
@@ -663,7 +719,7 @@ const file_agentrepl_v1_endpoint_set_model_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x1d.agentrepl.v1.SetModelSuccessH\x00R\asuccess\x123\n" +
 	"\x05error\x18\x02 \x01(\v2\x1b.agentrepl.v1.SetModelErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x11\n" +
-	"\x0fSetModelSuccess\"\xd5\x04\n" +
+	"\x0fSetModelSuccess\"\x87\x05\n" +
 	"\rSetModelError\x12U\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.SetModelUnknownWorkspaceH\x00R\x10unknownWorkspace\x12b\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2*.agentrepl.v1.SetModelWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12U\n" +
@@ -672,8 +728,10 @@ const file_agentrepl_v1_endpoint_set_model_proto_rawDesc = "" +
 	"\n" +
 	"no_session\x18\x05 \x01(\v2\x1f.agentrepl.v1.SetModelNoSessionH\x00R\tnoSession\x12J\n" +
 	"\x0enot_in_catalog\x18\x06 \x01(\v2\".agentrepl.v1.SetModelNotInCatalogH\x00R\fnotInCatalog\x12L\n" +
-	"\x0evendor_refused\x18\a \x01(\v2#.agentrepl.v1.SetModelVendorRefusedH\x00R\rvendorRefusedB\a\n" +
-	"\x05cause\"\x1a\n" +
+	"\x0evendor_refused\x18\a \x01(\v2#.agentrepl.v1.SetModelVendorRefusedH\x00R\rvendorRefused\x120\n" +
+	"\x04cold\x18\b \x01(\v2\x1a.agentrepl.v1.SetModelColdH\x00R\x04coldB\a\n" +
+	"\x05cause\"\x0e\n" +
+	"\fSetModelCold\"\x1a\n" +
 	"\x18SetModelUnknownWorkspace\"A\n" +
 	"\x1cSetModelWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"4\n" +
@@ -697,39 +755,41 @@ func file_agentrepl_v1_endpoint_set_model_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_set_model_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_model_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_agentrepl_v1_endpoint_set_model_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_set_model_proto_goTypes = []any{
 	(*SetModelRequest)(nil),              // 0: agentrepl.v1.SetModelRequest
 	(*SetModelResponse)(nil),             // 1: agentrepl.v1.SetModelResponse
 	(*SetModelSuccess)(nil),              // 2: agentrepl.v1.SetModelSuccess
 	(*SetModelError)(nil),                // 3: agentrepl.v1.SetModelError
-	(*SetModelUnknownWorkspace)(nil),     // 4: agentrepl.v1.SetModelUnknownWorkspace
-	(*SetModelWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SetModelWorkspaceRefMismatch
-	(*SetModelTransferringAway)(nil),     // 6: agentrepl.v1.SetModelTransferringAway
-	(*SetModelNotYetAdopted)(nil),        // 7: agentrepl.v1.SetModelNotYetAdopted
-	(*SetModelNoSession)(nil),            // 8: agentrepl.v1.SetModelNoSession
-	(*SetModelNotInCatalog)(nil),         // 9: agentrepl.v1.SetModelNotInCatalog
-	(*SetModelVendorRefused)(nil),        // 10: agentrepl.v1.SetModelVendorRefused
-	(*v1.WorkspaceRef)(nil),              // 11: workspace.v1.WorkspaceRef
-	(*v11.AgentModel)(nil),               // 12: conversation.v1.AgentModel
+	(*SetModelCold)(nil),                 // 4: agentrepl.v1.SetModelCold
+	(*SetModelUnknownWorkspace)(nil),     // 5: agentrepl.v1.SetModelUnknownWorkspace
+	(*SetModelWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.SetModelWorkspaceRefMismatch
+	(*SetModelTransferringAway)(nil),     // 7: agentrepl.v1.SetModelTransferringAway
+	(*SetModelNotYetAdopted)(nil),        // 8: agentrepl.v1.SetModelNotYetAdopted
+	(*SetModelNoSession)(nil),            // 9: agentrepl.v1.SetModelNoSession
+	(*SetModelNotInCatalog)(nil),         // 10: agentrepl.v1.SetModelNotInCatalog
+	(*SetModelVendorRefused)(nil),        // 11: agentrepl.v1.SetModelVendorRefused
+	(*v1.WorkspaceRef)(nil),              // 12: workspace.v1.WorkspaceRef
+	(*v11.AgentModel)(nil),               // 13: conversation.v1.AgentModel
 }
 var file_agentrepl_v1_endpoint_set_model_proto_depIdxs = []int32{
-	11, // 0: agentrepl.v1.SetModelRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	12, // 1: agentrepl.v1.SetModelRequest.model:type_name -> conversation.v1.AgentModel
+	12, // 0: agentrepl.v1.SetModelRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	13, // 1: agentrepl.v1.SetModelRequest.model:type_name -> conversation.v1.AgentModel
 	2,  // 2: agentrepl.v1.SetModelResponse.success:type_name -> agentrepl.v1.SetModelSuccess
 	3,  // 3: agentrepl.v1.SetModelResponse.error:type_name -> agentrepl.v1.SetModelError
-	4,  // 4: agentrepl.v1.SetModelError.unknown_workspace:type_name -> agentrepl.v1.SetModelUnknownWorkspace
-	5,  // 5: agentrepl.v1.SetModelError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetModelWorkspaceRefMismatch
-	6,  // 6: agentrepl.v1.SetModelError.transferring_away:type_name -> agentrepl.v1.SetModelTransferringAway
-	7,  // 7: agentrepl.v1.SetModelError.not_yet_adopted:type_name -> agentrepl.v1.SetModelNotYetAdopted
-	8,  // 8: agentrepl.v1.SetModelError.no_session:type_name -> agentrepl.v1.SetModelNoSession
-	9,  // 9: agentrepl.v1.SetModelError.not_in_catalog:type_name -> agentrepl.v1.SetModelNotInCatalog
-	10, // 10: agentrepl.v1.SetModelError.vendor_refused:type_name -> agentrepl.v1.SetModelVendorRefused
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	5,  // 4: agentrepl.v1.SetModelError.unknown_workspace:type_name -> agentrepl.v1.SetModelUnknownWorkspace
+	6,  // 5: agentrepl.v1.SetModelError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetModelWorkspaceRefMismatch
+	7,  // 6: agentrepl.v1.SetModelError.transferring_away:type_name -> agentrepl.v1.SetModelTransferringAway
+	8,  // 7: agentrepl.v1.SetModelError.not_yet_adopted:type_name -> agentrepl.v1.SetModelNotYetAdopted
+	9,  // 8: agentrepl.v1.SetModelError.no_session:type_name -> agentrepl.v1.SetModelNoSession
+	10, // 9: agentrepl.v1.SetModelError.not_in_catalog:type_name -> agentrepl.v1.SetModelNotInCatalog
+	11, // 10: agentrepl.v1.SetModelError.vendor_refused:type_name -> agentrepl.v1.SetModelVendorRefused
+	4,  // 11: agentrepl.v1.SetModelError.cold:type_name -> agentrepl.v1.SetModelCold
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_model_proto_init() }
@@ -749,6 +809,7 @@ func file_agentrepl_v1_endpoint_set_model_proto_init() {
 		(*SetModelError_NoSession)(nil),
 		(*SetModelError_NotInCatalog)(nil),
 		(*SetModelError_VendorRefused)(nil),
+		(*SetModelError_Cold)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -756,7 +817,7 @@ func file_agentrepl_v1_endpoint_set_model_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_model_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_model_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_model.proto.
  */
 export const file_agentrepl_v1_endpoint_set_model: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X21vZGVsLnByb3RvEgxhZ2VudHJlcGwudjEibAoPU2V0TW9kZWxSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSKgoFbW9kZWwYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbCJ8ChBTZXRNb2RlbFJlc3BvbnNlEjAKB3N1Y2Nlc3MYASABKAsyHS5hZ2VudHJlcGwudjEuU2V0TW9kZWxTdWNjZXNzSAASLAoFZXJyb3IYAiABKAsyGy5hZ2VudHJlcGwudjEuU2V0TW9kZWxFcnJvckgAQggKBnJlc3VsdCIRCg9TZXRNb2RlbFN1Y2Nlc3Mi5AMKDVNldE1vZGVsRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuU2V0TW9kZWxVbmtub3duV29ya3NwYWNlSAASTAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIqLmFnZW50cmVwbC52MS5TZXRNb2RlbFdvcmtzcGFjZVJlZk1pc21hdGNoSAASQwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyJi5hZ2VudHJlcGwudjEuU2V0TW9kZWxUcmFuc2ZlcnJpbmdBd2F5SAASPgoPbm90X3lldF9hZG9wdGVkGAQgASgLMiMuYWdlbnRyZXBsLnYxLlNldE1vZGVsTm90WWV0QWRvcHRlZEgAEjUKCm5vX3Nlc3Npb24YBSABKAsyHy5hZ2VudHJlcGwudjEuU2V0TW9kZWxOb1Nlc3Npb25IABI8Cg5ub3RfaW5fY2F0YWxvZxgGIAEoCzIiLmFnZW50cmVwbC52MS5TZXRNb2RlbE5vdEluQ2F0YWxvZ0gAEj0KDnZlbmRvcl9yZWZ1c2VkGAcgASgLMiMuYWdlbnRyZXBsLnYxLlNldE1vZGVsVmVuZG9yUmVmdXNlZEgAQgcKBWNhdXNlIhoKGFNldE1vZGVsVW5rbm93bldvcmtzcGFjZSI0ChxTZXRNb2RlbFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIrChhTZXRNb2RlbFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIXChVTZXRNb2RlbE5vdFlldEFkb3B0ZWQiEwoRU2V0TW9kZWxOb1Nlc3Npb24iFgoUU2V0TW9kZWxOb3RJbkNhdGFsb2ciJwoVU2V0TW9kZWxWZW5kb3JSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_api]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X21vZGVsLnByb3RvEgxhZ2VudHJlcGwudjEibAoPU2V0TW9kZWxSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSKgoFbW9kZWwYAiABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbCJ8ChBTZXRNb2RlbFJlc3BvbnNlEjAKB3N1Y2Nlc3MYASABKAsyHS5hZ2VudHJlcGwudjEuU2V0TW9kZWxTdWNjZXNzSAASLAoFZXJyb3IYAiABKAsyGy5hZ2VudHJlcGwudjEuU2V0TW9kZWxFcnJvckgAQggKBnJlc3VsdCIRCg9TZXRNb2RlbFN1Y2Nlc3MikAQKDVNldE1vZGVsRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuU2V0TW9kZWxVbmtub3duV29ya3NwYWNlSAASTAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIqLmFnZW50cmVwbC52MS5TZXRNb2RlbFdvcmtzcGFjZVJlZk1pc21hdGNoSAASQwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyJi5hZ2VudHJlcGwudjEuU2V0TW9kZWxUcmFuc2ZlcnJpbmdBd2F5SAASPgoPbm90X3lldF9hZG9wdGVkGAQgASgLMiMuYWdlbnRyZXBsLnYxLlNldE1vZGVsTm90WWV0QWRvcHRlZEgAEjUKCm5vX3Nlc3Npb24YBSABKAsyHy5hZ2VudHJlcGwudjEuU2V0TW9kZWxOb1Nlc3Npb25IABI8Cg5ub3RfaW5fY2F0YWxvZxgGIAEoCzIiLmFnZW50cmVwbC52MS5TZXRNb2RlbE5vdEluQ2F0YWxvZ0gAEj0KDnZlbmRvcl9yZWZ1c2VkGAcgASgLMiMuYWdlbnRyZXBsLnYxLlNldE1vZGVsVmVuZG9yUmVmdXNlZEgAEioKBGNvbGQYCCABKAsyGi5hZ2VudHJlcGwudjEuU2V0TW9kZWxDb2xkSABCBwoFY2F1c2UiDgoMU2V0TW9kZWxDb2xkIhoKGFNldE1vZGVsVW5rbm93bldvcmtzcGFjZSI0ChxTZXRNb2RlbFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIrChhTZXRNb2RlbFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIXChVTZXRNb2RlbE5vdFlldEFkb3B0ZWQiEwoRU2V0TW9kZWxOb1Nlc3Npb24iFgoUU2V0TW9kZWxOb3RJbkNhdGFsb2ciJwoVU2V0TW9kZWxWZW5kb3JSZWZ1c2VkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_conversation_v1_api]);
 
 /**
  * @generated from message agentrepl.v1.SetModelRequest
@@ -157,6 +157,17 @@ export type SetModelError = Message<"agentrepl.v1.SetModelError"> & {
      */
     value: SetModelVendorRefused;
     case: "vendorRefused";
+  } | {
+    /**
+     * The switch would discard a warm cache above the threshold: the shim
+     * raised the cold gate instead (landing 10). The remediation menu
+     * (pay | clear | compact) is the gate row's; answer it with
+     * AnswerColdGate, then set the model again.
+     *
+     * @generated from field: agentrepl.v1.SetModelCold cold = 8;
+     */
+    value: SetModelCold;
+    case: "cold";
   } | { case: undefined; value?: undefined };
 };
 
@@ -166,6 +177,19 @@ export type SetModelError = Message<"agentrepl.v1.SetModelError"> & {
  */
 export const SetModelErrorSchema: GenMessage<SetModelError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_model, 3);
+
+/**
+ * @generated from message agentrepl.v1.SetModelCold
+ */
+export type SetModelCold = Message<"agentrepl.v1.SetModelCold"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetModelCold.
+ * Use `create(SetModelColdSchema)` to create a new message.
+ */
+export const SetModelColdSchema: GenMessage<SetModelCold> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 4);
 
 /**
  * @generated from message agentrepl.v1.SetModelUnknownWorkspace
@@ -178,7 +202,7 @@ export type SetModelUnknownWorkspace = Message<"agentrepl.v1.SetModelUnknownWork
  * Use `create(SetModelUnknownWorkspaceSchema)` to create a new message.
  */
 export const SetModelUnknownWorkspaceSchema: GenMessage<SetModelUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 4);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 5);
 
 /**
  * @generated from message agentrepl.v1.SetModelWorkspaceRefMismatch
@@ -197,7 +221,7 @@ export type SetModelWorkspaceRefMismatch = Message<"agentrepl.v1.SetModelWorkspa
  * Use `create(SetModelWorkspaceRefMismatchSchema)` to create a new message.
  */
 export const SetModelWorkspaceRefMismatchSchema: GenMessage<SetModelWorkspaceRefMismatch> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 5);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 6);
 
 /**
  * @generated from message agentrepl.v1.SetModelTransferringAway
@@ -216,7 +240,7 @@ export type SetModelTransferringAway = Message<"agentrepl.v1.SetModelTransferrin
  * Use `create(SetModelTransferringAwaySchema)` to create a new message.
  */
 export const SetModelTransferringAwaySchema: GenMessage<SetModelTransferringAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 6);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 7);
 
 /**
  * @generated from message agentrepl.v1.SetModelNotYetAdopted
@@ -229,7 +253,7 @@ export type SetModelNotYetAdopted = Message<"agentrepl.v1.SetModelNotYetAdopted"
  * Use `create(SetModelNotYetAdoptedSchema)` to create a new message.
  */
 export const SetModelNotYetAdoptedSchema: GenMessage<SetModelNotYetAdopted> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 7);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 8);
 
 /**
  * @generated from message agentrepl.v1.SetModelNoSession
@@ -242,7 +266,7 @@ export type SetModelNoSession = Message<"agentrepl.v1.SetModelNoSession"> & {
  * Use `create(SetModelNoSessionSchema)` to create a new message.
  */
 export const SetModelNoSessionSchema: GenMessage<SetModelNoSession> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 8);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 9);
 
 /**
  * @generated from message agentrepl.v1.SetModelNotInCatalog
@@ -255,7 +279,7 @@ export type SetModelNotInCatalog = Message<"agentrepl.v1.SetModelNotInCatalog"> 
  * Use `create(SetModelNotInCatalogSchema)` to create a new message.
  */
 export const SetModelNotInCatalogSchema: GenMessage<SetModelNotInCatalog> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 9);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 10);
 
 /**
  * @generated from message agentrepl.v1.SetModelVendorRefused
@@ -274,5 +298,5 @@ export type SetModelVendorRefused = Message<"agentrepl.v1.SetModelVendorRefused"
  * Use `create(SetModelVendorRefusedSchema)` to create a new message.
  */
 export const SetModelVendorRefusedSchema: GenMessage<SetModelVendorRefused> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_set_model, 10);
+  messageDesc(file_agentrepl_v1_endpoint_set_model, 11);
 

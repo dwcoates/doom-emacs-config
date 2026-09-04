@@ -485,6 +485,16 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
   existing headline path (the daemon composes the sentence); the schema-driven
   arm enumeration must pick them up; one test per arm.
 
+## Landing 10 relay (2026-09-04, project lead)
+
+- FeedAgentPrompt.delivery: the sender's agent-prompt row shows the delivery
+  outcome (queued / resumed the recipient) when set.
+- FeedPermissionAnswered.denied_undecidable: a verdict treatment distinct
+  from denied_by_policy, wording drawn verbatim.
+- FeedTurnErrorQueryDied.cause: the turn-error line names the cause.
+- SetModelError.cold: the model picker's refusal routes attention to the
+  cold gate row instead of "daemon could not be reached".
+
 ## Landing 9 relay (2026-09-03, project lead)
 
 - OpenWorkspaceError.vendor_start_failed{detail}: the schema-driven refusal

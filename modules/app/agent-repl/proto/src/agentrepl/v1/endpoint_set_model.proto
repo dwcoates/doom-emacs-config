@@ -47,8 +47,14 @@ message SetModelError {
     SetModelNotInCatalog not_in_catalog = 6;
     // The vendor refused the change.
     SetModelVendorRefused vendor_refused = 7;
+    // The switch would discard a warm cache above the threshold: the shim
+    // raised the cold gate instead (landing 10). The remediation menu
+    // (pay | clear | compact) is the gate row's; answer it with
+    // AnswerColdGate, then set the model again.
+    SetModelCold cold = 8;
   }
 }
+message SetModelCold {}
 message SetModelUnknownWorkspace {}
 message SetModelWorkspaceRefMismatch {
   // The dir the registry holds for this id.
