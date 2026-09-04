@@ -49,10 +49,10 @@ type emacsScenario struct {
 
 // newEmacsScenario brings the layer up to the point every area-D and area-E
 // scenario begins at, driving only ordinary commands.
-func newEmacsScenario(t *testing.T) *emacsScenario {
+func newEmacsScenario(t *testing.T, options ...EmacsWorldOption) *emacsScenario {
 	t.Helper()
 	box := requireSandbox(t)
-	w := NewEmacsWorld(t, box)
+	w := NewEmacsWorld(t, box, options...)
 	e := w.Emacs
 
 	// EMACS spawns the daemon, through the module's own launcher.
