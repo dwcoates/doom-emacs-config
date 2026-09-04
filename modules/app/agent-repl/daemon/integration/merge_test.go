@@ -839,11 +839,13 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	})
 
 	// Assert: the fake deploy script was invoked. The self-reload trigger
-	// fires after the terminal push as part of teardown, so wait for its own
-	// log record rather than racing the push.
-	d.AwaitRunLogOperation("daemon.merge.self_reload")
-	// The deploy chain runs BEYOND the trigger call, so its own record is the
-	// synchronization point; the trigger's record only says it was asked for.
+	// fires after the terminal push as part of teardown, so wait for a log
+	// record rather than racing the push. THE TRIGGER'S OWN RECORD IS NOT
+	// AVAILABLE HERE: it is workspace-scoped, and a landed merge's workspace
+	// sink is reached through a symlink in the worktree the same teardown has
+	// already removed. The deploy chain runs BEYOND the trigger call anyway,
+	// so its global record is the synchronization point; the trigger's would
+	// only have said it was asked for.
 	d.AwaitRunLogOperation("daemon.rollout.deploy")
 	if got := len(d.Deploy.Invocations()); got != 1 {
 		t.Fatalf("deploy script invocations = %d, want EXACTLY 1 from the self-repo landing's rollout trigger (no double-fire)", got)
