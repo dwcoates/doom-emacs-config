@@ -476,3 +476,75 @@ func TestNestedSubagentHistoricalUsage(t *testing.T) {
 	// on an unusual file shape.
 	w.RequireNoUnexpectedExit(t)
 }
+
+// ---------------------------------------------------------------------------
+// Coverage extension — `!subagent-failed`: a subagent ending in failure.
+// ---------------------------------------------------------------------------
+
+// TestSubagentFailed drives "!subagent-failed" (subagents.ts's
+// SUBAGENT_FAILED): a detached `Agent` whose vendor `task_updated` carries
+// `status: "failed"` and whose `task_notification` reports the same — the
+// scenario's own declared arm is AgentSubagentFailure.
+//
+// The frontend fact under test is feed.proto's FeedSubagentSettled.outcome
+// oneof, which spells four DISTINCT terminals — succeeded, failed, cancelled,
+// and lost ("We STOPPED BEING ABLE TO SEE IT — not known to have failed; the
+// word carries the distinction, so it never draws as a plain failure"). A
+// subagent that ended on its OWN failure must reach `failed` and none of the
+// other three: drawing it succeeded would hide the failure, cancelled would
+// blame a hand that never touched it, and lost would claim ignorance the
+// producer does not have. Every arm is therefore checked, not just the wanted
+// one — this is the bubble family's terminal-arm discrimination, and the
+// positive alone would pass on a resolver that collapsed all four.
+//
+// Placement is asserted alongside it: the launch is `run_in_background: true`,
+// so the row is the DETACHED wrapper on the root feed, exactly as #28's
+// successful sibling is (feed.proto's FeedDetachedSubagent: "identical to the
+// sync arm's; the wrapper carries the placement fact, never a second
+// drawing").
+func TestSubagentFailed(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// Act: the main turn ends on the async-launch ack; the failure itself
+	// lands after it.
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent-failed")
+
+	rootPage, rootToken := openFeed(t, w, ws, nil)
+	bubbleRow := findRow(rootPage.GetSuccess().GetRows(), func(row *frontendv1.FeedRow) bool {
+		return row.GetDetachedSubagent() != nil
+	})
+	if bubbleRow == nil {
+		t.Fatalf("root feed page %v, want a detached_subagent row for the launched sweep", rootPage)
+	}
+	if bubbleRow.GetActivity().GetSubagent() != nil {
+		t.Errorf("row %v carries the SYNC subagent arm, want the detached wrapper", bubbleRow)
+	}
+
+	// Assert: the head still names the commission, so a failed run is
+	// readable rather than anonymous.
+	bubble := awaitSubagentSettled(t, w, rootPage, w.WatchFeed(rootToken), bubbleRow.GetId())
+	if got := bubble.GetDescription().GetText(); got != "A sweep that will fail" {
+		t.Errorf("settled bubble description = %q, want the commission's own text %q", got, "A sweep that will fail")
+	}
+
+	// Assert: the terminal is `failed`, and specifically NOT one of the three
+	// neighbouring arms.
+	settled := bubble.GetSettled()
+	if settled.GetFailed() == nil {
+		t.Fatalf("settled outcome = %v, want failed (the vendor reported status \"failed\")", settled.GetOutcome())
+	}
+	if settled.GetSucceeded() != nil {
+		t.Errorf("settled outcome also carries succeeded, want failed alone")
+	}
+	if settled.GetCancelled() != nil {
+		t.Errorf("settled outcome = cancelled, want failed: nothing stopped this agent by hand")
+	}
+	if settled.GetLost() != nil {
+		t.Errorf("settled outcome = lost, want failed: the producer reported the failure, so it was never " +
+			"out of sight (feed.proto: lost is \"not known to have failed\")")
+	}
+}
