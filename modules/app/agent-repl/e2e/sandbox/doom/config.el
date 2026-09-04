@@ -152,16 +152,6 @@ effect."
           (tab-bar-mode 1)
           (setq server-name socket)
           (server-start)
-          ;; THE SAMPLING PROFILER, ARMED FOR THE WHOLE SCENARIO. A wedge in
-          ;; this layer is a command loop burning CPU (`state=R' in the Go
-          ;; side's kernel snapshot), and while it burns Emacs answers
-          ;; NOTHING -- not the server socket, not a nested eval, not the
-          ;; debugger. Nothing can be ASKED of a wedged Emacs; what can be
-          ;; done is to have it already recording, and read the recording out
-          ;; afterwards. Sampling is timer-driven and its cost does not scale
-          ;; with what the scenario does.
-          (require 'profiler)
-          (profiler-start 'cpu)
           (when ready
             (agent-repl-e2e--write-stamp
              ready
@@ -176,7 +166,20 @@ effect."
                    (cons "map_bang" (if (fboundp 'map!) t :json-false))
                    (cons "popup_rule" (if (fboundp 'set-popup-rule!) t :json-false))
                    (cons "agent_repl" (if (featurep 'agent-repl) t :json-false))
-                   (cons "server_name" server-name)))))
+                   (cons "server_name" server-name))))
+          ;; THE SAMPLING PROFILER, ARMED FOR THE WHOLE SCENARIO, AND ARMED
+          ;; AFTER THE STAMP. A wedge in this layer is a command loop burning
+          ;; CPU (`state=R' in the Go side's kernel snapshot), and while it
+          ;; burns Emacs answers NOTHING -- not the server socket, not a
+          ;; nested eval, not the debugger. Nothing can be ASKED of a wedged
+          ;; Emacs; what can be done is to have it already recording, and read
+          ;; the recording out afterwards.
+          ;;
+          ;; It comes after the stamp because the stamp is what `doomBootBound'
+          ;; is measured against, and a diagnostic must not be inside the
+          ;; phase it exists to explain.
+          (require 'profiler)
+          (profiler-start 'cpu))
       (error
        ;; Never leave the Go side waiting on a socket that is not coming.
        (when ready
