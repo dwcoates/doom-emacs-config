@@ -792,6 +792,11 @@ type proxyStore struct {
 	mu      sync.Mutex
 	batches []*storev1.WriteBatchRequest
 
+	// gate, when armed, WITHHOLDS the answer to the first batch that matches
+	// it — the same interlock the fake store offers, for the subjects that
+	// need the REAL store's behavior behind it. See writeGate.
+	gate *writeGate
+
 	srv     *http.Server
 	ln      net.Listener
 	done    chan struct{}
@@ -799,6 +804,19 @@ type proxyStore struct {
 }
 
 var _ storev1connect.ShimStoreHandler = (*proxyStore)(nil)
+
+// gateOnBatch arms the proxy's one-shot write gate, released at cleanup
+// whatever the subject does so a failure can never leave a producer wedged in
+// a write.
+func (p *proxyStore) gateOnBatch(t *testing.T, match func(*storev1.WriteBatchRequest) bool) *writeGate {
+	t.Helper()
+	g := &writeGate{match: match, reached: make(chan struct{}), released: make(chan struct{})}
+	p.mu.Lock()
+	p.gate = g
+	p.mu.Unlock()
+	t.Cleanup(g.release)
+	return g
+}
 
 func startProxyStore(t *testing.T, upstream string) *proxyStore {
 	t.Helper()
@@ -838,13 +856,19 @@ func (p *proxyStore) Stop() {
 }
 
 func (p *proxyStore) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
+	recorded := proto.Clone(req.Msg).(*storev1.WriteBatchRequest)
 	p.mu.Lock()
-	p.batches = append(p.batches, proto.Clone(req.Msg).(*storev1.WriteBatchRequest))
+	p.batches = append(p.batches, recorded)
+	gate := p.gate
 	p.mu.Unlock()
 	resp, err := p.up.WriteBatch(ctx, connect.NewRequest(req.Msg))
 	if err != nil {
 		return nil, err
 	}
+	// The upstream store has already COMMITTED the batch and only the answer is
+	// withheld, so a subject waiting on the gate reads the same durable state
+	// the producer just wrote.
+	gate.hold(recorded)
 	return connect.NewResponse(resp.Msg), nil
 }
 
