@@ -58,11 +58,25 @@ func TestEmacsRosterArmsPaintTheTabInOrder(t *testing.T) {
 	typeIntoComposer(e, s.Input, "paint the tab through one turn")
 	e.KeysIn(s.Input, "RET")
 
-	// The walk ends on a SETTLED arm — the roster's own vocabulary answers
-	// which those are, so this test does not restate the list.
-	e.AwaitTrue("the roster row to reach a settled arm",
-		`(and (memq (agent-repl-e2e--arm-of `+elispString(s.Name)+`)
-                    agent-repl-roster-settled-statuses)
+	// The walk ends on a SETTLED arm HAVING PASSED THROUGH A RUNNING ONE,
+	// and both halves are the wait, not the assertion. Waiting for a settled
+	// arm alone was satisfied by the row's own opening `:ready' — measured:
+	// the row walks `:none' -> `:ready' -> `:init' -> `:submitting' ->
+	// `:thinking', so it is ALREADY settled ~340ms after `SubmitPrompt'
+	// answered with a turn id and before the turn's first running arm
+	// arrives. The wait then returned before the turn had started and the
+	// assertions below read a one-element walk, which is the whole of this
+	// scenario's flakiness.
+	//
+	// The running half is read from the recorded walk rather than from the
+	// row, because a running arm is a TRANSIENT the row does not keep: a
+	// poll can miss it, which is why the walk is collected on the module's
+	// own per-push hook in the first place.
+	e.AwaitTrue("the roster row to walk a running arm to a settled one",
+		`(and (seq-some (lambda (a) (memq a agent-repl-roster-running-statuses))
+                        agent-repl-e2e--arms)
+               (memq (agent-repl-e2e--arm-of `+elispString(s.Name)+`)
+                     agent-repl-roster-settled-statuses)
                t)`)
 
 	arms := decodeStrings(e.Eval(`(mapcar (lambda (a) (format "%s" a)) (reverse agent-repl-e2e--arms))`))
