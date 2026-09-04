@@ -184,6 +184,25 @@ func (q *queue) standingHold(ctx context.Context, ws ids.WorkspaceID, turn ids.T
 // verdict without sleeping for it.
 func (q *queue) waitForClassifications() { q.classifying.Wait() }
 
+// Drain implements Queue: a BOUNDED join of the classification verdicts and the
+// background revivals. It reports whether they all left, so the caller decides
+// what an overrun means rather than this package guessing — and it is bounded
+// because an unbounded wait is a daemon that does not exit.
+func (q *queue) Drain(bound time.Duration) bool {
+	left := make(chan struct{})
+	go func() {
+		q.classifying.Wait()
+		q.reviving.Wait()
+		close(left)
+	}()
+	select {
+	case <-left:
+		return true
+	case <-time.After(bound):
+		return false
+	}
+}
+
 // saidText renders a submission's text for the classifier and the durable turn
 // record: the text blocks, joined. Images carry no text and contribute none.
 func saidText(said *conversationv1.UserSaid) string {

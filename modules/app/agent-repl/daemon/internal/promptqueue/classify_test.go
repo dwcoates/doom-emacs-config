@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -301,5 +302,45 @@ func TestAHoldBehindAContextCutAsksNoClassifier(t *testing.T) {
 	// Assert.
 	if got := len(h.judge.questions()); got != 0 {
 		t.Fatalf("classifier calls = %d, want none behind a context cut", got)
+	}
+}
+
+// --- the exit's bounded join ----------------------------------------------
+//
+// A verdict and a background revival each read and write the state client off
+// their own goroutine. Nothing joined them, so a SIGTERM landing inside one
+// left `daemon.promptqueue.tray: could not read the standing holds — sql:
+// database is closed` in the log of an ORDERLY exit.
+
+func TestDrainReportsTrueWhenNoBackgroundWorkIsInFlight(t *testing.T) {
+	// Arrange: a queue that has classified nothing.
+	h := newHarness(t)
+
+	// Act.
+	left := h.q.Drain(time.Second)
+
+	// Assert.
+	if !left {
+		t.Fatal("Drain = false with nothing in flight, want true")
+	}
+}
+
+func TestDrainReportsFalseWhenAVerdictOutlivesTheBound(t *testing.T) {
+	// Arrange: a classification held at the judge, so it is genuinely in
+	// flight for as long as the test wants it to be.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	release := h.judge.hold()
+	t.Cleanup(func() { release(); h.q.waitForClassifications() })
+	if _, err := h.q.Submit(context.Background(), submission("t1", "an unrelated question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Act.
+	left := h.q.Drain(10 * time.Millisecond)
+
+	// Assert: reported, never waited on forever.
+	if left {
+		t.Fatal("Drain = true with a verdict still in flight, want false")
 	}
 }

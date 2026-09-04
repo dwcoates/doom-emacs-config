@@ -317,6 +317,12 @@ func run(ctx context.Context, opts options, h hooks) error {
 		}(loop)
 	}
 	defer joinBackgroundLoops(&loops, loopJoinBound, log)
+	// AND THE QUEUE'S OWN GOROUTINES, for the same reason and on the same
+	// bound: a classification verdict and a background revival each read and
+	// write the state client off their own goroutine.
+	if built.DrainQueue != nil {
+		defer joinQueueWork(built.DrainQueue, loopJoinBound, log)
+	}
 
 	log.Debug("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
@@ -386,6 +392,18 @@ const shutdownGrace = 2 * time.Second
 // the teardown that follows will run under it — never something to keep
 // waiting on, because an unbounded wait is a daemon that does not exit.
 const loopJoinBound = 2 * time.Second
+
+// joinQueueWork waits, bounded, for the prompt queue's own background
+// goroutines to leave, and says so loudly when they do not.
+func joinQueueWork(drain func(time.Duration) bool, bound time.Duration, log dlog.Logger) {
+	if drain(bound) {
+		log.Debug("daemon.cmd.serve", "the prompt queue's background work left before the teardown", nil)
+		return
+	}
+	log.Error("daemon.cmd.serve", "the prompt queue's background work outlived its serving context; tearing down under it", dlog.Context{
+		"bound_ms": bound.Milliseconds(),
+	})
+}
 
 // joinBackgroundLoops waits, bounded, for every background loop to leave, and
 // says so loudly when one does not.

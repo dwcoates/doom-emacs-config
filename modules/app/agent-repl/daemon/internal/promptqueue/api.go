@@ -167,6 +167,17 @@ type Queue interface {
 	// RestoreHolds reloads every standing hold at boot, ALL-OR-NOTHING: a
 	// corrupt row fails the restore and nothing is loaded.
 	RestoreHolds(ctx context.Context) error
+	// Drain waits, BOUNDED, for the queue's own background goroutines — the
+	// asynchronous classification verdicts and the background revivals — to
+	// finish, and reports whether they all did.
+	//
+	// THE ORDERLY EXIT CALLS IT BEFORE THE STATE CLIENT CLOSES. Both of those
+	// goroutines read and write that client off their own goroutine, so a
+	// SIGTERM landing inside one left `daemon.promptqueue.tray: could not read
+	// the standing holds — sql: database is closed` and
+	// `daemon.promptqueue.classify: the verdict was recorded but the tray was
+	// not republished` in the log of an ORDERLY exit.
+	Drain(bound time.Duration) bool
 }
 
 // Deps are the queue's collaborators.
