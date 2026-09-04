@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -165,14 +166,44 @@ func TestEmacsUnknownRosterArmIsRefusedLoudly(t *testing.T) {
 //     registered and selected through the ordinary command so the first is
 //     genuinely unselected.
 func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
-	s := newEmacsScenario(t)
-	e := s.E
 	box := requireSandbox(t)
+
+	// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send' —
+	// the ONLY send there is — submits to the CURRENT workspace, so a turn
+	// can only ever be started on the SELECTED one; typing into an
+	// unselected workspace's composer and pressing RET submits nothing (the
+	// current workspace's composer is empty) and the ask never fires. So the
+	// turn is started while this workspace IS selected and PARKED on the
+	// fake's turn gate (hibernation_e2e_test.go's
+	// turnGatePathEnv/turnGateTextEnv) BEFORE its ask goes out; the second
+	// workspace is then selected, and only then is the gate opened. The ask
+	// therefore arrives with this workspace genuinely unselected, which is
+	// the case `agent-repl-host--notify' routes to
+	// `agent-repl-status-blink-tab'.
+	gatePath := filepath.Join(box.Scratch(), "perm-ask-gate")
+	const askPrompt = "!perm-hold"
+	s := newEmacsScenario(t,
+		WithEmacsEnv(turnGatePathEnv, gatePath),
+		WithEmacsEnv(turnGateTextEnv, askPrompt))
+	e := s.E
 
 	e.Eval(`(progn
              (defun agent-repl-e2e--focused (&rest _) t)
              (advice-add 'agent-repl--emacs-focused-p :override #'agent-repl-e2e--focused)
              t)`)
+
+	// The fake SDK's parked-permission scenario: the ask goes out and stays
+	// outstanding, so the notification is guaranteed to arrive while the
+	// turn is still running. It is submitted through the ordinary composer
+	// RET, whose binding is asserted rather than assumed — a RET that
+	// resolved to anything else would submit nothing and fail this test
+	// silently five seconds later.
+	typeIntoComposer(e, s.Input, askPrompt)
+	if want, got := "agent-repl-send", e.BindingForIn(s.Input, "RET"); got != want {
+		t.Fatalf("composer RET resolves to %q, want %q", got, want)
+	}
+	e.KeysIn(s.Input, "RET")
+	emGHIAwaitStatus(t, e, s.Name, "the gated turn to be in flight before the switch", emGHIRunningArms...)
 
 	// A SECOND workspace, selected, so the first is unselected.
 	other := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "repo-other"))
@@ -181,11 +212,11 @@ func TestEmacsPermissionAskFiresTheAttentionMarker(t *testing.T) {
 		`(format "%s" (agent-repl--ws-current-name))`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == otherName })
 
-	// The fake SDK's parked-permission scenario: the ask goes out and stays
-	// outstanding, so the notification is guaranteed to arrive while the
-	// turn is still running.
-	typeIntoComposer(e, s.Input, "!perm-hold")
-	e.KeysIn(s.Input, "RET")
+	// The gate opens only now, so the ask fires against an unselected
+	// workspace.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("e2e: open the turn gate: %v", err)
+	}
 
 	e.AwaitTrue("the unselected workspace's attention marker to be drawn",
 		`(and (agent-repl-status-attention-visible-p `+elispString(s.Name)+`) t)`)
