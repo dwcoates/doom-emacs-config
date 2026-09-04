@@ -94,3 +94,51 @@ func TestStartSpawnsWhenNothingHoldsAndNothingListens(t *testing.T) {
 			len(f.supervisor.spawns), len(f.supervisor.adopts))
 	}
 }
+
+// TestStartStartsASessionOnTheInertSurvivorWhoseLockReadsFree pins the run-12
+// defect: a StartSession that REFUSED (vendor_start_failed) rolls the shim's
+// two conversation locks back but leaves the process serving, so the recovery
+// bring-up finds a live listener over a free lock. Per shim.md that is an
+// INERT shim — spawned, serving, no session — and attaching to it without
+// starting one leaves the workspace sessionless, which is what answered the
+// recovery prompt `no_session`.
+func TestStartStartsASessionOnTheInertSurvivorWhoseLockReadsFree(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateFree
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 1 {
+		t.Fatalf("StartSession calls = %d, want exactly one: an inert survivor holds no lock and has no session",
+			len(f.client.requests))
+	}
+}
+
+// TestStartDoesNotStartASecondSessionOnAShimHoldingTheLock pins the other side:
+// a HELD lock is the shim saying the conversation is already its own, and a
+// second StartSession would answer `already_started`.
+func TestStartDoesNotStartASecondSessionOnAShimHoldingTheLock(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateHeld
+	f.socketState = shimsocket.StateLive
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 0 {
+		t.Fatalf("StartSession calls = %d, want none: an adopted shim is attached to, never started",
+			len(f.client.requests))
+	}
+}
