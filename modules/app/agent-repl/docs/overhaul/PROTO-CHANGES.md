@@ -302,3 +302,13 @@ interrupted text, not `failed`. The daemon's deliberate `failed` drawing
 - FeedMergeTabLabel: no badge counts (label + state only).
 - FailureKind: no carrier this wave.
 - HibernateError: no free-text detail beyond compaction_failed.error.
+
+## Landing 11 (2026-09-04): a cause on the feed's lost arms
+
+- frontend.v1 FeedShellLost and FeedSubagentLost gain `oneof how
+  {file_vanished | went_silent | swept_up}` (empty markers), mirroring
+  conversation.v1 DetachedLost.how one-to-one. Previously both were empty
+  messages, so the frontend could not say which lost it was, and the e2e
+  suite had to pin the arm on the sidecar's own terminal reason instead of
+  the feed. Owner ruling 2026-09-04: "yes, carry it". Daemon relays the arm
+  by name; webapp draws it; Emacs draws no feed (no change).
