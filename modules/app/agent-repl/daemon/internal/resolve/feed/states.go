@@ -117,6 +117,31 @@ type shellState struct {
 	feed placement
 }
 
+// stateCommand records WHAT WAS RUN, once.
+//
+// THE FIRST STATEMENT OF A COMMAND IS THE BINDING ONE, and a later frame can
+// only fill a gap it left. Two reasons, both load-bearing:
+//
+//   - An EMPTY restatement is not a fact. A terminal that omits the line says
+//     nothing about the command, and letting it through would blank a bubble
+//     that had been drawing the command correctly all along.
+//   - A DISAGREEING restatement is not the command either. A run's terminal is
+//     composed by whoever observed the run END — for a detached shell that is
+//     the sidecar tailing a spool file, which knows the run by its handle and
+//     not by the line the caller typed. The line the CALL itself stated (the
+//     foreground unit's input, or the run's own start frame) is the one thing
+//     that ever saw the command, so it is the one that stands.
+//
+// AgentBashSuccess.command is "what was run, repeated here so a settled frame
+// describes itself" — a restatement, by the proto's own word, and a
+// restatement never redefines.
+func (sh *shellState) stateCommand(line string) {
+	if sh.command != "" || line == "" {
+		return
+	}
+	sh.command = line
+}
+
 // shell resolves a detached shell's accumulation, creating it on first sight.
 func (s *wsState) shell(id string) *shellState {
 	sh, ok := s.shells[id]
