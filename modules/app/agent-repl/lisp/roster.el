@@ -428,6 +428,24 @@ gone or closed, and sets the tab ORDER to the walk order strictly."
   "Return the tab names in roster walk order — the tab bar's only order."
   agent-repl-roster--tab-order)
 
+(defun agent-repl-roster-move-tab-to-back (ws)
+  "Move WS to the LAST slot of the tab order and return the new order.
+Returns nil, leaving the order untouched, when WS is not on the tab bar
+at all — a workspace with no tab has no slot to vacate.
+
+This is the roster-side half of the deprio close (`SPC o C'): the roster
+owns the tab order, so the shuffle is applied HERE and the persp-mode
+names cache is brought in line by the caller
+\=`agent-repl-workspace-push-to-back\=' (panels.el).  The next accepted
+roster push re-derives the order from the daemon's walk, exactly as it
+does for every other local paint."
+  (when (and ws (member ws agent-repl-roster--tab-order))
+    (let ((reordered (append (remove ws agent-repl-roster--tab-order)
+                             (list ws))))
+      (setq agent-repl-roster--tab-order reordered)
+      (agent-repl--log ws "elisp.roster.tab-to-back: ws=%s order=%S" ws reordered)
+      reordered)))
+
 ;;;; ---- The current workspace (R8) ---------------------------------------
 
 (defun agent-repl-roster--current-id (roster)
