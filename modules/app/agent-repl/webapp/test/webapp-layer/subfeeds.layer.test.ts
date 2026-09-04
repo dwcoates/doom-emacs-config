@@ -14,7 +14,15 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { BOOT_BUDGET_MS, TURN_TEST_MS, awaitDrawn, bootLayer, driveTurn, rows } from "./drive";
+import {
+  BOOT_BUDGET_MS,
+  TURN_TEST_MS,
+  awaitDrawn,
+  bootLayer,
+  driveTurn,
+  rows,
+  textOf,
+} from "./drive";
 
 let app: MountedApp;
 
@@ -152,6 +160,68 @@ it(
     const inside = app.rowIds(app.feedContainer(id) ?? undefined);
     const rootTurnEnded = rows(app, "turnEnded").map((el) => el.dataset.feedRow ?? "");
     for (const terminal of rootTurnEnded) expect(inside).not.toContain(terminal);
+  },
+  TURN_TEST_MS,
+);
+
+/**
+ * The commission the fake gives every spawned agent, sync and detached alike
+ * (`agent-shim/claude/shim/src/fake/scenarios/subagents.ts`), read verbatim so
+ * the assertion pins the INSTRUCTION and not a paraphrase of it.
+ */
+const COMMISSION = "Do the sweep and report.";
+
+/**
+ * Expand a spawn bubble and answer the `agent_prompt` row drawn inside its own
+ * container.
+ *
+ * THE COMMISSION IS A SUB-FEED ROW, never a root one: a bubble's body IS its
+ * sub-feed, so the instruction is addressed to the CREATED agent and drawn on
+ * that agent's feed with a "from <sender>" address line.
+ */
+async function commissionRow(row: HTMLElement): Promise<HTMLElement> {
+  const id = bubbleId(row);
+  await app.click(`[data-feed-row="${id}"] [data-expand]`);
+  await awaitDrawn(app, `the sub-feed at ${id}`, () => app.feedContainer(id) !== null);
+  const container = app.feedContainer(id);
+  expect(container).not.toBeNull();
+  await awaitDrawn(
+    app,
+    `an agentPrompt row inside the sub-feed at ${id}`,
+    () => (container?.querySelectorAll('[data-row-kind="agentPrompt"]').length ?? 0) > 0,
+  );
+  const drawn = container?.querySelectorAll<HTMLElement>('[data-row-kind="agentPrompt"]') ?? [];
+  const last = drawn[drawn.length - 1];
+  expect(last, "the sub-feed drew no agentPrompt row").toBeDefined();
+  return last as HTMLElement;
+}
+
+// §F3 #19 — the SYNC spawn's commission, drawn in the bubble's body.
+it(
+  "draws a sync spawn's commission as an agent_prompt row inside its bubble",
+  async () => {
+    // Arrange / Act
+    const commission = await commissionRow(await subagentBubble());
+
+    // Assert — the instruction verbatim, under an address naming the sender.
+    expect(textOf(commission)).toContain(COMMISSION);
+    expect(textOf(commission.querySelector(".prompt-address"))).toContain("from ");
+  },
+  TURN_TEST_MS,
+);
+
+// §F3 #20 — the DETACHED spawn's commission. Sync-versus-detached is placement,
+// so the body draws the same way through the same sub-feed address.
+it(
+  "draws a detached spawn's commission as an agent_prompt row inside its bubble",
+  async () => {
+    // Arrange / Act
+    const row = await driveTurn(app, "subagent-detached", "detachedSubagent");
+    const commission = await commissionRow(row);
+
+    // Assert
+    expect(textOf(commission)).toContain(COMMISSION);
+    expect(textOf(commission.querySelector(".prompt-address"))).toContain("from ");
   },
   TURN_TEST_MS,
 );

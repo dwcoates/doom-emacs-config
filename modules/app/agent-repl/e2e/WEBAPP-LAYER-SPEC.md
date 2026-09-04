@@ -300,13 +300,19 @@ the daemon composes the row for whichever feed it resolves
 here is NOT evidence of a gap; what the chain does and does not produce for a
 subagent commission is Finding (3).
 
-### F3. Sub-feed plumbing (4 tests) — `subfeeds.layer.test.ts`
+### F3. Sub-feed plumbing (6 tests) — `subfeeds.layer.test.ts`
 
 Expand issues `OpenFeed` on the bubble's own `FeedId` and draws its rows
 inside that container; collapse folds it away and KEEPS the address (the
 contract's collapse abandons the TOKEN, not the DOM); re-opening the same
 address answers the same rows; the root feed's rows never leak into the
 bubble's container.
+
+THE COMMISSION IS A ROW OF THAT SUB-FEED. A spawn's instruction is drawn on
+the CREATED agent's own feed as an `agent_prompt` row under a "from <sender>"
+address, for the sync spawn and the detached one alike — a bubble's body IS
+its sub-feed, so this is the only place the instruction appears and neither
+form draws a second row on the caller's feed.
 
 ### F4. Permission and question cards (9 tests) — `cards.layer.test.ts`
 
@@ -405,7 +411,7 @@ lived on the daemon that went away.
 |---|---|
 | F1 proof of life | 1 |
 | F2 feed row families | 22 |
-| F3 sub-feed plumbing | 4 |
+| F3 sub-feed plumbing | 6 |
 | F4 permission / question | 9 |
 | F5 footer / topbar | 7 |
 | F6 command panels | 5 |
@@ -413,7 +419,7 @@ lived on the daemon that went away.
 | F8 refusal placement | 5 |
 | F9 tray / sidebar / lifecycle | 5 |
 | F9 #39 the restart handover | 1 |
-| **total** | **64** |
+| **total** | **66** |
 
 ## G. Findings and gaps
 
@@ -434,39 +440,25 @@ found it, and NONE is papered over with a fixture.
    rule still holds over it, which is what §F8's test pins.
    (`refusals.layer.test.ts`)
 
-3. **`agent_prompt` is drawn from nothing this chain produces — and it is NOT
-   the fake's gap.** The family map's "no scenario draws `agent_prompt`" was
-   re-examined (project lead, 2026-09-03) on the theory that it was a
+3. **`agent_prompt` was drawn from nothing this chain produced — FIXED, and
+   the finding is now §F3's two assertions.** The family map's "no scenario
+   draws `agent_prompt`" was first re-examined (project lead, 2026-09-03) as a
    MEASUREMENT ARTIFACT: `agent_prompt` is a SUB-FEED row ("THE CONNECTION IS
    THE PLACEMENT — a subagent's rows never name a parent, they arrive on the
    bubble's own feed", `proto/src/frontend/v1/feed.proto:41-45`), so a map that
-   scans only the root feed could never see it. THE ASSERTION WAS WRITTEN AND
-   IT FAILS: driving `!subagent`, opening the feed the spawn bubble's own
-   `FeedId` names and waiting on an `agentPrompt` row inside it times out; the
-   sub-feed draws `activity.response`, `activity.simpleToolCall`,
-   `activity.response` and no prompt row at all.
+   scans only the root feed could never see it. The assertion written on that
+   correction still failed: the sub-feed drew `activity.response`,
+   `activity.simpleToolCall`, `activity.response` and no prompt row, because
+   `applyPrompt` folded only `subagent_type` and `description` onto the bubble
+   HEAD and the commission's BODY was never drawn anywhere.
 
-   The cause is in the daemon, and it is not placement:
-
-   - `drawAgentPrompt` composes a `FeedAgentPrompt` ONLY from a
-     `conversation.v1.AgentPrompt` whose recipient is a known sub-feed
-     (`daemon/internal/resolve/feed/prompt.go:21-92`).
-   - A subagent COMMISSION does not arrive that way. It rides
-     `AgentSubagentStart.prompt` (`docs/overhaul/sidecar.md:298-300`, R15 — the
-     file-plane user record IS classified as unserved
-     `vendor_specific{kind "user_prompt"}`, so the served form is the only
-     one), and the feed resolver's `applyPrompt` folds only
-     `subagent_type` and `description` onto the bubble head
-     (`daemon/internal/resolve/feed/subagent.go:106-119`). THE COMMISSION'S
-     BODY IS NEVER DRAWN ANYWHERE.
-
-   So the fake does emit the commission and the placement rule is exactly as
-   stated; what is missing is a daemon path from
-   `AgentSubagentStart.prompt` to a row. For the daemon owner. No test is
-   left behind asserting the current behavior, because pinning "no commission
-   row exists" would pin the gap as correct. When the path lands, §F3 gains
-   two tests (the sync commission and the detached one) and this finding
-   becomes those assertions.
+   The daemon path landed (`drawCommission`,
+   `daemon/internal/resolve/feed/subagent.go`): a spawn's commission is drawn
+   on the CREATED agent's own feed as a `FeedAgentPrompt` under
+   `KindPrompt`/`Sub "commission"`, addressed "from <sender feed>", with the
+   instruction as one text block — and no second row on the caller's feed,
+   whose head IS the sender's end. §F3 now carries the two assertions this
+   finding promised: the sync commission and the detached one.
 
    THE F2 FAMILY MAP IS CORRECTED accordingly: `agent_prompt` is a SUB-FEED
    row and is NOT expected on the root feed, so its absence there is never
