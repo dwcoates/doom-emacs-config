@@ -40,6 +40,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	u := s.unit(unitID)
 
 	var resolved *conversationv1.AgentId
+	var delivery deliveryArm
 	switch state := send.GetResult().(type) {
 	case *conversationv1.AgentSendMessage_Start:
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
@@ -53,6 +54,7 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentSendMessage_Success:
 		resolved = state.Success.GetRecipientAgentId()
+		delivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		// A send that could not be delivered still HAPPENED, and its row is
 		// what explains the attempt. It is drawn against what the start said.
@@ -68,6 +70,9 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 			},
 			Body: &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
 		}},
+	}
+	if delivery != nil {
+		delivery(row.GetAgentPrompt())
 	}
 	u.row = row
 	return row, nil
@@ -108,4 +113,34 @@ func sendBodyBlocks(summary string) []*frontendv1.FeedAgentPromptBlock {
 	return []*frontendv1.FeedAgentPromptBlock{{
 		Block: &frontendv1.FeedAgentPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: summary}},
 	}}
+}
+
+// deliveryArm sets HOW THE SEND WAS DELIVERED on the sender's row. A setter
+// rather than the generated oneof interface, whose method is unexported and
+// unimplementable from here.
+type deliveryArm func(*frontendv1.FeedAgentPrompt)
+
+// deliveryOf relays AgentSendMessageSuccess's delivery arm onto the SENDER's
+// row (feed.proto: "UNSET on the recipient's copy and when the producer
+// observed nothing; the row's presence already says the attempt happened").
+// A producer that stated no arm leaves the field unset — nil here — rather
+// than having one guessed for it.
+func deliveryOf(success *conversationv1.AgentSendMessageSuccess) deliveryArm {
+	switch success.GetDelivery().(type) {
+	case *conversationv1.AgentSendMessageSuccess_QueuedToLive:
+		return func(p *frontendv1.FeedAgentPrompt) {
+			p.Delivery = &frontendv1.FeedAgentPrompt_QueuedToLive{
+				QueuedToLive: &frontendv1.FeedAgentPromptQueuedToLive{},
+			}
+		}
+	case *conversationv1.AgentSendMessageSuccess_ResumedRecipient:
+		// The recipient WAS RESUMED to receive this — the cause of that
+		// agent's renewed activity and renewed cost.
+		return func(p *frontendv1.FeedAgentPrompt) {
+			p.Delivery = &frontendv1.FeedAgentPrompt_ResumedRecipient{
+				ResumedRecipient: &frontendv1.FeedAgentPromptResumedRecipient{},
+			}
+		}
+	}
+	return nil
 }
