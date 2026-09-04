@@ -44,11 +44,14 @@ import {
   messageMatches,
   parseArgv,
   patternMatches,
+  readCapturedSession,
   resolveTokens,
   runCwdInit,
+  seedResumableSession,
   permissionResultFor,
   resolvePermissionDecision,
 } from "./capture.mjs";
+import { AUTH_CONFIG_ROOT, AUTH_SEED_CREDENTIALS } from "./auth.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "capture.mjs");
@@ -314,9 +317,13 @@ describe("the corpus uses the features that retired its manual_setup notes", () 
     expect(turns[1]).toBe("/clear");
   });
 
-  it("drives the cold-resume scenario's resume from the harness", () => {
-    const turns = by["cold-resume"].prompts;
-    expect(turns[turns.length - 1].resume).toBe(true);
+  it("drives cold-resume by resuming a capture already in the corpus", () => {
+    // NOT a `resume: true` TURN any more. That spelling only ever reached a
+    // WARM resume — same process, vendor cache still live — which cannot trip
+    // the cold-context gate this scenario exists for. It now names a committed
+    // capture whose session went cold days ago.
+    expect(by["cold-resume"].resume_capture).toBe("prose-streamed");
+    expect(by["cold-resume"].prompts).toBeUndefined();
   });
 });
 
@@ -1229,5 +1236,103 @@ describe("createQuerySession", () => {
     session.open({});
     session.open({ resume: "s-1" });
     expect(opened).toBe(2);
+  });
+});
+
+describe("resuming a session captured on an earlier run", () => {
+  /** A committed capture's committed layout, in a throwaway corpus. */
+  const corpusWith = (linesOf) => {
+    const corpus = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-corpus-")));
+    const cwd = path.join(corpus, "world", "cwd");
+    const slugDir = path.join(corpus, "old", "files", "projects", cwdSlug(cwd));
+    mkdirSync(slugDir, { recursive: true });
+    writeFileSync(
+      path.join(slugDir, "11111111-2222-3333-4444-555555555555.jsonl"),
+      linesOf(cwd)
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf8",
+    );
+    return { corpus, cwd };
+  };
+  const SCRATCH_AUTH = { mode: AUTH_SEED_CREDENTIALS };
+  const WORLD_AUTH = { mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" };
+
+  it("reads the session id, slug and cwd back off a committed capture", () => {
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const seed = readCapturedSession(corpus, "old");
+    expect(seed.sessionId).toBe("11111111-2222-3333-4444-555555555555");
+    expect(seed.cwd).toBe(cwd);
+    expect(seed.slug).toBe(cwdSlug(cwd));
+  });
+
+  it("skips lines that carry no cwd rather than giving up on the first one", () => {
+    // The real transcripts open with `queue-operation` records, which have no
+    // cwd at all; the cwd first appears a couple of lines in.
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "queue-operation" }, { type: "attachment", cwd: dir }]);
+    expect(readCapturedSession(corpus, "old").cwd).toBe(cwd);
+  });
+
+  it("refuses a capture whose transcript records no cwd", () => {
+    const { corpus } = corpusWith(() => [{ type: "queue-operation" }]);
+    expect(() => readCapturedSession(corpus, "old")).toThrow(/records no cwd/);
+  });
+
+  it("refuses a capture whose recorded cwd disagrees with its committed slug", () => {
+    // The guard that makes a silently-wrong resume impossible: a cwd that does
+    // not slug to the committed directory would resume in a project holding no
+    // such session, and the vendor would quietly start a fresh one.
+    const { corpus } = corpusWith(() => [{ type: "attachment", cwd: "/somewhere/else" }]);
+    expect(() => readCapturedSession(corpus, "old")).toThrow(/not the committed/);
+  });
+
+  it("refuses a capture directory that was never committed", () => {
+    const { corpus } = corpusWith(() => [{ type: "attachment", cwd: "/x" }]);
+    expect(() => readCapturedSession(corpus, "absent")).toThrow(/no files\/projects tree/);
+  });
+
+  it("seeds the transcript into a scratch account root, and recreates the cwd", () => {
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const seed = readCapturedSession(corpus, "old");
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
+    const { target } = seedResumableSession(SCRATCH_AUTH, accountRoot, seed);
+    expect(existsSync(target)).toBe(true);
+    expect(existsSync(seed.cwd)).toBe(true);
+    expect(target).toBe(path.join(accountRoot, "projects", seed.slug, `${seed.sessionId}.jsonl`));
+  });
+
+  it("REFUSES to seed into the operator's real account root", () => {
+    // ~/.claude is bind-mounted and shared; a synthetic transcript seeded there
+    // would outlive the run in a tree a stray write has damaged before. The
+    // refusal is what makes "scratch only" structural instead of a note.
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const seed = readCapturedSession(corpus, "old");
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
+    expect(() => seedResumableSession({ mode: AUTH_CONFIG_ROOT }, accountRoot, seed)).toThrow(
+      /--seed-credentials/,
+    );
+    expect(existsSync(path.join(accountRoot, "projects"))).toBe(false);
+  });
+
+  it("refuses to overwrite a transcript already sitting at the target", () => {
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const seed = readCapturedSession(corpus, "old");
+    const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
+    seedResumableSession(SCRATCH_AUTH, accountRoot, seed);
+    expect(() => seedResumableSession(SCRATCH_AUTH, accountRoot, seed)).toThrow(
+      /refusing to overwrite/,
+    );
+  });
+
+  it("gives a resumed world the captured cwd instead of a fresh scratch one", () => {
+    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const seed = readCapturedSession(corpus, "old");
+    const world = createWorld(WORLD_AUTH, "cold-resume", seed.cwd);
+    expect(world.cwd).toBe(seed.cwd);
+  });
+
+  it("still gives an ordinary world a scratch cwd of its own", () => {
+    const world = createWorld(WORLD_AUTH, "ordinary");
+    expect(world.cwd).toBe(path.join(world.scratch, "cwd"));
   });
 });

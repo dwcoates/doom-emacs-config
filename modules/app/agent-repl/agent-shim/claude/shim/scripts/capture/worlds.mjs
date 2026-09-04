@@ -135,3 +135,38 @@ export function resumeTurnIndexes(scenario) {
     .map((turn, index) => (turn.resume ? index : -1))
     .filter((index) => index >= 0);
 }
+
+/**
+ * A scenario that resumes a session captured on an EARLIER RUN, days ago.
+ *
+ * WHY THIS EXISTS: the `resume: true` TURN spelling reopens the session inside
+ * the SAME process, moments after the first turn — a WARM resume, with the
+ * vendor's prompt cache still live. The cold-context gate the `cold-resume`
+ * scenario exists for trips only once that cache has LAPSED, which no
+ * same-process run can wait out, and which the corpus therefore could not
+ * reach: two 2026-09-03 attempts and the harness fix that followed all captured
+ * warm resumes.
+ *
+ * This field names a capture ALREADY IN THE CORPUS instead. Its session is as
+ * cold as its commit date, so resuming it is exactly the lapsed-cache case —
+ * reproducibly, from committed bytes, with no waiting.
+ *
+ * Returns the capture directory name, or `null` for an ordinary scenario.
+ */
+export function resumeCaptureOf(scenario) {
+  const value = scenario?.resume_capture;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || value === "") {
+    throw new Error(
+      `capture: scenario ${scenario?.name} has resume_capture ` +
+        `${JSON.stringify(value)}; it must be a non-empty capture directory name`,
+    );
+  }
+  if (worldOf(scenario) !== null) {
+    throw new Error(
+      `capture: scenario ${scenario?.name} names both a world and a resume_capture; ` +
+        "a resumed session brings its own cwd and cannot share one",
+    );
+  }
+  return value;
+}

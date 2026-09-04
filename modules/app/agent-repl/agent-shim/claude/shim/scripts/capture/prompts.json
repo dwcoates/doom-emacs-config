@@ -18,7 +18,8 @@
     "expects_error_subtypes": "Result subtypes this scenario's GOLDEN is allowed to end in with is_error true (e.g. [\"error_max_turns\"]). Never excuses an api_error terminal; use expects_api_error for that.",
     "config_root": "\"shared-world:<name>\": scenarios naming the same world share ONE cwd and account root and run in corpus order, so a later scenario sees what the earlier ones did. Absent = an isolated world of its own.",
     "prompts": "An ordered array of turns, instead of `prompt`. Each entry is a string, or { text, resume: true } to close the query and reopen it resuming the same vendor session id.",
-    "cwd_init": "A shell command run in the scratch cwd BEFORE the query (e.g. `git init`). A non-zero exit fails the scenario."
+    "cwd_init": "A shell command run in the scratch cwd BEFORE the query (e.g. `git init`). A non-zero exit fails the scenario.",
+    "resume_capture": "The directory name of a capture ALREADY IN testdata/captures/ whose vendor session this scenario resumes. That session is as cold as its commit date, so resuming it is a genuinely LAPSED prompt cache — the one thing a same-process `resume: true` turn cannot be. The capture's own cwd is read from its transcript (which records it verbatim) and recreated, and its transcript is seeded into the run's THROWAWAY account root, so this requires --seed-credentials."
   },
   "scenarios": [
     {
@@ -1502,23 +1503,17 @@
     {
       "name": "cold-resume",
       "covers": "cold resume — resuming a session after its context has gone cold (past the vendor's cache TTL)",
-      "prompt": null,
-      "manual": "The RESUME ITSELF is now driven by the harness (turn 2 carries `resume: true`, which closes the query and reopens it against the same vendor session id). What the harness cannot do is WAIT: a genuinely COLD resume needs the prompt-cache TTL to lapse between the two turns (well over an hour). Run this scenario as-is for the warm-resume golden; for the cold one, run turn 1, wait past the TTL, and run turn 2 with --only cold-resume against the same world.",
+      "prompt": "What did you tell me about write-ahead logs? Answer in one sentence.",
+      "manual": "Runs with --seed-credentials (REQUIRED: `seedResumableSession` refuses to seed a transcript into the operator's real, bind-mounted ~/.claude). `resume_capture` names `prose-streamed`, captured 2026-09-01, so the resumed session's prompt cache lapsed days ago — which the harness cannot fake and cannot wait for. The earlier `resume: true` TURN spelling captured only WARM resumes (same process, cache still live) and so never reached the cold-context gate.",
       "expect": [
-        "a resume that emits system:init and nothing else",
-        "the first prompt's usage showing a full cache MISS",
+        "a resume that emits system:init and nothing else before the first prompt",
+        "the first prompt's usage showing a full cache MISS (cache_read_input_tokens 0)",
         "the model and permission mode readable from the transcript's last mode / permission-mode lines"
-      ],
-      "prompts": [
-        "Explain in one paragraph what a write-ahead log is.",
-        {
-          "text": "What did you just tell me? Answer in one sentence.",
-          "resume": true
-        }
       ],
       "options": {
         "model": "claude-haiku-4-5-20251001"
-      }
+      },
+      "resume_capture": "prose-streamed"
     }
   ]
 }
