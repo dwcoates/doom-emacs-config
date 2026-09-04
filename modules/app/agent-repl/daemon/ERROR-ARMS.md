@@ -27,7 +27,6 @@ landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| SetModel | `cold` | the shim's `SetSessionModelFailure.cold`: the switch would discard a warm cache above the threshold the daemon stated. The daemon's own policy (`workspace.coldThresholdPolicy`) means no context is above it, so the arm does not arise today — but the shim may still raise `cold` for a reason of its own, and there is then no `SetModelError` arm and no path from this rpc to the remediation menu (pay \| clear \| compact) the cold gate serves | workspace |
 | SetModel | `unspecified` | a `SetSessionModelFailure` whose `cause` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
 
 `CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
