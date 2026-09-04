@@ -5,8 +5,8 @@
  * is still arriving, `success` once it settled, `error` when the turn died
  * mid-arrival. A turn holds SEVERAL of these — multiple responses per turn is
  * the normal case — so nothing here assumes it is the only one, and the
- * final-answer treatment is not this module's to apply (see
- * `FINAL_ANSWER_CLASS`).
+ * final-answer treatment is not this module's to apply: `turn-ended.ts` names
+ * the answering row and marks it with its own `FINAL_RESPONSE_CLASS`.
  *
  * THE ERROR ARM CARRIES NO REASON, deliberately: it says only that this bubble
  * is the one the death cut short. WHY the turn died is `turn_ended.errored`'s to
@@ -51,17 +51,6 @@ import { findTreeRegion, renderTreeHtml } from "../../metaprompt-tree.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { SmoothReveal } from "../../smooth.js";
 import type { RowContext } from "./context.js";
-
-/**
- * The class the FEED CORE adds to a response bubble that a turn named as its
- * answer (`turn_ended.concluded.answer`).
- *
- * It is exported rather than applied here because the fact lives on a DIFFERENT
- * ROW: this renderer sees one response and cannot know whether the turn ended on
- * it. The name is the class the stylesheet has always used for the green border,
- * so the treatment is the existing one and not a second look for the same idea.
- */
-export const FINAL_ANSWER_CLASS = "final-response";
 
 /** The attribute the shown length is carried on across a redraw. */
 export const REVEALED_ATTRIBUTE = "data-revealed";
