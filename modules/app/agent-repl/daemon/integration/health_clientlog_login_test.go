@@ -147,6 +147,14 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	d.ExpectWarnings("daemon.workspace.request_command_support",
 		"daemon.health.open_fault", "daemon.health.daemon",
 		"daemon.promptqueue.restore_holds")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design. The successor appends to the SAME run log, so this daemon's
+	// own log assertion reads the record too.
+	d.ExpectWarnings("daemon.rollout.reconcile")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	if err := os.RemoveAll(d.PromptsDir); err != nil {
@@ -173,6 +181,13 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: stateDir})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
 	nd.ExpectWarnings("daemon.promptqueue.restore_holds")
+	// A shim now genuinely SURVIVES this bounce: the successor probes the same
+	// kernel-lock directory its predecessor named, so the surviving shim's
+	// workspace lock reads held and the session is ADOPTED rather than
+	// respawned. A bounce that wrote no intent manifest therefore has a live
+	// session to account for, which the rollout reconciler states as a fault
+	// by design.
+	nd.ExpectWarnings("daemon.rollout.reconcile")
 
 	// Assert
 	resp, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest())
