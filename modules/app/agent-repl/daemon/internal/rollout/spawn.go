@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -164,6 +165,23 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (st
 	cmd := exec.Command(s.Exe, successorArgv(os.Args[1:], incumbentAddress)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	// ITS OWN SESSION, WHICH IS WHAT "OUTLIVES" ACTUALLY TAKES.
+	//
+	// Emacs spawns the incumbent through `make-process' with the default
+	// connection type, so the daemon runs on a PTY that Emacs owns. A child
+	// started plainly inherits that controlling terminal and the incumbent's
+	// process group -- so when the incumbent exited and Emacs closed the pty
+	// master, the kernel sent SIGHUP to the whole foreground group and took
+	// the successor down with it. The successor died with no shutdown record,
+	// two seconds after a handover that had already moved every workspace onto
+	// it, and Emacs found the address it had just been promoted to refusing
+	// connections.
+	//
+	// Setsid makes the successor a session leader with NO controlling
+	// terminal, which is the structural form of the guarantee: no signal aimed
+	// at the incumbent's terminal, session or process group can reach it. It
+	// is not a matter of the incumbent exiting politely enough.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("rollout: start the successor %s: %w", s.Exe, err)
 	}
