@@ -324,6 +324,11 @@ describe("the settled card", () => {
     { arm: "allowedStanding", value: {}, text: "allowed with standing" },
     { arm: "deniedByUser", value: {}, text: "denied by user" },
     { arm: "deniedByPolicy", value: { text: "denied by rule" }, text: "denied by rule" },
+    {
+      arm: "deniedUndecidable",
+      value: { text: "denied for want of a decider" },
+      text: "denied for want of a decider",
+    },
   ] as const;
 
   for (const c of answers) {
@@ -355,6 +360,44 @@ describe("the settled card", () => {
       expect(el.querySelector(".perm-verdict")?.getAttribute("data-arm")).toBe(c.arm);
     });
   }
+
+  it("gives the undecidable denial its own verdict value, apart from the policy denial", () => {
+    // Arrange
+    const answered = create(FeedPermissionAnsweredSchema, {
+      atMs: 0n,
+      answer: { case: "deniedUndecidable", value: { text: "denied for want of a decider" } },
+    });
+
+    // Act
+    const el = drawFeedPermission(
+      permission({ case: "answered", value: answered }),
+      askHarness().rc,
+    );
+
+    // Assert
+    expect(el.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict")).toBe(
+      "deniedUndecidable",
+    );
+  });
+
+  it("does not style the undecidable denial as the user's own act", () => {
+    // Arrange
+    const answered = create(FeedPermissionAnsweredSchema, {
+      atMs: 0n,
+      answer: { case: "deniedUndecidable", value: { text: "nobody could decide" } },
+    });
+
+    // Act
+    const el = drawFeedPermission(
+      permission({ case: "answered", value: answered }),
+      askHarness().rc,
+    );
+
+    // Assert — the arm-specific class the user denial never wears.
+    expect(
+      el.querySelector(".perm-verdict .badge")?.classList.contains("arm-deniedUndecidable"),
+    ).toBe(true);
+  });
 
   it("draws every answered arm the schema carries", () => {
     expect([...PERMISSION_ANSWERED_ARMS].sort()).toEqual(
