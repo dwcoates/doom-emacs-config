@@ -21,8 +21,16 @@
  *
  * `AgentReadSuccess` retired tags 4-8: the image, pdf, notebook, split-to-
  * directory and unchanged extents are deferred. A read of any of those has NO
- * arm that could describe it, so this converter produces NO terminal for one
- * and says so in the log rather than dressing image bytes as text.
+ * arm that could describe HOW MUCH came back — but the read still HAPPENED and
+ * still SETTLED, and a card that never settles is a lie about a live call. So
+ * such a read settles as a success whose `extent` oneof is UNSET: the path and
+ * the settle instant are stated, the extent is not. That is the contract's own
+ * spelling of "returned nothing to draw" — the daemon's read resolver already
+ * answers an unset extent with no output form (resolve/feed/toolcall.go
+ * readForm: "A read that came back with no extent has nothing to draw; the
+ * card still says it returned"), which applyReturnedForm renders as
+ * `FeedToolCallNoOutput`. Nothing is invented: no image bytes are dressed as
+ * text, and the absent arm remains absent.
  */
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
@@ -183,12 +191,24 @@ function readSuccess(
   const file = obj(record, "file");
   if (type !== "text") {
     // The image, pdf, notebook, parts and file_unchanged extents are RETIRED
-    // tags on AgentReadSuccess this wave. No arm exists, so nothing is said.
+    // tags on AgentReadSuccess this wave. No arm can say HOW MUCH came back, so
+    // the extent stays unset — but the read settled, and the card must too.
+    const nonTextPath = str(file ?? {}, "filePath") ?? requestedPath(call);
+    if (nonTextPath === undefined) {
+      LOGGER.log(
+        { level: "error", tool_use_id: call.toolUseId, read_type: type ?? "unstated" },
+        "a non-text read settled with no path at all; no success frame is produced",
+      );
+      return undefined;
+    }
     LOGGER.log(
       { level: "warn", tool_use_id: call.toolUseId, read_type: type ?? "unstated" },
-      "this read's extent has no arm in the contract this wave; no success frame is produced",
+      "this read's extent has no arm in the contract this wave; it settles with no extent stated",
     );
-    return undefined;
+    return create(conversationv1.AgentReadSuccessSchema, {
+      path: readPath(nonTextPath),
+      settledAt: settle(outcome),
+    });
   }
   if (file === undefined) {
     LOGGER.log(
