@@ -2,6 +2,26 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl-instantiation-p "workspace")
+(declare-function agent-repl-instantiation-session-id "workspace")
+
+;; `agent-repl--input-history' is buffer-local and declared with
+;; `defvar-local' further down, beside the history commands that own it.
+;; The state save/restore pair above those commands reads and writes it, so
+;; the special declaration has to precede them.
+(defvar agent-repl--input-history)
+
 ;;;; Constants
 
 (defconst agent-repl--environment-keys '(:bare-metal)
