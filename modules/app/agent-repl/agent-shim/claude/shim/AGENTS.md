@@ -533,23 +533,44 @@ a hang — never fixed by raising the number back up.
 | `testTimeout` | `vitest.config.ts` (unit) | 2,500ms | ~640ms (`test/log.test.ts`, bootstrap-stderr logging) |
 | `hookTimeout` | `vitest.config.ts` (unit) | 2,500ms | same — hooks here are `setupFiles` only |
 | `teardownTimeout` | `vitest.config.ts` (unit) | 2,500ms | same |
-| `testTimeout` | `vitest.integration.config.ts` | 16,000ms | ~5.14s (`test/integration/session.test.ts`, a forced `KillSession` that rides the real 5s `EXIT_QUIET_BUDGET_MS` production quiet-drain) |
-| `hookTimeout` | `vitest.integration.config.ts` | 16,000ms | shares the test budget — the only hook is `afterEach(cleanupShims)` (SIGKILL + temp-dir removal), far cheaper than any test body |
+| `testTimeout` | `vitest.integration.config.ts` | 5,000ms | ~1.55s, the CONTENDED max across 310 tests (~645ms on a quiet machine: `test/integration/session.test.ts`, a forced `KillSession` spending the whole scaled watcher-conclusion budget). Sized from the contended figure because this suite always runs its seven files in parallel, each spawning a real node process — contention is its normal condition, not an anomaly to size below and flake on |
+| `hookTimeout` | `vitest.integration.config.ts` | 5,000ms | shares the test budget — the only hook is `afterEach(cleanupShims)` (SIGKILL + temp-dir removal), far cheaper than any test body |
 | `teardownTimeout` | `vitest.integration.config.ts` | 10,000ms | same reasoning, vitest's own default |
 | the fs.watch re-drain interval | `test/integration-support/redrain.ts` | 20ms | deliberate level-then-edge guard against a dropped FSEvents notification, not a success path — keep as-is, do not tighten further |
 | the "stops promptly" hang guards | `test/store/reader.test.ts` (2 sites) | 300ms | the real settle is sub-millisecond; this only bounds how long a genuine hang costs before failing with a clear "hung" value |
 
-Two integration scenarios legitimately run several seconds and are NOT test
-harness bounds to tighten — they are production code paths under test:
+### The production windows a test would otherwise RIDE
 
-- `test/integration/session.test.ts`'s two `KillSession force` tests
-  (~5.14s) ride `EXIT_QUIET_BUDGET_MS` (`src/main.ts`, 5,000ms): the test
-  deliberately leaves a standing watch open, so the shim's own graceful-exit
-  quiet-drain runs to its full production budget before exiting.
-- `test/integration/record.test.ts`'s outage/retry tests (~4.2s each) ride
-  `DEFAULT_RETRY_POLICY.backoffMs` (`src/store/persistence.ts`,
-  `[50, 200, 800, 3000]`): a real store outage exercised end to end through
-  the real backoff schedule.
+Three constants are LAST-RESORT bounds that only a test arranging the
+pathological case ever actually spends. Riding them cost the suite 35 of its 80
+seconds of test time and made those eight scenarios the slowest here, while
+proving nothing the same scenario at a smaller bound does not prove — what they
+assert is an ordering and an attempt count, neither of which is a function of
+how long the process idles.
 
-Neither is a test-side wait bound, so neither was changed; both are already
-comfortably inside the 16s `testTimeout` above with margin.
+Each therefore has a `--fake`-ONLY environment override, in the shape
+`AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` already established: REFUSED for a real
+session, refused when malformed, every refusal reported. **The production
+defaults are unchanged, and a real session cannot reach any of them.**
+
+| Constant | Where | Production default | Override | Harness value |
+| --- | --- | --- | --- | --- |
+| `WATCHER_CONCLUSION_BUDGET_MS` | `src/engine/session.ts` | 5,000ms | `AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS` | 500ms |
+| `EXIT_QUIET_BUDGET_MS` | `src/main.ts` | 5,000ms | `AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS` | 500ms |
+| `DEFAULT_RETRY_POLICY.backoffMs` | `src/store/persistence.ts` | `[50, 200, 800, 3000]` | `AGENT_REPL_FAKE_STORE_BACKOFF_MS` | `5,20,80,300` |
+
+`test/integration-support/harness.ts` sets all three in every spawn's standard
+env; a test that wants a production window back overrides it per-spawn through
+`SpawnShimOptions.env`, which layers over that standard env.
+
+ONLY THE WAITING IS OVERRIDABLE. The retry override reaches `backoffMs` alone —
+`maxAttempts` and `bufferCapacity` stay pinned to `DEFAULT_RETRY_POLICY` and are
+not reachable from the environment at all, precisely so this cannot become a way
+to weaken the attempt-count and bounded-buffer assertions it exists to keep
+fast. Keep it that way.
+
+The forced-kill scenarios fell from ~5.14s to ~0.64s and the six store-outage
+scenarios from ~4.2s to ~0.55s each; the suite went from 30.9s to 11.6s, and its
+slowest test is now 645ms. **No test in either suite is above a second.** A new
+test that takes longer than that is riding a window — find it and scale it here,
+never by weakening what the test asserts.
