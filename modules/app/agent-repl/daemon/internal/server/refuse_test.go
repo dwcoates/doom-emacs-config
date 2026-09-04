@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 
+	"connectrpc.com/connect"
+
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/internal/drain"
@@ -416,5 +418,92 @@ func TestStreamVerbsEndQuietlyWhenTheClientsContextIsCancelled(t *testing.T) {
 				t.Fatalf("%s INFO records = %v, want exactly one naming the stream", rpc, info)
 			}
 		})
+	}
+}
+
+// TestResolveRefDecidesTheStandingBeforeReadingState pins the ORDERING the
+// contract owes: the serving standing is answered before any state is touched,
+// so the outgoing daemon of a handover — whose state client is already closed
+// when the late rpc lands — still answers the typed arm rather than the state
+// client's failure.
+func TestResolveRefDecidesTheStandingBeforeReadingState(t *testing.T) {
+	closedDB := errors.New("sql: database is closed")
+	tests := []struct {
+		name     string
+		standing workspace.Standing
+		want     func(*agentreplv1.SubmitPromptError) bool
+	}{
+		{
+			name:     "a transferred workspace answers transferring_away",
+			standing: workspace.StandingTransferringAway,
+			want: func(e *agentreplv1.SubmitPromptError) bool {
+				return e.GetTransferringAway().GetAddress() == "127.0.0.1:9999"
+			},
+		},
+		{
+			name:     "an unadopted workspace answers not_yet_adopted",
+			standing: workspace.StandingNotYetAdopted,
+			want: func(e *agentreplv1.SubmitPromptError) bool {
+				return e.GetNotYetAdopted() != nil
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Ownership.standing = test.standing
+			h.DB.workspaceErr = closedDB
+
+			// Act.
+			resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("SubmitPrompt answered an error rather than a typed arm: %v", err)
+			}
+			if !test.want(resp.Msg.GetError()) {
+				t.Fatalf("SubmitPrompt answered %v, want the standing's own arm", resp.Msg.GetError())
+			}
+		})
+	}
+}
+
+// TestResolveRefFailsAnOwnedWorkspaceOnAClosedState pins that the reordering
+// does NOT swallow a genuine state failure: a workspace this daemon still
+// serves surfaces the read's error.
+func TestResolveRefFailsAnOwnedWorkspaceOnAClosedState(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Ownership.standing = workspace.StandingOwned
+	h.DB.workspaceErr = errors.New("sql: database is closed")
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err == nil || connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("SubmitPrompt = %v, want an internal error for an owned workspace", err)
+	}
+}
+
+// TestResolveRefRefusesOnceTheDaemonIsShuttingDown pins that an rpc arriving
+// after the surface's lifetime ended — an h2c connection the client still holds
+// through the shutdown grace — is answered UNAVAILABLE, never with whatever the
+// state client being torn down underneath it returns.
+func TestResolveRefRefusesOnceTheDaemonIsShuttingDown(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.DB.workspaceErr = errors.New("sql: database is closed")
+	if err := h.Server.Close(); err != nil {
+		t.Fatalf("close the surface: %v", err)
+	}
+
+	// Act.
+	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err == nil || connect.CodeOf(err) != connect.CodeUnavailable {
+		t.Fatalf("SubmitPrompt = %v, want CodeUnavailable while the daemon is shutting down", err)
 	}
 }
