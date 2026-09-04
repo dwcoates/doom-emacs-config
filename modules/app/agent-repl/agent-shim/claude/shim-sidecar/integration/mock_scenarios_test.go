@@ -77,10 +77,9 @@ func TestMockScenarios(t *testing.T) {
 			// EACH ROW IS ITS OWN FOUR PROCESSES OVER ITS OWN t.TempDir()
 			// trees and its own randomly-named sockets, so no row can observe
 			// another's records and the table is safe to run concurrently.
-			// takeMockDriveSlot is what keeps "concurrently" from meaning
-			// "all 133 at once".
+			// generateMock's own drive slot is what keeps "concurrently" from
+			// meaning "all 133 at once".
 			t.Parallel()
-			takeMockDriveSlot(t)
 
 			tree := generateMock(t, tc.Prompt, tc.Wait)
 			in := ingestMock(t, tree)

@@ -66,12 +66,20 @@ const (
 	spoolUID = "501"
 
 	// waitBudget bounds every "wait until the store shows X" helper. Exceeding
-	// it is a test failure, never a retry. 50s is ~3x the observed healthy max
-	// across this package (a real vendor+sidecar+store scenario, -race,
-	// go test -v ./... baseline): the heaviest legitimate scenario
-	// (TestMockScenarios/!subagent) took ~16.6s; nearly everything else
-	// finishes in well under a second.
-	waitBudget = 50 * time.Second
+	// it is a test failure, never a retry.
+	//
+	// 10s is ~3x the observed healthy max of the slowest WHOLE subject in this
+	// package (2.82s, TestMockKeepAliveTurnsNeverReachAPage, measured on a
+	// green `go test ./integration/ -count=1 -json` run at the package's own
+	// parallelism on a contended machine; 0.92s measured alone). A whole
+	// subject's wall time is an upper bound on any single wait inside it, so
+	// the budget has that margin over every individual wait several times over.
+	//
+	// It was 50s, on a stated basis of a ~16.6s healthy max for
+	// TestMockScenarios/!subagent. That scenario measures 0.33s and no subtest
+	// in the package exceeds 0.87s, so the number was ~50x its own premise and
+	// a single red burned 50s of the suite's wall time proving nothing.
+	waitBudget = 10 * time.Second
 
 	// snapshotBudget bounds watchBashRun's read of an UNFINISHED run. The
 	// endpoint follows until the terminal, so a snapshot of a live run has no
