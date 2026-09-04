@@ -215,7 +215,14 @@ func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 		t.Fatalf("stamp %s: %v", fx.SpoolPath, err)
 	}
 	opts := lostOptions(t, fake.Socket, tree)
-	opts.UnownedSpoolWindow = time.Millisecond
+	// LONG, FOR THE REASON THE SUBJECT ABOVE STATES. This spool is CLAIMED, so
+	// the hold is released the moment the reader observes the transcript line
+	// naming it and the window is never reached on the healthy path. At 1ms it
+	// WAS reached: a rescan that resolved the spool before reading the
+	// transcript demoted a claimed spool to residue, which names no run and is
+	// owed no terminal, and the subject then waited out its whole budget for a
+	// settle that could no longer happen.
+	opts.UnownedSpoolWindow = longWindow
 
 	// Act.
 	startSidecar(t, opts)
