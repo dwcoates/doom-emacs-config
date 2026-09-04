@@ -167,3 +167,22 @@ type subagentState struct {
 	// feed is where the bubble landed.
 	feed placement
 }
+
+// markDetached remembers that a unit this resolver has not drawn yet has
+// already left the turn, and under which handle the work is addressed.
+func (s *wsState) markDetached(unit, work string) {
+	s.detachedUnits[unit] = work
+}
+
+// claimDetached answers the work handle a detachment announced for this unit
+// before it drew, consuming the mark: the placement is now carried by the
+// drawn element's own state, and a mark left standing would be reported as a
+// detachment naming a unit nothing ever drew.
+func (s *wsState) claimDetached(unit string) (string, bool) {
+	work, ok := s.detachedUnits[unit]
+	if !ok {
+		return "", false
+	}
+	delete(s.detachedUnits, unit)
+	return work, true
+}
