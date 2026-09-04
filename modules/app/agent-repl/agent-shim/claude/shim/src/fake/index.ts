@@ -612,6 +612,7 @@ export function createFakeQuery(
         parent_tool_use_id: options.agent?.parentToolUseId ?? null,
         request_id: requestId,
         timestamp,
+        ...(options.error === undefined ? {} : { error: options.error }),
         ...(options.aborted === true ? { aborted: true } : {}),
         ...(options.agent === undefined
           ? {}
