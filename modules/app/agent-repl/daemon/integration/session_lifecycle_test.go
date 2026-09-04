@@ -35,6 +35,7 @@ func (f *fixture) openRaw() (*agentreplv1.OpenWorkspaceResponse, error) {
 }
 
 func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	info := f.shim.Info()
@@ -88,6 +89,7 @@ func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T)
 }
 
 func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
+	t.Parallel()
 	// Arrange: a shim that withholds its opening diagnostics.
 	f := newRegistered(t, harness.Opts{})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
@@ -140,6 +142,7 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 }
 
 func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives.
@@ -200,6 +203,7 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 }
 
 func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 
@@ -211,6 +215,7 @@ func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
 }
 
 func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.T) {
+	t.Parallel()
 	// Arrange: open once to mint a vendor session, then kill it so the
 	// workspace's session record carries a vendor id with no live shim.
 	f := newOpened(t, harness.Opts{})
@@ -246,6 +251,7 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 }
 
 func TestResumingAMissingVendorTranscriptComesUpFresh(t *testing.T) {
+	t.Parallel()
 	// Arrange: a session with a conversation to resume, killed and REAPED, and
 	// then its transcript removed from under both account roots. The recorded
 	// conversation cannot be resumed — but the workspace must keep a LIVE
@@ -282,6 +288,7 @@ func TestResumingAMissingVendorTranscriptComesUpFresh(t *testing.T) {
 }
 
 func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
+	t.Parallel()
 	// Arrange: as above. The fresh start is loud — the abandoned vendor
 	// session id is the workspace's own record of what was left behind.
 	f := newOpened(t, harness.Opts{})
@@ -311,6 +318,7 @@ func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 }
 
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
+	t.Parallel()
 	// Arrange: kill to get a resumable session, then script the resume as cold.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -379,6 +387,7 @@ func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing
 }
 
 func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -444,6 +453,7 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 }
 
 func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -489,6 +499,7 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 }
 
 func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
+	t.Parallel()
 	// Arrange: a repository OUTSIDE the multi-repo root.
 	d := newDaemon(t, harness.Opts{})
 	defaultRepo := harness.NewRepo(t)
@@ -507,6 +518,7 @@ func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
 }
 
 func TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount(t *testing.T) {
+	t.Parallel()
 	// Arrange: the repository lives directly UNDER $MULTI_REPO_ROOT, which is
 	// the only input the account routing takes.
 	d := newDaemon(t, harness.Opts{})
@@ -525,6 +537,7 @@ func TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount(t *testing
 }
 
 func TestALoggedOutAccountRootDrawsLoggedOut(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := harness.StartDaemon(t, harness.Opts{DefaultAccountEmail: harness.LoggedOut})
 	repo := harness.NewRepo(t)
@@ -546,6 +559,7 @@ func TestALoggedOutAccountRootDrawsLoggedOut(t *testing.T) {
 // ---- critique 4: topbar account for a MULTI_REPO_ROOT workspace ----
 
 func TestATopbarInsideTheMultiRepoRootShowsTheMultiRepoAccountEmail(t *testing.T) {
+	t.Parallel()
 	// Arrange: a repository directly under $MULTI_REPO_ROOT, with the two
 	// account roots given DISTINCT emails so a topbar reading the wrong root
 	// cannot pass by accident.
@@ -573,6 +587,7 @@ func TestATopbarInsideTheMultiRepoRootShowsTheMultiRepoAccountEmail(t *testing.T
 }
 
 func TestATopbarOutsideTheMultiRepoRootShowsTheDefaultAccountEmail(t *testing.T) {
+	t.Parallel()
 	// Arrange: a sibling repository OUTSIDE $MULTI_REPO_ROOT, with the two
 	// account roots given distinct emails.
 	d := harness.StartDaemon(t, harness.Opts{
@@ -599,6 +614,7 @@ func TestATopbarOutsideTheMultiRepoRootShowsTheDefaultAccountEmail(t *testing.T)
 }
 
 func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testing.T) {
+	t.Parallel()
 	// Arrange: a repository directly under $MULTI_REPO_ROOT.
 	d := harness.StartDaemon(t, harness.Opts{})
 	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "inside-the-root-vendor-claude"))
@@ -625,6 +641,7 @@ func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testi
 // ---- critique 5: account-switch transcript porting ----
 
 func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *testing.T) {
+	t.Parallel()
 	// Arrange: a parent workspace INSIDE the multi-repo root, opened so it has
 	// a vendor conversation to fork.
 	d := harness.StartDaemon(t, harness.Opts{})
@@ -673,6 +690,7 @@ func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *t
 }
 
 func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
 	// vendor transcript filed under the default root.
 	f := newOpened(t, harness.Opts{})
@@ -725,6 +743,7 @@ func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 }
 
 func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -771,6 +790,7 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 }
 
 func TestCloseWorkspaceWithNothingLiveSucceedsAndLeavesTheShimRunning(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.shim.ExpectStartSession()
@@ -791,6 +811,7 @@ func TestCloseWorkspaceWithNothingLiveSucceedsAndLeavesTheShimRunning(t *testing
 }
 
 func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.shim.ExpectStartSession()
@@ -821,6 +842,7 @@ func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
 // blocked arm states WHY, so a caller with no footer can say it — and
 // `summary` is the same composed sentence the footer's activity line draws.
 func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.shim.ExpectStartSession()
@@ -841,6 +863,7 @@ func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 }
 
 func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace the daemon CREATED, so it carries the merge layout
 	// facts an enqueue needs, with a second one ahead of it in its repo's queue
 	// so its own merge stays queued rather than running to a terminal.
@@ -890,6 +913,7 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 }
 
 func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
+	t.Parallel()
 	// Arrange: stand a cold gate with no turn and no live async work.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -927,6 +951,7 @@ func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
 }
 
 func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
@@ -959,6 +984,7 @@ func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
 }
 
 func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, the shim death the test drives, the shim link the test severs.
@@ -996,6 +1022,7 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 }
 
 func TestRestartWorkspaceGracefulHoldsPromptsWithBuildRefreshAndDrainsAfterReadiness(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1060,6 +1087,7 @@ func TestRestartWorkspaceGracefulHoldsPromptsWithBuildRefreshAndDrainsAfterReadi
 }
 
 func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange: a very short idle cutoff so hibernation fires promptly.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1121,6 +1149,7 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 // conversation the shim rightly refuses as `unknown_session`, no client was
 // installed, and every later prompt answered `no_session` forever.
 func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
+	t.Parallel()
 	// Arrange: the deployed stamp disagrees with what the fake reports, so the
 	// mount bounces the shim — and the fake withholds the transcript until the
 	// first turn, exactly as the vendor does.
@@ -1155,6 +1184,7 @@ func TestABounceOfANeverTurnedSessionComesUpFresh(t *testing.T) {
 }
 
 func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
+	t.Parallel()
 	// Arrange: the deployed stamp disagrees with what the fake reports, so the
 	// mount finds the session on an older build.
 	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_DEPLOY_STAMP=deployed-sha"}})
@@ -1200,6 +1230,7 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
@@ -1249,6 +1280,7 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 // ---- critique 3: CloseWorkspace with a held prompt ----
 
 func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
+	t.Parallel()
 	// Arrange: hibernate an idle session, then submit a revival prompt while
 	// the revival's new shim withholds its diagnostics. Nothing else is live
 	// (no turn, no detached work) at that point, which is what lets
@@ -1316,6 +1348,7 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 // ---- critique 12: relaunch mechanics ----
 
 func TestRestartWorkspaceGracefulPrelaunchesASecondShimWithNoStartSessionUntilFreeness(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act: attaching to the prelaunch's control socket already
 	// proves it was spawned WHILE the turn still runs -- ShimAt blocks until
 	// the control listener binds, and the turn is never ended in this test.
@@ -1326,6 +1359,7 @@ func TestRestartWorkspaceGracefulPrelaunchesASecondShimWithNoStartSessionUntilFr
 }
 
 func TestRestartWorkspaceGracefulSendsGracefulKillSessionToTheOldShim(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, _ := restartGracefulInFlight(t, "k-relaunch-kill-old")
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1349,6 +1383,7 @@ func TestRestartWorkspaceGracefulSendsGracefulKillSessionToTheOldShim(t *testing
 }
 
 func TestRestartWorkspaceGracefulReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, second := restartGracefulInFlight(t, "k-relaunch-reap-order")
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1376,6 +1411,7 @@ func TestRestartWorkspaceGracefulReapsTheOldShimBeforeResumingOnTheNew(t *testin
 }
 
 func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1419,6 +1455,7 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 // into this boot is one whose bounce nobody accounted for, and each is surfaced
 // per workspace as an OPEN bounce_unknown fault rather than passed over.
 func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
 	// the successor adopts it.
 	f := newOpened(t, harness.Opts{})
@@ -1442,6 +1479,7 @@ func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
 }
 
 func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace whose shim will be gone before restart.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the unaccounted-for sessions the crash boot leaves.
@@ -1489,6 +1527,7 @@ func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
 // ---- critique 14: SessionStarted.live_work ----
 
 func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered-but-unopened workspace whose profile states one
 	// already-live detached shell, so OpenWorkspace's SessionStarted carries
 	// it as restored live work.
@@ -1509,6 +1548,7 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 }
 
 func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
+	t.Parallel()
 	// Arrange: a restored live item whose origin is `detached` (continuing an
 	// in-turn unit) rather than `created`. At restore time the watcher has no
 	// prior in-turn fact for ANY activity id -- it was just constructed -- so
@@ -1544,6 +1584,7 @@ func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----
 
 func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1592,6 +1633,7 @@ func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 // ---- critique 25 (this agent's share): KillWorkspace preserves data ----
 
 func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
@@ -1668,6 +1710,7 @@ func assertShimRequestOrder(t *testing.T, f *fixture, first, second string) {
 // reaches that branch at all, so this test asserts the ERROR record the
 // source actually produces.
 func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
+	t.Parallel()
 	// Arrange: a very short idle cutoff so the sweep fires promptly, and a
 	// generous run of scripted Hibernate transport failures so the assertion
 	// window below never lands on a sweep pass that got through to a real
@@ -1706,6 +1749,7 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 // hibernation") — quieter than the OTHER typed refusals (compaction_failed,
 // no_session), which log WARN — so this test asserts no WARN fires at all.
 func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
 	f.shim.ExpectStartSession()
@@ -1737,6 +1781,7 @@ func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
 // anything but "deleted" as resumable, so the mount resumes the vendor
 // session exactly as a revival does.
 func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
+	t.Parallel()
 	// Arrange: hibernate the session via the idle sweep.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1748,15 +1793,33 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	killed := &shimv1.KillSessionRequest{}
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
 	f.shim.AwaitGone()
+	// THE PARK IS NOT DONE UNTIL THE DAEMON SAYS SO. The shim's exit is the
+	// sweep's means, not its completion: until the daemon has recorded the
+	// hibernation the workspace still reads as OPEN to it, and an OpenWorkspace
+	// arriving in that window is answered as the idempotent no-op it looks like
+	// — success, no second mount, no StartSession at all.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
 
 	// Act: OpenWorkspace re-mounts the parked session directly.
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	// THE RE-MOUNTED SESSION IS BORN IDLE, and this daemon's 50ms cutoff — the
+	// one the Arrange needed — is still armed, so the sweep parks the mount
+	// again and takes its control socket with it within a sweep. Dialing that
+	// socket is therefore a race the assertion can only sometimes win. The
+	// request is read instead from the fake's DURABLE log, which the mount
+	// writes on the way up (nothing can park a session before it has been
+	// started) and which outlives the second shim. The wait names the resume
+	// because the Arrange's own StartSession is already in that log.
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+		"a StartSession resuming the hibernated session", req,
+		func() bool { return req.GetResume() != nil })
 
 	// Assert
-	req := shim.ExpectStartSession()
 	if req.GetResume() == nil {
 		t.Fatalf("StartSession request = %v, want a resume source reviving the hibernated session", req)
 	}
@@ -1772,6 +1835,7 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 // successor refuse it. See internal/workspace/sessions.go's decideSource,
 // which refuses BEFORE any spawn.
 func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testing.T) {
+	t.Parallel()
 	// Arrange: kill to get a real, whole session-terminal row, then corrupt
 	// just its kind to "deleted" (wsm's terminalDeleted spelling).
 	f := newOpened(t, harness.Opts{})
@@ -1815,6 +1879,7 @@ func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testin
 // both delete the served gate from Fleet.coldGates, so a SECOND answer
 // against the same (now resolved) gate id finds none standing.
 func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
+	t.Parallel()
 	// Arrange: stand a cold gate and resolve it once.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
@@ -1886,6 +1951,7 @@ func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
 // composing the typed no_session refusal. That is the production gap this
 // test exposes; see the report.
 func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
+	t.Parallel()
 	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never
 	// through KillWorkspace, which would also clear the coldGates record).
 	f := newOpened(t, harness.Opts{})
@@ -1941,6 +2007,7 @@ func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
 // before liveness. This locks that ordering down so a future reordering of
 // the two checks is caught here rather than only in the no_session test above.
 func TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered workspace that was never opened.
 	f := newRegistered(t, harness.Opts{})
 
@@ -1972,6 +2039,7 @@ func TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate(t *testin
 // setArm matches directly against InterruptError's no_session field) while
 // Freeness still reports a turn open.
 func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn appears open, but the shim itself reports no session.
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the long task", "k-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -2023,6 +2091,7 @@ func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.
 //     _test.go) returns zero producers. The arm is UNREACHABLE as things
 //     stand.
 func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a turn kill the test fails.
@@ -2056,6 +2125,7 @@ func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
 // an untyped Connect internal. LANDING 9 landed the arm:
 // OpenWorkspaceError.vendor_start_failed carries the shim's `detail`.
 func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	const shimDetail = "the vendor SDK threw before its first message"
 	f := newRegistered(t, harness.Opts{})

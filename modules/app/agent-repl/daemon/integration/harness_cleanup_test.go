@@ -18,6 +18,7 @@ import (
 // crashed test from leaking a shim — and a leaked daemon keeps prelaunching
 // more of them for as long as the machine is up.
 func TestAKilledDaemonLeavesNoProcessNamingItsStateDir(t *testing.T) {
+	t.Parallel()
 	// Arrange: a daemon with a live shim under it.
 	f := newOpened(t, harness.Opts{})
 	if len(f.d.StrayPIDs()) == 0 {
@@ -47,6 +48,7 @@ func TestAKilledDaemonLeavesNoProcessNamingItsStateDir(t *testing.T) {
 // minted outside the run's state directory survives every cleanup the harness
 // has: a killed test would leave one behind per sink, per run, forever.
 func TestAKilledDaemonLeavesNoLogTargetOutsideItsStateDir(t *testing.T) {
+	t.Parallel()
 	// Arrange: an opened workspace, so both the daemon and the shim sinks exist.
 	f := newOpened(t, harness.Opts{})
 	logsDir := filepath.Join(f.d.StateDir, "logs")

@@ -29,6 +29,7 @@ import (
 // notification kind does, alike (internal/workspace/notify.go's Notify sets
 // it unconditionally once note.Kind is set).
 func TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notify-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -73,6 +74,7 @@ func TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention(t *testing.T)
 // is this system's own fan-out of it (agent_activity.proto). The pushed
 // message rides the envelope's `text`; the kind arm itself carries no fields.
 func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-notify-addressed", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

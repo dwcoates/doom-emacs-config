@@ -26,6 +26,7 @@ const origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT
 // ---------------------------------------------------------------------------
 
 func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange: a metaprompt-wrapped span the drawn row must strip, while the
 	// full text still travels to the shim unchanged.
 	f := newOpened(t, harness.Opts{})
@@ -63,6 +64,7 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 }
 
 func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
@@ -87,6 +89,7 @@ func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T)
 }
 
 func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -125,6 +128,7 @@ func promptHeldEntry(tray *frontendv1.DaemonHoldTray, turn *conversationv1.TurnI
 }
 
 func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn in flight (StartTurn accepted, no terminal frame yet).
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -164,6 +168,7 @@ func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.
 }
 
 func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunningTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	resp1 := f.submit("start the long task", "k-running", origin)
@@ -202,6 +207,7 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 }
 
 func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -248,6 +254,7 @@ func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
 // covers. A force-through is refused (there is no interrupt this entry could
 // ride), and delivery still happens FIFO once the cut's own turn concludes.
 func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesRelease(t *testing.T) {
+	t.Parallel()
 	// Arrange: /clear runs as the turn in front, marking it uninterruptible
 	// (internal/promptqueue/acts.go's runContextCut).
 	f := newOpened(t, harness.Opts{})
@@ -322,6 +329,7 @@ func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesR
 // refuses a force-through on it -- there is nothing live to send an interrupt
 // to yet).
 func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t *testing.T) {
+	t.Parallel()
 	// Arrange: hibernate an idle session, then submit a revival prompt while
 	// the revival's new shim withholds its diagnostics, so the lease is still
 	// held when the assertions run.
@@ -380,6 +388,7 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 // ---------------------------------------------------------------------------
 
 func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
@@ -422,6 +431,7 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 }
 
 func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -456,6 +466,7 @@ func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans.
@@ -497,6 +508,7 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 // "daemon boots with an empty tray" some report of this critique assumed; see
 // the report for that divergence.
 func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *testing.T) {
+	t.Parallel()
 	// Arrange: two held prompts on one workspace.
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the in-flight turn the restart orphans, the state row the test corrupts.
@@ -543,6 +555,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 // ---------------------------------------------------------------------------
 
 func TestAHeldPromptMirrorsToTheTrayOnlyUntilDelivery(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn in flight, then an ordinary follow-up that is held.
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -591,6 +604,7 @@ func TestAHeldPromptMirrorsToTheTrayOnlyUntilDelivery(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAcceptOnAHoldForTurnEndVerdictFlipsAcceptedAndRePushesTheTray(t *testing.T) {
+	t.Parallel()
 	// Arrange: an ordinary follow-up prompt classifies hold_for_turn_end.
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -628,6 +642,7 @@ func TestAcceptOnAHoldForTurnEndVerdictFlipsAcceptedAndRePushesTheTray(t *testin
 }
 
 func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
+	t.Parallel()
 	// Arrange: the "stop" fast path classifies interject.
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the long task", "k-running", origin)
@@ -667,6 +682,7 @@ func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the long task", "k-running", origin)
@@ -776,6 +792,7 @@ func promptAwaitMergeLease(t *testing.T, f *fixture) {
 }
 
 func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f, _, _ := promptMergeFixture(t)
 	if _, err := f.d.Client().MergeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -810,6 +827,7 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 // refusing the composer would strand it. A wait that stopped at parked would
 // therefore have quietly inverted the refusal these tests assert.
 func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
+	t.Parallel()
 	// Arrange: the scripted conflict's brief is concluded, so the run leaves
 	// the conflicts phase and parks awaiting the user's guidance.
 	f, _, _ := promptMergeFixture(t)
@@ -839,6 +857,7 @@ func TestSubmitPromptOnceTheMergeParksIsAccepted(t *testing.T) {
 }
 
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
+	t.Parallel()
 	// Arrange: a prompt is held (turn in flight) BEFORE the merge begins.
 	f, _, _ := promptMergeFixture(t)
 	f.submit("start the work", "k-running", origin)
@@ -871,6 +890,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAnswerHeldOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) {
+	t.Parallel()
 	// Arrange: an ordinary workspace with nothing ever raised in its tray.
 	f := newOpened(t, harness.Opts{})
 
@@ -898,6 +918,7 @@ func TestAnswerHeldOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) 
 // and the tray's composed heading counts the standing offer like any other
 // item.
 func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCounts(t *testing.T) {
+	t.Parallel()
 	// Arrange: a second workspace queued behind the first's blocked merge,
 	// then an interrupt raises the dequeue offer.
 	_, behind, _, d := mergeBlockedQueueFixture(t)
@@ -945,6 +966,7 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 // ---------------------------------------------------------------------------
 
 func TestSubmitPromptToASubagentBubbleDeliversViaUpdateAgentPrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -976,6 +998,7 @@ func TestSubmitPromptToASubagentBubbleDeliversViaUpdateAgentPrompt(t *testing.T)
 }
 
 func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1026,6 +1049,7 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 // ---------------------------------------------------------------------------
 
 func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow(t *testing.T) {
+	t.Parallel()
 	// Arrange: a DEPLOYED daemon, stated through AGENT_REPL_DEPLOY_STAMP. The
 	// harness builds the binary with `go build -o <tmp>`, so no deploy chain
 	// ever wrote daemon/bin/.built-sha and the daemon knows no version to put
@@ -1094,8 +1118,10 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 }
 
 func TestAgentsAndHelpAnswerCommandRefusedAndNeverReachTheShim(t *testing.T) {
+	t.Parallel()
 	for _, cmd := range []string{"/agents", "/help"} {
 		t.Run(cmd, func(t *testing.T) {
+			t.Parallel()
 			// Arrange
 			f := newOpened(t, harness.Opts{})
 			feed := f.watchRootFeed()
@@ -1118,6 +1144,7 @@ func TestAgentsAndHelpAnswerCommandRefusedAndNeverReachTheShim(t *testing.T) {
 }
 
 func TestAnUnknownSlashCommandFallsThroughAsAPrompt(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	text_ := "/frobnicate the whole build"
@@ -1136,8 +1163,10 @@ func TestAnUnknownSlashCommandFallsThroughAsAPrompt(t *testing.T) {
 }
 
 func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t *testing.T) {
+	t.Parallel()
 	for _, cmd := range []string{"/clear", "/compact"} {
 		t.Run(cmd, func(t *testing.T) {
+			t.Parallel()
 			// Arrange
 			f := newOpened(t, harness.Opts{})
 			feed := f.watchRootFeed()
@@ -1178,6 +1207,7 @@ func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t
 }
 
 func TestModelWithAnArgumentSubmitsTheModelChange(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -1200,6 +1230,7 @@ func TestModelWithAnArgumentSubmitsTheModelChange(t *testing.T) {
 }
 
 func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
+	t.Parallel()
 	// Arrange: audit-2 critique 22 -- internal/prompthandler/recognition.go's
 	// recognize takes the SAME RecognizedRefused path for a bare /model as it
 	// does for /agents and /help (the `matched.command ==
@@ -1229,6 +1260,7 @@ func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
 }
 
 func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn in flight.
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -1267,6 +1299,7 @@ func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing
 // ---------------------------------------------------------------------------
 
 func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnModelChanged(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1314,6 +1347,7 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 }
 
 func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -1334,6 +1368,7 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 }
 
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
+	t.Parallel()
 	// Arrange: the served set is topbar.SwitchableModes, a FIXED six-mode set
 	// the resolver installs regardless of what the fake session states, so
 	// there is always an alternate to switch to -- the earlier t.Skip here
@@ -1386,6 +1421,7 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 }
 
 func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -1406,6 +1442,7 @@ func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
 }
 
 func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange: a registered (not created-with-consent) workspace, so an
 	// ungated mode ("bypass" — the wire spelling this suite assumes mirrors
 	// AgentPermissionMode's own oneof field name, per the report) is refused.
@@ -1434,6 +1471,7 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -1470,6 +1508,7 @@ func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t
 }
 
 func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -1511,6 +1550,7 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 // detached shell is not one. It dies with the query like anything else, but
 // the user is not challenged over it.
 func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
@@ -1548,6 +1588,7 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 }
 
 func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -1567,6 +1608,7 @@ func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
 }
 
 func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedWork(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1611,6 +1653,7 @@ func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedW
 }
 
 func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
+	t.Parallel()
 	// Arrange: interruptAllAgents sweeps AGENTS only, so a lone detached
 	// subagent is the fixture (internal/workspace/interrupt.go).
 	f := newOpened(t, harness.Opts{})
@@ -1648,7 +1691,9 @@ func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
+	t.Parallel()
 	t.Run("allow_once", func(t *testing.T) {
+		t.Parallel()
 		f := newOpened(t, harness.Opts{})
 		feed := f.watchRootFeed()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1674,6 +1719,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	})
 
 	t.Run("allow_standing echoes the daemon-held offer", func(t *testing.T) {
+		t.Parallel()
 		f := newOpened(t, harness.Opts{})
 		feed := f.watchRootFeed()
 		offer := standingPermission("perm-standing", "act-standing")
@@ -1699,6 +1745,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 	})
 
 	t.Run("deny with a reason", func(t *testing.T) {
+		t.Parallel()
 		f := newOpened(t, harness.Opts{})
 		feed := f.watchRootFeed()
 		f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1724,6 +1771,7 @@ func TestAnswerPermissionForwardsTheCorrectDecision(t *testing.T) {
 }
 
 func TestAllowStandingOnACardWithoutStandingOfferedIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1773,6 +1821,7 @@ func promptOpenQuestion(id, question string, options ...string) *conversationv1.
 }
 
 func TestAnswerQuestionEchoesServedTextsAndLabels(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1806,6 +1855,7 @@ func TestAnswerQuestionEchoesServedTextsAndLabels(t *testing.T) {
 }
 
 func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1830,6 +1880,7 @@ func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
 }
 
 func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1854,6 +1905,7 @@ func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
 }
 
 func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
+	t.Parallel()
 	// Arrange: no question was ever posed, so the named feed row addresses
 	// nothing standing.
 	f := newOpened(t, harness.Opts{})
@@ -1877,6 +1929,7 @@ func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
 }
 
 func TestAQuestionThatExpiresIsDrawnExpired(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	feed := f.watchRootFeed()
@@ -1924,6 +1977,7 @@ func TestAQuestionThatExpiresIsDrawnExpired(t *testing.T) {
 // workspace's shim ever sees -- which is what lets the count below name the
 // resubmission exactly, with no race against the merge's own traffic.
 func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease(t *testing.T) {
+	t.Parallel()
 	// Arrange: a clean self-repo merge target with a turn of its own still
 	// open when the merge takes the lease.
 	f, d, _, script := mergeCleanRepo(t)

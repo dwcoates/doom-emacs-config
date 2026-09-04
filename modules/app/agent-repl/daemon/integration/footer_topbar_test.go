@@ -24,6 +24,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -43,6 +44,7 @@ func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
 }
 
 func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -70,6 +72,7 @@ func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFooterStatusTreeFollowsIdleThinkingDone(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -98,9 +101,24 @@ func TestFooterStatusTreeFollowsIdleThinkingDone(t *testing.T) {
 	})
 }
 
+// ftDwell is the momentary-status dwell the two retirement tests run the
+// daemon with, in place of footer.DefaultMomentaryDwell's 1.5s.
+//
+// MEASURED BASIS: a push that IS coming arrives on an open stream at a p90 of
+// 5.8ms and a p50 of 0.4ms over this suite at -parallel 8, so 150ms is ~25x the
+// p90 — wide enough that the momentary status and its successor remain two
+// distinct, separately observed pushes rather than a coalesced one, and short
+// enough that neither test spends its wall time waiting on a window sized for a
+// reader.
+const ftDwell = 150 * time.Millisecond
+
 func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	t.Parallel()
+	// Arrange: the dwell is compressed to ftDwell. THE SUBJECT IS THE
+	// RETIREMENT, not the window's length — nothing below reads the clock —
+	// and the product's 1.5s is sized for a person's eyes, not for a stream
+	// this test already holds open.
+	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the interrupt", func(v *frontendv1.FooterView) bool {
@@ -121,8 +139,10 @@ func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 }
 
 func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	t.Parallel()
+	// Arrange: the dwell is compressed to ftDwell, for the same reason as the
+	// interrupted case above.
+	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-loading", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the injection", func(v *frontendv1.FooterView) bool {
@@ -152,6 +172,7 @@ func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFooterTokensCellExcludesCacheReads(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn whose only usage is a huge cache READ and no misses.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -183,6 +204,7 @@ func TestFooterTokensCellExcludesCacheReads(t *testing.T) {
 }
 
 func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing.T) {
+	t.Parallel()
 	// Arrange: one API response whose usage is stamped on the FIRST unit
 	// only, per the envelope contract.
 	f := newOpened(t, harness.Opts{})
@@ -227,6 +249,7 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 }
 
 func TestFooterTokensCellVerdictIsIncompleteWhenAResponseCarriedNoUsage(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -258,6 +281,7 @@ func TestFooterTokensCellVerdictIsIncompleteWhenAResponseCarriedNoUsage(t *testi
 // ---------------------------------------------------------------------------
 
 func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -293,6 +317,7 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 }
 
 func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -313,6 +338,7 @@ func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -362,6 +388,7 @@ func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-deny-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -415,6 +442,7 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 // ---------------------------------------------------------------------------
 
 func TestWatchWebWorkspaceFlushesHeadersBeforeAnyFrameWhenNothingIsPublishedYet(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act: WatchWebWorkspace carries no state topic of its own --
 	// only the `transferred` event, which nothing in this test ever raises --
 	// so a fresh subscription has no published view to replay. Without
@@ -435,6 +463,7 @@ func TestWatchWebWorkspaceFlushesHeadersBeforeAnyFrameWhenNothingIsPublishedYet(
 // ---------------------------------------------------------------------------
 
 func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -458,6 +487,7 @@ func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 }
 
 func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
+	t.Parallel()
 	// Arrange: a pending wakeup while idle.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -479,6 +509,7 @@ func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
 }
 
 func TestFooterNotificationOutranksRateLimitedAndContextBudget(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -532,6 +563,7 @@ func TestFooterNotificationOutranksRateLimitedAndContextBudget(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of the vendor failure the test feeds.
@@ -572,6 +604,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 // ---------------------------------------------------------------------------
 
 func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
@@ -602,6 +635,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 }
 
 func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -651,6 +685,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTopbarTitleIsComposedFromTheWorkspacesNaming(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -665,6 +700,7 @@ func TestTopbarTitleIsComposedFromTheWorkspacesNaming(t *testing.T) {
 }
 
 func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -694,6 +730,7 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 }
 
 func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -730,6 +767,7 @@ func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
 }
 
 func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T) {
+	t.Parallel()
 	// Arrange: a turn whose single usage-carrying unit fixes the session
 	// breakdown's basis at a round 1000 tokens (100 uncached input + 900
 	// cache read), so each row's share_permille is an exact, checkable figure.
@@ -764,6 +802,7 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 }
 
 func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -779,9 +818,13 @@ func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
 		}},
 	})
 	// The chip resolves from the same fact, so its arrival is the synchronizing
-	// edge for the panel the fact also feeds.
-	awaitTopbar(t, f, topbar, "the context chip carrying the pushed usage", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != ""
+	// edge for the panel the fact also feeds. THE EDGE NAMES THIS FACT'S OWN
+	// FIGURE: the fake states an opening context usage of its own alongside
+	// readiness (fakeshim.DefaultContextUsage, 1000 tokens and no categories),
+	// so a merely non-empty chip is already true before this push lands and
+	// would let the panel be read from that opening fact instead.
+	awaitTopbar(t, f, topbar, "the context chip carrying the pushed 50,000 tokens", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == "50k"
 	})
 
 	// Assert: the /context panel — the topbar resolver's OTHER product from
@@ -813,6 +856,7 @@ func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *fr
 }
 
 func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
@@ -856,6 +900,7 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 }
 
 func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared record is evidence of the session faults the test pushes.
@@ -890,6 +935,7 @@ func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
 }
 
 func TestTopbarDegradedWindowIsDrawnOpenThenClosed(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -939,6 +985,7 @@ func TestTopbarDegradedWindowIsDrawnOpenThenClosed(t *testing.T) {
 }
 
 func TestTopbarConnectivityToneAndGlyphComeFromTheSharedVocabulary(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -955,6 +1002,7 @@ func TestTopbarConnectivityToneAndGlyphComeFromTheSharedVocabulary(t *testing.T)
 }
 
 func TestTopbarAccountReflectsTheWorkspacesConfigRootEmail(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{DefaultAccountEmail: "dodge@example.invalid"})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -969,6 +1017,7 @@ func TestTopbarAccountReflectsTheWorkspacesConfigRootEmail(t *testing.T) {
 }
 
 func TestTopbarPermissionModePickerServesTheSwitchableSetWithTheCurrentMode(t *testing.T) {
+	t.Parallel()
 	// Arrange / Act
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -993,6 +1042,7 @@ func TestTopbarPermissionModePickerServesTheSwitchableSetWithTheCurrentMode(t *t
 }
 
 func TestTopbarPermissionModeChangedPushUpdatesTheCurrentMode(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1166,6 +1216,7 @@ func ftAwaitTrue(t *testing.T, ctx interface{ Done() <-chan struct{} }, pred fun
 // ---------------------------------------------------------------------------
 
 func TestFooterIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
+	t.Parallel()
 	// Arrange: a workspace opened with only the HOST hop held, so the shim
 	// link serves but the web hop does not.
 	f := newRegistered(t, harness.Opts{})
@@ -1180,6 +1231,7 @@ func TestFooterIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 }
 
 func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.open()
@@ -1199,6 +1251,7 @@ func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 }
 
 func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
+	t.Parallel()
 	// Arrange: every hop up.
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
@@ -1216,6 +1269,7 @@ func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 }
 
 func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.open()
@@ -1233,6 +1287,7 @@ func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 }
 
 func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.open()
@@ -1252,6 +1307,7 @@ func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 }
 
 func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1273,6 +1329,7 @@ func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 // by the topbar resolver and drawn as the panel's rows, one per server, each
 // carrying the health the shim stated.
 func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
+	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1300,8 +1357,12 @@ func TestMcpPanelListsEveryServerTheSessionStatedAHealthFor(t *testing.T) {
 			TotalTokens: 50_000, MaxTokens: 200_000, Percentage: 25, Model: "claude-opus-5",
 		}},
 	})
+	// The edge names THIS push's own figure: the fake's opening context usage
+	// (1000 tokens) already draws a non-empty chip, so "non-empty" would be
+	// satisfied before this update — and therefore before the two mcp_server
+	// frames ahead of it — had been applied.
 	awaitTopbar(t, f, topbar, "the context chip that follows the mcp_server updates", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != ""
+		return v.GetContext().GetText() == "50k"
 	})
 
 	// Assert

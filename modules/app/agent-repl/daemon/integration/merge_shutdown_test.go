@@ -26,6 +26,7 @@ import (
 // orderly exit begins — so the stamps really do race the store's close, and
 // the drain is the only reason they land.
 func TestStoppingTheDaemonInsideAMergesTerminalStampsTheLandingWithNoFailedWrites(t *testing.T) {
+	t.Parallel()
 	// Arrange: a merge on a repository that is NOT the daemon's own checkout,
 	// so the run reaches its terminal straight from the prompts, with no
 	// worktree removal and no self-reload in the way.

@@ -6,10 +6,31 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
 ## Build and test
 
-- `go build ./... && go vet ./... && go test ./...` from this directory.
-- Integration suite: `TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s`
+- `make test` — `go build ./... && go vet ./... && go test ./... -count=1` from
+  this directory. Measured 2.2s wall; slowest package 1.21s
+  (`internal/gitclient`), slowest test 0.19s (`TestConfigDirForRouting`).
+  Nothing in it is parallelized within a package, because at those figures
+  per-test parallelism buys nothing measurable.
+- `make integration` — the integration suite:
+  `TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s -count=1 -parallel 8`
   (a real daemon subprocess against a fake shim.v1 server, fake git repos and a
   temp state root; the fake shim binary is `integration/fakeshim`).
+- **EVERY TEST IN THE INTEGRATION SUITE CALLS `t.Parallel()`, and a new one
+  must too.** The suite's fixture is per-test and shares nothing: each test
+  gets its own `t.TempDir()` root, its own short socket root under `/tmp`, its
+  own `StateDir`, `LockDir` and config roots, an ephemeral loopback port, its
+  own fake `git` first on `PATH`, and its own fake-git world keyed on its own
+  `*testing.T`. The package globals (`daemonBinary`, `fakeshimBinary`,
+  `gitBinary`, `pinnedCheckout`) are written once in `harness.MainAt` before
+  `m.Run()` and only read thereafter, and no test sets an environment variable
+  or changes directory. Serial execution was therefore a choice, and it cost
+  118.3s against 18.4s at `-parallel 8`. A `t.Run` subtest that builds its OWN
+  daemon fixture calls `t.Parallel()` too; one that reads state an earlier
+  sibling wrote (`register_select_test.go`'s re-registration table) does not.
+- `GOTEST_PARALLEL` bounds the concurrency; see the Makefile for the measured
+  basis. Do not raise it without re-measuring: every test owns a real daemon
+  process plus a fake shim, and at 16 that load pushed ordinary daemon steps
+  past `harness.DefaultTimeout` in tests that are green at 8.
   `TMPDIR=/tmp` IS REQUIRED on macOS: `t.TempDir()` otherwise roots the state
   under `/var/folders/...`, and `<state>/sock/<workspace-id>.sock` then exceeds
   the 103-byte unix socket path limit, so the daemon refuses the state root at
@@ -26,18 +47,22 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 
   | bound | value | where | reason |
   | --- | --- | --- | --- |
-  | `harness.DefaultTimeout` | 5s | every `harness.Daemon`'s context, unless overridden | ~3x run 8's observed 1.7s max; the shared budget for one daemon process's whole test |
+  | `harness.DefaultTimeout` | 5s | every `harness.Daemon`'s context, unless overridden | ~3x run 8's observed 1.7s max; the shared budget for one daemon process's whole test. RE-MEASURED at `-parallel 8`: the suite's slowest test is 2.84s and its p99 leaf is under 1s, so 5s is still ~1.8x the observed max under the concurrency the suite now runs at |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s (3x default) | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
-  | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event; 500ms is long enough for a push that IS coming to have arrived |
+  | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
   | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
 
   A wait that needs longer than `DefaultTimeout` gets one of the rows above —
-  never a bigger default. Package `-timeout 180s` leaves margin over the
-  measured ~139s full-suite wall time with today's known reds (each now
-  costing ~5s instead of ~30s) plus build/link time; it existed only as Go's
-  implicit 10-minute default before this bound table, which let a run with
-  many reds run needlessly long.
+  never a bigger default. Package `-timeout 180s` leaves ample margin over the
+  measured 16.5s full-suite wall time at `-parallel 8`, all green (118.3s
+  serial), plus build/link time; it existed only as Go's implicit 10-minute
+  default before this bound table, which let a run with many reds run
+  needlessly long.
+
+  | production window | value | override | why it is overridable |
+  | --- | --- | --- | --- |
+  | `footer.DefaultMomentaryDwell` | 1500ms | `--footer-momentary-dwell`, `AGENT_REPL_FOOTER_MOMENTARY_DWELL` (the environment beats the flag; a malformed or non-positive value is REFUSED, never ignored), `harness.Opts.FooterMomentaryDwell` | the window is sized for a PERSON to read a momentary status, so it is a real product window and not a bound to be tightened. The two tests whose subject is its RETIREMENT read no clock, so they run the daemon at 150ms — ~25x the measured p90 push arrival, wide enough that the status and its successor stay two separately observed pushes — and cost 0.39s each instead of 1.74s |
 
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
@@ -60,6 +85,7 @@ environment. Every flag is optional.
 | `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface, opened BEFORE any dependency; a wildcard or routable bind is refused, not opened | off |
 | `--no-browser` | this daemon has NO external browser: `OpenExternal` answers `no_browser_configured` and nothing is launched. Without it the browser is still absent on a host where neither `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists | off |
 | `--feed-tail-retention <rows>` | how many published rows one feed retains for a tail's replay, which is what makes WatchFeed's `token_expired` refusal reachable | `$AGENT_REPL_FEED_TAIL_RETENTION`, else the resolver's `DefaultTailRetention` (4096) |
+| `--footer-momentary-dwell <duration>` | how long a MOMENTARY footer status (`interrupted`, `loading`) stands before the daemon's own successor push retires it | `$AGENT_REPL_FOOTER_MOMENTARY_DWELL`, else the resolver's `DefaultMomentaryDwell` (1.5s) |
 | `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
 
 ## Run and boot order (binding; `cmd/claude-repld`)
