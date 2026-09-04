@@ -62,9 +62,12 @@ var greenPathSiteClasses = []siteClass{
 	{"tool call entry", "tool-call", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
 	{"tool return entry", "tool-return", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
 	{"thinking entry", "thinking", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
-	// A hook site both ANNOUNCES a row and narrates what the hook did; only the
-	// announcement owes a key, which the upsert-key subject below pins.
-	{"hook entry", "hook", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id"}},
+	// The hook site narrates what the hook did AND names the row it stored it
+	// as. It owes no activity_id: the 2026-09-04 plane-ownership ruling gives
+	// the STREAM plane the served hook row, so this plane mints no unit of work
+	// here and the record it writes is an unserved item keyed by the vendor
+	// record's own uuid.
+	{"hook entry", "hook", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "upsert_key"}},
 	{"injected context entry", "context-injected", []string{"component", "path", "file_id", "offset", "producer", "agent_id", "vendor_session_id", "activity_id", "upsert_key"}},
 
 	// Per-LINE conversion. A line is not yet a row, so it owes the book it was

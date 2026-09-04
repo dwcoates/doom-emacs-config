@@ -4,9 +4,11 @@ package convert
 // work, the IDE's diagnostics, and context the vendor SILENTLY pulled in.
 //
 // Most attachment types are context-cut exclusions and CLI machinery, withheld
-// so no resolver ever sees them as prose. Four families are conversation facts
-// and are modeled: the hook outcomes, the diagnostics report, the injected
-// memory/skills, and the skill listing.
+// so no resolver ever sees them as prose. Three families are conversation facts
+// and are modeled: the diagnostics report, the injected memory/skills, and the
+// skill listing. The HOOK outcomes are read and kept whole but deliberately
+// UNSERVED — the stream plane owns the hook row (ruling 2026-09-04, see
+// hookAttachment).
 
 import (
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -28,7 +30,7 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 
 	switch kind {
 	case "hook_success", "hook_blocking_error", "hook_non_blocking_error", "hook_cancelled":
-		return []*storev1.StoreEntry{c.hookAttachment(kind, attachment, at, env, agent)}
+		return []*storev1.StoreEntry{c.hookAttachment(kind, record, attachment, at)}
 	case "diagnostics":
 		return c.diagnosticsAttachment(attachment, at, env, agent)
 	case "nested_memory":
@@ -50,74 +52,55 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 // hooks
 // ---------------------------------------------------------------------------
 
-// hookAttachment converts one hook execution.
+// hookAttachment stores one hook firing the vendor recorded in the transcript.
 //
-// THE LARGEST RECORD CLASS THE VENDOR WRITES, and quiet by default in the UI: a
-// succeeded hook draws nothing, a failing one draws a card, and a BLOCKING one is
-// a refusal the user must be able to understand — which is why the refusal text
-// is the whole point of that arm.
-func (c *Converter) hookAttachment(kind string, attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	// A hook's unit identity is the vendor's own toolUseID for the firing: a
-	// PreToolUse and a PostToolUse around one call are separate firings and must
-	// not collapse onto one row, so the kind rides the identity.
-	unitID := "hook:" + str(pick(attachment, "hookName", "hook_name")) + ":" + str(pick(attachment, "toolUseID", "toolUseId", "tool_use_id"))
-
-	hook := &conversationv1.AgentHook{}
+// THE STREAM PLANE OWNS THE SERVED HOOK ROW (ruling 2026-09-04), which is why
+// nothing here lands on a page. A hook reaches this system on BOTH planes by
+// vendor design, and the two planes are handed DISJOINT IDENTITY MATERIAL: the
+// stream's `hook_started`/`hook_response` pair carries a `hook_id` and never a
+// `tool_use_id`, the transcript's attachment carries a `toolUseID` and never a
+// `hook_id`, and the two records' uuids differ. No key spans them, so a hook
+// converted on both planes drew TWO rows a reader could not reconcile — the
+// second of them degraded, since this plane writes no start frame and so
+// carries neither the hook's name nor its event.
+//
+// It is the SAME precedent R15 sets for the transcript's user records (user.go):
+// the shim's row is the one served form, and the file plane keeps the record
+// durable and investigable as an UNSERVED item rather than regrowing a second,
+// poorer copy of a row the stream already serves. The cost is stated rather than
+// hidden: a transcript-only session — one this sidecar read with no shim ever
+// having watched it — shows its hooks as unserved items, not as live rows.
+//
+// THE KEY IS THE ATTACHMENT RECORD'S OWN UUID (ResidueKey), which is also what
+// makes distinct firings distinct: the vendor reuses one `toolUseID` across
+// every hook that gates the same call — four PreToolUse:Bash firings share it in
+// testdata/captures/hook-blocked — so the old `hook:<hookName>:<toolUseID>`
+// identity collapsed them onto one row and left only the last.
+func (c *Converter) hookAttachment(kind string, record, attachment map[string]any, at Attribution) *storev1.StoreEntry {
+	name := str(pick(attachment, "hookName", "hook_name"))
+	// VERBOSE, NOT A WARNING. A hook the vendor recorded as blocking or failing
+	// is CONTENT this copier carried perfectly. A warning here would say "the
+	// sidecar is degraded" about a transcript that merely describes a blocked
+	// call, and the census that drives the reader's warnings to zero could then
+	// never reach zero over a real capture.
+	log := c.log.With(at.ctxFor("hook")).With(logging.Context{UpsertKey: ResidueKey(at)})
 	switch kind {
-	case "hook_success":
-		hook.Result = &conversationv1.AgentHook_Succeeded{Succeeded: &conversationv1.AgentHookSucceeded{
-			Command:    str(attachment["command"]),
-			ExitCode:   int32(number(attachment["exitCode"])),
-			DurationMs: int64(number(attachment["durationMs"])),
-			Output:     hookOutput(attachment),
-		}}
 	case "hook_blocking_error":
-		blocking := obj(attachment["blockingError"])
-		hook.Result = &conversationv1.AgentHook_BlockingError{BlockingError: &conversationv1.AgentHookBlockingError{
-			Command:      firstNonEmpty(str(blocking["command"]), str(attachment["command"])),
-			BlockingText: firstNonEmpty(str(blocking["blockingError"]), str(attachment["blockingError"])),
-		}}
-		// VERBOSE, NOT A WARNING. A hook the vendor recorded as blocking is
-		// CONTENT this copier is faithfully carrying into the blocking_error
-		// arm — the conversion went perfectly. A warning here would say "the
-		// sidecar is degraded" about a transcript that merely describes a
-		// blocked call, and the census that drives the reader's warnings to zero
-		// could then never reach zero over a real capture.
-		c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID}).
-			LogVerbose("hook %q BLOCKED the gated call; carried on the blocking_error arm", str(pick(attachment, "hookName", "hook_name")))
+		log.LogVerbose("hook %q BLOCKED the gated call; the stream plane serves the row and the record is kept whole as an unserved item", name)
 	case "hook_non_blocking_error":
-		hook.Result = &conversationv1.AgentHook_NonBlockingError{NonBlockingError: &conversationv1.AgentHookNonBlockingError{
-			Command:    str(attachment["command"]),
-			ExitCode:   int32(number(attachment["exitCode"])),
-			DurationMs: int64(number(attachment["durationMs"])),
-			Output:     hookOutput(attachment),
-		}}
-		c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID}).
-			LogVerbose("hook %q failed without blocking; carried on the non_blocking_error arm", str(pick(attachment, "hookName", "hook_name")))
+		log.LogVerbose("hook %q failed without blocking; the stream plane serves the row and the record is kept whole as an unserved item", name)
 	default:
-		hook.Result = &conversationv1.AgentHook_Cancelled{Cancelled: &conversationv1.AgentHookCancelled{}}
+		log.LogVerbose("hook attachment kind=%s kept whole as an unserved item; the stream plane serves the row", kind)
 	}
-
-	c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
-		LogVerbose("hook attachment kind=%s", kind)
-
-	activity := item(&conversationv1.AgentActivity_Hook{Hook: hook})
-	activity.ActivityId = activityID(unitID)
-	return c.landFrame(at, agent, ActivityKey(unitID), "hook:"+kind, activityFrame(agent, activity))
+	return VendorSpecificEntry(at, "attachment/"+kind, record)
 }
 
-// hookStartFor is not minted from an attachment: the vendor writes ONE record per
-// hook execution carrying its outcome, never a separate announcement, so a start
-// frame would be a fact this reader invented.
-
-// hookOutput reads what a hook printed. UNSET when it printed nothing.
-func hookOutput(attachment map[string]any) *conversationv1.AgentHookOutput {
-	stdout, stderr := str(attachment["stdout"]), str(attachment["stderr"])
-	if stdout == "" && stderr == "" {
-		return nil
-	}
-	return &conversationv1.AgentHookOutput{Stdout: stdout, Stderr: stderr}
-}
+// No start frame is minted here either: the vendor writes ONE transcript record
+// per hook execution carrying its outcome, never a separate announcement, so a
+// start frame would be a fact this reader invented. AgentHookStart.gated_call
+// likewise stays UNSET on the stream (daemon.md ~1306) — it is never invented
+// from this plane's `toolUseID`, which names the gated call but belongs to a
+// record the stream's firing cannot be joined to.
 
 // ---------------------------------------------------------------------------
 // IDE diagnostics
