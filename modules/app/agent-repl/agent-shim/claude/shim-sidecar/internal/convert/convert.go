@@ -28,6 +28,7 @@ package convert
 import (
 	"strings"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -81,6 +82,13 @@ type openCall struct {
 	startedAt  int64
 	activityID string
 	agentID    string
+	// retainedAllowedTools carries what a skill's ACKNOWLEDGEMENT declared, kept
+	// for the document record that actually settles the unit. The allowances
+	// ride the acknowledgement and nothing else — the call's input names only
+	// the skill and its args, and the document states no allowances of its own.
+	// NIL means the acknowledgement declared none, which the proto distinguishes
+	// from an empty declared set.
+	retainedAllowedTools *conversationv1.AgentSkillAllowedTools
 }
 
 // Converter holds the per-file correlation a conversion needs beyond the record
