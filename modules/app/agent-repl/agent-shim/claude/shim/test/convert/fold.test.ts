@@ -1248,3 +1248,108 @@ describe("a skill's declared allowances, from the acknowledgement to the settled
     expect(success.allowedTools).toBeUndefined();
   });
 });
+
+/**
+ * THE VENDOR'S API ERROR CLASS, carried from the records that state it to the
+ * terminal that needs it.
+ *
+ * The `result` record carries the HTTP status alone. The class and the retry
+ * delay ride `api_retry` (corpus: every `"subtype":"api_retry"` line) and a
+ * failed assistant message's `error`, both of which arrive BEFORE the terminal,
+ * so the fold remembers the last one of the turn and the terminal reads it.
+ */
+describe("the vendor's API failure class reaching the terminal", () => {
+  function apiRetry(errorClass: string, retryDelayMs: number): SdkMessage {
+    return {
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 10,
+      retry_delay_ms: retryDelayMs,
+      error_status: null,
+      error: errorClass,
+      uuid: "uuid-api-retry",
+      session_id: "session-1",
+    } as unknown as SdkMessage;
+  }
+
+  function apiResult(status: number | null): SdkMessage {
+    return {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      terminal_reason: "api_error",
+      errors: ["the vendor said so"],
+      api_error_status: status,
+      uuid: "uuid-api-result",
+      session_id: "session-1",
+    } as unknown as SdkMessage;
+  }
+
+  function apiKindOf(messages: readonly SdkMessage[]): conversationv1.ApiRequestFailed {
+    const fold = createFold();
+    let last;
+    for (const message of messages) last = fold.onSdkMessage(message, foldContext());
+    const result = last?.turnEnded?.frame?.result;
+    if (result?.case !== "failure") throw new Error("the api terminal must be a failure");
+    const failure = result.value.failure;
+    if (failure.case !== "apiRequestFailed") throw new Error("the api terminal must be api_request_failed");
+    return failure.value;
+  }
+
+  it("reads the class off an api_retry record", () => {
+    // Arrange + Act
+    const failed = apiKindOf([apiRetry("max_output_tokens", 549), apiResult(null)]);
+
+    // Assert
+    expect(failed.kind.case).toBe("maxOutputTokens");
+  });
+
+  it("reads the wait off an api_retry record", () => {
+    // Arrange + Act
+    const failed = apiKindOf([apiRetry("rate_limit", 549), apiResult(429)]);
+
+    // Assert
+    expect(failed.kind.value).toMatchObject({ retryAfterMs: 549n });
+  });
+
+  it("reads the class off a failed assistant message", () => {
+    // Arrange + Act
+    const failed = apiKindOf([
+      assistant("msg-api", [{ type: "text", text: "billing" }], { error: "billing_error" }),
+      apiResult(402),
+    ]);
+
+    // Assert
+    expect(failed.kind.case).toBe("billingError");
+  });
+
+  it("keeps the LAST class stated when a run failed several times", () => {
+    // Arrange + Act
+    const failed = apiKindOf([
+      apiRetry("overloaded", 549),
+      apiRetry("oauth_org_not_allowed", 1_144),
+      apiResult(403),
+    ]);
+
+    // Assert
+    expect(failed.kind.case).toBe("oauthOrgNotAllowed");
+  });
+
+  it("does not let one turn's class reach the next turn's terminal", () => {
+    // Arrange
+    const fold = createFold();
+    for (const message of [apiRetry("oauth_org_not_allowed", 549), apiResult(403)]) {
+      fold.onSdkMessage(message, foldContext());
+    }
+
+    // Act
+    const second = fold.onSdkMessage(apiResult(403), foldContext());
+
+    // Assert
+    const result = second.turnEnded?.frame?.result;
+    const failure = result?.case === "failure" ? result.value.failure : undefined;
+    const value = failure?.case === "apiRequestFailed" ? failure.value : undefined;
+    expect(value?.kind.case).toBe("permissionDenied");
+  });
+});

@@ -320,7 +320,8 @@ function apiErrorScenario(spec: {
     name: spec.name,
     prompt: `!${spec.name}`,
     emits:
-      `a \`system:api_error\` record${spec.retries ? " and an `api_retry` message" : ""}, then an ` +
+      `a \`system:api_error\` record${spec.retries ? " and an `api_retry` message" : ""}, a failed assistant message ` +
+      `carrying the vendor's \`error\` class, then an ` +
       `\`error_during_execution\` result with \`terminal_reason: "api_error"\` and status ${String(spec.status)}`,
     writes: "a `system:api_error` line, the prompt line and the turn record",
     arms: `AgentUpdate.api_error mid-turn, then AgentFailure.api_request_failed → ${spec.arm}`,
@@ -344,6 +345,18 @@ function apiErrorScenario(spec: {
         isMeta: false,
         uuid: ctx.newUuid(),
         timestamp: ctx.nowIso(),
+      });
+      // THE VENDOR'S OWN ERROR CLASS, ON THE STREAM. The result record states
+      // the HTTP status alone, and the status cannot separate `billing_error`
+      // from an unmodelled 402, `oauth_org_not_allowed` from an ordinary 403,
+      // or `max_output_tokens` from a status-less failure. `SDKAssistantMessage`
+      // declares `error: SDKAssistantMessageError`, so the failed response is
+      // where the class rides; the transcript keeps its own `system:api_error`
+      // line and is left untouched.
+      ctx.assistant([{ type: "text", text: spec.formatted }], {
+        error: spec.errorClass,
+        noReasoning: true,
+        skipTranscript: true,
       });
       if (spec.retries) {
         ctx.systemMessage("api_retry", {

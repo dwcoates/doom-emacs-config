@@ -392,21 +392,24 @@ const STOP_TAXONOMY: readonly StopRow[] = [
   { prompt: "!api-429", terminal: "failure", arm: "apiRequestFailed", apiKind: "rateLimited" },
   { prompt: "!api-500", terminal: "failure", arm: "apiRequestFailed", apiKind: "internal" },
   { prompt: "!api-529", terminal: "failure", arm: "apiRequestFailed", apiKind: "overloaded" },
-  // THREE KINDS THE RESULT RECORD CANNOT NAME. `billing_error`,
-  // `oauth_org_not_allowed` and `max_output_tokens` are separated from their
-  // neighbours only by the vendor's own error CLASS, and the result record
-  // carries the HTTP status alone — 402 and a null status fall through to
-  // `unmodeled`, and the org refusal is indistinguishable from an ordinary 403.
-  // Asserted as they actually land, with the gap named, rather than as an arm
-  // nothing on this plane produces.
-  { prompt: "!api-billing", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  // THREE KINDS NO STATUS CAN NAME. `billing_error`, `oauth_org_not_allowed`
+  // and `max_output_tokens` are separated from their neighbours only by the
+  // vendor's own error CLASS — 402 is shared, the org refusal is an ordinary
+  // 403 and the output ceiling carries no status at all — so the class the
+  // vendor states on its error records is what puts each in its own arm.
+  { prompt: "!api-billing", terminal: "failure", arm: "apiRequestFailed", apiKind: "billingError" },
   {
     prompt: "!api-oauth-org",
     terminal: "failure",
     arm: "apiRequestFailed",
-    apiKind: "permissionDenied",
+    apiKind: "oauthOrgNotAllowed",
   },
-  { prompt: "!api-max-output", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  {
+    prompt: "!api-max-output",
+    terminal: "failure",
+    arm: "apiRequestFailed",
+    apiKind: "maxOutputTokens",
+  },
   { prompt: "!api-unmodeled", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
   // The response-level stops. `!max-tokens` keeps the partial text and the turn
   // itself completes; `!context-window` and the two refusals end the turn.
