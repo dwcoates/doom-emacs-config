@@ -22,6 +22,14 @@ func (h *harness) terminal(turn string, success *conversationv1.AgentSuccess, fa
 }
 
 // terminalRow finds the terminal row for a turn.
+// queryDied hands the resolver one session-level query death.
+func (h *harness) queryDied(died *conversationv1.SessionQueryDied) {
+	h.t.Helper()
+	h.resolver.OnSessionUpdate(testWorkspace, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: died},
+	})
+}
+
 func (h *harness) terminalRow(turn string) *frontendv1.FeedTurnEnded {
 	h.t.Helper()
 	want := testEncode(feedid.Ref{
@@ -845,6 +853,112 @@ func TestTheTurnOpenEdgeIsWhatAQueryDeathTerminates(t *testing.T) {
 	// Assert.
 	if h.terminalRow("turn-7").GetErrored().GetQueryDied() == nil {
 		t.Fatalf("rows = %+v, want the opened turn's query_died terminal", h.rows(rootFeed()))
+	}
+}
+
+// Landing 10 gave FeedTurnErrorQueryDied a `cause` oneof mirroring
+// SessionQueryDied's, so a reader can tell the agent binary vanishing from
+// the SDK throwing. One test per cause.
+
+func TestAnUnexpectedEofDrawsTheUnexpectedEofCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act.
+	h.queryDied(&conversationv1.SessionQueryDied{
+		Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+		},
+	})
+
+	// Assert.
+	if h.terminalRow("turn-1").GetErrored().GetQueryDied().GetUnexpectedEof() == nil {
+		t.Fatalf("cause = %v, want unexpected_eof", h.terminalRow("turn-1").GetErrored().GetQueryDied())
+	}
+}
+
+func TestAnIteratorFailureDrawsTheIteratorFailureCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act.
+	h.queryDied(&conversationv1.SessionQueryDied{
+		Cause: &conversationv1.SessionQueryDied_IteratorFailure{
+			IteratorFailure: &conversationv1.SessionQueryIteratorFailure{Cause: "iterator threw"},
+		},
+	})
+
+	// Assert.
+	if h.terminalRow("turn-1").GetErrored().GetQueryDied().GetIteratorFailure() == nil {
+		t.Fatalf("cause = %v, want iterator_failure", h.terminalRow("turn-1").GetErrored().GetQueryDied())
+	}
+}
+
+// TestADeathStatingNoCauseLeavesTheCauseUnset: inventing one would claim the
+// producer said something it did not.
+func TestADeathStatingNoCauseLeavesTheCauseUnset(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+
+	// Act.
+	h.queryDied(&conversationv1.SessionQueryDied{})
+
+	// Assert.
+	if got := h.terminalRow("turn-1").GetErrored().GetQueryDied().GetCause(); got != nil {
+		t.Fatalf("cause = %v, want unset", got)
+	}
+}
+
+// TestTheShimsOwedTerminalDoesNotRedrawADeathAsAnExecutionError covers the
+// frame the shim owes every open turn when the query dies under it. It states
+// AgentFailure.execution_error -- conversation.v1 gives a dead query no
+// failure arm -- and it arrives AFTER the session stated the death.
+func TestTheShimsOwedTerminalDoesNotRedrawADeathAsAnExecutionError(t *testing.T) {
+	// Arrange: the death, drawn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.queryDied(&conversationv1.SessionQueryDied{
+		Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+			UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+		},
+	})
+
+	// Act: the shim's stand-in terminal for the same turn.
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Errors: []string{"the vendor query ended without being asked to"},
+		Failure: &conversationv1.AgentFailure_ExecutionError{
+			ExecutionError: &conversationv1.AgentExecutionError{},
+		},
+	})
+
+	// Assert: the death is the truer account and keeps the arm.
+	errored := h.terminalRow("turn-1").GetErrored()
+	if errored.GetQueryDied() == nil {
+		t.Fatalf("arm = %q, want query_died", erroredArmWord(errored))
+	}
+	if errored.GetQueryDied().GetUnexpectedEof() == nil {
+		t.Fatalf("cause = %v, want the death's own unexpected_eof", errored.GetQueryDied())
+	}
+}
+
+// TestAnOrdinaryExecutionErrorIsStillDrawnAsOne: the witness is per turn, so
+// a turn with no death behind it keeps the producer's own arm.
+func TestAnOrdinaryExecutionErrorIsStillDrawnAsOne(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ExecutionError{
+			ExecutionError: &conversationv1.AgentExecutionError{},
+		},
+	})
+
+	// Assert.
+	if h.terminalRow("turn-1").GetErrored().GetExecutionError() == nil {
+		t.Fatalf("arm = %q, want execution_error", erroredArmWord(h.terminalRow("turn-1").GetErrored()))
 	}
 }
 

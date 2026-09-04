@@ -69,6 +69,7 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 
 	delete(s.turnEvidence, string(*turn))
 	delete(s.turnRefusals, string(*turn))
+	delete(s.turnQueryDeaths, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
 		s.turnInFlight = nil
 	}
@@ -138,6 +139,19 @@ func (r *resolver) erroredOutcome(s *wsState, turn string, failure *conversation
 		vendorMessage string
 		sentence      string
 	)
+
+	// A DEAD QUERY OUTRANKS THE TERMINAL THE SHIM OWED FOR IT. The shim
+	// concludes an open turn with AgentFailure.execution_error when the query
+	// dies under it, because conversation.v1 gives a dead query no failure arm
+	// of its own -- but the session already stated the death, feed.proto has
+	// the arm for it, and drawing "the run broke while executing" over it
+	// loses the one fact that says the producer is gone.
+	if died, ok := s.turnQueryDeaths[turn]; ok {
+		errored.Error = queryDiedArm(died)
+		applyHeadline(errored, headline{Text: queryDeathSentence(died)},
+			strings.Join(failure.GetErrors(), "; "))
+		return errored
+	}
 
 	if api, ok := failure.GetFailure().(*conversationv1.AgentFailure_ApiRequestFailed); ok {
 		vendorMessage = api.ApiRequestFailed.GetMessage()
@@ -361,9 +375,9 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 	turn := string(*s.turnInFlight)
 	at := r.place(s, nil)
 
-	errored := &frontendv1.FeedTurnEndedErrored{
-		Error: &frontendv1.FeedTurnEndedErrored_QueryDied{QueryDied: &frontendv1.FeedTurnErrorQueryDied{}},
-	}
+	s.turnQueryDeaths[turn] = died
+
+	errored := &frontendv1.FeedTurnEndedErrored{Error: queryDiedArm(died)}
 	applyHeadline(errored, headline{Text: queryDeathSentence(died)}, queryDeathDetail(died))
 
 	row := &frontendv1.FeedRow{
@@ -380,6 +394,29 @@ func (r *resolver) drawQueryDied(s *wsState, died *conversationv1.SessionQueryDi
 	r.upsert(s, at, row, true)
 	r.breakPlanEpisodes(s, "the query died while plan mode was still open")
 	s.turnInFlight = nil
+}
+
+// queryDiedArm builds feed.proto's query-died arm, carrying the cause through
+// from SessionQueryDied's own. The two vocabularies are deliberately parallel:
+// an EOF is the agent binary vanishing and an iterator failure is the SDK
+// throwing, and a reader who cannot tell them apart cannot tell a crashed
+// producer from a broken one.
+func queryDiedArm(died *conversationv1.SessionQueryDied) *frontendv1.FeedTurnEndedErrored_QueryDied {
+	arm := &frontendv1.FeedTurnErrorQueryDied{}
+	switch died.GetCause().(type) {
+	case *conversationv1.SessionQueryDied_UnexpectedEof:
+		arm.Cause = &frontendv1.FeedTurnErrorQueryDied_UnexpectedEof{
+			UnexpectedEof: &frontendv1.FeedTurnErrorQueryUnexpectedEof{},
+		}
+	case *conversationv1.SessionQueryDied_IteratorFailure:
+		arm.Cause = &frontendv1.FeedTurnErrorQueryDied_IteratorFailure{
+			IteratorFailure: &frontendv1.FeedTurnErrorQueryIteratorFailure{},
+		}
+	}
+	// NO DEFAULT ARM: a death the producer stated no cause for leaves the
+	// oneof unset, which is the honest reading -- inventing one would claim
+	// the producer said something it did not.
+	return &frontendv1.FeedTurnEndedErrored_QueryDied{QueryDied: arm}
 }
 
 // queryDeathSentence words a query death for the headline.

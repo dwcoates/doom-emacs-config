@@ -116,6 +116,14 @@ type wsState struct {
 	// response's own AgentResponseFailureReason.refused is the only place that
 	// fact is stated, and the terminal row is drawn after it.
 	turnRefusals map[string]bool
+	// turnQueryDeaths records, per turn, that the SESSION's query died under
+	// it. The shim owes every open turn a terminal and writes one as
+	// AgentFailure.execution_error -- conversation.v1 gives a dead query no
+	// failure arm of its own -- so that frame arrives after the death and
+	// would otherwise redraw the terminal as execution_error. The death is the
+	// truer account, and feed.proto has an arm for exactly it, so the witness
+	// outlives the row it drew and the cause it carries is the death's own.
+	turnQueryDeaths map[string]*conversationv1.SessionQueryDied
 	// turnInFlight is the turn the session is running, learned from the rows
 	// it stamps. It is what a session-scoped death (query_died) terminates.
 	turnInFlight *ids.TurnID
@@ -287,26 +295,27 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		return s
 	}
 	s = &wsState{
-		id:             ws,
-		feeds:          map[string]*feedState{},
-		feedAddrs:      map[string]feedid.Feed{},
-		subFeeds:       map[string]*subFeedHead{},
-		agentFeeds:     map[string]string{},
-		readers:        map[ReaderID]*walk{},
-		units:          map[string]*unitState{},
-		responses:      map[string]*proseState{},
-		plans:          map[string]*planState{},
-		planEpisodes:   map[string]uint64{},
-		shells:         map[string]*shellState{},
-		detachedUnits:  map[string]string{},
-		subagents:      map[string]*subagentState{},
-		standing:       map[string]*conversationv1.AgentPermissionStanding{},
-		permissionRows: map[string]*permissionState{},
-		questionAsks:   map[string]*questionState{},
-		gatedCalls:     map[string]string{},
-		turnEvidence:   map[string][]string{},
-		turnRefusals:   map[string]bool{},
-		answerRows:     map[string]*frontendv1.FeedId{},
+		id:              ws,
+		feeds:           map[string]*feedState{},
+		feedAddrs:       map[string]feedid.Feed{},
+		subFeeds:        map[string]*subFeedHead{},
+		agentFeeds:      map[string]string{},
+		readers:         map[ReaderID]*walk{},
+		units:           map[string]*unitState{},
+		responses:       map[string]*proseState{},
+		plans:           map[string]*planState{},
+		planEpisodes:    map[string]uint64{},
+		shells:          map[string]*shellState{},
+		detachedUnits:   map[string]string{},
+		subagents:       map[string]*subagentState{},
+		standing:        map[string]*conversationv1.AgentPermissionStanding{},
+		permissionRows:  map[string]*permissionState{},
+		questionAsks:    map[string]*questionState{},
+		gatedCalls:      map[string]string{},
+		turnEvidence:    map[string][]string{},
+		turnRefusals:    map[string]bool{},
+		turnQueryDeaths: map[string]*conversationv1.SessionQueryDied{},
+		answerRows:      map[string]*frontendv1.FeedId{},
 
 		unitAPIResponse:  map[string]uint64{},
 		apiResponseUsage: map[uint64]string{},
