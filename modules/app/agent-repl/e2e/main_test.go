@@ -71,7 +71,12 @@ func runSuite(m *testing.M) int {
 	defer os.RemoveAll(binDir)
 	e2eBinDir = binDir
 
-	return harness.MainAt(m, l.daemonDir)
+	code := harness.MainAt(m, l.daemonDir)
+	// The perf phase's final summary block (PERF-SPEC.md §D4), after every
+	// test has reported. A no-op in the default build, where the perf files
+	// are not compiled at all.
+	perfReportSummary()
+	return code
 }
 
 // ---------------------------------------------------------------------------
