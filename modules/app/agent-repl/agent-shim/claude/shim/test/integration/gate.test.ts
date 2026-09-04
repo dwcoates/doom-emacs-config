@@ -74,6 +74,20 @@ async function awaitPermissionStart(
   return update.update.value;
 }
 
+/** The permission `start` an opening page already carries, or null. */
+function permissionStartIn(
+  frame: shimv1.WatchAgentResponse,
+): conversationv1.AgentPermission | null {
+  if (frame.frame.case !== "page") return null;
+  for (const entry of frame.frame.value.entries) {
+    const agentFrame = entryFrame(entry);
+    if (agentFrame?.result.case !== "update") continue;
+    const update = agentFrame.result.value.update;
+    if (update.case === "permission" && update.value.result.case === "start") return update.value;
+  }
+  return null;
+}
+
 /** Wait for the question ask and return it. */
 async function awaitQuestionStart(stream: AgentStream): Promise<conversationv1.AgentQuestion> {
   const frame = await stream.until((f) => {
@@ -536,10 +550,12 @@ describe("an ask raised by a SUBAGENT", () => {
   test("it is answered by naming the subagent as the target", async () => {
     // `!subagent-detached-live` leaves a detached agent running past the turn
     // and has it raise its OWN gated call, with the subagent's `agentID` on the
-    // vendor callback. The answer names that agent as `target` — the consumer
-    // is answering the agent it is watching, not the main thread — and the ask
-    // is keyed by its own AgentPermissionId either way, which is why the echo
-    // still validates.
+    // vendor callback. THE ASK LANDS ON THE SUBAGENT'S BOOK, never the main
+    // agent's — a subagent's question in front of the main conversation is the
+    // bug the vendor TASK id translation exists to prevent — so it is watched
+    // on a SECOND WatchAgent opened on that agent. The answer names that agent
+    // as `target`, and the ask is keyed by its own AgentPermissionId either
+    // way, which is why the echo still validates.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
@@ -555,7 +571,15 @@ describe("an ask raised by a SUBAGENT", () => {
       throw new Error("expected the detached agent's announcement");
     }
     const subagent = detached.result.value.work?.value ?? "";
-    const ask = await awaitPermissionStart(stream);
+    const child = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(subagent) }), options),
+    );
+    // The ask may already be written when the child watch opens, so the OPENING
+    // PAGE is searched before the tail — waiting on a tail alone would be a race
+    // against the vendor, not a wait on the ask.
+    const opening = await child.next();
+    const ask =
+      permissionStartIn(opening) ?? (await awaitPermissionStart(child));
 
     const response = await shim.clients.h1.updateAgent(
       allowOnce(
@@ -563,13 +587,19 @@ describe("an ask raised by a SUBAGENT", () => {
         agentId(subagent),
       ),
     );
-    const settled = await awaitPermissionSettled(stream);
+    const settled = await awaitPermissionSettled(child);
 
     updateAccepted(response);
+    // AND THE MAIN AGENT'S BOOK NEVER SAW IT.
+    for (const frame of stream.frames()) {
+      const update = updateOf(frame);
+      expect(update?.update.case).not.toBe("permission");
+    }
     if (settled.result.case !== "success" || settled.result.value.decision.case !== "allowed") {
       throw new Error("the subagent's ask did not settle allowed");
     }
     expect(settled.result.value.decision.value.scope.case).toBe("once");
+    child.close();
     stream.close();
   });
 });

@@ -317,9 +317,13 @@ describe("a stream closed by the client ends nothing", () => {
     // reason that has nothing to do with cancellation.
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
     await watch.until((frame) => frame.frame.case === "entry");
-    const tails = shim.store?.openTails() ?? [];
-    expect(tails).toHaveLength(1);
-    const token = tails[0]!;
+    // THE TAIL'S OPEN IS AN EVENT, not a level. A row reaching this client says
+    // the shim pulled from its tail; it does not say the store's own generator
+    // has begun on the other side of the socket, so reading `openTails()` here
+    // raced the store and read an empty ledger under load.
+    const token = await (shim.store?.tailOpened() ??
+      Promise.reject(new Error("this shim has no store")));
+    expect(shim.store?.openTails()).toEqual([token]);
 
     watch.close();
 
