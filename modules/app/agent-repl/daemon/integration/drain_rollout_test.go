@@ -20,6 +20,7 @@ import (
 
 	"claude-repld/integration/harness"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/stateroot"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -717,6 +718,15 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
+	// THE ANNOUNCEMENT PRECEDES THE MANIFEST. Handover spawns, announces,
+	// snapshots the participants and only THEN writes the intent manifest
+	// (internal/rollout/handover.go), and the successor arms its rendezvous
+	// from that manifest — so an adopt call made the instant shutdown_announced
+	// lands reaches a successor with nothing to arm from and is refused
+	// no_transfer_announced, which is the OTHER arm of this same endpoint. The
+	// manifest's atomic installation is the edge that makes this call reach an
+	// armed successor and so exercise the arm this test names.
+	d.AwaitFileExists(drainIntentManifest(t, d))
 	successor := drainDial(announced.GetAddress())
 
 	// Act: the never-open web client attempts to join anyway.
@@ -986,4 +996,20 @@ func drainDial(addr string) agentreplv1connect.AgentReplClient {
 		},
 	}
 	return agentreplv1connect.NewAgentReplClient(client, "http://"+addr)
+}
+
+// drainIntentManifest answers a daemon's stand-down intent manifest path.
+//
+// A handover's manifest is the successor's ONLY input — there is no
+// daemon-to-daemon channel — and it is installed by rename, so its existence is
+// a sound synchronizing edge for any call that needs an armed rendezvous. The
+// incumbent's run log is not: the successor's own boot rotates that file out
+// from under the incumbent, which keeps appending to the rotated inode.
+func drainIntentManifest(t *testing.T, d *harness.Daemon) string {
+	t.Helper()
+	layout, err := stateroot.Root(d.StateDir, "")
+	if err != nil {
+		t.Fatalf("harness: resolve the state root layout for %q: %v", d.StateDir, err)
+	}
+	return layout.IntentManifest()
 }

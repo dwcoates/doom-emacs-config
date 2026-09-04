@@ -1753,10 +1753,20 @@ func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
 	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
 	}
-	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	// THE RE-MOUNTED SESSION IS BORN IDLE, and this daemon's 50ms cutoff — the
+	// one the Arrange needed — is still armed, so the sweep parks the mount
+	// again and takes its control socket with it within a sweep. Dialing that
+	// socket is therefore a race the assertion can only sometimes win. The
+	// request is read instead from the fake's DURABLE log, which the mount
+	// writes on the way up (nothing can park a session before it has been
+	// started) and which outlives the second shim. The wait names the resume
+	// because the Arrange's own StartSession is already in that log.
+	req := &shimv1.StartSessionRequest{}
+	f.d.AwaitShimLoggedRequestMatching(f.repo.Dir, harness.RPCStartSession,
+		"a StartSession resuming the hibernated session", req,
+		func() bool { return req.GetResume() != nil })
 
 	// Assert
-	req := shim.ExpectStartSession()
 	if req.GetResume() == nil {
 		t.Fatalf("StartSession request = %v, want a resume source reviving the hibernated session", req)
 	}
