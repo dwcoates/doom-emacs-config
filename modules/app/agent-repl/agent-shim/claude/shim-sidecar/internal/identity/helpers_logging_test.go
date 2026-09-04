@@ -86,19 +86,3 @@ func operationLevels(records []logRecord) []string {
 	}
 	return out
 }
-
-// ctxString reads one correlation key as a string, failing when the record does
-// not carry it. A missing key is the defect the subject exists to catch, so it
-// is never defaulted away.
-func ctxString(t *testing.T, r logRecord, key string) string {
-	t.Helper()
-	raw, ok := r.Context[key]
-	if !ok {
-		t.Fatalf("record %q carries no %q; its context was %v", r.Operation, key, r.Context)
-	}
-	value, ok := raw.(string)
-	if !ok {
-		t.Fatalf("record %q carries %q as %T, want a string", r.Operation, key, raw)
-	}
-	return value
-}
