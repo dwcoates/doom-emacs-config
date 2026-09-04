@@ -546,16 +546,19 @@ func TestBashDetachedNonzeroExit(t *testing.T) {
 // went_silent | swept_up}, drawn as feed.proto's FeedShellLost — "We stopped
 // being able to see it — spool gone or silent past the shim's ruling; not
 // known to have failed"). Reaching a LOST settle requires the sidecar's own
-// staleness ruling to elapse or its sweep to run, neither of which this
-// suite can provoke without either sleeping (forbidden) or reaching into
-// production configuration (out of scope for an e2e writer). So this test
-// pins the state that PRECEDES every one of those arms and that the registry
+// staleness ruling to elapse or its sweep to run, and this world runs the
+// sidecar with its PRODUCTION windows (a 30s grace, a 30m shell silence),
+// which no test's budget can wait out. So this test pins the state that
+// PRECEDES every one of those arms and that the registry
 // must hold indefinitely: the shell stays LIVE with its unterminated
 // spool's text, and settles into NOTHING — not completed, not lost — for as
 // long as nothing stops it.
 //
-// GAP RECORDED, not silently absorbed: the three DetachedLost arms remain
-// undriven by any e2e layer after this test.
+// GAP SINCE CLOSED: detachedlost_e2e_test.go drives all three DetachedLost
+// arms off THIS scenario, buying the sidecar's own staleness windows through
+// NewWorldWithSidecarStaleness. This test keeps its subject unchanged — the
+// state that PRECEDES every one of those arms, under a sidecar running with
+// PRODUCTION windows, where nothing is ever concluded.
 func TestBashDetachedLiveNeverSettles(t *testing.T) {
 	t.Parallel()
 	w := NewWorld(t, WorldOpts{})
