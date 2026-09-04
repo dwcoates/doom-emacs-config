@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -47,6 +48,24 @@ const xvfbScreen = "1280x1024x24"
 // no socket directory -- not a slow one.
 const xvfbReadyBound = 1 * time.Second
 
+// xvfbStartMu serializes Xvfb STARTS -- not their lives.
+//
+// The display number is a namespace shared by every server in the container
+// (`/tmp/.X11-unix' and `/tmp/.X<n>-lock'), and `-displayfd' has each server
+// SEARCH that namespace for a free number. Two searches running at once are
+// a check-then-act over shared state, and the harness owns the concurrency
+// that creates it, so the harness holds the lock: a start is admitted only
+// once the previous server has reported the number it settled on, after
+// which the two run side by side with nothing in common.
+//
+// MEASURED, and this is the defect it fixes. Boots were blocking FOREVER --
+// not slowly: raised to 20s, a stalled boot still never finished -- with
+// Emacs in `select', no pty output, and the boot breadcrumb file absent
+// entirely, so it had not reached init.el and was still connecting to its
+// display. It happened only under the layer's own parallelism, at 1-to-5 of
+// every 8 boots. With the searches serialized: zero in 32.
+var xvfbStartMu sync.Mutex
+
 // xdisplay is one Xvfb server and the display it bound.
 type xdisplay struct {
 	// Display is the value to put in DISPLAY, e.g. ":1".
@@ -66,6 +85,8 @@ type xdisplay struct {
 // down BEFORE the display it is drawing on goes away.
 func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 	t.Helper()
+	xvfbStartMu.Lock()
+	defer xvfbStartMu.Unlock()
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("prepare the display directory %s: %v", dir, err)
