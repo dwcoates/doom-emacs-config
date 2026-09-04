@@ -429,7 +429,7 @@ One file per drawn component; each file's header comment is its spec.
 ## Landing 3 relay (2026-08-29, project lead)
 
 - A per-bubble prompt to a subagent may come back as a refusal (`not_deliverable`) this wave; render the refusal honestly, no client-side disabling until the user rules.
-- The detach (Ctrl-B) control may be refused `unsupported` on the pinned SDK; same policy.
+- The detach of in-flight foreground work (no client verb today) may be refused `unsupported` on the pinned SDK; same policy.
 
 ## Landing 4 relay (2026-08-29, project lead)
 
