@@ -29,6 +29,16 @@ func readSuccess(call openCall, result map[string]any, ts int64) *conversationv1
 		Path:      &conversationv1.ReadPath{Path: path},
 		SettledAt: settledAt(ts),
 	}
+	// A NON-TEXT READ HAS NO EXTENT ARM THIS WAVE. AgentReadSuccess retired the
+	// image, pdf, notebook, parts and file_unchanged tags, so no arm can say how
+	// much came back: the extent stays UNSET and the read still settles. Falling
+	// through to `whole` would invent a fact — an empty whole file — and the
+	// daemon would draw an empty code block instead of feed.proto's `none`
+	// output arm. The shim's own converter states the same
+	// (convert/tools/read.ts readSuccess).
+	if kind := str(result["type"]); kind != "" && kind != "text" {
+		return success
+	}
 	contents := str(file["content"])
 	totalLines := uint32(number(file["totalLines"]))
 	numLines := uint32(number(file["numLines"]))
