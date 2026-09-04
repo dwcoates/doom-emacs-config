@@ -52,7 +52,7 @@ import (
 // MEASURED, then set at ~3x the observed max, the same way every other bound
 // in this suite was derived.
 //
-// Two full runs of all nine areas (2026-09-03), per-area vitest child
+// Two full runs of all the areas (2026-09-03), per-area vitest child
 // durations: 1.21s, 1.30s, 1.38s, 1.44s, 1.48s, 1.50s, 1.74s, 3.16s — the
 // slowest is the feed-families area (22 real turns in one child). The Go
 // tests wrapping them ran 1.58-3.77s including a full world bring-up each.
@@ -158,7 +158,7 @@ func wlRequireWebappDeps(t *testing.T) string {
 // ONE GO TEST PER AREA (project-lead ruling). Each area gets its OWN world,
 // so its artifacts are preserved on its own failure, a red run names the area,
 // and the areas parallelize; the ~2.7s world cost per area is acceptable at
-// nine areas. Each area's Go test names exactly one vitest file, and that
+// ten areas. Each area's Go test names exactly one vitest file, and that
 // file is the area's scenario list from WEBAPP-LAYER-SPEC.md section F.
 
 // TestWebappLayer is section F1: proof of life.
@@ -168,9 +168,27 @@ func TestWebappLayer(t *testing.T) {
 }
 
 // TestWebappLayerFeedFamilies is section F2: one drawn row family per test.
+//
+// THE DECLARED FAULT IS THE AREA'S OWN SUBJECT: the file's last test drives
+// `!query-eof`, and a vendor query dying under a turn is exactly what
+// `daemon.health.open_fault` records.
 func TestWebappLayerFeedFamilies(t *testing.T) {
 	t.Parallel()
-	wlDriveArea(t, "feed-families.layer.test.ts")
+	wlDriveArea(t, "feed-families.layer.test.ts", "daemon.health.open_fault")
+}
+
+// TestWebappLayerQueryDeath is section F2's SECOND query-death cause arm.
+//
+// ITS OWN AREA, AND THE REASON IS STRUCTURAL: a dead vendor query ends its
+// session (every later StartTurn is refused `query_dead`), and one area file
+// drives one session, so one file can exercise exactly one query death.
+// `!query-eof` is feed-families' last test; `!query-fail` is this one's only
+// test.
+func TestWebappLayerQueryDeath(t *testing.T) {
+	t.Parallel()
+	// THE DECLARED FAULT IS THIS AREA'S WHOLE SUBJECT: the vendor query dies,
+	// and `daemon.health.open_fault` is the daemon recording exactly that.
+	wlDriveArea(t, "query-death.layer.test.ts", "daemon.health.open_fault")
 }
 
 // TestWebappLayerSubfeeds is section F3: sub-feed open/collapse lifecycle.
