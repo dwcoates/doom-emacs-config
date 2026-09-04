@@ -292,6 +292,65 @@ func (s *server) resolveRefLogging(
 	warnStanding bool,
 ) (resolved, *refusal, error) {
 	id := ids.WorkspaceID(ref.GetId())
+
+	// THE SERVING STANDING IS DECIDED FIRST, BEFORE ANY STATE IS TOUCHED. A
+	// workspace this daemon transferred away is answered `transferring_away`
+	// no matter what shape the outgoing daemon's shared state is in: the
+	// handover's exit closes the state client while requests for the
+	// transferred workspace are still arriving, and reading the registry
+	// first turned the standing answer the contract owes into
+	// "sql: database is closed". The standing is held in memory by the
+	// rollout controller, so it costs no read.
+	standing, err := s.deps.Ownership.Standing(ctx, id)
+	if err != nil {
+		if endedOnCancel(err) {
+			s.log.Info(rpc, "the serving standing was not determined; the request's context was cancelled",
+				dlog.Context{"stream": rpc, "workspace": string(id), "cause": err.Error()})
+		} else {
+			s.log.Error(rpc, "could not determine the serving standing",
+				dlog.Context{"workspace": string(id), "cause": err.Error()})
+		}
+		return resolved{}, nil, fmt.Errorf("%s: serving standing %q: %w", rpc, id, err)
+	}
+	switch standing {
+	case workspace.StandingOwned:
+	case workspace.StandingTransferringAway:
+		r := s.fill(refusal{
+			Arm:    workspace.ArmTransferringAway,
+			Reason: fmt.Sprintf("workspace %q has been handed to a successor daemon", id),
+		})
+		if warnStanding {
+			s.log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon no longer serves",
+				dlog.Context{"rpc": rpc, "arm": r.Arm, "workspace": string(id)})
+		}
+		return resolved{}, &r, nil
+	case workspace.StandingNotYetAdopted:
+		r := s.fill(refusal{
+			Arm:    workspace.ArmNotYetAdopted,
+			Reason: fmt.Sprintf("workspace %q has not been adopted by this daemon yet", id),
+		})
+		if warnStanding {
+			s.log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon has not adopted",
+				dlog.Context{"rpc": rpc, "arm": r.Arm, "workspace": string(id)})
+		}
+		return resolved{}, &r, nil
+	default:
+		return resolved{}, nil, fmt.Errorf("%s: workspace %q: unknown serving standing %d", rpc, id, standing)
+	}
+
+	// THE SHARED STATE IS NOT READ ONCE IT IS BEING TORN DOWN. Close() ends
+	// the server's lifetime BEFORE the state client is closed underneath it,
+	// and an h2c connection the client already holds can still carry a new
+	// rpc through the shutdown grace. Such a request is the daemon going
+	// away, and it says so as UNAVAILABLE rather than surfacing whatever the
+	// half-closed state client happens to return.
+	if err := s.life.Err(); err != nil {
+		s.log.Info(rpc, "refused a request that arrived while the daemon was shutting down",
+			dlog.Context{"workspace": string(id)})
+		return resolved{}, nil, connect.NewError(connect.CodeUnavailable,
+			fmt.Errorf("%s: workspace %q: the daemon is shutting down", rpc, id))
+	}
+
 	record, err := s.deps.DB.Workspace(ctx, id)
 	if err != nil {
 		if errors.Is(err, wsm.ErrNotFound) {
@@ -327,48 +386,20 @@ func (s *server) resolveRefLogging(
 		return resolved{}, nil, fmt.Errorf("%s: resolve log sink %q: %w", rpc, record.Dir, err)
 	}
 	log = log.With(dlog.Context{"workspace": string(id)})
-
-	standing, err := s.deps.Ownership.Standing(ctx, id)
-	if err != nil {
-		if endedOnCancel(err) {
-			log.Info(rpc, "the serving standing was not determined; the request's context was cancelled",
-				dlog.Context{"stream": rpc, "cause": err.Error()})
-		} else {
-			log.Error(rpc, "could not determine the serving standing", dlog.Context{"cause": err.Error()})
-		}
-		return resolved{}, nil, fmt.Errorf("%s: serving standing %q: %w", rpc, id, err)
-	}
-	switch standing {
-	case workspace.StandingOwned:
-		return resolved{Record: record, Log: log}, nil, nil
-	case workspace.StandingTransferringAway:
-		r := s.fill(refusal{
-			Arm:    workspace.ArmTransferringAway,
-			Reason: fmt.Sprintf("workspace %q has been handed to a successor daemon", id),
-		})
-		if warnStanding {
-			log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon no longer serves",
-				dlog.Context{"rpc": rpc, "arm": r.Arm})
-		}
-		return resolved{}, &r, nil
-	case workspace.StandingNotYetAdopted:
-		r := s.fill(refusal{
-			Arm:    workspace.ArmNotYetAdopted,
-			Reason: fmt.Sprintf("workspace %q has not been adopted by this daemon yet", id),
-		})
-		if warnStanding {
-			log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon has not adopted",
-				dlog.Context{"rpc": rpc, "arm": r.Arm})
-		}
-		return resolved{}, &r, nil
-	default:
-		return resolved{}, nil, fmt.Errorf("%s: workspace %q: unknown serving standing %d", rpc, id, standing)
-	}
+	return resolved{Record: record, Log: log}, nil, nil
 }
 
 // fail renders an ordinary (non-refusal) failure as a Connect internal error,
 // logged at ERROR so nothing is swallowed.
 func fail(log dlog.Logger, rpc string, err error) *connect.Error {
+	// A failure that already NAMED its Connect code keeps it: the shutdown
+	// refusal is UNAVAILABLE, and restamping it internal would tell the client
+	// the daemon broke rather than that it went away.
+	var coded *connect.Error
+	if errors.As(err, &coded) {
+		log.Error(rpc, "the rpc failed", dlog.Context{"cause": err.Error(), "code": coded.Code().String()})
+		return coded
+	}
 	log.Error(rpc, "the rpc failed", dlog.Context{"cause": err.Error()})
 	return connect.NewError(connect.CodeInternal, err)
 }
