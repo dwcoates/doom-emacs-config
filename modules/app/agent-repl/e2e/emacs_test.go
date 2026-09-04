@@ -109,6 +109,41 @@ const HeartbeatBound = 1250 * time.Millisecond
 // number a future revision must re-derive this from.
 const evalBound = 1250 * time.Millisecond
 
+// daemonStopForm is the teardown's stop, WAITED ON.
+//
+// THE DEFECT IT FIXES. `agent-repl-frontend-daemon-stop` is asynchronous: it
+// hands the `UpdateShutdownSchedule{now}` to a curl child and returns `t` the
+// same instant. The teardown's very next act was `(kill-emacs)`, which takes
+// that child down with it — so the request the daemon never received could not
+// possibly have made it exit, and the reaper found the whole tree standing with
+// nothing to blame. Measured over one 24-scenario run: 17 surviving
+// `claude-repld` processes, 24 shims and 48 `shim-lock` holders.
+//
+// So the form BLOCKS on the command's own on-done callback and reports what it
+// carried. It waits through `accept-process-output`, never `sleep-for`, because
+// the answer it is waiting for arrives on exactly the process output a sleep
+// would refuse to serve.
+const daemonStopForm = `(let ((done nil) (accepted nil))
+  (agent-repl-frontend-daemon-stop (lambda (ok) (setq accepted ok done t)))
+  (with-timeout (` + teardownStopAckSeconds + ` (setq done 'timeout))
+    (while (not done) (accept-process-output nil 0.05)))
+  (format "%S" (list :done done :accepted accepted)))`
+
+// teardownStopAckSeconds is how long Emacs waits INSIDE that form for the ack,
+// and teardownStopBound is the Go side's outer bound on the same call.
+//
+// The ack is a loopback unary rpc, and the daemon answers it only once every
+// shim is down — so the worst case this has to cover is one shim that accepts
+// the forced stand-down and never answers, which costs the daemon exactly
+// `drain.DefaultStandBound` (5s). Eight seconds covers that with room for the
+// round trip; ten is the outer bound, which exists so a wedge inside Emacs
+// itself still ends the teardown rather than hanging it. In the healthy case
+// both are unreached: the stand-down of a live fake shim was measured at 2ms.
+const (
+	teardownStopAckSeconds = "8"
+	teardownStopBound      = 10 * time.Second
+)
+
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
 // and therefore measures the command loop's real responsiveness rather than
@@ -980,9 +1015,9 @@ func (e *Emacs) stop() {
 	// "EMACS NEVER KILLS A DAEMON". A wedged Emacs cannot honor this, which
 	// is exactly why the kill below is unconditional.
 	if !e.isWedged() {
-		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
-		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", "(ignore-errors (agent-repl-frontend-daemon-stop))")
+		ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
+		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+			"--eval", daemonStopForm)
 		cancel()
 		if err != nil {
 			// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
@@ -990,6 +1025,13 @@ func (e *Emacs) stop() {
 			// reports as a stray is downstream of it. Swallowing the error
 			// left the reap looking like an unexplained leak.
 			e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
+		}
+		// The OUTCOME, not merely the transport. `agent-repl-frontend-daemon-stop`
+		// answers its callback with nil on a REFUSAL as well as on a transport
+		// failure, and a refused stop is exactly the case whose leaked tree the
+		// reaper below then reports with no cause attached.
+		if outcome := strings.TrimSpace(out); !strings.Contains(outcome, ":accepted t") {
+			e.t.Logf("emacs's daemon stop was not accepted: %s", outcome)
 		}
 
 		ctx, cancel = context.WithTimeout(context.Background(), DefaultTimeout)

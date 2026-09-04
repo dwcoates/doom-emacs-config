@@ -225,9 +225,30 @@ func (c *controller) Current(ctx context.Context) (*wsm.DrainSchedule, error) {
 	return current, nil
 }
 
-// ShutdownNow announces an immediate shutdown and exits. It takes no lease and
-// waits for no freeness: the operator asked for now, and the in-flight WRITES —
-// not the in-flight turns — are what the exit flushes.
+// ShutdownNow announces an immediate shutdown, STANDS EVERY SESSION DOWN, and
+// exits. It takes no lease and waits for no freeness: the operator asked for
+// now, and the in-flight WRITES — not the in-flight turns — are what the exit
+// flushes.
+//
+// THE PROCESS TREE GOES WITH THE DAEMON. Every shim is spawned into a process
+// GROUP OF ITS OWN so that a BOUNCE can hand it to a successor that adopts it
+// (boot step "adopt"), and each of them holds two `shim-lock` children on the
+// workspace's kernel claims. `now` has no successor — its announcement carries
+// no address, which every client reads as a plain bounce — so a shim left
+// standing here is nothing's to adopt: it holds the workspace lock that would
+// refuse the next session, and its ~95 MiB stays resident for as long as the
+// machine is up. Measured over one 24-scenario Emacs e2e run: 24 leaked shims
+// and 48 leaked `shim-lock` holders, all of them downstream of this call.
+//
+// THIS IS THE ONE PLACE THE DRAIN FORCES. The package's standing ruling —
+// teardown never interrupts the vendor — is about the SCHEDULED drain, which
+// buys the shim's freeness by WAITING for it (`fire`, and the idle sweep's
+// `KillSession(..., false)`). `now` bought nothing: the caller said now, and a
+// graceful stand-down that waits on a turn parked at a permission gate would
+// hang the very stop that is supposed to be immediate. So each stand-down is
+// forced and BOUNDED by StandBound, and a workspace that will not go is
+// REPORTED and stepped over rather than waited on — the exit below must happen
+// whatever any one shim does.
 func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainReason) error {
 	if reason == nil || reason.GetKind() == nil {
 		err := errors.New("drain: an immediate shutdown states its reason")
@@ -243,11 +264,48 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 		MintedAtMs: milliseconds(c.deps.Clock.Now()),
 	})
 	c.log.Info(opNow, "announced an immediate shutdown", nil)
+	c.standEverySessionDown(ctx)
 	if err := c.deps.Exit(ctx); err != nil {
 		c.log.Error(opNow, "the orderly exit could not be started", withCause(nil, err))
 		return fmt.Errorf("drain: shutdown now: %w", err)
 	}
 	return nil
+}
+
+// standEverySessionDown forces every workspace's shim down ahead of an
+// immediate exit, one bounded call at a time.
+//
+// IT NEVER RETURNS AN ERROR, and that is deliberate rather than a swallowed
+// one: every failure below is recorded at ERROR on the controller's own log,
+// and none of them may stop the exit the operator asked for. A workspace whose
+// stand-down failed is a leaked shim the caller cannot do anything about — the
+// record is what makes it visible — while an exit skipped over one is a leaked
+// DAEMON as well.
+//
+// It runs SERIALLY. The whole set is small (one shim per open workspace), each
+// call is bounded by StandBound, and a forced stand-down of a healthy shim is
+// single-digit milliseconds; a concurrent fan-out would buy nothing and would
+// put N goroutines into the fleet's lock at the exact moment the process is
+// tearing down.
+func (c *controller) standEverySessionDown(ctx context.Context) {
+	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		c.log.Error(opNow, "could not list the workspaces to stand down; the shims will outlive this daemon",
+			withCause(nil, err))
+		return
+	}
+	for _, ws := range workspaces {
+		fields := dlog.Context{"workspace": string(ws.ID)}
+		standDown, cancel := context.WithTimeout(ctx, c.deps.StandBound)
+		err := c.deps.Stand.KillSession(standDown, ws.ID, true)
+		cancel()
+		if err != nil {
+			c.log.Error(opNow, "a session would not stand down before the immediate exit; its shim will outlive this daemon",
+				withCause(fields, err))
+			continue
+		}
+		c.log.Debug(opNow, "stood a session down ahead of the immediate exit", fields)
+	}
 }
 
 // fire runs the scheduled drain: hold every workspace's intake, wait for each
