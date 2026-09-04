@@ -300,6 +300,14 @@ func buildShimBundle(node string) (string, error) {
 	cmd := exec.Command(node, "build.mjs")
 	cmd.Dir = repo.shimDir
 	cmd.Env = append(os.Environ(), "SHIM_BUILD_OUTFILE="+out)
+	// A COVERAGE RUN NEEDS THE BUNDLE'S SOURCE MAP. The shim runs as one
+	// esbuild bundle, so v8 reports coverage against dist/main.js; only the
+	// map attributes those ranges back to src/**/*.ts. The flag is read by
+	// build.mjs and is OFF for every other build, so the production bundle's
+	// bytes — and with them its build identity — are untouched.
+	if harness.CoverageEnabled() {
+		cmd.Env = append(cmd.Env, "SHIM_BUILD_SOURCEMAP=1")
+	}
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("build shim bundle: %w\n%s", err, combined)
 	}
@@ -383,7 +391,7 @@ var (
 func requireStoreBinary(t *testing.T) string {
 	t.Helper()
 	storeOnce.Do(func() {
-		storePath, storeErr = goBuildOnce(repo.storeDir, filepath.Join(e2eBinDir, "shim-store"))
+		storePath, storeErr = goBuildCovered(repo.storeDir, filepath.Join(e2eBinDir, "shim-store"))
 	})
 	if storeErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL store, which does not build: %v", storeErr)
@@ -401,7 +409,7 @@ var (
 func requireSidecarBinary(t *testing.T) string {
 	t.Helper()
 	sidecarOnce.Do(func() {
-		sidecarPath, sidecarErr = goBuildOnce(repo.sidecarDir, filepath.Join(e2eBinDir, "shim-claude-sidecar"))
+		sidecarPath, sidecarErr = goBuildCovered(repo.sidecarDir, filepath.Join(e2eBinDir, "shim-claude-sidecar"))
 	})
 	if sidecarErr != nil {
 		t.Fatalf("e2e: this suite runs against the REAL sidecar, which does not build: %v", sidecarErr)
@@ -433,8 +441,32 @@ func requireLockBinary(t *testing.T) string {
 	return lockPath
 }
 
+// goBuildOnce builds one module's binary into out, uninstrumented.
 func goBuildOnce(moduleDir, out string) (string, error) {
-	cmd := exec.Command("go", "build", "-o", out, ".")
+	return goBuild(moduleDir, out, false)
+}
+
+// goBuildCovered builds one module's binary into out, INSTRUMENTED whenever
+// the run collects coverage: `go build -cover` covers the built module's own
+// packages, and this suite's spawn sites hand the resulting process its
+// GOCOVERDIR.
+//
+// It is deliberately NOT used for shim-lock. That binary is spawned by the
+// SHIM, not by this suite, so nothing can give it a GOCOVERDIR — and an
+// instrumented Go binary started without one writes a warning to its stderr,
+// which the shim reads. An unmeasured lock is better than a suite-wide
+// spurious warning; see SPEC.md's Coverage section.
+func goBuildCovered(moduleDir, out string) (string, error) {
+	return goBuild(moduleDir, out, harness.CoverageEnabled())
+}
+
+func goBuild(moduleDir, out string, instrumented bool) (string, error) {
+	args := []string{"build"}
+	if instrumented {
+		args = append(args, harness.CoverageBuildArgs(harness.CoverageRoot())...)
+	}
+	args = append(args, "-o", out, ".")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = moduleDir
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("go build in %s: %w\n%s", moduleDir, err, combined)
