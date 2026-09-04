@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -189,15 +190,27 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return err
 	}
 
-	shim, live := v.deps.Shim(ws)
-	if !live {
-		return refuse(log, "AnswerColdGate", ArmNoSession,
-			fmt.Sprintf("workspace %q has no live session to re-open", ws), false)
-	}
-	if err := shim.StartSession(ctx, ColdResume{
+	// THE RE-OPEN IS A SESSION BRING-UP, not a bare shim call, so it goes
+	// through the fleet's one start path: the remediated resume must leave the
+	// workspace with its session facts recorded, its session watcher installed
+	// and its host view live, exactly as a cold start does. Sent straight at
+	// the shim it did none of those, and the next SubmitPrompt was refused
+	// `no_session` on a session the shim had re-opened perfectly well. The
+	// no-live-session refusal is the fleet's own, raised under this verb's
+	// ArmNoSession from the client the park left serving.
+	if err := v.deps.Sessions.ResumeCold(ctx, ws, ColdResume{
 		VendorSessionID: served.VendorSessionID,
 		Remediation:     remediation,
 	}); err != nil {
+		// A TYPED REFUSAL IS ALREADY RECORDED, by `refuse` itself and under the
+		// arm it names, and it is returned UNWRAPPED so the server still reads
+		// the arm off it. Re-logging it here as an error would record one
+		// contract answer twice and file a stated arm — no_session — as a
+		// daemon fault.
+		var refusal *Refusal
+		if errors.As(err, &refusal) {
+			return err
+		}
 		log.Error(opColdGate, "the re-open with the remediation failed", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("answer cold gate on %q: %w", ws, err)
 	}

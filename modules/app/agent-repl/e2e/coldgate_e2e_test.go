@@ -56,22 +56,61 @@
 // (session.ts:1667), and compact runs the shim's real throwaway-session
 // compaction (engine/compaction.ts) before resuming.
 //
-// STANDING FAILURE, DELIBERATELY NOT WEAKENED (2026-09-03). Every subtest
-// below currently fails at its LAST assertion — "the session proceeds" — and
-// only there. Raising the gate, its facts, the footer's parked status, the
-// AnswerColdGate rpc and the resolved trace all pass for all three buttons,
-// and the shim's own log shows the remediated re-open SUCCEEDING ("cold
-// remediation: paying for the read", then "session started"). What does not
-// happen is the DAEMON's half: AnswerColdGate (daemon/internal/workspace/
-// answers.go:167-215) calls shim.StartSession, clears the gate and republishes
-// the row, but — unlike the bring-up path (Fleet.startSession's callers, which
-// record the session facts and open the watches) — it installs no session
-// watcher and never republishes the host view as live. So the next prompt is
-// refused `no_session` ("daemon.promptqueue.submit: the workspace has no
-// session watcher") and the host view never reports the re-opened session.
-// The contract says the gate's answer resumes the session ("The daemon reopens
-// naming a remediation", daemon.md), so the assertion stands as written and
-// the gap is reported rather than asserted away.
+// THE STANDING FAILURE IS FIXED (2026-09-04), and the assertions that reported
+// it are unchanged — two defects stood between the gate's answer and a working
+// session, one in each half:
+//
+//   - THE DAEMON'S HALF, and the real one. AnswerColdGate called
+//     shim.StartSession DIRECTLY: it cleared the gate and drew the resolved row
+//     over a session the shim had re-opened perfectly well, while the daemon
+//     itself installed no session watcher, recorded no session facts and never
+//     republished the host view as live — so the next prompt was refused
+//     `no_session` ("daemon.promptqueue.submit: the workspace has no session
+//     watcher"). The re-open is a SESSION BRING-UP, so it now goes through the
+//     fleet's one start path: Sessions.ResumeCold (daemon/internal/workspace/
+//     sessions.go) sends the remediated resume and then runs `sessionUp` — the
+//     SAME watcher/facts/host-view step Fleet.Start runs, extracted rather than
+//     copied so the two paths cannot drift again.
+//   - THIS FILE'S OWN ARRANGEMENT. The hand-rolled successor daemon below
+//     inherited none of NewWorld's env, so its shim looked for `shim-lock` at
+//     the deploy location under $HOME, found nothing, and its kernel claim died
+//     `spawn ENOENT` — which the shim reports as `conversation_owned`. The
+//     symptom was an AnswerColdGate refused "another process already owns
+//     vendor session ...", and it hit ONLY the remediated re-open because the
+//     cold refusal returns before either lock is taken. AGENT_REPL_SHIM_LOCK_BIN
+//     is now restated on the successor beside AGENT_REPL_LOCK_DIR.
+//
+// The shim was checked and is CLEAN on the point the daemon half was suspected
+// of: a `SessionCold` refusal takes NO lock to leave behind, because both
+// claims are made after the refusal returns (engine/session.ts) — docs/overhaul/
+// shim.md's "an inert shim holds neither lock" holds as written.
+//
+// Pay and Compact now pass end to end.
+//
+// WHAT `Clear` STILL FAILS ON, DELIBERATELY NOT WEAKENED (2026-09-04), IS THE
+// SIDECAR AND NOT THIS GATE. The daemon's half works for all three buttons:
+// Clear's post-answer prompt is accepted and its turn RUNS TO ITS TERMINAL —
+// which is the very thing that was refused `no_session` before. It then fails
+// in driveScenarioToCompletion's LAST step, the wait for the sidecar to durably
+// advance a cursor, because `clear` is the one button that ROTATES the vendor
+// session id (session.ts:1667):
+//
+//   - the shim keeps writing under the conversation's ORIGINAL id, which is R9
+//     ("the AgentId is unaffected"), and leaves a link file naming the original
+//     at `<state>/shim/<workspace>/vendor-id/<new-id>.json`
+//     (engine/identity.ts's SessionIdentity.rotate / vendorLinkPath);
+//   - the sidecar reads the rotated transcript and keys the SAME rows under the
+//     NEW id — it consumes that link file nowhere at all — so the store rightly
+//     refuses the batch ("would move the row from book <original> to <new> — an
+//     upsert supersedes a row's content, never its identity"), parks the file,
+//     and its cursor never advances.
+//
+// That is docs/overhaul/sidecar.md's OWN standing blocker, stated there and not
+// yet settled: the main agent's id is "stable across vendor identity rotations
+// ... How a file-only reader learns these is the doc's standing lead-level
+// blocker". Resolving it is a sidecar landing with a cross-system decision
+// behind it, so the assertion stands as written and the gap is reported rather
+// than asserted away.
 package e2e
 
 import (
@@ -210,7 +249,21 @@ func raiseColdGate(t *testing.T) *coldGate {
 		ShimNode:    requireNode(t),
 		ShimMain:    requireShimBundle(t),
 		StoreSocket: first.Store.Socket,
-		ExtraEnv:    append([]string{"AGENT_REPL_LOCK_DIR=" + first.LockDir}, buildIdentityEnv()...),
+		// THE LOCK BINARY IS RESTATED HERE, exactly as the lock DIRECTORY is.
+		// NewWorld hands every shim it spawns AGENT_REPL_SHIM_LOCK_BIN (the
+		// shim-lock this run built into a temp directory), but this successor
+		// is a hand-rolled second daemon and inherits none of that world's
+		// env. Without it the successor's shim falls back to the deploy
+		// location under $HOME — which the e2e HOME does not have — and its
+		// kernel claim dies `spawn ENOENT`, which locks.ts's caller reports as
+		// `conversation_owned`: "another process already owns vendor session".
+		// The first StartSession never reaches the claim (the cold refusal
+		// returns before either lock is taken), so the whole arrangement stands
+		// up and only the REMEDIATED re-open collides.
+		ExtraEnv: append([]string{
+			"AGENT_REPL_LOCK_DIR=" + first.LockDir,
+			"AGENT_REPL_SHIM_LOCK_BIN=" + requireLockBinary(t),
+		}, buildIdentityEnv()...),
 		// THE SUCCESSOR MUST ROUTE THROUGH THE FIRST DAEMON'S ACCOUNT ROOT,
 		// or the resume it performs looks at an empty projects tree, the
 		// source classifier finds no transcript, and the session comes up
