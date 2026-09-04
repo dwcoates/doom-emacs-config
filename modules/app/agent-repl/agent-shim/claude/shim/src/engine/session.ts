@@ -371,12 +371,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const main = requireIdentity().agentId;
       if (vendorAgentId === main.value) return main;
       if (announcedAgents.has(vendorAgentId)) return subagentId(vendorAgentId);
-      // THE LIVE REGISTRY IS THE OTHER ANNOUNCEMENT. A vendor `agentID` is
-      // minted from the SPAWNING CALL's `tool_use_id` (convert/ids.ts
-      // subagentId), which is exactly the key the live detached-work table is
-      // addressable by -- so a DETACHED subagent's ask arrived under an id the
-      // announced-agent set had no row for, and every permission or question
-      // raised inside a subagent landed on the main agent's book.
+      // THE LIVE REGISTRY IS THE OTHER ANNOUNCEMENT, AND IT IS KEYED THE WAY
+      // THE VENDOR SPELLS THE ASK. `canUseTool`'s `agentID` is the agent TASK
+      // id -- `task_started.task_id` for the `local_agent` task, verbatim
+      // (testdata/captures/ctrl-b-detach-of-foreground-subagent: `agentID`
+      // "a2c1930ea977473d4" is that task's id, and the subagent's own
+      // transcript is `subagents/agent-a2c1930ea977473d4.jsonl`). What this
+      // session ANNOUNCED under, however, is the spawning call's
+      // `tool_use_id`, because that is the only agent identity the stream
+      // plane carries (convert/fold-context.ts subagentBook). The two are
+      // different strings for the same subagent, so an ask raised inside a
+      // subagent resolved to nothing and landed on the main agent's book.
+      //
+      // `task_started` states BOTH ids in one message, which is exactly the
+      // join the live table already holds -- so the task id is translated to
+      // the announced book through it, never guessed.
+      const byTask = live.get(vendorAgentId);
+      if (byTask?.toolUseId !== undefined && byTask.toolUseId !== "") {
+        return subagentId(byTask.toolUseId);
+      }
+      // A vendor that names the spawning call directly is taken at its word.
       //
       // Only the LIVE set resolves: once the subagent has concluded there is no
       // book still taking questions, and the ask falls back to the main agent
