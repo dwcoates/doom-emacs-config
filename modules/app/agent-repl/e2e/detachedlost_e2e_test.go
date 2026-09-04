@@ -23,23 +23,21 @@
 //
 // WHERE EACH ARM IS ASSERTED, and why it takes two surfaces.
 //
-//   - THE FEED says LOST, and that is the whole of what the FRONTEND proto
-//     can say: `FeedShellLost` is an EMPTY message — feed.proto carries no
-//     cause on a lost shell, deliberately (the word itself is the
-//     distinction the client draws; the three arms are not a client-facing
-//     vocabulary). So a feed assertion pins "lost, not cancelled, not
-//     completed" and cannot pin WHICH arm.
-//   - THE SIDECAR'S OWN RECORD says which arm, on its dedicated `reason`
-//     key — the same word the wire's DetachedLost arm carries, and the key
-//     the sidecar's own integration suite joins a terminal to its sweep on
-//     (`lost-terminal`, seam.go). That is this suite's only reachable
-//     statement of the ARM, since e2e speaks agentrepl/v1 and never reads a
-//     store row.
+//   - THE FEED says LOST AND WHICH LOST. Landing 11 gave `FeedShellLost` an
+//     `oneof how {file_vanished | went_silent | swept_up}` mirroring
+//     DetachedLost one-to-one, so the frontend surface now states the arm
+//     itself and every test here pins it there. Before Landing 11 the
+//     message was empty and this suite could only pin "lost, not cancelled,
+//     not completed" at the feed.
+//   - THE SIDECAR'S OWN RECORD says which arm it CONCLUDED, on its dedicated
+//     `reason` key — the key the sidecar's own integration suite joins a
+//     terminal to its sweep on (`lost-terminal`, seam.go).
 //
-// Both are asserted for every arm. Neither alone is the guarantee: the feed
-// without the reason would pass whichever way the run was concluded, and the
-// reason without the feed would pass while the daemon still drew the run as
-// cancelled.
+// Both are asserted for every arm, and they remain distinct claims: the
+// sidecar's reason is the conclusion it reached, the feed's `how` is the arm
+// the daemon relayed onward. Asserting only the feed would pass while the
+// sidecar concluded one arm and the relay named another; asserting only the
+// reason would pass while the daemon dropped the arm on the floor.
 //
 // EVERY WAIT IS BOUNDED AND STATED, and there is no sleep in this file. The
 // bounds are derived from the windows the tests themselves buy, and their
@@ -238,6 +236,7 @@ func dlAwaitLostShell(
 	initial []*frontendv1.FeedRow,
 	stream *harness.Stream[*frontendv1.FeedRow],
 	commandSubstring string,
+	wantHow string,
 ) *frontendv1.FeedShell {
 	t.Helper()
 	shell, _ := dbAwaitDetachedShell(t, ctx, initial, stream, commandSubstring,
@@ -245,12 +244,32 @@ func dlAwaitLostShell(
 	if shell == nil {
 		t.Fatalf("e2e: the detached shell %q never settled within %s", commandSubstring, dlLostBound)
 	}
-	if shell.GetSettled().GetLost() == nil {
+	lost := shell.GetSettled().GetLost()
+	if lost == nil {
 		t.Fatalf("settled outcome = %v, want the LOST arm (feed.proto, FeedShellSettled.outcome.lost): "+
 			"the sidecar stopped being able to see the run, which is neither a completion nor a cancel",
 			shell.GetSettled().GetOutcome())
 	}
+	if got := dlShellLostHow(lost); got != wantHow {
+		t.Fatalf("the LOST shell's how = %q, want %q (feed.proto, FeedShellLost.how): "+
+			"the daemon relays the sidecar's DetachedLost arm by name, so a different word here "+
+			"means the arm was dropped or renamed on the way to the frontend", got, wantHow)
+	}
 	return shell
+}
+
+// dlShellLostHow names the feed's own lost arm, in the DetachedLost
+// vocabulary, so a mismatch reads as the word rather than a wrapper type.
+func dlShellLostHow(lost *frontendv1.FeedShellLost) string {
+	switch lost.GetHow().(type) {
+	case *frontendv1.FeedShellLost_FileVanished:
+		return "file_vanished"
+	case *frontendv1.FeedShellLost_WentSilent:
+		return "went_silent"
+	case *frontendv1.FeedShellLost_SweptUp:
+		return "swept_up"
+	}
+	return "unset"
 }
 
 // dlDriveDetachedLive submits `!bash-detach-live` — the one scenario whose
@@ -304,7 +323,7 @@ func TestDetachedLostWentSilent(t *testing.T) {
 
 	// Assert: the feed draws it LOST, and the spool it managed to write is
 	// still carried — a LOST conclusion never drops what was observed.
-	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000")
+	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "went_silent")
 	if got := shell.GetSpool().GetText(); !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the one line the run managed to write before it went silent", got)
 	}
@@ -355,7 +374,7 @@ func TestDetachedLostFileVanished(t *testing.T) {
 
 	// Assert: the arm, then the feed's LOST draw.
 	dlAwaitLostReason(t, ctx, w, spool, "file_vanished")
-	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000")
+	shell := dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "file_vanished")
 	if got := shell.GetSpool().GetText(); !strings.Contains(got, "partial output with no terminator") {
 		t.Errorf("the LOST shell's spool = %q, want the bytes read before the file vanished — "+
 			"the file going away is not a licence to drop what was already observed", got)
@@ -424,5 +443,5 @@ func TestDetachedLostSweptUp(t *testing.T) {
 
 	// Assert: the arm, then the feed's LOST draw.
 	dlAwaitLostReason(t, ctx, w, spool, "swept_up")
-	dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000")
+	dlAwaitLostShell(t, ctx, initial, stream, "sleep 100000", "swept_up")
 }
