@@ -92,6 +92,15 @@ answers a bare success, which is what almost every verb's success is."
                  (lambda (ws arm) (push (list ws arm) agent-repl-test-verbs--handover)))
                 ((symbol-function 'agent-repl-link-primary) (lambda () 'test-conn))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                ;; The default registry is one real workspace, "ws-one", which
+                ;; is also the current perspective: that is what makes the
+                ;; command wrappers act on it without a picker.
+                ((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-one")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws key)
+                   (and (eq key :project-dir) (equal ws "ws-one") "/tmp/agent-repl-test/ws-1")))
+                ((symbol-function 'agent-repl--pseudo-workspace-name-p)
+                 (lambda (ws) (member ws '("main" "none"))))
                 ((symbol-function 'agent-repl--kill-one-workspace)
                  (lambda (ws &optional _p) (push ws agent-repl-test-verbs--torn-down)))
                 ((symbol-function 'message)
@@ -1087,6 +1096,90 @@ a plain workspace the caller never asked for."
         (agent-repl-verb-merge "ws-one")))
     (should (cl-find-if (lambda (fmt) (string-prefix-p "elisp.verbs.merge-refused" fmt))
                         formats))))
+
+;;;; ---- Current-perspective target resolution ----
+
+(defmacro agent-repl-test-verbs--with-registry (names dirs current &rest body)
+  "Run BODY with NAMES live, DIRS as their `:project-dir's and CURRENT active.
+NAMES that are absent from DIRS own no directory, which is exactly how a
+persp-mode perspective such as \"main\" appears in the registry."
+  (declare (indent 3))
+  `(cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () ,names))
+             ((symbol-function 'agent-repl--ws-get)
+              (lambda (ws key)
+                (and (eq key :project-dir) (cdr (assoc ws ,dirs)))))
+             ((symbol-function 'agent-repl--pseudo-workspace-name-p)
+              (lambda (ws) (member ws '("main" "none"))))
+             ((symbol-function 'agent-repl--ws-current-name) (lambda () ,current)))
+     ,@body))
+
+(ert-deftest agent-repl-verbs-close-with-an-empty-registry-refuses ()
+  "No registered workspace at all: the picker's refusal, and no wire call."
+  ;; Arrange
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry nil nil "main"
+      ;; Act / Assert
+      (should (equal (should-error (agent-repl-close-workspace) :type 'user-error)
+                     '(user-error "No agent-repl workspaces registered")))
+      (should (null agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-close-with-only-pseudo-workspaces-refuses ()
+  "A registry holding only persp-mode's own perspectives is an EMPTY registry."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("main" "none") nil "main"
+      (should (equal (should-error (agent-repl-close-workspace) :type 'user-error)
+                     '(user-error "No agent-repl workspaces registered"))))))
+
+(ert-deftest agent-repl-verbs-close-from-a-pseudo-perspective-picks ()
+  "Current is \"main\" but real workspaces exist: the user PICKS one."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("main" "ws-one") '(("ws-one" . "/tmp/ws-one")) "main"
+      (cl-letf (((symbol-function 'agent-repl--read-known-workspace)
+                 (lambda (_prompt) "ws-one")))
+        (agent-repl-close-workspace))
+      (should (equal (agent-repl-test-verbs--request :close)
+                     (list :workspace (agent-repl-test-verbs--ref)))))))
+
+(ert-deftest agent-repl-verbs-close-from-a-registered-workspace-acts-on-it ()
+  "A registered current workspace is acted on directly, with no picker."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (cl-letf (((symbol-function 'agent-repl--read-known-workspace)
+                 (lambda (_prompt) (error "the picker must not run"))))
+        (agent-repl-close-workspace))
+      (should (agent-repl-test-verbs--request :close)))))
+
+(ert-deftest agent-repl-verbs-close-without-a-ref-keeps-the-identity-refusal ()
+  "A REAL registered workspace with no daemon ref still refuses on identity."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry '("ws-one") '(("ws-one" . "/tmp/ws-one")) "ws-one"
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil)))
+        (should (equal (should-error (agent-repl-close-workspace) :type 'user-error)
+                       '(user-error "agent-repl: workspace ws-one has no daemon identity yet")))))))
+
+(ert-deftest agent-repl-verbs-kill-with-an-empty-registry-refuses ()
+  "The kill verb defaults to the current perspective too, and refuses alike."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry nil nil "main"
+      (should (equal (should-error (agent-repl-kill-workspace) :type 'user-error)
+                     '(user-error "No agent-repl workspaces registered")))
+      (should (null agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-restart-with-an-empty-registry-refuses ()
+  "So does restart: same default, same refusal, nothing sent."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry nil nil "main"
+      (should (equal (should-error (agent-repl-restart-workspace) :type 'user-error)
+                     '(user-error "No agent-repl workspaces registered")))
+      (should (null agent-repl-test-verbs--sent)))))
+
+(ert-deftest agent-repl-verbs-merge-with-an-empty-registry-refuses ()
+  "And merge, which shares the same current-perspective default."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-registry nil nil "main"
+      (should (equal (should-error (agent-repl-merge-workspace) :type 'user-error)
+                     '(user-error "No agent-repl workspaces registered")))
+      (should (null agent-repl-test-verbs--sent)))))
 
 (provide 'test-verbs)
 
