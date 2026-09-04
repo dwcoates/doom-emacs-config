@@ -83,6 +83,9 @@
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (defvar agent-repl-roster-view)
 
+;; Defined by session.el.  Declared, never defined here.
+(defvar agent-repl-interactive-model)
+
 
 ;;;; ---- Logging ----------------------------------------------------------
 ;;
@@ -864,11 +867,17 @@ commands that read it, which are its only consumer."
   "Read a model, or nil for the daemon's default.
 Completes against `agent-repl-oneshot-model-candidates' without requiring
 a match: the candidate list is a convenience, and the model vocabulary is
-the vendor's, not ours."
+the vendor's, not ours.
+
+`agent-repl-interactive-model' seeds the prompt as its INITIAL INPUT, so
+the user's configured model is what a bare RET sends while the picker
+still allows any override -- including erasing the seed back to blank,
+which is what asks the daemon to choose.  A nil setting seeds nothing."
   (let ((value (string-trim
                 (completing-read
                  "Model (blank = daemon default): "
-                 agent-repl-oneshot-model-candidates nil nil))))
+                 agent-repl-oneshot-model-candidates nil nil
+                 agent-repl-interactive-model))))
     (unless (string-empty-p value) value)))
 
 (cl-defun agent-repl-verbs--create-oneshot (finish &key model
