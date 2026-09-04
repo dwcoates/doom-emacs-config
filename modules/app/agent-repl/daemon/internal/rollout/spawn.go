@@ -151,7 +151,17 @@ func (s *ProcessSpawner) Spawn(ctx context.Context, incumbentAddress string) (st
 		return "", fmt.Errorf("rollout: clear the stale joining address report: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, s.Exe, successorArgv(os.Args[1:], incumbentAddress)...)
+	// NOT exec.CommandContext, AND THAT IS THE WHOLE POINT. CommandContext
+	// kills the child when ctx is done, and ctx here is the incumbent's own
+	// serving lifetime -- the very thing the handover ends. Bound that way the
+	// successor was SIGKILLed the instant the outgoing daemon finished its
+	// orderly exit: it served for the two seconds the exit takes, then died
+	// without a shutdown record, and Emacs -- which had already adopted every
+	// workspace onto it and promoted it to primary -- found the address it had
+	// just been handed refusing connections. ctx still bounds the WAIT below,
+	// which is this call's own work; it must not bound the process this call
+	// exists to leave running.
+	cmd := exec.Command(s.Exe, successorArgv(os.Args[1:], incumbentAddress)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
