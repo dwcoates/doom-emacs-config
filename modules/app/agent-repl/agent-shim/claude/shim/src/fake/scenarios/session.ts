@@ -405,11 +405,19 @@ const RATE_LIMIT_FIVE_HOUR = rateLimitWindowScenario(
   3_600,
 );
 
+// ABOVE THE NEWSWORTHY GATE, deliberately. The footer only draws an allowance
+// once its utilization reaches the newsworthy threshold (daemon's
+// resolve/footer DefaultRateLimitNewsworthyThreshold, 0.8), so a weekly figure
+// below it makes the seven-day allowance UNREACHABLE from this scenario — the
+// window row could never be asserted. No capture in the corpus carries a
+// seven-day window or a utilization figure of any kind, so there is no real
+// number to prefer; the figure is chosen above the gate, and kept distinct
+// from the five-hour scenario's so a join cannot pass by luck.
 const RATE_LIMIT_SEVEN_DAY = rateLimitWindowScenario(
   "rate-limit-seven-day",
   "seven_day",
   "seven_day",
-  0.61,
+  0.91,
   259_200,
 );
 

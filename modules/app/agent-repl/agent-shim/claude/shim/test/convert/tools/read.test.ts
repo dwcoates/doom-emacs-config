@@ -163,12 +163,51 @@ describe("readConverter.settle", () => {
     expect(head.cut.case).toBe("lineCap");
   });
 
-  it("produces NO frame for an IMAGE read, whose extent arm is retired", () => {
+  it("settles an IMAGE read as a success with NO extent, whose arm is retired", () => {
     // Arrange.
     const pending = call({ file_path: "/tmp/shot.png" });
 
     // Act.
     const item = readConverter.settle(pending, outcome(corpusResult("read-image")));
+
+    // Assert.
+    const read = item?.value as conversationv1.AgentRead;
+    expect(read.result.case).toBe("success");
+    expect((read.result.value as conversationv1.AgentReadSuccess).extent.case).toBeUndefined();
+  });
+
+  it("states an image read's path from the CALLER, the only place it appears", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/shot.png" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(corpusResult("read-image")));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.path?.path).toBe("/tmp/shot.png");
+  });
+
+  it("states an image read's settle instant, so the card stops running", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/shot.png" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(corpusResult("read-image")));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.settledAt?.atMs).toBe(1_700_000_001_000n);
+  });
+
+  it("produces NO frame for a non-text read whose path is nowhere stated", () => {
+    // Arrange.
+    const pending = call({});
+
+    // Act.
+    const item = readConverter.settle(pending, outcome({ type: "image", file: {} }));
 
     // Assert.
     expect(item).toBeUndefined();
