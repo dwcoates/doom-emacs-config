@@ -187,6 +187,9 @@ func runSuite(m *testing.M) int {
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	// The mocked vendor's shared throwaway store outlives every subject, so
+	// nothing else can stand it down. It is a no-op when nothing started it.
+	defer stopSharedVendorStore()
 	return m.Run()
 }
 
@@ -790,13 +793,23 @@ type realStore struct {
 // systems, and says why.
 func storeBinary(t *testing.T) string {
 	t.Helper()
+	path, err := storeBinaryPath()
+	if err != nil {
+		t.Fatalf("this subject runs against the REAL store, which does not build: %v", err)
+	}
+	return path
+}
+
+// storeBinaryPath is storeBinary without a *testing.T, for the fixtures whose
+// lifetime is the TEST BINARY's rather than one subject's.
+func storeBinaryPath() (string, error) {
 	storeBinOnce.Do(func() {
 		storeBinErr = goBuild(repo.storeDir, storeBinPath)
 	})
 	if storeBinErr != nil {
-		t.Fatalf("this subject runs against the REAL store, which does not build: %v", storeBinErr)
+		return "", storeBinErr
 	}
-	return storeBinPath
+	return storeBinPath, nil
 }
 
 func startRealStore(t *testing.T) *realStore {
