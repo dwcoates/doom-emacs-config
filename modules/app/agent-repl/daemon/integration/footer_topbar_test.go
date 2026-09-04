@@ -98,9 +98,23 @@ func TestFooterStatusTreeFollowsIdleThinkingDone(t *testing.T) {
 	})
 }
 
+// ftDwell is the momentary-status dwell the two retirement tests run the
+// daemon with, in place of footer.DefaultMomentaryDwell's 1.5s.
+//
+// MEASURED BASIS: a push that IS coming arrives on an open stream at a p90 of
+// 5.8ms and a p50 of 0.4ms over this suite at -parallel 8, so 150ms is ~25x the
+// p90 — wide enough that the momentary status and its successor remain two
+// distinct, separately observed pushes rather than a coalesced one, and short
+// enough that neither test spends its wall time waiting on a window sized for a
+// reader.
+const ftDwell = 150 * time.Millisecond
+
 func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// Arrange: the dwell is compressed to ftDwell. THE SUBJECT IS THE
+	// RETIREMENT, not the window's length — nothing below reads the clock —
+	// and the product's 1.5s is sized for a person's eyes, not for a stream
+	// this test already holds open.
+	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the interrupt", func(v *frontendv1.FooterView) bool {
@@ -121,8 +135,9 @@ func TestFooterInterruptedStatusIsRetiredByADaemonSideDwell(t *testing.T) {
 }
 
 func TestFooterLoadingStatusIsRetiredByADaemonSideDwell(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// Arrange: the dwell is compressed to ftDwell, for the same reason as the
+	// interrupted case above.
+	f := newOpened(t, harness.Opts{FooterMomentaryDwell: ftDwell})
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("do it", "k-loading", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the injection", func(v *frontendv1.FooterView) bool {

@@ -90,6 +90,7 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		"--pprof", "/tmp/pprof.sock",
 		"--self-repo", "/checkout",
 		"--feed-tail-retention", "16",
+		"--footer-momentary-dwell", "120ms",
 	}
 
 	// Act.
@@ -206,5 +207,91 @@ func TestTheFeedTailRetentionDefaultsToTheResolversOwn(t *testing.T) {
 	}
 	if got != 0 {
 		t.Fatalf("retention = %d, want zero so the resolver's own default stands", got)
+	}
+}
+
+// TestTheFooterMomentaryDwellFlagIsParsed covers the flag itself: the dwell is
+// a product window, so a caller that wants a different one states it on the
+// command line exactly as -feed-tail-retention is stated.
+func TestTheFooterMomentaryDwellFlagIsParsed(t *testing.T) {
+	// Arrange, Act.
+	opts, err := parseFlags("claude-repld", []string{"--footer-momentary-dwell", "120ms"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	if opts.footerMomentaryDwell != 120*time.Millisecond {
+		t.Fatalf("opts.footerMomentaryDwell = %s, want the flag's 120ms", opts.footerMomentaryDwell)
+	}
+}
+
+// TestTheFooterMomentaryDwellEnvironmentKnobBeatsTheFlag pins the precedence a
+// test relies on: a suite sets the environment and must not also have to know
+// how the daemon under it was launched.
+func TestTheFooterMomentaryDwellEnvironmentKnobBeatsTheFlag(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFooterMomentaryDwell(1500*time.Millisecond, "40ms")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveFooterMomentaryDwell: %v", err)
+	}
+	if got != 40*time.Millisecond {
+		t.Fatalf("dwell = %s, want the environment's 40ms", got)
+	}
+}
+
+// TestTheFooterMomentaryDwellKnobRefusesANonDuration covers the loud failure: a
+// knob that silently did nothing would make the suite it was set for lie about
+// how long the daemon actually held the status.
+func TestTheFooterMomentaryDwellKnobRefusesANonDuration(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFooterMomentaryDwell(0, "a while")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFooterMomentaryDwell with a non-duration knob = nil, want a refusal")
+	}
+}
+
+// TestTheFooterMomentaryDwellKnobRefusesANonPositiveDuration covers the other
+// malformed shape: a zero dwell retires the status in the same instant it is
+// published, which is not a window any caller means to ask for.
+func TestTheFooterMomentaryDwellKnobRefusesANonPositiveDuration(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFooterMomentaryDwell(0, "0s")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFooterMomentaryDwell with a zero knob = nil, want a refusal")
+	}
+}
+
+// TestTheFooterMomentaryDwellRefusesANegativeFlag covers the flag's own
+// malformed shape, which the environment's parse never reaches.
+func TestTheFooterMomentaryDwellRefusesANegativeFlag(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFooterMomentaryDwell(-time.Second, "")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFooterMomentaryDwell with a negative flag = nil, want a refusal")
+	}
+}
+
+// TestTheFooterMomentaryDwellDefaultsToTheResolversOwn covers the ordinary
+// boot: neither the flag nor the knob is set, and zero means the footer
+// resolver's DefaultMomentaryDwell decides.
+func TestTheFooterMomentaryDwellDefaultsToTheResolversOwn(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFooterMomentaryDwell(0, "")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveFooterMomentaryDwell: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("dwell = %s, want zero so the resolver's own default stands", got)
 	}
 }
