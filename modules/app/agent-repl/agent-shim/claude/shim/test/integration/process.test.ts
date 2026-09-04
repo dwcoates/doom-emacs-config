@@ -34,7 +34,7 @@ import { parseRecords } from "../integration-support/log.js";
 import {
   connectCode,
   freshSession,
-  openStream, openSessionUpdates,
+  openSessionUpdates,
   readHistoryFirst,
 } from "../integration-support/client.js";
 import {
