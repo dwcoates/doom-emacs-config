@@ -1,6 +1,7 @@
 package dlog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,10 @@ type surfaces struct {
 	// minting a second one and orphaning everything written before.
 	targets map[string]string
 	closed  bool
+
+	// dropWarnOnce guards the ONE stderr warning that says workspace records
+	// arriving after Close are being dropped.
+	dropWarnOnce sync.Once
 
 	scanEvery time.Duration
 	stop      chan struct{}
@@ -92,11 +97,46 @@ func (s *surfaces) Global() Logger {
 	return &logger{s: s, dest: s.runLog, runtime: RuntimeDaemon}
 }
 
+// errSurfacesClosed is resolve's refusal once Close has run. It is a sentinel
+// because Workspace has to tell "this daemon is shutting down" apart from
+// every other resolution failure.
+var errSurfacesClosed = errors.New("log surfaces are closed")
+
+// droppedSink is the destination a workspace logger gets when the surfaces are
+// ALREADY CLOSED: every record is discarded, and the first one says so on
+// stderr. LOGGING MAY NEVER FAIL AN RPC -- a late request that arrives while
+// the daemon tears down still has to reach its handler and get the handler's
+// own typed answer, so a closed sink costs the record, never the answer.
+type droppedSink struct{ s *surfaces }
+
+func (d droppedSink) write(line []byte) error {
+	d.s.dropWarnOnce.Do(func() {
+		fmt.Fprintf(os.Stderr,
+			"agent-repl daemon: LOG SURFACES CLOSED: workspace records arriving after Close are dropped\nfirst dropped record: %s",
+			line)
+	})
+	return nil
+}
+
 // Workspace resolves the logger whose durable sink is the canonical
 // <dir>/.claude/emacs/daemon.log. It fails rather than falling back to the
-// global sink.
+// global sink -- EXCEPT once the surfaces are closed, where it hands back a
+// dropping logger so a request racing the daemon's shutdown is answered by its
+// handler instead of failing inside logging.
 func (s *surfaces) Workspace(dir string) (Logger, error) {
 	ws, sk, err := s.resolve(dir, "daemon")
+	if errors.Is(err, errSurfacesClosed) {
+		clean, cerr := cleanDir(dir)
+		if cerr != nil {
+			return nil, cerr
+		}
+		return &logger{
+			s:       s,
+			dest:    droppedSink{s: s},
+			runtime: RuntimeDaemon,
+			base:    Context{KeyWorkspaceDir: clean},
+		}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +268,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return nil, nil, fmt.Errorf("log surfaces are closed")
+		return nil, nil, errSurfacesClosed
 	}
 	ws, ok := s.workspaces[clean]
 	if !ok {
