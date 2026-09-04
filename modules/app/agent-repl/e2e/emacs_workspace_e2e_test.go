@@ -430,10 +430,33 @@ func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
 
-	// Clear it first: registration already switches, so a stale value would
+	// A SWITCH IS A CHANGE OF PERSPECTIVE. Select rides persp-mode's
+	// activation hook, so re-switching to the workspace registration already
+	// made current activates nothing and owes no Select. The fixture leaves
+	// exactly one workspace standing, so a SECOND one is what makes the switch
+	// under test a real switch rather than a no-op.
+	other := harness.NewRepoAt(t, filepath.Join(box.Scratch(), "other-repo"))
+	e.Eval(`(agent-repl-add-project-workspace ` + elispString(other.Dir) + `)`)
+	e.AwaitEvalFor(emacsVerbBound, "Emacs to stand on the second workspace",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool {
+			var got string
+			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got != f.Name
+		})
+
+	// Clear it only now: both registrations switched, and a stale value would
 	// make this vacuous.
 	e.Eval(`(setq agent-repl-host-last-selected-id nil)`)
 	e.Eval(`(agent-repl-switch-to-project ` + elispString(f.Repo.Dir) + `)`)
+
+	// The switch must actually land, or the Select assertion below would be
+	// waiting on an act that was never performed.
+	e.AwaitEvalFor(emacsVerbBound, "the first workspace to become current again",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool {
+			var got string
+			return !isJSONNull(raw) && json.Unmarshal(raw, &got) == nil && got == f.Name
+		})
 
 	e.AwaitEvalFor(emacsVerbBound, "the daemon to ack Emacs's select",
 		`(and agent-repl-host-last-selected-id (format "%s" agent-repl-host-last-selected-id))`,
