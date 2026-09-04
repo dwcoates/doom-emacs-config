@@ -1063,3 +1063,113 @@ func TestAClaimedDetachmentIsNotReportedAsUnknownWhenTheTurnEnds(t *testing.T) {
 		t.Fatalf("records = %+v, want no unknown-unit warning for a claimed detachment", h.records())
 	}
 }
+
+// ---- THE COMMAND IS STATED ONCE ----
+
+// TestATerminalRestatementNeverRedefinesTheCommand pins the one rule behind
+// AgentBashSuccess.command being a RESTATEMENT ("repeated here so a settled
+// frame describes itself"): it can fill a command nothing has stated, and it
+// can never rewrite or blank one that was.
+//
+// This is the shape the detached-shell e2e family met head on. A detached
+// shell's terminal is composed by the sidecar tailing the run's spool file,
+// which knows the run only by its vendor handle — so the settled frame's line
+// is that handle, not the command the caller typed. Taking it made the settled
+// bubble draw a task id where its command had been.
+func TestATerminalRestatementNeverRedefinesTheCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		startLine    string
+		terminalLine string
+		want         string
+	}{
+		{
+			name:         "a disagreeing terminal keeps the command the run stated",
+			startLine:    "tail -f build.log",
+			terminalLine: "b16522b11",
+			want:         "tail -f build.log",
+		},
+		{
+			name:         "an empty terminal does not blank the command",
+			startLine:    "tail -f build.log",
+			terminalLine: "",
+			want:         "tail -f build.log",
+		},
+		{
+			name:         "a terminal alone still describes itself",
+			startLine:    "",
+			terminalLine: "tail -f build.log",
+			want:         "tail -f build.log",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			if tt.startLine != "" {
+				h.bash("work-1", &conversationv1.AgentBashStart{
+					Command:   &conversationv1.AgentBashCommand{Line: tt.startLine},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				})
+			}
+
+			// Act: the run's terminal restates a command.
+			h.bash("work-1", &conversationv1.AgentBashSuccess{
+				Command: &conversationv1.AgentBashCommand{Line: tt.terminalLine},
+				Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+					Termination: &conversationv1.AgentBashTermination{
+						How: &conversationv1.AgentBashTermination_Exited{
+							Exited: &conversationv1.AgentBashExited{Code: 0},
+						},
+					},
+				}},
+			})
+
+			// Assert.
+			shell := h.shellRow()
+			if got := shell.GetCommand().GetText(); got != tt.want {
+				t.Fatalf("settled command = %q, want %q", got, tt.want)
+			}
+			if shell.GetSettled() == nil {
+				t.Fatalf("state = %T, want the bubble settled", shell.GetState())
+			}
+		})
+	}
+}
+
+// TestADetachedForegroundShellsTerminalKeepsTheCallsOwnCommand is the whole
+// e2e path in one: a foreground Bash call moves to the background and its
+// terminal arrives from the sidecar under the run's handle. The bubble must
+// still say what was run.
+func TestADetachedForegroundShellsTerminalKeepsTheCallsOwnCommand(t *testing.T) {
+	// Arrange: a foreground call that then moved.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "for i in 1 2 3; do echo line-$i; done"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+	h.detachWork("unit-1", "unit-1")
+
+	// Act: the run's terminal, composed by a reader that knows only the handle.
+	h.bash("unit-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "b6bf040a8"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{
+					Exited: &conversationv1.AgentBashExited{Code: 0},
+				},
+			},
+		}},
+	})
+
+	// Assert.
+	shell := h.shellRow()
+	if got := shell.GetCommand().GetText(); got != "for i in 1 2 3; do echo line-$i; done" {
+		t.Fatalf("settled command = %q, want the command the call itself stated", got)
+	}
+	if shell.GetSettled().GetExit().GetCode() != 0 {
+		t.Fatalf("settled = %+v, want the exit chip the terminal carried", shell.GetSettled())
+	}
+}
