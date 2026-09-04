@@ -27,6 +27,7 @@
 package e2e
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -514,9 +515,24 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// exactly the gate text does not begin emitting until the gate path
 	// exists. Without it the real shim answers `keep going` in microseconds
 	// and the turn is very likely already over by the time MergeWorkspace
-	// admits — which is not a displacement at all. The gate path is never
-	// created: the turn must still be in flight when the merge takes the
-	// workspace, and the crash below ends the shim.
+	// admits — which is not a displacement at all.
+	//
+	// The gate stays SHUT for the whole displacement window — the turn must
+	// still be in flight when the merge takes the workspace — and is opened
+	// exactly once, below, after the boot sweep's resubmission has been
+	// observed. It has to be opened there: the shim runs in its OWN PROCESS
+	// GROUP (daemon/internal/shimclient/supervisor.go's Setpgid; "sessions
+	// and turns OUTLIVE the daemon"), so the crash does NOT end it. The same
+	// shim process, still carrying this gate's env from the first daemon, is
+	// adopted by the second daemon and serves the resubmitted turn — whose
+	// prompt is the displaced turn's OWN words and therefore matches the gate
+	// text exactly. Gating on text unique to the original submission is not
+	// available as an alternative: the resubmission is a verbatim replay of
+	// that submission (this test's own `matches != 2` assertion depends on
+	// it), so the only text that parks the original also parks the replay.
+	// Opening the gate after the resubmission is observed keeps the
+	// scenario's intent whole — captured, ended, then resubmitted exactly
+	// once, and that resubmission runs to its own ordinary terminal.
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
@@ -604,6 +620,14 @@ func TestDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	}
 	if resubmitTurn == nil {
 		t.Fatalf("no resubmitted turn found carrying the displaced turn's own words on a turn id of its own")
+	}
+
+	// Act: the resubmission is now observed, so OPEN THE GATE. The adopted
+	// shim parked this replay on the very gate that held the original (see
+	// the arrangement above); releasing it lets the resubmitted turn end the
+	// ORDINARY way, which is what the assertion below is about.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("opening the turn gate for the resubmitted turn = error %v, want the gate created", err)
 	}
 	AwaitTurnEnded(t, w, child, resubmitTurn)
 
