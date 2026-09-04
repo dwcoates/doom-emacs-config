@@ -167,18 +167,18 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 // ("stop the detached work"), so they must not drift apart in what they reach
 // or in how they answer a refusal.
 //
-// A BENIGN shim refusal is one item that finished on its own between the
-// freeness read and the stop, which is the state the caller asked for, so it is
-// skipped rather than counted; every other refusal fails the sweep, because a
-// user who asked for the work to stop must not be told it is gone when it is
-// not.
+// A refusal that says the item is GONE — it finished on its own, or the shim no
+// longer knows it at all, between the freeness read and the stop — is the state
+// the caller asked for, so it is skipped rather than counted; every other
+// refusal fails the sweep, because a user who asked for the work to stop must
+// not be told it is gone when it is not.
 func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, shim Shim, running Running) (int, error) {
 	stopped := 0
 	for _, agent := range running.LiveWork.Agents {
 		fields := dlog.Context{"agent": agent.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopAgent(ctx, agent); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
-				if refusal.Benign() {
+				if refusal.GoneFromTheSweep() {
 					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
 					continue
 				}
@@ -194,7 +194,7 @@ func (v *verbs) stopEveryDetached(ctx context.Context, log dlog.Logger, ws ids.W
 		fields := dlog.Context{"shell": shell.GetValue(), "stopped_so_far": stopped}
 		if err := shim.StopBash(ctx, shell); err != nil {
 			if refusal, ok := AsShimRefusal(err); ok {
-				if refusal.Benign() {
+				if refusal.GoneFromTheSweep() {
 					log.Debug(opInterrupt, "a detached shell was already not running", withArm(fields, refusal))
 					continue
 				}
@@ -258,6 +258,13 @@ func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.
 	stopped, err := v.stopEveryDetached(ctx, log, ws, shim, running)
 	if err != nil {
 		return InterruptOutcome{}, err
+	}
+	if stopped == 0 {
+		// Every item in the freeness snapshot turned out already gone, so the
+		// sweep reached nothing. That is the `nothing_running` ANSWER, not an
+		// `interrupted_detached` of zero: the stop found the session quiet.
+		log.Debug(opInterrupt, "nothing is running", dlog.Context{"target": "all_agents", "reason": "every live item was already gone"})
+		return InterruptOutcome{NothingRunning: true}, nil
 	}
 	log.Info(opInterrupt, "stopped every live detached item", dlog.Context{"count": stopped})
 	return InterruptOutcome{DetachedCount: stopped}, nil
