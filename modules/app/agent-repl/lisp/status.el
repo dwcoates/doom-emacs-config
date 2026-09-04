@@ -330,10 +330,6 @@ A magenta-leaning purple, deliberately clear of any violet: a merge is
 the system working, and confusing it with a session that has stopped is
 the misread this color exists to prevent.")
 
-(defconst agent-repl--color-done-green-bright "#2a8c2a"
-  "Brighter green used for :done / :permission bracket-fg on selected
-tabs; readable against `agent-repl--color-selected-bg'.")
-
 (defconst agent-repl--color-default-bracket  "white"
   "White used for bracket numerals on unselected tabs of any state.")
 
