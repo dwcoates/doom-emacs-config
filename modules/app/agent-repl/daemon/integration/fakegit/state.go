@@ -94,6 +94,13 @@ type Failure struct {
 type Call struct {
 	Args []string `json:"args"`
 	Cwd  string   `json:"cwd"`
+	// At is when the fake answered this invocation. Every caller shares one
+	// exclusive lock over the fixture file, so a run's git conversation is a
+	// single ordered timeline and the GAPS in it are the only place a
+	// scenario's own cost can be told apart from time spent waiting behind
+	// somebody else's git. A bound derived from a run without it would be a
+	// guess about which of the two was paying.
+	At time.Time `json:"at"`
 }
 
 // State is the whole fake world.
