@@ -409,9 +409,16 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 	gate := harness.NewTestAllScript(t, selfRepo.Dir)
 	gate.SetExitCode(0)
 	gate.SetStdout("e2e: passed in 1s\n")
+	// Arrange: the rollout's DEPLOY CHAIN. Without it the trigger resolves
+	// `bin/deploy-all.sh` relative to the daemon's own cwd, the exec fails,
+	// and the self-reload aborts BEFORE a successor is ever spawned -- so no
+	// announcement can carry an address and the handover cannot begin.
+	deploy := harness.NewFakeDeployScript(t, filepath.Join(selfRepo.Dir, "bin"))
+	deploy.SetExitCode(0)
 	w := NewEmacsWorld(t, box,
 		WithEmacsEnv("AGENT_REPL_SELF_REPO_DIR", selfRepo.Dir),
-		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path))
+		WithEmacsEnv("AGENT_REPL_TEST_ALL_SCRIPT", gate.Path),
+		WithEmacsEnv("AGENT_REPL_DEPLOY_SCRIPT", deploy.Path))
 	e := w.Emacs
 	e.EnsureDaemon()
 
