@@ -173,7 +173,7 @@ duration actually observed, never left at a tool default. Measured against
 
 | bound | old (default) | new | observed healthy max | why |
 |---|---|---|---|---|
-| unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 300ms / 300ms | 88.9ms | no real I/O, everything fake-timered |
+| unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
 | integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
 | `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
 
@@ -182,3 +182,26 @@ terminal included) took long enough to need its own raised `timeout`. If a
 future test genuinely needs more than these globals, give it its own
 `{ timeout: ... }` with a one-line comment naming why, rather than raising
 the shared bound.
+
+**Unit `testTimeout` re-derivation (300ms proved too tight).** The 300ms unit
+bound tripped three times under load on tests that pass alone —
+`test/feed/asks/question.test.ts`, `test/feed/cards/shell.test.ts`, and
+`test/feed/feed.test.ts` ("tails the token the reopen minted") — with no real
+timer or heavy fixture in any of them. Re-measured with
+`npx vitest run --reporter=json`, four passes: two quiet, two with the box
+pinned on all 16 cores (`yes > /dev/null &` x4, killed after). All 3359 tests
+passed every time; per-run slowest-test figures:
+
+| run | slowest test | duration |
+|---|---|---|
+| quiet 1 | `shell.test.ts`: "the stop control interrupts the detached target by this row's own id" | 272.8ms |
+| quiet 2 | `question.test.ts`: "answering sends the allowOnce arm from the allowOnce button" | 211.4ms |
+| loaded 1 (`yes` x4) | `shell.test.ts`: "the stop control clears the outcome once it has been readable long enough" | 197.9ms |
+| loaded 2 (`yes` x4) | `question.test.ts`: "the entry click is SelectWorkspace and nothing else (R8) echoes the ref the queue served, verbatim" | 174.7ms |
+
+The old 88.9ms baseline no longer holds: the healthy max across these four
+runs is 272.8ms, inside the old 300ms bound with essentially no margin —
+that gap, not a slow test, is the flake. Ruling: (b) — the bound was too
+tight for the suite's own variance, not any one test's arrangement.
+`testTimeout`/`hookTimeout` are re-set to 850ms (~3x the 272.8ms measured
+max).
