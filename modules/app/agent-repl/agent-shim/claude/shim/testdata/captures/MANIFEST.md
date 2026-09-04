@@ -65,6 +65,7 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 |---|---|---|---|---|---|
 | `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | `!usage-full` (same shape as `!usage-available`) | single turn | 44 KB |
 | `artifact-publish-and-list` | 2026-09-01 | `hook`, `thinking`, `read`, `bash`, `response` → `success.completed` | `!artifact-publish` + `!artifact-list` | single turn | 188 KB |
+| `auto-compaction` | 2026-09-04 (Haiku) | `hook`, `thinking`, `read`, `response` → `success.completed` | `!compact-auto` | GROUNDED. 16 turn terminals, one per paced read. The two 2026-09-03 attempts tried to force this with `.claude/settings.local.json`'s `autoCompactWindow` and got nothing (occupancy never left ~45k); this run instead PACES real occupancy — sixteen turns, each reading one 40000-byte file (~10k tokens) in full — so the window climbs ~10k a turn and the vendor compacts BETWEEN turns rather than the run blowing past the window inside one turn. Real `compact_boundary` with `compact_metadata{trigger:"auto", pre_tokens:165716, post_tokens:13675, cumulative_dropped_tokens:152041, duration_ms:18695, preserved_segment{head_uuid, anchor_uuid, tail_uuid}, preserved_messages{anchor_uuid, uuids, all_uuids}}` — the SAME field set as the manual `compaction-directed`, `trigger` being the only discriminator. THREE shapes this capture settles, each AGREEING with `compaction-directed` so neither is a one-run accident: (1) the compaction's END is a `system:status` carrying `status: null` AND `compact_result: "success"`; (2) `preserved_segment.head_uuid`/`tail_uuid` are the FIRST and LAST entries of `preserved_messages.uuids` (a real multi-message span) while `anchor_uuid` is a uuid of its own appearing in NEITHER list; (3) `logical_parent_uuid` equals the preserved TAIL, not the head. The fake collapsed all five uuids onto the transcript head and pointed `logical_parent_uuid` at the head; both are fixed (`src/fake/scenarios/session.ts`'s `preservedUuids`, applied to `!compact` and `!compact-auto` alike), and `!compact-auto`'s previously invented token/duration figures are now this capture's real ones. | 872 KB |
 | `bash-detached` | 2026-09-02 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash-detach` | single turn | 52 KB |
 | `bash-foreground-completed` | 2026-09-01 | `hook`, `thinking`, `bash`, `response` → `success.completed` | `!bash` | single turn | 56 KB |
 | `bash-image-output` | 2026-09-01 | `hook`, `thinking`, `bash`, `read`, `response` → `success.completed` | `!bash-image` | single turn | 92 KB |
@@ -185,8 +186,26 @@ each is graded against the grounding named below, or marked ungrounded.
   discipline after the second attempt. `prompts.json`'s `cwd_init` now
   generates smaller (80000-byte) files and the prompt tells the model to page
   a file with successive offset/limit `Read` calls rather than one call per
-  file; this combination was written but NOT run (attempt budget spent), so
-  it is an untested lever for the next attempt, not a result.
+  file. STILL UNGROUNDED after that third lever was RUN (2026-09-04, Haiku,
+  `--only context-budget-warning`): the run produced NO attachment of any
+  kind — no `context_budget_warning`, no `context_tip`, no
+  `total_tokens_reminder` — and instead ended in a hard API 400. What the
+  vendor does as the window fills is now recorded evidence rather than
+  conjecture: it emits NO warning beat at all, then answers with a SYNTHETIC
+  assistant message (`model: "<synthetic>"`, `stop_reason: "stop_sequence"`,
+  all usage counters zero) whose only content is the text `Prompt is too
+  long`, carrying `error: "invalid_request"` and `is_api_error_message:
+  true`, and the turn's `result` is `is_error: true` with
+  `api_error_status: 400` and `terminal_reason: "prompt_too_long"`. That is a
+  FAILED run, so by the harness's own rule it is not a golden and is not
+  committed; the evidence sits at
+  `~/.config/doom-overhaul/captures-0904/_failed/context-budget-warning/`.
+  Two consequences for the taxonomy: `!context-budget-warning` remains
+  UNGROUNDED and INVENTED after THREE attempts, and the previously
+  DECLARED-ONLY `!context-window` / `!fail-prompt-too-long` arms now have
+  real observed evidence (not a golden) of the shape the vendor actually
+  produces. The scenario is not retried again without a NEW lever: three
+  attempts have shown the vendor has no low-context warning on this path.
 
 - **`!skill [skill-name] [args]` parameterization** (`src/fake/scenarios/skills.ts`).
   GROUNDED: `skill-invocation` (this manifest, above) remains the golden for
@@ -302,23 +321,12 @@ the narrower/alternate state**:
   session.
 - `!rate-limit`, `!rate-limit-five-hour`, `!rate-limit-seven-day` — declared
   `rate_limit_event` shapes; no capture recorded one.
-- `!compact-auto`, `!compact-failed` — declared compaction variants; the only
-  captured `/compact` was the manual one `compaction-directed` grounds
-  (`!compact`) — no run recorded an automatic trigger or a compaction
-  failure. Two attempts (2026-09-03, Haiku) to force `!compact-auto`'s real
-  counterpart via `.claude/settings.local.json`'s `autoCompactWindow` (tried
-  500, then 195000, `autoCompactEnabled: true`, against an eight-turn
-  conversation) produced NO `status{compacting}` and NO `compact_boundary`
-  in either run — cache-read usage stayed near 45k tokens across the run,
-  well inside any plausible threshold, so either the setting is not honored
-  from `settingSources: local` in this SDK version or its semantics differ
-  from what the field's doc comment ("Auto-compact window size") suggests.
-  Not captured; bailed per cost discipline after the second attempt. Both
-  declared variants' shapes are now aligned to the `compaction-directed`
-  grounding (`src/fake/scenarios/session.ts`): same `compact_metadata`/
-  `compactMetadata` field set as `!compact`, differing only in `trigger` and
-  the chosen (ungrounded, since neither variant has a capture) token/duration
-  figures.
+- `!compact-failed` — a declared compaction variant; no run recorded a
+  compaction FAILURE. Its shape is aligned to the two real compaction
+  groundings (`src/fake/scenarios/session.ts`): the `status{compacting}` start
+  beat is real, and only the `compact_result: "failed"` end beat is invented,
+  since no capture carries one. (`!compact-auto` is NO LONGER in this list —
+  see `auto-compaction`'s own row in the table above, captured 2026-09-04.)
 - `!read-truncated`, `!read-image` — declared `Read` extents; no capture's
   model truncated a read by length or read an image back through `Read`
   itself (the one captured image round trip, `bash-image-output`, read it
@@ -406,6 +414,37 @@ the narrower/alternate state**:
   note describes. Bailed per cost discipline after the second attempt;
   reported as a harness-side finding rather than a vendor shape, since
   neither run got far enough to observe one.
+
+  STILL NOT CAPTURED (2026-09-04). The harness's warm-resume path is fixed
+  (a fresh `AbortController` per open), but a WARM resume cannot trip the
+  cold-context gate by construction: it reopens the session moments after the
+  first turn, inside the same process, with the vendor's prompt cache still
+  live. The gate needs a LAPSED cache, and the only way to get one without
+  waiting out the TTL is to resume a session captured on an EARLIER RUN —
+  which the harness cannot express. It has `--config-root` and a
+  `resume: true` TURN, but no way to name an already-committed capture's
+  vendor session as the session to open against. The lever that would close
+  this is spelled out here so the next attempt does not re-derive it:
+
+  - a scenario field naming a committed capture (e.g.
+    `"resume_capture": "prose-streamed"`), whose session is as cold as its
+    commit date;
+  - the capture's own cwd read from its transcript (the transcript records
+    `cwd` verbatim on its own lines) rather than inverted from the project
+    slug — the slug flattens both `/` and `_` to `-`, so inverting it is
+    ambiguous and would resume in the wrong directory, where the vendor
+    would silently start a FRESH session instead;
+  - the transcript copied back under `<account root>/projects/<slug>/` and
+    that cwd recreated, so `resume: <session id>` resolves;
+  - the first query opened with `resume`, rather than a later turn.
+
+  This was implemented and then REVERTED unrun: the seeding step writes into
+  the operator's real `~/.claude` account root, which is outside the project
+  and needs the owner's explicit per-use approval. It is a permission
+  decision for the project lead, not a technical unknown. NOTE ALSO, from
+  `prose-streamed`'s meta: a committed capture carries everything the lever
+  needs — `vendor_session_id`, `cwd_slug`, and a single
+  `files/projects/<slug>/<session id>.jsonl`.
 
 This reconciliation is now COMPLETE and AUTHORITATIVE: every one of the 69
 goldens above names its registered scenario(s), every registered scenario

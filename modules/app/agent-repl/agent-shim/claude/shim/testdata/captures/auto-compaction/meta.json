@@ -1,0 +1,91 @@
+{
+  "scenario": "auto-compaction",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": null,
+  "prompts": [
+    {
+      "text": "Read bulk/file_1.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_2.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_3.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_4.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_5.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_6.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_7.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_8.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_9.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_10.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_11.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_12.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_13.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_14.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_15.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    },
+    {
+      "text": "Read bulk/file_16.txt in full with the Read tool (never Bash) and reply with ONLY its first line.",
+      "resume": false
+    }
+  ],
+  "world": "auto-compaction",
+  "cwd_init": {
+    "command": "mkdir -p bulk && for i in $(seq 1 16); do yes \"file $i: the quick brown fox jumps over the lazy dog, again and again.\" | head -c 40000 > bulk/file_$i.txt; done",
+    "stdout": "",
+    "stderr": ""
+  },
+  "vendor_session_id": "66ded1f4-d3a1-480e-b7ee-2bf3eca56026",
+  "manual": "Auto-compaction fires on WINDOW OCCUPANCY, not on a prompt, and the 2026-09-03 attempts showed a tiny `autoCompactWindow` alone does not provoke it (occupancy never left ~45k). This entry instead PACES real occupancy upward: sixteen turns, each reading one 40000-byte file (~10k tokens) in full, so the transcript climbs ~10k per turn toward the 200k window and crosses the auto-compact threshold between turns rather than blowing past the window inside one turn (which is what `context-budget-warning`'s 80000-byte corpus does: it 400s with `terminal_reason: prompt_too_long`). The two goldens are the `system:status` message whose status is `compacting` (START) and the `system:compact_boundary` line (END).",
+  "expect": [
+    "system:status(compacting)",
+    "system:compact_boundary"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-auto-compaction-PS2TGH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-04T20:10:29.230Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
