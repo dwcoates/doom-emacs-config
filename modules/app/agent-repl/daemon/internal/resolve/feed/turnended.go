@@ -58,6 +58,15 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
 	r.upsert(s, at, row, true)
 
+	// A DETACHMENT THAT NEVER FOUND ITS UNIT is a producer fault, and the turn
+	// ending is the last moment it could still have been claimed.
+	for unit := range s.detachedUnits {
+		log.Warn("daemon.feed.detached_unknown_unit",
+			"work detached from a unit this resolver never drew",
+			dlog.Context{"unit": unit, "turn": string(*turn)})
+		delete(s.detachedUnits, unit)
+	}
+
 	delete(s.turnEvidence, string(*turn))
 	if s.turnInFlight != nil && *s.turnInFlight == *turn {
 		s.turnInFlight = nil
