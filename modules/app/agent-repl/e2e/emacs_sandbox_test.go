@@ -245,24 +245,40 @@ type localSandbox struct {
 //   - on the host with a usable image: the test was invoked the wrong way, and
 //     the skip names the command that invokes it the right way.
 //   - on the host with no usable image: preflight's own message, verbatim.
+//
+// hostPreflightOnce guards the one preflight a host-side process performs;
+// hostPreflightReason is empty when the image is usable.
+var (
+	hostPreflightOnce   sync.Once
+	hostPreflightReason string
+)
+
 func (s *localSandbox) Available() (bool, string) {
 	if insideSandbox() {
 		return true, ""
 	}
 
-	script := filepath.Join(repoRoot(), sandboxScriptRel)
-	if _, err := os.Stat(script); err != nil {
-		return false, fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
-	}
-
-	out, err := exec.Command(script, "preflight").CombinedOutput()
-	if err != nil {
-		// Quoted VERBATIM: preflight's message is actionable (start Docker,
-		// build the image) and paraphrasing it would throw away the only
-		// instructions the reader needs.
-		return false, fmt.Sprintf(
-			"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
-			strings.TrimRight(string(out), "\n"))
+	// The host-side verdict is the same for every scenario in one process,
+	// and preflight talks to Docker (tens of seconds under load), so it runs
+	// ONCE; only the per-test instruction below is composed per test.
+	hostPreflightOnce.Do(func() {
+		script := filepath.Join(repoRoot(), sandboxScriptRel)
+		if _, err := os.Stat(script); err != nil {
+			hostPreflightReason = fmt.Sprintf("%s not found: %v", sandboxScriptRel, err)
+			return
+		}
+		out, err := exec.Command(script, "preflight").CombinedOutput()
+		if err != nil {
+			// Quoted VERBATIM: preflight's message is actionable (start
+			// Docker, build the image) and paraphrasing it would throw away
+			// the only instructions the reader needs.
+			hostPreflightReason = fmt.Sprintf(
+				"the sandbox is not usable, and this layer never falls back to an unsandboxed run.\n%s",
+				strings.TrimRight(string(out), "\n"))
+		}
+	})
+	if hostPreflightReason != "" {
+		return false, hostPreflightReason
 	}
 
 	return false, fmt.Sprintf(
