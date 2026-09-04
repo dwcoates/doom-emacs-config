@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -234,6 +235,18 @@ func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 	global := r.deps.Log.Global()
 	dir, err := r.deps.WorkspaceDir(ws)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// THE DAEMON IS GOING AWAY, and the workspace lookup runs under
+			// the daemon's own context. A cancelled read is that shutdown, not
+			// an unresolvable workspace: it is recorded at INFO, and the global
+			// fallback is NOT cached, so a resolver that outlives the
+			// cancellation still routes the workspace's records to its own
+			// sink rather than to the global one forever.
+			global.Info("daemon.feed.workspace_lookup_cancelled",
+				"a workspace's log sink was not resolved; the daemon's context was cancelled",
+				dlog.Context{"workspace": string(ws), "cause": err.Error()})
+			return global
+		}
 		global.Error("daemon.feed.workspace_unresolved",
 			"the feed resolver could not resolve a workspace's log sink; its records are unroutable",
 			dlog.Context{"workspace": string(ws), "cause": err.Error()})
