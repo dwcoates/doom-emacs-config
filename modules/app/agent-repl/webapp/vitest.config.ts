@@ -20,15 +20,18 @@ export default defineConfig({
     // needs the REAL daemon the Go e2e world spawns, and refuses to run
     // without it, so riding along here would fail every unit run.
     exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**", "test/webapp-layer/**"],
-    // TIGHT ON PURPOSE. Everything here is mocked/fake-timered — no real I/O,
-    // no daemon — so a healthy run's slowest test is under 100ms (measured:
-    // 88.9ms). Vitest's own defaults (5000ms/10000ms) would let a genuinely
-    // hung test burn 50-100x that before failing. ~3x the observed max, so
-    // real variance has headroom without masking a hang. If a test needs more,
-    // it gets its own `{ timeout: ... }` with a one-line reason, not a raised
-    // global.
-    testTimeout: 300,
-    hookTimeout: 300,
+    // TIGHT ON PURPOSE, RE-MEASURED after the 300ms bound tripped three times
+    // under load on otherwise-passing tests (question.test.ts, shell.test.ts,
+    // feed.test.ts). Four `npx vitest run --reporter=json` passes (2 quiet, 2
+    // with `yes` x4 pinning all 16 cores) put the observed healthy max at
+    // 272.8ms — already inside the old 300ms bound with no headroom, which is
+    // the flake: no test here has a real timer or a heavy fixture, the whole
+    // suite is mocked/fake-timered, and host scheduling noise alone closes the
+    // gap. ~3x that observed max, so real variance has headroom without
+    // masking a hang. If a test needs more, it gets its own
+    // `{ timeout: ... }` with a one-line reason, not a raised global.
+    testTimeout: 850,
+    hookTimeout: 850,
     coverage: {
       provider: "v8",
       all: true,
