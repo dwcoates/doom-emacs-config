@@ -583,3 +583,53 @@ func TestAnUnsetWholeSetResolvesToZerosSoEveryPackageDefaultStands(t *testing.T)
 		t.Fatalf("resolveWindows with nothing set = %+v, want every field zero", got)
 	}
 }
+
+// TestResolveStateDirPrecedence pins the three spellings of the state root, in
+// the order the daemon's own stateroot.Root applies them. The root is where the
+// shim's identity records live, so a process that resolved a DIFFERENT one from
+// the daemon would silently book every rotated transcript under the wrong id.
+func TestResolveStateDirPrecedence(t *testing.T) {
+	home := t.TempDir()
+	tests := []struct {
+		name string
+		flag string
+		env  string
+		want string
+	}{
+		{
+			name: "an explicit flag beats the environment",
+			flag: "/state/from-flag", env: "/state/from-env", want: "/state/from-flag",
+		},
+		{
+			name: "the environment answers when no flag was passed",
+			flag: "", env: "/state/from-env", want: "/state/from-env",
+		},
+		{
+			name: "neither one leaves the home-directory default",
+			flag: "", env: "", want: filepath.Join(home, DefaultStateDirName),
+		},
+		{
+			name: "a whitespace-only flag is no flag at all",
+			flag: "   ", env: "/state/from-env", want: "/state/from-env",
+		},
+		{
+			name: "a leading tilde is expanded, exactly as a config root's is",
+			flag: "~/state-here", env: "", want: filepath.Join(home, "state-here"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv("HOME", home)
+			t.Setenv(StateDirEnv, tc.env)
+
+			// Act.
+			got := resolveStateDir(tc.flag)
+
+			// Assert.
+			if got != tc.want {
+				t.Errorf("resolveStateDir(%q) with $%s=%q = %q, want %q", tc.flag, StateDirEnv, tc.env, got, tc.want)
+			}
+		})
+	}
+}
