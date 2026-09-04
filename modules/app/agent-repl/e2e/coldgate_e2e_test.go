@@ -85,32 +85,39 @@
 // claims are made after the refusal returns (engine/session.ts) — docs/overhaul/
 // shim.md's "an inert shim holds neither lock" holds as written.
 //
-// Pay and Compact now pass end to end.
-//
-// WHAT `Clear` STILL FAILS ON, DELIBERATELY NOT WEAKENED (2026-09-04), IS THE
-// SIDECAR AND NOT THIS GATE. The daemon's half works for all three buttons:
-// Clear's post-answer prompt is accepted and its turn RUNS TO ITS TERMINAL —
-// which is the very thing that was refused `no_session` before. It then fails
-// in driveScenarioToCompletion's LAST step, the wait for the sidecar to durably
-// advance a cursor, because `clear` is the one button that ROTATES the vendor
-// session id (session.ts:1667):
+// WHAT `Clear` NEEDED, AND NOW HAS (2026-09-04), WAS A SIDECAR LANDING RATHER
+// THAN A CHANGE HERE — the assertions below are unchanged. `clear` is the one
+// button that ROTATES the vendor session id (session.ts:1667), and the file
+// plane had no way to know that:
 //
 //   - the shim keeps writing under the conversation's ORIGINAL id, which is R9
 //     ("the AgentId is unaffected"), and leaves a link file naming the original
 //     at `<state>/shim/<workspace>/vendor-id/<new-id>.json`
 //     (engine/identity.ts's SessionIdentity.rotate / vendorLinkPath);
-//   - the sidecar reads the rotated transcript and keys the SAME rows under the
-//     NEW id — it consumes that link file nowhere at all — so the store rightly
-//     refuses the batch ("would move the row from book <original> to <new> — an
-//     upsert supersedes a row's content, never its identity"), parks the file,
-//     and its cursor never advances.
+//   - the sidecar CONSUMED THAT FILE NOWHERE AT ALL, so it read the rotated
+//     transcript and keyed the same rows under the NEW id — the store rightly
+//     refused the batch ("would move the row from book <original> to <new> — an
+//     upsert supersedes a row's content, never its identity"), parked the file,
+//     and its cursor never advanced, which is the wait this file's last step
+//     timed out on.
 //
-// That is docs/overhaul/sidecar.md's OWN standing blocker, stated there and not
-// yet settled: the main agent's id is "stable across vendor identity rotations
-// ... How a file-only reader learns these is the doc's standing lead-level
-// blocker". Resolving it is a sidecar landing with a cross-system decision
-// behind it, so the assertion stands as written and the gap is reported rather
-// than asserted away.
+// THE SIDECAR NOW RESOLVES A TRANSCRIPT'S BOOK THROUGH THOSE FILES
+// (agent-shim/claude/shim-sidecar/internal/identity, wired at
+// cycle.go's mainAgentFor / rekeyRotations). It learns the state root from
+// --state-dir ($AGENT_REPL_STATE_DIR, else ~/.claude-emacs — the daemon's own
+// precedence), which NewWorld passes it as the world's own root, and it never
+// derives a workspace key: it ENUMERATES `<state>/shim/*`, because the only
+// thing it holds for a transcript is the vendor's lossy, non-invertible cwd
+// slug. A rotated id answers from its link file, an unrotated one answers
+// itself, and a transcript no record names keeps the book it always had.
+//
+// The book is re-resolved on every rescan, so a link that appears after the
+// transcript was first seen moves the file's book — and un-parks it when the
+// refusal that parked it was that very book move. Nothing is duplicated: a
+// record's write and upsert identities are digested from a file position that
+// did not move, so the re-read supersedes those rows rather than adding any.
+//
+// All three buttons now pass end to end.
 package e2e
 
 import (

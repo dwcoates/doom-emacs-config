@@ -74,6 +74,7 @@ it, and AN EXPLICIT FLAG ALWAYS BEATS THE ENV.
 | `--store-socket` | `AGENT_REPL_STORE_SOCKET` | `~/.cache/agent-repl/sock/store.sock` |
 | `--config-roots` | — | `~/.claude,~/.claude-chesscom` |
 | `--spool-root` | — | `/tmp` |
+| `--state-dir` | `AGENT_REPL_STATE_DIR` | `~/.claude-emacs` |
 | `--log` | — | `~/.cache/agent-repl/log/shim-claude-sidecar.log` |
 | `--poll-interval` | — | `1s` |
 | `--rescan-interval` | — | `30s` |
@@ -718,9 +719,25 @@ the suite rather than quietly shrinking what the feed can show.
 ### Identity (R9)
 
 - MAIN AGENT: `AgentId.value` == the transcript FILE's session uuid (the
-  `<session>.jsonl` basename). NEVER the per-record `sessionId`, which diverges
-  from the runtime's answer in ~22% of records; that divergence never rides the
-  wire.
+  `<session>.jsonl` basename), RESOLVED THROUGH THE SHIM'S IDENTITY RECORDS.
+  NEVER the per-record `sessionId`, which diverges from the runtime's answer in
+  ~22% of records; that divergence never rides the wire.
+- A ROTATION DOES NOT MOVE THE BOOK. A `/clear` (and a `forkSession`) mints a
+  new vendor session id and a new transcript file, and NOTHING IN EITHER FILE
+  LINKS THEM. The shim writes the link the files lack, under `--state-dir`:
+  `shim/<workspace-key>/agent-id.json` names the conversation's
+  `original_vendor_session_id`, and `shim/<workspace-key>/vendor-id/<id>.json`
+  names the original a rotated id belongs to. `internal/identity` reads them;
+  a rotated id books under its original, an id no record names books under
+  itself (R9's resume rule). THE WORKSPACE KEY IS ENUMERATED, NEVER DERIVED:
+  the reader holds only the vendor's lossy, non-invertible cwd slug, so it
+  globs `<state>/shim/*` and takes the key from the records.
+- THE BOOK IS RE-RESOLVED EVERY RESCAN (`cycle.go`'s `rekeyRotations`), because
+  discovery order is not causal order: a link that lands after the transcript
+  was first seen moves the watched file's book, and UN-PARKS it when the
+  refusal that parked it was that very book move — the one refusal that stops
+  being true. Nothing is duplicated, because `write_id` and `upsert_key` are
+  digested from a file position that did not move.
 - SUBAGENT: `AgentId.value` == the `toolUseId` of the companion
   `agent-<id>.meta.json` — the `tool_use_id` of the call that SPAWNED the agent
   (the cross-plane minting rule; see "Identity and keys"). The vendor `agentId`
