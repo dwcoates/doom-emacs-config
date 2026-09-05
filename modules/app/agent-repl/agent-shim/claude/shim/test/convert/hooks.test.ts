@@ -172,3 +172,42 @@ describe("how a hook firing went", () => {
     expect(armOf(response({ outcome: "cancelled" }))).toBe("cancelled");
   });
 });
+
+/**
+ * The in-flight hook table is BOUNDED. A vendor that fires a hook and never
+ * answers it must not grow this process's memory without limit, so the oldest
+ * unanswered firing is forgotten rather than the table growing.
+ */
+describe("the registry of hook firings in flight", () => {
+  /** One remembered firing, distinguished only by its id. */
+  function pending(hookId: string) {
+    return {
+      hookId,
+      hookName: "PreToolUse:one",
+      event: conversationv1.AgentHookEvent.PRE_TOOL_USE,
+      startedAtMs: 1,
+    };
+  }
+
+  it("forgets the OLDEST unanswered firing once the table is full", () => {
+    // Arrange: 128 is the capacity, so 129 firings evict exactly the first.
+    const registry = createHookRegistry();
+
+    // Act
+    for (let index = 0; index <= 128; index += 1) registry.remember(pending(`hook-${index}`));
+
+    // Assert
+    expect(registry.take("hook-0")).toBeUndefined();
+  });
+
+  it("still answers the newest firing after an eviction", () => {
+    // Arrange
+    const registry = createHookRegistry();
+
+    // Act
+    for (let index = 0; index <= 128; index += 1) registry.remember(pending(`hook-${index}`));
+
+    // Assert
+    expect(registry.take("hook-128")?.hookId).toBe("hook-128");
+  });
+});
