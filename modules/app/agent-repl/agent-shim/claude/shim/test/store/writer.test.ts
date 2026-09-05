@@ -217,6 +217,14 @@ describe("the bounded retry buffer", () => {
     expect(fake.book("book-1")).toHaveLength(1);
   });
 
+  /**
+   * A REFUSAL IS THE STORE ANSWERING, NOT THE STORE FAILING.
+   *
+   * This used to assert `storeUnreachable`, which was a false diagnosis: the
+   * store read the batch and named a malformed row, so it was plainly
+   * reachable. The refusal is still surfaced as a fault -- nothing is swallowed
+   * -- on the arm that names its real cause.
+   */
   it("raises the refusal as a fault, so a refused batch is surfaced rather than swallowed", async () => {
     // Arrange.
     const { store: fake, persistence: plane } = await persistence("invalid-fault");
@@ -229,7 +237,22 @@ describe("the bounded retry buffer", () => {
     await plane.flush();
 
     // Assert.
-    expect(faults.map((fault) => fault.kind.case)).toContain("storeUnreachable");
+    expect(faults.map((fault) => fault.kind.case)).toContain("converterDefect");
+  });
+
+  it("opens no degraded window for a refusal: nothing about the store is degraded", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("invalid-no-window");
+    const windows: conversationv1.SessionDegradedWindow[] = [];
+    plane.onDegradedWindow((window) => windows.push(window));
+    fake.failWritesWith("invalid_request", "entry 0 sets no item arm");
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    expect(windows).toHaveLength(0);
   });
 
   it("opens a degraded window while the store is unreachable", async () => {
@@ -731,6 +754,89 @@ describe("a durable write the store calls invalid_request", () => {
 
     // Assert. The refused row is GONE rather than queued: the same bytes
     // cannot become valid, so only the later row reaches the book.
+    expect(fake.book("book-1")).toHaveLength(1);
+  });
+});
+
+/**
+ * A ROW THIS WRITER CANNOT ENVELOPE AT ALL.
+ *
+ * `toStoreEntry` refuses an entry with an empty upsert key (it would collide
+ * with every other row) and one whose kind has no servable item. The throw
+ * happens BEFORE anything reaches the wire, so the store is not involved: it is
+ * the producer's defect, and reporting it as `store_unreachable` -- which is
+ * what the transport `catch` did while the envelope was built inside it -- both
+ * named the wrong component and replayed bytes that could never become valid.
+ */
+describe("a row the writer cannot envelope", () => {
+  /** An entry `toStoreEntry` refuses: an empty upsert key. */
+  const unenvelopable = () => ({ ...readEntry(BOOK, "unit-1", "/tmp/a"), upsertKey: "" });
+
+  it("raises it as a converter defect, since the store never saw it", async () => {
+    // Arrange.
+    const { persistence: plane } = await persistence("envelope-defect-fault");
+    const faults: conversationv1.SessionFault[] = [];
+    plane.onFault((fault) => faults.push(fault));
+
+    // Act.
+    plane.write([unenvelopable()]);
+    await plane.flush();
+
+    // Assert.
+    expect(faults.map((fault) => fault.kind.case)).toEqual(["converterDefect"]);
+  });
+
+  it("names the refusal in the fault's detail rather than a transport message", async () => {
+    // Arrange.
+    const { persistence: plane } = await persistence("envelope-defect-detail");
+    const faults: conversationv1.SessionFault[] = [];
+    plane.onFault((fault) => faults.push(fault));
+
+    // Act.
+    plane.write([unenvelopable()]);
+    await plane.flush();
+
+    // Assert.
+    expect(faults[0]?.detail).toMatch(/empty upsert key/);
+  });
+
+  it("opens no degraded window, because the store is answering fine", async () => {
+    // Arrange.
+    const { persistence: plane } = await persistence("envelope-defect-window");
+    const windows: conversationv1.SessionDegradedWindow[] = [];
+    plane.onDegradedWindow((window) => windows.push(window));
+
+    // Act.
+    plane.write([unenvelopable()]);
+    await plane.flush();
+
+    // Assert.
+    expect(windows).toHaveLength(0);
+  });
+
+  it("sends nothing to the store, rather than replaying bytes it could not build", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("envelope-defect-no-wire");
+
+    // Act.
+    plane.write([unenvelopable()]);
+    await plane.flush();
+
+    // Assert.
+    expect(fake.writes()).toHaveLength(0);
+  });
+
+  it("keeps the queue draining, so a later well-formed batch still lands", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("envelope-defect-drains");
+    plane.write([unenvelopable()]);
+    await plane.flush();
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
+    await plane.flush();
+
+    // Assert.
     expect(fake.book("book-1")).toHaveLength(1);
   });
 });
