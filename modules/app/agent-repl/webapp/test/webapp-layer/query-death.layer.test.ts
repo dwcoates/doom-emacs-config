@@ -49,7 +49,7 @@ it(
 
     // Assert
     const drawn = rows(app, "turnEnded");
-    const row = drawn[drawn.length - 1] as HTMLElement;
+    const row = drawn[drawn.length - 1];
     expect(row.querySelector("[data-turn-error]")?.getAttribute("data-turn-error")).toBe(
       "queryDied",
     );

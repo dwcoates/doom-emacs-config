@@ -126,7 +126,7 @@ it(
     await awaitDrawn(app, "the model options", () => app.$$("[data-model-option]").length > 0);
 
     // Act — pick a served option.
-    await app.clickElement(app.$$("[data-model-option]")[0] as HTMLElement);
+    await app.clickElement(app.$$("[data-model-option]")[0]);
     await app.settle();
 
     // Assert — nothing about this control's answer escaped it: no page-wide

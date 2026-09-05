@@ -163,7 +163,7 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       refusalHost(anchor),
       "OpenExternalError.cause",
       "OpenExternal",
-      (result.value as OpenExternalError).cause,
+      (result.value).cause,
       EXTERNAL_SENTENCES,
     );
     log("warn", `OpenExternal refused ${url}`, {
@@ -204,7 +204,7 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
       refusalHost(anchor),
       "OpenInEditorError.cause",
       "OpenInEditor",
-      (result.value as OpenInEditorError).cause,
+      (result.value).cause,
       EDITOR_SENTENCES,
     );
     log("warn", `OpenInEditor refused ${spec.path}`, {
@@ -289,7 +289,7 @@ const EXTERNAL_SENTENCES: SentenceTable = {
   noBrowserConfigured: () =>
     openExternalRefusal({ case: "noBrowserConfigured", value: {} } as OpenExternalCause),
   launchFailed: (value) =>
-    openExternalRefusal({ case: "launchFailed", value } as OpenExternalCause),
+    openExternalRefusal({ case: "launchFailed", value }),
 };
 
 const EDITOR_SENTENCES: SentenceTable = {

@@ -195,7 +195,7 @@ async function commissionRow(row: HTMLElement): Promise<HTMLElement> {
   const drawn = container?.querySelectorAll<HTMLElement>('[data-row-kind="agentPrompt"]') ?? [];
   const last = drawn[drawn.length - 1];
   expect(last, "the sub-feed drew no agentPrompt row").toBeDefined();
-  return last as HTMLElement;
+  return last;
 }
 
 // §F3 #19 — the SYNC spawn's commission, drawn in the bubble's body.

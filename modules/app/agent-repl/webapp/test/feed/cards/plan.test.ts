@@ -111,12 +111,12 @@ describe("drawFeedPlan", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the bubble's state`, () => {
-      const el = drawFeedPlan(plan(c.state as InitOfFeedPlan), harness().rc);
+      const el = drawFeedPlan(plan(c.state), harness().rc);
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedPlan(plan(c.state as InitOfFeedPlan), harness().rc);
+      const el = drawFeedPlan(plan(c.state), harness().rc);
       expect(el.querySelector(".badge")?.textContent).toBe(c.badge);
     });
   }
