@@ -206,6 +206,30 @@ describe("a settling task's KIND decides whether it settles a subagent", () => {
     expect(armsFor("local_agent")).toContain("activity.subagent.success");
   });
 
+  it("names the created agent on the settling notification's success", () => {
+    // This terminal can be the only frame of the spawn a consumer receives:
+    // the launch's own start rode the tool result, on a delivery this one need
+    // not share. Without the id the bubble drawn from it addresses nothing.
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    const context = foldContext();
+    [...convertDetached(taskStarted("local_agent"), context, registry)];
+
+    // Act.
+    const entries = [...convertDetached(taskNotification(), context, registry)];
+    const settled = entries.find(
+      (entry) => entry.source.discriminator === "activity.subagent.success",
+    );
+
+    // Assert: the spawning call's own id, per the minting rule.
+    const update = (settled?.item as { frame: conversationv1.AgentFrame }).frame.result
+      .value as conversationv1.AgentUpdate;
+    const activity = update.update.value as conversationv1.AgentActivity;
+    const spawn = (activity.item.value as conversationv1.AgentSubagent).result
+      .value as conversationv1.AgentSubagentSuccess;
+    expect(spawn.createdAgentId?.value).toBe("toolu_1");
+  });
+
   it("never settles a backgrounded SHELL command as a subagent", () => {
     // The `Bash` unit already settled on its own tool result saying it moved to
     // the background; a subagent terminal here would restate a shell command as
