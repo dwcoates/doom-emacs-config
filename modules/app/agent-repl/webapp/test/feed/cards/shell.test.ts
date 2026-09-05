@@ -36,7 +36,7 @@ function ctxFor(answer?: InterruptResponse) {
     id: feedId(ROW),
     row: { case: "detachedShell", value: { shell: {} } },
   });
-  return { h, rc: rowContext(h.ctx, row) as RowContext };
+  return { h, rc: rowContext(h.ctx, row) };
 }
 
 /** The ordinary success: N detached targets stopped. */
@@ -597,7 +597,7 @@ function ctxAnswering(answer: InterruptResponse): {
     id: feedId(ROW),
     row: { case: "detachedShell", value: { shell: {} } },
   });
-  return { rc: rowContext(ctx, row) as RowContext, reported };
+  return { rc: rowContext(ctx, row), reported };
 }
 
 describe("the stop's unreadable answers", () => {

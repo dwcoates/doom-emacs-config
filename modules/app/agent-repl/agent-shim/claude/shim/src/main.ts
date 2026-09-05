@@ -509,8 +509,8 @@ export interface SignalTargets {
 
 /** The handler set, exposed so a test can invoke it without raising a signal. */
 export interface SignalHandlers {
-  onSigterm(): void;
-  onSigint(): void;
+  readonly onSigterm: () => void;
+  readonly onSigint: () => void;
   /** The in-progress stand-down, or null while none has begun. */
   standingDown(): Promise<void> | null;
 }

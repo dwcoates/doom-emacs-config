@@ -150,7 +150,7 @@ export function drawFeedQuestionItem(
   // THE ARM PICKS THE INPUT TYPE. Checked before anything is drawn from it, so
   // an arm a newer daemon set reaches the refusal that quotes its name.
   if (options.case !== "singleSelect" && options.case !== "multiSelect") {
-    return unreachableArm(`${path}.options`, armName(options as { case: string }));
+    return unreachableArm(`${path}.options`, armName(options));
   }
   const single = options.case === "singleSelect";
   el.setAttribute("data-question-mode", options.case);

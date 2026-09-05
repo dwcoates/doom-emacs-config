@@ -148,7 +148,7 @@ export function drawFeedShell(u: FeedShell, rc: RowContext): HTMLElement {
       const settled = state.value;
       const outcome = requireCase(settled.outcome, `${PATH}.settled.outcome`);
       if (outcome.case !== "completed" && outcome.case !== "cancelled" && outcome.case !== "lost") {
-        return unreachableArm(`${PATH}.settled.outcome`, armName(outcome as { case: string }));
+        return unreachableArm(`${PATH}.settled.outcome`, armName(outcome));
       }
       el.setAttribute("data-state", outcome.case);
       dot.classList.add(outcome.case === "lost" ? "agent-lost" : "agent-done");
@@ -380,7 +380,7 @@ function drawAnswer(
           el.textContent = "nothing was running";
           break;
         default:
-          unreachableArm("InterruptSuccess.outcome", armName(outcome as { case: string }));
+          unreachableArm("InterruptSuccess.outcome", armName(outcome));
       }
       expire(el, rc);
       wrap.append(el);

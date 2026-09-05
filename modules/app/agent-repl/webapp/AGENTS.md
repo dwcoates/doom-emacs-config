@@ -149,6 +149,29 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
 - **NEVER edit `proto/`.** The contract is frozen and the bindings are
   committed; a schema gap is reported, never patched locally.
 
+## Verification
+
+```bash
+npm run lint             # eslint, type-aware, over src/, test/ and the root configs
+npm run typecheck        # tsc over src/ and test/
+npm test                 # the unit suite (un-isolated; see vitest.config.ts)
+npm run test:integration # the whole app under jsdom against the fake daemon
+```
+
+`npm run lint` is TYPE-AWARE and is not a style pass: it reads the same program
+`tsc` does, and the rules it adds on top are the ones that catch what `tsc`
+cannot see — a floating promise, a `switch` with neither a missing arm's case
+nor a default, an `any` that spreads through an object literal, a `||` that
+substitutes a default for a legitimately empty string. Several of the standing
+rules above are mechanized in it: logging goes through `src/log.ts` only, and
+`no-console` now says so everywhere but the two documented bootstrap sites.
+
+Its rule set and every deliberate omission are argued inline in
+`eslint.config.js` — including the measurement behind the exhaustiveness rule's
+setting. Disagree with a rule there, in one place, rather than with an inline
+disable. An inline disable is legitimate when it carries a `--` reason a
+reviewer would accept, and unused ones fail the run.
+
 ## Tests
 
 - One test file per source module, mirroring the directory: `src/feed/feed.ts`

@@ -186,10 +186,13 @@ describe("mountRevealLayer: the default DOM geometry", () => {
       x: init.left,
       y: init.top,
       toJSON: () => ({}),
-    }) as DOMRect;
+    });
 
   beforeEach(() => {
     rects.clear();
+    // Captured to be ASSIGNED back onto the prototype in afterEach, never called off the
+    // reference, so there is no `this` to lose.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
     original = Element.prototype.getBoundingClientRect;
     Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
       return rects.get(this) ?? rect({ left: 0, top: 0, width: 0, height: 0 });

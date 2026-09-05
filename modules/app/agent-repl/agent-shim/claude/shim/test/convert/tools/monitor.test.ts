@@ -18,7 +18,7 @@ function corpusOutput(): Record<string, unknown> {
   const path = fileURLToPath(
     new URL("../../../../../../testdata/corpus/tool-results/monitor.jsonl", import.meta.url),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { toolUseResult: Record<string, unknown> }).toolUseResult;
 }
 
@@ -166,7 +166,7 @@ describe("monitorConverter.settle", () => {
     const call = callWith({ description: "d", command: "c" });
 
     // Act.
-    const monitor = monitorOf(monitorConverter.settle(call, outcomeWith(undefined, true))!);
+    const monitor = monitorOf(monitorConverter.settle(call, outcomeWith(undefined, true)));
 
     // Assert.
     const failure = monitor.result.value as conversationv1.AgentMonitorFailure;

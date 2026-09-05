@@ -100,16 +100,16 @@ export function readAmbient(file: string): TranscriptAmbient {
       continue;
     }
     const pick = (key: string): string | undefined =>
-      typeof record[key] === "string" ? (record[key] as string) : undefined;
+      typeof record[key] === "string" ? (record[key]) : undefined;
     ambient = {
       sessionId: pick("sessionId") ?? ambient.sessionId,
-      ...(pick("cwd") === undefined ? {} : { cwd: pick("cwd") as string }),
-      ...(pick("version") === undefined ? {} : { version: pick("version") as string }),
-      ...(pick("gitBranch") === undefined ? {} : { gitBranch: pick("gitBranch") as string }),
-      ...(pick("userType") === undefined ? {} : { userType: pick("userType") as string }),
-      ...(pick("entrypoint") === undefined ? {} : { entrypoint: pick("entrypoint") as string }),
-      ...(pick("slug") === undefined ? {} : { slug: pick("slug") as string }),
-      ...(pick("uuid") === undefined ? {} : { lastUuid: pick("uuid") as string }),
+      ...(pick("cwd") === undefined ? {} : { cwd: pick("cwd") }),
+      ...(pick("version") === undefined ? {} : { version: pick("version") }),
+      ...(pick("gitBranch") === undefined ? {} : { gitBranch: pick("gitBranch") }),
+      ...(pick("userType") === undefined ? {} : { userType: pick("userType") }),
+      ...(pick("entrypoint") === undefined ? {} : { entrypoint: pick("entrypoint") }),
+      ...(pick("slug") === undefined ? {} : { slug: pick("slug") }),
+      ...(pick("uuid") === undefined ? {} : { lastUuid: pick("uuid") }),
     };
   }
   return ambient;

@@ -280,7 +280,7 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     expect(arms[0]).toBe("start");
     expect(arms[arms.length - 1]).toBe("success");
     expect(arms.filter((arm) => arm === "update").length).toBe(2);
-    const first = bashFrame(frames[0] as shimv1.WatchBashResponse);
+    const first = bashFrame(frames[0]);
     if (first.result.case === "start") {
       // A RE-ANNOUNCEMENT REPEATS THE ORIGINAL INSTANT: drawn clocks must not
       // reset when work moves streams.

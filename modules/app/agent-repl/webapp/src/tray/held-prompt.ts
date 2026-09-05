@@ -356,7 +356,10 @@ export function sessionCommandLiteral(command: SessionCommand, path: string): st
   if (command === SessionCommand.UNSPECIFIED) {
     throw new MalformedView(path, "the session command is UNSPECIFIED");
   }
-  const value = SessionCommandSchema.values.find((v) => v.number === command);
+  // The enum's numeric value, named as a number: `v.number` is a plain number off the
+  // descriptor, and comparing it to the enum type directly is the mismatch the linter flags.
+  const wanted: number = command;
+  const value = SessionCommandSchema.values.find((v) => v.number === wanted);
   if (value === undefined) {
     throw new MalformedView(path, `no session command has number ${command}`);
   }
@@ -541,7 +544,7 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     const result = requireCase(response.result, "UpdateHeldPromptResponse.result");
     if (result.case !== "success") {
       const cause = requireCase(
-        (result.value as UpdateHeldPromptError).cause,
+        (result.value).cause,
         "UpdateHeldPromptError.cause",
       );
       const say =

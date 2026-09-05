@@ -258,7 +258,7 @@ export function drawFeedPermissionAnswered(
       word.textContent = answer.value.text;
       break;
     default:
-      return unreachableArm(`${path}.answer`, armName(answer as { case: string }));
+      return unreachableArm(`${path}.answer`, armName(answer));
   }
   el.append(word, stampedAge(u.atMs, `${path}.at_ms`, rc));
   return el;

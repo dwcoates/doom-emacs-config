@@ -153,7 +153,7 @@ async function answer(
     const result = requireCase(response.result, "AnswerHeldOfferResponse.result");
     if (result.case === "success") return;
     const cause = requireCase(
-      (result.value as AnswerHeldOfferError).cause,
+      (result.value).cause,
       "AnswerHeldOfferError.cause",
     );
     const say = crossCuttingSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);

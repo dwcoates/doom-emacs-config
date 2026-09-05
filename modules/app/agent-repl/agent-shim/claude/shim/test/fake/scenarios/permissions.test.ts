@@ -6,11 +6,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { CanUseToolLike, PermissionResultLike, PermissionUpdateLike } from "../../../src/sdk/types.js";
+import type { CanUseToolLike } from "../../../src/sdk/types.js";
 import { driveScenario, ofType, theResult, toolUseResults } from "../harness.js";
 
 const allowOnce: CanUseToolLike = async (_n, input) =>
-  ({ behavior: "allow", updatedInput: input }) as PermissionResultLike;
+  ({ behavior: "allow", updatedInput: input });
 
 const allowStanding: CanUseToolLike = async (_n, input, options) =>
   ({
@@ -18,11 +18,11 @@ const allowStanding: CanUseToolLike = async (_n, input, options) =>
     updatedInput: input,
     // The gate echoes the ask's suggestions back. That round trip IS the
     // standing arm; an ask with no suggestions could only ever produce a once.
-    updatedPermissions: (options.suggestions ?? []) as PermissionUpdateLike[],
-  }) as PermissionResultLike;
+    updatedPermissions: (options.suggestions ?? []),
+  });
 
 const deny: CanUseToolLike = async () =>
-  ({ behavior: "deny", message: "the user declined this command" }) as PermissionResultLike;
+  ({ behavior: "deny", message: "the user declined this command" });
 
 describe("the ask itself", () => {
   it("carries the tool_use id as the question's identity", async () => {
@@ -30,7 +30,7 @@ describe("the ask itself", () => {
     const seen: string[] = [];
     const spy: CanUseToolLike = async (_n, input, options) => {
       seen.push(options.toolUseID);
-      return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+      return { behavior: "allow", updatedInput: input };
     };
 
     // Act
@@ -54,7 +54,7 @@ describe("the ask itself", () => {
     let offered = 0;
     const spy: CanUseToolLike = async (_n, input, options) => {
       offered = (options.suggestions ?? []).length;
-      return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+      return { behavior: "allow", updatedInput: input };
     };
 
     // Act
@@ -69,7 +69,7 @@ describe("the ask itself", () => {
     let context: { title?: string; displayName?: string } = {};
     const spy: CanUseToolLike = async (_n, input, options) => {
       context = { title: options.title, displayName: options.displayName };
-      return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+      return { behavior: "allow", updatedInput: input };
     };
 
     // Act
@@ -147,7 +147,7 @@ describe("deny by policy", () => {
     let asked = 0;
     const spy: CanUseToolLike = async (_n, input) => {
       asked++;
-      return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+      return { behavior: "allow", updatedInput: input };
     };
 
     // Act
@@ -195,7 +195,7 @@ describe("undecidable", () => {
     let asked = 0;
     const spy: CanUseToolLike = async (_n, input) => {
       asked++;
-      return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+      return { behavior: "allow", updatedInput: input };
     };
 
     // Act

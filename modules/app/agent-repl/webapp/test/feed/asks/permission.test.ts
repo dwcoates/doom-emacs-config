@@ -279,7 +279,7 @@ describe("a refused answer", () => {
 
   for (const c of causes) {
     it(`draws the ${c.arm} cause at the buttons`, async () => {
-      const h = askHarness({ permission: refused(c.cause as never) });
+      const h = askHarness({ permission: refused(c.cause) });
       const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
       el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
       await settle();
@@ -287,7 +287,7 @@ describe("a refused answer", () => {
     });
 
     it(`says what ${c.arm} means`, async () => {
-      const h = askHarness({ permission: refused(c.cause as never) });
+      const h = askHarness({ permission: refused(c.cause) });
       const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
       el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
       await settle();

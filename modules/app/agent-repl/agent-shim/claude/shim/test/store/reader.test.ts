@@ -357,7 +357,6 @@ describe("the refused-open convention", () => {
         if (refusals === 0) {
           refusals += 1;
           return {
-            // eslint-disable-next-line require-yield
             async *[Symbol.asyncIterator]() {
               throw new ConnectError("unknown token", Code.NotFound);
             },
@@ -900,7 +899,6 @@ describe("the tail against a malformed or ending watch", () => {
     // Arrange.
     const reader = readerOver({
       openAgentSession: async () => opened(floorPage([]), WATCH),
-      // eslint-disable-next-line @typescript-eslint/require-await
       watchAgentSession: () => ({ async *[Symbol.asyncIterator]() {} }),
     });
     const session = await reader.openAgentPage(BOOK, 10);
@@ -940,7 +938,6 @@ describe("the tail against a malformed or ending watch", () => {
         opens += 1;
         return opens === 1 ? opened(floorPage([]), WATCH) : opened(floorPage([]), undefined);
       },
-      // eslint-disable-next-line require-yield
       watchAgentSession: () => ({
         async *[Symbol.asyncIterator]() {
           throw new ConnectError("unknown token", Code.NotFound);
@@ -972,7 +969,6 @@ describe("the tail against a malformed or ending watch", () => {
         if (!refused) {
           refused = true;
           return {
-            // eslint-disable-next-line require-yield
             async *[Symbol.asyncIterator]() {
               throw new ConnectError("unknown token", Code.NotFound);
             },
@@ -1047,7 +1043,7 @@ describe("the deferred book, against a hand-built store", () => {
   it("ends the tail, serving nothing, when the session is closed while the book is being opened", async () => {
     // Arrange.
     let opens = 0;
-    let session: AgentPageSession | undefined;
+    let session: AgentPageSession | undefined = undefined;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
@@ -1145,7 +1141,6 @@ describe("openBashRun against a store that misbehaves", () => {
   it("reports a transport failure as unavailable rather than as an absent run", async () => {
     // Arrange.
     const reader = readerOver({
-      // eslint-disable-next-line require-yield
       watchBashRun: () => ({
         async *[Symbol.asyncIterator]() {
           throw new Error("the socket reset");
@@ -1164,7 +1159,6 @@ describe("openBashRun against a store that misbehaves", () => {
     // about a run that genuinely is absent -- the refusal is the truth.
     // Arrange.
     const reader = readerOver({
-      // eslint-disable-next-line require-yield
       watchBashRun: () => ({
         async *[Symbol.asyncIterator]() {
           throw new ConnectError("no such run", Code.NotFound);
@@ -1187,7 +1181,6 @@ describe("openBashRun against a store that misbehaves", () => {
     // under test here and the wait is the mechanism, not a synchronization.
     // Arrange.
     const reader = readerOver({
-      // eslint-disable-next-line require-yield
       watchBashRun: () => ({
         async *[Symbol.asyncIterator]() {
           throw new ConnectError("no such run", Code.NotFound);
@@ -1243,7 +1236,6 @@ function refusedOnce(
     if (refused) return then();
     refused = true;
     return {
-      // eslint-disable-next-line require-yield
       async *[Symbol.asyncIterator]() {
         throw new ConnectError("unknown token", Code.NotFound);
       },
@@ -1304,7 +1296,6 @@ describe("the re-open's catch-up page", () => {
       },
       // The re-opened watch ends at once, so the tail's only possible output
       // would be the catch-up page the re-open failed to carry.
-      // eslint-disable-next-line @typescript-eslint/require-await
       watchAgentSession: refusedOnce(() => ({ async *[Symbol.asyncIterator]() {} })),
     });
     const session = await reader.openAgentPage(BOOK, 10);
@@ -1331,13 +1322,11 @@ describe("the re-open's catch-up page", () => {
         watched.push(request.watch?.value ?? "");
         if (watched.length === 1) {
           return {
-            // eslint-disable-next-line require-yield
             async *[Symbol.asyncIterator]() {
               throw new ConnectError("unknown token", Code.NotFound);
             },
           };
         }
-        // eslint-disable-next-line @typescript-eslint/require-await
         return { async *[Symbol.asyncIterator]() {} };
       },
     });
@@ -1460,7 +1449,7 @@ describe("the deferred book's own waiting", () => {
   it("ends the tail when the session is closed while an open that refuses is in flight", async () => {
     // Arrange.
     let opens = 0;
-    let session: AgentPageSession | undefined;
+    let session: AgentPageSession | undefined = undefined;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;
@@ -1481,7 +1470,7 @@ describe("the deferred book's own waiting", () => {
   it("concludes the real session at once when the teardown concluded while it was opening", async () => {
     // Arrange.
     let opens = 0;
-    let session: AgentPageSession | undefined;
+    let session: AgentPageSession | undefined = undefined;
     const reader = readerOver({
       openAgentSession: async () => {
         opens += 1;

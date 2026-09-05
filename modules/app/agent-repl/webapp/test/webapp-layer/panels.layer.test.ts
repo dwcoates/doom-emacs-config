@@ -41,7 +41,7 @@ async function command(literal: string): Promise<HTMLElement> {
   await submit(app, literal);
   await awaitDrawn(app, `the panel answering ${literal}`, () => panels().length > 0);
   const drawn = panels();
-  return drawn[drawn.length - 1] as HTMLElement;
+  return drawn[drawn.length - 1];
 }
 
 /**

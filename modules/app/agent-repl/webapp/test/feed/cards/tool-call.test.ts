@@ -65,10 +65,8 @@ function rowContext(): RowContext {
  */
 function card(init: MessageInitShape<typeof FeedSimpleToolCallSchema>): FeedSimpleToolCall {
   const built = create(FeedSimpleToolCallSchema, init);
-  if (built.name === undefined) built.name = create(FeedToolCallNameSchema, { text: "Bash" });
-  if (built.input === undefined) {
-    built.input = create(FeedToolCallInputSchema, { text: "$ go test ./..." });
-  }
+  built.name ??= create(FeedToolCallNameSchema, { text: "Bash" });
+  built.input ??= create(FeedToolCallInputSchema, { text: "$ go test ./..." });
   return built;
 }
 
@@ -845,7 +843,7 @@ describe("a malformed card", () => {
   });
 
   it("refuses an arm this build has no case for", () => {
-    const u = card({}) as FeedSimpleToolCall;
+    const u = card({});
     // Arrange: the shape a NEWER daemon's arm arrives in.
     (u as { outcome: unknown }).outcome = { case: "teleported", value: {} };
     expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);

@@ -129,7 +129,7 @@ interface EngineDeps {
     readonly configDir: string;
     readonly cwd: string;
   };
-  nowMs(): number;
+  readonly nowMs: () => number;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
   /** Injected so a suite substitutes a temp directory without a state dir. */
@@ -1435,7 +1435,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const created = await deps.createQuery({
       binding,
       permissionMode: toVendorPermissionMode(permissionMode),
-      canUseTool: gate.canUseTool as CanUseToolLike,
+      canUseTool: gate.canUseTool,
       abortController: controller,
       prompt: queue,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
@@ -1480,7 +1480,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let vendorSessionId: string;
     let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
-    let requestedModel = "";
+    // No initializer: BOTH source arms below set it, and a third arm that
+    // forgot to would be a compile error rather than a silent empty model.
+    let requestedModel: string;
     if (source.case === "fresh") {
       vendorSessionId = mintVendorSessionId();
       requestedModel = source.value.model?.name ?? "";
@@ -1759,7 +1761,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throwaway = await deps.createQuery({
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
         permissionMode: "plan",
-        canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })) as CanUseToolLike,
+        canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
         abortController: controller,
         prompt: queue,
         ...(model === "" ? {} : { model }),

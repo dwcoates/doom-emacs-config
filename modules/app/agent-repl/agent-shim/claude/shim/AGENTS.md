@@ -518,6 +518,7 @@ way a refusal does.
 ## Verification
 
 ```bash
+npm run lint          # eslint, type-aware, over src/, test/, scripts/ and the root configs
 npm run typecheck     # tsc over src/, test/, scripts/ and the generated stubs
 npm test              # vitest
 npm run coverage      # vitest with v8 coverage over authored src/**/*.ts
@@ -525,6 +526,14 @@ npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
 ```
 
+- `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same
+  program `tsc` does, and the rules it adds on top are the ones that catch what
+  `tsc` cannot see — a floating promise, a `switch` with neither a missing arm's
+  case nor a default, an `any` that spreads through an object literal. Its rule
+  set and every deliberate omission are argued inline in `eslint.config.js`;
+  disagree with a rule there, in one place, rather than with an inline disable.
+  An inline disable is legitimate when it carries a `--` reason a reviewer would
+  accept, and unused ones fail the run.
 - `AGENT_REPL_FORBID_VENDOR_CALLS=1` in every shell you run tests in.
 - `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs every
   tracked suite across the module.

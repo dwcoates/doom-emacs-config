@@ -543,7 +543,7 @@ function buildRefusal(rpc: RpcName, arm: string): unknown {
       case: "error",
       value: { [oneof]: { case: arm, value: completeInit(field.message) } },
     },
-  } as MessageInitShape<DescMessage>);
+  });
 }
 
 /**
@@ -654,7 +654,7 @@ export function createFakeDaemon(): FakeDaemon {
     consumeFailure(rpc);
     const supplied = scripted.get(rpc);
     const message = supplied ?? create(schema, fallback);
-    if (unknowns.delete(rpc)) withUnknown(message as object);
+    if (unknowns.delete(rpc)) withUnknown(message);
     return message as never;
   };
 
@@ -781,8 +781,8 @@ export function createFakeDaemon(): FakeDaemon {
               },
             },
           });
-        if (unknowns.delete("openFeed")) withUnknown(message as object);
-        return message as never;
+        if (unknowns.delete("openFeed")) withUnknown(message);
+        return message;
       },
       async *watchFeed(request, context) {
         record("watchFeed", request);
@@ -809,8 +809,8 @@ export function createFakeDaemon(): FakeDaemon {
           create(GetFeedPageResponseSchema, {
             result: { case: "success", value: wanted ?? emptyFeedPage() },
           });
-        if (unknowns.delete("getFeedPage")) withUnknown(message as object);
-        return message as never;
+        if (unknowns.delete("getFeedPage")) withUnknown(message);
+        return message;
       },
       interrupt(request) {
         record("interrupt", request);

@@ -30,7 +30,7 @@ import { RecordingPersistence, ScriptedQuery } from "./fakes.js";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { SdkTaskNotificationMessage, SdkTaskStartedMessage } from "../../src/sdk/types.js";
+import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
 
 const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
 
@@ -331,7 +331,7 @@ describe("UpdateAgent.stop", () => {
       signal: new AbortController().signal,
       toolUseID: "toolu_1",
       requestId: "r",
-    } as Parameters<PermissionGate["canUseTool"]>[2]);
+    });
     await Promise.resolve();
 
     await h.turns.updateAgent(stop());
@@ -355,7 +355,7 @@ describe("UpdateAgent.stop", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskStartedMessage);
+    });
 
     await h.turns.updateAgent(stop(create(conversationv1.AgentIdSchema, { value: "a01" })));
 
@@ -413,7 +413,7 @@ describe("UpdateAgent.answer addressee", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    }) as SdkTaskStartedMessage;
+    });
 
   const cases: {
     readonly name: string;
@@ -513,7 +513,7 @@ describe("KillTurn", () => {
     // verb to stop under the turn it belongs to.
     const h = await harness();
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
@@ -523,7 +523,7 @@ describe("KillTurn", () => {
   it("forced, ends the work a CLOSED turn left running", async () => {
     const h = await harness();
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
@@ -566,7 +566,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
@@ -577,7 +577,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
@@ -592,7 +592,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "turn-1",
     );
 
@@ -605,7 +605,7 @@ describe("KillTurn", () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
-      { type: "system", subtype: "task_started", task_id: "b99", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      { type: "system", subtype: "task_started", task_id: "b99", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" },
       "another-turn",
     );
 
@@ -637,7 +637,7 @@ describe("DetachForeground", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskStartedMessage);
+    });
 
     expect(failureKind(await h.turns.detachForeground(detach("toolu_1")))).toBe("alreadyConcluded");
   });
@@ -835,7 +835,7 @@ describe("StopBash", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskStartedMessage);
+    });
 
     // The handle names the SPAWNING CALL (ruling, landing 3); the task id stays
     // shim-side as the internal address.
@@ -981,7 +981,7 @@ describe("UpdateAgent.prompt to a subagent", () => {
         uuid: "00000000-0000-4000-8000-000000000000",
         session_id: "s",
         ...(taskType === undefined ? {} : { task_type: taskType }),
-      } as SdkTaskStartedMessage,
+      },
       "turn-1",
     );
   }
@@ -1049,7 +1049,7 @@ describe("DetachForeground on a live foreground unit", () => {
         description: "sleep 100",
         uuid: "00000000-0000-4000-8000-000000000000",
         session_id: "s",
-      } as SdkTaskStartedMessage,
+      },
       "turn-1",
     );
   }
@@ -1192,7 +1192,7 @@ describe("WatchBash's announcement predicate", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskStartedMessage);
+    });
     h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
 
     for await (const response of h.turns.watchBash(
@@ -1217,7 +1217,7 @@ describe("WatchBash's announcement predicate", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskStartedMessage);
+    });
     h.live.onTaskNotification({
       type: "system",
       subtype: "task_notification",
@@ -1227,7 +1227,7 @@ describe("WatchBash's announcement predicate", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000001",
       session_id: "s",
-    } as SdkTaskNotificationMessage);
+    });
     h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
 
     for await (const response of h.turns.watchBash(
@@ -1503,7 +1503,7 @@ describe("UpdateAgent.answer's own guards", () => {
       signal: new AbortController().signal,
       toolUseID: "toolu_open",
       requestId: "r",
-    } as Parameters<PermissionGate["canUseTool"]>[2]);
+    });
     await Promise.resolve();
     const answer = create(conversationv1.AgentAnswerSchema, {
       answer: {
@@ -1710,7 +1710,7 @@ describe("StopBash's remaining arms", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    }) as SdkTaskStartedMessage;
+    });
 
   it("RAISES when StopBash reaches the engine with no work id", async () => {
     const h = await harness();
@@ -1732,7 +1732,7 @@ describe("StopBash's remaining arms", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000001",
       session_id: "s",
-    } as SdkTaskNotificationMessage);
+    });
 
     expect(failureKind(await h.turns.stopBash(stopRequest("t")))).toBe("alreadyEnded");
   });

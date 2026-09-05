@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
 import { cwdSlug } from "../../src/fake/vendor-files.js";
-import type { CanUseToolLike, PermissionResultLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
+import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 
 /** A record on either plane, as a plain object. */
 export type Line = Record<string, unknown>;
@@ -114,7 +114,7 @@ export class PromptFeeder {
 }
 
 const ALLOW: CanUseToolLike = async (_name, input) =>
-  ({ behavior: "allow", updatedInput: input }) as PermissionResultLike;
+  ({ behavior: "allow", updatedInput: input });
 
 /**
  * Run a fake query over a fixed list of prompts and collect both planes.
@@ -171,7 +171,7 @@ export async function driveScenario(
     }
   })();
 
-  if (options.during !== undefined) await options.during(query, feeder, messages as unknown as Line[]);
+  if (options.during !== undefined) await options.during(query, feeder, messages);
   feeder.close();
   await collect;
 
@@ -216,7 +216,8 @@ export async function driveScenario(
  */
 export function expectDroveCleanly(driven: Driven): Driven {
   if (driven.failure !== undefined) {
-    const detail = driven.failure instanceof Error ? driven.failure.message : String(driven.failure);
+    const detail =
+      driven.failure instanceof Error ? driven.failure.message : JSON.stringify(driven.failure);
     throw new Error(`the fake vendor drive REJECTED before the scenario finished: ${detail}`);
   }
   return driven;
@@ -248,7 +249,7 @@ export function theResult(driven: Driven): Line {
   if (results.length !== 1) {
     throw new Error(`expected exactly one result message, saw ${results.length}`);
   }
-  return results[0]!;
+  return results[0];
 }
 
 /** The `toolUseResult` values the transcript's user records carried, in order. */

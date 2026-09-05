@@ -70,7 +70,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
       taskActConverter.settle(
         call("TaskCreate", { subject: "s", description: "d" }),
         outcome(toolUseResult("task_create")),
-      )!,
+      ),
     );
 
     // Assert.
@@ -80,7 +80,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("is the `created` arm, so a consumer adds an entry rather than replacing one", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", {}), outcome(toolUseResult("task_create")))!,
+      taskActConverter.settle(call("TaskCreate", {}), outcome(toolUseResult("task_create"))),
     );
 
     // Assert.
@@ -93,7 +93,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
       taskActConverter.settle(
         call("TaskCreate", { subject: "what I asked for" }),
         outcome(toolUseResult("task_create")),
-      )!,
+      ),
     );
 
     // Assert.
@@ -106,7 +106,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
       taskActConverter.settle(
         call("TaskCreate", { description: "the badge count is wrong" }),
         outcome(toolUseResult("task_create")),
-      )!,
+      ),
     );
 
     // Assert.
@@ -116,7 +116,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("leaves a created task `pending`, since the create tool takes no status", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", {}), outcome(toolUseResult("task_create")))!,
+      taskActConverter.settle(call("TaskCreate", {}), outcome(toolUseResult("task_create"))),
     );
 
     // Assert.
@@ -126,7 +126,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("is the `rejected` arm when the tracker refused a create", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true)),
     );
 
     // Assert.
@@ -136,7 +136,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("carries what the tracker said was wrong with a refused create", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true)),
     );
 
     // Assert.
@@ -147,7 +147,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("falls back to the INPUT subject when the tracker echoed none", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "from input" }), outcome({ task: { id: "9" } }))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "from input" }), outcome({ task: { id: "9" } })),
     );
 
     // Assert.
@@ -157,7 +157,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("records an EMPTY subject when neither the tracker nor the input named one", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } }))!,
+      taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } })),
     );
 
     // Assert. The create still lands — an unnamed task is a real row, not a
@@ -175,7 +175,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("keys the act by the identity the tracker echoed", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update")))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update"))),
     );
 
     // Assert.
@@ -185,7 +185,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("is the `changed` arm, so a consumer replaces what it holds", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update")))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update"))),
     );
 
     // Assert.
@@ -195,7 +195,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("takes the resolved status from the tracker's own statusChange", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update")))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update"))),
     );
 
     // Assert.
@@ -208,7 +208,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
       taskActConverter.settle(
         call("TaskUpdate", { taskId: "1", activeForm: "fixing the badges" }),
         outcome(toolUseResult("task_update")),
-      )!,
+      ),
     );
 
     // Assert.
@@ -219,7 +219,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("leaves the running phrasing UNSET when the caller gave none", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update")))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(toolUseResult("task_update"))),
     );
 
     // Assert.
@@ -232,7 +232,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
     const structured = { success: true, taskId: "1", updatedFields: ["status"], statusChange: { from: "in_progress", to: "completed" } };
 
     // Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured)));
 
     // Assert.
     expect(act.state?.status.case).toBe("completed");
@@ -243,7 +243,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
     const structured = { success: true, taskId: "1", statusChange: { from: "pending", to: "deleted" } };
 
     // Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured)));
 
     // Assert.
     expect(act.state?.status.case).toBe("deleted");
@@ -254,7 +254,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
     const structured = { success: true, taskId: "1", statusChange: { from: "in_progress", to: "pending" } };
 
     // Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured)));
 
     // Assert.
     expect(act.state?.status.case).toBe("pending");
@@ -266,7 +266,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1", subject: "renamed" }), outcome(structured))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", subject: "renamed" }), outcome(structured)),
     );
 
     // Assert.
@@ -279,7 +279,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1", addBlocks: ["3", "4"] }), outcome(structured))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", addBlocks: ["3", "4"] }), outcome(structured)),
     );
 
     // Assert.
@@ -292,7 +292,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1", addBlockedBy: ["2"] }), outcome(structured))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", addBlockedBy: ["2"] }), outcome(structured)),
     );
 
     // Assert.
@@ -305,7 +305,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1", owner: "vetter" }), outcome(structured))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", owner: "vetter" }), outcome(structured)),
     );
 
     // Assert.
@@ -317,7 +317,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
     const structured = { success: true, taskId: "1" };
 
     // Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured)));
 
     // Assert.
     expect(act.state?.owner).toBeUndefined();
@@ -328,7 +328,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
     const structured = { success: false, taskId: "1", updatedFields: [], error: "no such task" };
 
     // Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome(structured)));
 
     // Assert.
     expect(act.act.case).toBe("rejected");
@@ -337,7 +337,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("is the `rejected` arm when the vendor marked the result an error", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome({ taskId: "1" }, true))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome({ taskId: "1" }, true)),
     );
 
     // Assert.
@@ -347,7 +347,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
   it("carries what the tracker said was wrong with a refused act", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome({ taskId: "1" }, true))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1" }), outcome({ taskId: "1" }, true)),
     );
 
     // Assert.
@@ -361,7 +361,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskUpdate", { taskId: "1", status: "completed" }), outcome(structured))!,
+      taskActConverter.settle(call("TaskUpdate", { taskId: "1", status: "completed" }), outcome(structured)),
     );
 
     // Assert.
@@ -370,7 +370,7 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
   it("falls back to the call's own taskId when the tracker echoed none", () => {
     // Arrange, Act.
-    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "7" }), outcome({ success: true }))!);
+    const act = actOf(taskActConverter.settle(call("TaskUpdate", { taskId: "7" }), outcome({ success: true })));
 
     // Assert.
     expect(act.task?.value).toBe("7");

@@ -9,7 +9,7 @@ import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 describe("identity rotation", () => {
   /** Every message, as plain records, in arrival order. */
   const records = (driven: Awaited<ReturnType<typeof driveScenario>>): Record<string, unknown>[] =>
-    driven.messages as unknown as Record<string, unknown>[];
+    driven.messages;
 
   it("announces the reset under the OLD identity", async () => {
     // OBSERVED (identity-rotation-clear, 2026-09-01): `conversation_reset`
@@ -432,7 +432,7 @@ describe("compaction", () => {
 
       // Assert
       expect({
-        hasAllUuids: Array.isArray(metadata?.preservedMessages && (metadata!.preservedMessages as Record<string, unknown>).allUuids),
+        hasAllUuids: Array.isArray(metadata?.preservedMessages && (metadata.preservedMessages as Record<string, unknown>).allUuids),
         cumulativeDroppedTokens: typeof metadata?.cumulativeDroppedTokens === "number",
       }).toEqual({ hasAllUuids: true, cumulativeDroppedTokens: true });
     },
@@ -449,7 +449,7 @@ describe("compaction", () => {
       // Assert
       expect({
         hasAllUuids: Array.isArray(
-          metadata?.preserved_messages && (metadata!.preserved_messages as Record<string, unknown>).all_uuids,
+          metadata?.preserved_messages && (metadata.preserved_messages as Record<string, unknown>).all_uuids,
         ),
         cumulativeDroppedTokens: typeof metadata?.cumulative_dropped_tokens === "number",
         logicalParentUuid: typeof boundary?.logical_parent_uuid === "string",
@@ -568,14 +568,14 @@ async function contextUsageSamples(
   const samples: Record<string, unknown>[] = [];
   await driveScenario([], {
     during: async (query, feeder, messages) => {
-      samples.push((await query.getContextUsage()) as unknown as Record<string, unknown>);
+      samples.push(await query.getContextUsage());
       for (const [index, prompt] of prompts.entries()) {
         feeder.push(prompt);
         for (let yields = 0; messages.filter((m) => m.type === "result").length <= index; yields++) {
           if (yields > 10_000) throw new Error(`turn ${index + 1} never produced a result`);
           await new Promise((resolve) => setImmediate(resolve));
         }
-        samples.push((await query.getContextUsage()) as unknown as Record<string, unknown>);
+        samples.push(await query.getContextUsage());
       }
     },
   });

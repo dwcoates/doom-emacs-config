@@ -511,7 +511,7 @@ const CONTEXT_BUDGET_WARNING = scenario({
  */
 function preservedUuids(ctx: ScenarioContext, head: string) {
   const uuids = [head, ctx.newUuid(), ctx.newUuid()];
-  const tail = uuids[uuids.length - 1]!;
+  const tail = uuids[uuids.length - 1];
   const anchor = ctx.newUuid();
   return {
     head,

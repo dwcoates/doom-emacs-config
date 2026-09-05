@@ -8,6 +8,7 @@
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1395,9 +1396,9 @@ describe("the teardown's waits are bounded", () => {
     const h = harness({ watcherConclusionBudgetMs: 5 });
     await started(h);
     h.persistence.standingTail = true;
-    const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
-      [Symbol.asyncIterator]();
+    const watching = h.engine.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+    )[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.openHangs = true;
 
@@ -1578,7 +1579,7 @@ describe("standing down", () => {
       signal: new AbortController().signal,
       toolUseID: "toolu_1",
       requestId: "r",
-    } as never);
+    });
     await Promise.resolve();
 
     await h.engine.standDown("SIGTERM");
@@ -1670,10 +1671,10 @@ describe("WatchSession", () => {
       }),
     );
 
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
-    expect(second.value?.frame.case).toBe("update");
+    expect(second.frame.case).toBe("update");
   });
 
   it("re-announces the session's opening right AFTER the diagnostics", async () => {
@@ -1702,12 +1703,12 @@ describe("WatchSession", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.vendorSessionId
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.vendorSessionId
         : undefined,
     ).toBe(announced);
   });
@@ -1730,12 +1731,12 @@ describe("WatchSession", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.turnInFlight?.value !== undefined
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.turnInFlight?.value !== undefined
         : undefined,
     ).toBe(true);
   });
@@ -1900,12 +1901,12 @@ describe("GetLiveWork reconciliation", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.liveWork.map(
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.liveWork.map(
             (work: conversationv1.AgentDetachedWork) => work.work?.value,
           )
         : undefined,
@@ -2632,7 +2633,7 @@ describe("account usage, pushed on the account-usage interval", () => {
           model_scoped: [],
         },
         behaviors: null,
-      } as AccountUsageLike,
+      },
     });
     const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
     let seen: conversationv1.SessionAccountUsage | undefined;
@@ -2774,7 +2775,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "a01",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2794,7 +2795,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "toolu_spawn",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2824,7 +2825,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "a01",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2985,7 +2986,7 @@ describe("the vendor request the turn runs under", () => {
     const before = vi.mocked(writeSync).mock.calls.length;
     bindLog({ operation: "shim.test.request-id" }).log({}, "probe");
     const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
-    const [, bytes, offset, length] = calls[before]!;
+    const [, bytes, offset, length] = calls[before];
     const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
     return record.request_id;
   }
@@ -3100,7 +3101,7 @@ describe("the context usage the vendor states, mapped field by field", () => {
         cache_read_input_tokens: 24,
       },
       ...overrides,
-    } as ContextUsageLike;
+    };
   }
 
   /** Start a session whose vendor answers `getContextUsage` with `usage`. */
@@ -3272,7 +3273,7 @@ describe("the account's rate-limit windows", () => {
       rate_limits: null,
       behaviors: null,
       ...overrides,
-    } as AccountUsageLike;
+    };
   }
 
   /** The account-usage push a session with this vendor answer produces. */
@@ -3305,7 +3306,7 @@ describe("the account's rate-limit windows", () => {
 
   it("reports window_unavailable when the answer carries no five-hour window", async () => {
     const pushed = await accountUsagePushed(
-      usage({ rate_limits: { five_hour: null } } as Partial<AccountUsageLike>),
+      usage({ rate_limits: { five_hour: null } }),
     );
 
     expect(unavailableReason(pushed)).toBe("windowUnavailable");
@@ -3315,7 +3316,7 @@ describe("the account's rate-limit windows", () => {
     const pushed = await accountUsagePushed(
       usage({
         rate_limits: { five_hour: { utilization: null, resets_at: "2026-01-01T00:00:00.000Z" } },
-      } as Partial<AccountUsageLike>),
+      }),
     );
 
     expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
@@ -3325,7 +3326,7 @@ describe("the account's rate-limit windows", () => {
     const pushed = await accountUsagePushed(
       usage({
         rate_limits: { five_hour: { utilization: 10, resets_at: "not a timestamp" } },
-      } as Partial<AccountUsageLike>),
+      }),
     );
 
     expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
@@ -3340,7 +3341,7 @@ describe("the account's rate-limit windows", () => {
             { display_name: "Fable", utilization: 30, resets_at: "2026-01-03T00:00:00.000Z" },
           ],
         },
-      } as Partial<AccountUsageLike>),
+      }),
     );
     const available =
       pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
@@ -3357,7 +3358,7 @@ describe("the account's rate-limit windows", () => {
           five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
           model_scoped: [{ display_name: "Fable", utilization: null, resets_at: null }],
         },
-      } as Partial<AccountUsageLike>),
+      }),
     );
     const available =
       pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
@@ -3482,7 +3483,7 @@ function foldEntry(item: PersistEntry["item"], arm: string): PersistEntry {
   return {
     agentId: mainAgentId("vendor-session"),
     upsertKey: `k-${arm}`,
-    source: { vendorUuid: `u-${arm}`, discriminator: arm } as never,
+    source: { vendorUuid: `u-${arm}`, discriminator: arm },
     keepalive: false,
     item,
   };
@@ -3782,12 +3783,11 @@ describe("what the engine remembers from the fold's own frames", () => {
           target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
-    const first = await iterator.next();
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
     await iterator.return?.();
 
-    expect(first.value?.frame.case).toBe("page");
+    expect(first.frame.case).toBe("page");
   });
 
   it("REFUSES a watch on an agent this session never announced", async () => {
@@ -3800,8 +3800,7 @@ describe("what the engine remembers from the fold's own frames", () => {
           target: create(conversationv1.AgentIdSchema, { value: "agent-nobody-minted" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
+      )[Symbol.asyncIterator]();
 
     await expect(iterator.next()).rejects.toThrow(/never been announced|no agent by that id/);
   });
@@ -4259,8 +4258,7 @@ describe("what this session will answer a watch about", () => {
           target: create(conversationv1.AgentIdSchema, { value: "" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
+      )[Symbol.asyncIterator]();
 
     await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
   });
@@ -4285,12 +4283,11 @@ describe("what this session will answer a watch about", () => {
           target: create(conversationv1.AgentIdSchema, { value: "toolu_live_agent" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
-    const first = await iterator.next();
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
     await iterator.return?.();
 
-    expect(first.value?.frame.case).toBe("page");
+    expect(first.frame.case).toBe("page");
   });
 
   it("answers a watch on a subagent that has since RETIRED", async () => {
@@ -4324,12 +4321,11 @@ describe("what this session will answer a watch about", () => {
           target: create(conversationv1.AgentIdSchema, { value: "toolu_retired_agent" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
-    const first = await iterator.next();
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
     await iterator.return?.();
 
-    expect(first.value?.frame.case).toBe("page");
+    expect(first.frame.case).toBe("page");
   });
 });
 
@@ -4355,8 +4351,7 @@ describe("the teardown's tails", () => {
     h.persistence.page = pageWithHead("p-9");
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
-      [Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
     await watching.next();
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
@@ -4396,8 +4391,7 @@ describe("the teardown's tails", () => {
         create(shimv1.WatchBashRequestSchema, {
           work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_never_ends" }),
         }),
-      )
-      [Symbol.asyncIterator]();
+      )[Symbol.asyncIterator]();
     void watching.next().catch(() => undefined);
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -4935,8 +4929,7 @@ describe("a vendor failure that is not an Error", () => {
       await started(h);
       h.persistence.openAgentPage = () => Promise.reject("the store socket went away");
       const watching = h.engine
-        .watchSession(create(shimv1.WatchSessionRequestSchema, {}))
-        [Symbol.asyncIterator]();
+        .watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
       await watching.next();
       await watching.next();
       await watching.return?.();
@@ -4994,8 +4987,7 @@ describe("a vendor failure that is not an Error", () => {
     await started(h);
     h.persistence.standingTail = true;
     const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
-      [Symbol.asyncIterator]();
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.openAgentPage = () => Promise.reject("the store socket went away");
     const before = logCursor();
@@ -5057,9 +5049,9 @@ describe("the prompt queue's own buffer", () => {
         pageSize: 5,
       }),
     );
-    const first = await prompts.next();
+    const first = await nextPush(prompts);
 
-    expect(first.value?.message.content).toBe("go");
+    expect(first.message.content).toBe("go");
   });
 
   it("completes for a vendor that pulls only after the stand-down closed it", async () => {
@@ -5112,7 +5104,7 @@ describe("whose book a gated ask lands on", () => {
       toolUseID: "toolu_asked",
       agentID,
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -5249,7 +5241,7 @@ describe("the vendor answers the engine maps around an absent field", () => {
         query.contextUsage = {
           ...query.contextUsage,
           mcpTools: [{ name: "search", serverName: "docs", tokens: 9 }],
-        } as ContextUsageLike;
+        };
       },
     });
     const seen = await pushedUpdates(
@@ -5497,8 +5489,7 @@ describe("the fold rows the engine walks past", () => {
           target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
           pageSize: 5,
         }),
-      )
-      [Symbol.asyncIterator]();
+      )[Symbol.asyncIterator]();
 
     await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
   });

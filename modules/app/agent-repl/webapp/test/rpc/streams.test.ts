@@ -627,7 +627,7 @@ describe("watchStream: cancelling mid-run", () => {
     const sink = new RecordingSink();
     const { client } = scriptedClient([[]]);
     const seen: WatchFooterResponse[] = [];
-    let handle: { cancel(): void } | undefined;
+    let handle: { cancel(): void } | undefined = undefined;
     // ACT
     handle = openLocal(contextFor(client, sink), [push(), push()], (r) => {
       seen.push(r);
@@ -643,7 +643,7 @@ describe("watchStream: cancelling mid-run", () => {
     const sink = new RecordingSink();
     const { client } = scriptedClient([[]]);
     const ends: StreamEnd[] = [];
-    let handle: { cancel(): void } | undefined;
+    let handle: { cancel(): void } | undefined = undefined;
     // ACT
     handle = openLocal(
       contextFor(client, sink),
@@ -660,7 +660,7 @@ describe("watchStream: cancelling mid-run", () => {
     // ARRANGE
     const sink = new RecordingSink();
     const { client } = scriptedClient([[]]);
-    let handle: { cancel(): void } | undefined;
+    let handle: { cancel(): void } | undefined = undefined;
     // ACT
     handle = openLocal(contextFor(client, sink), [push(), push()], () => handle?.cancel());
     await settle();

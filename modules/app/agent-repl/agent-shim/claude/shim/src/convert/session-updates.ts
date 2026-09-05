@@ -234,7 +234,10 @@ function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | un
     // a user their weekly allowance is nearly spent when it was the five-hour.
     if (value !== undefined) {
       LOGGER.log(
-        { level: "warn", rate_limit_type: String(value) },
+        // JSON, not String: the vendor sends `unknown` here, and the one shape
+        // worth logging — an object this contract did not expect — is exactly
+        // the shape `String` flattens to "[object Object]".
+        { level: "warn", rate_limit_type: JSON.stringify(value) ?? typeof value },
         "the vendor named a rate-limit window this contract does not spell; the field stays unset",
       );
     }
@@ -525,8 +528,8 @@ export function convertSessionMessage(
         residueEntry(
           context,
           message,
-          vendorSpecificResidue(residueKind(record as { type?: string; subtype?: string }), message),
-          `residue.vendor_specific.${residueKind(record as { type?: string; subtype?: string })}`,
+          vendorSpecificResidue(residueKind(record), message),
+          `residue.vendor_specific.${residueKind(record)}`,
         ),
       ];
   }

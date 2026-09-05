@@ -964,16 +964,16 @@ describe("the cause behind a refusal", () => {
 
 describe("the facts drawn under a refusal sentence", () => {
   it("draws no list for an arm that carries no paths", () => {
-    expect(refusalDetail({ case: "spawnFailed", value: { detail: "x" } } as never)).toBeNull();
+    expect(refusalDetail({ case: "spawnFailed", value: { detail: "x" } })).toBeNull();
   });
 
   it("draws no list when the search-paths field was never set", () => {
-    expect(refusalDetail({ case: "transcriptMissing", value: {} } as never)).toBeNull();
+    expect(refusalDetail({ case: "transcriptMissing", value: {} })).toBeNull();
   });
 
   it("draws no empty list when the daemon searched nowhere", () => {
     expect(
-      refusalDetail({ case: "transcriptMissing", value: { searchedPaths: [] } } as never),
+      refusalDetail({ case: "transcriptMissing", value: { searchedPaths: [] } }),
     ).toBeNull();
   });
 });

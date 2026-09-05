@@ -186,7 +186,7 @@ export async function driveTurn(
   const drawn = rows(app, kind, unit);
   const last = drawn[drawn.length - 1];
   expect(last, `!${scenario} drew no ${what} row`).toBeDefined();
-  return last as HTMLElement;
+  return last;
 }
 
 /**
@@ -219,7 +219,7 @@ export async function driveScenarioRow(
   const drawn = await driveScenario(app, scenario, kind, unit);
   const last = drawn[drawn.length - 1];
   expect(last, `!${scenario} drew no ${kind} row`).toBeDefined();
-  return last as HTMLElement;
+  return last;
 }
 
 /** Wait for the turn to be terminal — its `turn_ended` row is drawn. */

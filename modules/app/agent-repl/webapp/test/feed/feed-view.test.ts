@@ -522,7 +522,7 @@ describe("createFeedController: following the tail", () => {
         row: create(FeedRowSchema, {}),
         revealRow: async () => false,
       },
-      scroll: { box: scroll.box as never, tail: scroll.tail as never },
+      scroll: { box: scroll.box, tail: scroll.tail as never },
     });
     return { controller, acts: scroll.acts };
   }

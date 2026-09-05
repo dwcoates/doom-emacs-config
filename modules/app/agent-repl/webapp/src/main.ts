@@ -85,7 +85,7 @@ export async function boot(): Promise<void> {
     const workspace = workspaceRef(address.workspaceId, address.workspaceDir);
 
     const transport = createDaemonTransport(window.location.origin);
-    let client = createAgentReplClient(transport);
+    const client = createAgentReplClient(transport);
 
     overlay = mountFailureOverlay(shell.failureOverlay);
 

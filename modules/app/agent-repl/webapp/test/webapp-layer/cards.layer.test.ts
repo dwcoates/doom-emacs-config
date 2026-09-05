@@ -107,7 +107,7 @@ async function ask(scenario: string, kind: "permission" | "question"): Promise<H
   await submit(app, `!${scenario}`);
   await awaitDrawn(app, `a new ${kind} card for !${scenario}`, () => rows(app, kind).length > before);
   const drawn = rows(app, kind);
-  return drawn[drawn.length - 1] as HTMLElement;
+  return drawn[drawn.length - 1];
 }
 
 // §F4 #19.
@@ -315,7 +315,7 @@ it(
       () => rows(app, "permission").length > before,
     );
     const drawn = rows(app, "permission");
-    const card = drawn[drawn.length - 1] as HTMLElement;
+    const card = drawn[drawn.length - 1];
     expect(
       card.querySelector(".perm-verdict")?.getAttribute("data-permission-verdict"),
     ).toBe("deniedUndecidable");

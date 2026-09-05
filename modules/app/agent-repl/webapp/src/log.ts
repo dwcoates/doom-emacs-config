@@ -288,6 +288,11 @@ function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") return String(value);
   if (value instanceof Error) return { name: value.name, message: value.message, ...(value.stack !== undefined ? { stack: value.stack } : {}) };
+  // An unreachable backstop, kept deliberately: every `typeof` result but "object" is answered
+  // above, so nothing narrows the static type here and eslint reads this as stringifying an
+  // object. A runtime that grows a new `typeof` must land in the log as SOMETHING rather than
+  // throwing inside the logger.
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- see above
   if (typeof value !== "object") return String(value);
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
