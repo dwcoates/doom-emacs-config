@@ -16,6 +16,9 @@ import (
 
 // drawSubagent draws a spawn's bubble head. detached selects the placement
 // wrapper — sync-vs-detached is PLACEMENT, never a second drawing.
+//
+// A FRAME THAT ARRIVES BEFORE THE START DRAWS NOTHING YET. See subagentState.held:
+// the row's identity carries the created agent, and only the start states it.
 func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.AgentActivity, spawn *conversationv1.AgentSubagent, detached bool) (*frontendv1.FeedRow, error) {
 	unitID := act.GetActivityId().GetValue()
 	state, ok := s.subagents[unitID]
@@ -31,12 +34,66 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	if detached || announcedDetached {
 		state.detached = true
 	}
-	bubble := state.bubble
-	if bubble == nil {
-		bubble = &frontendv1.FeedSubagent{}
-		state.bubble = bubble
+	if state.bubble == nil {
+		state.bubble = &frontendv1.FeedSubagent{}
 	}
 
+	_, isStart := spawn.GetResult().(*conversationv1.AgentSubagent_Start)
+	if !isStart && state.created.GetValue() == "" {
+		if !subagentArmDraws(spawn) {
+			return nil, errNotARow
+		}
+		// THE PLACEMENT IS RECORDED WITH THE HOLD: the frames were carried on
+		// this feed, and the retirement that draws them has no frame of its
+		// own to place them from.
+		state.feed = at
+		state.held = append(state.held, spawn)
+		r.logger(s.id).Debug("daemon.feed.subagent_held",
+			"a spawn's frame arrived before its start named the created agent; it is held until the start lands",
+			dlog.Context{"unit": unitID, "held": len(state.held)})
+		return nil, nil
+	}
+
+	if err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil {
+		return nil, err
+	}
+	// THE START RETIRES THE HOLD. The frames are folded in the order the run
+	// happened — the start first, then whatever had already landed — so a
+	// terminal that arrived early still settles the bubble it settles.
+	if isStart {
+		held := state.held
+		state.held = nil
+		for _, frame := range held {
+			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+				r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
+					"a held spawn frame could not be folded once its start landed",
+					dlog.Context{"unit": unitID, "cause": err.Error()})
+			}
+		}
+	}
+
+	return r.composeSubagent(s, at, unitID, state, commissionOf(spawn)), nil
+}
+
+// subagentArmDraws reports whether a spawn frame carries an arm this family
+// draws. An unset or unknown arm is never held: a hold exists to be folded,
+// and a frame nothing can fold would sit until the turn's terminal reported it.
+func subagentArmDraws(spawn *conversationv1.AgentSubagent) bool {
+	switch spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start,
+		*conversationv1.AgentSubagent_Update,
+		*conversationv1.AgentSubagent_Success,
+		*conversationv1.AgentSubagent_Failure:
+		return true
+	}
+	return false
+}
+
+// foldSubagentFrame folds ONE frame onto the bubble the state carries. It is
+// the whole of a frame's effect on the head, so a held frame folded later is
+// folded exactly as a live one would have been.
+func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentState, spawn *conversationv1.AgentSubagent) error {
+	bubble := state.bubble
 	switch frame := spawn.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
 		state.created = frame.Start.GetCreatedAgentId()
@@ -73,9 +130,15 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		subagentFailureOutcome(r.logger(s.id), unitID, frame.Failure)(settled)
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: settled}
 	default:
-		return nil, errNotARow
+		return errNotARow
 	}
+	return nil
+}
 
+// composeSubagent renders the bubble the state now holds into its row, mints
+// the sub-feed the row addresses, and draws the commission on it.
+func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, state *subagentState, commission *conversationv1.AgentSubagentPrompt) *frontendv1.FeedRow {
+	bubble := state.bubble
 	if bubble.Runtime == nil {
 		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: 0}
 	}
@@ -93,7 +156,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	// makes an expand's OpenFeed resolve and a page's crumbs draw.
 	if state.created.GetValue() != "" {
 		r.mintSubFeed(s, id, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
-		r.drawCommission(s, at, unitID, state, commissionOf(spawn))
+		r.drawCommission(s, at, unitID, state, commission)
 	}
 
 	row := &frontendv1.FeedRow{Id: id}
@@ -106,7 +169,44 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 			Unit: &frontendv1.FeedTurnActivity_Subagent{Subagent: bubble},
 		}}
 	}
-	return row, nil
+	return row
+}
+
+// retireHeldSpawns draws every spawn whose frames are still waiting for a
+// start, and empties the hold.
+//
+// A START THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the spawn:
+// the bubble is drawn from what did arrive, and it is warned, because its row
+// carries no created agent and so addresses no sub-feed. Nothing is left held
+// afterwards — a hold that outlived the delivery it was waiting on would sit
+// in this workspace's state for the rest of the daemon's life.
+func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
+	log := r.logger(s.id)
+	for unitID, state := range s.subagents {
+		if len(state.held) == 0 {
+			continue
+		}
+		held := state.held
+		state.held = nil
+		log.Warn("daemon.feed.subagent_without_start",
+			"a spawn's frames arrived with no start naming the created agent; its bubble is drawn but addresses no sub-feed",
+			dlog.Context{"unit": unitID, "frames": len(held), "occasion": occasion})
+		var commission *conversationv1.AgentSubagentPrompt
+		for _, frame := range held {
+			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+				log.Error("daemon.feed.subagent_held_frame_undrawable",
+					"a held spawn frame could not be folded at its retirement",
+					dlog.Context{"unit": unitID, "cause": err.Error()})
+				continue
+			}
+			if p := commissionOf(frame); p != nil {
+				commission = p
+			}
+		}
+		row := r.composeSubagent(s, state.feed, unitID, state, commission)
+		r.stampTurn(s, row, nil)
+		r.upsert(s, state.feed, row, true)
+	}
 }
 
 // applyPrompt folds the commission's label and description onto the head. The
@@ -300,6 +400,11 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 			}
 			row, err := r.drawSubagent(s, at, act, created.Subagent, true)
 			if err != nil {
+				return
+			}
+			if row == nil {
+				// HELD: the announcement carried a frame that is not the
+				// spawn's start, so nothing names the created agent yet.
 				return
 			}
 			r.stampTurn(s, row, nil)
