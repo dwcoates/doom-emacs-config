@@ -149,30 +149,90 @@ const (
 	hibernateSucceededMsg = "hibernated an idle session"
 )
 
-// awaitHibernateSweepRecord polls a workspace's own daemon log sink until a
-// hibernateSweepOp record with the given message appears, bounded by
-// HibernationChainTimeout. It is this file's own bounded-wait primitive
-// because harness.Daemon.AwaitWorkspaceLogRecord has no per-call timeout
-// (it relies on the daemon's own unbounded context) — this area's own named
-// budget is the "per-site override" SPEC.md section B calls for.
-func awaitHibernateSweepRecord(t *testing.T, w *World, workspaceDir, what, message string) harness.LogRecord {
+// sweepMark is a position in a workspace's own daemon sink: the number of
+// records it already held when the mark was taken. A wait carrying a mark
+// reads only what the daemon wrote AFTER it, so a test can never be satisfied
+// by a record that predates the act it is waiting on.
+//
+// THIS AREA NEEDS ONE, and the need is a measurement rather than a caution.
+// The daemon spawns a session ON MOUNT (daemon.md's SPAWN ON MOUNT), and a
+// mount-spawned session that is never prompted goes idle at
+// hibernationIdleCutoffMS like any other — so on a quiet box the sweep stands
+// that session down BEFORE the test has submitted anything. Observed, from
+// TestRevivalAfterHibernate's own sink on an idle host: "hibernated an idle
+// session" at T+0.368s, "the session was engaged inside the cutoff" (the
+// prompt queue's engagement stamp, promptqueue/deliver.go's touchEngagement)
+// at T+0.522s. An unmarked wait for that message therefore matched a
+// stand-down of a session the test's first turn had not yet run on, and only
+// a SATURATED box — where the first prompt lands inside the 50ms cutoff, so
+// no such record exists — made the test wait for the hibernation it actually
+// names. Waiting on the wrong fact is what made the pass load-dependent.
+type sweepMark int
+
+// markSweepLog answers the current position of a workspace's daemon sink.
+func markSweepLog(w *World, workspaceDir string) sweepMark {
+	return sweepMark(len(w.WorkspaceLog(workspaceDir, "daemon")))
+}
+
+// sweepRecordSince answers the first hibernateSweepOp record with the given
+// message that the sink holds AT OR AFTER mark. It is a pure function so the
+// marking rule itself is tested rather than only exercised.
+func sweepRecordSince(records []harness.LogRecord, mark sweepMark, message string) (harness.LogRecord, bool) {
+	if int(mark) < 0 {
+		mark = 0
+	}
+	for i := int(mark); i < len(records); i++ {
+		if records[i].Operation == hibernateSweepOp && records[i].Message == message {
+			return records[i], true
+		}
+	}
+	return harness.LogRecord{}, false
+}
+
+// awaitHibernateSweepRecordSince polls a workspace's own daemon log sink until
+// a hibernateSweepOp record with the given message appears AFTER mark. It is
+// this file's own bounded-wait primitive because
+// harness.Daemon.AwaitWorkspaceLogRecord has no per-call timeout (it relies on
+// the daemon's own unbounded context) — this area's own named budget is the
+// "per-site override" SPEC.md section B calls for.
+//
+// A miss reports what the sweep DID decide, not merely that it did not decide
+// what was wanted: every one of the sweep's own records is rendered, so a
+// deferral (not free, already terminal, no session) is distinguishable from a
+// sweep that never ran at all without a second run to find out.
+func awaitHibernateSweepRecordSince(t *testing.T, w *World, workspaceDir string, mark sweepMark, what, message string) harness.LogRecord {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
-		for _, r := range w.WorkspaceLog(workspaceDir, "daemon") {
-			if r.Operation == hibernateSweepOp && r.Message == message {
-				return r
-			}
+		if r, found := sweepRecordSince(w.WorkspaceLog(workspaceDir, "daemon"), mark, message); found {
+			return r
 		}
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			t.Fatalf("waiting for %s: %v", what, ctx.Err())
+			t.Fatalf("waiting for %s: %v (the world's own budget: %v)\nthe sweep's own records for this workspace:\n%s",
+				what, ctx.Err(), w.Ctx().Err(), sweepRecordDigest(w, workspaceDir))
 		}
 	}
+}
+
+// sweepRecordDigest renders every idle-sweep record a workspace's own daemon
+// sink carries, so a missed hibernation reports WHAT THE SWEEP DECIDED.
+func sweepRecordDigest(w *World, workspaceDir string) string {
+	var b strings.Builder
+	for i, r := range w.WorkspaceLog(workspaceDir, "daemon") {
+		if r.Operation != hibernateSweepOp {
+			continue
+		}
+		fmt.Fprintf(&b, "  [%d] %s %s %s %v\n", i, r.Timestamp, r.Level, r.Message, r.Context)
+	}
+	if b.Len() == 0 {
+		return "  (the sweep recorded nothing at all about this workspace)"
+	}
+	return b.String()
 }
 
 // shimDetached reports whether the host workspace view shows a live,
@@ -237,6 +297,17 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "turn-gate")
 	const gateText = "hibernation e2e turn gate: TestHibernateOnIdleCutoff"
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		// HibernationChainTimeout IS THIS WORLD'S BUDGET, not just the
+		// individual waits'. See that constant's own comment: a `WithTimeout`
+		// derived from w.Ctx() cannot outlive w.Ctx(), so a 15s wait inside a
+		// 5s world is bounded by whatever the world has left, and the bound
+		// declared at the wait was never the bound in force. MEASURED: this
+		// test's whole chain consumes 0.36s of the world budget in a quiet
+		// full-package run at -parallel 8, and 2.15s at a 1-minute load of
+		// 88 — 2.3x the ordinary DefaultTimeout margin away, close enough
+		// that the first wait to outrun the remainder reports a bare
+		// "context deadline exceeded" that says nothing about the sweep.
+		Timeout:      HibernationChainTimeout,
 		IdleCutoffMS: hibernationIdleCutoffMS,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
@@ -270,12 +341,18 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 
 	// Act: submit the gated turn. It parks before emitting anything, so it
 	// stays genuinely in flight until this test releases it.
+	//
+	// THE MARK IS TAKEN FIRST, so neither assertion below can be satisfied by
+	// the sweep's verdict on the MOUNT-SPAWNED session — which, never having
+	// been prompted, is itself idle past the cutoff and gets stood down on a
+	// fast box before this line runs (see sweepMark).
+	mark := markSweepLog(w, ws.GetDir())
 	gatedTurn := SubmitPrompt(t, w, ws, gateText)
 
 	// Assert: the sweep, firing every hibernationIdleCutoffMS, sees a real
 	// turn_in_flight refusal from the real shim and defers — never forcing a
 	// stand-down out from under live work.
-	awaitHibernateSweepRecord(t, w, ws.GetDir(),
+	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
 		"the sweep deferring hibernation for the in-flight gated turn",
 		hibernateNotFreeMsg)
 
@@ -289,7 +366,7 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 	// Assert: with the turn closed, the session goes idle again and the SAME
 	// sweep now succeeds — a real Hibernate ack followed by a graceful
 	// (non-forced) KillSession.
-	awaitHibernateSweepRecord(t, w, ws.GetDir(),
+	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
 		"the idle sweep hibernating the now-idle session", hibernateSucceededMsg)
 
 	// Assert: the host view settles on the documented park shape — the
@@ -389,7 +466,16 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 func TestRevivalAfterHibernate(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{IdleCutoffMS: hibernationIdleCutoffMS}})
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		// HibernationChainTimeout IS THIS WORLD'S BUDGET — the same reason
+		// TestHibernateOnIdleCutoff states, with this test's own figures: it
+		// spends 0.50s of the world budget quiet and 3.34s at a 1-minute load
+		// of 88, leaving DefaultTimeout only ~1.5x margin over a chain the
+		// file's own header already describes as two real process lifecycles
+		// plus a third spawn.
+		Timeout:      HibernationChainTimeout,
+		IdleCutoffMS: hibernationIdleCutoffMS,
+	}})
 	// Standing a shim down and reviving it opens a health fault while the
 	// session has no producer; that is what this test provokes. The link
 	// records are the same stand-down seen from the connectivity layer — the
@@ -408,8 +494,17 @@ func TestRevivalAfterHibernate(t *testing.T) {
 
 	// Act: one real turn, then let the compressed idle cutoff hibernate the
 	// session for real.
+	//
+	// THE MARK IS TAKEN BEFORE THE TURN, so nothing the sweep decided before
+	// this test acted can satisfy the wait below. What it cannot exclude is
+	// the mount-spawned session's OWN stand-down (sweepMark), which lands
+	// after the mark on a fast box; what it does guarantee is that a slow box,
+	// where no such record exists, waits for the real post-turn hibernation on
+	// this world's declared budget rather than on whatever a 5s default had
+	// left — which is the whole of what made this test's pass load-dependent.
+	mark := markSweepLog(w, ws.GetDir())
 	turn1 := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
-	awaitHibernateSweepRecord(t, w, ws.GetDir(),
+	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
 		"the idle sweep hibernating the session before revival", hibernateSucceededMsg)
 	hostCtx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
 	defer cancel()
@@ -448,5 +543,65 @@ func TestRevivalAfterHibernate(t *testing.T) {
 	}
 	if !sawTurn1End {
 		t.Fatalf("the feed never showed the pre-hibernation turn (%s) ending", turn1.GetValue())
+	}
+}
+
+// TestSweepRecordSinceIgnoresARecordBeforeTheMark is the marking rule itself,
+// against the exact shape that made TestRevivalAfterHibernate's pass depend on
+// how busy the box was: a "hibernated an idle session" record the daemon wrote
+// BEFORE the test acted (the mount-spawned session's own stand-down) must not
+// satisfy a wait for the hibernation of the session the test then ran a turn
+// on. Against an unmarked scan of the same sink this is the record that was
+// returned.
+func TestSweepRecordSinceIgnoresARecordBeforeTheMark(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	records := []harness.LogRecord{
+		{Operation: hibernateSweepOp, Message: hibernateSucceededMsg},
+		{Operation: hibernateSweepOp, Message: "the workspace's session is already terminal"},
+	}
+
+	// Act
+	_, found := sweepRecordSince(records, sweepMark(len(records)), hibernateSucceededMsg)
+
+	// Assert
+	if found {
+		t.Fatalf("sweepRecordSince matched a record written before the mark; that record is about an act the test had not yet performed")
+	}
+}
+
+// TestSweepRecordSinceFindsARecordAfterTheMark is the same rule's other half:
+// the record the test's own act produces is the one returned.
+func TestSweepRecordSinceFindsARecordAfterTheMark(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	before := []harness.LogRecord{{Operation: hibernateSweepOp, Message: hibernateSucceededMsg}}
+	after := append(append([]harness.LogRecord{}, before...),
+		harness.LogRecord{Operation: hibernateSweepOp, Message: hibernateSucceededMsg, Timestamp: "the one this test caused"})
+
+	// Act
+	got, found := sweepRecordSince(after, sweepMark(len(before)), hibernateSucceededMsg)
+
+	// Assert
+	if !found || got.Timestamp != "the one this test caused" {
+		t.Fatalf("sweepRecordSince(mark=%d) = %v, %t; want the record written after the mark", len(before), got, found)
+	}
+}
+
+// TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage keeps the match
+// bound to the idle sweep's OWN operation: a record from a different operation
+// that happens to carry the same message is not the sweep's decision.
+func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	records := []harness.LogRecord{{Operation: "daemon.workspace.bring_up", Message: hibernateSucceededMsg}}
+
+	// Act
+	_, found := sweepRecordSince(records, 0, hibernateSucceededMsg)
+
+	// Assert
+	if found {
+		t.Fatalf("sweepRecordSince matched a %q record; only %q is the idle sweep's own decision",
+			"daemon.workspace.bring_up", hibernateSweepOp)
 	}
 }
