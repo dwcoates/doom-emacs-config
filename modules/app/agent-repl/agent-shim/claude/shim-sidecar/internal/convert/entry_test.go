@@ -6,6 +6,8 @@ package convert
 import (
 	"errors"
 	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
 )
 
 func TestWriteIdIsTheRuledDigestOfItsSourceCoordinates(t *testing.T) {
@@ -379,4 +381,85 @@ func TestAWriteIdWithNeitherAFileIdNorARunScopeIsRaised(t *testing.T) {
 		}
 	}()
 	_ = WriteID(Attribution{Path: "/p/s.jsonl"}, "bash_terminal")
+}
+
+// Describe is the log line that says WHAT was not carried, so each residue arm
+// has to name itself distinctly: a reader tracing a lost record has nothing
+// else to go on.
+func TestDescribeNamesTheResidueArm(t *testing.T) {
+	cases := []struct {
+		name string
+		item *storev1.StoreUnservedItem
+		want string
+	}{
+		{
+			name: "keepalive",
+			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{
+				Keepalive: &storev1.StoreAgentItem{},
+			}},
+			want: "keepalive",
+		},
+		{
+			name: "vendor specific",
+			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
+				VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook_result"},
+			}},
+			want: `vendor_specific kind="hook_result"`,
+		},
+		{
+			name: "unknown",
+			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{
+				Unknown: &storev1.StoreUnknown{Discriminator: "widget", DiscriminatorField: "type"},
+			}},
+			want: `unknown discriminator="widget" field="type"`,
+		},
+		{
+			name: "unparsed",
+			item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{
+				Unparsed: &storev1.StoreUnparsed{Offset: 42, ParseError: "bad json"},
+			}},
+			want: `unparsed offset=42 error="bad json"`,
+		},
+		{
+			name: "an arm nobody set",
+			item: &storev1.StoreUnservedItem{},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			entry := &storev1.StoreEntry{Entry: &storev1.StoreEntry_AgentUpdate{
+				AgentUpdate: &storev1.StoreAgentUpdate{
+					AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: tc.item},
+				},
+			}}
+
+			// Act.
+			got := Describe(entry)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("Describe = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A CONVERSION FAILURE IS NOT A DROP: a value structpb cannot represent leaves
+// the record stored, carrying the failure where the body would have been.
+func TestRawStructCarriesTheFailureRatherThanLosingTheRecord(t *testing.T) {
+	// Arrange: a value encoding/json can never produce, so structpb refuses it.
+	raw := map[string]any{"bad": make(chan int)}
+
+	// Act.
+	got := rawStruct(raw)
+
+	// Assert.
+	if got == nil {
+		t.Fatal("an unconvertible body produced no struct at all, which is the drop this branch exists to prevent")
+	}
+	if got.GetFields()["__raw_struct_error"].GetStringValue() == "" {
+		t.Fatalf("struct = %v, want the conversion failure recorded in its place", got)
+	}
 }
