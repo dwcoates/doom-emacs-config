@@ -110,13 +110,28 @@ func run(args []string) error {
 	// A STAND-DOWN ENDS THE PROCESS, exactly as the real shim's does: the
 	// daemon's relaunch gate is the old process being REAPED, and a fake that
 	// answered KillSession and kept running would leave every stand-down
-	// waiting out its window and then force-killing. The exit happens AFTER
-	// the handler has written its response, which is what makes it
-	// deterministic rather than a race with the reply.
+	// waiting out its window and then force-killing.
+	//
+	// THE EXIT WAITS FOR THE REQUEST'S OWN CONTEXT, NOT FOR THE HANDLER TO
+	// RETURN. A handler returning does not mean its answer has left: over h2c
+	// the response's final frames are written by the connection's own
+	// goroutine after `handlerDone`, and an `os.Exit` on the handler's
+	// goroutine raced them. The daemon then read `unavailable: unexpected EOF`
+	// from a `KillSession` this fake had accepted, recorded "the session kill
+	// did not answer" against an orderly stand-down, and failed the warning
+	// sweep with it -- `TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous`
+	// and `TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall`, in 2 of 2
+	// integration runs. net/http cancels a request's context when its stream
+	// is closed, which is after the last frame of the answer was written, so
+	// that cancellation is the answer having left rather than a guess about it.
 	mux.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.ServeHTTP(w, r)
 		if strings.HasSuffix(r.URL.Path, "/KillSession") && proc.srv.killedSession() {
-			proc.die(0, "")
+			answered := r.Context()
+			go func() {
+				<-answered.Done()
+				proc.die(0, "")
+			}()
 		}
 	}))
 	httpSrv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
