@@ -1253,7 +1253,8 @@ const nativeBacktraceBound = 20 * time.Second
 const nativeBacktraceFile = "emacs.native-backtrace.txt"
 
 // nativeBacktraceHeadFrames is how much of the capture the failure message
-// quotes inline. Enough to name the loop without burying the failure.
+// quotes inline BEYOND the main thread, which is never trimmed. Enough to
+// name the loop without burying the failure.
 const nativeBacktraceHeadFrames = 40
 
 // nativeBacktrace is the LAST witness this layer has.
@@ -1298,6 +1299,16 @@ func (e *Emacs) captureNativeBacktrace() string {
 		"-ex", "set pagination off",
 		"-ex", "set confirm off",
 		"-ex", "info threads",
+		// THE MAIN THREAD IS ASKED FOR FIRST, BY NAME. `thread apply all bt`
+		// walks threads in DESCENDING order, so on an Emacs with glib helper
+		// threads the one that matters -- thread 1, the lisp interpreter --
+		// comes out last, and a capture read inline had already run out of
+		// room by the time it arrived (measured 2026-09-04 on
+		// TestEmacsVisitingAFileRoutesIntoItsOwningWorkspace, whose inline
+		// excerpt printed threads 4, 3 and 2 and cut off before thread 1).
+		// Asking for it separately puts it at the top of the capture, ahead
+		// of the walk that repeats it.
+		"-ex", "thread apply 1 bt",
 		"-ex", "thread apply all bt",
 		"-ex", "detach",
 		"-ex", "quit",
@@ -1316,14 +1327,80 @@ func (e *Emacs) captureNativeBacktrace() string {
 		text += fmt.Sprintf("\n(gdb exited with: %v)", runErr)
 	}
 	e.writeNativeBacktrace(text)
-	lines := strings.Split(text, "\n")
-	head := lines
-	if len(head) > nativeBacktraceHeadFrames {
-		head = append(head[:nativeBacktraceHeadFrames:nativeBacktraceHeadFrames],
-			fmt.Sprintf("... %d more lines in %s", len(lines)-nativeBacktraceHeadFrames, nativeBacktraceFile))
-	}
 	return "\n  emacs's native stack, from outside the process:\n    " +
-		strings.Join(head, "\n    ")
+		strings.Join(nativeBacktraceExcerpt(text), "\n    ")
+}
+
+// nativeBacktraceMainThread names the thread whose stack is the answer. Emacs
+// runs lisp on ONE thread and gdb numbers it 1; the rest are glib's helpers,
+// which are asleep in `poll` in every capture ever taken here and say nothing
+// about why the editor stopped.
+const nativeBacktraceMainThread = "Thread 1 "
+
+// nativeBacktraceExcerpt is what the failure message quotes inline.
+//
+// WHAT IT GUARANTEES, and the reason it is not a plain head: THE MAIN
+// THREAD'S STACK APPEARS IN FULL, FIRST, whatever else is trimmed. gdb's own
+// output puts it last and a head-of-N excerpt therefore dropped exactly the
+// frames the failure turns on. Everything before the first thread section --
+// gdb's preamble and its `info threads` table -- is kept as the index to what
+// follows, and the remaining threads fill whatever budget is left.
+func nativeBacktraceExcerpt(text string) []string {
+	lines := strings.Split(text, "\n")
+	preamble, sections := nativeBacktraceSections(lines)
+
+	out := append([]string{}, preamble...)
+	var rest [][]string
+	seenMain := false
+	for _, section := range sections {
+		if !seenMain && strings.HasPrefix(section[0], nativeBacktraceMainThread) {
+			// The main thread, in full, immediately after the index. gdb
+			// prints it twice (once for `thread apply 1 bt`, once inside the
+			// `all` walk); only the first copy is quoted.
+			seenMain = true
+			out = append(out, section...)
+			continue
+		}
+		if seenMain && strings.HasPrefix(section[0], nativeBacktraceMainThread) {
+			continue
+		}
+		rest = append(rest, section)
+	}
+
+	budget := nativeBacktraceHeadFrames
+	dropped := 0
+	for _, section := range rest {
+		if budget-len(section) < 0 {
+			dropped += len(section)
+			continue
+		}
+		budget -= len(section)
+		out = append(out, section...)
+	}
+	if dropped > 0 {
+		out = append(out, fmt.Sprintf("... %d more lines in %s", dropped, nativeBacktraceFile))
+	}
+	return out
+}
+
+// nativeBacktraceSections splits a capture into gdb's preamble and one group
+// of lines per thread. A thread's group runs from its `Thread N (...)` header
+// to the line before the next one, so a stack is never cut in half.
+func nativeBacktraceSections(lines []string) (preamble []string, sections [][]string) {
+	current := -1
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Thread ") && strings.Contains(line, "(") {
+			sections = append(sections, []string{line})
+			current = len(sections) - 1
+			continue
+		}
+		if current < 0 {
+			preamble = append(preamble, line)
+			continue
+		}
+		sections[current] = append(sections[current], line)
+	}
+	return preamble, sections
 }
 
 // emacsPID answers the Emacs this scenario owns.
