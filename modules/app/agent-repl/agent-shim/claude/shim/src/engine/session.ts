@@ -1480,7 +1480,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     let vendorSessionId: string;
     let clearedTo: string | undefined;
     let facts: TranscriptFacts | undefined;
-    let requestedModel = "";
+    // No initializer: BOTH source arms below set it, and a third arm that
+    // forgot to would be a compile error rather than a silent empty model.
+    let requestedModel: string;
     if (source.case === "fresh") {
       vendorSessionId = mintVendorSessionId();
       requestedModel = source.value.model?.name ?? "";
