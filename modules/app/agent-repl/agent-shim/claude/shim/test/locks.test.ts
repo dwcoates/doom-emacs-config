@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
+import { EventEmitter } from "node:events";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -9,6 +10,7 @@ import {
   lockPath,
   workspaceLockPath,
   LOCK_BIN_ENV,
+  LOCK_DIR_ENV,
   type LockRelease,
 } from "../src/locks.js";
 
@@ -201,6 +203,19 @@ describe("workspace lock", () => {
     expect(path.basename(p)).toBe("workspace-0b96ccc5.lock");
   });
 
+  it("keeps the root directory itself as a workspace, separator and all", () => {
+    // Arrange: cleanForKey strips a TRAILING separator, but "/" is nothing but
+    // one — stripping it would key the root off the empty string, the same key
+    // an unnamed workspace would have if it were allowed at all.
+    isolateHome();
+    // Act
+    const root = workspaceLockPath("/");
+    const doubled = workspaceLockPath("//");
+    // Assert
+    expect(path.basename(root)).toBe(path.basename(doubled));
+    expect(path.basename(root)).not.toBe(path.basename(workspaceLockPath("/ws")));
+  });
+
   it("refuses an unnamed workspace rather than resolving one shared lock", () => {
     // Arrange
     isolateHome();
@@ -229,5 +244,166 @@ describe("workspace lock", () => {
     // Assert: two separate holders, so the workspace claim is not a byproduct
     // of the session one.
     expect(releases).toHaveLength(2);
+  });
+});
+
+/**
+ * The claim's PROTOCOL, driven over a fully synthetic holder.
+ *
+ * The stand-in scripts above prove the happy paths, but a real child cannot be
+ * made to fail on cue: a spawn that raises synchronously, a stdin pipe that
+ * EPIPEs at release, a holder killed by a signal. Those arms are driven here
+ * over a fake `node:child_process`, so every one of them is deterministic.
+ */
+describe("the claim protocol over a synthetic holder", () => {
+  const priorLockDir = process.env[LOCK_DIR_ENV];
+
+  afterEach(() => {
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+    if (priorLockDir === undefined) delete process.env[LOCK_DIR_ENV];
+    else process.env[LOCK_DIR_ENV] = priorLockDir;
+  });
+
+  /** A child whose every stream and event this test drives by hand. */
+  interface FakeChild {
+    stdout: EventEmitter & { setEncoding(enc: string): void };
+    stderr: EventEmitter & { setEncoding(enc: string): void };
+    stdin: EventEmitter & { end(): void };
+    stdinEnded: number;
+    killed: string[];
+    emitter: EventEmitter;
+  }
+
+  function makeChild(): FakeChild {
+    const stdout = Object.assign(new EventEmitter(), { setEncoding: (): void => {} });
+    const stderr = Object.assign(new EventEmitter(), { setEncoding: (): void => {} });
+    const child: FakeChild = {
+      stdout,
+      stderr,
+      stdin: Object.assign(new EventEmitter(), {
+        end: (): void => {
+          child.stdinEnded += 1;
+        },
+      }),
+      stdinEnded: 0,
+      killed: [],
+      emitter: new EventEmitter(),
+    };
+    return child;
+  }
+
+  /** The locks module wired to a spawn this test controls. */
+  async function withSpawn(
+    spawnImpl: (binary: string, args: string[]) => unknown,
+  ): Promise<typeof import("../src/locks.js")> {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "shim-lock-fake-"));
+    homes.push(dir);
+    process.env[LOCK_DIR_ENV] = dir;
+    process.env[LOCK_BIN_ENV] = path.join(dir, "shim-lock");
+    vi.resetModules();
+    vi.doMock("node:child_process", () => ({ spawn: spawnImpl }));
+    const log = await import("../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "locks-suite" });
+    return import("../src/locks.js");
+  }
+
+  /** A spawn that yields a hand-driven child, exposed for the test to poke. */
+  async function withFakeChild(): Promise<{
+    locks: typeof import("../src/locks.js");
+    child: FakeChild;
+  }> {
+    const child = makeChild();
+    const locks = await withSpawn(() =>
+      Object.assign(child.emitter, {
+        stdout: child.stdout,
+        stderr: child.stderr,
+        stdin: child.stdin,
+        kill: (signal: string): void => {
+          child.killed.push(signal);
+        },
+      }),
+    );
+    return { locks, child };
+  }
+
+  it("rejects when spawning the holder raises synchronously", async () => {
+    // Arrange: an argument the platform refuses outright, which is how a
+    // misconfigured holder path reaches the caller as a throw rather than an
+    // 'error' event.
+    const locks = await withSpawn(() => {
+      throw new Error("EINVAL: invalid argument");
+    });
+
+    // Act, Assert — the claim cannot be attempted, and a shim that cannot
+    // prove it is the only one must not start.
+    await expect(locks.acquireSessionLock("s_unspawnable")).rejects.toThrow(
+      /cannot spawn the lock holder .*EINVAL: invalid argument/,
+    );
+  });
+
+  it("reports the signal when the holder was killed before taking the lock", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_signalled");
+
+    // Act.
+    child.emitter.emit("close", null, "SIGKILL");
+
+    // Assert — a signal death is not a "held by another shim" refusal.
+    await expect(claim).rejects.toThrow(/code null, signal SIGKILL/);
+  });
+
+  it("waits for a whole line before judging what the holder announced", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_partial");
+
+    // Act: the ready line arrives split across two chunks.
+    child.stdout.emit("data", "loc");
+    child.stdout.emit("data", "ked\n");
+
+    // Assert — a partial read is not a wrong announcement.
+    const release = await claim;
+    expect(release).toBeTypeOf("function");
+  });
+
+  it("survives the holder's stdin failing, because a gone holder IS the release", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_epipe");
+    child.stdout.emit("data", "locked\n");
+    await claim;
+    const mirror = vi.mocked(process.stderr.write);
+    const before = mirror.mock.calls.length;
+
+    // Act: the holder died, so writing to its stdin raises EPIPE.
+    child.stdin.emit("error", new Error("write EPIPE"));
+
+    // Assert — recorded, not thrown: an unhandled 'error' would take the shim
+    // down over a lock it no longer needs.
+    const recorded = mirror.mock.calls
+      .slice(before)
+      .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({ level: "warn", message: expect.stringContaining("stdin failed") });
+  });
+
+  it("closes the holder's stdin exactly once however often the release is called", async () => {
+    // Arrange.
+    const { locks, child } = await withFakeChild();
+    const claim = locks.acquireSessionLock("s_double_release");
+    child.stdout.emit("data", "locked\n");
+    const release = await claim;
+
+    // Act: the first release closes stdin and awaits the exit; the second
+    // must not re-close a pipe that is already gone.
+    const first = release();
+    child.emitter.emit("close", 0, null);
+    await first;
+    await release();
+
+    // Assert.
+    expect(child.stdinEnded).toBe(1);
   });
 });
