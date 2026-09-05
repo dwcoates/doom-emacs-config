@@ -8,7 +8,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Engine } from "../../src/engine/engine.js";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { shimRoutes } from "../../src/service/routes.js";
@@ -268,5 +268,154 @@ describe("shimRoutes validation ordering", () => {
 
     // Assert.
     expect(rejection?.message).toContain("start_turn.page_size");
+  });
+});
+
+describe("shimRoutes stream completion", () => {
+  it.each([
+    ["watchSession", requests.watchSessionRequest],
+    ["watchAgent", requests.watchAgentRequest],
+    ["watchBash", requests.watchBashRequest],
+  ] as const)("yields %s's frames through and ends when the engine's stream ends", async (verb, build) => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    const client = clientFor(engine);
+
+    // Act: drained to completion, not broken out of, so the pass-through's own
+    // end is what closes the stream.
+    const frames: unknown[] = [];
+    for await (const frame of (client[verb] as (r: unknown) => AsyncIterable<unknown>)(build())) {
+      frames.push(frame);
+    }
+
+    // Assert.
+    expect(frames).toHaveLength(1);
+  });
+});
+
+/**
+ * An exception the handler never anticipated must reach the caller WITH its
+ * detail: a bare `[internal] internal error` buries the evidence inside the
+ * process, and on a stream it would be a silent close.
+ */
+describe("shimRoutes unanticipated exceptions", () => {
+  /** An engine whose WatchSession throws `thrown` instead of yielding. */
+  function throwingStreamEngine(thrown: unknown): Engine {
+    const { engine } = recordingEngine();
+    return {
+      ...engine,
+      // eslint-disable-next-line require-yield
+      async *watchSession(): AsyncIterable<shimv1.WatchSessionResponse> {
+        throw thrown;
+      },
+    };
+  }
+
+  /** The stderr mirror, which every `error` record reaches. */
+  function records(written: string[]): Array<{ level: string; context: Record<string, unknown> }> {
+    return written.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as { level: string; context: Record<string, unknown> }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("turns a plain exception thrown mid-stream into Internal", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(new Error("the fold came apart")));
+
+    // Act.
+    const rejection = await drain(client.watchSession(requests.watchSessionRequest())).then(
+      () => null,
+      (err: unknown) => ConnectError.from(err),
+    );
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.Internal);
+  });
+
+  it("carries the exception's own detail out to the caller", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(new Error("the fold came apart")));
+
+    // Act.
+    const rejection = await drain(client.watchSession(requests.watchSessionRequest())).then(
+      () => null,
+      (err: unknown) => ConnectError.from(err),
+    );
+
+    // Assert.
+    expect(rejection?.message).toContain("the fold came apart");
+  });
+
+  it("names the rpc that threw, so the record points somewhere", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(new Error("the fold came apart")));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(
+      records(written).some(
+        (record) => record.level === "error" && record.context.rpc === "WatchSession",
+      ),
+    ).toBe(true);
+  });
+
+  it("records the throwing stack, which is the only copy of it", async () => {
+    // Arrange.
+    const client = clientFor(throwingStreamEngine(new Error("the fold came apart")));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(
+      records(written).some(
+        (record) => typeof record.context.stack === "string" && record.context.stack.includes("Error: the fold came apart"),
+      ),
+    ).toBe(true);
+  });
+
+  it("passes a ConnectError the shim MEANT to throw straight through", async () => {
+    // Arrange.
+    const client = clientFor(
+      throwingStreamEngine(new ConnectError("that session is gone", Code.NotFound)),
+    );
+
+    // Act.
+    const rejection = await drain(client.watchSession(requests.watchSessionRequest())).then(
+      () => null,
+      (err: unknown) => ConnectError.from(err),
+    );
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.NotFound);
+  });
+
+  it("says NOTHING about an unanticipated exception when the refusal was deliberate", async () => {
+    // A record per deliberate refusal would bury the one that names a defect.
+    // Arrange.
+    const client = clientFor(
+      throwingStreamEngine(new ConnectError("that session is gone", Code.NotFound)),
+    );
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert.
+    expect(records(written).some((record) => record.level === "error")).toBe(false);
   });
 });

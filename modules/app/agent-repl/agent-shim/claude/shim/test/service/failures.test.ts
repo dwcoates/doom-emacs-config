@@ -538,3 +538,22 @@ describe("unimplemented", () => {
     expect(error.message).toContain("shim.v1.StopWorkflow");
   });
 });
+
+describe("internalFromUnknown", () => {
+  it("carries the detail of a thrown value that is not an Error at all", () => {
+    // A `throw "..."` loses its detail entirely if only Error is read.
+    // Arrange, Act.
+    const failure = failures.internalFromUnknown("StartTurn", "the fold came apart");
+
+    // Assert.
+    expect(failure.rawMessage).toBe("shim.v1.StartTurn: the fold came apart");
+  });
+
+  it("codes a non-Error throw Internal, because it is a defect and not a refusal", () => {
+    // Arrange, Act.
+    const failure = failures.internalFromUnknown("StartTurn", 7);
+
+    // Assert.
+    expect(failure.code).toBe(Code.Internal);
+  });
+});
