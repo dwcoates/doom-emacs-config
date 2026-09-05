@@ -27,6 +27,7 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   AdoptionFailed,
   adoptAtBoot,
+  announceShutdown,
   classifyAdoptionRefusal,
   drainReasonText,
   drawDrainNotice,
@@ -852,5 +853,164 @@ describe("adoptAtBoot", () => {
     });
     const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
     await expect(adoptAtBoot(ctx)).rejects.toThrow(MalformedView);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ARMS A NEWER DAEMON COULD SET. The generated oneof cannot carry an arm
+// this build has no descriptor for, so these reach the words directly with the
+// shape a future schema would produce.
+// ---------------------------------------------------------------------------
+
+describe("the unknown arm", () => {
+  it("refuses a shutdown cause this build cannot word", () => {
+    // ARRANGE / ACT / ASSERT
+    expect(() =>
+      shutdownCauseText({ kind: { case: "quantumRollout", value: {} } } as never),
+    ).toThrow(/arm 'quantumRollout' is not one this build can draw/);
+  });
+
+  it("refuses a drain reason this build cannot word", () => {
+    expect(() =>
+      drainReasonText({ kind: { case: "diskSwap", value: {} } } as never, "DrainReason"),
+    ).toThrow(/arm 'diskSwap' is not one this build can draw/);
+  });
+
+  it("refuses an adoption refusal cause this build cannot classify", () => {
+    expect(() =>
+      classifyAdoptionRefusal({ cause: { case: "quarantined", value: {} } } as never),
+    ).toThrow(/arm 'quarantined' is not one this build can draw/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("announceShutdown", () => {
+  /** A sink that cannot mute a window, which the announcement must survive. */
+  const sinkWithoutSuppress = (): FailureSink & { reported: FailureKind[] } => {
+    const reported: FailureKind[] = [];
+    return { reported, report: (kind) => reported.push(kind), retract: () => undefined };
+  };
+
+  it("still draws the restarting notice when the sink cannot mute the outage", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const ticker = fakeTicker();
+    const ctx = bannerContext(ticker, sinkWithoutSuppress());
+    const banner = mountBanner(host, ctx);
+    // ACT
+    announceShutdown(
+      ctx,
+      banner,
+      announced({
+        cause: { kind: { case: "selfMergeRollout", value: {} } },
+        outageMs: 8000,
+        mintedAtMs: NOW,
+      }),
+    );
+    // ASSERT: the mute is a nicety; the notice is the contract.
+    expect(host.textContent).toBe("daemon restarting · rollout · expected back in 8s");
+    banner.dispose();
+  });
+
+  it("refuses an announcement carrying no cause rather than drawing a bare notice", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const ctx = bannerContext(fakeTicker(), new RecordingSink());
+    const banner = mountBanner(host, ctx);
+    const causeless = create(DaemonShutdownAnnouncedSchema, {
+      expectedOutageMs: 8000n,
+      mintedAtMs: BigInt(NOW),
+    });
+    // ACT / ASSERT
+    expect(() => announceShutdown(ctx, banner, causeless)).toThrow(MalformedView);
+    banner.dispose();
+  });
+
+  it("mutes the window before it tries to draw, so a causeless one still mutes", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const sink = new RecordingSink();
+    const ctx = bannerContext(fakeTicker(), sink);
+    const banner = mountBanner(host, ctx);
+    const causeless = create(DaemonShutdownAnnouncedSchema, {
+      expectedOutageMs: 8000n,
+      mintedAtMs: BigInt(NOW),
+    });
+    // ACT
+    expect(() => announceShutdown(ctx, banner, causeless)).toThrow(MalformedView);
+    // ASSERT
+    expect(sink.suppressed).toEqual([["daemonUnreachable", NOW + 8000]]);
+    banner.dispose();
+  });
+});
+
+describe("mountBanner: cancelling what never stood", () => {
+  it("leaves the terminal notice's own element in place when no drain is standing", () => {
+    // ARRANGE
+    const host = document.createElement("div");
+    const banner = mountBanner(host, bannerContext(fakeTicker()));
+    banner.showMoved("127.0.0.1:9");
+    const drawn = host.firstElementChild;
+    // ACT: no schedule was ever shown, so this must not redraw the host.
+    banner.clearDrain();
+    // ASSERT: a redraw would have replaced the element with an equal-looking one.
+    expect(host.firstElementChild).toBe(drawn);
+    banner.dispose();
+  });
+});
+
+describe("startLifecycle: the daemon answering again", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes the restarting notice down when the bounced daemon stream reopens", async () => {
+    // ARRANGE: run 1 announces the outage and then ends, which is the bounce;
+    // run 2 is the successor answering, and that is what ends the outage.
+    const host = document.createElement("div");
+    let runs = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        watchWebWorkspace: async function* () {
+          await new Promise<never>(() => undefined);
+        },
+        watchDaemon: async function* () {
+          runs += 1;
+          if (runs === 1) {
+            yield create(WatchDaemonResponseSchema, {
+              push: {
+                case: "shutdownAnnounced",
+                value: announced({
+                  cause: { kind: { case: "selfMergeRollout", value: {} } },
+                  outageMs: 8000,
+                  mintedAtMs: NOW,
+                }),
+              },
+            });
+            return;
+          }
+          yield create(WatchDaemonResponseSchema, { push: { case: "drainCancelled", value: {} } });
+          await new Promise<never>(() => undefined);
+        },
+      });
+    });
+    const ctx = lifecycleContext(
+      createAgentReplClient(transport),
+      new RecordingSink(),
+      fakeTicker(),
+    );
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    expect(host.textContent).toContain("daemon restarting");
+    // ACT: wait out the reopen backoff.
+    await vi.advanceTimersByTimeAsync(300);
+    await settle();
+    // ASSERT
+    expect(host.children.length).toBe(0);
+    handle.dispose();
   });
 });
