@@ -31,6 +31,43 @@ emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exi
 emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
 
+### One suite at a time: `bin/suite-slot.sh`
+
+Every suite here is already internally parallel — vitest takes one worker per
+CPU by default, `go test` takes GOMAXPROCS, and the Go e2e suite runs
+`-parallel 8` with each test booting a real daemon/shim/store/sidecar quartet.
+A single run is sized to fill the machine ON PURPOSE, so two runs do not go
+twice as fast: they go slower, and one of them reports a bound as missed that
+a quiet box meets.
+
+That is not hypothetical. Several agents each running their own suites at once
+took this box to a load average of 253, and the Emacs layer then failed 37 of
+45 scenarios on Doom's boot bound alone — a whole run's evidence thrown away,
+with nothing wrong with the product. So:
+
+```bash
+bin/suite-slot.sh npm test          # from the package dir; wraps, never relocates
+bin/suite-slot.sh go test ./... -count=1
+```
+
+The gate counts what is actually running, claiming slots as directories via
+`mkdir` (atomic, fails if the name exists), and reclaims a slot whose recorded
+pid is gone. It is the same mechanism as the sandbox's container gate in
+`e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
+
+Do NOT gate on the load average instead. It is a decaying mean, so it keeps
+climbing for a minute after the work stops, and every waiter reads the same
+number and starts at the same instant — a thundering herd that recreates the
+overload. This was tried; it is what produced the 253.
+
+Two standing rules follow from the same measurement:
+
+- The vitest configs cap `maxWorkers` at 50%. A suite may not claim every CPU
+  even when it does hold the slot.
+- A test that starts a child process group must kill the GROUP. `npm run` is a
+  wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
+  to init and burning CPU for the rest of the run.
+
 ### Test wait/timeout bounds are measured, not guessed
 
 Every synchronization wait in `test-integration-*.el` funnels through
