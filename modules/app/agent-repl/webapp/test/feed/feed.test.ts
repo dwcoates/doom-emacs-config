@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedBreadcrumbSchema,
+  FeedPageSchema,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
@@ -363,5 +364,251 @@ describe("mountFeed: disposal", () => {
     channel.push(push(responseRow("late")));
     await settle();
     expect(host.querySelector('[data-feed-row="late"]')).toBeNull();
+  });
+});
+
+describe("mountFeed: the scroll box", () => {
+  it("mounts and paints a feed with no scroll box at all", async () => {
+    // Arrange: a host with no parent and no scrollBox named — there is then no
+    // tail to follow, and the feed must still draw.
+    const h = harness({
+      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    });
+    const host = document.createElement("div");
+    document.body.replaceChildren();
+    // Act
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers() });
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-feed-row="p1"]')).not.toBeNull();
+    feed.dispose();
+  });
+
+  it("takes the host's own parent as the scroll box when none is named", async () => {
+    // Arrange
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const h = harness({
+      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    });
+    // Act
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers() });
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-feed-row="p1"]')).not.toBeNull();
+    feed.dispose();
+  });
+});
+
+describe("mountFeed: a bubble row re-pushed as another kind", () => {
+  /** A root feed holding ROW, with a tail the test pushes on. */
+  function withTail(row: FeedRow) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({
+      channels,
+      openFeed: (req) =>
+        openSuccess(page(req.feed === undefined ? [row] : []), tokenFor(req)),
+    });
+    return { h, channel };
+  }
+
+  const KINDS: ReadonlyArray<[string, FeedRow]> = [
+    ["a sync subagent", subagentRow("b1")],
+    ["a detached subagent", subagentRow("b1", { detached: true })],
+    ["a merge", mergeRow("b1")],
+  ];
+
+  it.each(KINDS)("files %s that stopped being one as an unreadable frame", async (_n, row) => {
+    // Arrange
+    const { h, channel } = withTail(row);
+    mount(h);
+    await settle();
+    // Act: the same id comes back as an ordinary response.
+    channel.push(push(responseRow("b1")));
+    await settle();
+    // Assert
+    expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+
+  it.each(KINDS)("keeps %s's drawn head rather than tearing the feed down", async (_n, row) => {
+    // Arrange
+    const { h, channel } = withTail(row);
+    const { host } = mount(h);
+    await settle();
+    // Act
+    channel.push(push(responseRow("b1")));
+    await settle();
+    // Assert: the bubble the reader was looking at is still there.
+    expect(host.querySelector('[data-feed-row="b1"] .bubble')).not.toBeNull();
+  });
+});
+
+describe("mountFeed: revealRow's harder answers", () => {
+  it("answers false when the probe never reached the daemon", async () => {
+    // Arrange: the root open succeeds, the reveal probe throws.
+    const h = harness({
+      openFeed: (req) => {
+        if (req.feed !== undefined) throw new Error("gone");
+        return openSuccess(page([]), tokenFor(req));
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+    // Act / Assert
+    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+  });
+
+  it("answers false when the probe's own page could not be served", async () => {
+    // Arrange: the probe answers an ERROR page, so there are no breadcrumbs.
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([]), tokenFor(req))
+          : openSuccess(
+              create(FeedPageSchema, {
+                result: {
+                  case: "error",
+                  value: {
+                    headline: { text: "history has a gap", tone: "red" },
+                    kind: {
+                      case: "historyReplayTruncated",
+                      value: { reason: "store closed" },
+                    },
+                  },
+                },
+              }),
+              tokenFor(req),
+            ),
+    });
+    const { feed } = mount(h);
+    await settle();
+    // Act / Assert
+    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+  });
+
+  it("answers false when a breadcrumb names a row that is no bubble", async () => {
+    // Arrange: the crumb points at an ordinary response row on the root feed.
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([responseRow("plain")]), tokenFor(req))
+          : openSuccess(
+              page([], {
+                crumbs: [create(FeedBreadcrumbSchema, { target: feedId("plain"), label: "p" })],
+              }),
+              tokenFor(req),
+            ),
+    });
+    const { feed } = mount(h);
+    await settle();
+    // Act / Assert
+    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+  });
+
+  it("does not search inside a bubble the reader has left closed", async () => {
+    // Arrange: a collapsed bubble stands on the root feed; the target is not
+    // drawn anywhere, so the probe must be made rather than answered locally.
+    const h = harness({
+      openFeed: (req) =>
+        req.feed === undefined
+          ? openSuccess(page([subagentRow("b1")]), tokenFor(req))
+          : openSuccess(page([]), tokenFor(req)),
+    });
+    const { feed, h: used } = mount(h);
+    await settle();
+    // Act
+    await feed.revealRow(feedId("deep"));
+    await settle();
+    // Assert
+    expect(used.calls.openFeed.map((req) => req.feed?.value)).toEqual([undefined, "deep"]);
+  });
+});
+
+describe("mountFeed: the root open's harder answers", () => {
+  it("paints nothing from an open the disposal overtook", async () => {
+    // Arrange: the OpenFeed answer disposes the feed before it is painted.
+    let feed: { dispose(): void } | null = null;
+    const h = harness({
+      openFeed: (req) => {
+        feed?.dispose();
+        return openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req));
+      },
+    });
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    // Act
+    feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-feed-row="p1"]')).toBeNull();
+  });
+
+  it("opens no tail when the daemon says it has not adopted the workspace yet", async () => {
+    // Arrange: a refusal carrying its typed cause.
+    const h = harness({
+      openFeed: () =>
+        create(OpenFeedResponseSchema, {
+          result: {
+            case: "error",
+            value: { cause: { case: "notYetAdopted", value: {} } },
+          },
+        }),
+    });
+    const { h: used } = mount(h);
+    await settle();
+    // Assert
+    expect(used.calls.watchFeed).toHaveLength(0);
+  });
+});
+
+describe("mountFeed: a walk whose container will not open", () => {
+  it("answers false when a breadcrumb's bubble refuses to expand", async () => {
+    // Arrange: the crumb names a real bubble whose own sub-feed is refused.
+    const h = harness({
+      openFeed: (req) => {
+        if (req.feed === undefined) return openSuccess(page([subagentRow("b1")]), tokenFor(req));
+        if (req.feed.value === "b1") {
+          return create(OpenFeedResponseSchema, { result: { case: "error", value: {} } });
+        }
+        return openSuccess(
+          page([], {
+            crumbs: [create(FeedBreadcrumbSchema, { target: feedId("b1"), label: "Explore" })],
+          }),
+          tokenFor(req),
+        );
+      },
+    });
+    const { feed } = mount(h);
+    await settle();
+    // Act / Assert
+    expect(await feed.revealRow(feedId("deep"))).toBe(false);
+  });
+});
+
+describe("mountFeed: disposal is once", () => {
+  it("cancels the root watch exactly once, however often dispose is called", async () => {
+    // Arrange
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    const h = harness({ channels });
+    const { feed, host } = mount(h);
+    await settle();
+    // Act
+    feed.dispose();
+    feed.dispose();
+    channel.push(push(responseRow("late")));
+    await settle();
+    // Assert: the second call is inert and nothing reopened.
+    expect([host.querySelector('[data-feed-row="late"]'), h.calls.watchFeed.length]).toEqual([
+      null,
+      1,
+    ]);
   });
 });

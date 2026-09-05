@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ATTENTION_BLINKS,
   ATTENTION_PHASES,
   ATTENTION_PHASE_MS,
   AttentionRegistry,
+  WINDOW_TIMERS,
   blinkState,
 } from "../../src/sidebar/attention.js";
 import { fakeTimers } from "./harness.js";
@@ -190,5 +191,54 @@ describe("disposing the registry", () => {
     registry.endPass();
     registry.dispose();
     expect(registry.stateOf("ws-1")).toBeNull();
+  });
+});
+
+describe("a marker nothing is drawing", () => {
+  it("has no blink state at all, rather than a resting one", () => {
+    expect(new AttentionRegistry(fakeTimers()).stateOf("ws-never-marked")).toBeNull();
+  });
+});
+
+describe("a marker the roster is drawing", () => {
+  it("reports the phase it is lit in", () => {
+    const registry = new AttentionRegistry(fakeTimers());
+    registry.mark("ws-1", element());
+    expect(registry.stateOf("ws-1")).toBe("on");
+  });
+
+  it("reports the dark half of the blink once a phase has elapsed", () => {
+    const timers = fakeTimers();
+    const registry = new AttentionRegistry(timers);
+    registry.mark("ws-1", element());
+    timers.run();
+    expect(registry.stateOf("ws-1")).toBe("off");
+  });
+});
+
+describe("the page's own timers, which production always uses", () => {
+  // The unit run shares one jsdom per worker, so the fake clock is uninstalled
+  // in this same file rather than left standing for whatever runs next.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("advances the cadence a phase at a time on the page's clock", () => {
+    vi.useFakeTimers();
+    const registry = new AttentionRegistry(WINDOW_TIMERS);
+    const el = element();
+    registry.mark("ws-1", el);
+    vi.advanceTimersByTime(ATTENTION_PHASE_MS);
+    expect(el.getAttribute("data-blink")).toBe("off");
+  });
+
+  it("cancels the page's pending phase when the registry is disposed", () => {
+    vi.useFakeTimers();
+    const registry = new AttentionRegistry(WINDOW_TIMERS);
+    const el = element();
+    registry.mark("ws-1", el);
+    registry.dispose();
+    vi.advanceTimersByTime(ATTENTION_PHASE_MS * ATTENTION_PHASES);
+    expect(el.getAttribute("data-blink")).toBe("on");
   });
 });

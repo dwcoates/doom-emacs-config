@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -314,5 +314,71 @@ describe("mounting the rail", () => {
     mountSidebar(document.createElement("nav"), ctx, { storage: null, timers: fakeTimers() });
     await settle();
     expect(requests).toBe(1);
+  });
+});
+
+describe("the page's own storage, when no storage was injected", () => {
+  /** Everything this section writes into the real jsdom storage. */
+  afterEach(() => {
+    globalThis.localStorage.removeItem(PREFS_KEY);
+  });
+
+  it("persists a preference into the page's localStorage", () => {
+    createSidebarPrefs().setGrouping("task");
+    expect(JSON.parse(globalThis.localStorage.getItem(PREFS_KEY) as string).grouping).toBe("task");
+  });
+
+  it("reads a preference back out of the page's localStorage", () => {
+    globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
+    expect(createSidebarPrefs().grouping()).toBe("task");
+  });
+
+  it("mounts on the page's storage, so a remembered grouping is the one drawn", async () => {
+    globalThis.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
+    const host = document.createElement("nav");
+    mountSidebar(host, ctxFor(), { timers: fakeTimers() });
+    await settle();
+    expect(
+      host.querySelector("[data-grouping-pick='task']")?.classList.contains("active"),
+    ).toBe(true);
+  });
+});
+
+describe("a page whose storage cannot even be reached", () => {
+  /** The real accessor, put back the moment the test that removed it ends. */
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+
+  afterEach(() => {
+    if (real === undefined) return;
+    Object.defineProperty(globalThis, "localStorage", real);
+  });
+
+  it("keeps its preferences in memory rather than failing to draw", () => {
+    // Arrange: an embedding where touching `localStorage` throws outright.
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get(): Storage {
+        throw new Error("site data is disabled");
+      },
+    });
+    // Act
+    const prefs = createSidebarPrefs();
+    prefs.setGrouping("task");
+    // Assert
+    expect(prefs.grouping()).toBe("task");
+  });
+});
+
+describe("a row's remembered expansion", () => {
+  it("is closed for a row nothing was ever remembered about", () => {
+    const storage = memoryStorage({ [PREFS_KEY]: JSON.stringify({ grouping: "task" }) });
+    expect(createSidebarPrefs(storage).isExpanded("ws-1")).toBe(false);
+  });
+
+  it("is closed for a row absent from a remembered set", () => {
+    const storage = memoryStorage({
+      [PREFS_KEY]: JSON.stringify({ expanded: { "ws-2": true } }),
+    });
+    expect(createSidebarPrefs(storage).isExpanded("ws-1")).toBe(false);
   });
 });

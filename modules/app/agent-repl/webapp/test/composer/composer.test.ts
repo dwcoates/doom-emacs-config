@@ -22,8 +22,10 @@ import { createAppContext, type AppContext } from "../../src/rpc/context.js";
 import {
   createComposerGate,
   mountComposer,
+  submitPromptRefusal,
   type ComposerHandle,
 } from "../../src/composer/composer.js";
+import { MalformedView } from "../../src/rpc/malformed.js";
 import { DROPPED_EVENT } from "../../src/tray/held-prompt.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -672,5 +674,81 @@ describe("a command the daemon acted on without minting a turn", () => {
     await sendText(h, "/model opus");
     expect(h.handle.lastTurn()).toBeUndefined();
     h.handle.dispose();
+  });
+});
+
+describe("the inert handle", () => {
+  it("answers no last turn, because it never sent one", () => {
+    // ARRANGE: production's root composer is Emacs's, so this one draws nothing.
+    const h = mount(turnSuccess, { composerEnabled: false });
+    // ACT / ASSERT
+    expect(h.handle.lastTurn()).toBeUndefined();
+    h.handle.dispose();
+  });
+});
+
+describe("the gate's own wording", () => {
+  it("says 'composer closed' when the gate shut without naming a reason", () => {
+    // ARRANGE
+    const h = mount();
+    // ACT
+    h.gate.set("closed");
+    // ASSERT
+    expect(h.host.querySelector(".composer-notice")?.textContent).toBe("composer closed");
+    h.handle.dispose();
+  });
+});
+
+describe("a command panel that sets no arm", () => {
+  const emptyPanel = (): SubmitPromptResponse =>
+    create(SubmitPromptResponseSchema, {
+      result: { case: "success", value: { outcome: { case: "commandPanel", value: {} } } },
+    });
+
+  it("still hands the panel to the host rather than drawing a refusal", async () => {
+    // ARRANGE
+    const h = mount(emptyPanel);
+    // ACT
+    await sendText(h, "/status");
+    // ASSERT: the panel's own emptiness is the panel mount's business, not this
+    // component's — the composer's job was to pass it on.
+    expect(h.panels.length).toBe(1);
+    h.handle.dispose();
+  });
+
+  it("spends the words, because the daemon accepted them", async () => {
+    const h = mount(emptyPanel);
+    await sendText(h, "/status");
+    expect(h.input.value).toBe("");
+    h.handle.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ARMS A NEWER DAEMON COULD SET. The generated oneof drops a case this
+// build has no descriptor for, so the wording is reached directly with the
+// shape a future schema would produce.
+// ---------------------------------------------------------------------------
+
+describe("submitPromptRefusal: the unknown arm", () => {
+  it("refuses a refusal reason this build cannot word", () => {
+    expect(() =>
+      submitPromptRefusal({ case: "quotaExhausted", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it("names the arm it could not word, so the log says which", () => {
+    expect(() => submitPromptRefusal({ case: "quotaExhausted", value: {} } as never)).toThrow(
+      /arm 'quotaExhausted' is not one this build can draw/,
+    );
+  });
+
+  it("refuses a bubble refusal whose kind this build cannot word", () => {
+    expect(() =>
+      submitPromptRefusal({
+        case: "bubbleRefused",
+        value: { detail: "", kind: { case: "agentAsleep", value: {} } },
+      } as never),
+    ).toThrow(/arm 'agentAsleep' is not one this build can draw/);
   });
 });

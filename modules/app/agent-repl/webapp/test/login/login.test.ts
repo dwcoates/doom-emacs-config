@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
   CloseLoginErrorSchema,
   CloseLoginResponseSchema,
@@ -18,8 +19,16 @@ import {
   type LoginTerminalOutput,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
 import type { LoginLink } from "../../src/login/link.js";
-import { mountLoginOverlay, report } from "../../src/login/login.js";
+import {
+  closeLogin,
+  handleFrame,
+  mountLoginOverlay,
+  openLogin,
+  pump,
+  report,
+} from "../../src/login/login.js";
 import type { LoginTerminalView } from "../../src/login/terminal.js";
+import type { AppContext } from "../../src/rpc/context.js";
 import { oneofArms } from "../arms.js";
 import { RecordingSink, appContext } from "../topbar/fixtures.js";
 
@@ -538,5 +547,273 @@ describe("report: one SendLoginInput, awaited", () => {
     await expect(report(appContext(), el, Promise.resolve(answered))).rejects.toThrow(
       "reading the answer threw",
     );
+  });
+});
+
+describe("openLogin: the paths that are not an answer", () => {
+  const header = (): HTMLElement => {
+    const el = document.createElement("div");
+    host.replaceChildren(el);
+    return el;
+  };
+
+  /** A context whose client is scripted directly, past the wire schema. */
+  const withClient = (client: unknown, sink = new RecordingSink()): AppContext => ({
+    ...appContext({}, sink),
+    client: client as AppContext["client"],
+  });
+
+  /** A well-formed response whose result names an arm this build has not. */
+  const openArm = (arm: string) => {
+    const response = create(OpenLoginResponseSchema, {});
+    (response as { result: unknown }).result = { case: arm, value: {} };
+    return response;
+  };
+
+  it("states a transport refusal at the header when OpenLogin never answered", async () => {
+    // ARRANGE
+    const el = header();
+    const ctx = appContext({
+      openLogin: () => {
+        throw new ConnectError("socket closed", Code.Unavailable);
+      },
+    });
+    // ACT
+    const configDir = await openLogin(ctx, el);
+    // ASSERT
+    expect([configDir, el.querySelector(".refusal")?.getAttribute("data-arm")]).toEqual([
+      null,
+      "transport",
+    ]);
+  });
+
+  it("leaves the overlay hidden when the open failed at the transport", async () => {
+    // ARRANGE
+    const overlay = mountLoginOverlay(
+      host,
+      appContext({
+        openLogin: () => {
+          throw new ConnectError("socket closed", Code.Unavailable);
+        },
+      }),
+      { terminalFactory: async () => fakeTerminal(), link: scriptedLink([]) },
+    );
+    // ACT
+    overlay.open();
+    await flush();
+    // ASSERT
+    expect(host.hidden).toBe(true);
+    overlay.dispose();
+  });
+
+  it("files a result arm this build cannot read through the failure sink", async () => {
+    // ARRANGE: a newer daemon's third arm on OpenLoginResponse.result.
+    const sink = new RecordingSink();
+    const el = header();
+    const ctx = withClient({ openLogin: async () => openArm("deferred") }, sink);
+    // ACT
+    const configDir = await openLogin(ctx, el);
+    // ASSERT
+    expect([configDir, sink.reported.map((k) => k.kind.case)]).toEqual([null, ["frameUndecodable"]]);
+  });
+
+  it("draws no refusal at the header for a result arm it cannot read", async () => {
+    // ARRANGE
+    const el = header();
+    const ctx = withClient({ openLogin: async () => openArm("deferred") });
+    // ACT
+    await openLogin(ctx, el);
+    // ASSERT
+    expect(el.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("closeLogin: the overlay comes down either way", () => {
+  const header = (): HTMLElement => {
+    const el = document.createElement("div");
+    host.replaceChildren(el);
+    return el;
+  };
+
+  const withClient = (client: unknown, sink = new RecordingSink()): AppContext => ({
+    ...appContext({}, sink),
+    client: client as AppContext["client"],
+  });
+
+  /** A well-formed response whose result names an arm this build has not. */
+  const closeArm = (arm: string) => {
+    const response = create(CloseLoginResponseSchema, {});
+    (response as { result: unknown }).result = { case: arm, value: {} };
+    return response;
+  };
+
+  it("states a transport refusal at the header when CloseLogin never answered", async () => {
+    // ARRANGE
+    const el = header();
+    const ctx = appContext({
+      closeLogin: () => {
+        throw new ConnectError("socket closed", Code.Unavailable);
+      },
+    });
+    // ACT
+    await closeLogin(ctx, el, () => undefined);
+    // ASSERT
+    expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("still hides the overlay when CloseLogin never answered", async () => {
+    // ARRANGE: leaving a terminal up over an unreachable daemon helps nobody.
+    const el = header();
+    let hidden = 0;
+    const ctx = appContext({
+      closeLogin: () => {
+        throw new ConnectError("socket closed", Code.Unavailable);
+      },
+    });
+    // ACT
+    await closeLogin(ctx, el, () => {
+      hidden += 1;
+    });
+    // ASSERT
+    expect(hidden).toBe(1);
+  });
+
+  it("files a result arm this build cannot read through the failure sink", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const el = header();
+    const ctx = withClient(
+      { closeLogin: async () => closeArm("deferred") },
+      sink,
+    );
+    // ACT
+    await closeLogin(ctx, el, () => undefined);
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toEqual(["frameUndecodable"]);
+  });
+
+  it("still hides the overlay for a result arm it cannot read", async () => {
+    // ARRANGE
+    const el = header();
+    let hidden = 0;
+    const ctx = withClient({ closeLogin: async () => closeArm("deferred") });
+    // ACT
+    await closeLogin(ctx, el, () => {
+      hidden += 1;
+    });
+    // ASSERT
+    expect(hidden).toBe(1);
+  });
+});
+
+describe("pump: the stream's own conclusions", () => {
+  it("reports a non-Error thrown by the stream by its string form", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const terminal = fakeTerminal();
+    const controller = new AbortController();
+    const link = scriptedLink([], {
+      // eslint-disable-next-line require-yield
+      attach: async function* () {
+        throw "the pipe broke";
+      },
+    });
+    // ACT
+    await pump(appContext({}, sink), link, controller, terminal, () => undefined);
+    // ASSERT
+    const kind = sink.reported[0]?.kind;
+    expect(kind?.case === "controlPlaneFailed" ? kind.value.cause : null).toBe("the pipe broke");
+  });
+
+  it("stays silent when the stream throws because the overlay aborted it", async () => {
+    // ARRANGE: an abort is the overlay closing, not the link failing.
+    const sink = new RecordingSink();
+    const controller = new AbortController();
+    controller.abort();
+    const link = scriptedLink([], {
+      // eslint-disable-next-line require-yield
+      attach: async function* () {
+        throw new Error("aborted");
+      },
+    });
+    // ACT
+    await pump(appContext({}, sink), link, controller, fakeTerminal(), () => undefined);
+    // ASSERT
+    expect(sink.reported).toEqual([]);
+  });
+
+  it("does not hide again when the stream throws after the overlay aborted it", async () => {
+    // ARRANGE
+    let hidden = 0;
+    const controller = new AbortController();
+    controller.abort();
+    const link = scriptedLink([], {
+      // eslint-disable-next-line require-yield
+      attach: async function* () {
+        throw new Error("aborted");
+      },
+    });
+    // ACT
+    await pump(appContext({}, new RecordingSink()), link, controller, fakeTerminal(), () => {
+      hidden += 1;
+    });
+    // ASSERT
+    expect(hidden).toBe(0);
+  });
+
+  it("stays silent when the stream ENDS because the overlay aborted it", async () => {
+    // ARRANGE: no closed frame, but the abort explains the ending.
+    const sink = new RecordingSink();
+    const controller = new AbortController();
+    controller.abort();
+    const link = scriptedLink([], {
+      attach: async function* () {
+        yield bytes([1]);
+      },
+    });
+    // ACT
+    await pump(appContext({}, sink), link, controller, fakeTerminal(), () => undefined);
+    // ASSERT
+    expect(sink.reported).toEqual([]);
+  });
+
+  it("does not hide when the stream ends after the overlay aborted it", async () => {
+    // ARRANGE
+    let hidden = 0;
+    const controller = new AbortController();
+    controller.abort();
+    const link = scriptedLink([], {
+      attach: async function* () {
+        yield bytes([1]);
+      },
+    });
+    // ACT
+    await pump(appContext({}, new RecordingSink()), link, controller, fakeTerminal(), () => {
+      hidden += 1;
+    });
+    // ASSERT
+    expect(hidden).toBe(0);
+  });
+});
+
+describe("handleFrame", () => {
+  it("refuses an output arm this build cannot draw", () => {
+    // ARRANGE: a newer daemon's third arm on LoginTerminalOutput.output.
+    const frame = { output: { case: "resized", value: {} } } as unknown as LoginTerminalOutput;
+    // ACT / ASSERT
+    expect(() => handleFrame(frame, fakeTerminal())).toThrow(
+      "arm 'resized' is not one this build can draw",
+    );
+  });
+});
+
+describe("the overlay's own defaults", () => {
+  it("mounts its hidden panel with no deps supplied at all", () => {
+    // ARRANGE / ACT: no terminalFactory and no link, so both defaults are
+    // taken; neither is reached until the overlay is opened.
+    const overlay = mountLoginOverlay(host, appContext());
+    // ASSERT
+    expect([host.hidden, host.querySelector(".login-panel") !== null]).toEqual([true, true]);
+    overlay.dispose();
   });
 });

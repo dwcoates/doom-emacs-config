@@ -7,6 +7,8 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import {
   AgentEffortLevel,
+  ModelMarker,
+  ModelMarkerSchema,
   ModelOptionSchema,
   type ModelOption,
 } from "../../../proto/gen/ts/conversation/v1/api_pb";
@@ -21,6 +23,7 @@ import {
   drawModelCapabilities,
   drawTopbarModelSelector,
   effortLevelName,
+  pickModel,
   offerableOptions,
   routeToColdGate,
   syntheticMarkerLiteral,
@@ -50,6 +53,23 @@ function mountSelector(tc: ReturnType<typeof topbarContext>["tc"], host: HTMLEle
 describe("syntheticMarkerLiteral", () => {
   it("reads the spelling off the schema rather than restating it", () => {
     expect(syntheticMarkerLiteral()).toBe("<synthetic>");
+  });
+
+  it("refuses to guess the spelling when the schema stops carrying it", () => {
+    // ARRANGE: the enum value loses its option block, which is the only place
+    // the literal lives. Restored in the same test, since the schema object is
+    // shared by every file in this worker.
+    const value = ModelMarkerSchema.value[ModelMarker.SYNTHETIC] as { proto: { options?: unknown } };
+    const options = value.proto.options;
+    try {
+      value.proto.options = undefined;
+      // ACT / ASSERT
+      expect(() => syntheticMarkerLiteral()).toThrow(
+        "conversation.v1.ModelMarker.SYNTHETIC carries no model_marker_literal",
+      );
+    } finally {
+      value.proto.options = options;
+    }
   });
 });
 
@@ -88,6 +108,34 @@ describe("drawTopbarModelSelector", () => {
     const button = mountSelector(tc, host, selector({ options: [option("a", { description: "fast one" })] }));
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(openPanel(host)?.textContent).toContain("fast one");
+  });
+
+  it("draws the option's capability tags in its row", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const withCaps = create(ModelOptionSchema, {
+      model: { name: "opus" },
+      displayName: "Opus 5",
+      capabilities: {
+        supportsFastMode: true,
+        effortSupport: { case: "effortUnsupported", value: {} },
+      },
+    });
+    const button = mountSelector(tc, host, selector({ options: [withCaps] }));
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.querySelector(".topbar-model-tags")?.textContent).toBe("fast");
+  });
+
+  it("draws no tag row for an option the daemon served no capabilities for", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const button = mountSelector(tc, host, selector({ options: [option("opus")] }));
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.querySelector(".topbar-model-tags")).toBeNull();
   });
 
   it("draws no description row for an empty description", () => {
@@ -156,8 +204,40 @@ describe("drawModelCapabilities", () => {
     ).toBe("lowhigh");
   });
 
+  it("tags adaptive thinking when the vendor declares it", () => {
+    expect(
+      drawModelCapabilities(
+        caps({
+          supportsAdaptiveThinking: true,
+          effortSupport: { case: "effortUnsupported", value: {} },
+        }),
+      ).textContent,
+    ).toContain("adaptive");
+  });
+
+  it("draws no adaptive tag for a model that does not declare it", () => {
+    expect(
+      drawModelCapabilities(
+        caps({
+          supportsAdaptiveThinking: false,
+          effortSupport: { case: "effortUnsupported", value: {} },
+        }),
+      ).textContent,
+    ).not.toContain("adaptive");
+  });
+
   it("refuses capabilities naming no effort arm", () => {
     expect(() => drawModelCapabilities(caps({}))).toThrow(MalformedView);
+  });
+
+  it("refuses an effort-support arm this build cannot draw", () => {
+    // ARRANGE: a newer daemon's effort arm, reaching a build with no case for it.
+    const capabilities = caps({ effortSupport: { case: "effortUnsupported", value: {} } });
+    (capabilities.effortSupport as { case: string }).case = "effortInherited";
+    // ACT / ASSERT
+    expect(() => drawModelCapabilities(capabilities)).toThrow(
+      /ModelCapabilities.effort_support.*effortInherited/,
+    );
   });
 });
 
@@ -321,6 +401,55 @@ describe("the pick", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     // ASSERT
     expect(host.querySelector(".refusal")).toBeNull();
+  });
+
+  it("states a transport failure at the selector when the pick never reached the daemon", async () => {
+    // ARRANGE / ACT
+    const host = await pick(() => {
+      throw new Error("no route to the daemon");
+    });
+    // ASSERT
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("re-throws a page with nowhere to route the cold refusal, rather than wording it twice", async () => {
+    // ARRANGE: the cold arm routes to the gate row, and a page with neither a
+    // gate row nor a footer has nowhere to put it. That is this end's own
+    // machinery failing, not an unreadable view, so it escapes.
+    const ctx = appContext({
+      setModel: () =>
+        create(SetModelResponseSchema, {
+          result: { case: "error", value: { cause: { case: "cold", value: {} } } },
+        }),
+    });
+    const { host, tc } = topbarContext(ctx);
+    const wrap = document.createElement("div");
+    host.append(wrap);
+    const button = document.createElement("button");
+    const row = document.createElement("button");
+    // ACT / ASSERT
+    await expect(pickModel(option("opus"), tc, wrap, button, row)).rejects.toThrow(
+      "the page has neither a cold gate row nor a footer to notice on",
+    );
+  });
+
+  it("still states the cold refusal at the selector before that page failure escapes", async () => {
+    // ARRANGE
+    const ctx = appContext({
+      setModel: () =>
+        create(SetModelResponseSchema, {
+          result: { case: "error", value: { cause: { case: "cold", value: {} } } },
+        }),
+    });
+    const { host, tc } = topbarContext(ctx);
+    const wrap = document.createElement("div");
+    host.append(wrap);
+    const button = document.createElement("button");
+    const row = document.createElement("button");
+    // ACT
+    await pickModel(option("opus"), tc, wrap, button, row).catch(() => undefined);
+    // ASSERT
+    expect(wrap.querySelector(".refusal")?.getAttribute("data-arm")).toBe("cold");
   });
 
   it("refuses an error naming no cause", async () => {

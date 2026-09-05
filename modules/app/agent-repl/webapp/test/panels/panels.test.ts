@@ -437,3 +437,55 @@ describe("the /context tool-call fold", () => {
     );
   });
 });
+
+describe("an arm this build has no case for", () => {
+  /** Poke an arm in AFTER `create`, which drops a case its descriptors lack. */
+  const poke = (target: object, field: string, arm: string): void => {
+    (target as Record<string, unknown>)[field] = { case: arm, value: {} };
+  };
+
+  it("refuses a submission panel arm the bundle cannot name", () => {
+    // ARRANGE
+    const foreign = panel({ case: "status", value: { rows: [] } });
+    poke(foreign, "panel", "cost");
+    // ACT / ASSERT
+    expect(() => drawCommandPanel(foreign, appContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a feed panel arm the bundle cannot name", () => {
+    const foreign = feedPanel({ case: "status", value: { rows: [] } });
+    poke(foreign, "panel", "help");
+    expect(() => drawFeedCommandPanel(foreign, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a todo status arm the bundle cannot name", () => {
+    const view = create(TodosPanelViewSchema, {
+      rows: [{ status: { case: "pending", value: {} }, subject: "ship it" }],
+    });
+    poke(view.rows[0] as object, "status", "abandoned");
+    expect(() => drawCommandPanel(panel({ case: "todos", value: view }), appContext())).toThrow(
+      MalformedView,
+    );
+  });
+
+  it("refuses an mcp status arm the bundle has no badge for", () => {
+    const view = create(McpPanelViewSchema, {
+      rows: [{ name: "github", status: { case: "connected", value: {} } }],
+    });
+    poke(view.rows[0] as object, "status", "degraded");
+    expect(() => drawCommandPanel(panel({ case: "mcp", value: view }), appContext())).toThrow(
+      MalformedView,
+    );
+  });
+});
+
+describe("the /context category color", () => {
+  it("writes no color at all when the vendor sent none", () => {
+    // ARRANGE / ACT
+    const drawn = drawContext(
+      contextView({ categories: [{ label: "Messages", figure: "1k", color: "" }] }),
+    );
+    // ASSERT
+    expect(drawn.querySelector(".context-category")?.hasAttribute("data-color")).toBe(false);
+  });
+});

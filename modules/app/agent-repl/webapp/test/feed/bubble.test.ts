@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
-import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountBubble } from "../../src/feed/bubble.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
 import {
@@ -36,7 +36,12 @@ async function settle(): Promise<void> {
 function mount(
   row: FeedRow,
   h: Harness = harness(),
-  opts: { folded?: boolean; composerFactory?: (host: HTMLElement) => Handle } = {},
+  opts: {
+    folded?: boolean;
+    composerFactory?: (host: HTMLElement) => Handle;
+    /** What the head states about itself, per draw. */
+    states?: (string | null)[];
+  } = {},
 ) {
   const heads: number[] = [];
   const bubble = mountBubble({
@@ -44,9 +49,11 @@ function mount(
     row,
     rc: rowContext(h.ctx, row),
     head: () => {
-      heads.push(1);
       const el = document.createElement("span");
       el.className = "stub-head";
+      const state = opts.states?.[heads.length];
+      if (state !== undefined && state !== null) el.setAttribute("data-state", state);
+      heads.push(1);
       return el;
     },
     body: defaultBubbleBody,
@@ -309,5 +316,287 @@ describe("mountBubble: disposal", () => {
     const { bubble } = mount(subagentRow("b1"));
     bubble.dispose();
     expect(await bubble.expand()).toBe(false);
+  });
+});
+
+describe("mountBubble: the head's state is the bubble's", () => {
+  it("repeats what the head stated about itself", () => {
+    const { bubble } = mount(subagentRow("b1"), harness(), { states: ["live"] });
+    expect(bubble.element.getAttribute("data-state")).toBe("live");
+  });
+
+  it("stops stating it once a later head states nothing", () => {
+    // Arrange: the first head says "live", the redrawn one says nothing.
+    const { bubble } = mount(subagentRow("b1"), harness(), { states: ["live", null] });
+    // Act
+    bubble.update(subagentRow("b1", { tokens: "9k" }));
+    // Assert: the bubble decides nothing of its own.
+    expect(bubble.element.hasAttribute("data-state")).toBe(false);
+  });
+});
+
+describe("mountBubble: the fold is a fact about the ROW", () => {
+  it("says the fold on the row chrome the bubble sits in", async () => {
+    // Arrange: the bubble mounted inside a real row element.
+    const h = harness();
+    const row = document.createElement("article");
+    row.setAttribute("data-feed-row", "b1");
+    const { bubble } = mount(subagentRow("b1"), h);
+    row.append(bubble.element);
+    document.body.replaceChildren(row);
+    // Act
+    await bubble.expand();
+    await settle();
+    // Assert
+    expect(row.getAttribute("data-expanded")).toBe("true");
+  });
+});
+
+describe("mountBubble: expanding what is already open", () => {
+  it("issues no second OpenFeed for a bubble that is already expanded", async () => {
+    const { bubble, h } = mount(subagentRow("b1"));
+    await bubble.expand();
+    await settle();
+    await bubble.expand();
+    await settle();
+    expect(h.calls.openFeed).toHaveLength(1);
+  });
+
+  it("answers true straight away for a bubble that is already expanded", async () => {
+    const { bubble } = mount(subagentRow("b1"));
+    await bubble.expand();
+    await settle();
+    expect(await bubble.expand()).toBe(true);
+  });
+});
+
+describe("mountBubble: a row with no arm at all", () => {
+  it("still opens its sub-feed by the row's own id", async () => {
+    // Arrange: the id is all a bubble needs; the arm is the head's business.
+    const h = harness();
+    const bare = create(FeedRowSchema, { id: create(FeedIdSchema, { value: "b1" }) });
+    const { bubble } = mount(bare, h);
+    // Act
+    await bubble.expand();
+    await settle();
+    // Assert
+    expect(h.calls.openFeed[0]?.feed?.value).toBe("b1");
+  });
+});
+
+describe("mountBubble: re-opening the tail", () => {
+  /** A bubble whose sub-feed page is whatever `pages` yields next. */
+  function reopening(pages: FeedRow[][], refuseAfter = Number.POSITIVE_INFINITY) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    let served = 0;
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        const at = served;
+        served += 1;
+        if (at >= refuseAfter) {
+          return create(OpenFeedResponseSchema, { result: { case: "error", value: {} } });
+        }
+        return openSuccess(page(pages[Math.min(at, pages.length - 1)]), tokenFor(req));
+      },
+    });
+    return { h, channel };
+  }
+
+  it("opens the feed again when the sub-feed's tail ends on its own", async () => {
+    // Arrange
+    const { h, channel } = reopening([[responseRow("r1")]]);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert
+    expect(h.calls.openFeed.length).toBeGreaterThan(1);
+  });
+
+  it("paints the fresh page over the sub-feed's rows on a reopen", async () => {
+    // Arrange
+    const { h, channel } = reopening([[responseRow("r1")], [responseRow("r2")]]);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert
+    expect(bubble.element.querySelector('[data-feed-row="r2"]')).not.toBeNull();
+  });
+
+  it("drops a row the fresh page omits, a page being a whole view", async () => {
+    const { h, channel } = reopening([[responseRow("r1")], [responseRow("r2")]]);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(bubble.element.querySelector('[data-feed-row="r1"]')).toBeNull();
+  });
+
+  it("tails the token the reopen minted, never the dead one", async () => {
+    const { h, channel } = reopening([[responseRow("r1")]]);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(h.calls.watchFeed.at(-1)?.watch?.value).toBe("tok:b1");
+  });
+
+  it("draws no refusal when the REOPEN is refused, there being no click to mark", async () => {
+    // Arrange: the expanding open succeeds, every reopen after it is refused.
+    const { h, channel } = reopening([[responseRow("r1")]], 1);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert
+    expect(bubble.element.querySelector(".refusal")).toBeNull();
+  });
+
+  it("keeps the rows the last good page painted when a reopen is refused", async () => {
+    const { h, channel } = reopening([[responseRow("r1")]], 1);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(bubble.element.querySelector('[data-feed-row="r1"]')).not.toBeNull();
+  });
+
+  it("opens nothing more once the bubble is disposed mid-reopen", async () => {
+    // Arrange
+    const { h, channel } = reopening([[responseRow("r1")]]);
+    const { bubble } = mount(subagentRow("b1"), h);
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    bubble.dispose();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert: a cancelled watch reopens nothing.
+    expect(h.calls.watchFeed).toHaveLength(1);
+  });
+});
+
+describe("mountBubble: the refusal does not accumulate", () => {
+  it("drops the previous refusal when the toggle is used again", async () => {
+    // Arrange: a daemon that refuses every open.
+    const h = harness({
+      openFeed: () => create(OpenFeedResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { bubble } = mount(subagentRow("b1"), h);
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    // Assert
+    expect(bubble.element.querySelectorAll(".refusal")).toHaveLength(1);
+  });
+});
+
+describe("mountBubble: disposal is once", () => {
+  it("disposes the sub-feed's composer exactly once", async () => {
+    // Arrange
+    let disposals = 0;
+    const { bubble } = mount(subagentRow("b1"), harness(), {
+      composerFactory: () => ({
+        dispose: () => {
+          disposals += 1;
+        },
+      }),
+    });
+    await bubble.expand();
+    await settle();
+    // Act
+    bubble.dispose();
+    bubble.dispose();
+    // Assert
+    expect(disposals).toBe(1);
+  });
+});
+
+describe("mountBubble: the sub-feed it hands the reveal walk", () => {
+  it("has no sub-feed before the first expansion", () => {
+    const { bubble } = mount(subagentRow("b1"));
+    expect(bubble.child()).toBeNull();
+  });
+
+  it("hands over the controller holding the sub-feed's rows once open", async () => {
+    // Arrange
+    const h = harness({
+      openFeed: (req) => openSuccess(page([responseRow("r1")]), tokenFor(req)),
+    });
+    const { bubble } = mount(subagentRow("b1"), h);
+    // Act
+    await bubble.expand();
+    await settle();
+    // Assert
+    expect(bubble.child()?.rows().map((row) => row.id?.value)).toEqual(["r1"]);
+  });
+});
+
+describe("mountBubble: the row says the fold on the way back too", () => {
+  it("says the collapse on the row chrome the bubble sits in", async () => {
+    // Arrange
+    const row = document.createElement("article");
+    row.setAttribute("data-feed-row", "b1");
+    const { bubble } = mount(subagentRow("b1"));
+    row.append(bubble.element);
+    document.body.replaceChildren(row);
+    await bubble.expand();
+    await settle();
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    // Assert
+    expect(row.getAttribute("data-expanded")).toBe("false");
+  });
+});
+
+describe("mountBubble: disposed while a reopen is in flight", () => {
+  it("paints no page from a reopen the disposal overtook", async () => {
+    // Arrange: the reopen's own OpenFeed disposes the bubble before answering.
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:b1", channel);
+    let served = 0;
+    let live: { dispose(): void } | null = null;
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        served += 1;
+        if (served === 2) live?.dispose();
+        return openSuccess(page([responseRow(served === 1 ? "r1" : "r2")]), tokenFor(req));
+      },
+    });
+    const { bubble } = mount(subagentRow("b1"), h);
+    live = bubble;
+    await bubble.expand();
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert: the fresh page is dropped rather than painted into a dead bubble.
+    expect(bubble.element.querySelector('[data-feed-row="r2"]')).toBeNull();
   });
 });

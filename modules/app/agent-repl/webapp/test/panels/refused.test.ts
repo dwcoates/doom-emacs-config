@@ -22,7 +22,10 @@ import type { RowContext } from "../../src/feed/cards/context.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createAppContext } from "../../src/rpc/context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { drawFeedCommandRefused } from "../../src/panels/refused.js";
+import {
+  drawFeedCommandRefused,
+  requestCommandSupportRefusal,
+} from "../../src/panels/refused.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
@@ -231,5 +234,61 @@ describe("the add-support offer", () => {
     const button = card.querySelector<HTMLButtonElement>("[data-add-support]");
     button?.click();
     expect(button?.disabled).toBe(true);
+  });
+});
+
+describe("an answer this build cannot read", () => {
+  /** A recording sink, so the guard's filed card is observable. */
+  function recordingContext(answer: () => RequestCommandSupportResponse): {
+    rc: RowContext;
+    reported: string[];
+  } {
+    const reported: string[] = [];
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, { requestCommandSupport: () => answer() });
+    });
+    const ctx = createAppContext({
+      client: createAgentReplClient(transport),
+      workspace: WORKSPACE,
+      ticker: createTicker(60_000),
+      failures: {
+        report: (kind) => reported.push(kind.kind.case ?? "unset"),
+        retract: () => undefined,
+      },
+      composerEnabled: false,
+    });
+    return {
+      rc: { ctx, feed: "root", row: create(FeedRowSchema, {}), revealRow: async () => true },
+      reported,
+    };
+  }
+
+  /** The daemon answered with a `result` oneof that sets no arm. */
+  const unreadable = (): RequestCommandSupportResponse =>
+    create(RequestCommandSupportResponseSchema, {});
+
+  it("files the unreadable answer as frame_undecodable rather than losing it", async () => {
+    // ARRANGE
+    const { rc, reported } = recordingContext(unreadable);
+    const card = drawFeedCommandRefused(refused(true), rc);
+    // ACT
+    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    await settle();
+    // ASSERT
+    expect(reported).toEqual(["frameUndecodable"]);
+  });
+
+  it("draws no transport sentence for an unreadable answer, which is not the link failing", async () => {
+    const { rc } = recordingContext(unreadable);
+    const card = drawFeedCommandRefused(refused(true), rc);
+    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    await settle();
+    expect(card.querySelector(".command-refused-refusal")).toBeNull();
+  });
+
+  it("refuses a support-refusal cause arm the bundle cannot name", () => {
+    expect(() =>
+      requestCommandSupportRefusal({ case: "quotaSpent", value: {} } as never),
+    ).toThrow(MalformedView);
   });
 });

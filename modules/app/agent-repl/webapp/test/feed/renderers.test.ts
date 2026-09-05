@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { FeedBreadcrumbSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import { FeedBreadcrumbSchema, FeedRowSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
   createRowRenderers,
@@ -110,6 +110,27 @@ describe("arrangeSubfeedRows", () => {
     expect(host.children).toHaveLength(1);
   });
 
+  it("places an ID-LESS row whose container this feed never drew at the top level", () => {
+    // Arrange: no id at all, so the warning's row name falls back to "unset".
+    const host = document.createElement("div");
+    const orphan = create(FeedRowSchema, {
+      parent: { row: feedId("missing") },
+      row: {
+        case: "activity",
+        value: {
+          unit: {
+            case: "response",
+            value: { result: { case: "success", value: { prose: { markdown: "hi" } } } },
+          },
+        },
+      },
+    });
+    // Act
+    arrangeSubfeedRows(host, viewOf([orphan]));
+    // Assert: it is drawn, at the top level, rather than dropped.
+    expect(host.children).toHaveLength(1);
+  });
+
   it("clears a stale nested child when its parent stops naming it", () => {
     const host = document.createElement("div");
     const rows = [responseRow("a"), responseRow("b", "x", "a")];
@@ -145,6 +166,77 @@ describe("drawBreadcrumbTrail", () => {
       rowContext(ctx, userPromptRow("a", "x")),
     );
     expect([...host.children].map((el) => el.textContent)).toEqual(["outer", "inner"]);
+  });
+
+  it("puts the trail at the top of the mount it was given", () => {
+    // Arrange: a detached host and a mount that already holds a row.
+    const { ctx } = harness();
+    const mount = document.createElement("div");
+    const row = document.createElement("p");
+    mount.append(row);
+    const host = document.createElement("div");
+    // Act
+    drawBreadcrumbTrail(
+      host,
+      [create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" })],
+      rowContext(ctx, userPromptRow("a", "x")),
+      mount,
+    );
+    // Assert: the header line leads the mount.
+    expect([...mount.children]).toEqual([host, row]);
+  });
+
+  it("leaves the trail where the caller put it when no mount was named", () => {
+    // Arrange
+    const { ctx } = harness();
+    const host = document.createElement("div");
+    // Act: no mount argument at all.
+    drawBreadcrumbTrail(
+      host,
+      [create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" })],
+      rowContext(ctx, userPromptRow("a", "x")),
+    );
+    // Assert: the crumbs are drawn and nothing was attached anywhere.
+    expect([host.children.length, host.parentElement]).toEqual([1, null]);
+  });
+
+  it("does not move a trail that is already in the page", () => {
+    // Arrange: the host sits AFTER another child of the mount.
+    const { ctx } = harness();
+    const mount = document.createElement("div");
+    const first = document.createElement("p");
+    const host = document.createElement("div");
+    mount.append(first, host);
+    // Act
+    drawBreadcrumbTrail(
+      host,
+      [create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" })],
+      rowContext(ctx, userPromptRow("a", "x")),
+      mount,
+    );
+    // Assert: it was NOT prepended above the sibling it already followed.
+    expect([...mount.children]).toEqual([first, host]);
+  });
+
+  it("makes a crumb the daemon gave no target inert", () => {
+    // Arrange
+    const { ctx } = harness();
+    const host = document.createElement("div");
+    const revealed: string[] = [];
+    drawBreadcrumbTrail(
+      host,
+      [create(FeedBreadcrumbSchema, { label: "nowhere" })],
+      rowContext(ctx, userPromptRow("a", "x"), {
+        revealRow: async (id) => {
+          revealed.push(id.value);
+          return true;
+        },
+      }),
+    );
+    // Act
+    host.querySelector("button")?.click();
+    // Assert: a crumb with nothing to jump to jumps nowhere.
+    expect(revealed).toEqual([]);
   });
 
   it("makes a crumb a jump target rather than a navigation", () => {
