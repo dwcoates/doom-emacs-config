@@ -45,6 +45,8 @@ const DefaultLaunchWindow = 2 * time.Second
 // opener is the Opener.
 type opener struct {
 	launcherCmd  string
+	defaultBin   string
+	activateBin  string
 	profile      string
 	launchWindow time.Duration
 	log          dlog.Logger
@@ -54,12 +56,20 @@ type opener struct {
 func newOpener(cfg Config) *opener {
 	o := &opener{
 		launcherCmd:  cfg.LauncherCmd,
+		defaultBin:   cfg.DefaultLauncherBin,
+		activateBin:  cfg.ActivateBin,
 		profile:      cfg.Profile,
 		launchWindow: cfg.LaunchWindow,
 		log:          cfg.Logger,
 	}
 	if o.launcherCmd == "" {
 		o.launcherCmd = os.Getenv(EnvBrowserCmd)
+	}
+	if o.defaultBin == "" {
+		o.defaultBin = DefaultBinary
+	}
+	if o.activateBin == "" {
+		o.activateBin = activateBinary
 	}
 	if o.profile == "" {
 		o.profile = DefaultProfileDirectory
@@ -81,7 +91,7 @@ func (o *opener) launcherName() string {
 	if o.launcherCmd != "" {
 		return o.launcherCmd
 	}
-	return DefaultBinary
+	return o.defaultBin
 }
 
 // Validate reports whether url is something worth handing to a browser command
@@ -165,7 +175,7 @@ func (o *opener) openOverridden(ctx context.Context, url string) error {
 // A failed raise and a failed hand-off are distinct errors: a link the user
 // clicked that silently went nowhere is worse than a loud failure.
 func (o *opener) openDefault(ctx context.Context, url string) error {
-	if err := o.run(ctx, activateBinary, ActivateArgv(DefaultApp)); err != nil {
+	if err := o.run(ctx, o.activateBin, ActivateArgv(DefaultApp)); err != nil {
 		wrapped := fmt.Errorf("externalbrowser: raising %q before opening %s: %w", DefaultApp, url, err)
 		o.log.Error("daemon.externalbrowser.open", "could not raise the external browser", dlog.Context{
 			"url":    url,
@@ -175,7 +185,7 @@ func (o *opener) openDefault(ctx context.Context, url string) error {
 		})
 		return wrapped
 	}
-	if err := o.run(ctx, DefaultBinary, LaunchArgv(o.profile, url)); err != nil {
+	if err := o.run(ctx, o.defaultBin, LaunchArgv(o.profile, url)); err != nil {
 		wrapped := fmt.Errorf("externalbrowser: opening %s in profile %q: %w", url, o.profile, err)
 		o.log.Error("daemon.externalbrowser.open", "external link launch failed", dlog.Context{
 			"url":     url,
