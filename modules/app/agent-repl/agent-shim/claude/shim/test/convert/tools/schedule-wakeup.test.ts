@@ -20,7 +20,7 @@ function corpusOutput(): Record<string, unknown> {
       import.meta.url,
     ),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { toolUseResult: Record<string, unknown> }).toolUseResult;
 }
 
@@ -60,7 +60,7 @@ function startOf(call: PendingCall): conversationv1.AgentScheduleWakeupStart {
 
 function successOf(structured: unknown): conversationv1.AgentScheduleWakeupSuccess {
   const wakeup = wakeupOf(
-    scheduleWakeupConverter.settle(callWith({ delaySeconds: 1200 }), outcomeWith(structured))!,
+    scheduleWakeupConverter.settle(callWith({ delaySeconds: 1200 }), outcomeWith(structured)),
   );
   expect(wakeup.result.case).toBe("success");
   return wakeup.result.value as conversationv1.AgentScheduleWakeupSuccess;
@@ -182,7 +182,7 @@ describe("scheduleWakeupConverter.settle", () => {
     const call = callWith({ delaySeconds: 60 });
 
     // Act.
-    const wakeup = wakeupOf(scheduleWakeupConverter.settle(call, outcomeWith(undefined, true))!);
+    const wakeup = wakeupOf(scheduleWakeupConverter.settle(call, outcomeWith(undefined, true)));
 
     // Assert.
     const failure = wakeup.result.value as conversationv1.AgentScheduleWakeupFailure;

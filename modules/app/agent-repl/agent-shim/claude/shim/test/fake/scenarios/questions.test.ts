@@ -9,19 +9,19 @@ import { driveScenario, theResult, toolUseResults, toolUses } from "../harness.j
 
 /** A gate that answers every question with its first option's label. */
 const answerFirst: CanUseToolLike = async (name, input) => {
-  if (name !== "AskUserQuestion") return { behavior: "allow", updatedInput: input } as PermissionResultLike;
+  if (name !== "AskUserQuestion") return { behavior: "allow", updatedInput: input };
   const questions = (input as { questions: { question: string; options: { label: string }[] }[] }).questions;
   const answers: Record<string, string> = {};
   for (const q of questions) answers[q.question] = q.options[0]?.label ?? "";
-  return { behavior: "allow", updatedInput: { ...input, answers } } as PermissionResultLike;
+  return { behavior: "allow", updatedInput: { ...input, answers } };
 };
 
 const declineToAnswer: CanUseToolLike = async () =>
-  ({ behavior: "deny", message: "the question was never answered" }) as PermissionResultLike;
+  ({ behavior: "deny", message: "the question was never answered" });
 
 const questionInput = (driven: Awaited<ReturnType<typeof driveScenario>>): {
   questions: { question: string; multiSelect: boolean; options: unknown[] }[];
-} => (toolUses(driven)[0] as { input: { questions: never[] } }).input as never;
+} => (toolUses(driven)[0] as { input: { questions: never[] } }).input;
 
 describe("a single-select question", () => {
   it("asks through the gate with the question's own tool_use id", async () => {

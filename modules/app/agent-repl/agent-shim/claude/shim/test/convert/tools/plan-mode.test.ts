@@ -43,7 +43,7 @@ function startOf(call: PendingCall): conversationv1.AgentPlanModeStart {
 }
 
 function successOf(toolName: string, structured: unknown): conversationv1.AgentPlanModeSuccess {
-  const plan = planOf(planModeConverter.settle(callNamed(toolName), outcomeWith(structured))!);
+  const plan = planOf(planModeConverter.settle(callNamed(toolName), outcomeWith(structured)));
   expect(plan.state.case).toBe("success");
   return plan.state.value as conversationv1.AgentPlanModeSuccess;
 }
@@ -202,7 +202,7 @@ describe("planModeConverter.settle", () => {
   it("settles an errored call as the failure arm", () => {
     // Arrange, Act.
     const plan = planOf(
-      planModeConverter.settle(callNamed("ExitPlanMode"), outcomeWith(undefined, true))!,
+      planModeConverter.settle(callNamed("ExitPlanMode"), outcomeWith(undefined, true)),
     );
 
     // Assert.

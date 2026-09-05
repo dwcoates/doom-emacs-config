@@ -1191,7 +1191,7 @@ describe("rotation, against the session's own facts", () => {
     await first.exited;
     const rotatedTo = readdirSync(
       join(first.dirs.stateDir, "shim", workspaceLockKey(workspaceRealPath(first.dirs)), "vendor-id"),
-    )[0]!.replace(/\.json$/, "");
+    )[0].replace(/\.json$/, "");
     expect(rotatedTo).not.toBe(started.vendorSessionId);
 
     const second = await spawnShim({ reuse: first.dirs });

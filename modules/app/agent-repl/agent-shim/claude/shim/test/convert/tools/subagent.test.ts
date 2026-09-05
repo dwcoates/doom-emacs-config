@@ -235,7 +235,7 @@ describe("subagentConverter.settle", () => {
     // id the bubble it draws would address nothing.
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call(toolInput("agent")), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call(toolInput("agent")), outcome(toolUseResult("agent"))),
     );
 
     // Assert: the minting rule's value, the same one the start states.
@@ -247,18 +247,18 @@ describe("subagentConverter.settle", () => {
     const structured = toolUseResult("agent");
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.report?.prose?.markdown).toBe(
-      (structured["content"] as { text: string }[])[0]!.text,
+      (structured["content"] as { text: string }[])[0].text,
     );
   });
 
   it("leaves the structured result unset, because no vendor field declares one", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -268,7 +268,7 @@ describe("subagentConverter.settle", () => {
   it("carries the corpus run's duration and tool-use count", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -278,7 +278,7 @@ describe("subagentConverter.settle", () => {
   it("maps the corpus usage counters into the canonical token shape", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -296,7 +296,7 @@ describe("subagentConverter.settle", () => {
   it("takes the SYNC usage arm, because an awaited completion is the only path it settles", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -309,7 +309,7 @@ describe("subagentConverter.settle", () => {
     delete structured["usage"];
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.totals?.usage.case).toBeUndefined();
@@ -318,7 +318,7 @@ describe("subagentConverter.settle", () => {
   it("carries the corpus tool-stat breakdown", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -331,7 +331,7 @@ describe("subagentConverter.settle", () => {
     delete structured["toolStats"];
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.totals?.toolStats).toBeUndefined();
@@ -340,7 +340,7 @@ describe("subagentConverter.settle", () => {
   it("falls back to the resolved model for models_used when no list was given", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -352,7 +352,7 @@ describe("subagentConverter.settle", () => {
     const structured = { ...toolUseResult("agent"), modelsUsed: ["claude-opus-5", "claude-fable-5"] };
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.modelsUsed.map((model) => model.name)).toEqual([
@@ -364,7 +364,7 @@ describe("subagentConverter.settle", () => {
   it("reads resolved_subagent_type off agentType, which is what that field means", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -380,7 +380,7 @@ describe("subagentConverter.settle", () => {
     };
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect([success.worktree?.path, success.worktree?.branch]).toEqual(["/tmp/wt", "agent/wt"]);
@@ -391,7 +391,7 @@ describe("subagentConverter.settle", () => {
     const structured = { ...toolUseResult("agent"), worktreePath: "/tmp/wt" };
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.worktree).toBeUndefined();
@@ -400,7 +400,7 @@ describe("subagentConverter.settle", () => {
   it("carries no worktree for a subagent that shared its caller's tree", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -410,7 +410,7 @@ describe("subagentConverter.settle", () => {
   it("stamps the settle instant", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "p" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -420,7 +420,7 @@ describe("subagentConverter.settle", () => {
   it("restates the prompt on the settled frame, so it describes itself", () => {
     // Arrange, Act.
     const success = successOf(
-      subagentConverter.settle(call({ prompt: "instruction" }), outcome(toolUseResult("agent")))!,
+      subagentConverter.settle(call({ prompt: "instruction" }), outcome(toolUseResult("agent"))),
     );
 
     // Assert.
@@ -513,11 +513,11 @@ describe("subagentConverter.settle for facts the vendor left unstated", () => {
     delete structured["agentId"];
 
     // Act.
-    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
     // Assert.
     expect(success.report?.prose?.markdown).toBe(
-      (structured["content"] as { text: string }[])[0]!.text,
+      (structured["content"] as { text: string }[])[0].text,
     );
   });
 
@@ -535,7 +535,7 @@ describe("subagentConverter.settle for facts the vendor left unstated", () => {
       const structured = completionWith({ usage: {} });
 
       // Act.
-      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
       // Assert.
       expect(read(success.totals!.usage.value as conversationv1.TokenUsage)).toBe(0n);
@@ -559,7 +559,7 @@ describe("subagentConverter.settle for facts the vendor left unstated", () => {
       const structured = completionWith({ toolStats: {} });
 
       // Act.
-      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured)));
 
       // Assert.
       expect(read(success.totals!.toolStats!)).toBe(0);

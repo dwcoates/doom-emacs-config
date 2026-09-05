@@ -44,7 +44,7 @@ function startOf(call: PendingCall): conversationv1.AgentArtifactStart {
 
 function successOf(structured: unknown): conversationv1.AgentArtifactSuccess {
   const artifact = artifactOf(
-    artifactConverter.settle(callWith({ file_path: "page.html" }), outcomeWith(structured))!,
+    artifactConverter.settle(callWith({ file_path: "page.html" }), outcomeWith(structured)),
   );
   expect(artifact.result.case).toBe("success");
   return artifact.result.value as conversationv1.AgentArtifactSuccess;
@@ -215,7 +215,7 @@ describe("artifactConverter.settle", () => {
     const call = callWith({ file_path: "/tmp/page.html" });
 
     // Act.
-    const artifact = artifactOf(artifactConverter.settle(call, outcomeWith(undefined, true))!);
+    const artifact = artifactOf(artifactConverter.settle(call, outcomeWith(undefined, true)));
 
     // Assert.
     const failure = artifact.result.value as conversationv1.AgentArtifactFailure;

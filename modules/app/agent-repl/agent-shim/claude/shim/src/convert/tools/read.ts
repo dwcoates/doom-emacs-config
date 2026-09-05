@@ -154,7 +154,7 @@ function textExtent(
   const stoppedShort =
     totalLines !== undefined && numLines !== undefined && numLines < totalLines;
   if (askedLimit !== undefined && startedAtFirstLine && stoppedShort) {
-    return headExtent(contents, totalLines as number, "line_cap");
+    return headExtent(contents, totalLines, "line_cap");
   }
 
   if (stoppedShort) {
@@ -166,9 +166,9 @@ function textExtent(
         { level: "warn", tool_use_id: call.toolUseId },
         "a short read began past line 1 with no offset asked; recorded as a range",
       );
-      return rangeExtent(contents, startLine as number, numLines as number, totalLines as number);
+      return rangeExtent(contents, startLine, numLines, totalLines);
     }
-    return headExtent(contents, totalLines as number, "line_cap");
+    return headExtent(contents, totalLines, "line_cap");
   }
 
   return wholeExtent(contents);

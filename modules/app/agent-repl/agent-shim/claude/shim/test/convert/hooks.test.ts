@@ -23,7 +23,7 @@ function started(hookEvent: string, hookId = "hook-1"): Extract<SdkMessage, { ty
     hook_event: hookEvent,
     uuid: "00000000-0000-0000-0000-000000000001",
     session_id: "session-1",
-  } as Extract<SdkMessage, { type: "system"; subtype: "hook_started" }>;
+  };
 }
 
 /** A `hook_response` as the vendor spells one. */
@@ -44,7 +44,7 @@ function response(
     uuid: "00000000-0000-0000-0000-000000000002",
     session_id: "session-1",
     ...fields,
-  } as Extract<SdkMessage, { type: "system"; subtype: "hook_response" }>;
+  };
 }
 
 /** The hook arm one converted response carries. */

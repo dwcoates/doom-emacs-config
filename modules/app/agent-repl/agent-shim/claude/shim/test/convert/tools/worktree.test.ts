@@ -44,7 +44,7 @@ function startOf(call: PendingCall): conversationv1.AgentWorktreeStart {
 }
 
 function successOf(toolName: string, structured: unknown): conversationv1.AgentWorktreeSuccess {
-  const worktree = worktreeOf(worktreeConverter.settle(callNamed(toolName), outcomeWith(structured))!);
+  const worktree = worktreeOf(worktreeConverter.settle(callNamed(toolName), outcomeWith(structured)));
   expect(worktree.state.case).toBe("success");
   return worktree.state.value as conversationv1.AgentWorktreeSuccess;
 }
@@ -285,7 +285,7 @@ describe("worktreeConverter.settle", () => {
   it("settles an errored call as the failure arm", () => {
     // Arrange, Act.
     const worktree = worktreeOf(
-      worktreeConverter.settle(callNamed("ExitWorktree"), outcomeWith(undefined, true))!,
+      worktreeConverter.settle(callNamed("ExitWorktree"), outcomeWith(undefined, true)),
     );
 
     // Assert.

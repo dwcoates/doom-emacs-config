@@ -201,7 +201,7 @@ describe("a detached subagent's mid-flight utterance", () => {
     const agentId = agentIdOf(driven);
     const utterance = driven
       .subagent(agentId)
-      .find((l) => l.type === "assistant") as Record<string, unknown> | undefined;
+      .find((l) => l.type === "assistant");
 
     // Assert
     expect({

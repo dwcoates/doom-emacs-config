@@ -1578,7 +1578,7 @@ describe("standing down", () => {
       signal: new AbortController().signal,
       toolUseID: "toolu_1",
       requestId: "r",
-    } as never);
+    });
     await Promise.resolve();
 
     await h.engine.standDown("SIGTERM");
@@ -2632,7 +2632,7 @@ describe("account usage, pushed on the account-usage interval", () => {
           model_scoped: [],
         },
         behaviors: null,
-      } as AccountUsageLike,
+      },
     });
     const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
     let seen: conversationv1.SessionAccountUsage | undefined;
@@ -2774,7 +2774,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "a01",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2794,7 +2794,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "toolu_spawn",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2824,7 +2824,7 @@ describe("an ask raised under a subagent's vendor agent id", () => {
       toolUseID: "toolu_inner",
       agentID: "a01",
       requestId: "req_1",
-    } as never);
+    });
     await Promise.resolve();
     await h.engine.standDown("SIGTERM");
     await pending;
@@ -2985,7 +2985,7 @@ describe("the vendor request the turn runs under", () => {
     const before = vi.mocked(writeSync).mock.calls.length;
     bindLog({ operation: "shim.test.request-id" }).log({}, "probe");
     const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
-    const [, bytes, offset, length] = calls[before]!;
+    const [, bytes, offset, length] = calls[before];
     const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
     return record.request_id;
   }

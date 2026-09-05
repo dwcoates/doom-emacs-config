@@ -134,7 +134,7 @@ export const FAKE_MCP_SERVERS: McpServerStatusLike[] = [
 ];
 
 /** Only the healthy server, for the arm-narrowing scenario. */
-export const FAKE_MCP_SERVERS_HEALTHY: McpServerStatusLike[] = [FAKE_MCP_SERVERS[0]!];
+export const FAKE_MCP_SERVERS_HEALTHY: McpServerStatusLike[] = [FAKE_MCP_SERVERS[0]];
 
 /** Who the offline session is authenticated as. */
 export const FAKE_ACCOUNT_INFO: AccountInfoLike = {

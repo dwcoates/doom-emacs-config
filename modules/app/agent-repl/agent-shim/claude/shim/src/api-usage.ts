@@ -128,7 +128,7 @@ function copyJsonObject(
     return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
       key,
       copyJsonValue(rawUsage, entry, `${path}.${key}`, ancestors),
-    ])) as JsonObject;
+    ]));
   } finally {
     ancestors.delete(value);
   }
@@ -181,7 +181,7 @@ function aliasedValue(
   if (present.length > 1) {
     throw new InvalidModeledUsageError(field, Object.fromEntries(present.map((alias) => [alias, raw[alias]])), raw, `has conflicting aliases ${present.join(", ")}`);
   }
-  return present.length === 0 ? { present: false, value: undefined } : { present: true, value: raw[present[0]!] };
+  return present.length === 0 ? { present: false, value: undefined } : { present: true, value: raw[present[0]] };
 }
 
 function validCounter(raw: Record<string, unknown>, field: string, value: unknown): number {

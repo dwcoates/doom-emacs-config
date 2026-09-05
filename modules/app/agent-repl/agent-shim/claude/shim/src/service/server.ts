@@ -445,7 +445,7 @@ export function flushStreamHead(request: StreamableRequest, response: Streamable
       );
     }
     return response;
-  }) as typeof response.writeHead;
+  });
   LOGGER.logVerbose({ content_type: contentType }, "flushed the response head on accepting a stream");
   return true;
 }

@@ -19,7 +19,7 @@ function persisted(): Record<string, unknown>[] {
 describe("shim runtime logging", () => {
   beforeEach(() => {
     mockedWriteSync.mockReset();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => args[3] as number) as typeof writeSync);
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => args[3] as number));
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -77,7 +77,7 @@ describe("shim runtime logging", () => {
 
   it("writes multibyte JSONL with byte-accurate short-write offsets", async () => {
     const log = await configured();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => Math.min(5, args[3] as number)) as typeof writeSync);
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => Math.min(5, args[3] as number)));
     log.bindLog({ operation: "shim.test.unicode" }).log({}, "snowman ☃ and rocket 🚀");
     const calls = mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>;
     expect(calls.length).toBeGreaterThan(1);
@@ -142,7 +142,7 @@ describe("shim runtime logging", () => {
     // it per record would only bury the announcement.
     mockedWriteSync.mockImplementation(() => 0);
     log.bindLog({ operation: "shim.test.zero" }).log({}, "nope");
-    expect(JSON.parse(terminal[0]!)).toMatchObject({
+    expect(JSON.parse(terminal[0])).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
       workspace_dir: "/canonical/workspace",
     });
@@ -155,15 +155,15 @@ describe("shim runtime logging", () => {
   it("uses emergency stderr when the sink throws or over-reports bytes", async () => {
     const log = await configured();
     const terminal = stderr();
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
     log.bindLog({ operation: "shim.test.throw" }).log({}, "nope");
-    expect(JSON.parse(terminal[0]!).message).toContain("bad fd");
+    expect(JSON.parse(terminal[0]).message).toContain("bad fd");
     vi.clearAllMocks();
     const overLog = await configured();
     const overTerminal = stderr();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1) as typeof writeSync);
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1));
     overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope");
-    expect(JSON.parse(overTerminal[0]!).message).toContain("invalid write length");
+    expect(JSON.parse(overTerminal[0]).message).toContain("invalid write length");
   });
 
   it("reports fatal errors canonically after configuration and through bootstrap stderr before it", async () => {
@@ -175,10 +175,10 @@ describe("shim runtime logging", () => {
     const bootstrapTerminal = stderr();
     bootstrapFatal(new Error("bootstrap"));
     expect(mockedWriteSync).not.toHaveBeenCalled();
-    expect(JSON.parse(bootstrapTerminal[0]!)).toMatchObject({
+    expect(JSON.parse(bootstrapTerminal[0])).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
     });
-    expect(JSON.parse(bootstrapTerminal[0]!).message).toContain("bootstrap");
+    expect(JSON.parse(bootstrapTerminal[0]).message).toContain("bootstrap");
     vi.clearAllMocks();
     await bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
@@ -231,13 +231,13 @@ describe("shim runtime logging", () => {
     const log = await configured();
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
     log.bindLog({ operation: "shim.test.epipe" }).log({}, "retire the mirror");
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
     const terminal = stderr();
     log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure");
 
     // The mirror is gone and the durable sink has just died, so the emergency
     // path is the only channel left -- and it still carries the cause.
-    expect(JSON.parse(terminal[0]!).message).toContain("bad fd");
+    expect(JSON.parse(terminal[0]).message).toContain("bad fd");
   });
 
   it("tells a registered observer that the sink is poisoned", async () => {
@@ -247,7 +247,7 @@ describe("shim runtime logging", () => {
     stderr();
     const causes: string[] = [];
     log.onLogSinkPoisoned((cause) => causes.push(cause.message));
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
 
     log.bindLog({ operation: "shim.test.observed" }).log({}, "durable failure");
 
@@ -257,7 +257,7 @@ describe("shim runtime logging", () => {
   it("tells an observer that registers AFTER the poisoning, since it is a standing condition", async () => {
     const log = await configured();
     stderr();
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
     log.bindLog({ operation: "shim.test.late" }).log({}, "durable failure");
 
     const causes: string[] = [];
@@ -271,7 +271,7 @@ describe("shim runtime logging", () => {
     stderr();
     const causes: string[] = [];
     log.onLogSinkPoisoned((cause) => causes.push(cause.message));
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
 
     log.bindLog({ operation: "shim.test.once" }).log({}, "one");
     log.bindLog({ operation: "shim.test.once" }).log({}, "two");

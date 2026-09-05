@@ -25,7 +25,7 @@ const LAST_CHANGE = create(conversationv1.AgentActivityIdSchema, { value: "toolu
 
 /** One attachment fixture from the corpus, as the record the converter reads. */
 function attachment(name: string): AttachmentRecord {
-  return corpusLine(join("attachments", `${name}.jsonl`)) as unknown as AttachmentRecord;
+  return corpusLine(join("attachments", `${name}.jsonl`));
 }
 
 describe("injected context", () => {

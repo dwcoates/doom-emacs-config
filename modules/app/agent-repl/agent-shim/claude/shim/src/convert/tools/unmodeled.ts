@@ -69,7 +69,7 @@ function argumentsOf(call: PendingCall): JsonObject | undefined {
     );
     return undefined;
   }
-  return (isMessage(raw, StructSchema) ? toJson(StructSchema, raw) : raw) as JsonObject;
+  return (isMessage(raw, StructSchema) ? toJson(StructSchema, raw) : raw);
 }
 
 /** The vendor's MCP tool-name prefix. */

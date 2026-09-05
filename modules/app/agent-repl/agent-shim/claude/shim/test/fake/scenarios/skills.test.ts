@@ -108,7 +108,7 @@ describe("a PARAMETERIZED skill invocation", () => {
     // Arrange + Act
     const driven = await driveScenario(["!skill create-or-update-workspace merge"]);
     const meta = recordsOfType(driven.transcript(), "user").find((l) => l.isMeta === true);
-    const text = ((meta?.message as { content: { text: string }[] }).content[0] as { text: string }).text;
+    const text = ((meta?.message as { content: { text: string }[] }).content[0]).text;
 
     // Assert
     expect(text).toContain("/w/s/.claude/skills/create-or-update-workspace");
