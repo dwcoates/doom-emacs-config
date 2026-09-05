@@ -97,8 +97,9 @@ type watcher struct {
 	// exits silently instead of reporting a transport failure.
 	gen    uint64
 	closed bool
-	// sessionEnded records that the session itself is over (query_died), which
-	// is the one way a stream may legally end without a terminal.
+	// sessionEnded records that the session itself is over — the vendor query
+	// died, or the daemon is deliberately ending it (SessionEnding) — which is
+	// the one way a stream may legally end without a terminal.
 	sessionEnded bool
 	// degraded records that a standing stream is actually DOWN -- a stream
 	// that ended while the session was live, or a watch that could not be
@@ -472,6 +473,23 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	if page != nil {
 		w.routeOpeningPageLocked(w.main, page)
 	}
+}
+
+// SessionEnding records that the daemon itself is ending this session, so the
+// standing streams the shim closes on its way out read as the session's end
+// rather than as transport faults. It is idempotent, and it does NOT close
+// anything: the shim still writes its own terminals as the session ends, and
+// the watcher must stay open to receive them.
+func (w *watcher) SessionEnding(reason string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sessionEnded {
+		return
+	}
+	w.sessionEnded = true
+	w.log.Info("daemon.sessionwatcher.session_ending",
+		"the daemon is ending the session; its standing streams end with it",
+		dlog.Context{"reason": reason})
 }
 
 // Close tears down every watch this workspace owns. It NEVER kills anything:
