@@ -1109,3 +1109,74 @@ describe("the trigger facts, one arm at a time", () => {
     ]);
   });
 });
+
+/**
+ * The unknown-word fallbacks, on the two rule arms the round-trip tests reach
+ * only with words this build already knows. A vendor newer than this build
+ * spells a behavior we have never seen, and each arm must degrade the same way:
+ * UNSPECIFIED going out, `ask` coming back — never a guessed grant.
+ */
+describe("rule replacement and removal, on behavior words this build does not know", () => {
+  const unknownBehavior = (type: "replaceRules" | "removeRules"): PermissionUpdateLike =>
+    ({
+      type,
+      destination: "session",
+      behavior: "confirm",
+      rules: [{ toolName: "Bash" }],
+    }) as unknown as PermissionUpdateLike;
+
+  const echoed = (
+    type: "replaceRules" | "removeRules",
+  ): conversationv1.AgentPermissionStanding =>
+    create(conversationv1.AgentPermissionStandingSchema, {
+      changes: [
+        create(conversationv1.AgentPermissionChangeSchema, {
+          destination: conversationv1.AgentPermissionDestination.SESSION,
+          change:
+            type === "replaceRules"
+              ? {
+                  case: "replaceRules",
+                  value: create(conversationv1.AgentPermissionRulesReplacedSchema, {
+                    behavior: conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+                  }),
+                }
+              : {
+                  case: "removeRules",
+                  value: create(conversationv1.AgentPermissionRulesRemovedSchema, {
+                    behavior: conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+                  }),
+                },
+        }),
+      ],
+    });
+
+  it("marks a replacement's unknown behavior UNSPECIFIED rather than guessing one", () => {
+    const change = toStanding([unknownBehavior("replaceRules")]).changes[0]?.change;
+
+    expect(change?.case === "replaceRules" ? change.value.behavior : undefined).toBe(
+      conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+    );
+  });
+
+  it("marks a removal's unknown behavior UNSPECIFIED rather than guessing one", () => {
+    const change = toStanding([unknownBehavior("removeRules")]).changes[0]?.change;
+
+    expect(change?.case === "removeRules" ? change.value.behavior : undefined).toBe(
+      conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+    );
+  });
+
+  it("reads an unspecified replacement behavior back as ask, the most restrictive of the three", () => {
+    expect(fromStanding(echoed("replaceRules"))[0]).toMatchObject({
+      type: "replaceRules",
+      behavior: "ask",
+    });
+  });
+
+  it("reads an unspecified removal behavior back as ask, the most restrictive of the three", () => {
+    expect(fromStanding(echoed("removeRules"))[0]).toMatchObject({
+      type: "removeRules",
+      behavior: "ask",
+    });
+  });
+});
