@@ -125,8 +125,19 @@ almost useless."
           (error "agent-repl-itest: timed out after %ss waiting for %s"
                  limit (or description (prin1-to-string pred))))
         ;; A nil PROCESS argument serves every process's output and runs any
-        ;; pending sentinel, then returns after the interval at the latest.
-        (accept-process-output nil 0.02)))))
+        ;; pending sentinel, and RETURNS THE MOMENT ANY ARRIVES -- so for a
+        ;; predicate over Emacs's own state this loop is already woken by the
+        ;; event, and the interval is only the floor under a predicate whose
+        ;; fact lives on the DAEMON (a subscriber count, a recorded call) and
+        ;; so cannot announce itself.
+        ;;
+        ;; 2ms, not the 20ms it was: at 20ms nearly every wait in the suite
+        ;; slept a whole slot, which was the single largest cost in the
+        ;; integration run (454 waits, 10.0s of an 11.5s host run).  A
+        ;; daemon-state predicate now costs one loopback round trip (~0.3ms
+        ;; since the control plane stopped spawning curl), so 2ms samples an
+        ;; order of magnitude finer at a duty cycle the predicate can carry.
+        (accept-process-output nil 0.002)))))
 
 (defconst agent-repl-itest--fixture-root
   (expand-file-name (format "agent-repl-itest-fixtures-%d" (emacs-pid))

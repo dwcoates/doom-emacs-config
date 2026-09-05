@@ -310,6 +310,13 @@ is host.el's OWN `agent-repl-link-down-functions' hook, live via
          (lambda () (agent-repl-host-ref ws))
          nil "host.el's own initial register+subscribe")
         (let ((id (plist-get (agent-repl-host-ref ws) :id)))
+          ;; THE REF IS THE CLIENT'S FACT, THE SUBSCRIBER IS THE DAEMON'S.
+          ;; `agent-repl-host-ref' is minted when RegisterWorkspace answers,
+          ;; strictly BEFORE the WatchHostWorkspace subscription it then
+          ;; opens is registered daemon-side.  A push in that window reaches
+          ;; nobody and this scenario waits out its whole deadline for a
+          ;; state that was delivered to no one.
+          (agent-repl-itest--await-subscriber daemon "host" id)
           (agent-repl-itest--push
            daemon "host" '((host . ((none . ()) (naming . ())))) id)
           (agent-repl-itest--wait-until

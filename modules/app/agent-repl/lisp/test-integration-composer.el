@@ -1629,6 +1629,13 @@ regression could hide in; nothing here is stubbed."
             (agent-repl-itest--wait-until
              (lambda () (agent-repl-host-ref agent-repl-itest-composer--ws))
              nil "host.el's own register+subscribe on the primary")
+            ;; THE REF IS THE CLIENT'S FACT, THE SUBSCRIBER IS THE DAEMON'S:
+            ;; the ref is minted when RegisterWorkspace answers, strictly
+            ;; before the WatchHostWorkspace subscription it then opens is
+            ;; registered.  A push in that window reaches nobody.
+            (agent-repl-itest--await-subscriber
+             primary "host"
+             (plist-get (agent-repl-host-ref agent-repl-itest-composer--ws) :id))
             (agent-repl-itest--push
              primary "host"
              `((host . ,(agent-repl-itest-composer--live 'open)))
