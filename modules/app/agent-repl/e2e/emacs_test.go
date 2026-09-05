@@ -820,8 +820,14 @@ func (e *Emacs) awaitDoom() {
 				// Doom tree Emacs refuses as unsafe -- are explained only by
 				// what is actually sitting in the scratch root, which is
 				// deleted with the test.
-				e.t.Fatalf("Doom failed to initialize: %s%s; pty output:\n%s",
-					ready.Error, e.rootListing(), e.proc.Output())
+				// THE BREADCRUMB COMES WITH IT, exactly as it does for a boot
+				// that never stamps at all. A GUI Emacs writes its messages
+				// to the frame rather than the pty, so a failed stamp is
+				// routinely accompanied by an EMPTY pty -- measured -- and
+				// the breadcrumb is then the only record of which boot step
+				// the error came out of.
+				e.t.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
+					ready.Error, e.bootBreadcrumb(), e.rootListing(), e.proc.Output())
 			}
 			// The whole reason for booting Doom rather than `-Q` is that
 			// these are real. A stamp that says otherwise means the profile
