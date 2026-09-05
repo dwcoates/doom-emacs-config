@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
+  FeedBreadcrumbSchema,
+  FeedIdSchema,
   FeedPageSchema,
   FeedRowSchema,
+  type FeedId,
   type FeedRow,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
@@ -62,15 +65,19 @@ interface Fixture {
   bubbles: Map<string, ReturnType<typeof stubBubble>>;
 }
 
-function fixture(h: Harness = harness(), overrides: Partial<RowContext> = {}): Fixture {
+function fixture(
+  h: Harness = harness(),
+  overrides: Partial<RowContext> = {},
+  opts: { feed?: FeedId; renderers?: Partial<Parameters<typeof stubRenderers>[0]> } = {},
+): Fixture {
   const host = document.createElement("div");
   document.body.replaceChildren(host);
   const bubbles = new Map<string, ReturnType<typeof stubBubble>>();
   const controller = createFeedController({
     ctx: h.ctx,
     host,
-    feed: "root",
-    renderers: stubRenderers(),
+    feed: opts.feed ?? "root",
+    renderers: stubRenderers(opts.renderers),
     body: defaultBubbleBody,
     revealRow: async () => false,
     bubble: (row) => {
@@ -572,5 +579,332 @@ describe("createFeedController: lookups and disposal", () => {
     controller.applyPage(page([responseRow("a")]), "replace");
     controller.dispose();
     expect(host.children).toHaveLength(0);
+  });
+});
+
+/** A row carrying ARM, built straight onto the generated schema. */
+function rowWith(id: string, arm: MessageInitShape<typeof FeedRowSchema>["row"]): FeedRow {
+  return create(FeedRowSchema, { id: feedId(id), row: arm });
+}
+
+function unknownArmRow(id: string): FeedRow {
+  const row = create(FeedRowSchema, { id: feedId(id) });
+  // A wire arm no build knows, past the generated union.
+  (row as { row: unknown }).row = { case: "surprise", value: {} };
+  return row;
+}
+
+/** A row carrying one activity UNIT. */
+function unitRow(id: string, unit: unknown): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    row: { case: "activity", value: { unit: unit as never } },
+  });
+}
+
+describe("createFeedController: every row arm reaches its own drawing", () => {
+  /** Each arm of `FeedRow.row` the ordinary row path draws, and its mark. */
+  const ARMS: ReadonlyArray<
+    [string, MessageInitShape<typeof FeedRowSchema>["row"], string]
+  > = [
+    [
+      "agentPrompt",
+      {
+        case: "agentPrompt",
+        value: {
+          address: { text: "→ Explore" },
+          body: { blocks: [{ block: { case: "text", value: { text: "go" } } }] },
+        },
+      },
+      ".prompt-agent",
+    ],
+    [
+      "turnEnded",
+      { case: "turnEnded", value: { endedAtMs: 1n, outcome: { case: "concluded", value: {} } } },
+      "[data-arm='concluded']",
+    ],
+    [
+      "separation",
+      {
+        case: "separation",
+        value: { label: { text: "context cleared" }, kind: { case: "cleared", value: {} } },
+      },
+      ".sep-label",
+    ],
+    [
+      "detachedShell",
+      { case: "detachedShell", value: { shell: {} } },
+      ".stub-shell",
+    ],
+    ["permission", { case: "permission", value: {} }, ".stub-permission"],
+    ["question", { case: "question", value: {} }, ".stub-question"],
+    ["coldGate", { case: "coldGate", value: {} }, ".stub-coldGate"],
+    ["commandPanel", { case: "commandPanel", value: {} }, ".stub-commandPanel"],
+    ["commandRefused", { case: "commandRefused", value: {} }, ".stub-commandRefused"],
+  ];
+
+  it.each(ARMS)("draws the %s arm", (name, arm, mark) => {
+    // Arrange / Act
+    const { controller, host } = fixture();
+    controller.applyPage(page([rowWith(name, arm)]), "replace");
+    // Assert
+    expect(host.querySelector(`[data-feed-row="${name}"] ${mark}`)).not.toBeNull();
+  });
+
+  it("refuses a row arm this build does not know", () => {
+    const { controller, h } = fixture();
+    controller.applyPage(page([unknownArmRow("x")]), "replace");
+    expect(h.sink.reported).toEqual(["frameUndecodable"]);
+  });
+
+  it("names FeedRow.row as the path of an unknown arm's refusal", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([unknownArmRow("x")]), "replace");
+    expect(host.querySelector(".row-malformed")?.textContent).toContain("FeedRow.row");
+  });
+
+  it("refuses a detached subagent that reached the ordinary row path", () => {
+    // Arrange: a plain row takes the id first, so no bubble is built for it.
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("b1")]), "replace");
+    // Act: the same id is re-pushed as a detached bubble row.
+    controller.upsert(subagentRow("b1", { detached: true }));
+    // Assert
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedRow.row.detached_subagent",
+    );
+  });
+});
+
+describe("createFeedController: every activity unit reaches its own renderer", () => {
+  const UNITS: ReadonlyArray<[string, unknown, string]> = [
+    [
+      "simpleToolCall",
+      { case: "simpleToolCall", value: {} },
+      ".stub-simpleToolCall",
+    ],
+    ["skill", { case: "skill", value: {} }, ".stub-skill"],
+    ["hook", { case: "hook", value: {} }, ".stub-hook"],
+    ["artifact", { case: "artifact", value: {} }, ".stub-artifact"],
+    ["plan", { case: "plan", value: {} }, ".stub-plan"],
+    ["findings", { case: "findings", value: {} }, ".stub-findings"],
+  ];
+
+  it.each(UNITS)("draws the %s unit", (name, unit, mark) => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([unitRow(name, unit)]), "replace");
+    expect(host.querySelector(`[data-feed-row="${name}"] ${mark}`)).not.toBeNull();
+  });
+
+  it("refuses an activity unit this build does not know", () => {
+    const { controller, host } = fixture();
+    const row = unitRow("x", { case: "response", value: {} });
+    // A wire arm no build knows: set past the generated union, which is exactly
+    // what a newer daemon's field number looks like once it is decoded.
+    (row.row.value as { unit: unknown }).unit = { case: "surprise", value: {} };
+    controller.applyPage(page([row]), "replace");
+    expect(host.querySelector(".row-malformed")?.textContent).toContain("FeedTurnActivity.unit");
+  });
+
+  it("refuses a subagent unit that reached the ordinary row path", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("b1")]), "replace");
+    controller.upsert(subagentRow("b1"));
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedTurnActivity.unit.subagent",
+    );
+  });
+
+  it("refuses a merge unit that reached the ordinary row path", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(page([responseRow("m1")]), "replace");
+    controller.upsert(mergeRow("m1"));
+    expect(host.querySelector(".row-malformed")?.textContent).toContain(
+      "FeedTurnActivity.unit.merge",
+    );
+  });
+
+  it("stamps no unit on an activity row whose unit is unset", () => {
+    const { controller, host } = fixture();
+    controller.applyPage(
+      page([create(FeedRowSchema, { id: feedId("x"), row: { case: "activity", value: {} } })]),
+      "replace",
+    );
+    expect(host.querySelector('[data-feed-row="x"]')?.hasAttribute("data-unit")).toBe(false);
+  });
+
+  it("stamps a row with no arm at all as malformed rather than dropping it", () => {
+    const { controller, host } = fixture();
+    controller.upsert(create(FeedRowSchema, { id: feedId("x") }));
+    expect(host.querySelector('[data-feed-row="x"]')?.getAttribute("data-row-kind")).toBe(
+      "malformed",
+    );
+  });
+});
+
+describe("createFeedController: the page's own arms", () => {
+  it("refuses a page result arm this build does not know", () => {
+    const { controller } = fixture();
+    const bad = page([]);
+    (bad as { result: unknown }).result = { case: "surprise", value: {} };
+    expect(() => controller.applyPage(bad, "replace")).toThrow(MalformedView);
+  });
+
+  it("refuses a page error whose evidence arm this build does not know", () => {
+    const { controller } = fixture();
+    const bad = create(FeedPageSchema, {
+      result: {
+        case: "error",
+        value: {
+          headline: { text: "x", tone: "red" },
+          kind: { case: "historyReplayTruncated", value: { reason: "r" } },
+        },
+      },
+    });
+    (bad.result.value as { kind: unknown }).kind = { case: "surprise", value: {} };
+    expect(() => controller.applyPage(bad, "replace")).toThrow(MalformedView);
+  });
+});
+
+describe("createFeedController: mirroring the card's state onto the chrome", () => {
+  /** A response renderer whose card states STATE, or states nothing. */
+  function stating(state: string | null) {
+    return {
+      response: (): HTMLElement => {
+        const el = document.createElement("div");
+        el.className = "stub-response";
+        if (state !== null) el.setAttribute("data-state", state);
+        return el;
+      },
+    };
+  }
+
+  it("copies the card's state up onto the row chrome", () => {
+    const { controller, host } = fixture(harness(), {}, { renderers: stating("running") });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-state")).toBe("running");
+  });
+
+  it("states nothing on the chrome when the card states nothing", () => {
+    const { controller, host } = fixture(harness(), {}, { renderers: stating(null) });
+    controller.applyPage(page([responseRow("a")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-state")).toBe(false);
+  });
+});
+
+describe("createFeedController: a feed that is not the root", () => {
+  it("names the feed it draws by its own id", () => {
+    const { host } = fixture(harness(), {}, { feed: create(FeedIdSchema, { value: "b1" }) });
+    expect(host.getAttribute("data-feed")).toBe("b1");
+  });
+
+  it("walks THAT feed, addressing the page request to its id", async () => {
+    // Arrange
+    const h = harness();
+    const { controller, host } = fixture(h, {}, { feed: create(FeedIdSchema, { value: "b1" }) });
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    // Assert
+    expect(h.calls.getFeedPage[0]?.feed?.value).toBe("b1");
+  });
+});
+
+describe("createFeedController: the bubbles it holds", () => {
+  it("reports the bubbles on this feed, for the reveal walk", () => {
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([subagentRow("b1"), responseRow("r1")]), "replace");
+    expect(controller.bubbles()).toEqual([bubbles.get("b1")]);
+  });
+
+  it("reports none on a feed with no bubble row", () => {
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("r1")]), "replace");
+    expect(controller.bubbles()).toEqual([]);
+  });
+});
+
+describe("createFeedController: what a body renderer reads", () => {
+  it("hands the body renderer the trail the page came with", () => {
+    // Arrange / Act
+    const { controller } = fixture();
+    controller.applyPage(
+      page([responseRow("a")], {
+        crumbs: [create(FeedBreadcrumbSchema, { target: feedId("o"), label: "outer" })],
+      }),
+      "replace",
+    );
+    // Assert
+    expect(controller.breadcrumbs().map((crumb) => crumb.label)).toEqual(["outer"]);
+  });
+
+  it("exposes the view a body renderer draws from", () => {
+    const { controller } = fixture();
+    controller.applyPage(page([responseRow("a")]), "replace");
+    expect(controller.view().rows().map((row) => row.id?.value)).toEqual(["a"]);
+  });
+});
+
+describe("createFeedController: drawing and disposal edges", () => {
+  it("refuses to draw a row it does not hold", () => {
+    const { controller } = fixture();
+    expect(() => controller.drawRow(responseRow("nope"))).toThrow(/unheld row nope/);
+  });
+
+  it("disposes each bubble exactly once, however often dispose is called", () => {
+    // Arrange
+    const { controller, bubbles } = fixture();
+    controller.applyPage(page([subagentRow("b1")]), "replace");
+    let disposals = 0;
+    const bubble = bubbles.get("b1")!;
+    const inner = bubble.dispose.bind(bubble);
+    bubble.dispose = () => {
+      disposals += 1;
+      inner();
+    };
+    // Act
+    controller.dispose();
+    controller.dispose();
+    // Assert
+    expect(disposals).toBe(1);
+  });
+});
+
+describe("createFeedController: a failure that is not a malformed view", () => {
+  it("lets a renderer's own crash out rather than drawing it as an unreadable row", () => {
+    // Arrange: a renderer that fails for a reason the schema has nothing to do
+    // with. Only a MalformedView costs one row; anything else is this build's
+    // bug and must not be disguised as bad data.
+    const { controller } = fixture(harness(), {}, {
+      renderers: {
+        response: () => {
+          throw new TypeError("the renderer is broken");
+        },
+      },
+    });
+    // Act / Assert
+    expect(() => controller.applyPage(page([responseRow("a")]), "replace")).toThrow(
+      "the renderer is broken",
+    );
+  });
+});
+
+describe("createFeedController: the walk's refusal does not accumulate", () => {
+  it("drops the previous walk's refusal when the control is used again", async () => {
+    // Arrange: a daemon that refuses every walk.
+    const h = harness({
+      getFeedPage: () =>
+        create(GetFeedPageResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const { controller, host } = fixture(h);
+    controller.applyPage(page([responseRow("a")], { hasMore: true }), "replace");
+    // Act: two refused walks in a row.
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    host.querySelector<HTMLElement>("[data-load-more]")?.click();
+    await settle();
+    // Assert: one refusal stands, not two.
+    expect(host.querySelectorAll(".refusal")).toHaveLength(1);
   });
 });
