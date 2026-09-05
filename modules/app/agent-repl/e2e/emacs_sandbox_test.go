@@ -108,11 +108,12 @@ func requireSandbox(t *testing.T) sandbox {
 	s := &localSandbox{t: t}
 	ok, reason := s.Available()
 	if !ok {
-		t.Skipf("emacs client layer needs the e2e sandbox: %s", reason)
+		noteEnvironmentSkip(t, "emacs client layer needs the e2e sandbox: %s", reason)
 	}
 	ok, version := s.HasEmacs()
 	if !ok {
-		t.Skipf("emacs client layer needs Emacs 27 or later in the sandbox image; found %q", version)
+		requireDependency(t, "emacs client layer needs Emacs 27 or later in the sandbox image; found %q "+
+			"(the image installs it; rebuild it with `%s build`)", version, sandboxScriptRel)
 	}
 	// `script` is INSTALLED BY NAME in the image now (bsdutils + util-linux
 	// in the Dockerfile's apt list), so this is a backstop rather than the
@@ -120,7 +121,7 @@ func requireSandbox(t *testing.T) sandbox {
 	// drops it, must skip loudly instead of failing obscurely inside
 	// StartPTY.
 	if _, err := exec.LookPath("script"); err != nil {
-		t.Skipf("emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it): %v", err)
+		requireDependency(t, "emacs client layer needs 'script' for a pty (the Dockerfile installs bsdutils/util-linux for it; rebuild the image with `%s build`): %v", sandboxScriptRel, err)
 	}
 	// Xvfb is what makes a GRAPHICAL frame possible, and the panel this
 	// layer opens is an `xwidget-webkit` webview, which cannot exist without
@@ -129,7 +130,7 @@ func requireSandbox(t *testing.T) sandbox {
 	// but without it every scenario would fail at `make-xwidget` with "GTK
 	// has not been initialized", which names nothing that is actually wrong.
 	if _, err := exec.LookPath("Xvfb"); err != nil {
-		t.Skipf("emacs client layer needs 'Xvfb' for a GUI frame (the panel is an xwidget-webkit webview; the Dockerfile installs xvfb for it): %v", err)
+		requireDependency(t, "emacs client layer needs 'Xvfb' for a GUI frame (the panel is an xwidget-webkit webview; the Dockerfile installs xvfb for it; rebuild the image with `%s build`): %v", sandboxScriptRel, err)
 	}
 	assertHostIsolation(t)
 	return s
