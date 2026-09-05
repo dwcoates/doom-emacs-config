@@ -1190,6 +1190,32 @@ describe("main", () => {
     expect(record.fields["fake"]).toBe(true);
     expect(h.engineDeps()["createQuery"]).toBeTypeOf("function");
   });
+
+  it("hands the engine the keep-alive cadence the fake environment named", async () => {
+    // Arrange.
+    const h = await harness([...SERVING, "--fake"], { [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" });
+
+    // Act.
+    h.run();
+    await h.reached("startup_arguments_validated");
+
+    // Assert.
+    expect(h.engineDeps()["keepaliveIntervalMs"]).toBe(200);
+  });
+
+  it("hands the engine the watcher-conclusion budget the fake environment named", async () => {
+    // Arrange.
+    const h = await harness([...SERVING, "--fake"], {
+      [FAKE_WATCHER_CONCLUSION_BUDGET_ENV]: "250",
+    });
+
+    // Act.
+    h.run();
+    await h.reached("startup_arguments_validated");
+
+    // Assert.
+    expect(h.engineDeps()["watcherConclusionBudgetMs"]).toBe(250);
+  });
 });
 
 /**
