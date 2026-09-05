@@ -249,3 +249,76 @@ func awaitPIDFile(t *testing.T, path string) int {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// startFakeDaemon runs one process carrying this scenario's HOME but NOT the
+// `emacs' name, which is exactly what the daemon and the shims are to the
+// teardown: this scenario's processes, and not its Emacs.
+func startFakeDaemon(t *testing.T, root string, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("/bin/sleep", args...)
+	cmd.Env = []string{"HOME=" + root, "PATH=/usr/bin:/bin"}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the stand-in daemon: %v", err)
+	}
+	waited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(waited)
+	}()
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		<-waited
+	})
+	return cmd
+}
+
+func TestEmacsTeardownWaitsForTheStoppedDaemonToExit(t *testing.T) {
+	requireProcfs(t)
+	// Arrange: a daemon of this scenario that is on its way out but not gone
+	// — the state the stop's ack actually leaves it in, since the ack says
+	// the orderly exit was STARTED. Its exit is a clock, so nothing teardown
+	// does can bring it forward: a wait that returns first did not happen.
+	e, root := teardownFixture(t)
+	const minimumWait = 250 * time.Millisecond
+	startFakeDaemon(t, root, "0.35")
+	if len(e.findStrays()) != 1 {
+		t.Fatalf("arrange: want exactly one stand-in daemon before teardown, got %d", len(e.findStrays()))
+	}
+
+	// Act.
+	started := time.Now()
+	e.awaitDaemonExit(true)
+	took := time.Since(started)
+
+	// Assert.
+	if left := e.findStrays(); len(left) != 0 {
+		t.Fatalf("awaitDaemonExit returned with %s still alive", pidList(left))
+	}
+	if took < minimumWait {
+		t.Fatalf("awaitDaemonExit returned after %s, well before the daemon's own 350ms exit: it did not wait",
+			took.Round(time.Millisecond))
+	}
+}
+
+func TestEmacsTeardownDoesNotWaitOnADaemonNobodyAskedToStop(t *testing.T) {
+	requireProcfs(t)
+	// Arrange: a wedged Emacs was never asked to stop its daemon, so the
+	// daemon is not on its way anywhere and waiting out the bound would only
+	// hold this scenario's parallelism slot.
+	e, root := teardownFixture(t)
+	startFakeDaemon(t, root, "60")
+
+	// Act.
+	started := time.Now()
+	e.awaitDaemonExit(false)
+	took := time.Since(started)
+
+	// Assert: it returned at once, leaving the reaper to report the stray.
+	if took >= strayPollInterval {
+		t.Fatalf("awaitDaemonExit took %s for a stop nobody made, want an immediate return",
+			took.Round(time.Millisecond))
+	}
+}
