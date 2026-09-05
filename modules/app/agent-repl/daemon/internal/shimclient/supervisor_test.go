@@ -617,3 +617,35 @@ func spawnReadyOn(t *testing.T, sup Supervisor, f *fakeShim, spec Spec) Client {
 	}
 	return r.c
 }
+
+// TestSpawnIsRefusedOnceTheSupervisorHasStoodDown asserts the latch the sweep
+// sets, which is what makes the sweep total.
+//
+// THE SWEEP ALONE IS NOT ENOUGH. It snapshots the processes that have already
+// STARTED, so a bring-up still short of cmd.Start when the shutdown lands would
+// start its shim just after the sweep walked past — and nothing would ever
+// stand that process down, because the supervisor is the only thing that knew
+// it was coming. Measured on the Emacs e2e layer: a SubmitPrompt whose spawn
+// was still probing the workspace lock left a node shim running with no daemon
+// left to own it.
+func TestSpawnIsRefusedOnceTheSupervisorHasStoodDown(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	_, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	sup := newSupervisor(t)
+	if err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested"); err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v", err)
+	}
+
+	// Act.
+	c, err := sup.Spawn(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, ErrStandingDown) {
+		t.Fatalf("Spawn() error = %v, want ErrStandingDown", err)
+	}
+	if c != nil {
+		t.Fatal("Spawn() answered a client while the supervisor was standing down")
+	}
+}
