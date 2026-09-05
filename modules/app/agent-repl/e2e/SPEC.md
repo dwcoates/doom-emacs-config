@@ -212,7 +212,7 @@ value.
 |---|---|---|---|---|
 | `claude-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/claude-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
 | fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
-| real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `t.Skip`, never an implicit `npm ci`** |
+| real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `requireDependency` FAILURE, never an implicit `npm ci`** (a skip only under `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`; see `precondition_test.go`) |
 | `shim-store` | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShimStore` and on `shim-sidecar/integration/helpers_test.go`'s `storeBinary` | `agent-shim/shim-store` (`go build -o <bin> .`) | `go` on PATH (already required) |
 | `shim-sidecar` | same pattern | `agent-shim/claude/shim-sidecar` (`go build -o <bin> .`) | same |
 

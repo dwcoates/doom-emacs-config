@@ -187,12 +187,15 @@ than copied:
 `webapp/test/webapp-layer/real-daemon.ts` wraps `startAppAgainst` with the
 environment read and the loud skip.
 
-## D. Loud skips
+## D. Loud missing prerequisites
 
-The layer refuses to pass quietly when it cannot run. Every skip names the
-missing prerequisite and the exact command that supplies it.
+The layer refuses to pass quietly when it cannot run. Every unmet prerequisite
+names itself and the exact command that supplies it, and FAILS the test — a run
+that covered nothing must never look like a pass. `AGENT_REPL_E2E_ALLOW_MISSING_DEPS=1`
+turns those failures back into skips for a deliberate local poke, and every skip
+so taken is reprinted in the end-of-run summary block (`precondition_test.go`).
 
-- **Go side** (`webapplayer_e2e_test.go`), each a `t.Skip` with the reason:
+- **Go side** (`webapplayer_e2e_test.go`), each a `requireDependency` with the reason:
   - `npm` not on `PATH`.
   - `webapp/node_modules` absent (the message names
     `npm ci --prefix webapp`); `npm run` would otherwise fail as a build

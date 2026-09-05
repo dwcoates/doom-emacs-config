@@ -76,6 +76,9 @@ func runSuite(m *testing.M) int {
 	// test has reported. A no-op in the default build, where the perf files
 	// are not compiled at all.
 	perfReportSummary()
+	// A SKIP IS NOT A PASS: every unmet precondition this run hit, reprinted
+	// where the reader of the summary line cannot miss it (precondition_test.go).
+	reportSkipSummary()
 	return code
 }
 
@@ -129,10 +132,13 @@ var e2eBinDir string
 
 // ---------------------------------------------------------------------------
 // Loud, lazy, per-precondition builds. Each is built ONCE (sync.Once) on the
-// first test that needs it, and SKIPS the calling test (never fails the
-// whole run) when its precondition is absent. The harness never installs
-// anything — a missing node_modules names the exact `npm ci` command and
-// directory instead of running it.
+// first test that needs it. The harness never installs anything — a missing
+// node_modules names the exact `npm ci` command and directory instead of
+// running it — but naming it is not the same as tolerating it: an absent
+// dependency FAILS the calling test through requireDependency, because a
+// suite that covered nothing must never read as a pass. See
+// precondition_test.go, including the AGENT_REPL_E2E_ALLOW_MISSING_DEPS
+// opt-out that turns those failures back into (loudly summarized) skips.
 // ---------------------------------------------------------------------------
 
 var (
@@ -141,15 +147,15 @@ var (
 	nodeErr  error
 )
 
-// requireNode answers the `node` binary on PATH, skipping the test loudly if
-// none is found.
+// requireNode answers the `node` binary on PATH, failing the test loudly if
+// none is found (a skip only under the opt-out; see precondition_test.go).
 func requireNode(t *testing.T) string {
 	t.Helper()
 	nodeOnce.Do(func() {
 		nodeBin, nodeErr = exec.LookPath("node")
 	})
 	if nodeErr != nil {
-		t.Skip("e2e: node not found on PATH")
+		requireDependency(t, "e2e: node not found on PATH: install Node.js (the shim bundle is built with it)")
 	}
 	return nodeBin
 }
@@ -268,7 +274,7 @@ var (
 
 // requireShimBundle builds the real TypeScript shim from source into
 // e2eBinDir, once per run, and answers its entry point (dist/main.js under a
-// staged package.json, exactly as the daemon expects to spawn it). It skips
+// staged package.json, exactly as the daemon expects to spawn it). It fails
 // loudly, naming the exact `npm ci` command, when the shim's dependencies are
 // not installed; it never installs them itself. A genuine build failure
 // (deps present, esbuild fails) is NOT a skip — it fails every test that
@@ -278,7 +284,7 @@ func requireShimBundle(t *testing.T) string {
 	t.Helper()
 	node := requireNode(t)
 	if _, err := os.Stat(filepath.Join(repo.shimDir, "node_modules")); err != nil {
-		t.Skipf("e2e: shim deps not installed (%s/node_modules missing): run `npm ci` in %s",
+		requireDependency(t, "e2e: shim deps not installed (%s/node_modules missing): run `npm ci` in %s",
 			repo.shimDir, repo.shimDir)
 	}
 	shimOnce.Do(func() {
