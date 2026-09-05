@@ -102,8 +102,11 @@ func TestWriteBatchCreatesTheAgentRowASubagentStartAnnounces(t *testing.T) {
 	if got := scalar[string](t, d, `SELECT spawned_by_agent FROM agent WHERE agent_id = 'agent-2'`); got != "agent-1" {
 		t.Fatalf("spawned_by_agent = %q, want agent-1", got)
 	}
-	if got := scalar[int64](t, d, `SELECT started_at_ms FROM agent WHERE agent_id = 'agent-2'`); got != 42 {
-		t.Fatalf("started_at_ms = %d, want the spawn's own instant 42", got)
+	// The spawn's own instant is 42 and is deliberately NOT what lands here:
+	// started_at_ms is the STORE's clock at first sight, because LiveWork
+	// orders by it and the spawn frame's instant is the shim's or the vendor's.
+	if got := scalar[int64](t, d, `SELECT started_at_ms FROM agent WHERE agent_id = 'agent-2'`); got != testNow {
+		t.Fatalf("started_at_ms = %d, want the store's own clock %d", got, testNow)
 	}
 	if got := scalar[string](t, d, `SELECT isolation FROM agent WHERE agent_id = 'agent-2'`); got != "worktree" {
 		t.Fatalf("isolation = %q, want worktree", got)

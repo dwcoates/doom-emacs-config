@@ -118,6 +118,21 @@ func newStore(t *testing.T) (*DB, *sink) {
 
 const testNow int64 = 1_700_000_000_000
 
+// newStoreWithClock opens a fresh on-disk store whose clock is the caller's, so
+// a test can advance it between writes and assert an ORDER rather than an
+// instant.
+func newStoreWithClock(t *testing.T, now func() int64) *DB {
+	t.Helper()
+	_, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+	d, err := OpenWithOptions(path, log, Options{Now: now})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	t.Cleanup(func() { d.Close() }) //nolint:errcheck // best-effort test teardown
+	return d
+}
+
 func ctx() context.Context { return context.Background() }
 
 // ---- entry builders ----
@@ -213,13 +228,21 @@ func failureFrame(agentID string) *conversationv1.AgentFrame {
 }
 
 func subagentStart(createdAgentID string) *conversationv1.AgentSubagent {
+	return subagentStartAt(createdAgentID, 42)
+}
+
+// subagentStartAt is subagentStart with the PRODUCER's start instant chosen by
+// the caller — the shim's Date.now() on the stream plane, the vendor's
+// transcript timestamp on the file plane, and 0 when that timestamp was missing
+// or unparseable.
+func subagentStartAt(createdAgentID string, atMs int64) *conversationv1.AgentSubagent {
 	return &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
 		CreatedAgentId: &conversationv1.AgentId{Value: createdAgentID},
 		Prompt: &conversationv1.AgentSubagentPrompt{
 			Text:      "do the thing",
 			Isolation: &conversationv1.AgentSubagentPrompt_Worktree{Worktree: &conversationv1.AgentSubagentIsolationWorktree{}},
 		},
-		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 42},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: atMs},
 	}}}
 }
 

@@ -80,7 +80,7 @@ func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, agentID strin
 	act := activity.Activity
 	if subagent, ok := act.GetItem().(*conversationv1.AgentActivity_Subagent); ok {
 		if start, ok := subagent.Subagent.GetResult().(*conversationv1.AgentSubagent_Start); ok {
-			if err := d.createSpawnedAgent(ctx, tx, agentID, start.Start); err != nil {
+			if err := d.createSpawnedAgent(ctx, tx, agentID, start.Start, now); err != nil {
 				return err
 			}
 		}
@@ -95,8 +95,8 @@ func (d *DB) applyUpdateLifecycle(ctx context.Context, tx *sql.Tx, agentID strin
 //
 // DO NOTHING ON CONFLICT, deliberately: `started_at_ms` is when the store first
 // heard of the agent, and a later frame that overwrote it would move an agent's
-// start forward every time it spoke. The spawn frame is what supplies the real
-// instant and the metadata (createSpawnedAgent).
+// start forward every time it spoke. The spawn frame supplies the metadata
+// (createSpawnedAgent) and NOT the instant — see there for why.
 func (d *DB) ensureAgent(ctx context.Context, tx *sql.Tx, agentID string, now int64) error {
 	if agentID == "" {
 		// Unreachable: classify refuses an empty agent identity before this
@@ -119,7 +119,29 @@ func (d *DB) ensureAgent(ctx context.Context, tx *sql.Tx, agentID string, now in
 // The spawn's own unit lives in the SPAWNING agent's book as an ordinary page
 // line; this row is the created agent's home, and it is what makes the
 // subagent's own book addressable before a single frame of it has arrived.
-func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy string, start *conversationv1.AgentSubagentStart) error {
+//
+// `started_at_ms` IS THE STORE'S OWN CLOCK, AT FIRST SIGHT, AND NOTHING ELSE.
+// It is excluded from the DO UPDATE clause and bound to `now` in the insert, so
+// a row already present keeps the instant `ensureAgent` gave it and a row
+// created here gets the same kind of instant.
+//
+// This used to bind `start.GetStartedAt().GetAtMs()` and to overwrite the
+// column with it on conflict, which was not a value the column could be
+// ordered by. THREE producers reach this row: the store itself (ensureAgent),
+// the SHIM's stream plane (its own Date.now(), stamped when it converted the
+// SDK event) and the SIDECAR's file plane (the vendor's transcript
+// `timestamp`, and a literal 0 whenever that field is missing or unparseable).
+// The shim and the sidecar mint the SAME key for the same unit on purpose, so
+// which of the three last wrote the column is an arrival race between two
+// independent producers — and `LiveWork` orders the live agents by exactly
+// this column (internal/db/live.go). A 0 sorted every such agent to the front
+// of the listing and destroyed a real instant that was already in the row.
+//
+// The store's clock is the one clock every other timestamp column here is
+// already taken from, it is read once per batch under the write transaction,
+// and it therefore agrees with the store's own write order — which is the
+// order `LiveWork` is trying to report.
+func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy string, start *conversationv1.AgentSubagentStart, now int64) error {
 	created := start.GetCreatedAgentId().GetValue()
 	if created == "" {
 		return invalidFieldf("agent_update.serveable_frame.agent_item.agent_frame.update.activity.subagent.start.created_agent_id", "a subagent start names no created_agent_id — the created agent could never be addressed")
@@ -141,8 +163,7 @@ func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy strin
 	    working_dir = excluded.working_dir,
 	    transcript_suppressed = excluded.transcript_suppressed,
 	    isolation = excluded.isolation,
-	    forked_from_caller = excluded.forked_from_caller,
-	    started_at_ms = excluded.started_at_ms`
+	    forked_from_caller = excluded.forked_from_caller`
 	_, err := tx.ExecContext(ctx, upsertSQL,
 		created,
 		spawnedBy,
@@ -156,7 +177,7 @@ func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy strin
 		start.GetTranscriptSuppressed(),
 		isolationKind(prompt),
 		prompt.GetForkedFromCaller(),
-		start.GetStartedAt().GetAtMs(),
+		now,
 	)
 	if err != nil {
 		return d.queryError("store.db.write-batch", "agent", logging.Fields{AgentID: created}, storagef(err, "recording spawned agent %q", created))
@@ -203,7 +224,7 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string,
 				if created := start.Start.GetCreatedAgentId().GetValue(); created != "" {
 					originUnit = sql.NullString{String: created, Valid: true}
 				}
-				if err := d.createSpawnedAgent(ctx, tx, owner, start.Start); err != nil {
+				if err := d.createSpawnedAgent(ctx, tx, owner, start.Start, now); err != nil {
 					return err
 				}
 			}
