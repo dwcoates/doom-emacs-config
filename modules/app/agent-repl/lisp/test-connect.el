@@ -588,6 +588,7 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (string-match "\r\nContent-Length: \\([0-9]+\\)\r\n" request))
       (should (= (string-to-number (match-string 1 request)) (length body))))))
 
+
 ;;;; ---- Tests: connection lifecycle ----
 
 (ert-deftest agent-repl-test-connect-open-records-the-address ()
