@@ -418,13 +418,17 @@ baked here, so `map!`, `set-popup-rule!` and module load order are all real.
 Three things in `doom/` exist for it, and all three are inert without the
 environment variables the Go layer sets:
 
-- **`doom/init.el`** loads `$AGENT_REPL_E2E_SETTINGS` right after its `doom!`
+- **`doom/init.el`** pins `server-name` to `$AGENT_REPL_E2E_SERVER` and
+  `server-socket-dir` under the same scratch root **before anything can load
+  `server`**, and loads `$AGENT_REPL_E2E_SETTINGS` right after its `doom!`
   form — before any module's `config.el`, which is the last moment at which
   `agent-repl-frontend-auto-start` nil can still stop cold start from
   spawning a daemon against the host's defaults.
 - **`doom/config.el`** defines the file-based readback helper
   (`agent-repl-e2e--eval`) and, on Doom's own after-init edge, enables
-  `tab-bar-mode`, calls `server-start`, and writes the readiness stamp at
+  `tab-bar-mode`, binds the server socket (or notices that Doom's own
+  `use-package! server` already bound it, under the name init.el pinned), and
+  writes the readiness stamp at
   `$AGENT_REPL_E2E_READY` **last** — so the stamp means "Doom is up AND
   emacsclient answers". A boot failure writes the same file with
   `"ok": false` and the elisp error.
