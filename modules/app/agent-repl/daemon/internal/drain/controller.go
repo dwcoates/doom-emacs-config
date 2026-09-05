@@ -240,6 +240,26 @@ func (c *controller) Current(ctx context.Context) (*wsm.DrainSchedule, error) {
 // machine is up. Measured over one 24-scenario Emacs e2e run: 24 leaked shims
 // and 48 leaked `shim-lock` holders, all of them downstream of this call.
 //
+// A REGISTERED SESSION AND AN IN-FLIGHT SPAWN GO DOWN SEPARATELY, in that
+// order. standEverySessionDown walks the workspaces the STATE knows and stands
+// each session down the ordinary way, through the fleet. It cannot reach a
+// shim that was spawned and has not finished coming up: such a process enters
+// the fleet's session map only after bring-up returns healthy AND StartSession
+// answers, and Fleet.Stop answers nil for a workspace that is not in that map,
+// so the walk steps straight past it and the daemon exits with the spawn still
+// running. Measured: a shim spawned at 18:02:54.268 outlived a daemon whose
+// serving lifetime ended 21 ms later, and was still holding the workspace lock
+// and ~95 MiB when a 10 second grace expired. So the supervisor's own sweep
+// runs AFTER the walk, over exactly the processes nothing else knew about.
+//
+// THE SWEEP IS THE `now` PATH'S ALONE. A BOUNCE must not kill its shims: they
+// are what the successor adopts, and killing one would take the workspace's
+// kernel lock down with it. Two things keep it out of the bounce. The bounce
+// exits through rollout.controller.Handover, which never calls ShutdownNow at
+// all; and each of its transfers calls Client.Detach, which leaves the process
+// running and takes it OUT of the supervisor's registry, so even a sweep that
+// somehow ran after a handover would find nothing of the successor's to kill.
+//
 // THIS IS THE ONE PLACE THE DRAIN FORCES. The package's standing ruling —
 // teardown never interrupts the vendor — is about the SCHEDULED drain, which
 // buys the shim's freeness by WAITING for it (`fire`, and the idle sweep's
@@ -265,6 +285,7 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 	})
 	c.log.Info(opNow, "announced an immediate shutdown", nil)
 	c.standEverySessionDown(ctx)
+	c.sweepInFlightSpawns(ctx)
 	if err := c.deps.Exit(ctx); err != nil {
 		c.log.Error(opNow, "the orderly exit could not be started", withCause(nil, err))
 		return fmt.Errorf("drain: shutdown now: %w", err)
@@ -306,6 +327,35 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 		}
 		c.log.Debug(opNow, "stood a session down ahead of the immediate exit", fields)
 	}
+}
+
+// sweepInFlightSpawns stands down every shim process the supervisor started
+// and still owns — the spawns that never reached the state the walk above
+// reads, and which therefore have no workspace row to be stood down by.
+//
+// IT NEVER RETURNS AN ERROR, for the same reason standEverySessionDown does
+// not: the failure is RECORDED at ERROR, and nothing may stop the exit the
+// operator asked for. What it must never do is hide one, so the supervisor's
+// joined failures are logged whole.
+//
+// THE BOUND IS StandBound (5s), the same budget one registered session's
+// stand-down gets, and for the same reason: this runs on the request's own
+// goroutine ahead of the exit, and an unbounded sweep is a daemon that does
+// not go. It bounds the WHOLE sweep, while the supervisor additionally bounds
+// each process by its own kill grace, so one unreapable child cannot spend the
+// budget its siblings need. The set is normally EMPTY — a spawn is in flight
+// for the few hundred milliseconds of one bring-up — and a forced kill of one
+// that is there is a SIGKILL plus a reap, single-digit milliseconds, so 5s is
+// three orders of magnitude of headroom over the work it actually does.
+func (c *controller) sweepInFlightSpawns(ctx context.Context) {
+	sweep, cancel := context.WithTimeout(ctx, c.deps.StandBound)
+	defer cancel()
+	if err := c.deps.Spawns.StandDownEverySpawn(sweep, "an immediate shutdown was requested"); err != nil {
+		c.log.Error(opNow, "a spawn in flight would not stand down before the immediate exit; its shim will outlive this daemon and hold the workspace lock",
+			withCause(nil, err))
+		return
+	}
+	c.log.Debug(opNow, "swept the spawns still in flight ahead of the immediate exit", nil)
 }
 
 // fire runs the scheduled drain: hold every workspace's intake, wait for each

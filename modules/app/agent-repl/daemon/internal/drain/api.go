@@ -78,8 +78,12 @@ type Deps struct {
 	// RefusalWindow is how long one refusal WARN suppresses its successors.
 	RefusalWindow time.Duration
 	// Stand is how the controller reaches a workspace's shim. It is the only
-	// shim contact the controller has.
+	// shim contact the controller has for a REGISTERED session.
 	Stand Stand
+	// Spawns is the shim supervisor's own sweep, and the only contact the
+	// controller has with a shim NOTHING has registered yet. Required: an
+	// immediate shutdown without it is the leak this exists to close.
+	Spawns SpawnSweep
 	// StandBound is how long ONE of those shim round trips has to answer
 	// before the sweep gives that workspace up and moves on. Zero takes
 	// DefaultStandBound.
@@ -117,6 +121,24 @@ type Stand interface {
 	// shutdown does force — it bought nothing, and a graceful stand-down there
 	// would wait on the very turn the operator asked to stop.
 	KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error
+}
+
+// SpawnSweep is the shim supervisor's stand-down of every process IT started
+// and still owns. The drain reaches it only from ShutdownNow.
+//
+// It is a separate surface from Stand because it is keyed on nothing: Stand
+// addresses one workspace's REGISTERED session, and the whole point of this
+// one is the spawn that has no registration to address. The supervisor is the
+// only component that can answer it, because from cmd.Start until the fleet
+// remembers the session it is the only component that knows the process is
+// there.
+type SpawnSweep interface {
+	// StandDownEverySpawn force-kills every process the supervisor started and
+	// still owns, and returns every failure joined together rather than
+	// stopping at the first. A shim handed to a successor by a BOUNCE is not
+	// in that set: the handover detached from it, which is what tells a
+	// transfer from an in-flight spawn.
+	StandDownEverySpawn(ctx context.Context, reason string) error
 }
 
 // Freeness answers a workspace's freeness and lets a caller WAIT for it
@@ -172,6 +194,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Stand == nil {
 		return nil, errors.New("drain: a shim stand is required")
+	}
+	if deps.Spawns == nil {
+		return nil, errors.New("drain: a spawn sweep is required")
 	}
 	if deps.Freeness == nil {
 		return nil, errors.New("drain: a freeness answer is required")

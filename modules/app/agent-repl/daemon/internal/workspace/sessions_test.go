@@ -1609,3 +1609,8 @@ func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
 		}
 	}
 }
+
+// StandDownEverySpawn is the supervisor's own sweep of processes it started
+// and still owns. These fakes spawn no process, so there is never one to
+// sweep.
+func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
