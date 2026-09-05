@@ -36,7 +36,7 @@ import {
 import type { PersistEntry } from "../store/persistence.js";
 import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
-import { detachedWorkId, toolCallActivityId } from "./ids.js";
+import { detachedWorkId, subagentId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { activityEntry, agentActivity } from "./entries.js";
 
@@ -603,6 +603,12 @@ function subagentTerminalEntries(
           result: {
             case: "success",
             value: create(conversationv1.AgentSubagentSuccessSchema, {
+              // THE CREATED AGENT, named on the conclusion. This notification
+              // is a settled frame that can arrive with no start beside it —
+              // the launch's own start rides the tool result, on a delivery
+              // this one need not share — so the id is restated here from the
+              // spawning call, which the minting rule makes the same value.
+              createdAgentId: subagentId(toolUseId),
               prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
               report: create(conversationv1.AgentSubagentReportSchema, {
                 prose: prose(raw.summary ?? ""),

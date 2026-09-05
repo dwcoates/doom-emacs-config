@@ -1617,3 +1617,176 @@ func TestAStartAfterTheHoldRetiredDoesNotUnsettleTheBubble(t *testing.T) {
 		t.Fatalf("state = %T, want the bubble still settled", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
 	}
 }
+
+// ---- A SETTLED FRAME THAT NAMES THE AGENT IT SETTLES ----
+//
+// AgentSubagentSuccess.created_agent_id (landing 12) exists because the success
+// arm is the ONLY frame some deliveries ever carry: a replayed history, or a
+// transcript-only session the sidecar read with nothing watching live. A frame
+// that names the agent is drawn at once and addresses its sub-feed; one that
+// does not keeps the hold-then-warn path exactly as it was.
+
+// settleSubagentNaming settles a spawn successfully with the terminal itself
+// naming the agent the spawn created.
+func (h *harness) settleSubagentNaming(unit string, created *conversationv1.AgentId) {
+	h.t.Helper()
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				CreatedAgentId: created,
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Report:         &conversationv1.AgentSubagentReport{Prose: &conversationv1.AgentResponseProse{Markdown: "found it"}},
+				Totals:         &conversationv1.AgentSubagentTotals{ToolUseCount: 18},
+				SettledAt:      &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+			}},
+		}},
+	})
+}
+
+func TestASettledOnlyFrameNamingTheCreatedAgentDrawsWithNoStart(t *testing.T) {
+	// Arrange, Act: the whole delivery is one settled frame.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagentNaming("spawn-1", created)
+
+	// Assert: the bubble is on the caller's feed already, settled.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetEndedAtMs(); got != 9_000 {
+		t.Fatalf("settled = %+v, want the terminal drawn without waiting for a start",
+			bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled())
+	}
+}
+
+func TestASettledOnlyFrameNamingTheCreatedAgentIsNotHeld(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.settleSubagentNaming("spawn-1", &conversationv1.AgentId{Value: "agent-explore"})
+
+	// Assert: nothing waits for a start that is not coming.
+	if held := h.heldSpawnFrames("spawn-1"); held != 0 {
+		t.Fatalf("held frames = %d, want none for a terminal that names the agent", held)
+	}
+}
+
+func TestASettledOnlyFrameNamingTheCreatedAgentIsNotWarnedAtTheTurnsEnd(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.settleSubagentNaming("spawn-1", &conversationv1.AgentId{Value: "agent-explore"})
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: the warning is for a spawn nothing named, and this one was named.
+	if h.hasRecord("warn", "daemon.feed.subagent_without_start") {
+		t.Fatalf("records = %+v, want no producer-fault warning for a named terminal", h.records())
+	}
+}
+
+func TestASettledOnlyFramesRowAddressesItsSubFeed(t *testing.T) {
+	// Arrange: the settled-only delivery, which used to draw an unopenable row.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagentNaming("spawn-1", created)
+	row := h.bubbleRow("spawn-1", created)
+
+	// Act: a page opened on the sub-feed the row addresses.
+	page, _ := h.openPage(feedid.Feed{Agent: created}, "reader-1")
+
+	// Assert: the crumb names the bubble's own row, so an expand resolves.
+	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
+	if len(crumbs) != 1 || crumbs[0].GetTarget().GetValue() != row.GetId().GetValue() {
+		t.Fatalf("crumbs = %+v, want the bubble's own row", crumbs)
+	}
+}
+
+func TestASettledOnlyFrameWithNoCreatedAgentIsStillHeld(t *testing.T) {
+	// Arrange, Act: the same delivery from a producer that could not name it.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+
+	// Assert: today's behavior is untouched — held, not drawn.
+	if held := h.heldSpawnFrames("spawn-1"); held != 1 {
+		t.Fatalf("held frames = %d, want the unnamed terminal held as before", held)
+	}
+}
+
+func TestAStartThenASuccessNamingTheSameAgentDrawsOneBubble(t *testing.T) {
+	// Arrange: the ordinary live order, with the terminal now also naming.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Act.
+	h.settleSubagentNaming("spawn-1", created)
+
+	// Assert: one row, settled, exactly as it was before the field existed.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetEndedAtMs(); got != 9_000 {
+		t.Fatalf("settled = %+v, want the terminal folded onto the started bubble",
+			bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled())
+	}
+}
+
+func TestANamingSuccessBeforeItsStartStaysSettledWhenTheStartLands(t *testing.T) {
+	// Arrange: the terminal outran the start AND named the agent, so it drew.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagentNaming("spawn-1", created)
+
+	// Act: the start lands afterwards and must not reopen the bubble.
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled",
+			bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestAnUpdateHeldBeforeANamingSuccessDoesNotRedrawItLive(t *testing.T) {
+	// Arrange: an update arrives first, with nothing yet naming the agent.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
+			}},
+		}},
+	})
+
+	// Act: the naming terminal releases the hold.
+	h.settleSubagentNaming("spawn-1", created)
+
+	// Assert: the run's order wins over the arrival order — settled, not live.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled() == nil {
+		t.Fatalf("state = %T, want the terminal to fold after the frames it outran",
+			bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestAnUpdateHeldBeforeANamingSuccessIsStillFoldedIn(t *testing.T) {
+	// Arrange: the held update carries the only running token sum.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
+			}},
+		}},
+	})
+
+	// Act.
+	h.settleSubagentNaming("spawn-1", created)
+
+	// Assert: the hold is drained rather than dropped.
+	if got := bubbleOf(h.bubbleRow("spawn-1", created)).GetTokens().GetText(); got != "12.4k tok" {
+		t.Fatalf("tokens = %q, want the held update's running sum folded in", got)
+	}
+}

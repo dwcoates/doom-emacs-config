@@ -312,3 +312,42 @@ interrupted text, not `failed`. The daemon's deliberate `failed` drawing
   suite had to pin the arm on the sidecar's own terminal reason instead of
   the feed. Owner ruling 2026-09-04: "yes, carry it". Daemon relays the arm
   by name; webapp draws it; Emacs draws no feed (no change).
+
+## Landing 12 (2026-09-05): a settled spawn can name the agent it created
+
+OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
+behalf; protos 974f5356e).
+
+- conversation.v1 AgentSubagentSuccess.created_agent_id (tag 8, AgentId) —
+  the same join key AgentSubagentStart states, restated on the conclusion.
+  UNSET stays legal and means the producer could not name the agent on this
+  frame; a consumer that already saw the start is unaffected.
+
+WHY. The success arm is the ONLY frame some deliveries ever carry. Every frame
+of one spawn shares one store upsert key, so a history replay hands a consumer
+the terminal and nothing else; a transcript-only session the sidecar read with
+no shim watching does the same, since the sidecar produces a start only for an
+async launch. The daemon already held a settled frame that outran its start
+(resolve/feed/subagent.go, retireHeldSpawns), but a start that is never coming
+cannot be waited for: the bubble was drawn warned and its OpenFeed then refused
+as feed_undecodable, because the row named no agent.
+
+NOT A DERIVATION, AND THIS IS THE POINT. detached_work.proto forbids deriving
+one identity from another. This field makes that derivation UNNECESSARY rather
+than permitted — the producer states what it knows, and no consumer has to
+reconstruct it from the unit id, the calling agent, or a spool's file name.
+
+PRODUCERS. All three fill it, with the minting rule's value (the spawning
+call's tool_use_id):
+- shim convert/tools/subagent.ts — the awaited spawn's tool result.
+- shim convert/detached.ts — a background task's settling notification.
+- shim-sidecar internal/convert/subagent.go — the transcript's settled spawn,
+  the delivery the field exists for. Its helper answers nil for an empty id,
+  so a call whose own id is unknown leaves the field UNSET.
+
+CONSUMER. daemon resolve/feed/subagent.go takes the created agent from
+whichever frame states it. A naming success draws at once, mints its sub-feed
+and earns no subagent_without_start warning; a success without one keeps the
+hold-then-warn path untouched. Held frames released by a non-start naming
+frame fold BEFORE it, since the terminal is later in the run than everything
+it outran.

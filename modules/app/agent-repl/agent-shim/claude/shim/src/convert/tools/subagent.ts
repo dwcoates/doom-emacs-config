@@ -328,12 +328,13 @@ function settleCompleted(
   const totals = totalsOf(structured);
   if (report === undefined || totals === undefined) return undefined;
   if (str(structured, "agentId") === undefined) {
-    // NOT FATAL: the success arm carries no identity of its own — the created
-    // agent is named by the start frame — so a report without one is still a
-    // faithful conclusion.
+    // NOT FATAL, and it does not cost the conclusion its identity: the created
+    // agent is the SPAWNING CALL'S OWN ID (the minting rule at the head of this
+    // file), which is stated below whether or not the vendor echoed its own
+    // 17-hex locator here. What is lost is only the link to this run's files.
     LOGGER.log(
       { level: "warn", tool_use_id: call.toolUseId },
-      "a completed subagent named no agent id; the report is carried, no identity is restated here",
+      "a completed subagent named no vendor agent id; its transcript files cannot be linked to this spawn",
     );
   }
   return {
@@ -342,6 +343,11 @@ function settleCompleted(
       result: {
         case: "success",
         value: create(conversationv1.AgentSubagentSuccessSchema, {
+          // THE SAME IDENTITY THE START STATES, restated so a delivery that
+          // carries only this frame — a replayed history, a transcript read
+          // with nothing watching live — can still name the agent this spawn
+          // created. It is the minting rule's value, not a second identity.
+          createdAgentId: subagentId(call.toolUseId),
           prompt: subagentPrompt(call),
           report,
           totals,

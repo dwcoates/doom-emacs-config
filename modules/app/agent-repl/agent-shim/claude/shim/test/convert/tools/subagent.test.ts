@@ -230,6 +230,18 @@ describe("subagentPrompt", () => {
 });
 
 describe("subagentConverter.settle", () => {
+  it("names the created agent on the conclusion, so a settled-only delivery can address it", () => {
+    // A history replay hands a consumer this frame and no start; without the
+    // id the bubble it draws would address nothing.
+    // Arrange, Act.
+    const success = successOf(
+      subagentConverter.settle(call(toolInput("agent")), outcome(toolUseResult("agent")))!,
+    );
+
+    // Assert: the minting rule's value, the same one the start states.
+    expect(success.createdAgentId?.value).toBe("toolu_spawn");
+  });
+
   it("settles the corpus's completed spawn with the subagent's own prose", () => {
     // Arrange.
     const structured = toolUseResult("agent");
