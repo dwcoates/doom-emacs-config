@@ -276,6 +276,86 @@ func (s *fakeStand) Killed() []killCall {
 	return append([]killCall(nil), s.killed...)
 }
 
+// fakeSpawns is the shim supervisor's spawn sweep. It records every call and
+// can be made to refuse, which is how the "a spawn whose kill fails is
+// reported" case is arranged.
+type fakeSpawns struct {
+	mu      sync.Mutex
+	reasons []string
+	// bounds records the deadline left on each call's context, so a test can
+	// assert the sweep was given a bound at all rather than the caller's own.
+	bounds []time.Duration
+	err    error
+	// wedge, when set, is the supervisor that accepts the sweep and never
+	// answers until the caller's bound ends it.
+	wedge bool
+	// calls announces every sweep, so a test synchronizes on one having
+	// happened rather than polling for it.
+	calls chan string
+	// witness reads how many registered sessions had been stood down at the
+	// moment the sweep was asked for, which is how ORDER is asserted without a
+	// clock.
+	witness func() int
+	// seen records that witness, once per call.
+	seen []int
+}
+
+func newFakeSpawns() *fakeSpawns {
+	return &fakeSpawns{calls: make(chan string, 16)}
+}
+
+func (s *fakeSpawns) StandDownEverySpawn(ctx context.Context, reason string) error {
+	s.mu.Lock()
+	s.reasons = append(s.reasons, reason)
+	if deadline, ok := ctx.Deadline(); ok {
+		s.bounds = append(s.bounds, time.Until(deadline))
+	}
+	err := s.err
+	wedge := s.wedge
+	witness := s.witness
+	s.mu.Unlock()
+	if witness != nil {
+		s.mu.Lock()
+		s.seen = append(s.seen, witness())
+		s.mu.Unlock()
+	}
+	s.calls <- reason
+	if wedge {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return err
+}
+
+// Reasons returns every reason the sweep was called with.
+func (s *fakeSpawns) Reasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.reasons...)
+}
+
+// Bounds returns the remaining budget observed on each call's context.
+func (s *fakeSpawns) Bounds() []time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Duration(nil), s.bounds...)
+}
+
+// Seen returns, per call, how many registered stand-downs had already
+// happened when the sweep ran.
+func (s *fakeSpawns) Seen() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int(nil), s.seen...)
+}
+
+// fail makes the sweep report a failure.
+func (s *fakeSpawns) fail(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
+}
+
 // harness is one controller under test with every fake reachable.
 type harness struct {
 	c         *controller
@@ -284,6 +364,7 @@ type harness struct {
 	announcer *fakeAnnouncer
 	freeness  *fakeFreeness
 	stand     *fakeStand
+	spawns    *fakeSpawns
 	log       *dlog.TestSurfaces
 	exits     chan struct{}
 }
@@ -307,6 +388,7 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		announcer: &fakeAnnouncer{},
 		freeness:  newFakeFreeness(),
 		stand:     newFakeStand(),
+		spawns:    newFakeSpawns(),
 		log:       log,
 		exits:     make(chan struct{}, 4),
 	}
@@ -316,12 +398,14 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 		SweepEvery:    5 * time.Minute,
 		RefusalWindow: time.Minute,
 		Stand:         h.stand,
+		Spawns:        h.spawns,
 		Freeness:      h.freeness,
 		Announcer:     h.announcer,
 		Exit:          func(context.Context) error { h.exits <- struct{}{}; return nil },
 		Clock:         h.clock,
 		Log:           log,
 	}
+	h.spawns.witness = func() int { return len(h.stand.Killed()) }
 	for _, a := range adjust {
 		a(&deps)
 	}
