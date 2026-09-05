@@ -2,9 +2,13 @@ package rollout
 
 import (
 	"context"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -459,4 +463,121 @@ func TestTheManifestNamesAWorkspaceWithALiveShimAsPreserve(t *testing.T) {
 	if m.Sessions[0].ShimPID == 0 {
 		t.Fatalf("shim pid = 0, want the running shim's pid on a preserve entry")
 	}
+}
+
+// A MERGED WORKSPACE IS THE CASE THESE COVER. The merge removes the worktree
+// and leaves the registry row, so the handover cannot transfer the workspace —
+// the successor cannot even resolve a log sink for a directory that is gone.
+// Its SHIM is still running, though, and this daemon is the only thing that
+// knows the process exists.
+
+// untransferableWorkspace is a workspace this daemon serves whose worktree has
+// been removed under it, exactly as a merge's terminal removes it.
+func untransferableWorkspace(t *testing.T, h *harness) *fakeShim {
+	t.Helper()
+	ws, dir := h.workspace(t)
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the merged workspace's worktree: %v", err)
+	}
+	return h.fleet.live[ws]
+}
+
+// TestHandoverStandsDownAWorkspaceItCannotTransfer asserts the obligation the
+// split creates: a served workspace that is not handed over does not simply
+// stay behind, because nothing after this daemon knows its shim exists.
+func TestHandoverStandsDownAWorkspaceItCannotTransfer(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	merged := untransferableWorkspace(t, h)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	kills := merged.ForceKills()
+	if len(kills) != 1 {
+		t.Fatalf("the untransferred workspace's shim took %d kills, want 1", len(kills))
+	}
+	if !kills[0].Force {
+		t.Fatalf("kill = %+v, want a forced one: this daemon is already exiting", kills[0])
+	}
+}
+
+// TestHandoverEndsAnUntransferredSessionBeforeStoppingItsProcess asserts the
+// order: the shim writes its own terminals as the session ends, and a signal
+// alone gives it no chance to.
+func TestHandoverEndsAnUntransferredSessionBeforeStoppingItsProcess(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	merged := untransferableWorkspace(t, h)
+
+	// Act
+	if err := runHandover(t, h, 0); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	if len(merged.KillRequests()) != 1 {
+		t.Fatalf("the untransferred workspace's session took %d kill calls, want 1", len(merged.KillRequests()))
+	}
+	taken := h.order.Taken()
+	kill, force := indexOf(taken, "kill_session"), indexOf(taken, "force_kill")
+	if kill < 0 || force < 0 || kill > force {
+		t.Fatalf("steps = %v, want the session ended before the process was stopped", taken)
+	}
+}
+
+// TestHandoverStillExitsWhenAnUntransferredShimWillNotGo asserts the failure is
+// RECORDED and stepped over: an exit skipped over a leaked shim leaks the
+// daemon too.
+func TestHandoverStillExitsWhenAnUntransferredShimWillNotGo(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	merged := untransferableWorkspace(t, h)
+	merged.SetForceError(errors.New("the kernel will not let it go"))
+
+	// Act
+	err := runHandover(t, h, 0)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Handover: %v, want the exit to happen anyway", err)
+	}
+	if !loggedError(h.log, opHandover, "will outlive this daemon") {
+		t.Fatalf("no error record says the shim will outlive this daemon: %v", h.log.Records())
+	}
+}
+
+// TestHandoverNeverStopsAShimItTransferred asserts the other half of the same
+// accounting: a transferred shim is the successor's to adopt, and stopping it
+// would take the workspace's kernel lock down with it.
+func TestHandoverNeverStopsAShimItTransferred(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	transferred := h.fleet.live[ws]
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	if kills := transferred.ForceKills(); len(kills) != 0 {
+		t.Fatalf("a transferred shim took %d kills, want none: it is the successor's to adopt", len(kills))
+	}
+}
+
+// loggedError reports whether an ERROR record under an operation carries the
+// substring.
+func loggedError(log *dlog.TestSurfaces, operation, substr string) bool {
+	for _, rec := range records(log, operation) {
+		if rec.Level == dlog.LevelError && strings.Contains(rec.Message, substr) {
+			return true
+		}
+	}
+	return false
 }
