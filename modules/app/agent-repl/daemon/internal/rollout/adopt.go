@@ -117,13 +117,94 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 			// failure, not the join's: the rest still transfer.
 			c.log.Error(opJoin, "a headless workspace could not be adopted",
 				withCause(dlog.Context{"workspace": string(ws)}, err))
-			// THE CLAIM IS RELEASED ON FAILURE so a later manifest read can
-			// try this workspace again; an adoption that never happened must
-			// not look like one that did.
+			// THE CLAIM IS RELEASED ON FAILURE so this workspace can be tried
+			// again; an adoption that never happened must not look like one
+			// that did.
 			c.releaseHeadless(ws)
+			// AND SOMETHING MUST ACTUALLY TRY AGAIN. Releasing the claim only
+			// makes a retry POSSIBLE; for a headless workspace nothing was
+			// making one. `awaitManifest` stops the moment a manifest is read
+			// (this function answered "found"), `armFromManifest` arms and
+			// never adopts, and a headless workspace has no participant whose
+			// own adopt call would come round — so a single transient failure
+			// here used to strand the workspace on the incumbent for good.
+			//
+			// THE COST OF THAT GAP, and it is the whole 30s: the incumbent
+			// waits out its entire AdoptionWindow for a workspace nobody is
+			// going to adopt (`handover.go`), which delays `windows.Wait()`,
+			// which delays its exit, which delays the primary stream close
+			// EMACS PROMOTES THE SUCCESSOR ON (`lisp/daemon-link.el`
+			// `agent-repl-link--handle-close'). That is the exact shape of
+			// `TestEmacsHandoverTransfersAtFreeness' failing under load: the
+			// promotion arrived at 32s and 42s against ~2s healthy, and the
+			// headless workspace was still on the predecessor's address. The
+			// failing run's dlog was not preserved, so which call inside
+			// `adopt` returned the error is not on record; what IS on record
+			// is that no second attempt could ever have been made.
+			go c.retryHeadless(ctx, ws)
 		}
 	}
 	return true, nil
+}
+
+// The headless re-adoption backoff. This is a FAILURE path, not a happy one:
+// the first retry is soon enough that an ordinary transient costs a small
+// fraction of the adoption window, and the cap keeps a workspace that will
+// never adopt from turning a 30s window into 1200 log lines.
+const (
+	headlessRetryInitial = 100 * time.Millisecond
+	headlessRetryMax     = 2 * time.Second
+)
+
+// retryHeadless keeps trying to adopt one headless workspace until it adopts,
+// somebody else adopts it, or the daemon stops.
+//
+// IT RE-CLAIMS BEFORE EVERY ATTEMPT, so it can never race a manifest read that
+// picked the workspace up in the meantime: `claimHeadless` and this both go
+// through the same one-at-a-time claim, and whichever takes it is the sole
+// adopter of that attempt.
+//
+// It is driven by the injected Clock, so a test drives the backoff rather than
+// waiting it out.
+func (c *controller) retryHeadless(ctx context.Context, ws ids.WorkspaceID) {
+	delay := headlessRetryInitial
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.deps.Clock.After(delay):
+		}
+		if !c.reclaimHeadless(ws) {
+			// Adopted in the meantime, by a manifest read or a participant.
+			return
+		}
+		fields := dlog.Context{"workspace": string(ws), "attempt": attempt}
+		if err := c.adopt(ctx, ws, "headless-retry"); err != nil {
+			c.log.Warn(opJoin, "a headless workspace could not be adopted; retrying",
+				withCause(fields, err))
+			c.releaseHeadless(ws)
+			if delay *= 2; delay > headlessRetryMax {
+				delay = headlessRetryMax
+			}
+			continue
+		}
+		c.log.Info(opJoin, "adopted the headless workspace on a retry", fields)
+		return
+	}
+}
+
+// reclaimHeadless takes the headless claim for ONE workspace, and reports
+// whether this caller now holds it. It answers false for a workspace that has
+// since been adopted, is claimed by somebody else, or is no longer armed.
+func (c *controller) reclaimHeadless(ws ids.WorkspaceID) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.rendezvous[ws]
+	if !ok || e.adopted || e.headlessClaimed {
+		return false
+	}
+	e.headlessClaimed = true
+	return true
 }
 
 // armSessions arms the rendezvous for every manifest session NOT already

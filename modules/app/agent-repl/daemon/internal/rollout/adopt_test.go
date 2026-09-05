@@ -488,3 +488,151 @@ func TestHeadlessWorkspaceIsAdoptedOnceAcrossTwoReads(t *testing.T) {
 		t.Fatalf("adoptions = %v, want exactly one across the two manifest reads", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A headless adopt that FAILS is retried.
+// ---------------------------------------------------------------------------
+
+// setAdoptErr makes the fleet's next Adopt of WS fail with ERR, or succeed when
+// ERR is nil. It lives here rather than in the shared harness because the retry
+// is the only thing that turns an adopt failure on and off mid-test.
+func setAdoptErr(f *fakeFleet, ws ids.WorkspaceID, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err == nil {
+		delete(f.adoptErr, ws)
+		return
+	}
+	f.adoptErr[ws] = err
+}
+
+// harnessSignallingAdoptions is a harness that announces every completed
+// adoption on ADOPTED.
+//
+// PUBLISHVIEWS IS THE COMPLETION EDGE. It is the last thing `adopt` does before
+// it marks the workspace owned, so a test synchronizes on it rather than
+// polling the fleet's adoption list.
+func harnessSignallingAdoptions(t *testing.T, adopted chan<- ids.WorkspaceID) *harness {
+	t.Helper()
+	return newHarness(t, func(d *Deps) {
+		inner := d.PublishViews
+		d.PublishViews = func(ctx context.Context, published ids.WorkspaceID) error {
+			err := inner(ctx, published)
+			adopted <- published
+			return err
+		}
+	})
+}
+
+// TestHeadlessAdoptFailureIsRetriedUntilItAdopts is the defect this retry
+// exists for.
+//
+// A headless workspace has no participant whose own adopt call would come
+// round, `awaitManifest` stops the moment a manifest is read, and
+// `armFromManifest` arms without adopting — so before this retry a SINGLE
+// transient failure stranded the workspace on the incumbent, which then waited
+// out its whole 30s adoption window. Observed as a handover that took 32s and
+// 42s under load against ~2s healthy.
+func TestHeadlessAdoptFailureIsRetriedUntilItAdopts(t *testing.T) {
+	// Arrange: the first adopt fails; the workspace is otherwise ordinary.
+	adopted := make(chan ids.WorkspaceID, 4)
+	h := harnessSignallingAdoptions(t, adopted)
+	ws, _ := h.workspace(t)
+	setAdoptErr(h.fleet, ws, errors.New("the shim was not reachable yet"))
+	writeHeadlessManifest(t, h, ws)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Act: the join adopts nothing, and the retry window opens.
+	if err := h.c.Join(ctx); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want none while the adopt is failing", got)
+	}
+	h.clock.awaitArmed(t, headlessRetryInitial)
+	setAdoptErr(h.fleet, ws, nil)
+	h.clock.Fire(headlessRetryInitial)
+
+	// Assert
+	select {
+	case got := <-adopted:
+		if got != ws {
+			t.Fatalf("the retry adopted %q, want the headless workspace %q", got, ws)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the headless workspace was never adopted on a retry")
+	}
+}
+
+// TestHeadlessAdoptRetryBacksOffWhileItKeepsFailing pins the cadence: a
+// workspace that will never adopt must not turn the adoption window into a
+// retry-per-millisecond log flood, so each failure doubles the wait.
+func TestHeadlessAdoptRetryBacksOffWhileItKeepsFailing(t *testing.T) {
+	// Arrange: an adopt that never succeeds.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	setAdoptErr(h.fleet, ws, errors.New("the shim is gone"))
+	writeHeadlessManifest(t, h, ws)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Act
+	if err := h.c.Join(ctx); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	h.clock.awaitArmed(t, headlessRetryInitial)
+	h.clock.Fire(headlessRetryInitial)
+
+	// Assert: the second window is twice the first.
+	h.clock.awaitArmed(t, 2*headlessRetryInitial)
+}
+
+// TestReclaimHeadlessRefusesAWorkspaceAnotherAdopterHolds is why the retry can
+// never adopt behind somebody else: it re-claims before every attempt, and the
+// claim is one-at-a-time.
+func TestReclaimHeadlessRefusesAWorkspaceAnotherAdopterHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHeadlessManifest(t, h, ws)
+	if err := h.c.armFromManifest(); err != nil {
+		t.Fatalf("armFromManifest: %v", err)
+	}
+	if claimed := h.c.claimHeadless(); len(claimed) != 1 || claimed[0] != ws {
+		t.Fatalf("claimHeadless = %v, want the armed headless workspace", claimed)
+	}
+
+	// Act
+	got := h.c.reclaimHeadless(ws)
+
+	// Assert
+	if got {
+		t.Fatalf("reclaimHeadless took a claim another adopter already holds")
+	}
+}
+
+// TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace pins the other stand-down
+// edge: a released claim on a workspace that has since adopted must not be
+// taken again.
+func TestReclaimHeadlessRefusesAnAlreadyAdoptedWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHeadlessManifest(t, h, ws)
+	if err := h.c.Join(context.Background()); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if got := h.fleet.Adoptions(); len(got) != 1 {
+		t.Fatalf("adoptions = %v, want the headless workspace adopted at boot", got)
+	}
+	h.c.releaseHeadless(ws)
+
+	// Act
+	got := h.c.reclaimHeadless(ws)
+
+	// Assert
+	if got {
+		t.Fatalf("reclaimHeadless took a claim on a workspace that has already adopted")
+	}
+}
