@@ -137,6 +137,41 @@ export default tseslint.config(
   // honor. Satisfying that rule means deleting defensive checks, and this repo
   // does not trade error handling for a clean lint run.
 
+
+  // ---- the suites' fault injection ------------------------------------
+  {
+    // THREE RULES ARE OFF IN TEST CODE, and this is the one place in either
+    // config where a rule is scoped rather than global, so it gets the whole
+    // argument.
+    //
+    // `only-throw-error` and `prefer-promise-reject-errors` exist because a
+    // rejection carrying a string loses its stack. That is right for PRODUCING
+    // code and stays on everywhere it produces. In the suites the non-Error
+    // rejection is the SUBJECT: `Promise.reject("the store socket went away")`,
+    // `throw "EBADF"`, `throw "the volume went away"` are fakes standing in for
+    // a socket, a syscall and a mount that failed in a way nobody typed. The
+    // production code they drive is written defensively for exactly that —
+    // `err instanceof Error ? err.message : ...` appears all over — and a suite
+    // forced to inject `new Error(...)` would never once execute the other side
+    // of those branches. Enforcing the rules here would DELETE error-handling
+    // coverage in the name of error handling.
+    //
+    // `require-yield` flags an `async function*` whose body never yields. Every
+    // hit is a stream fake: one that stays open forever (`await new
+    // Promise<never>`), one that ends having pushed nothing, one that refuses
+    // at the first `next()`. A generator with no `yield` is what those three
+    // conditions ARE, and the alternative is a `yield` nobody wants reached.
+    //
+    // Scoped, not global: `src/` — the mocked vendor in `src/fake/` included —
+    // keeps all three.
+    files: ["test/**/*.ts"],
+    rules: {
+      "@typescript-eslint/only-throw-error": "off",
+      "@typescript-eslint/prefer-promise-reject-errors": "off",
+      "require-yield": "off",
+    },
+  },
+
   // ---- the two documented pre-logger sites ----------------------------
   {
     // src/log.ts IS the logger: it is where console finally gets called.
