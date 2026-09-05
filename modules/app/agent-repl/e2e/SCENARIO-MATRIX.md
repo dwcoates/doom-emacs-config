@@ -62,22 +62,22 @@ as `!(default prose)`).
 | `!context-window` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!cron` | grounded | remainder_e2e_test.go | — | — | Go: TestCronCreateListDelete asserts turn Concluded and footer LiveWork.Crons chip Count positive. | covered |
 | `!edit` | grounded | filetools_e2e_test.go | feed-families.layer.test.ts | — | Go: TestEdit asserts a diff output form. Web: feed-families.layer asserts [data-diff-line] count>0. | covered |
-| `!fail-aborted-tools` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-blocking-limit` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!fail-aborted-tools` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTurnAbortedWhileToolsRunning asserts the terminal is specifically FeedTurnEndedInterrupted and specifically NOT Errored, plus the fate of the in-flight work — exactly one settled response row carrying the partial answer. | covered |
+| `!fail-blocking-limit` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/BlockingLimit asserts TurnFailed.StopReason==blocking_limit, the exact headline "an account-level block stopped the run", the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-budget` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestTurnStopMaxBudgetUsd asserts errored.GetMaxBudget()!=nil plus headline. | covered |
-| `!fail-continuation-prevented` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!fail-continuation-prevented` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTurnStopContinuationPrevented asserts the StopHookPrevented arm, the exact headline "a Stop hook ended the run", the exact vendor message, and the specific negative that NO response row is fabricated (this fake emits no assistant content). | covered |
 | `!fail-execution` | declared-only | turnlifecycle_e2e_test.go | refusals.layer.test.ts | — | Go: TestTurnStopErrorDuringExecution asserts errored.GetExecutionError()!=nil. Web: refusals.layer asserts zero refusal rows and zero failureArms (specific negative). | covered |
-| `!fail-hook-stopped` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-image` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-malformed-tool-use` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!fail-hook-stopped` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/HookStopped asserts TurnFailed.StopReason==hook_stopped, the exact headline "a hook ended the run" (distinct from the Stop hook's own sentence), the exact vendor message, and the surviving partial answer. | covered |
+| `!fail-image` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ImageError asserts TurnFailed.StopReason==image_error, the exact headline "an image in the request could not be processed", the exact vendor message, and the surviving partial answer. | covered |
+| `!fail-malformed-tool-use` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/MalformedToolUseExhausted asserts TurnFailed.StopReason==malformed_tool_use_exhausted, the exact headline, the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-max-turns` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestTurnStopMaxTurns asserts errored.GetMaxTurns()!=nil plus headline. | covered |
-| `!fail-model` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-prompt-too-long` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-rapid-refill` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!fail-model` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ModelError asserts TurnFailed.StopReason==model_error and the exact headline "the model errored in a way the API did not classify" — specifically NOT the refusal sentence, which needs a witnessing response frame — plus the exact vendor message and the surviving partial answer. | covered |
+| `!fail-prompt-too-long` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/PromptTooLong asserts TurnFailed.StopReason==prompt_too_long (NOT request_too_large, the vendor's 413), the exact headline, the exact vendor message, and the surviving partial answer. | covered |
+| `!fail-rapid-refill` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/RapidRefillBreaker asserts TurnFailed.StopReason==rapid_refill_breaker, the exact headline naming it a wait rather than a fault, the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-stop-hook` | declared-only | turnlifecycle_e2e_test.go | — | — | Go: TestTurnStopHookStop asserts errored.GetStopHookPrevented()!=nil plus headline. | covered |
 | `!fail-structured-output` | declared-only | turnlifecycle_e2e_test.go | — | — | Go: TestTurnStopMaxStructuredOutputRetries asserts exact StopReason==structured_output_retry_exhausted. | covered |
-| `!fail-tool-deferred` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!fail-tool-deferred-unavailable` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!fail-tool-deferred` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ToolDeferred asserts TurnFailed.StopReason==tool_deferred, the exact headline "the run ended waiting on a deferred tool call", the exact vendor message, and the fate of the deferred work — the partial answer survives, settled. | covered |
+| `!fail-tool-deferred-unavailable` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ToolDeferredUnavailable asserts TurnFailed.StopReason==tool_deferred_unavailable, the exact headline distinguishing it from the plain deferral, the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-turn-setup` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!fast-cooldown` | ungrounded | — | — | — | no covering test in any layer | uncovered |
 | `!fast-off` | ungrounded | — | — | — | no covering test in any layer | uncovered |
@@ -176,18 +176,18 @@ as `!(default prose)`).
 The four verdict totals and the Go line below are DERIVED FROM TABLE (a)
 ABOVE by counting its verdict and Go columns, so the two can be
 re-reconciled mechanically rather than by memory; they were last recounted
-when the session/tools/refusals rows were corrected. The webapp and Emacs
+when the eleven turn-failure rows were corrected. The webapp and Emacs
 lines are their own owners' hand counts and are NOT derived that way — (a)'s
 columns currently hold 32 and 3 respectively, and the Emacs line explains
 its own larger figure.
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **109**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **120**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **13**
-- Uncovered (no counted layer drives the scenario at all): **26**
+- Uncovered (no counted layer drives the scenario at all): **15**
 - Total canonical scenarios: 148
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 120 scenarios referenced across 23 files
+- Go e2e (non-emacs): 131 scenarios referenced across 23 files
 - Webapp layer (10 `.layer.test.ts` files): 33 scenarios referenced
 - Emacs e2e (9 files): 5 scenarios referenced (`hold`, `interrupt`, `perm-hold`, `prose-streamed`-token, plus the plain gated-prompt tests that use no `!` scenario at all)
 
@@ -216,9 +216,9 @@ Fully covered: `!bash-detach-fail` (`TestBashDetachedNonzeroExit`), `!bash-hold`
 ### Merge/hold (0)
 Fully covered: `!hold`, `!perm-hold`, `!cancel-all` all have Go coverage; `!hold`/`!perm-hold` also have webapp and (for `!hold`, `!perm-hold`) Emacs coverage.
 
-### Failure arms — api-error classes, max turns/budget, execution error, stop hook (12)
+### Failure arms — api-error classes, max turns/budget, execution error, stop hook (0)
 - Every `!api-*` class is now COVERED by `failurearms_e2e_test.go`: `!api-400`, `!api-401`, `!api-403`, `!api-404`, `!api-413`, `!api-429`, `!api-500`, `!api-529`, `!api-billing`, `!api-max-output`, `!api-oauth-org`, `!api-unmodeled`. Each of the twelve `AgentFailure.api_request_failed` sub-arms is driven by its own subtest of `TestApiRequestFailedArms`, which asserts the named `FeedTurnEndedErrored` arm, the exact per-arm headline the client draws verbatim, and the exact vendor message. Two arms carry a field of their own and get a second test each: `!api-429`'s `retry_after_ms` and `!api-unmodeled`'s `type`. All twelve remain ungrounded — the capture harness quarantines failed runs, so every asserted vendor shape is the fake's declaration.
-- `terminal_reason` failure arms with no capture AND no e2e test: `!fail-aborted-tools`, `!fail-blocking-limit`, `!fail-continuation-prevented`, `!fail-hook-stopped`, `!fail-image`, `!fail-malformed-tool-use`, `!fail-model`, `!fail-prompt-too-long`, `!fail-rapid-refill`, `!fail-tool-deferred`, `!fail-tool-deferred-unavailable`, `!fail-turn-setup`. (Contrast with the SAME family's covered members — `!fail-execution`, `!fail-max-turns`, `!fail-budget`, `!fail-stop-hook`, `!fail-structured-output` — all driven by `turnlifecycle_e2e_test.go`, which evidently stops short of the full terminal-reason enumeration.)
+- `terminal_reason` failure arms: ALL TWELVE ARE NOW COVERED by `failurearms_e2e_test.go`, which this section predated. Each of `!fail-blocking-limit`, `!fail-rapid-refill`, `!fail-prompt-too-long`, `!fail-image`, `!fail-model`, `!fail-malformed-tool-use`, `!fail-tool-deferred`, `!fail-tool-deferred-unavailable`, `!fail-turn-setup` and `!fail-hook-stopped` is asserted by name three ways — `FailureVendorTurnFailed.stop_reason`, the daemon's own composed headline for THAT arm, and the vendor's wording — never a collapsed sentence, per `daemon/ERROR-ARMS.md`. `!fail-continuation-prevented` reaches `stop_hook_prevented` (the arm its own fake declares it actually lands on). `!fail-aborted-tools` reaches `FeedTurnEndedInterrupted`, not an error arm at all. The three that are about work already in flight — aborted tools, tool deferred, hook stopped — additionally assert the fate of that work: the partial answer the turn had reached is still on the feed and SETTLED, neither swept away nor left spinning; `!fail-continuation-prevented` asserts the same claim's negative, that a fake emitting no assistant content has no response row invented for it. They join the family's already-covered members (`!fail-execution`, `!fail-max-turns`, `!fail-budget`, `!fail-stop-hook`, `!fail-structured-output`) in `turnlifecycle_e2e_test.go`.
 
 ### Other (10)
 - Session/footer facts with no dedicated test: `!fast-off`, `!fast-cooldown` (siblings of the covered-but-weak `!fast-on`), `!rate-limit`, `!rate-limit-five-hour`, `!rate-limit-seven-day`, all five `!usage-*-unavailable`/`!usage-opus-absent`/`!usage-sampling-failure` account-usage negative shapes (siblings of the covered `!usage-full`/`!usage-available`).
