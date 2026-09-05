@@ -10,8 +10,8 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
-import { LOCK_DIR_ENV, lockDir } from "../src/locks.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LOCK_DIR_ENV, lockBinaryPath, lockDir } from "../src/locks.js";
 import { DEFAULT_RETRY_POLICY } from "../src/store/persistence.js";
 import {
   DEFAULT_STATE_DIR_NAME,
@@ -812,5 +812,510 @@ describe("queryFactory", () => {
     // worktree; constructing the real-query factory never touches the vendor,
     // only CALLING it does, which is exactly what is pinned here.
     await expect(create(spec())).rejects.toThrow();
+  });
+});
+
+/**
+ * `main()` itself — the wiring, the exit paths and the signal boundary.
+ *
+ * Everything outside this process is replaced: the listener, the engine, the
+ * store client, the record plane and the vendor query factory are all mocked,
+ * so no socket is bound, no lock is taken, no process is spawned and the SDK is
+ * never reached. What is asserted is the wiring main() performs and the order
+ * it performs it in, which is the part no other suite covers: the dist smoke
+ * runs the built bundle, and neither it nor the integration suite can provoke
+ * a quiet-drain failure or a kill that arrives before the listener exists.
+ */
+describe("main", () => {
+  const priorArgv = process.argv;
+  const priorEnv = { ...process.env };
+
+  afterEach(() => {
+    vi.doUnmock("../src/service/server.js");
+    vi.doUnmock("../src/service/routes.js");
+    vi.doUnmock("../src/engine/session.js");
+    vi.doUnmock("../src/store/client.js");
+    vi.doUnmock("../src/store/persistence.js");
+    vi.doUnmock("../src/sdk/real-query.js");
+    vi.doUnmock("../src/fatal.js");
+    vi.resetModules();
+    vi.restoreAllMocks();
+    process.argv = priorArgv;
+    for (const key of Object.keys(process.env)) {
+      if (!(key in priorEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, priorEnv);
+  });
+
+  /** One lifecycle record, as `logMainLifecycle` was handed it. */
+  interface Lifecycle {
+    readonly fields: Record<string, unknown>;
+    readonly message: string;
+  }
+
+  /** Everything the harness lets a test reach inside a running main(). */
+  interface Harness {
+    readonly lifecycle: Lifecycle[];
+    readonly fatals: unknown[];
+    /** Resolves with the first fatal main() reported, so no poll is needed. */
+    readonly firstFatal: Promise<unknown>;
+    readonly exits: number[];
+    readonly quiet: ReturnType<typeof vi.fn>;
+    readonly close: ReturnType<typeof vi.fn>;
+    readonly stdout: string[];
+    /** The signals main() registered a handler for, without registering them. */
+    readonly signals: Map<string, () => void>;
+    /** Resolve to let `serve` return; until then the listener does not exist. */
+    letServeReturn: () => void;
+    /** Resolves once the given lifecycle outcome has been recorded. */
+    reached: (outcome: string) => Promise<Lifecycle>;
+    /** The engine deps main() built, available once createEngine has run. */
+    engineDeps: () => Record<string, unknown>;
+    run: () => void;
+    /** Await main() itself; only the --version path ever returns. */
+    runToCompletion: () => Promise<void>;
+  }
+
+  /**
+   * Wire main() over mocks, without starting it.
+   *
+   * `serve` parks on a promise this test resolves, so the window BEFORE the
+   * listener exists — the one `endProcess`'s pre-serving arm lives in — is
+   * reachable at all.
+   */
+  async function harness(argv: string[], env: NodeJS.ProcessEnv = {}): Promise<Harness> {
+    const lifecycle: Lifecycle[] = [];
+    const fatals: unknown[] = [];
+    let announceFatal: (err: unknown) => void = () => {};
+    const firstFatal = new Promise<unknown>((resolve) => {
+      announceFatal = resolve;
+    });
+    const exits: number[] = [];
+    const stdout: string[] = [];
+    const signals = new Map<string, () => void>();
+    const waiters = new Map<string, (record: Lifecycle) => void>();
+    const quiet = vi.fn(async (): Promise<void> => {});
+    const close = vi.fn(async (): Promise<void> => {});
+    let deps: Record<string, unknown> = {};
+    let letServeReturn = (): void => {};
+    const serveGate = new Promise<void>((resolve) => {
+      letServeReturn = resolve;
+    });
+
+    process.argv = ["node", "/shim/dist/main.js", ...argv];
+    Object.assign(process.env, spawnEnv(env));
+
+    vi.resetModules();
+    vi.doMock("../src/fatal.js", () => ({
+      MAIN_LIFECYCLE_OPERATION: "shim.main.lifecycle",
+      MAIN_FATAL_OPERATION: "shim.main.fatal",
+      logMainLifecycle: (fields: Record<string, unknown>, message: string): void => {
+        const record = { fields, message };
+        lifecycle.push(record);
+        const outcome = String(fields["outcome"] ?? "");
+        waiters.get(outcome)?.(record);
+      },
+      reportFatal: (err: unknown): void => {
+        fatals.push(err);
+        announceFatal(err);
+      },
+    }));
+    vi.doMock("../src/service/server.js", () => ({
+      serve: async () => {
+        await serveGate;
+        return { socketPath: "/tmp/shim.sock", quiet, close };
+      },
+    }));
+    vi.doMock("../src/service/routes.js", () => ({ shimRoutes: () => (): void => {} }));
+    vi.doMock("../src/store/client.js", () => ({ createStoreClient: () => ({}) }));
+    vi.doMock("../src/store/persistence.js", () => ({
+      createPersistence: () => ({}),
+      DEFAULT_RETRY_POLICY: { attempts: 1, baseDelayMs: 1, maxDelayMs: 1 },
+    }));
+    vi.doMock("../src/engine/session.js", () => ({
+      createEngine: (given: Record<string, unknown>) => {
+        deps = given;
+        return { standDown: async (): Promise<number> => 0 };
+      },
+    }));
+
+    const mainModule = await import("../src/main.js");
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      exits.push(code ?? 0);
+      return undefined as never;
+    }) as typeof process.exit);
+    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    vi.spyOn(process, "on").mockImplementation(((name: string, handler: () => void) => {
+      signals.set(name, handler);
+      return process;
+    }) as typeof process.on);
+
+    return {
+      lifecycle,
+      fatals,
+      firstFatal,
+      exits,
+      quiet,
+      close,
+      stdout,
+      signals,
+      letServeReturn,
+      reached: (outcome) =>
+        new Promise<Lifecycle>((resolve) => {
+          const seen = lifecycle.find((record) => record.fields["outcome"] === outcome);
+          if (seen !== undefined) {
+            resolve(seen);
+            return;
+          }
+          waiters.set(outcome, resolve);
+        }),
+      engineDeps: () => deps,
+      run: () => {
+        void mainModule.main();
+      },
+      runToCompletion: () => mainModule.main(),
+    };
+  }
+
+  /** The serving arguments, as the daemon spells them on the command line. */
+  const SERVING = ["--listen", "/tmp/shim.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3"];
+
+  it("answers --version and returns without binding anything", async () => {
+    // Arrange.
+    const h = await harness(["--version"]);
+
+    // Act — --version is the one argv that makes main() return.
+    await h.runToCompletion();
+
+    // Assert — no listener, no engine, no lifecycle record at all: it is a
+    // dependency-free smoke of the bundle.
+    expect(h.stdout).toEqual([`${versionLine()}\n`]);
+    expect(h.lifecycle).toEqual([]);
+  });
+
+  it("records the whole resolved spawn contract before it serves", async () => {
+    // Arrange.
+    const h = await harness(SERVING, { AGENT_REPL_SESSION_ID: "daemon-session-7" });
+
+    // Act.
+    h.run();
+    const record = await h.reached("startup_arguments_validated");
+
+    // Assert.
+    expect(record.fields).toMatchObject({
+      listen_socket: "/tmp/shim.sock",
+      store_socket: "/tmp/store.sock",
+      claude_config_dir: "/accounts/primary",
+      shim_build_sha: "abc1234",
+      fake: false,
+      agent_repl_session_id_source: "daemon_env",
+      lock_dir: lockDir(),
+      lock_binary: lockBinaryPath(),
+    });
+  });
+
+  it("says the lock directory was relocated when the environment relocated it", async () => {
+    // Arrange — the daemon's probe reads the same variable, which is what
+    // makes relocation safe; a record that did not say so hides the split.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-main-lockdir-"));
+    const h = await harness(SERVING, { [LOCK_DIR_ENV]: dir });
+
+    // Act.
+    h.run();
+    const record = await h.reached("startup_arguments_validated");
+
+    // Assert.
+    expect(record.fields).toMatchObject({ lock_dir: dir, lock_dir_overridden: true });
+  });
+
+  it("announces that it is serving only after the listener exists", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+
+    // Act.
+    h.run();
+    await h.reached("startup_arguments_validated");
+
+    // Assert — while serve() has not returned, nothing has announced readiness.
+    expect(h.lifecycle.map((r) => r.fields["outcome"])).toEqual(["startup_arguments_validated"]);
+    h.letServeReturn();
+    const serving = await h.reached("serving");
+    expect(serving.fields).toMatchObject({ listen_socket: "/tmp/shim.sock" });
+  });
+
+  it("installs the signal handlers BEFORE announcing readiness", async () => {
+    // Arrange — a supervisor acts on the readiness record, so a shim that
+    // announced it under node's default dispositions could be killed by the
+    // very SIGINT it exists to refuse.
+    const h = await harness(SERVING);
+
+    // Act.
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+
+    // Assert.
+    expect([...h.signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
+  it("refuses SIGINT through the handler it registered", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+
+    // Act.
+    h.signals.get("SIGINT")?.();
+
+    // Assert.
+    const refusal = await h.reached("refused_shutdown");
+    expect(refusal.fields).toMatchObject({ level: "error", query_preserved: true });
+  });
+
+  it("exits immediately when a session end is requested before the listener exists", async () => {
+    // Arrange: serve() has not returned, so KillSession's exit has no
+    // response left to drain.
+    const h = await harness(SERVING);
+    h.run();
+    await h.reached("startup_arguments_validated");
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(3);
+
+    // Assert.
+    const record = await h.reached("exit_before_serving");
+    expect(record.fields).toMatchObject({ level: "error", exit_code: 3 });
+    expect(h.exits).toEqual([3]);
+    expect(h.quiet).not.toHaveBeenCalled();
+  });
+
+  it("drains the wire before closing the listener on a clean kill", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
+    const record = await h.reached("session_killed_exit");
+
+    // Assert — closing first would destroy the socket carrying the
+    // KillSession response itself.
+    expect(h.quiet.mock.invocationCallOrder[0]!).toBeLessThan(h.close.mock.invocationCallOrder[0]!);
+    expect(record.fields).toMatchObject({ exit_code: 0 });
+    expect(record.fields["level"]).toBeUndefined();
+    expect(h.exits).toEqual([0]);
+  });
+
+  it("exits nonzero and at error when the kill left writes the store never acked", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(1);
+    const record = await h.reached("session_killed_exit_lost_writes");
+
+    // Assert.
+    expect(record.fields).toMatchObject({ level: "error", exit_code: 1 });
+    expect(h.exits).toEqual([1]);
+  });
+
+  it("ignores a second end request rather than draining twice", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+    const end = h.engineDeps()["endProcess"] as (code: number) => void;
+
+    // Act.
+    end(0);
+    end(0);
+    await h.reached("session_killed_exit");
+
+    // Assert — two concurrent drains race over one socket's responses.
+    expect(h.quiet).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a failed drain as a fatal and exits 1 rather than claiming a clean end", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+    h.run();
+    h.letServeReturn();
+    await h.reached("serving");
+    const failure = new Error("the socket died mid-drain");
+    h.quiet.mockRejectedValueOnce(failure);
+
+    // Act.
+    (h.engineDeps()["endProcess"] as (code: number) => void)(0);
+    await h.firstFatal;
+
+    // Assert — the first exit is the honest one; `process.exit` is mocked to
+    // a no-op here, so the real process's termination at that point is what
+    // stops anything after it from running.
+    expect(h.fatals).toEqual([failure]);
+    expect(h.exits[0]).toBe(1);
+  });
+
+  it("self-names its log correlation when the daemon exported no session id", async () => {
+    // Arrange.
+    const h = await harness(SERVING);
+
+    // Act.
+    h.run();
+    const record = await h.reached("startup_arguments_validated");
+
+    // Assert — a record with no correlation id at all is the one outcome
+    // neither side can recover from.
+    expect(record.fields["agent_repl_session_id_source"]).toBe("self_named");
+  });
+
+  it("hands the engine the mocked vendor query factory under --fake", async () => {
+    // Arrange.
+    const h = await harness([...SERVING, "--fake"]);
+
+    // Act.
+    h.run();
+    const record = await h.reached("startup_arguments_validated");
+
+    // Assert.
+    expect(record.fields["fake"]).toBe(true);
+    expect(h.engineDeps()["createQuery"]).toBeTypeOf("function");
+  });
+});
+
+/**
+ * The non-fake query factory's forwarding, over a mocked `createRealQuery`.
+ *
+ * The vendor guard makes the real factory unreachable, so the ARGUMENTS it is
+ * handed — the ones a dropped field made unobservable before — are asserted at
+ * the seam instead.
+ */
+describe("queryFactory forwards the whole spec to the real query", () => {
+  afterEach(() => {
+    vi.doUnmock("../src/sdk/real-query.js");
+    vi.resetModules();
+  });
+
+  async function realQueryCalls(): Promise<{
+    factory: typeof import("../src/main.js").queryFactory;
+    calls: Array<Record<string, unknown>>;
+  }> {
+    const calls: Array<Record<string, unknown>> = [];
+    vi.resetModules();
+    vi.doMock("../src/sdk/real-query.js", () => ({
+      createRealQuery: (options: Record<string, unknown>) => {
+        calls.push(options);
+        return Promise.resolve({ interrupt: async (): Promise<void> => {} });
+      },
+    }));
+    const log = await import("../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "main-query-factory" });
+    const mod = await import("../src/main.js");
+    return { factory: mod.queryFactory, calls };
+  }
+
+  const env: ShimEnvironment = {
+    claudeConfigDir: "/accounts/primary",
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+  };
+
+  function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
+    return {
+      binding: { kind: "fresh", sessionId: "session-1" },
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+      ...overrides,
+    };
+  }
+
+  it("states the model when the session named one", async () => {
+    // Arrange.
+    const { factory, calls } = await realQueryCalls();
+
+    // Act.
+    await factory(false, env, "/ws")(spec({ model: "claude-opus-5" }));
+
+    // Assert.
+    expect(calls[0]).toMatchObject({ model: "claude-opus-5" });
+  });
+
+  it("omits the model entirely when the session named none", async () => {
+    // Arrange.
+    const { factory, calls } = await realQueryCalls();
+
+    // Act.
+    await factory(false, env, "/ws")(spec());
+
+    // Assert.
+    expect(calls[0]).not.toHaveProperty("model");
+  });
+
+  it("forwards the keep-alive rewind target so the rewind is observable at the vendor", async () => {
+    // Arrange.
+    const { factory, calls } = await realQueryCalls();
+
+    // Act.
+    await factory(false, env, "/ws")(
+      spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" }, resumeSessionAt: "uuid-9" }),
+    );
+
+    // Assert — the shim's own log saying what it intended is not evidence the
+    // value arrived.
+    expect(calls[0]).toMatchObject({ resumeSessionAt: "uuid-9" });
+  });
+
+  it("omits the rewind target when the turn asked for no rewind", async () => {
+    // Arrange.
+    const { factory, calls } = await realQueryCalls();
+
+    // Act.
+    await factory(false, env, "/ws")(spec());
+
+    // Assert.
+    expect(calls[0]).not.toHaveProperty("resumeSessionAt");
+  });
+});
+
+describe("queryFactory under --fake", () => {
+  const configDir = mkdtempSync(path.join(os.tmpdir(), "shim-fake-factory-config-"));
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "shim-fake-factory-cwd-"));
+  const env: ShimEnvironment = {
+    claudeConfigDir: configDir,
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+  };
+
+  it("constructs the mocked vendor for a RESUME binding carrying a rewind target", async () => {
+    // Arrange.
+    const create = queryFactory(true, env, cwd);
+
+    // Act.
+    const query = await create({
+      binding: { kind: "resume", resumeSessionId: "vendor-old" },
+      permissionMode: "plan",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+      model: "claude-opus-5",
+      resumeSessionAt: "uuid-9",
+    });
+
+    // Assert.
+    expect(query).toBeDefined();
+    await query.interrupt?.();
   });
 });

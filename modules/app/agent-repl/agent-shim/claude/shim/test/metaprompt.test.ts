@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -135,5 +135,34 @@ describe("systemPromptOption", () => {
     // Assert — the preset itself is never dropped: it carries the
     // environment block the model needs to resolve `~`.
     expect(option).toEqual({ type: "preset", preset: "claude_code" });
+  });
+});
+
+describe("readMetaprompt surfaces a non-Error read failure", () => {
+  afterEach(() => {
+    vi.doUnmock("node:fs");
+    vi.resetModules();
+  });
+
+  it("stringifies a thrown value that is not an Error", async () => {
+    // Arrange — a read failure that is neither ENOENT nor an Error instance.
+    const home = makeHome("guidelines");
+    vi.resetModules();
+    vi.doMock("node:fs", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs")>();
+      return {
+        ...actual,
+        readFileSync: () => {
+          throw "the volume went away";
+        },
+      };
+    });
+    const metaprompt = await import("../src/metaprompt.js");
+
+    // Act, Assert — absence is the ONLY tolerated failure, so this rethrows
+    // with the raw value stringified into the message.
+    expect(() => metaprompt.readMetaprompt(home)).toThrow(
+      `shim: reading the metaprompt at ${metapromptPath(home)} failed: the volume went away`,
+    );
   });
 });

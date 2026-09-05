@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   bundledAgentBinaryVersion,
   recordAgentBinaryVersion,
@@ -115,5 +115,152 @@ describe("the bundle never bakes the build identity", () => {
 
     // Assert.
     expect(source).not.toMatch(/"process\.env\.SHIM_BUILD_SHA"\s*:/);
+  });
+});
+
+/**
+ * What the module does when the SDK's own metadata files are not what it
+ * expects.
+ *
+ * The real installed SDK always has a good package.json and manifest, so the
+ * failure arms are unreachable against it. They are driven here by redirecting
+ * the module resolution the reader uses, which is the same seam production
+ * uses — nothing about the reading logic is stubbed.
+ */
+describe("reading the SDK's metadata when it is not what it should be", () => {
+  const dirs: string[] = [];
+
+  afterEach(async () => {
+    vi.doUnmock("node:module");
+    vi.resetModules();
+    const { rmSync } = await import("node:fs");
+    dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
+  });
+
+  /** A stand-in SDK package directory holding exactly the files named. */
+  async function sdkDirWith(files: Record<string, string>): Promise<string> {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-fake-sdk-"));
+    dirs.push(dir);
+    for (const [name, body] of Object.entries(files)) {
+      writeFileSync(path.join(dir, name), body, "utf8");
+    }
+    return dir;
+  }
+
+  /** The build-identity module reading its SDK metadata out of `dir`. */
+  async function identityOver(dir: string): Promise<typeof import("../src/build-identity.js")> {
+    const path = await import("node:path");
+    vi.resetModules();
+    vi.doMock("node:module", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:module")>();
+      return {
+        ...actual,
+        createRequire: (url: string) => {
+          const real = actual.createRequire(url);
+          const stub = (id: string): unknown => real(id);
+          return Object.assign(stub, real, {
+            resolve: (id: string): string =>
+              id === "@anthropic-ai/claude-agent-sdk" ? path.join(dir, "index.js") : real.resolve(id),
+          });
+        },
+      };
+    });
+    const log = await import("../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "build-identity-suite" });
+    return import("../src/build-identity.js");
+  }
+
+  it("refuses to invent an SDK version when the package.json is unreadable", async () => {
+    // Arrange: the directory exists but holds no package.json at all.
+    const identity = await identityOver(await sdkDirWith({}));
+
+    // Act, Assert — a fabricated version is a lie the daemon cannot detect.
+    await expect(async () => identity.sdkVersion()).rejects.toThrow(
+      /cannot read the SDK version from/,
+    );
+  });
+
+  it("refuses an SDK version whose package.json is not valid JSON", async () => {
+    // Arrange.
+    const identity = await identityOver(await sdkDirWith({ "package.json": "{ not json" }));
+
+    // Act, Assert.
+    await expect(async () => identity.sdkVersion()).rejects.toThrow(
+      /cannot read the SDK version from/,
+    );
+  });
+
+  it("refuses an SDK version whose package.json parses to something that is not an object", async () => {
+    // Arrange.
+    const identity = await identityOver(await sdkDirWith({ "package.json": '"a bare string"' }));
+
+    // Act, Assert.
+    await expect(async () => identity.sdkVersion()).rejects.toThrow(
+      /cannot read the SDK version from/,
+    );
+  });
+
+  it("refuses an SDK version the package.json declares as an empty string", async () => {
+    // Arrange.
+    const identity = await identityOver(await sdkDirWith({ "package.json": '{"version":""}' }));
+
+    // Act, Assert — an empty version is a usable-looking value that says
+    // nothing, which is worse than a refusal.
+    await expect(async () => identity.sdkVersion()).rejects.toThrow(
+      /cannot read the SDK version from/,
+    );
+  });
+
+  it("reports absence when the SDK ships no manifest to declare a binary version", async () => {
+    // Arrange.
+    const identity = await identityOver(await sdkDirWith({ "package.json": '{"version":"1.2.3"}' }));
+
+    // Act.
+    const version = identity.bundledAgentBinaryVersion();
+
+    // Assert — absence is normal here: system:init carries the value instead.
+    expect(version).toBeUndefined();
+  });
+
+  it("adopts the manifest's version into the runtime identity when nothing was recorded", async () => {
+    // Arrange.
+    process.env.SHIM_BUILD_SHA = "cafe123";
+    const identity = await identityOver(
+      await sdkDirWith({ "package.json": '{"version":"1.2.3"}', "manifest.json": '{"version":"4.5.6"}' }),
+    );
+
+    // Act.
+    const runtime = identity.runtimeIdentity();
+
+    // Assert.
+    expect(runtime).toEqual({
+      shimBuildSha: "cafe123",
+      sdkVersion: "1.2.3",
+      agentBinaryVersion: "4.5.6",
+    });
+  });
+
+  it("omits the binary version from the runtime identity while nothing has established it", async () => {
+    // Arrange.
+    const identity = await identityOver(await sdkDirWith({ "package.json": '{"version":"1.2.3"}' }));
+
+    // Act.
+    const runtime = identity.runtimeIdentity();
+
+    // Assert — presence, never an "unknown" sentinel.
+    expect(runtime.agentBinaryVersion).toBeUndefined();
+  });
+
+  it("refuses to build a SessionRuntime while the binary version is still unknown", async () => {
+    // Arrange: no manifest, and no session has reported init yet.
+    const identity = await identityOver(await sdkDirWith({ "package.json": '{"version":"1.2.3"}' }));
+
+    // Act, Assert.
+    await expect(async () => identity.requireSessionRuntime()).rejects.toThrow(
+      /agent binary version is not established yet/,
+    );
   });
 });
