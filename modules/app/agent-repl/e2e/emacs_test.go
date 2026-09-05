@@ -147,30 +147,37 @@ const (
 	teardownStopBound      = 10 * time.Second
 )
 
-// emacsExitBound is how long the Emacs PROCESS may take to actually be gone
-// after it has been asked to exit with `(kill-emacs)'.
+// emacsExitBound is how long EMACS AND ITS PROCESS GROUP may take to be gone
+// after Emacs has been asked to exit with `(kill-emacs)'.
 //
-// MEASURED over a full 47-scenario layer run instrumented at a 30s bound:
-// every healthy Emacs was gone on the FIRST poll after the ask -- 51ms,
-// 52ms, 53ms, 54ms across the run, with the two outliers below that being
-// scenarios whose Emacs had already exited. The spread is poll quantization,
-// not variance: `strayPollInterval' is 50ms, so a 51ms observation means the
-// process was already gone when the second /proc read happened and the true
-// exit is somewhere under one poll.
+// It is the group rather than the pid because the group is what the scenario
+// actually owns. `script' runs Emacs in a session of its own, and Emacs leads
+// a group inside it that also holds the WebKit network and web processes the
+// panel's webview starts -- both measured outliving Emacs and reaching the
+// reaper. Nothing else of this scenario is in that group: the daemon and
+// every shim are spawned into groups of their own.
 //
-// 500ms is ten times the worst of those. The multiple is 10x rather than 3x
-// for the same reason `emacsBootBound' gives: three times a number this
-// small is not a bound, it is a race with the scheduler. And missing this
-// bound is not a scenario failure -- it is the trigger for the escalation
-// below -- so the number is a patience budget, and buying more patience than
-// this would only hold the scenario's parallelism slot while a process that
-// was never going to answer is waited on.
+// MEASURED twice over full 47-scenario layer runs instrumented at a 30s
+// bound. Waiting on the pid alone: 51ms, 52ms, 53ms, 54ms. Waiting on the
+// whole group, which is what ships: 51ms, 52ms, 53ms, 54ms, 55ms -- the same
+// numbers, because the children go with Emacs -- with two scenarios below
+// that whose Emacs had already exited. The spread is poll quantization, not
+// variance: `strayPollInterval' is 50ms, so a 51ms observation means the
+// group was already empty at the second /proc read.
+//
+// 500ms is roughly ten times the worst of those. The multiple is 10x rather
+// than 3x for the same reason `emacsBootBound' gives: three times a number
+// this small is not a bound, it is a race with the scheduler. And missing
+// this bound is not a scenario failure -- it is the trigger for the
+// escalation below -- so the number is a patience budget, and buying more of
+// it would only hold the scenario's parallelism slot while a process that was
+// never going to answer is waited on.
 const emacsExitBound = 500 * time.Millisecond
 
-// emacsSignalBound is how long an Emacs that ignored `(kill-emacs)' gets to
-// disappear after each signal sent to its process GROUP.
+// emacsSignalBound is how long an Emacs group that ignored `(kill-emacs)'
+// gets to disappear after each signal sent to it.
 //
-// No healthy run has ever reached this: every Emacs in the run above exited
+// No healthy run has ever reached this: every Emacs in the runs above exited
 // on the ask. It is therefore sized from the observation the reaper already
 // records for the same question -- see `strayTermBound', where every process
 // that honors a signal at all does so within one 50ms poll -- and it is the
@@ -1286,30 +1293,45 @@ func (e *Emacs) awaitEmacsExit(asked bool) {
 			time.Since(started).Round(time.Millisecond), emacsExitBound)
 	}()
 
+	// THE GROUP IS TAKEN FIRST, WHILE EMACS IS STILL ALIVE TO NAME IT. Once
+	// the process is gone its /proc entry is gone with it, and the children
+	// it left cannot be tied to it by anything else: they carry the
+	// scenario's HOME, which says whose scenario they are, and their process
+	// group, which says whose EMACS they are.
+	groups := e.emacsGroups()
+	if len(groups) == 0 {
+		// Emacs was already gone before teardown reached this. Nothing was
+		// left to wait for, and there is no group to escalate against.
+		return
+	}
+
 	if asked {
-		if left := e.awaitEmacsGone(emacsExitBound); len(left) == 0 {
-			e.noteTeardownStep(fmt.Sprintf("emacs exited on (kill-emacs) within %s",
+		if left := e.awaitGroupsGone(groups, emacsExitBound); len(left) == 0 {
+			e.noteTeardownStep(fmt.Sprintf("emacs and its process group exited on (kill-emacs) within %s",
 				time.Since(started).Round(time.Millisecond)))
 			return
 		}
 		e.noteTeardownStep(fmt.Sprintf("waited %s for (kill-emacs) to be honored", emacsExitBound))
-		e.t.Logf("emacs teardown: %s did not exit within %s of (kill-emacs); escalating to the process group",
-			pidList(e.emacsProcs()), emacsExitBound)
+		e.t.Logf("emacs teardown: %s did not exit within %s of (kill-emacs); escalating to process group(s) %v",
+			pidList(e.groupStrays(groups)), emacsExitBound, groups)
 	}
-	// THE GROUP, NOT THE PID. Emacs under a pty parent leads its own session,
-	// and whatever it has spawned -- a `dbus-launch', a WebKit network
-	// process for the panel's webview -- is in that session with it. Signal
-	// the leader alone and the children are the next scenario's problem.
+	// THE GROUP, NOT THE PID, and it is measured rather than assumed to
+	// matter: `script' runs Emacs in a session of its own, so Emacs leads a
+	// group that also holds the WebKit network and web processes its panel's
+	// webview starts -- both of which have been observed outliving Emacs and
+	// reaching the reaper. The daemon and the shims are NOT in it; each of
+	// those is spawned into a group of its own, so signalling here cannot
+	// reach them.
 	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
-		live := e.emacsProcs()
+		live := e.groupStrays(groups)
 		if len(live) == 0 {
 			return
 		}
-		for _, p := range live {
-			e.signalEmacsGroup(p, sig)
+		for _, g := range groups {
+			e.signalGroup(g, sig)
 		}
-		e.noteTeardownStep(fmt.Sprintf("sent %v to the process group of %s", sig, pidList(live)))
-		if left := e.awaitEmacsGone(emacsSignalBound); len(left) == 0 {
+		e.noteTeardownStep(fmt.Sprintf("sent %v to process group(s) %v, holding %s", sig, groups, pidList(live)))
+		if left := e.awaitGroupsGone(groups, emacsSignalBound); len(left) == 0 {
 			return
 		}
 		e.noteTeardownStep(fmt.Sprintf("waited %s after %v", emacsSignalBound, sig))
@@ -1319,36 +1341,75 @@ func (e *Emacs) awaitEmacsExit(asked bool) {
 	// it, kills it, and fails this scenario with the list of steps above.
 }
 
-// signalEmacsGroup sends one signal to the process group led by an Emacs of
-// this scenario, falling back to the bare pid when the group cannot be
-// established as its own.
-func (e *Emacs) signalEmacsGroup(s stray, sig syscall.Signal) {
-	pgid, err := procPGID(s.pid)
-	switch {
-	case err != nil:
-		e.t.Logf("emacs teardown: cannot read the process group of pid %d (%v); signalling the pid alone", s.pid, err)
-		e.signalPID(s.pid, sig)
-		return
-	case pgid <= 1 || pgid == syscall.Getpgrp():
-		// A pgid of this test binary's own group would mean the read was
-		// wrong -- `script' puts Emacs in a session of its own -- and acting
-		// on it would signal the whole suite. Refuse it loudly.
-		e.t.Logf("emacs teardown: pid %d reports process group %d, which is not a group this scenario owns; signalling the pid alone",
-			s.pid, pgid)
-		e.signalPID(s.pid, sig)
-		return
+// emacsGroups answers the process groups this scenario's Emacsen lead.
+//
+// A group that reads back as the test binary's own -- or as init's -- is
+// DROPPED and reported: `script' puts Emacs in a session of its own, so such
+// a reading means the /proc read was wrong, and signalling it would signal
+// the suite.
+func (e *Emacs) emacsGroups() []int {
+	self := syscall.Getpgrp()
+	var out []int
+	for _, p := range e.emacsProcs() {
+		pgid, err := procPGID(p.pid)
+		if err != nil {
+			e.t.Logf("emacs teardown: cannot read the process group of pid %d (%v); it can only be signalled by pid", p.pid, err)
+			out = append(out, p.pid)
+			continue
+		}
+		if pgid <= 1 || pgid == self {
+			e.t.Logf("emacs teardown: pid %d reports process group %d, which is not a group this scenario owns; it can only be signalled by pid",
+				p.pid, pgid)
+			out = append(out, p.pid)
+			continue
+		}
+		if !containsInt(out, pgid) {
+			out = append(out, pgid)
+		}
 	}
+	return out
+}
+
+// groupStrays answers this scenario's live processes that belong to one of
+// the given process groups.
+func (e *Emacs) groupStrays(groups []int) []stray {
+	var out []stray
+	for _, s := range e.findStrays() {
+		pgid, err := procPGID(s.pid)
+		if err != nil {
+			// The process exited between the walk and this read. Not a
+			// member of anything any more.
+			continue
+		}
+		if containsInt(groups, pgid) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// awaitGroupsGone polls until no process of this scenario remains in the
+// given groups or the bound expires, answering whatever is left.
+func (e *Emacs) awaitGroupsGone(groups []int, bound time.Duration) []stray {
+	return awaitGone(bound, func() []stray { return e.groupStrays(groups) })
+}
+
+// signalGroup sends one signal to one process group, reporting anything but
+// "it is already gone".
+func (e *Emacs) signalGroup(pgid int, sig syscall.Signal) {
 	if err := syscall.Kill(-pgid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
-		e.t.Logf("emacs teardown: sending %v to process group %d failed (%v); signalling pid %d alone", sig, pgid, err, s.pid)
-		e.signalPID(s.pid, sig)
+		e.t.Logf("emacs teardown: sending %v to process group %d failed: %v", sig, pgid, err)
 	}
 }
 
-// signalPID signals one process, reporting anything but "it already exited".
-func (e *Emacs) signalPID(pid int, sig syscall.Signal) {
-	if err := syscall.Kill(pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
-		e.t.Logf("emacs teardown: sending %v to pid %d failed: %v", sig, pid, err)
+// containsInt reports whether a small int slice holds one value.
+func containsInt(list []int, want int) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
 	}
+	return false
 }
 
 // emacsProcs answers the live processes of this scenario that are Emacs
@@ -1367,12 +1428,6 @@ func (e *Emacs) emacsProcs() []stray {
 		}
 	}
 	return out
-}
-
-// awaitEmacsGone polls until this scenario owns no live Emacs or the bound
-// expires, answering whatever is left.
-func (e *Emacs) awaitEmacsGone(bound time.Duration) []stray {
-	return awaitGone(bound, e.emacsProcs)
 }
 
 // procPGID reads the process group id of one pid from /proc.
