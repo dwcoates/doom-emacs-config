@@ -1409,3 +1409,211 @@ func TestASpoolFrameThatRestatesHeldBytesDifferentlyIsRefused(t *testing.T) {
 		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_gap", h.records())
 	}
 }
+
+// ---- CROSS-PLANE ORDER: THE START MAY LAND LAST ----
+//
+// One run's frames reach the daemon from TWO producers under one upsert key —
+// the shim's live stream and the sidecar's file tail (shim-fanout.md, "the
+// CROSS-PLANE rule") — so the file plane's settled frame can land before the
+// stream plane's start. Only the start states `created_agent_id`
+// (agent_activity.proto: "THE AGENT THIS SPAWN CREATED — the join key the whole
+// flat model rests on"), and the bubble's own row id IS that agent's sub-feed
+// address, so a bubble drawn before the start lands is a row nothing can open.
+
+// startSubagentOnly announces one spawn without asserting a row, so a test can
+// deliver the frames in either order.
+func (h *harness) startSubagentOnly(unit string, created *conversationv1.AgentId, subagentType string) {
+	h.t.Helper()
+	prompt := &conversationv1.AgentSubagentPrompt{Text: "go and look"}
+	if subagentType != "" {
+		prompt.SubagentType = &subagentType
+	}
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: created,
+				Prompt:         prompt,
+				StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+			}},
+		}},
+	})
+}
+
+// heldSpawnFrames answers how many of a spawn's frames are still waiting for
+// its start.
+func (h *harness) heldSpawnFrames(unit string) int {
+	h.t.Helper()
+	h.resolver.mu.Lock()
+	defer h.resolver.mu.Unlock()
+	state, ok := h.resolver.state(testWorkspace).subagents[unit]
+	if !ok {
+		return 0
+	}
+	return len(state.held)
+}
+
+func TestASettledSpawnThatLandsBeforeItsStartStillNamesTheCreatedAgent(t *testing.T) {
+	// Arrange: the file plane's terminal arrives first.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Act: the stream plane's start lands afterwards.
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Assert: ONE row, addressing the created agent's sub-feed, settled.
+	row := h.bubbleRow("spawn-1", created)
+	if got := bubbleOf(row).GetSettled().GetEndedAtMs(); got != 9_000 {
+		t.Fatalf("settled = %+v, want the terminal that landed first", bubbleOf(row).GetSettled())
+	}
+}
+
+func TestASettledSpawnThatLandsBeforeItsStartDrawsNoUnaddressableRow(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagent("spawn-1", created, nil)
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Assert: no second bubble keyed on an empty created agent.
+	unaddressable := testEncode(feedid.Ref{
+		WS: testWorkspace, Feed: rootFeed(),
+		Row: feedid.RowKey{Kind: feedid.KindActivity, ID: "spawn-1"},
+	}).GetValue()
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetId().GetValue() == unaddressable {
+			t.Fatalf("rows = %v, want no bubble row that addresses no sub-feed", rowIDs(h.rows(rootFeed())))
+		}
+	}
+}
+
+func TestASpawnFrameHeldBeforeItsStartDrawsNothingYet(t *testing.T) {
+	// Arrange, Act: only the terminal has landed.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+
+	// Assert: nothing is published until the start names the agent.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %v, want none before the start lands", rowIDs(rows))
+	}
+}
+
+func TestASpawnWhoseStartLandsFirstIsDrawnAtOnce(t *testing.T) {
+	// Arrange: the ordinary order, so the hold never engages.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Act.
+	h.settleSubagent("spawn-1", created, nil)
+
+	// Assert.
+	row := h.bubbleRow("spawn-1", created)
+	if got := bubbleOf(row).GetSettled().GetEndedAtMs(); got != 9_000 {
+		t.Fatalf("settled = %+v, want the terminal folded onto the started bubble", bubbleOf(row).GetSettled())
+	}
+	if h.hasRecord("debug", "daemon.feed.subagent_held") {
+		t.Fatalf("records = %+v, want no hold for a spawn whose start landed first", h.records())
+	}
+}
+
+func TestAnUpdateHeldBeforeItsStartKeepsTheStartsOwnClock(t *testing.T) {
+	// Arrange: an update arrives before the start.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Update{Update: &conversationv1.AgentSubagentUpdate{
+				Prompt:   &conversationv1.AgentSubagentPrompt{Text: "go and look"},
+				Progress: &conversationv1.AgentSubagentProgress{TotalTokens: 12_400},
+			}},
+		}},
+	})
+
+	// Act.
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Assert: the start's instant stands and the held figure is folded.
+	bubble := bubbleOf(h.bubbleRow("spawn-1", created))
+	if got := bubble.GetRuntime().GetStartedAtMs(); got != 1_000 {
+		t.Fatalf("runtime = %d, want the start's own instant", got)
+	}
+	if got := bubble.GetTokens().GetText(); got != "12.4k tok" {
+		t.Fatalf("tokens = %q, want the held update's running sum", got)
+	}
+}
+
+func TestNoSpawnFrameIsStillHeldOnceTheTurnEnds(t *testing.T) {
+	// Arrange: a spawn whose start never arrives.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: nothing survives the terminal.
+	if held := h.heldSpawnFrames("spawn-1"); held != 0 {
+		t.Fatalf("held frames = %d, want none after the turn's terminal", held)
+	}
+}
+
+func TestASpawnWhoseStartNeverArrivedIsWarnedWhenTheTurnEnds(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert.
+	if !h.hasRecord("warn", "daemon.feed.subagent_without_start") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.subagent_without_start", h.records())
+	}
+}
+
+func TestASpawnWhoseStartNeverArrivedIsStillDrawnWhenTheTurnEnds(t *testing.T) {
+	// Arrange: the file plane's terminal alone, which is what a transcript-only
+	// delivery carries.
+	h := newHarness(t)
+	h.settleSubagent("spawn-1", &conversationv1.AgentId{Value: "agent-explore"}, nil)
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: a spawn is never lost to a start that did not come.
+	found := false
+	for _, row := range h.rows(rootFeed()) {
+		if bubbleOf(row) != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("rows = %v, want the spawn's bubble drawn from what did arrive", rowIDs(h.rows(rootFeed())))
+	}
+}
+
+func TestAStartAfterTheHoldRetiredDoesNotUnsettleTheBubble(t *testing.T) {
+	// Arrange: the hold was retired at the turn's terminal.
+	h := newHarness(t)
+	created := &conversationv1.AgentId{Value: "agent-explore"}
+	h.settleSubagent("spawn-1", created, nil)
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Act: a late start.
+	h.startSubagentOnly("spawn-1", created, "Explore")
+
+	// Assert: the settled bubble stays settled.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}

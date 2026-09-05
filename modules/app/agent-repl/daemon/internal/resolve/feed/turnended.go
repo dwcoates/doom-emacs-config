@@ -58,6 +58,11 @@ func (r *resolver) drawTerminal(s *wsState, agent *conversationv1.AgentId, turn 
 		dlog.Context{"turn": string(*turn), "outcome": terminalArm(ended)})
 	r.upsert(s, at, row, true)
 
+	// A SPAWN WHOSE START NEVER ARRIVED is the same class of producer fault,
+	// and the turn ending is the last moment its start could still have named
+	// the created agent.
+	r.retireHeldSpawns(s, "the turn ended")
+
 	// A DETACHMENT THAT NEVER FOUND ITS UNIT is a producer fault, and the turn
 	// ending is the last moment it could still have been claimed.
 	for unit := range s.detachedUnits {

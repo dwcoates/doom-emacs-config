@@ -29,6 +29,13 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 		r.replayEntry(s, agent, entries[i].GetEntry())
 	}
 
+	// A REPLAY CARRIES NO START — "what history replays is SETTLED frames" —
+	// so a spawn's settled frame waits for a start this page will never
+	// deliver. The page's end is that delivery's own terminal: the bubble is
+	// drawn from what the page did carry rather than held for a frame that is
+	// not coming.
+	r.retireHeldSpawns(s, "the history page ended")
+
 	// WHETHER OLDER HISTORY REMAINS decides what a walk that reaches the
 	// oldest replayed row may claim. `floor` means the replay reached the
 	// oldest RETAINED entry, so the walk really is at the start; `more` means
