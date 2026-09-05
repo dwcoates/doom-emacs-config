@@ -1353,3 +1353,133 @@ describe("the vendor's API failure class reaching the terminal", () => {
     expect(value?.kind.case).toBe("permissionDenied");
   });
 });
+
+/**
+ * What the fold does with a record it is not there to convert.
+ */
+describe("a message carrying no conversation fact", () => {
+  it("ignores a keep_alive outright rather than landing it as residue", () => {
+    const output = createFold().onSdkMessage(
+      { type: "keep_alive", uuid: "uuid-ka", session_id: "session-1" } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    expect(output).toBe(EMPTY_FOLD_OUTPUT);
+  });
+});
+
+describe("an SDK message type no converter owns", () => {
+  it("lands the record as residue named by its own type", () => {
+    const output = createFold().onSdkMessage(
+      { type: "telemetry_beacon", uuid: "uuid-tb", session_id: "session-1" } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    expect(output.entries[0]?.source.discriminator).toBe("unknown.telemetry_beacon");
+  });
+
+  it("keeps the whole record, so a later converter loses nothing", () => {
+    const output = createFold().onSdkMessage(
+      { type: "telemetry_beacon", uuid: "uuid-tb", beat: 3 } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    expect(residueOf(output.entries[0])?.unservedItem.case).toBe("unknown");
+  });
+});
+
+describe("a compaction summary the vendor stated as a bare string", () => {
+  it("records the cut with that string as the summary", () => {
+    // Arrange: the boundary is held until the prose that IS the summary arrives.
+    const fold = createFold();
+    fold.onSdkMessage(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
+        uuid: "uuid-boundary-string",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+      foldContext(),
+    );
+
+    // Act
+    const output = fold.onSdkMessage(
+      assistant("msg-summary-string", [], { message: { content: "a bare string summary" } }),
+      foldContext(),
+    );
+
+    // Assert
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const cut = update.value as conversationv1.ContextCut;
+    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe(
+      "a bare string summary",
+    );
+  });
+});
+
+/**
+ * The class and the wait are remembered SEPARATELY: a retry that restates only
+ * one of them must not erase the other, because the terminal reads both.
+ */
+describe("two api_retry records that each state only half the account", () => {
+  function retry(fields: Record<string, unknown>): SdkMessage {
+    return {
+      type: "system",
+      subtype: "api_retry",
+      attempt: 1,
+      max_retries: 10,
+      error_status: null,
+      uuid: "uuid-retry-partial",
+      session_id: "session-1",
+      ...fields,
+    } as unknown as SdkMessage;
+  }
+
+  function apiTerminal(messages: readonly SdkMessage[]): conversationv1.ApiRequestFailed {
+    const fold = createFold();
+    let last;
+    for (const message of messages) last = fold.onSdkMessage(message, foldContext());
+    const result = last?.turnEnded?.frame?.result;
+    if (result?.case !== "failure") throw new Error("the api terminal must be a failure");
+    const failure = result.value.failure;
+    if (failure.case !== "apiRequestFailed") throw new Error("expected api_request_failed");
+    return failure.value;
+  }
+
+  const terminal = {
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    terminal_reason: "api_error",
+    errors: ["the vendor said so"],
+    api_error_status: null,
+    uuid: "uuid-partial-result",
+    session_id: "session-1",
+  } as unknown as SdkMessage;
+
+  it("keeps the earlier CLASS when the later retry stated only a wait", () => {
+    // Arrange + Act
+    const failed = apiTerminal([
+      retry({ error: "rate_limit" }),
+      retry({ retry_delay_ms: 900 }),
+      terminal,
+    ]);
+
+    // Assert
+    expect(failed.kind.case).toBe("rateLimited");
+  });
+
+  it("keeps the earlier WAIT when the later retry stated only a class", () => {
+    // Arrange + Act
+    const failed = apiTerminal([
+      retry({ retry_delay_ms: 900 }),
+      retry({ error: "rate_limit" }),
+      terminal,
+    ]);
+
+    // Assert
+    expect(failed.kind.value).toMatchObject({ retryAfterMs: 900n });
+  });
+});

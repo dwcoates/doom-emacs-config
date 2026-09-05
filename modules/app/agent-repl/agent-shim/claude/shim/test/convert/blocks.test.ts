@@ -159,3 +159,45 @@ describe("userSaid", () => {
     expect(userSaid(undefined).content?.blocks).toHaveLength(0);
   });
 });
+
+describe("what a PERSON said, block by block", () => {
+  it("carries an image a person attached as an image", () => {
+    const block = userContentBlock({
+      type: "image",
+      source: { type: "url", url: "https://x/y.png", media_type: "image/png" },
+    });
+
+    expect(block.block.case).toBe("image");
+  });
+
+  it("keeps an image whose source names no location this contract can carry as unsupported", () => {
+    // Losing the block entirely would lose what the person actually attached.
+    const block = userContentBlock({ type: "image", source: { type: "file" } });
+
+    expect(block.block.case).toBe("unsupported");
+  });
+
+  it("keeps a kind nothing here models whole, rather than dropping it", () => {
+    const block = userContentBlock({ type: "document", title: "spec.pdf" });
+
+    expect(block.block.case).toBe("unsupported");
+  });
+
+  it("keeps a text block with no text whole, since the contract models only real text", () => {
+    const block = userContentBlock({ type: "text" });
+
+    expect(block.block.case).toBe("unsupported");
+  });
+});
+
+describe("an image block with no source at all", () => {
+  it("answers nothing, because there is no location to name", () => {
+    expect(imageBlock({ type: "image" })).toBeUndefined();
+  });
+});
+
+describe("an unsupported block the vendor did not even name", () => {
+  it("is kept under `unknown` rather than under the empty string", () => {
+    expect(unsupportedBlock({}).kind).toBe("unknown");
+  });
+});
