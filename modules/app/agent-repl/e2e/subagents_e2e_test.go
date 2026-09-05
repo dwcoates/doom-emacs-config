@@ -596,3 +596,58 @@ func TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed(t *testing.T) {
 		t.Fatalf("OpenFeed(bubble) = %v, want a success rather than a refusal", resp.Msg)
 	}
 }
+
+// TestSubagentBubbleFromAReplayIsStillAddressable — PROTO-CHANGES.md Landing
+// 12 (AgentSubagentSuccess.created_agent_id).
+//
+// A HISTORY REPLAY IS A SETTLED-ONLY DELIVERY, and that is not an accident of
+// this test's staging: every frame of one spawn shares ONE upsert key
+// (ActivityKey(<activity id>)), so the store durably holds the unit's LAST
+// frame and nothing else. A cold-booted daemon replaying that workspace is
+// therefore handed the spawn's success with no start behind it — the exact
+// delivery whose bubble used to be drawn warned (daemon.feed.subagent_without_start)
+// and whose OpenFeed then refused, because the row named no created agent.
+//
+// This drives the SAME real "subagent" scenario as
+// TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed and then bounces the
+// daemon exactly as #47 does (adColdBoot, adoption_e2e_test.go), so the only
+// thing under test is what the replay alone can draw.
+func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
+	t.Parallel()
+	// Arrange: a real spawn, driven to completion so the store holds it.
+	w := NewWorld(t, WorldOpts{})
+	w.ExpectWarnings("daemon.rollout.reconcile")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
+
+	// Act: crash the daemon and cold-boot a successor, which knows the spawn
+	// only from the store's durable rows.
+	successor := adColdBoot(t, w)
+	opened, err := successor.Client().OpenFeed(successor.Ctx(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = error %v, want a success", err)
+	}
+	page := opened.Msg.GetSuccess().GetPage().GetSuccess()
+	if page == nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a served page", opened.Msg)
+	}
+	bubble := findRow(page.GetRows(), func(row *frontendv1.FeedRow) bool {
+		return subagentBubble(row) != nil
+	})
+	if bubble == nil {
+		t.Fatalf("replayed feed page = %v, want the spawn's bubble drawn from the store's durable rows", page)
+	}
+
+	// Assert: the replayed row addresses the created agent's own feed, so an
+	// expand resolves rather than refusing as feed_undecodable.
+	sub, err := successor.Client().OpenFeed(successor.Ctx(),
+		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws, Feed: bubble.GetId()}))
+	if err != nil {
+		t.Fatalf("OpenFeed(replayed bubble) = error %v, want a success", err)
+	}
+	if sub.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenFeed(replayed bubble) = %v, want a success rather than a refusal", sub.Msg)
+	}
+}

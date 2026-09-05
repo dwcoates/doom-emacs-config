@@ -2254,6 +2254,30 @@ message AgentSubagentSuccess {
 
   // When the spawn settled. UNSET when the producer observed no instant.
   optional AgentActivitySettledAt settled_at = 7;
+
+  // THE AGENT THIS SPAWN CREATED, restated on the conclusion.
+  //
+  // THE SAME JOIN KEY `AgentSubagentStart.created_agent_id` states, and it is
+  // here because THE SUCCESS ARM IS THE ONLY FRAME SOME DELIVERIES EVER CARRY.
+  // A history replay, or a transcript-only session read after the fact with no
+  // live producer watching, hands a consumer a settled frame and no start; the
+  // consumer must still be able to name the agent in order to address that
+  // spawn's own items. Without this it cannot, and the bubble it draws leads
+  // nowhere.
+  //
+  // NOT A SECOND SPELLING AND NOT A DERIVATION. Deriving the created agent
+  // from another identity — this unit's own id, the calling agent's, a spool's
+  // file name — is forbidden (see the detached-work frame's identity rule),
+  // and this field exists so that no consumer ever needs to: it makes the
+  // derivation UNNECESSARY rather than permitted. A producer that states it
+  // must state the SAME identity the start states; a producer that does not
+  // know it leaves this UNSET and the consumer keeps whatever the start told
+  // it.
+  //
+  // UNSET is therefore not an error. It means this producer could not name the
+  // agent on this frame, and a consumer that already saw the start is
+  // unaffected.
+  AgentId created_agent_id = 8;
 }
 
 // A subagent's final report, as it wrote it.
