@@ -254,6 +254,37 @@ describe("the detail overlay", () => {
     ).toThrow(MalformedView);
   });
 
+  it("refuses a detail arm this build cannot draw, rather than drawing an empty overlay", () => {
+    // ARRANGE: a newer daemon's detail arm reaching a build with no case for it.
+    const { tc } = topbarContext();
+    const future = warning("a", ACCOUNTING);
+    (future.detail as { case: string }).case = "quotaExhausted";
+    // ACT / ASSERT
+    expect(() => drawWarningDetail(future, tc, "TopbarWarning")).toThrow(
+      /TopbarWarning.detail.*quotaExhausted/,
+    );
+  });
+
+  it("refuses a degraded window whose extent arm this build cannot draw", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    const future = warning("a", {
+      case: "degradedWindow",
+      value: {
+        component: { text: "watcher" },
+        reason: { text: "backpressure" },
+        beganAtMs: BigInt(NOW - 1000),
+        extent: { case: "closed", value: { endedAtMs: BigInt(NOW), droppedCount: 1n } },
+      },
+    });
+    const detail = future.detail.value as { extent: { case: string } };
+    detail.extent.case = "suspended";
+    // ACT / ASSERT
+    expect(() => drawWarningDetail(future, tc, "TopbarWarning")).toThrow(
+      /degraded_window.extent.*suspended/,
+    );
+  });
+
   // ENUMERATED FROM THE SCHEMA: a detail arm added to the proto fails here.
   it("has a drawing for every detail arm the schema declares", () => {
     const drawn = ["accounting", "unmodeledTool", "detachedUnmodeled", "sessionFault", "degradedWindow"];

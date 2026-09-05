@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
 
 /** jsdom reports every rect as zero, so geometry is supplied outright. */
@@ -164,5 +164,68 @@ describe("mountRevealLayer: dispose", () => {
     const layer = mountRevealLayer(host, GEOMETRY);
     layer.dispose();
     expect(host.querySelector(".topbar-reveal-layer")).toBeNull();
+  });
+});
+
+describe("mountRevealLayer: the default DOM geometry", () => {
+  // The layer's own reading of the page, used when no geometry is supplied —
+  // the shape main.ts mounts. jsdom returns zeros from the real
+  // getBoundingClientRect, so the rects are staged on the prototype and the
+  // window's size is stubbed, and both are put back afterwards.
+  const rects = new Map<Element, DOMRect>();
+  let original: typeof Element.prototype.getBoundingClientRect;
+
+  const rect = (init: { left: number; top: number; width: number; height: number }): DOMRect =>
+    ({
+      left: init.left,
+      top: init.top,
+      right: init.left + init.width,
+      bottom: init.top + init.height,
+      width: init.width,
+      height: init.height,
+      x: init.left,
+      y: init.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+
+  beforeEach(() => {
+    rects.clear();
+    original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function staged(this: Element): DOMRect {
+      return rects.get(this) ?? rect({ left: 0, top: 0, width: 0, height: 0 });
+    };
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = original;
+    vi.unstubAllGlobals();
+  });
+
+  /** Open a reveal under an anchor whose staged rect is ANCHORRECT. */
+  function openWithStagedRects(anchorRect: DOMRect): HTMLElement {
+    rects.set(host, rect({ left: 4, top: 2, width: 1000, height: 40 }));
+    const button = anchor("model");
+    rects.set(button, anchorRect);
+    const layer = mountRevealLayer(host);
+    layer.open("model", "model", body("options"));
+    const panel = host.querySelector<HTMLElement>("[data-reveal]")!;
+    return panel;
+  }
+
+  it("places the panel under the anchor it read off the page, in the host's own box", () => {
+    // ARRANGE / ACT
+    const panel = openWithStagedRects(rect({ left: 120, top: 2, width: 90, height: 30 }));
+    // ASSERT: anchor left 120 minus the host's left 4; top is the anchor's
+    // bottom (32) minus the host's top (2).
+    expect([panel.style.left, panel.style.top]).toEqual(["116px", "30px"]);
+  });
+
+  it("caps the panel's height at what the window it measured leaves below the strip", () => {
+    // ARRANGE / ACT
+    const panel = openWithStagedRects(rect({ left: 120, top: 2, width: 90, height: 30 }));
+    // ASSERT: the stubbed 800px window, less the 32px top, less the 8px margin.
+    expect(panel.style.maxHeight).toBe("760px");
   });
 });

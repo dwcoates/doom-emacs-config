@@ -5,9 +5,15 @@ import {
   SetPermissionModeErrorSchema,
   SetPermissionModeResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
-import { TopbarPermissionModePickerSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import {
+  TopbarPermissionModeOptionSchema,
+  TopbarPermissionModePickerSchema,
+} from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { drawTopbarPermissionModePicker } from "../../src/topbar/permission-mode.js";
+import {
+  drawTopbarPermissionModePicker,
+  pickPermissionMode,
+} from "../../src/topbar/permission-mode.js";
 import { oneofArms } from "../arms.js";
 import { RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -193,6 +199,67 @@ describe("the pick", () => {
       expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
     });
   }
+
+  it("states a transport failure at the picker when the pick never reached the daemon", async () => {
+    // ARRANGE / ACT
+    const host = await pick(() => {
+      throw new Error("no route to the daemon");
+    });
+    // ASSERT
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("re-throws a failure that is not an unreadable view, rather than drawing it as a refusal", async () => {
+    // ARRANGE: the reveal layer itself throws while closing on success. That is
+    // machinery of this end, not an answer from the daemon, so it escapes with
+    // no sentence invented at the control.
+    const { host, tc } = topbarContext(
+      appContext({
+        setPermissionMode: () =>
+          create(SetPermissionModeResponseSchema, { result: { case: "success", value: {} } }),
+      }),
+    );
+    tc.reveals.close = () => {
+      throw new Error("the reveal layer is gone");
+    };
+    const wrap = document.createElement("div");
+    host.append(wrap);
+    const button = document.createElement("button");
+    const row = document.createElement("button");
+    const option = create(TopbarPermissionModeOptionSchema, {
+      mode: "acceptEdits",
+      displayName: "accept edits",
+    });
+    // ACT / ASSERT
+    await expect(pickPermissionMode(option, tc, wrap, button, row)).rejects.toThrow(
+      "the reveal layer is gone",
+    );
+  });
+
+  it("leaves the picker button usable after a failure it re-throws", async () => {
+    // ARRANGE
+    const { host, tc } = topbarContext(
+      appContext({
+        setPermissionMode: () =>
+          create(SetPermissionModeResponseSchema, { result: { case: "success", value: {} } }),
+      }),
+    );
+    tc.reveals.close = () => {
+      throw new Error("the reveal layer is gone");
+    };
+    const wrap = document.createElement("div");
+    host.append(wrap);
+    const button = document.createElement("button");
+    const row = document.createElement("button");
+    const option = create(TopbarPermissionModeOptionSchema, {
+      mode: "acceptEdits",
+      displayName: "accept edits",
+    });
+    // ACT
+    await pickPermissionMode(option, tc, wrap, button, row).catch(() => undefined);
+    // ASSERT
+    expect(button.disabled).toBe(false);
+  });
 
   it("refuses an error naming no cause", async () => {
     const host = await pick(() =>
