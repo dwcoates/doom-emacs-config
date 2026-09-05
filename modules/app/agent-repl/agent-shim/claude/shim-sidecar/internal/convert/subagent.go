@@ -82,6 +82,13 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		LogVerbose("subagent spawn settled")
 
 	success := &conversationv1.AgentSubagentSuccess{
+		// THE SAME IDENTITY THE START STATES. A sidecar delivery is exactly the
+		// case the field exists for: a transcript read after the fact carries
+		// this conclusion and no start, and a consumer that could not name the
+		// created agent here would draw a bubble addressing nothing. `agentID`
+		// answers nil for an empty id, so a call whose own id is unknown leaves
+		// this UNSET rather than inventing one.
+		CreatedAgentId:       agentID(created),
 		Prompt:               prompt,
 		Report:               subagentReport(result),
 		Totals:               subagentTotals(result),
