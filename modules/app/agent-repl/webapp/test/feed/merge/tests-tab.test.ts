@@ -118,3 +118,23 @@ describe("drawFeedMergeTestSpan: the daemon paints, the client styles", () => {
     expect(el.textContent).toBe("still readable");
   });
 });
+
+describe("a suite state this build cannot draw is a refusal, never a default", () => {
+  it("refuses a state arm a newer daemon set, quoting its name", () => {
+    const newer = suite("unit", "running");
+    (newer as { state: unknown }).state = { case: "skipped", value: {} };
+
+    let thrown: unknown;
+    try {
+      drawFeedMergeTestSuite(newer);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedMergeTestSuite.state");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'skipped' is not one this build can draw",
+    );
+  });
+});

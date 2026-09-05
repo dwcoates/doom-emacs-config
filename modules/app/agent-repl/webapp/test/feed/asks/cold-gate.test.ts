@@ -4,12 +4,20 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   AnswerColdGateErrorSchema,
   AnswerColdGateResponseSchema,
+  type AnswerColdGateResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
 import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
 import {
   FeedColdGateSchema,
+  FeedIdSchema,
+  FeedRowSchema,
   type FeedColdGate,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FailureKind } from "../../../../proto/gen/ts/frontend/v1/failure_pb";
+import { createTicker } from "../../../src/clock.js";
+import type { AgentReplClient } from "../../../src/rpc/client.js";
+import { createAppContext } from "../../../src/rpc/context.js";
+import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   COLD_GATE_COPY,
@@ -18,7 +26,7 @@ import {
   scopeName,
 } from "../../../src/feed/asks/cold-gate.js";
 import { armsOf } from "../arms.js";
-import { askHarness, ROW_ID, settle as drain } from "./harness.js";
+import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 
 type InitState = MessageInitShape<typeof FeedColdGateSchema>["state"];
 
@@ -566,5 +574,126 @@ describe("drawFeedColdGate malformed input", () => {
       value: {},
     };
     expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(MalformedView);
+  });
+});
+
+/**
+ * A row context whose AnswerColdGate hands ANSWER back UNALTERED, and a sink
+ * that keeps what was filed.
+ *
+ * `createRouterTransport` re-encodes the response through the frozen schema,
+ * which DROPS an arm no descriptor knows and turns "an arm this build cannot
+ * draw" into "a oneof sets no arm" — a different refusal from the one under
+ * test. A fake client is how an arm a NEWER daemon set actually reaches the
+ * renderer.
+ */
+function unalteredColdGate(answer: AnswerColdGateResponse): {
+  rc: RowContext;
+  filed: FailureKind[];
+} {
+  const filed: FailureKind[] = [];
+  return {
+    filed,
+    rc: {
+      ctx: createAppContext({
+        client: {
+          answerColdGate: () => Promise.resolve(answer),
+        } as unknown as AgentReplClient,
+        workspace: WORKSPACE,
+        ticker: createTicker(1000),
+        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        composerEnabled: false,
+      }),
+      feed: "root",
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      revealRow: async () => false,
+    },
+  };
+}
+
+/** Catch what a click handler throws, which jsdom reports as a window error. */
+function thrownByClick(click: () => void): unknown {
+  let caught: unknown;
+  const onError = (event: ErrorEvent): void => {
+    caught = event.error;
+    event.preventDefault();
+  };
+  window.addEventListener("error", onError);
+  try {
+    click();
+  } finally {
+    window.removeEventListener("error", onError);
+  }
+  return caught;
+}
+
+describe("a gate answer this build cannot read", () => {
+  it("files the unknown result arm by name rather than drawing a refusal", async () => {
+    // Arrange: a newer daemon answers with a result arm this build has no case for.
+    const answer = create(AnswerColdGateResponseSchema, {
+      result: { case: "success", value: {} },
+    });
+    (answer as unknown as { result: { case: string; value: unknown } }).result = {
+      case: "deferred",
+      value: {},
+    };
+    const h = unalteredColdGate(answer);
+    const el = drawFeedColdGate(gate(standing()), h.rc);
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
+    await settle();
+    // Assert
+    const kind = h.filed[0]?.kind;
+    expect(kind?.case === "frameUndecodable" ? [kind.value.frameHead, kind.value.cause] : null,
+    ).toEqual([
+      "AnswerColdGateResponse.result",
+      "arm 'deferred' is not one this build can draw",
+    ]);
+  });
+});
+
+describe("a compact menu that cannot be answered", () => {
+  it("refuses to send when the menu offered no summarizer", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing({ models: [] })), askHarness().rc);
+    openSubmenu(el);
+    // Act
+    const err = thrownByClick(() =>
+      el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click(),
+    );
+    // Assert
+    expect([(err as MalformedView).name, (err as MalformedView).detail]).toEqual([
+      "MalformedView",
+      "the compact menu offered no model or no scope",
+    ]);
+  });
+
+  it("refuses to send when the menu offered no scope", () => {
+    // Arrange
+    const el = drawFeedColdGate(gate(standing({ scopes: [] })), askHarness().rc);
+    openSubmenu(el);
+    // Act
+    const err = thrownByClick(() =>
+      el.querySelector<HTMLButtonElement>('[data-cold-gate="compact"]')?.click(),
+    );
+    // Assert
+    expect([(err as MalformedView).name, (err as MalformedView).detail]).toEqual([
+      "MalformedView",
+      "the compact menu offered no model or no scope",
+    ]);
+  });
+});
+
+describe("a resolved trace this build cannot read", () => {
+  it("refuses a choice arm this build does not know, by name", () => {
+    // Arrange
+    const u = gate({ case: "resolved", value: { atMs: 0n, choice: { case: "pay", value: {} } } });
+    (
+      u.state as unknown as { value: { choice: { case: string; value: unknown } } }
+    ).value.choice = { case: "rehydrate", value: {} };
+    // Act / Assert
+    expect(() => drawFeedColdGate(u, askHarness().rc)).toThrow(
+      "malformed view at FeedColdGate.resolved.choice: arm 'rehydrate' is not one this build can draw",
+    );
   });
 });

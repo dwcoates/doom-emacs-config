@@ -182,3 +182,19 @@ describe("autoSelectedTab: the last live-or-parked tab, else the last tab", () =
     expect(autoSelectedTab([])).toBeUndefined();
   });
 });
+
+describe("drawTabStateGlyph: a state this build has no glyph for", () => {
+  it("draws the badge with an empty glyph rather than inventing one", () => {
+    // `readMergeTab` validates the arm, so this shape only arrives from a
+    // daemon newer than this bundle; the tab is built directly to reach it.
+    const row = tabRow("t1", { kind: "tests", state: "live" });
+    const tab = { ...readMergeTab(row, row.row.value as never), state: "rewinding" };
+
+    const el = drawFeedMergeTab(tab, { active: false });
+
+    const glyph = el.querySelector(".merge-tab-glyph");
+    expect(el.getAttribute("data-tab-state")).toBe("rewinding");
+    expect(glyph?.textContent).toBe("");
+    expect(glyph?.className).toBe("merge-tab-glyph");
+  });
+});

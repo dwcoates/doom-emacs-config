@@ -82,3 +82,22 @@ describe("drawPromptBlockArm", () => {
     }
   });
 });
+
+describe("drawPromptBlockArm: an arm this build has no case for", () => {
+  it("refuses a block arm a NEWER daemon set, quoting the arm it could not draw", () => {
+    // Arrange: the shape a build one schema ahead would hand this switch.
+    const arm = { case: "video", value: {} } as never;
+
+    // Act
+    let thrown: unknown;
+    try {
+      drawPromptBlockArm(arm, "p.block");
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).detail).toBe("arm 'video' is not one this build can draw");
+  });
+});

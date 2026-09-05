@@ -4,13 +4,21 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   AnswerQuestionErrorSchema,
   AnswerQuestionResponseSchema,
+  type AnswerQuestionResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
 import {
+  FeedIdSchema,
   FeedQuestionItemSchema,
   FeedQuestionSchema,
+  FeedRowSchema,
   type FeedQuestion,
   type FeedQuestionItem,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FailureKind } from "../../../../proto/gen/ts/frontend/v1/failure_pb";
+import { createTicker } from "../../../src/clock.js";
+import type { AgentReplClient } from "../../../src/rpc/client.js";
+import { createAppContext } from "../../../src/rpc/context.js";
+import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedQuestion,
@@ -19,7 +27,7 @@ import {
   UNANSWERED_NOTE,
 } from "../../../src/feed/asks/question.js";
 import { armsOf } from "../arms.js";
-import { askHarness, ROW_ID, settle as drain } from "./harness.js";
+import { askHarness, ROW_ID, settle as drain, WORKSPACE } from "./harness.js";
 
 type InitState = MessageInitShape<typeof FeedQuestionSchema>["state"];
 
@@ -564,5 +572,83 @@ describe("drawFeedQuestion malformed input", () => {
       value: {},
     };
     expect(() => drawFeedQuestion(u, askHarness().rc)).toThrow(MalformedView);
+  });
+});
+
+/**
+ * A row context whose AnswerQuestion hands ANSWER back UNALTERED, and a sink
+ * that keeps what was filed.
+ *
+ * `createRouterTransport` re-encodes the response through the frozen schema,
+ * which DROPS an arm no descriptor knows and turns "an arm this build cannot
+ * draw" into "a oneof sets no arm" — a different refusal from the one under
+ * test. A fake client is how an arm a NEWER daemon set actually reaches the
+ * renderer.
+ */
+function unalteredQuestion(answer: AnswerQuestionResponse): {
+  rc: RowContext;
+  filed: FailureKind[];
+} {
+  const filed: FailureKind[] = [];
+  return {
+    filed,
+    rc: {
+      ctx: createAppContext({
+        client: {
+          answerQuestion: () => Promise.resolve(answer),
+        } as unknown as AgentReplClient,
+        workspace: WORKSPACE,
+        ticker: createTicker(1000),
+        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        composerEnabled: false,
+      }),
+      feed: "root",
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      revealRow: async () => false,
+    },
+  };
+}
+
+describe("an answer this build cannot read", () => {
+  it("files the unknown result arm by name rather than drawing a refusal", async () => {
+    // Arrange: a newer daemon answers with a result arm this build has no case for.
+    const answer = create(AnswerQuestionResponseSchema, {
+      result: { case: "success", value: {} },
+    });
+    (answer as unknown as { result: { case: string; value: unknown } }).result = {
+      case: "deferred",
+      value: {},
+    };
+    const h = unalteredQuestion(answer);
+    const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
+    pick(el, "OAuth 2.0");
+    // Act
+    el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();
+    await settle();
+    // Assert
+    const kind = h.filed[0]?.kind;
+    expect(
+      kind?.case === "frameUndecodable" ? [kind.value.frameHead, kind.value.cause] : null,
+    ).toEqual([
+      "AnswerQuestionResponse.result",
+      "arm 'deferred' is not one this build can draw",
+    ]);
+  });
+});
+
+describe("a question whose options arm this build cannot read", () => {
+  it("refuses an options arm that is neither single- nor multi-select, by name", () => {
+    // Arrange
+    const bad = item();
+    (bad as unknown as { options: { case: string; value: unknown } }).options = {
+      case: "rankOrder",
+      value: { options: [] },
+    };
+    // Act / Assert
+    expect(() =>
+      drawFeedQuestion(question({ case: "open", value: {} }, [bad]), askHarness().rc),
+    ).toThrow(
+      "malformed view at FeedQuestion.questions[0].options: arm 'rankOrder' is not one this build can draw",
+    );
   });
 });

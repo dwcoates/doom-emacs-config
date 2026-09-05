@@ -423,3 +423,26 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
     expect(el.querySelector(".turn-ended-retry")).toBeNull();
   });
 });
+
+describe("drawFeedTurnEnded: an arm this build has no case for", () => {
+  it("refuses an outcome arm a NEWER daemon set, quoting the arm it could not draw", () => {
+    // Arrange
+    const msg = ended({ case: "concluded", value: {} });
+    (msg as unknown as { outcome: unknown }).outcome = { case: "abandoned", value: {} };
+
+    // Act
+    let thrown: unknown;
+    try {
+      drawFeedTurnEnded(msg, contextWithRow(null));
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedTurnEnded.outcome");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'abandoned' is not one this build can draw",
+    );
+  });
+});

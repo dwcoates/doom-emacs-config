@@ -851,3 +851,100 @@ describe("a malformed card", () => {
     expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
   });
 });
+
+/**
+ * The three arms a NEWER daemon could set on a RETURNED card. Each is planted
+ * on the built fixture rather than passed to `create`, which would drop a case
+ * the frozen schema has no field for.
+ */
+describe("a returned card a newer daemon wrote", () => {
+  it("names the verdict arm it cannot draw", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "text", value: { text: "x" } },
+        }),
+      },
+    });
+    const returned = u.outcome.value as { verdict: unknown };
+    returned.verdict = { case: "partiallySucceeded", value: {} };
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'partiallySucceeded' is not one this build can draw"]);
+  });
+
+  it("names the output form arm it cannot draw", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "text", value: { text: "x" } },
+        }),
+      },
+    });
+    const returned = u.outcome.value as { form: unknown };
+    returned.form = { case: "spectrogram", value: {} };
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'spectrogram' is not one this build can draw"]);
+  });
+
+  it("names the diff line kind it cannot draw", () => {
+    // Arrange
+    const line = create(FeedDiffLineSchema, {
+      text: "a line",
+      kind: { case: "added", value: {} },
+    });
+    (line as { kind: unknown }).kind = { case: "moved", value: {} };
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "diff", value: { lines: [line] } },
+        }),
+      },
+    });
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'moved' is not one this build can draw"]);
+  });
+});
