@@ -212,3 +212,293 @@ describe("a model refusal with no fallback", () => {
     expect(entries[0]?.upsertKey).toBe("activity:u-refusal");
   });
 });
+
+// ---------------------------------------------------------------------------
+// The usage block: validated first, never coerced.
+// ---------------------------------------------------------------------------
+
+/** One `assistant` line carrying exactly the usage a test wants read. */
+function assistantWithUsage(usage: unknown): SdkMessage {
+  return {
+    type: "assistant",
+    uuid: "u-usage",
+    session_id: "session-1",
+    parent_tool_use_id: null,
+    message: {
+      id: "msg_usage",
+      type: "message",
+      role: "assistant",
+      model: "claude-opus-5",
+      content: [{ type: "text", text: "hello" }],
+      stop_reason: "end_turn",
+      usage,
+    },
+  } as unknown as SdkMessage;
+}
+
+/** The usage the response's first block ended up carrying, if any. */
+function usageOf(usage: unknown) {
+  const entries = [
+    ...createFold().onSdkMessage(assistantWithUsage(usage), foldContext()).entries,
+  ];
+  return activityOf(entries[0])?.usage;
+}
+
+describe("the vendor's usage block", () => {
+  it("carries NO usage when the vendor stated something that is not an object at all", () => {
+    // A zeroed bill would be read as "this cost nothing"; absence says
+    // "not the carrying unit".
+    expect(usageOf("nope")).toBeUndefined();
+  });
+
+  it("carries NO usage when a modeled counter is malformed", () => {
+    expect(usageOf({ ...USAGE, input_tokens: -1 })).toBeUndefined();
+  });
+
+  it("still carries the figures when the vendor added a field this contract cannot express", () => {
+    const carried = usageOf({ ...USAGE, thermodynamic_tokens: 4 });
+
+    expect(carried?.outputTokens).toBe(30n);
+  });
+
+  it("reads the reasoning count out of the vendor's output-token details", () => {
+    const carried = usageOf({ ...USAGE, output_tokens_details: { reasoning_tokens: 7 } });
+
+    expect(carried?.outputThinkingTokens).toBe(7n);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stream events with no message to belong to.
+// ---------------------------------------------------------------------------
+
+describe("a stream event with no message behind it", () => {
+  it("produces nothing for a message_start that named no message id", () => {
+    const entries = createFold().onSdkMessage(
+      streamEvent({ type: "message_start", message: {} }, "u-noid"),
+      foldContext(),
+    ).entries;
+
+    expect(entries).toEqual([]);
+  });
+
+  it("skips a content block opened before any message_start was seen", () => {
+    const entries = createFold().onSdkMessage(
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "text" } }, "u-orphan"),
+      foldContext(),
+    ).entries;
+
+    expect(entries).toEqual([]);
+  });
+
+  it("skips a delta that arrived before any message_start was seen", () => {
+    const entries = createFold().onSdkMessage(
+      streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "x" } }, "u-orphan-d"),
+      foldContext(),
+    ).entries;
+
+    expect(entries).toEqual([]);
+  });
+
+  it("keeps a stream event no converter owns as residue rather than dropping it", () => {
+    const entries = [
+      ...createFold().onSdkMessage(streamEvent({ type: "citations_delta" }, "u-novel"), foldContext())
+        .entries,
+    ];
+
+    expect(entries[0]?.source.discriminator).toBe("unknown.stream_event");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The assistant message's malformed shapes.
+// ---------------------------------------------------------------------------
+
+/** One `assistant` line with the API message's fields a test wants. */
+function assistantMessage(api: Record<string, unknown>, uuid = "u-a"): SdkMessage {
+  return {
+    type: "assistant",
+    uuid,
+    session_id: "session-1",
+    parent_tool_use_id: null,
+    message: {
+      type: "message",
+      role: "assistant",
+      model: "claude-opus-5",
+      stop_reason: null,
+      usage: USAGE,
+      ...api,
+    },
+  } as unknown as SdkMessage;
+}
+
+function foldOne(message: SdkMessage): PersistEntry[] {
+  return [...createFold().onSdkMessage(message, foldContext()).entries];
+}
+
+describe("an assistant message whose blocks have no identity", () => {
+  it("lands the whole record as UNPARSED residue when it named no id", () => {
+    const entries = foldOne(
+      assistantMessage({ id: "", content: [{ type: "text", text: "orphan" }] }, "u-noid-a"),
+    );
+
+    expect(entries[0]?.source.discriminator).toBe("residue.unparsed");
+  });
+});
+
+describe("an assistant content block no converter owns", () => {
+  it("lands the block as residue named by its own kind", () => {
+    const entries = foldOne(
+      assistantMessage({ id: "msg_novel", content: [{ type: "server_tool_use_result" }] }),
+    );
+
+    expect(entries[0]?.source.discriminator).toBe("unknown.content_block.server_tool_use_result");
+  });
+});
+
+describe("a tool_use block the vendor did not fully name", () => {
+  it("produces no unit when the block named no tool_use id", () => {
+    const entries = foldOne(
+      assistantMessage({ id: "msg_tu", content: [{ type: "tool_use", name: "Read", input: {} }] }),
+    );
+
+    expect(entries).toEqual([]);
+  });
+
+  it("produces no unit when the block named no tool", () => {
+    const entries = foldOne(
+      assistantMessage({ id: "msg_tu", content: [{ type: "tool_use", id: "toolu_1", input: {} }] }),
+    );
+
+    expect(entries).toEqual([]);
+  });
+
+  it("reads a non-object input as NO arguments rather than failing the block", () => {
+    const entries = foldOne(
+      assistantMessage({
+        id: "msg_tu",
+        content: [{ type: "tool_use", id: "toolu_1", name: "mcp__Slack__send", input: "nope" }],
+      }),
+    );
+
+    const item = activityOf(entries[0])?.item;
+    const result = item?.case === "unmodeled" ? item.value.result : undefined;
+    expect(result?.case === "start" ? result.value.arguments : undefined).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Why a response ended without completing.
+// ---------------------------------------------------------------------------
+
+/** The failure reason arm the settled prose block ended up carrying. */
+function failureReasonOf(api: Record<string, unknown>): string | undefined {
+  const entries = foldOne(
+    assistantMessage({ id: "msg_fail", content: [{ type: "text", text: "partial" }], ...api }),
+  );
+  const item = activityOf(entries[0])?.item;
+  const result = item?.case === "response" ? item.value.result : undefined;
+  return result?.case === "failure" ? result.value.reason?.reason.case : undefined;
+}
+
+describe.each([
+  ["max_tokens", "maxTokens"],
+  ["refusal", "refused"],
+  ["model_context_window_exceeded", "contextWindowExceeded"],
+  ["stop_sequence", "stopSequence"],
+])("a response the vendor stopped with stop_reason %s", (stopReason, expectedCase) => {
+  it(`settles the prose as failure.${expectedCase}`, () => {
+    expect(failureReasonOf({ stop_reason: stopReason })).toBe(expectedCase);
+  });
+});
+
+describe("an aborted response", () => {
+  it("settles as ABORTED whatever the vendor's stop reason said", () => {
+    const entries = foldOne({
+      ...(assistantMessage({
+        id: "msg_abort",
+        content: [{ type: "text", text: "partial" }],
+        stop_reason: "max_tokens",
+      }) as unknown as Record<string, unknown>),
+      aborted: true,
+    } as unknown as SdkMessage);
+
+    const item = activityOf(entries[0])?.item;
+    const result = item?.case === "response" ? item.value.result : undefined;
+    expect(result?.case === "failure" ? result.value.reason?.reason.case : undefined).toBe(
+      "aborted",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A stream event that omits its block index.
+// ---------------------------------------------------------------------------
+
+/** Fold a message_start, then the events a test wants, over one fold. */
+function foldStream(...events: Record<string, unknown>[]): PersistEntry[] {
+  const fold = createFold();
+  const context = foldContext();
+  fold.onSdkMessage(
+    streamEvent({ type: "message_start", message: { id: MESSAGE_ID } }, "u-start"),
+    context,
+  );
+  return events.flatMap((event, at) => [
+    ...fold.onSdkMessage(streamEvent(event, `u-ev-${String(at)}`), context).entries,
+  ]);
+}
+
+describe("a content_block_start the vendor sent with no index", () => {
+  it("reads it as block ZERO, so the unit is the first block and not an unnumbered one", () => {
+    // Arrange, Act.
+    const entries = foldStream({ type: "content_block_start", content_block: { type: "text" } });
+
+    // Assert.
+    expect(entries[0]?.source.blockIndex).toBe(0);
+  });
+});
+
+describe("a content_block_delta the vendor sent with no index", () => {
+  it("lands the text on block ZERO's unit rather than on an unnumbered one", () => {
+    // Arrange, Act.
+    const entries = foldStream(
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+    );
+
+    // Assert.
+    expect(entries[1]?.source.blockIndex).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The vendor's own synthesized notices.
+// ---------------------------------------------------------------------------
+
+/** The notice subject the settled prose block ended up carrying. */
+function noticeSubjectOf(record: Record<string, unknown>): string | undefined {
+  const entries = [
+    ...createFold().onSdkMessage(
+      {
+        ...(assistantMessage({
+          id: "msg_notice",
+          content: [{ type: "text", text: "API Error" }],
+        }) as unknown as Record<string, unknown>),
+        ...record,
+      } as unknown as SdkMessage,
+      foldContext(),
+    ).entries,
+  ];
+  const item = activityOf(entries[0])?.item;
+  const result = item?.case === "response" ? item.value.result : undefined;
+  const authorship = result?.case === "success" ? result.value.authorship : undefined;
+  return authorship?.case === "synthesizedNotice"
+    ? authorship.value.subject.case
+    : undefined;
+}
+
+describe("prose the vendor synthesized for a rate limit", () => {
+  it("classifies the notice as a USAGE LIMIT, not as an unclassified failure", () => {
+    expect(noticeSubjectOf({ error: "rate_limit" })).toBe("usageLimit");
+  });
+});

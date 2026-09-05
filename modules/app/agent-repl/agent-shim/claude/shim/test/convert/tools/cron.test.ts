@@ -179,6 +179,15 @@ describe("cronConverter.settle", () => {
     });
   });
 
+  it("defaults a listing row's unstated recurrence and durability to the vendor's own false", () => {
+    // Arrange, Act.
+    const success = successOf("CronList", { jobs: [{ id: "job_2", cron: "* * * * *", prompt: "p" }] });
+
+    // Assert.
+    const job = (success.act.value as conversationv1.AgentCronListed).jobs[0]!;
+    expect([job.recurring, job.durable]).toEqual([false, false]);
+  });
+
   it("states an EMPTY job set when the vendor really reported none", () => {
     // Arrange, Act.
     const success = successOf("CronList", { jobs: [] });
@@ -193,6 +202,15 @@ describe("cronConverter.settle", () => {
 
     // Assert.
     expect((success.act.value as conversationv1.AgentCronListed).jobs).toEqual([]);
+  });
+
+  it("defaults a created job's unstated recurrence and durability to the vendor's own false", () => {
+    // Arrange, Act.
+    const success = successOf("CronCreate", { id: "job_01ABC", humanSchedule: "hourly" });
+
+    // Assert.
+    const created = success.act.value as conversationv1.AgentCronCreated;
+    expect([created.recurring, created.durable]).toEqual([false, false]);
   });
 
   it("stamps the settle instant on the success arm", () => {

@@ -16,6 +16,7 @@ import {
   announceLiveWork,
   createReconciler,
   findBashStart,
+  findUnit,
   reconciledCoordinate,
   stoppedBashTerminal,
 } from "../../src/store/reconcile.js";
@@ -406,5 +407,224 @@ describe("stoppedBashTerminal", () => {
     const interrupted = success?.outcome.value as conversationv1.AgentBashInterrupted | undefined;
     expect(interrupted?.cause.case).toBe("byUser");
     expect(interrupted?.output?.form.case).toBe("notObserved");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findUnit: the plain search over the pages the caller already has
+// ---------------------------------------------------------------------------
+
+describe("findUnit", () => {
+  /** One history entry carrying whatever `entry` arm is given. */
+  function entryAt(entry: conversationv1.HistoryEntry["entry"]): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, { entry }),
+    });
+  }
+
+  /** One agent frame carrying whatever `result` arm is given. */
+  function frameAt(result: conversationv1.AgentFrame["result"]): conversationv1.HistoryEntryAt {
+    return entryAt({
+      case: "agentFrame",
+      value: create(conversationv1.AgentFrameSchema, { agentId: BOOK, result }),
+    });
+  }
+
+  const cases: readonly {
+    readonly name: string;
+    readonly entry: conversationv1.HistoryEntryAt;
+  }[] = [
+    {
+      name: "an entry that is not an agent frame at all",
+      entry: entryAt({
+        case: "userPrompt",
+        value: create(conversationv1.AgentPromptSchema, { agent: BOOK }),
+      }),
+    },
+    {
+      name: "a frame that is not an update at all",
+      entry: frameAt({
+        case: "success",
+        value: create(conversationv1.AgentSuccessSchema, {}),
+      }),
+    },
+    {
+      name: "an update that is not an activity",
+      entry: frameAt({
+        case: "update",
+        value: create(conversationv1.AgentUpdateSchema, {
+          update: {
+            case: "contextCut",
+            value: create(conversationv1.ContextCutSchema, {}),
+          },
+        }),
+      }),
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(`walks past ${testCase.name}`, () => {
+      // Arrange, Act.
+      const found = findUnit([testCase.entry], RUN);
+
+      // Assert.
+      expect(found).toBeUndefined();
+    });
+  }
+});
+
+describe("findBashStart on a unit that is not at its start", () => {
+  it("answers nothing for a shell run the record already holds settled", () => {
+    // A terminal restates the command, but it is not the START arm -- and the
+    // reconciler asks only for the start it must restate.
+    // Arrange.
+    const settled = create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            agentId: BOOK,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: RUN,
+                    item: {
+                      case: "bash",
+                      value: create(conversationv1.AgentBashSchema, {
+                        result: {
+                          case: "update",
+                          value: create(conversationv1.AgentBashUpdateSchema, {
+                            newOutput: "working\n",
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+
+    // Act, Assert.
+    expect(findBashStart([settled], RUN)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other two kinds of work that can detach
+// ---------------------------------------------------------------------------
+
+describe("announceLiveWork for the non-shell kinds", () => {
+  /** One recorded unit of `item`'s kind, keyed as `run-1`. */
+  function recorded(
+    item: conversationv1.AgentActivity["item"],
+  ): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            agentId: BOOK,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, { activityId: RUN, item }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
+
+  it("describes a started SUBAGENT as the subagent arm of DetachableWork", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentSubagentStartSchema, {}),
+        },
+      }),
+    });
+
+    // Act.
+    const announced = announceLiveWork([entry], [HANDLE]);
+
+    // Assert.
+    const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
+    expect(created.workCreated?.work.case).toBe("subagent");
+  });
+
+  it("describes a started MONITOR as the monitor arm of DetachableWork", () => {
+    // Arrange.
+    const entry = recorded({
+      case: "monitor",
+      value: create(conversationv1.AgentMonitorSchema, {
+        result: {
+          case: "start",
+          value: create(conversationv1.AgentMonitorStartSchema, {}),
+        },
+      }),
+    });
+
+    // Act.
+    const announced = announceLiveWork([entry], [HANDLE]);
+
+    // Assert.
+    const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
+    expect(created.workCreated?.work.case).toBe("monitor");
+  });
+
+  it("omits a subagent the record holds no start for, rather than inventing one", () => {
+    // An announcement with an invented description is worse than a missing one.
+    // Arrange.
+    const entry = recorded({
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {}),
+    });
+
+    // Act, Assert.
+    expect(announceLiveWork([entry], [HANDLE])).toEqual([]);
+  });
+});
+
+describe("liveWork against a store that cannot be reached", () => {
+  it("reports the transport failure as store_unavailable", async () => {
+    // Arrange.
+    const refuse = (): never => {
+      throw new Error("stub store client: this suite did not expect that call");
+    };
+    const client: StoreClient = {
+      openAgentSession: refuse,
+      watchAgentSession: refuse,
+      watchBashRun: refuse,
+      readAgentPage: refuse,
+      getWorkflow: refuse,
+      getSidecarCursors: refuse,
+      getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
+      writeBatch: refuse,
+    };
+
+    // Act, Assert.
+    await expect(createReconciler({ client }).liveWork()).rejects.toMatchObject({
+      kind: "store_unavailable",
+      message: "connect ECONNREFUSED",
+    });
   });
 });

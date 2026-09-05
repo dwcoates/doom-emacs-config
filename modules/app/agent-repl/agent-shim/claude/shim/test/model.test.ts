@@ -18,3 +18,13 @@ describe("model normalization", () => {
     expect(normalizeOptionalModel("<synthetic>")).toBeUndefined();
   });
 });
+
+describe("normalizeOptionalModel keeps a real override", () => {
+  it("returns the id itself when the model is not empty-equivalent", () => {
+    // Arrange, Act.
+    const normalized = normalizeOptionalModel("claude-opus-5");
+
+    // Assert.
+    expect(normalized).toBe("claude-opus-5");
+  });
+});

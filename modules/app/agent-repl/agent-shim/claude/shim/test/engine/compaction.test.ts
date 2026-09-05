@@ -240,3 +240,55 @@ describe("the context_cut page line", () => {
     expect(cut.cut.case === "cleared" ? Object.keys(cut.cut.value) : undefined).not.toContain("tokens");
   });
 });
+
+describe("reading a transcript whose last line states almost nothing", () => {
+  it("keeps the sessionId an earlier line stated, because the conversation did not change", () => {
+    const file = transcript([{ ...OBSERVED_AMBIENT, uuid: "u-1" }, { type: "summary" }]);
+
+    expect(readAmbient(file).sessionId).toBe(OBSERVED_AMBIENT.sessionId);
+  });
+
+  it("carries no optional field the last line did not state", () => {
+    // The ambient is rebuilt from the LAST line, so a terse tail line means
+    // terse ambient — nothing is inherited except the conversation's own id.
+    const file = transcript([{ ...OBSERVED_AMBIENT, uuid: "u-1" }, { type: "summary" }]);
+
+    expect(readAmbient(file)).toEqual({ sessionId: OBSERVED_AMBIENT.sessionId });
+  });
+});
+
+describe("the two records written from a terse ambient", () => {
+  const terse = (): { boundary: Record<string, unknown>; summary: Record<string, unknown> } => {
+    let minted = 0;
+    return compactionLines({
+      ambient: { sessionId: "s-1" },
+      summary: "what happened",
+      preTokens: 1,
+      postTokens: 0,
+      durationMs: 2,
+      trigger: "auto",
+      atMs: Date.parse("2026-08-09T23:31:32.812Z"),
+      newUuid: () => `uuid-${++minted}`,
+    });
+  };
+
+  it("omits every ambient field the transcript did not state, rather than writing empties", () => {
+    const boundary = terse().boundary;
+
+    expect(Object.keys(boundary).filter((key) => AMBIENT_KEYS.includes(key))).toEqual(["sessionId"]);
+  });
+
+  it("names no logicalParentUuid when the transcript has no last record to parent to", () => {
+    expect("logicalParentUuid" in terse().boundary).toBe(false);
+  });
+});
+
+const AMBIENT_KEYS = [
+  "userType",
+  "entrypoint",
+  "cwd",
+  "sessionId",
+  "version",
+  "gitBranch",
+  "slug",
+];

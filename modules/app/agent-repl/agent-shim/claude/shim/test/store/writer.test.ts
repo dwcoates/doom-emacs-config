@@ -9,9 +9,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1, storev1 } from "../../src/proto.js";
-import { createStoreClient } from "../../src/store/client.js";
+import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
-import { DEFAULT_RETRY_POLICY, type Persistence } from "../../src/store/persistence.js";
+import {
+  DEFAULT_RETRY_POLICY,
+  type Persistence,
+  type PersistEntry,
+} from "../../src/store/persistence.js";
 import { createPersistence, toStoreEntry, toWriteBatchRequest } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import { agent, bashRunEntry, promptEntry, readEntry, socketPathForTest } from "./persistence-fixtures.js";
@@ -465,6 +469,27 @@ describe("clearProducer", () => {
     expect(() => plane.setProducer("vendor-session-2")).not.toThrow();
   });
 
+  it("stays a no-op on a writer that was never named, even after rows were attempted", async () => {
+    // The early return comes BEFORE the already-wrote check, so an unnamed
+    // writer whose rows never made it past the name check is still free.
+    // Arrange.
+    const started = await startFakeStore(socketPathForTest("clear-never-named"));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: undefined,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+    });
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Act, Assert. The rows never landed under any name, so nothing is claimed.
+    expect(() => plane.clearProducer()).not.toThrow();
+    expect(() => plane.setProducer("vendor-session-1")).not.toThrow();
+  });
+
   it("refuses to un-name a producer that already wrote rows", async () => {
     const { persistence: plane } = await persistence("clear-after-write");
     plane.setProducer("vendor-session-1");
@@ -516,5 +541,221 @@ describe("the default backoff sleep", () => {
     await plane.flush();
 
     expect(started.book("book-1")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The residue arm, and the row with nothing servable in it
+// ---------------------------------------------------------------------------
+
+/** A row the shim recorded but no book serves: a vendor record it cannot model. */
+function residueEntry(): PersistEntry {
+  return {
+    agentId: BOOK,
+    upsertKey: "residue:1",
+    source: { vendorUuid: "uuid-residue", discriminator: "residue.unknown" },
+    keepalive: false,
+    item: {
+      kind: "residue",
+      residue: create(storev1.StoreUnservedItemSchema, {
+        unservedItem: {
+          case: "unknown",
+          value: create(storev1.StoreUnknownSchema, {}),
+        },
+      }),
+    },
+  };
+}
+
+describe("the residue arm", () => {
+  it("lands a residue row under unserved_item, so no book ever serves it", () => {
+    // Arrange, Act.
+    const entry = toStoreEntry(PRODUCER, residueEntry());
+
+    // Assert.
+    const update = entry.entry.value as storev1.StoreAgentUpdate;
+    expect(update.agentInfo.case).toBe("unservedItem");
+  });
+
+  it("names no top-level book for a residue row, which belongs to no agent's page", () => {
+    // Arrange, Act.
+    const entry = toStoreEntry(PRODUCER, residueEntry());
+
+    // Assert.
+    const update = entry.entry.value as storev1.StoreAgentUpdate;
+    expect(update.topLevel).toBeUndefined();
+  });
+});
+
+describe("an entry whose kind has nothing servable in it", () => {
+  it("refuses loudly rather than writing a row with an empty agent_info arm", () => {
+    // A kind the router does not know cannot be turned into a store arm, and a
+    // row with no arm at all would be a blank line in someone's feed.
+    // Arrange.
+    const broken = {
+      ...readEntry(BOOK, "unit-1", "/tmp/a"),
+      item: { kind: "not_a_kind" } as unknown as PersistEntry["item"],
+    };
+
+    // Act, Assert.
+    expect(() => toStoreEntry(PRODUCER, broken)).toThrow(/no servable item/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A store that answers a WriteBatch badly
+// ---------------------------------------------------------------------------
+
+/** A store client whose every verb is a defect until an override names it. */
+function stubClient(overrides: Partial<StoreClient>): StoreClient {
+  const refuse = (): never => {
+    throw new Error("stub store client: this suite did not expect that call");
+  };
+  return {
+    openAgentSession: refuse,
+    watchAgentSession: refuse,
+    watchBashRun: refuse,
+    readAgentPage: refuse,
+    getWorkflow: refuse,
+    getSidecarCursors: refuse,
+    getLiveWork: refuse,
+    writeBatch: refuse,
+    ...overrides,
+  };
+}
+
+/** A persistence over a hand-built client, with no wall-clock backoff at all. */
+function planeOver(overrides: Partial<StoreClient>): Persistence {
+  return createPersistence({
+    client: stubClient(overrides),
+    producer: PRODUCER,
+    nowMs: () => 1_000,
+    sleep: async () => undefined,
+    retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+  });
+}
+
+describe("a WriteBatch the store answers badly", () => {
+  it("renders a thrown non-Error as the fault's detail", async () => {
+    // A rejected transport can carry anything at all; the fault must still say
+    // something a reader of the diagnostics can act on.
+    // Arrange.
+    const plane = planeOver({ writeBatch: () => Promise.reject("the socket said no") });
+    const faults: string[] = [];
+    plane.onFault((fault) => faults.push(fault.detail));
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert.
+    expect(faults).toContain("the socket said no");
+  });
+
+  it("treats an answer with no result arm as a refusal, never as durable", async () => {
+    // A response that says neither durable nor failed cannot be acted on
+    // either way, and calling it durable would lose the row silently.
+    // Arrange.
+    const plane = planeOver({
+      writeBatch: async () => create(storev1.WriteBatchResponseSchema, {}),
+    });
+    const faults: string[] = [];
+    plane.onFault((fault) => faults.push(fault.detail));
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    const outcome = await plane.flush();
+
+    // Assert.
+    expect(outcome.lostRows).toBe(1);
+    expect(faults).toContain("store answered a WriteBatch with no result arm set");
+  });
+
+  it("still replays on a retry policy that names no backoff at all", async () => {
+    // Arrange.
+    let calls = 0;
+    const plane = createPersistence({
+      client: stubClient({
+        writeBatch: async () => {
+          calls += 1;
+          return calls === 1
+            ? create(storev1.WriteBatchResponseSchema, {
+                result: {
+                  case: "failure",
+                  value: create(storev1.WriteBatchFailureSchema, {
+                    detail: "transient",
+                    kind: {
+                      case: "storageFailure",
+                      value: create(storev1.WriteBatchStorageFailureSchema, {}),
+                    },
+                  }),
+                },
+              })
+            : create(storev1.WriteBatchResponseSchema, {
+                result: {
+                  case: "success",
+                  value: create(storev1.WriteBatchSuccessSchema, {}),
+                },
+              });
+        },
+      }),
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [] },
+    });
+
+    // Act.
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    const outcome = await plane.flush();
+
+    // Assert. The empty schedule is a zero wait, not a lost row.
+    expect(outcome.lostRows).toBe(0);
+    expect(calls).toBe(2);
+  });
+});
+
+describe("a durable write the store calls invalid_request", () => {
+  it("drops the row rather than leaving it to be replayed as the same bad bytes", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("durable-invalid");
+    fake.failWritesWith("invalid_request", "row 0 names no agent");
+
+    // Act.
+    await expect(plane.writeDurable([promptEntry(BOOK, "turn-1", "hello")])).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+    fake.failWritesWith(null, "");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Assert. The refused row is GONE rather than queued: the same bytes
+    // cannot become valid, so only the later row reaches the book.
+    expect(fake.book("book-1")).toHaveLength(1);
+  });
+});
+
+describe("a write of nothing at all", () => {
+  it("enqueues no batch for an empty buffered write", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("write-empty");
+
+    // Act.
+    plane.write([]);
+    await plane.flush();
+
+    // Assert.
+    expect(fake.writes()).toHaveLength(0);
+  });
+
+  it("sends nothing for an empty durable write, rather than an empty batch", async () => {
+    // Arrange.
+    const { store: fake, persistence: plane } = await persistence("write-durable-empty");
+
+    // Act.
+    await plane.writeDurable([]);
+
+    // Assert.
+    expect(fake.writes()).toHaveLength(0);
   });
 });

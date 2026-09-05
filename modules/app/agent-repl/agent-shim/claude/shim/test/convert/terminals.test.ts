@@ -175,3 +175,158 @@ describe("the vendor's stated wait", () => {
     expect((failed.kind.value as conversationv1.ApiRateLimited).retryAfterMs).toBeUndefined();
   });
 });
+
+/**
+ * The vendor's CLASS as the fallback for a failure that stated no status.
+ *
+ * A result record can carry `api_error_status: null` — the vendor failed before
+ * it had a response to read a status off — and the only fact left is the class
+ * its own error record stated. Without this fallback every one of those landed
+ * on `unmodeled`, which says "a class we do not model" about a class that is
+ * modelled.
+ */
+describe.each([
+  ["authentication_failed", "authenticationFailed"],
+  ["rate_limit", "rateLimited"],
+  ["overloaded", "overloaded"],
+  ["invalid_request", "invalidRequest"],
+  ["model_not_found", "notFound"],
+  ["server_error", "internal"],
+])("an api_error terminal with NO status whose class is %s", (errorClass, expectedKind) => {
+  it(`falls back to kind.${expectedKind}`, () => {
+    // Arrange + Act
+    const failed = apiFailure(null, { errorClass });
+
+    // Assert
+    expect(failed.kind.case).toBe(expectedKind);
+  });
+});
+
+describe("an api_error terminal at status 402 with no class stated", () => {
+  it("lands on kind.billingError from the status alone", () => {
+    // Arrange + Act
+    const failed = apiFailure(402, {});
+
+    // Assert
+    expect(failed.kind.case).toBe("billingError");
+  });
+});
+
+describe("an api_error terminal with neither a status nor a class", () => {
+  it("names the unmodelled failure `unknown`, since nothing else names it", () => {
+    // Arrange + Act
+    const failed = apiFailure(null, {});
+
+    // Assert
+    expect(failed.kind.value).toMatchObject({ type: "unknown" });
+  });
+});
+
+describe("an api_error terminal the vendor accounted for with no errors", () => {
+  it("states the shim's own message rather than an empty one", () => {
+    // Arrange
+    const message = {
+      type: "result",
+      uuid: "result-uuid-empty",
+      terminal_reason: "api_error",
+      errors: [],
+      api_error_status: 500,
+    } as unknown as SdkMessage;
+
+    // Act
+    const output = convertResult(message as never, foldContext(), undefined, {});
+
+    // Assert
+    const result = output.turnEnded?.frame?.result;
+    const failure = result?.case === "failure" ? result.value.failure : undefined;
+    expect(failure?.case === "apiRequestFailed" ? failure.value.message : undefined).toBe(
+      "the vendor API failed the request",
+    );
+  });
+});
+
+/**
+ * The two terminals nothing above spells: the background move, and the gap.
+ */
+describe("a turn that moved to the background", () => {
+  it("is a SUCCESS whose outcome is backgrounded, because nothing ended", () => {
+    // Arrange + Act
+    const output = convertResult(resultMessage("background_requested"), foldContext(), undefined);
+
+    // Assert
+    const result = output.turnEnded?.frame?.result;
+    const success = result?.case === "success" ? result.value.outcome.case : undefined;
+    expect(success).toBe("backgrounded");
+  });
+});
+
+describe("a terminal reason no arm spells", () => {
+  it("is RELAYED as the unclassified execution failure rather than an invented arm", () => {
+    // Arrange + Act
+    const failureCase = failureCaseOf("swallowed_by_a_black_hole");
+
+    // Assert
+    expect(failureCase).toBe("executionError");
+  });
+
+  it("keeps the run's accumulated errors as the account of the gap", () => {
+    // Arrange
+    const message = {
+      type: "result",
+      uuid: "result-uuid-gap",
+      terminal_reason: "swallowed_by_a_black_hole",
+      errors: ["first attempt failed", "second attempt failed"],
+    } as unknown as SdkMessage;
+
+    // Act
+    const output = convertResult(message as never, foldContext(), undefined);
+
+    // Assert
+    const result = output.turnEnded?.frame?.result;
+    expect(result?.case === "failure" ? result.value.errors : undefined).toEqual([
+      "first attempt failed",
+      "second attempt failed",
+    ]);
+  });
+
+  it("is the unclassified execution failure when the vendor stated no reason at all", () => {
+    // Arrange
+    const message = { type: "result", uuid: "result-uuid-bare" } as unknown as SdkMessage;
+
+    // Act
+    const output = convertResult(message as never, foldContext(), undefined);
+
+    // Assert
+    const result = output.turnEnded?.frame?.result;
+    expect(result?.case === "failure" ? result.value.failure.case : undefined).toBe(
+      "executionError",
+    );
+  });
+});
+
+/**
+ * The result SUBTYPE, which is the arm for a vendor that stated no reason.
+ */
+describe.each([
+  ["error_during_execution", "executionError"],
+  ["error_max_turns", "maxTurns"],
+  ["error_max_budget_usd", "budgetExhausted"],
+  ["error_max_structured_output_retries", "structuredOutputRetryExhausted"],
+])("a result whose subtype is %s and which stated no terminal reason", (subtype, expectedCase) => {
+  it(`converts to failure.${expectedCase}`, () => {
+    // Arrange
+    const message = {
+      type: "result",
+      uuid: `result-uuid-${subtype}`,
+      subtype,
+      is_error: true,
+    } as unknown as SdkMessage;
+
+    // Act
+    const output = convertResult(message as never, foldContext(), undefined);
+
+    // Assert
+    const result = output.turnEnded?.frame?.result;
+    expect(result?.case === "failure" ? result.value.failure.case : undefined).toBe(expectedCase);
+  });
+});

@@ -8,7 +8,7 @@ import { create } from "@bufbuild/protobuf";
 import { connect as netConnect } from "node:net";
 import { request as httpRequest } from "node:http";
 import { connect as http2Connect } from "node:http2";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -581,5 +581,429 @@ describe("flushing a stream's head", () => {
     expect(flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res)).toBe(
       false,
     );
+  });
+});
+
+/**
+ * Records the shim wrote, read off the stderr mirror.
+ *
+ * The durable sink is mocked away suite-wide; every record these guards look
+ * for is `error`, which always mirrors.
+ */
+function mirroredRecords(written: string[]): Array<{ level: string; context: Record<string, unknown> }> {
+  return written.flatMap((line) => {
+    try {
+      return [JSON.parse(line) as { level: string; context: Record<string, unknown> }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+describe("removing the socket file", () => {
+  it("tolerates a socket file that is already gone by the time it closes", async () => {
+    // Arrange: something else removed the path first -- ENOENT is the one
+    // failure that means the job is already done.
+    const sock = socketPath();
+    const server = await serve(sock, shimRoutes(new NotImplementedEngine()));
+    unlinkSync(sock);
+
+    // Act, Assert.
+    await expect(server.close()).resolves.toBeUndefined();
+  });
+
+  it("RAISES an unlink failure that is not ENOENT rather than exiting on a socket still in place", async () => {
+    // Arrange: a directory with no write permission, so the socket file cannot
+    // be removed. A silent success here would leave a path a successor reads
+    // as a live predecessor.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-server-"));
+    const sock = path.join(dir, "shim.sock");
+    const server = await serve(sock, shimRoutes(new NotImplementedEngine()));
+    chmodSync(dir, 0o500);
+
+    // Act, Assert.
+    try {
+      await expect(server.close()).rejects.toThrow(/EACCES|EPERM/);
+    } finally {
+      chmodSync(dir, 0o700);
+      unlinkSync(sock);
+    }
+  });
+});
+
+describe("a connection that cannot be parsed", () => {
+  it("cuts an HTTP/1.1 connection whose request line is garbage, answering nothing", async () => {
+    // Arrange.
+    const sock = socketPath();
+    await start(sock);
+
+    // Act.
+    const answered = await new Promise<Buffer>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      const chunks: Buffer[] = [];
+      socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+      socket.on("close", () => resolve(Buffer.concat(chunks)));
+      socket.on("error", reject);
+      socket.write("@@ not a request line @@\r\n\r\n");
+    });
+
+    // Assert: the server destroyed the socket instead of replying.
+    expect(answered.length).toBe(0);
+  });
+
+  it("SURVIVES an h2c session that fails at the protocol level", async () => {
+    // Arrange: the preface, then a SETTINGS frame whose length is not a
+    // multiple of six -- a FRAME_SIZE_ERROR. Without the sessionError handler
+    // that is an unhandled 'error' that would end the shim.
+    const sock = socketPath();
+    await start(sock);
+    const badSettings = Buffer.from([0, 0, 3, 4, 0, 0, 0, 0, 0, 1, 2, 3]);
+
+    // Act: read until the server answers the broken session with a GOAWAY
+    // (frame type 7 at offset 3), which is how it reports the error rather
+    // than by throwing.
+    await new Promise<void>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      let seen = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        seen = Buffer.concat([seen, chunk]);
+        for (let at = 0; at + 9 <= seen.length; at += 9 + seen.readUIntBE(at, 3)) {
+          if (seen[at + 3] === 7) {
+            socket.destroy();
+            resolve();
+            return;
+          }
+        }
+      });
+      socket.on("error", reject);
+      socket.write(Buffer.concat([Buffer.from(HTTP2_PREFACE, "latin1"), badSettings]));
+    });
+
+    // Assert: the listener is still serving.
+    const rejection = await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
+
+describe("routing a preface that arrives in pieces", () => {
+  it("waits for the rest rather than handing a split preface to the HTTP/1.1 server", async () => {
+    // Arrange.
+    const sock = socketPath();
+    await start(sock);
+    const preface = Buffer.from(HTTP2_PREFACE, "latin1");
+
+    // Act: the deciding prefix is split across two writes, so the first chunk
+    // alone is `need-more`.
+    const first = await new Promise<Buffer>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      socket.on("error", reject);
+      socket.once("data", (chunk: Buffer) => {
+        socket.destroy();
+        resolve(chunk);
+      });
+      socket.write(preface.subarray(0, 8), () => socket.write(preface.subarray(8)));
+    });
+
+    // Assert: the h2 server took it and opened with its own SETTINGS frame
+    // (frame type 4 at offset 3), which the HTTP/1.1 server never sends.
+    expect(first[3]).toBe(4);
+  });
+});
+
+/** An engine whose Hibernate is held open until the test releases it. */
+function heldHibernateEngine(): {
+  engine: NotImplementedEngine;
+  entered: Promise<void>;
+  release: () => void;
+} {
+  let announceEntry = (): void => {};
+  const entered = new Promise<void>((resolve) => {
+    announceEntry = resolve;
+  });
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const engine = new NotImplementedEngine();
+  engine.hibernate = async (): Promise<shimv1.HibernateResponse> => {
+    announceEntry();
+    await held;
+    return create(shimv1.HibernateResponseSchema, {});
+  };
+  return { engine, entered, release };
+}
+
+describe("waiting for the wire to go quiet", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("resolves once the response that was in flight has closed", async () => {
+    // Arrange.
+    const sock = socketPath();
+    const { engine, entered, release } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "1.1").hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await entered;
+
+    // Act.
+    const quiet = server.quiet(30_000);
+    release();
+    await pending;
+
+    // Assert.
+    await expect(quiet).resolves.toBeUndefined();
+  });
+
+  it("says NOTHING about giving up when the response closed inside the budget", async () => {
+    // Arrange.
+    const sock = socketPath();
+    const { engine, entered, release } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "1.1").hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await entered;
+
+    // Act.
+    const quiet = server.quiet(30_000);
+    release();
+    await pending;
+    await quiet;
+
+    // Assert.
+    expect(mirroredRecords(written).some((record) => record.context.budget_ms !== undefined)).toBe(
+      false,
+    );
+  });
+
+  it("keeps waiting while a SECOND response is still open", async () => {
+    // A counter that fired on the first close would cut the other response off
+    // the wire on exit.
+    // Arrange.
+    const sock = socketPath();
+    const first = heldHibernateEngine();
+    const second = heldHibernateEngine();
+    let turn = 0;
+    const engine = new NotImplementedEngine();
+    engine.hibernate = (): Promise<shimv1.HibernateResponse> =>
+      (turn++ === 0 ? first : second).engine.hibernate();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const calls = client(sock, "1.1");
+    const pendingFirst = calls.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await first.entered;
+    const pendingSecond = calls.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    await second.entered;
+
+    // Act.
+    let quietSettled = false;
+    const quiet = server.quiet(30_000).then(() => {
+      quietSettled = true;
+    });
+    first.release();
+    await pendingFirst;
+    await new Promise<void>((resolve) => setImmediate(() => resolve()));
+    const settledAfterFirst = quietSettled;
+    second.release();
+    await pendingSecond;
+    await quiet;
+
+    // Assert.
+    expect([settledAfterFirst, quietSettled]).toEqual([false, true]);
+  });
+
+  it("REPORTS giving up and returns once the budget is spent on a response that never closes", async () => {
+    // A stream that never ends must not keep a killed shim alive forever.
+    // Arrange.
+    const sock = socketPath();
+    const { engine, entered, release } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .catch(() => undefined);
+    await entered;
+
+    // Act.
+    await server.quiet(10);
+
+    // Assert.
+    expect(
+      mirroredRecords(written).some(
+        (record) => record.level === "error" && record.context.in_flight === 1,
+      ),
+    ).toBe(true);
+    release();
+    await pending;
+  });
+});
+
+describe("the content type on a head that carries it more than once", () => {
+  it("echoes the FIRST value when the request repeats its content type", () => {
+    // Node hands a repeated header through as an array, and a head that echoed
+    // the array would be an illegal content type.
+    // Arrange.
+    const head: Array<[number, Record<string, string> | string[]]> = [];
+    const res = {
+      headersSent: false,
+      writeHead(status: number, headers: Record<string, string> | string[]): unknown {
+        head.push([status, headers]);
+        return res;
+      },
+    };
+
+    // Act.
+    flushStreamHead(
+      { headers: { "content-type": ["application/connect+proto", "application/connect+json"] } },
+      res,
+    );
+
+    // Assert.
+    expect(head[0]).toEqual([200, { "content-type": "application/connect+proto" }]);
+  });
+});
+
+describe("reading an encoding out of a flat-array head", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("finds the encoding past header pairs that are not encodings", () => {
+    // Arrange.
+    const res = {
+      headersSent: false,
+      writeHead(_status: number, _headers: Record<string, string> | string[]): unknown {
+        return res;
+      },
+    };
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    // Act.
+    res.writeHead(200, ["x-request-id", "r-1", "grpc-encoding", "gzip"]);
+
+    // Assert.
+    expect(
+      mirroredRecords(written).some(
+        (record) => record.level === "error" && record.context.content_encoding === "gzip",
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("a flat-array head that announces no encoding at all", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("says NOTHING, so an ordinary array head does not raise a false alarm", () => {
+    // The object form of this case is already guarded; the array form walks a
+    // different arm of the reader, and a false positive there would put an
+    // ERROR on every stream whose adapter passes its headers flat.
+    // Arrange.
+    const res = {
+      headersSent: false,
+      writeHead(_status: number, _headers: Record<string, string> | string[]): unknown {
+        return res;
+      },
+    };
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    // Act.
+    res.writeHead(200, ["x-request-id", "r-1", "x-trace", "t-1"]);
+
+    // Assert.
+    expect(
+      mirroredRecords(written).some(
+        (record) => record.context.content_encoding !== undefined,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("an h2c session that fails at the SESSION level", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("keeps serving after a DATA frame on stream 0, which is a connection error", async () => {
+    // Arrange: the preface, then a DATA frame addressed to stream 0. That is a
+    // PROTOCOL_ERROR the session raises as an 'error' -- an unhandled one would
+    // end the whole shim rather than the one bad connection.
+    const sock = socketPath();
+    await start(sock);
+    const dataOnStreamZero = Buffer.from([0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    // Act: the server answers a connection error with a GOAWAY (frame type 7
+    // at offset 3) and then closes.
+    await new Promise<void>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      let seen = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        seen = Buffer.concat([seen, chunk]);
+        for (let at = 0; at + 9 <= seen.length; at += 9 + seen.readUIntBE(at, 3)) {
+          if (seen[at + 3] === 7) {
+            socket.destroy();
+            resolve();
+            return;
+          }
+        }
+      });
+      socket.on("error", reject);
+      socket.write(Buffer.concat([Buffer.from(HTTP2_PREFACE, "latin1"), dataOnStreamZero]));
+    });
+
+    // Assert: the listener is still serving.
+    const rejection = await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
+
+describe("a connection that closes without ever speaking", () => {
+  it("keeps serving after a client that connects and hangs up with no bytes", async () => {
+    // A half-close with nothing written makes the socket readable with NOTHING
+    // to read; a peek that treated that as a first chunk would sniff an empty
+    // buffer and hand a dead connection to the HTTP/1.1 server.
+    // Arrange.
+    const sock = socketPath();
+    await start(sock);
+
+    // Act.
+    await new Promise<void>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      socket.on("error", reject);
+      socket.on("close", () => resolve());
+      socket.on("connect", () => socket.end());
+    });
+
+    // Assert: the listener is still serving.
+    const rejection = await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+    expect(rejection?.code).toBe(Code.Unimplemented);
   });
 });

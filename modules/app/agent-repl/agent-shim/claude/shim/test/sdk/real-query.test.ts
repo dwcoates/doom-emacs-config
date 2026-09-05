@@ -4,10 +4,10 @@
  * throws). Every option asserted here is load-bearing per
  * docs/overhaul/shim.md.
  */
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { realQueryOptions, type RealQuerySpec } from "../../src/sdk/real-query.js";
 import { METAPROMPT_REL_PATH, DOOM_CHECKOUT_REL_PATH } from "../../src/metaprompt.js";
 
@@ -178,5 +178,134 @@ describe("realQueryOptions", () => {
       canUseTool,
       abortController,
     });
+  });
+});
+
+describe("realQueryOptions on a resume", () => {
+  it("carries the rewind target alongside the resume handle", () => {
+    // Arrange, Act — the keep-alive rewind is a vendor option, not a shim
+    // intention: it has to reach the SDK to have happened at all.
+    const options = realQueryOptions(
+      spec({
+        binding: { kind: "resume", resumeSessionId: "vendor-old" },
+        resumeSessionAt: "msg-uuid-7",
+      }),
+    );
+
+    // Assert.
+    expect({ resume: options.resume, resumeSessionAt: options.resumeSessionAt }).toEqual({
+      resume: "vendor-old",
+      resumeSessionAt: "msg-uuid-7",
+    });
+  });
+
+  it("omits the rewind target when the resume named none", () => {
+    // Arrange, Act.
+    const options = realQueryOptions(
+      spec({ binding: { kind: "resume", resumeSessionId: "vendor-old" } }),
+    );
+
+    // Assert.
+    expect(options.resumeSessionAt).toBeUndefined();
+  });
+});
+
+/**
+ * The factory itself. It routes through the vendor guard, which is the ONE
+ * place the SDK can enter this process; the suite mocks that chokepoint so the
+ * vendor is never reached and the options the factory hands over are visible.
+ */
+describe("createRealQuery", () => {
+  afterEach(() => {
+    vi.doUnmock("../../src/vendor-guard.js");
+    vi.resetModules();
+  });
+
+  /** The mocked chokepoint, plus the arguments the factory hands the SDK. */
+  async function withMockedSdk(): Promise<{
+    createRealQuery: typeof import("../../src/sdk/real-query.js").createRealQuery;
+    calls: Array<{ prompt: unknown; options: Record<string, unknown> }>;
+    sites: string[];
+    query: unknown;
+  }> {
+    const calls: Array<{ prompt: unknown; options: Record<string, unknown> }> = [];
+    const sites: string[] = [];
+    const query = { interrupt: async (): Promise<void> => {} };
+    vi.resetModules();
+    vi.doMock("../../src/vendor-guard.js", () => ({
+      importRealSDK: (site: string) => {
+        sites.push(site);
+        return Promise.resolve({
+          query: (args: { prompt: unknown; options: Record<string, unknown> }) => {
+            calls.push(args);
+            return query;
+          },
+        });
+      },
+    }));
+    const log = await import("../../src/log.js");
+    log.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "real-query-suite" });
+    const mod = await import("../../src/sdk/real-query.js");
+    return { createRealQuery: mod.createRealQuery, calls, sites, query };
+  }
+
+  it("names its own call site at the vendor chokepoint", async () => {
+    // Arrange.
+    const { createRealQuery, sites } = await withMockedSdk();
+
+    // Act.
+    await createRealQuery(spec(), (async function* () {})());
+
+    // Assert — a blocked call has to say WHICH vendor entry was tripped.
+    expect(sites).toEqual(["createRealQuery"]);
+  });
+
+  it("hands the SDK the prompt stream and the assembled options", async () => {
+    // Arrange.
+    const { createRealQuery, calls } = await withMockedSdk();
+    const prompt = (async function* () {})();
+
+    // Act.
+    await createRealQuery(spec({ binding: { kind: "fresh", sessionId: "vendor-9" } }), prompt);
+
+    // Assert.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.prompt).toBe(prompt);
+    expect(calls[0]!.options).toMatchObject({ sessionId: "vendor-9", includePartialMessages: true });
+  });
+
+  it("names the RESUMED vendor session in the construction record", async () => {
+    // Arrange: a resume binding carries its id under a different field than a
+    // fresh one, and the record has to name whichever one applies.
+    const { createRealQuery } = await withMockedSdk();
+    vi.mocked(writeSync).mockClear();
+
+    // Act.
+    await createRealQuery(
+      spec({ binding: { kind: "resume", resumeSessionId: "vendor-resumed-7" } }),
+      (async function* () {})(),
+    );
+
+    // Assert.
+    const records = (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>)
+      .map(([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+          message: string;
+          context: Record<string, unknown>;
+        },
+      )
+      .filter((record) => record.message === "constructing the real vendor query");
+    expect(records.map((record) => record.context.vendor_session_id)).toEqual(["vendor-resumed-7"]);
+  });
+
+  it("returns the SDK's own query object rather than a wrapper", async () => {
+    // Arrange.
+    const { createRealQuery, query } = await withMockedSdk();
+
+    // Act.
+    const created = await createRealQuery(spec(), (async function* () {})());
+
+    // Assert.
+    expect(created).toBe(query);
   });
 });

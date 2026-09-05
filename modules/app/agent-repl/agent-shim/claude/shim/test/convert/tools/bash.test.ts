@@ -476,6 +476,48 @@ describe("bashConverter.settle", () => {
     expect(completed.termination).toBeUndefined();
   });
 
+  it("claims ZERO omitted bytes when the persisted total trails the inline output", () => {
+    // Arrange.
+    const pending = call({ command: "cat small" });
+    const result = { stdout: "abcde", stderr: "", interrupted: false, persistedOutputSize: 2 };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    const partial = textOf(success).extent.value as conversationv1.AgentBashOutputPartial;
+    expect(partial.bytesOmitted).toBe(0n);
+  });
+
+  it("states NO termination when the interpretation prose names no number at all", () => {
+    // Arrange.
+    const pending = call({ command: "true" });
+    const result = {
+      stdout: "",
+      stderr: "",
+      interrupted: false,
+      returnCodeInterpretation: "completed normally",
+    };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination).toBeUndefined();
+  });
+
+  it("produces NO terminal frame when a settled command has no command line to restate", () => {
+    // Arrange.
+    const pending = call({});
+
+    // Act.
+    const item = bashConverter.settle(pending, outcome({ stdout: "", stderr: "", interrupted: false }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the CALL could not be performed at all", () => {
     // Arrange, Act.
     const item = bashConverter.settle(call({ command: "rm -rf /" }), outcome("denied", true));
