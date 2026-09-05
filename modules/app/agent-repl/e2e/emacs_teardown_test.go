@@ -76,6 +76,7 @@ func startFakeEmacs(t *testing.T, root, bin string, args ...string) *exec.Cmd {
 		}
 		<-waited
 	})
+	awaitFindable(t, root, cmd.Process.Pid)
 	return cmd
 }
 
@@ -272,6 +273,7 @@ func startFakeDaemon(t *testing.T, root string, args ...string) *exec.Cmd {
 		}
 		<-waited
 	})
+	awaitFindable(t, root, cmd.Process.Pid)
 	return cmd
 }
 
@@ -320,5 +322,28 @@ func TestEmacsTeardownDoesNotWaitOnADaemonNobodyAskedToStop(t *testing.T) {
 	if took >= strayPollInterval {
 		t.Fatalf("awaitDaemonExit took %s for a stop nobody made, want an immediate return",
 			took.Round(time.Millisecond))
+	}
+}
+
+// awaitFindable blocks until a stand-in is visible to the reaper's own /proc
+// walk, and fails the test when it never becomes so.
+//
+// `cmd.Start' returns at the FORK, not at the exec. Until the exec lands the
+// child's /proc/<pid>/environ is still the test binary's own, so it carries no
+// `HOME=<root>' and findStrays does not see it -- and a test that acted on that
+// instant asserted against an empty /proc read rather than against the code.
+// Observed as `reapStrays reported 0 failures, want exactly 1'.
+func awaitFindable(t *testing.T, root string, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "environ"))
+		if err == nil && strings.Contains(string(raw), "HOME="+root) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the stand-in pid %d never became visible to the reaper's /proc walk", pid)
+		}
+		time.Sleep(strayPollInterval)
 	}
 }
