@@ -91,6 +91,18 @@ func faAssertMessage(t *testing.T, errored *frontendv1.FeedTurnEndedErrored, wan
 	}
 }
 
+// faAssertHeadline pins `FeedTurnEndedErrored.headline` — the sentence
+// feed.proto has the client draw verbatim — to the daemon's exact per-arm
+// wording. Asserted by NAME of the arm's own spelling rather than by a
+// non-empty check, because twelve api classes with one collapsed sentence is
+// precisely the regression this family exists to catch.
+func faAssertHeadline(t *testing.T, errored *frontendv1.FeedTurnEndedErrored, want string) {
+	t.Helper()
+	if got := errored.GetHeadline().GetText(); got != want {
+		t.Fatalf("FeedTurnEndedErrored.Headline.Text = %q, want the arm's own sentence %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The twelve AgentFailure.api_request_failed sub-arms
 // ---------------------------------------------------------------------------
@@ -106,29 +118,37 @@ func faAssertMessage(t *testing.T, errored *frontendv1.FeedTurnEndedErrored, wan
 // quarantines failed runs, so no `!api-*` golden exists or can exist without
 // an explicit exception to that rule.
 //
-// THREE SUBTESTS ARE WRITTEN TO THE PROTO AND ARE EXPECTED TO FAIL, because
-// the arm the proto declares is unreachable from what the seam carries:
+// THE HEADLINE IS THE USER-VISIBLE SURFACE, and it is asserted EXACTLY, arm
+// by arm. feed.proto:846-848 makes `FeedTurnEndedErrored.headline` the
+// sentence "the client draws verbatim", and
+// daemon/internal/resolve/feed/turnended.go's apiErrorArm states outright
+// that "THE ARM IS THE CAUSE and the sentence is ours: the client holds no
+// per-arm table" — so the twelve arms have twelve DISTINCT spellings and a
+// collapsed sentence would be a real regression. Equality is also a SPECIFIC
+// NEGATIVE: turnended.go appends the turn's evidence to the headline when the
+// resolver saw a mid-turn `OnApiError`, and none of these scenarios leaves
+// one — the fake writes its `system:api_error` line to the TRANSCRIPT only
+// (failures.ts apiErrorScenario), so the vendor's failure reaches the daemon
+// once, as the terminal — and the asserted headline carries no evidence
+// clause accordingly.
 //
-//   - billing: feed.proto:904-905 "The account cannot be charged; the user
-//     must act on their billing. FeedTurnErrorBillingError billing_error =
-//     14" — the fake declares ApiBillingError on status 402, but the shim's
-//     result-seam classifier (convert/terminals.ts apiFailureKind) reaches
-//     `billing_error` only from a vendor error STRING, and the result record
-//     carries only the status, which 402 does not match.
-//   - oauth-org: feed.proto:909-910 "The account's organization does not
-//     allow this OAuth access. FeedTurnErrorOauthOrgNotAllowed
-//     oauth_org_not_allowed = 16" — same cause; status 403 alone is
-//     indistinguishable from an ordinary permission denial.
-//   - max-output: feed.proto:911-913 "The request asked for more output
-//     tokens than the model will produce ... FeedTurnErrorMaxOutputTokens
-//     max_output_tokens = 17" — the fake states NO status at all for this
-//     class, so the classifier has nothing to key on.
+// ALL THREE FORMERLY-UNREACHABLE ARMS NOW LAND. `billing_error`,
+// `oauth_org_not_allowed` and `max_output_tokens` were once unreachable
+// because the result seam carried only an HTTP status, which cannot separate
+// a 402 billing failure from anything else charged, a 403 org refusal from an
+// ordinary permission denial, or a status-less max-output failure from
+// nothing at all. The vendor's own error CLASS now rides an
+// `SDKAssistantMessageError` on the failed assistant message, the fold holds
+// it for the turn (convert/fold.ts rememberVendorApiError) and
+// convert/terminals.ts apiFailureKind reads the class FIRST for exactly those
+// three, so each reaches its own proto arm.
 func TestApiRequestFailedArms(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
 		scenario string
 		message  string
+		headline string
 		arm      func(*frontendv1.FeedTurnEndedErrored) bool
 		want     string
 	}{
@@ -136,6 +156,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "RateLimited",
 			scenario: "api-429",
 			message:  "Rate limited; retry after 30 seconds.",
+			headline: "rate limited by the vendor",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetRateLimited() != nil },
 			want:     "RateLimited (feed.proto:879-880, 429)",
 		},
@@ -143,6 +164,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "Overloaded",
 			scenario: "api-529",
 			message:  "The API is overloaded.",
+			headline: "the vendor API is overloaded",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetOverloaded() != nil },
 			want:     "Overloaded (feed.proto:881-882, 529)",
 		},
@@ -150,6 +172,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "AuthenticationFailed",
 			scenario: "api-401",
 			message:  "Authentication failed.",
+			headline: "the credential was rejected — sign in again",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetAuthenticationFailed() != nil },
 			want:     "AuthenticationFailed (feed.proto:883-884, 401)",
 		},
@@ -157,6 +180,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "PermissionDenied",
 			scenario: "api-403",
 			message:  "Permission denied for this request.",
+			headline: "the credential lacks permission for this request",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetPermissionDenied() != nil },
 			want:     "PermissionDenied (feed.proto:885-886, 403)",
 		},
@@ -164,6 +188,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "InvalidRequest",
 			scenario: "api-400",
 			message:  "The request was invalid.",
+			headline: "the vendor refused the request as malformed",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetInvalidRequest() != nil },
 			want:     "InvalidRequest (feed.proto:887-888, 400)",
 		},
@@ -171,6 +196,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "RequestTooLarge",
 			scenario: "api-413",
 			message:  "The request was too large.",
+			headline: "the request exceeded the vendor's size limit",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetRequestTooLarge() != nil },
 			want:     "RequestTooLarge (feed.proto:889-890, 413)",
 		},
@@ -178,6 +204,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "NotFound",
 			scenario: "api-404",
 			message:  "The requested model was not found.",
+			headline: "the model or resource does not exist",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetNotFound() != nil },
 			want:     "NotFound (feed.proto:891-892, 404)",
 		},
@@ -185,6 +212,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "Internal",
 			scenario: "api-500",
 			message:  "The service raised.",
+			headline: "the vendor API hit its own internal error",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetInternal() != nil },
 			want:     "Internal (feed.proto:893-894, 500)",
 		},
@@ -192,6 +220,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "BillingError",
 			scenario: "api-billing",
 			message:  "The account has a billing problem.",
+			headline: "the account could not be charged — check your billing",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetBillingError() != nil },
 			want:     "BillingError (feed.proto:904-905, 402)",
 		},
@@ -199,6 +228,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "OauthOrgNotAllowed",
 			scenario: "api-oauth-org",
 			message:  "This organization is not permitted to use OAuth here.",
+			headline: "your organization does not allow this OAuth access",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetOauthOrgNotAllowed() != nil },
 			want:     "OauthOrgNotAllowed (feed.proto:909-910)",
 		},
@@ -206,6 +236,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "MaxOutputTokens",
 			scenario: "api-max-output",
 			message:  "The response hit the max output tokens.",
+			headline: "the request asked for more output than the model will produce",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetMaxOutputTokens() != nil },
 			want:     "MaxOutputTokens (feed.proto:911-913)",
 		},
@@ -213,6 +244,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			name:     "VendorUnmodeled",
 			scenario: "api-unmodeled",
 			message:  "An error class this build does not model.",
+			headline: "the vendor reported an error class we do not model yet",
 			arm:      func(e *frontendv1.FeedTurnEndedErrored) bool { return e.GetVendorUnmodeled() != nil },
 			want:     "VendorUnmodeled (feed.proto:895-896, an unmodeled class kept BY NAME)",
 		},
@@ -232,6 +264,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			if !test.arm(errored) {
 				t.Fatalf("!%s: FeedTurnEndedErrored.Error = %T, want %s", test.scenario, errored.GetError(), test.want)
 			}
+			faAssertHeadline(t, errored, test.headline)
 			faAssertMessage(t, errored, test.message)
 		})
 	}
@@ -246,11 +279,12 @@ func TestApiRequestFailedArms(t *testing.T) {
 // message — so the drawn arm must carry a wait rather than leaving the field
 // unset.
 //
-// WRITTEN TO THE PROTO, EXPECTED TO FAIL: convert/terminals.ts states
-// outright that "`retry_after_ms` is UNSET from a result record ... carrying
-// one across would be a join the fold does not make", so the seam drops the
-// only wait the vendor stated and the client has nothing to count down from.
-// This shape is the fake's declaration, not a capture.
+// THE JOIN IS MADE. convert/terminals.ts now states the opposite of what it
+// once did — "The retry delay travels the same way: the vendor states it on
+// `api_retry` (`retry_delay_ms`), and `ApiRateLimited.retry_after_ms` is the
+// field the client counts down from, so the join IS made rather than
+// dropped" — so the exact millisecond count the fake stated is asserted, not
+// merely its presence. This shape is the fake's declaration, not a capture.
 func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -268,6 +302,44 @@ func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	}
 	if limited.RetryAfterMs == nil {
 		t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs is UNSET, want the vendor's stated wait: %v", limited)
+	}
+	// The fake states `retry_delay_ms: 549` on its `api_retry` message
+	// (fake/scenarios/failures.ts apiErrorScenario), and fold.ts rounds that
+	// number through unchanged, so 549 is the whole of the wait the client
+	// counts down from.
+	const wantMs = 549
+	if got := limited.GetRetryAfterMs(); got != wantMs {
+		t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %d, want the vendor's stated %d", got, wantMs)
+	}
+}
+
+// TestApiUnmodeledKeepsTheVendorClassByName pins the one api arm that carries
+// a name: feed.proto:895-896 confines `vendor_unmodeled` to "an API error
+// class this schema does not model", and convert/terminals.ts apiFailureKind
+// says a class the vendor added later "is kept BY NAME as `unmodeled` rather
+// than being silently mishandled". `!api-unmodeled` states the class
+// `"unknown"` on a status (418) no arm claims, so the drawn arm must repeat
+// that class verbatim — an empty `type` would be the collapse the arm exists
+// to prevent. Ungrounded: the class and the status are the fake's own
+// declaration, since no `!api-*` capture exists.
+func TestApiUnmodeledKeepsTheVendorClassByName(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	w.ExpectWarnings(faApiErrorWarnings...)
+	ws := faNewWorkspace(t, w)
+
+	// Act
+	errored := faDriveErrored(t, w, ws, "api-unmodeled")
+
+	// Assert
+	unmodeled := errored.GetVendorUnmodeled()
+	if unmodeled == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want VendorUnmodeled (feed.proto:895-896)", errored.GetError())
+	}
+	const wantClass = "unknown"
+	if got := unmodeled.GetType(); got != wantClass {
+		t.Fatalf("FeedTurnErrorVendorUnmodeled.Type = %q, want the vendor's own class %q kept by name", got, wantClass)
 	}
 }
 
