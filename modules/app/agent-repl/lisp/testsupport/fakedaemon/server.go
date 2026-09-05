@@ -287,6 +287,44 @@ func (s *fakeServer) endStreams(stream, workspaceID string, req endRequest) int 
 	return len(subs)
 }
 
+// abortAllStreams drops every standing stream's TCP connection, with no end
+// frame, and reports how many it dropped.
+//
+// THIS IS THE EXIT PATH, and a standing stream is why it needs one.  A
+// subscription never concludes on its own, so `http.Server.Shutdown' — which
+// waits for in-flight requests to return — waits for streams that by
+// construction never will, burns its whole grace period, times out, and only
+// then does `http.Server.Close' drop the connections anyway.  The observable
+// end is identical either way (an abrupt drop, no end frame); the difference
+// is purely the seconds spent reaching it, once per daemon stop, in a suite
+// that stops a daemon in most of its scenarios.
+//
+// Aborting first is the same act Close would have performed, done when it is
+// known to be needed rather than after waiting to find out.
+func (s *fakeServer) abortAllStreams() int {
+	s.mu.Lock()
+	subs := make([]*subscriber, 0, len(s.subscribers))
+	for _, sub := range s.subscribers {
+		subs = append(subs, sub)
+	}
+	s.mu.Unlock()
+
+	for _, sub := range subs {
+		// `end' is buffered, so a subscriber whose goroutine is already on
+		// its way out cannot wedge the exit here.
+		select {
+		case sub.end <- endRequest{abort: true}:
+		default:
+			logWarn("fakedaemon.exit.stream-abort-dropped",
+				"a standing stream already had an end pending at exit",
+				map[string]any{"id": sub.id, "stream": sub.stream})
+		}
+	}
+	logInfo("fakedaemon.exit.streams-aborted", "dropped every standing stream before shutdown",
+		map[string]any{"subscribers": len(subs)})
+	return len(subs)
+}
+
 // ---- unary plumbing ----
 
 // handleUnary is the one body every unary method delegates to: record the

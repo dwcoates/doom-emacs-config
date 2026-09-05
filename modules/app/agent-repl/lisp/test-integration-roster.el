@@ -2011,6 +2011,10 @@ the gated case fanout §10 names but nothing in this suite exercised."
         (agent-repl-itest--wait-until
          (lambda () (agent-repl-host-ref "itest-defer-gated"))
          nil "the tab's host ref to attach")
+        ;; THE REF IS THE CLIENT'S FACT, THE SUBSCRIBER IS THE DAEMON'S: the
+        ;; ref attaches strictly before the WatchHostWorkspace subscription
+        ;; behind it is registered, and a push in that window reaches nobody.
+        (agent-repl-itest--await-subscriber daemon "host" "itest-defer-gated")
         (agent-repl-itest--push
          daemon "host"
          `((host . ,(agent-repl-itest-roster--host-live 'merging)))

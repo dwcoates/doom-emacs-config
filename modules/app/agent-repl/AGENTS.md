@@ -52,12 +52,76 @@ number).
 | restart-abandonment message (`test-integration-daemon.el`) | echo-area message after a refused stop | 5s | 3s | same shape as the build/start-ran checks above |
 | indicator-names-the-cause loop (`test-integration-link.el`) | per-case wait inside a `dolist` whose whole multi-case test runs in ~0.2s | 2s | 1s | still >3x any single case's real share of that 0.2s |
 | fake-daemon exit on teardown (`test-integration-helpers.el`) | `agent-repl-itest--stop-daemon`, runs after EVERY scenario in every suite | 5s | 5s (unchanged) | genuinely needs longer: this reclaims a REAL OS process via its own graceful-shutdown path after every single test, and a slow CI host is exactly the case a bound exists to tolerate — a spurious failure here still falls through to `delete-process` |
-| fake daemon's own HTTP graceful-shutdown grace (`lisp/testsupport/fakedaemon/main.go`) | `context.WithTimeout` around `httpServer.Shutdown` | 2s | 2s (unchanged) | reviewed; already well under the suite's own bounds and never observed as a bottleneck |
+| fake daemon's own HTTP graceful-shutdown grace (`lisp/testsupport/fakedaemon/main.go`) | `context.WithTimeout` around `httpServer.Shutdown` | 2s | 2s (never reached) | the exit path now aborts every standing stream first (`abortAllStreams`), so `Shutdown` returns on its own rather than waiting this out; the bound survives as the backstop it was always meant to be |
 
 Re-measure before loosening any of these: `git log -p` on this section names
 the run that produced each number, and a bound that creeps back up without a
 new measurement behind it is exactly the kind of unexamined slack this table
 exists to prevent.
+
+### What a scenario is allowed to spend time on
+
+The bounds above are ceilings on failure. These are the rules about what a
+PASSING scenario costs, which is a different question and the one that decides
+what the suite costs to run.
+
+- **A wait samples at 2ms, and only when it has to.**
+  `agent-repl-itest--wait-until` passes `nil` to `accept-process-output`, which
+  returns the moment ANY process output arrives — so a predicate over Emacs's
+  own state is already woken by the event, and the interval is the floor under
+  a predicate whose fact lives on the DAEMON (a subscriber count, a recorded
+  call) and so cannot announce itself. It was 20ms, and at 20ms nearly every
+  wait in the suite slept a whole slot: 454 waits, 10.0s of an 11.5s host run.
+
+- **The control plane never spawns a process.**
+  `agent-repl-itest--control` speaks HTTP/1.1 over `make-network-process` to
+  127.0.0.1. It is called several times by every scenario — twice by the reset
+  alone, then once per turn of every `--await-*` poll — so a `curl` child per
+  call cost 471 spawns and 3.3s of a 9.4s roster run. Production's transport
+  still spawns `curl`, through `agent-repl-connect--spawn-curl`; that is the
+  one boundary these suites run for real on purpose, and it is now the largest
+  remaining per-scenario cost (~270 spawns, ~3.7s, in a host run).
+
+- **A duration a scenario WRITES is a fixture, not a contract.**
+  An announced `expected_outage_ms`, a rebound
+  `agent-repl-daemon-boot-timeout-seconds`, a rebound
+  `agent-repl-daemon-boot-poll-interval-seconds`: none of these is what any
+  scenario asserts. Size them by the tolerance the assertion actually allows
+  itself — an order of magnitude over it — never by what production ships.
+  Three link scenarios were spending 1.5s each and three daemon scenarios a
+  second each proving only that the client honors the window at all.
+
+- **A push needs a SUBSCRIBER, not a ref.**
+  `agent-repl-host-ref` is minted when `RegisterWorkspace` answers, strictly
+  before the `WatchHostWorkspace` subscription behind it is registered
+  daemon-side. A push in that window reaches nobody and the scenario waits out
+  its whole deadline for a state delivered to no one. Every push after a
+  subscribe goes through `agent-repl-itest--await-subscriber` first. Three
+  scenarios were relying on the old 20ms poll to hide the window.
+
+What those rules bought, measured by running each suite at the branch point
+and at the tip alternately on one host, so both sides met the same load
+(ERT's own reported suite time, seconds):
+
+| suite | before | after |
+|---|---|---|
+| `test-agent-repl.el` (everything, 3695 -> 3701 tests) | 209.7 | 58.8 |
+| `test-integration-link.el` | 64.3 | 5.7 |
+| `test-integration-host.el` | 33.7 | 7.9 |
+| `test-integration-composer.el` | 30.4 | 9.7 |
+| `test-integration-verbs.el` | 26.7 | 5.5 |
+| `test-integration-daemon.el` | 10.6 | 4.6 |
+| `test-integration-roster.el` | 9.8 | 3.4 |
+
+- **A sentinel outlives the scenario that armed it.**
+  Emacs runs a sentinel from the event loop, never at the moment the process
+  dies, so a stub build script's exit is delivered after `cl-letf` has put the
+  external-boundary guards back — and the continuation behind it reaches them
+  and errors out of a sentinel, aborting the whole batch run and naming
+  whichever test happened to be running.
+  `agent-repl-itest--reset-cold-start` therefore drops the sentinel whenever
+  the process OBJECT exists, not only while it is live, and cancels the
+  departure wait alongside the boot wait.
 
 ### Integration suites restore a REGISTERED boundary, by name and per scenario
 

@@ -37,6 +37,7 @@
 (defvar agent-repl-daemon-build-script)
 (defvar agent-repl-daemon-command)
 (defvar agent-repl-daemon-boot-timeout-seconds)
+(defvar agent-repl-daemon-boot-poll-interval-seconds)
 (defvar agent-repl-daemon-mode-line-segment)
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-no-daemon-functions)
@@ -55,11 +56,36 @@
 (defmacro agent-repl-itest-daemon--with-stubs (dir &rest body)
   "Run BODY with DIR bound to a fresh temp dir holding the stub scripts.
 The stubs record their invocations by appending to files in DIR, which
-is how a test proves a script ran — or, just as importantly, did not."
+is how a test proves a script ran — or, just as importantly, did not.
+
+THE BOOT POLL IS THE RESOLUTION OF EVERY DEADLINE HERE.  Production
+polls for `daemon.addr' every
+`agent-repl-daemon-boot-poll-interval-seconds' (250ms by default), and
+the boot timeout can only be NOTICED on a tick — so a scenario whose
+subject is the timeout pays the timeout PLUS up to a quarter second of
+granularity, and one whose subject is the successful boot pays a quarter
+second to notice an address that was already there.  Nothing being
+tested is about the interval's length, and the fake publishes its
+address the instant it binds, so the poll runs at 20ms here: the
+timeouts the scenarios below set can then be sized by what they are
+actually asserting rather than by the tick that has to catch them."
   (declare (indent 1) (debug (symbolp body)))
-  `(let ((,dir (file-name-as-directory (make-temp-file "agent-repl-itest-boot-" t))))
+  `(let ((,dir (file-name-as-directory (make-temp-file "agent-repl-itest-boot-" t)))
+         (agent-repl-daemon-boot-poll-interval-seconds 0.02))
      (unwind-protect (progn ,@body)
        (ignore-errors (delete-directory ,dir t)))))
+
+(defun agent-repl-itest-daemon--record-shell (command path)
+  "Return shell that runs COMMAND and lands its stdout at PATH ATOMICALLY.
+
+A PLAIN REDIRECT CREATES THE FILE BEFORE THE CONTENT REACHES IT, and every
+reader here waits on the file APPEARING and then asserts on its whole
+content -- so a reader arriving inside that window sees an empty file or a
+prefix of the answer and fails on a mismatch that has nothing to do with
+what the scenario is testing.  Writing beside the target and renaming makes
+the file's existence and its completeness the same fact, because a rename
+within one directory is atomic."
+  (format "%s > %s.partial\nmv %s.partial %s" command path path path))
 
 (defun agent-repl-itest-daemon--ran-p (dir name)
   "Return non-nil when the stub NAME recorded a run in DIR."
@@ -261,8 +287,9 @@ inherited a different one would publish its address where nobody looks."
                          (expand-file-name "build.sh" boot-dir) "exit 0"))
                  (start (agent-repl-itest-daemon--write-script
                          (expand-file-name "start.sh" boot-dir)
-                         (format "printf '%%s' \"$AGENT_REPL_STATE_DIR\" > %sstate-dir"
-                                 boot-dir)))
+                         (agent-repl-itest-daemon--record-shell
+                          "printf '%s' \"$AGENT_REPL_STATE_DIR\""
+                          (expand-file-name "state-dir" boot-dir))))
                  (agent-repl-daemon-build-script build)
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 2)
@@ -385,9 +412,13 @@ nothing here can hang past it."
                (agent-repl-daemon-command (list start))
                ;; "wait for daemon.addr up to
                ;; `agent-repl-daemon-boot-timeout-seconds' (30)" — rebound
-               ;; small (well under the harness's 15s default wait) so a
-               ;; scenario that pins the timeout stays fast.
-               (agent-repl-daemon-boot-timeout-seconds 1.0)
+               ;; small (well under the harness's default wait) so a scenario
+               ;; that pins the timeout stays fast.  250ms, not a second:
+               ;; what is asserted is that the timeout FIRES and how it is
+               ;; surfaced, never how long it was, and the boot poll runs at
+               ;; 20ms here, so a quarter second is still an order of
+               ;; magnitude above the tick that has to notice it.
+               (agent-repl-daemon-boot-timeout-seconds 0.25)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil))
           ;; Act.
@@ -434,7 +465,9 @@ spawn without the roots exits 2 before the daemon ever serves."
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                (start (agent-repl-itest-daemon--write-script
                        (expand-file-name "start.sh" boot-dir)
-                       (format "printf '%%s\\n' \"$@\" > %sargv" boot-dir)))
+                       (agent-repl-itest-daemon--record-shell
+                        "printf '%s\\n' \"$@\""
+                        (expand-file-name "argv" boot-dir))))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                (agent-repl-daemon-boot-timeout-seconds 2)
@@ -544,6 +577,12 @@ any more and the \"no automatic retry\" ruling is broken; any less and
           (agent-repl-itest--wait-until
            (lambda () (file-exists-p counter))
            nil "the build script to run")
+          ;; THE COUNTER IS NOT THE FAILURE.  The script appends its line and
+          ;; only THEN exits; the segment is set by the sentinel behind that
+          ;; exit, so it is its own fact and has to be waited for as one.
+          (agent-repl-itest--wait-until
+           (lambda () (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))
+           nil "the build-failure mode-line segment")
           ;; Assert: "the mode-line segment \"daemon: build failed\"" —
           ;; the exact text.
           (should (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))
@@ -622,7 +661,12 @@ to the remediation loop that reads these runs by level."
                        (expand-file-name "start.sh" boot-dir) "sleep 30"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 1.0)
+               ;; 250ms, not a second: what these scenarios assert is that
+               ;; the timeout FIRES and how it is surfaced, never how long it
+               ;; was -- and the boot poll runs at 20ms here, so a quarter
+               ;; second is still an order of magnitude above the tick that
+               ;; has to notice it.
+               (agent-repl-daemon-boot-timeout-seconds 0.25)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil))
           ;; Act.
@@ -652,7 +696,9 @@ the BUILD state, and this build succeeded — a timeout that painted
                        (expand-file-name "start.sh" boot-dir) "sleep 30"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 1.0)
+               ;; 250ms for the same reason as its siblings above: the
+               ;; subject is the surfaced timeout, not its length.
+               (agent-repl-daemon-boot-timeout-seconds 0.25)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil)
                (messages nil))
@@ -690,7 +736,12 @@ which is the only shutdown that strands nothing."
                        (expand-file-name "start.sh" boot-dir) "exit 0"))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 1.0)
+               ;; 250ms, not a second: what these scenarios assert is that
+               ;; the timeout FIRES and how it is surfaced, never how long it
+               ;; was -- and the boot poll runs at 20ms here, so a quarter
+               ;; second is still an order of magnitude above the tick that
+               ;; has to notice it.
+               (agent-repl-daemon-boot-timeout-seconds 0.25)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil))
           ;; The link must be standing: the stop goes out on the primary.
