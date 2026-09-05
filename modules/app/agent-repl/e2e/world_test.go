@@ -507,13 +507,32 @@ func shortSocketPath(t *testing.T, tag string) string {
 // (the 103-byte path cap), the same way harness.StartDaemon mints its own —
 // t.TempDir() encodes the whole test name and blows that budget for this
 // suite's longer names.
+//
+// THE ROOT IS A CHILD OF THIS WORLD'S OWN DIRECTORY, NEVER /tmp ITSELF, and
+// that is the whole point of the extra level. harness.StartDaemon derives the
+// kernel-lock directory as a SIBLING of the state root
+// (`filepath.Join(filepath.Dir(d.StateDir), "locks")`) precisely so every
+// daemon over one state root probes one set of locks and a successor finds the
+// lock its predecessor's surviving shim still holds. Handing it `/tmp/are2eNNN`
+// made that sibling `/tmp/locks` — ONE directory shared by every world in the
+// package, by every concurrent `go test` run, and by every other checkout on
+// the box, none of which the harness ever cleans: an observed 7676 lock files,
+// 3871 of them `workspace-<8 hex>.lock` in a 32-bit key space, accumulated in
+// about an hour of runs. Nesting the root one level down makes the lock
+// directory `/tmp/are2eNNN/locks` — per-world, still shared across the
+// restarts that reuse the root (which is the invariant it exists for), and
+// removed with the root at cleanup.
 func shortStateRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "are2e")
+	world, err := os.MkdirTemp("/tmp", "are2e")
 	if err != nil {
+		t.Fatalf("e2e: mkdir a short world root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(world) })
+	dir := filepath.Join(world, "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("e2e: mkdir a short state root: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
 }
 
@@ -1166,7 +1185,18 @@ func cursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[s
 // sidecar has committed the turn's resulting facts.
 func awaitCursorAdvance(t *testing.T, w *World, projectDir string, baseline map[string]int64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	awaitCursorAdvanceWithin(t, w, projectDir, baseline, DefaultTimeout)
+}
+
+// awaitCursorAdvanceWithin is awaitCursorAdvance on a caller-supplied bound,
+// for the one wait whose budget is its OWN measured window rather than this
+// suite's ordinary one (hibernation_e2e_test.go's keepAliveObservationWindow).
+// It exists because that constant used to bound only the BASELINE read beside
+// this call, leaving the wait it documents running on DefaultTimeout — a bound
+// stated at a site that was not the bound in force.
+func awaitCursorAdvanceWithin(t *testing.T, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(w.Ctx(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

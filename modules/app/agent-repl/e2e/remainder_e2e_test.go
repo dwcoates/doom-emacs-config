@@ -819,8 +819,22 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	if ended := AwaitTurnEnded(t, w, ws, queuedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the send-message (queued) turn ended = %v, want a concluded outcome", ended)
 	}
-	queuedRow := rmAwaitFeedRow(t, w, ws, "the sender's outgoing-send agent_prompt row", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == queuedTurn.GetValue() && r.GetAgentPrompt() != nil
+	// THE WAIT IS ON THE DELIVERED ROW, NOT MERELY ON A ROW. Every frame of the
+	// send upserts the SAME row (drawSendMessage's own contract): the start
+	// draws the address and the summary with `delivery` still unset, and only
+	// the success carries the arm. The two reach the daemon by DIFFERENT
+	// paths — the turn's own lifecycle comes off the shim's control plane
+	// while the agent activity is tailed out of the store — so the turn's
+	// terminal row is routinely published before the send's success is drawn,
+	// and OpenFeed's page then legitimately answers the start-version of the
+	// row. Waiting on `GetAgentPrompt() != nil` therefore captured a row the
+	// daemon had not finished (observed: the start upsert at 12:09:50.711, the
+	// page read at .713, the success upsert at .722). Waiting on the arm this
+	// test is ABOUT loses no coverage — an arm that never arrives times the
+	// wait out and fails — and it is the only version of the row the
+	// assertions below are about.
+	queuedRow := rmAwaitFeedRow(t, w, ws, "the sender's outgoing-send agent_prompt row, delivered", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == queuedTurn.GetValue() && r.GetAgentPrompt().GetQueuedToLive() != nil
 	}).GetAgentPrompt()
 	if got, want := queuedRow.GetAddress().GetText(), "→ a1234567890abcde"; got != want {
 		t.Errorf("outgoing send address = %q, want %q", got, want)
@@ -828,11 +842,10 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	if got, want := rmAgentPromptText(t, queuedRow), "check the branch"; got != want {
 		t.Errorf("outgoing send body = %q, want the caller's summary %q", got, want)
 	}
-	// The delivery arm (landing 10): the recipient was already live, so the
-	// message queued for it and nothing was started.
-	if queuedRow.GetQueuedToLive() == nil {
-		t.Errorf("queued send delivery = %T, want the queued_to_live arm", queuedRow.GetDelivery())
-	}
+	// The delivery arm (landing 10) — the recipient was already live, so the
+	// message queued for it and nothing was started — is what the wait above
+	// is predicated on, so reaching this line IS that assertion: an arm that
+	// never arrived would have timed the wait out and failed the test.
 
 	// Act + Assert: resumed (idle agent, resumed from transcript). The
 	// recipient id is MINTED by the fake (ctx.mintAgentTaskId()), so the
@@ -848,8 +861,11 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	if ended := AwaitTurnEnded(t, w, ws, resumedTurn).GetTurnEnded(); ended.GetConcluded() == nil {
 		t.Fatalf("the send-message-resumed turn ended = %v, want a concluded outcome", ended)
 	}
-	resumedRow := rmAwaitFeedRow(t, w, ws, "the resumed send's agent_prompt row", func(r *frontendv1.FeedRow) bool {
-		return r.GetTurn().GetValue() == resumedTurn.GetValue() && r.GetAgentPrompt() != nil
+	// Waited on the resumed arm for the same reason the queued half waits on
+	// its own: the start-version of this row carries no delivery either, and
+	// its address is not yet resolved to the minted recipient.
+	resumedRow := rmAwaitFeedRow(t, w, ws, "the resumed send's agent_prompt row, delivered", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == resumedTurn.GetValue() && r.GetAgentPrompt().GetResumedRecipient() != nil
 	}).GetAgentPrompt()
 	address := resumedRow.GetAddress().GetText()
 	if !strings.HasPrefix(address, "→ ") {
@@ -861,9 +877,8 @@ func TestSendMessageQueuedAndResumed(t *testing.T) {
 	if got, want := rmAgentPromptText(t, resumedRow), "resume the sweep"; got != want {
 		t.Errorf("resumed send body = %q, want the caller's summary %q", got, want)
 	}
-	if resumedRow.GetResumedRecipient() == nil {
-		t.Errorf("resumed send delivery = %T, want the resumed_recipient arm", resumedRow.GetDelivery())
-	}
+	// The resumed_recipient arm, like the queued arm above, is the fact the
+	// wait for this row is predicated on; reaching here is that assertion.
 }
 
 // sendNotNamedLabel is the daemon's honest stand-in when nothing on the wire

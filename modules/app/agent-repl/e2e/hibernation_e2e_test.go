@@ -335,7 +335,11 @@ func TestKeepAliveNeverAppearsOnWire(t *testing.T) {
 	cursorCtx, cancel := context.WithTimeout(w.Ctx(), keepAliveObservationWindow)
 	defer cancel()
 	baseline := cursorOffsetsUnder(w.Store.Cursors(t, cursorCtx), projectDir)
-	awaitCursorAdvance(t, w, projectDir, baseline)
+	// ON keepAliveObservationWindow, NOT DefaultTimeout. The context above
+	// bounded only the baseline read, so the wait this constant documents ran
+	// on the suite-wide budget instead — the bound stated here was never the
+	// bound in force.
+	awaitCursorAdvanceWithin(t, w, projectDir, baseline, keepAliveObservationWindow)
 
 	// Assert: the daemon's own feed carries EXACTLY the one real turn — the
 	// keep-alive turn that just, provably, ran is not a distinct feed row.

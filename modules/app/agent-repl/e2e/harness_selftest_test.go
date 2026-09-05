@@ -170,3 +170,28 @@ func writeShimStamp(t *testing.T, root, content string) {
 		t.Fatalf("write the shim build stamp: %v", err)
 	}
 }
+
+// TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot pins the reason
+// shortStateRoot nests its root one level down.
+//
+// harness.StartDaemon derives the kernel-lock directory as a SIBLING of the
+// state root, so a state root minted directly under /tmp gives every world in
+// the package — and every concurrent run, and every other checkout on the box
+// — the one shared directory /tmp/locks, which nothing ever cleans. The lock
+// directory must instead live inside the per-world root the test's own cleanup
+// removes.
+func TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot(t *testing.T) {
+	t.Parallel()
+	// Arrange + Act.
+	stateRoot := shortStateRoot(t)
+
+	// Assert: the sibling harness.StartDaemon would name is inside a
+	// per-world directory, never the OS temp root every other run shares.
+	lockDir := filepath.Join(filepath.Dir(stateRoot), "locks")
+	if shared := filepath.Join(os.TempDir(), "locks"); lockDir == shared {
+		t.Fatalf("the world's lock directory is %q, the temp root every run shares; it must be per-world", lockDir)
+	}
+	if parent := filepath.Dir(stateRoot); parent == os.TempDir() {
+		t.Fatalf("shortStateRoot minted %q directly under the OS temp root; its lock sibling would be shared", stateRoot)
+	}
+}
