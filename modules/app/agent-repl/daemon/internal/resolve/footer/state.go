@@ -30,8 +30,9 @@ type standing struct {
 //     status oneof is legal and means "no vendor verdict observed yet" — it
 //     is never defaulted to "allowed".
 //
-// A rate-limit event that carries a utilization NEWER than the figures on
-// hand also wins for the figure; an older one does not.
+// A rate-limit event that carries a utilization ALSO supplies the figure, and
+// the LAST sighting to arrive is the one drawn. See `fileFigures` for why
+// arrival, and not a timestamp, is what orders the two sources.
 type allowanceWindow struct {
 	// figured reports whether any figure has been observed for this window.
 	figured bool
@@ -39,25 +40,65 @@ type allowanceWindow struct {
 	utilization float64
 	// resetsAtS is the drawn reset, epoch SECONDS.
 	resetsAtS int64
-	// figuresAtMs is when the figures on hand were observed, unix millis.
-	figuresAtMs int64
+	// sampledAtMs is SessionAccountUsage.observed_at_ms of the newest usage
+	// SAMPLE filed for this window, 0 before any sample. It is only ever
+	// compared with another sample's, because only samples carry it and only
+	// samples are stamped by the shim's clock.
+	sampledAtMs int64
 	// verdict is the last rate-limit event for this window, nil until one has
 	// been seen. Only its status arm is read.
 	verdict *conversationv1.SessionRateLimitStatus
 }
 
-// observeFigures files a figure sighting, keeping the NEWER of the two. The
-// vendor reports utilization as a percentage and resets in millis; the
-// contract carries a 0..1 fraction and epoch seconds, so the conversion is
-// the daemon's and never the client's.
-func (w *allowanceWindow) observeFigures(utilizationPercent float64, resetsAtMs, atMs int64) bool {
-	if w.figured && atMs <= w.figuresAtMs {
+// observeSampledFigures files a figure sighting read off a usage SAMPLE,
+// which carries its own observation instant.
+//
+// A sample OLDER than the newest sample already on hand is refused. That
+// comparison is sound where a cross-source one is not: both stamps are
+// SessionAccountUsage.observed_at_ms, so both come from the one shim process's
+// clock.
+func (w *allowanceWindow) observeSampledFigures(utilizationPercent float64, resetsAtMs, observedAtMs int64) bool {
+	if w.sampledAtMs != 0 && observedAtMs < w.sampledAtMs {
 		return false
 	}
+	w.sampledAtMs = observedAtMs
+	return w.fileFigures(utilizationPercent, resetsAtMs)
+}
+
+// observeEventFigures files a figure sighting read off a rate-limit EVENT.
+// SessionRateLimitStatus carries no observation instant at all, so an event is
+// ordered by nothing but its arrival.
+func (w *allowanceWindow) observeEventFigures(utilizationPercent float64, resetsAtMs int64) bool {
+	return w.fileFigures(utilizationPercent, resetsAtMs)
+}
+
+// fileFigures draws the sighting it is given, unconditionally: THE LAST
+// SIGHTING TO ARRIVE WINS.
+//
+// This used to compare an `atMs` per sighting and keep the newer, which was
+// not a valid ordering. A usage sample's stamp is
+// SessionAccountUsage.observed_at_ms, taken by the SHIM; a rate-limit event
+// has no stamp in the contract at all (SessionRateLimitStatus declares none),
+// so the daemon substituted its own clock at receipt. Two processes' clocks
+// are not one timeline, and the shim's stamp is taken before the update has
+// crossed the pipe, so a sample that genuinely arrived later routinely lost to
+// an event that arrived first — the footer then drew a retired allowance and
+// kept drawing it.
+//
+// Arrival IS a valid total order here, and it is the producer's own order:
+// account_usage and rate_limit_status are two arms of ONE SessionUpdate
+// stream from ONE shim, and sessionwatcher routes that stream to this sink
+// serially under its lock (internal/sessionwatcher/route.go). So the sighting
+// that arrives last is the sighting the shim emitted last, with no clock read
+// on either side.
+//
+// The vendor reports utilization as a percentage and resets in millis; the
+// contract carries a 0..1 fraction and epoch seconds, so the conversion is the
+// daemon's and never the client's.
+func (w *allowanceWindow) fileFigures(utilizationPercent float64, resetsAtMs int64) bool {
 	w.figured = true
 	w.utilization = utilizationPercent / 100
 	w.resetsAtS = resetsAtMs / 1000
-	w.figuresAtMs = atMs
 	return true
 }
 
