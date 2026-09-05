@@ -324,12 +324,24 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 //
 // The footer watch is opened BEFORE the prompt on purpose. The shim reprobes
 // account usage at every turn CLOSE (engine/session.ts
-// reprobeSessionFacts), and that sample's five-hour figure is 41% — below
-// the newsworthiness gate — so the drawn line stands only between the
-// rate-limit event and the turn's own close. publish.Topic's subscription
-// guarantee makes that a certainty rather than a race: "Subscribe delivers
-// the latest published value first... and then every later value in
-// publication order, skipping none", with an unbounded per-subscriber queue.
+// reprobeSessionFacts), that sample's five-hour figure is 41% — below the
+// newsworthiness gate — and the sample is the LAST figure sighting to reach
+// the footer, so it overwrites the event's 0.82 and the drawn line retires
+// with it (footer/state.go fileFigures: "THE LAST SIGHTING TO ARRIVE WINS",
+// arrival being the only valid order between a shim-stamped sample and an
+// event the contract gives no instant at all). MEASURED: the line is drawn
+// and then gone again, both inside one turn. So the line stands only between
+// the rate-limit event and the turn's own close, and publish.Topic's
+// subscription guarantee is what makes catching it a certainty rather than a
+// race: "Subscribe delivers the latest published value first... and then
+// every later value in publication order, skipping none", with an unbounded
+// per-subscriber queue.
+//
+// It did NOT always retire. While the footer ordered the two sightings by
+// comparing the shim's `observed_at_ms` against the daemon's own clock, the
+// reprobe's sample routinely lost to the event that preceded it and the
+// retired 0.82 kept being drawn after the close — the defect this window is
+// now free of.
 // ===========================================================================
 
 func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
@@ -380,10 +392,12 @@ func TestRateLimitFiveHourWindowDrawsTheSessionAllowance(t *testing.T) {
 // window reached the store.
 //
 // The footer watch opens BEFORE the prompt for the same reason as the
-// five-hour test: the turn's close reprobes account usage with figures
-// below the gate, so the drawn line stands only between the rate-limit
-// event and that close, and publish.Topic's subscription guarantee makes
-// catching it a certainty rather than a race.
+// five-hour test: the turn's close reprobes account usage with figures below
+// the gate (seven_day is 63%), that sample is the last figure sighting to
+// arrive and so overwrites the event's 0.91, and the drawn line retires with
+// it. It therefore stands only between the rate-limit event and that close,
+// and publish.Topic's subscription guarantee makes catching it a certainty
+// rather than a race.
 // ===========================================================================
 
 func TestRateLimitSevenDayWindowDrawsTheWeeklyAllowance(t *testing.T) {
