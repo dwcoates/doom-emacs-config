@@ -39,7 +39,7 @@ func (c *controller) Handover(ctx context.Context) error {
 	fields := dlog.Context{"successor": successor, "self_address": c.deps.SelfAddress}
 	c.log.Info(opHandover, "the successor is up in joining mode", fields)
 
-	workspaces, err := c.served(ctx)
+	workspaces, untransferable, err := c.served(ctx)
 	if err != nil {
 		return err
 	}
@@ -86,6 +86,11 @@ func (c *controller) Handover(ctx context.Context) error {
 	// delayed by at most one AdoptionWindow past the last transfer — a bounded
 	// stand-down, paid while the successor is already serving every workspace.
 	windows.Wait()
+
+	// NOTHING IS LEFT STANDING. Every workspace this daemon served has either
+	// moved to the successor above or is stood down here; the exit below owns
+	// no process either way.
+	c.standDownTheUntransferred(ctx, untransferable)
 
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {
@@ -264,22 +269,29 @@ func (c *controller) awaitFreeForever(ctx context.Context, ws ids.WorkspaceID, o
 	}
 }
 
-// served lists the workspaces this daemon currently serves. Serving ownership
-// is the WSM fact that arbitrates the overlap, so it — not "has a shim" — is
-// what a handover moves.
-func (c *controller) served(ctx context.Context) ([]wsm.Workspace, error) {
+// served lists the workspaces this daemon currently serves, SPLIT IN TWO:
+// the ones a handover moves, and the ones it cannot. Serving ownership is the
+// WSM fact that arbitrates the overlap, so it — not "has a shim" — is what
+// decides whether a workspace is this daemon's at all.
+//
+// THE SECOND LIST IS NOT A LEFTOVER, IT IS AN OBLIGATION. Every workspace this
+// daemon serves leaves the handover one of exactly two ways: transferred to
+// the successor, or stood down. There is no third way, because this daemon is
+// about to exit and nothing else knows the shim exists.
+func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm.Workspace, err error) {
 	all, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
 		c.log.Error(opHandover, "could not list the workspaces to hand over", withCause(nil, err))
-		return nil, fmt.Errorf("rollout: handover: %w", err)
+		return nil, nil, fmt.Errorf("rollout: handover: %w", err)
 	}
 	out := make([]wsm.Workspace, 0, len(all))
+	var left []wsm.Workspace
 	for _, ws := range all {
 		owner, err := c.deps.DB.Serving(ctx, ws.ID)
 		if err != nil {
 			c.log.Error(opHandover, "could not read a workspace's serving ownership",
 				withCause(dlog.Context{"workspace": string(ws.ID)}, err))
-			return nil, fmt.Errorf("rollout: handover: %w", err)
+			return nil, nil, fmt.Errorf("rollout: handover: %w", err)
 		}
 		if owner == nil || *owner != c.deps.Instance {
 			continue
@@ -290,14 +302,61 @@ func (c *controller) served(ctx context.Context) ([]wsm.Workspace, error) {
 		// sink for a directory that is not there — so it fails that adoption,
 		// and the incumbent then waits out a whole adoption window for a
 		// workspace nobody can serve.
+		//
+		// ITS SHIM IS STILL RUNNING, THOUGH, and that is why this is a second
+		// list rather than a `continue`. The merge does not stop the session it
+		// merged, so a self-merge rollout — merge a workspace, the daemon
+		// reloads itself — used to exit with that shim standing: not
+		// transferred, so not detached and nothing to adopt; not swept, because
+		// a handover deliberately never runs the immediate shutdown's sweep.
+		// It held both kernel locks and ~95 MiB for as long as the machine
+		// stayed up, and the next daemon read its locks as a live session on a
+		// worktree that no longer exists.
 		if _, statErr := os.Stat(ws.Dir); statErr != nil {
 			c.log.Info(opHandover, "the workspace's worktree is gone; it is not handed over",
 				dlog.Context{"workspace": string(ws.ID), "dir": ws.Dir, "cause": statErr.Error()})
+			left = append(left, ws)
 			continue
 		}
 		out = append(out, ws)
 	}
-	return out, nil
+	return out, left, nil
+}
+
+// standDownTheUntransferred stops the shim of every workspace this daemon
+// serves and is NOT handing over, so the exit below leaves nothing behind.
+//
+// IT RUNS AT THE EXIT, not at the split, because until the transfers are done
+// this daemon is still the one serving everything and a stand-down is time
+// spent inside the announced outage. By here every transfer has landed and the
+// only thing left to do is leave cleanly.
+//
+// IT GOES THROUGH THE FLEET, never through the client directly. The fleet ends
+// the SESSION before the process -- the shim writes its own terminals as the
+// session ends, and a signal alone gives it no chance to -- and, before either,
+// it tells the session watcher. A watcher that has not been told reads this
+// daemon's own act as a transport fault: it records a severing at ERROR, marks
+// the link degraded, and reopens watches at a shim the next line is about to
+// stop.
+//
+// NOTHING HERE MAY STOP THE EXIT, so each failure is recorded at ERROR and the
+// walk continues: a shim that would not go is a leaked process the caller
+// cannot do anything about, and this record is the only thing that will ever
+// say so, while an exit skipped over one leaks the daemon as well.
+func (c *controller) standDownTheUntransferred(ctx context.Context, workspaces []wsm.Workspace) {
+	for _, ws := range workspaces {
+		fields := dlog.Context{"workspace": string(ws.ID), "dir": ws.Dir}
+		if _, live := c.deps.Shims.Client(ws.ID); !live {
+			c.log.Debug(opHandover, "the untransferred workspace has no live shim to stand down", fields)
+			continue
+		}
+		if err := c.deps.Shims.StandDown(ctx, ws.ID); err != nil {
+			c.log.Error(opHandover, "an untransferred workspace's shim would not stand down; it will outlive this daemon and hold the workspace lock",
+				withCause(fields, err))
+			continue
+		}
+		c.log.Info(opHandover, "stood down the shim of a workspace this handover does not transfer", fields)
+	}
 }
 
 // manifest builds the stand-down record for every workspace being handed over.

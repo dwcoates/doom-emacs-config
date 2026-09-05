@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -145,6 +146,43 @@ const (
 	teardownStopAckSeconds = "8"
 	teardownStopBound      = 10 * time.Second
 )
+
+// emacsExitBound is how long EMACS AND ITS PROCESS GROUP may take to be gone
+// after Emacs has been asked to exit with `(kill-emacs)'.
+//
+// It is the group rather than the pid because the group is what the scenario
+// actually owns. `script' runs Emacs in a session of its own, and Emacs leads
+// a group inside it that also holds the WebKit network and web processes the
+// panel's webview starts -- both measured outliving Emacs and reaching the
+// reaper. Nothing else of this scenario is in that group: the daemon and
+// every shim are spawned into groups of their own.
+//
+// MEASURED twice over full 47-scenario layer runs instrumented at a 30s
+// bound. Waiting on the pid alone: 51ms, 52ms, 53ms, 54ms. Waiting on the
+// whole group, which is what ships: 51ms, 52ms, 53ms, 54ms, 55ms -- the same
+// numbers, because the children go with Emacs -- with two scenarios below
+// that whose Emacs had already exited. The spread is poll quantization, not
+// variance: `strayPollInterval' is 50ms, so a 51ms observation means the
+// group was already empty at the second /proc read.
+//
+// 500ms is roughly ten times the worst of those. The multiple is 10x rather
+// than 3x for the same reason `emacsBootBound' gives: three times a number
+// this small is not a bound, it is a race with the scheduler. And missing
+// this bound is not a scenario failure -- it is the trigger for the
+// escalation below -- so the number is a patience budget, and buying more of
+// it would only hold the scenario's parallelism slot while a process that was
+// never going to answer is waited on.
+const emacsExitBound = 500 * time.Millisecond
+
+// emacsSignalBound is how long an Emacs group that ignored `(kill-emacs)'
+// gets to disappear after each signal sent to it.
+//
+// No healthy run has ever reached this: every Emacs in the runs above exited
+// on the ask. It is therefore sized from the observation the reaper already
+// records for the same question -- see `strayTermBound', where every process
+// that honors a signal at all does so within one 50ms poll -- and it is the
+// same 500ms, deliberately, so the two cannot drift.
+const emacsSignalBound = 500 * time.Millisecond
 
 // heartbeatInterval is how often the probe runs. It rides the SAME server
 // socket every scenario uses, so it queues behind whatever Emacs is doing
@@ -304,6 +342,17 @@ type Emacs struct {
 	// nativeStack is what that one capture said, so both the wedge report and
 	// a stuck eval can quote it without racing to take it.
 	nativeStack string
+
+	// teardownSteps are the things stop() actually tried, in order, so the
+	// reaper can name them when it still finds a survivor afterwards.
+	teardownMu    sync.Mutex
+	teardownSteps []string
+
+	// fail is how reapStrays reports a survivor. It is nil in every
+	// scenario, which means e.t.Errorf; the field exists so the teardown
+	// tests can assert that a stray FAILS rather than merely logging, which
+	// nothing can observe through *testing.T itself.
+	fail func(format string, args ...any)
 
 	// phases are the boot durations this Emacs observed, in the order they
 	// happened. They MEASURE emacsBootBound, doomBootBound and
@@ -1176,6 +1225,7 @@ func (e *Emacs) stop() {
 	// Ask the DAEMON to exit through Emacs's own command: per daemon.el,
 	// "EMACS NEVER KILLS A DAEMON". A wedged Emacs cannot honor this, which
 	// is exactly why the kill below is unconditional.
+	asked := false
 	if !e.isWedged() {
 		ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
 		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
@@ -1206,8 +1256,293 @@ func (e *Emacs) stop() {
 			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
 		}
 		cancel()
+		asked = true
 	}
+	// AND THEN WAIT FOR IT. Asking is not stopping.
+	e.awaitEmacsExit(asked)
 	e.proc.Kill()
+	e.awaitDaemonExit(asked)
+}
+
+// daemonExitBound is how long the daemon this scenario asked Emacs to stop
+// gets to actually be gone.
+//
+// IT IS PRODUCTION'S OWN BUDGET, ADDED UP, not a number chosen here. The stop
+// is acked the moment the exit is STARTED -- `drain.ShutdownNow` announces,
+// stands every session down, calls Exit and answers -- and everything after
+// that ack is the daemon's orderly exit, whose every step is separately
+// bounded: `shutdownGrace` (2s) for the in-flight requests, then
+// `merge.TerminalDrainBound` (2s) for a merge terminal's durable stamps, then
+// `loopJoinBound` (2s) for the background loops. Six seconds is the sum, so a
+// daemon still here afterwards has missed a bound it states itself, which is a
+// failure rather than a slow machine.
+//
+// MEASURED, and the healthy case never comes near it: `go test -v` prints
+// `emacs phase daemon-exit` for every scenario, and on a quiet box it is a
+// single poll interval -- the daemon is gone before the reaper's first /proc
+// read. The observation that made this wait exist is the other end: with
+// Emacs's own exit escalating (1.06s of a 500ms bound on a loaded host), the
+// daemon's shutdown grace was still running when the reaper looked, because
+// the grace does not end until the standing streams' client -- that Emacs --
+// is gone. The reaper then reported a daemon that was exiting exactly as
+// designed.
+const daemonExitBound = 6 * time.Second
+
+// awaitDaemonExit does not return until the daemon and the shims this scenario
+// asked Emacs to stop are actually gone, or until their own bound expires.
+//
+// IT IS THE SECOND HALF OF "ASKING IS NOT STOPPING". The teardown asks Emacs
+// to stop its daemon and WAITS for the ack, and it asks Emacs to exit and
+// WAITS for the process -- and then it went straight to the reaper, which
+// reads /proc once. But the ack says the exit was STARTED, not that it
+// finished, so between the two there was a race the scenario could only lose:
+// the daemon's shutdown grace is held open by the standing streams of the very
+// Emacs teardown has just killed, so the slower Emacs is to go, the more of
+// that grace is still running when the reaper looks.
+//
+// Nothing is loosened by waiting here. What is left when the bound expires is
+// still the reaper's to report and still fails the scenario; the wait only
+// stops the reaper from calling a bounded exit a leak.
+func (e *Emacs) awaitDaemonExit(asked bool) {
+	if !asked {
+		// A wedged Emacs was never asked to stop its daemon, so nothing is on
+		// its way out and there is nothing to wait for. The reaper below still
+		// finds every one of them.
+		return
+	}
+	started := time.Now()
+	left := e.awaitStraysGone(daemonExitBound)
+	e.t.Logf("emacs phase daemon-exit took %s (bound %s)",
+		time.Since(started).Round(time.Millisecond), daemonExitBound)
+	if len(left) == 0 {
+		e.noteTeardownStep(fmt.Sprintf("the daemon and its shims exited on the stop within %s",
+			time.Since(started).Round(time.Millisecond)))
+		return
+	}
+	e.noteTeardownStep(fmt.Sprintf("waited %s for the stopped daemon to exit, still holding %s",
+		daemonExitBound, pidList(left)))
+}
+
+// awaitEmacsExit does not return until this scenario's Emacs process is
+// actually gone, or until every escalation has been sent AND waited on.
+//
+// It exists because killing the pty parent is not killing Emacs. `script'
+// forks its child into a session of its own -- setsid plus TIOCSCTTY, which
+// is how the child gets a controlling terminal -- so `e.proc.Kill()' reaps
+// the wrapper and REPARENTS the ~200 MiB Emacs to init. That is the same
+// trap the webapp layer's driver had. Before this, teardown asked Emacs to
+// exit and then assumed it had; the reaper below routinely found it alive
+// afterwards on scenarios that otherwise passed, and a scenario that ends
+// with an Emacs of its own still running is the exact shape that earlier in
+// this overhaul produced a shared-socket failure and a per-scenario leak
+// that drove the layer's peak to 3 GiB.
+//
+// asked says whether `(kill-emacs)' was actually delivered. A WEDGED Emacs
+// was never asked anything, so it skips the polite wait and goes straight to
+// the signals: waiting out a bound for an answer nobody requested would only
+// hold this scenario's parallelism slot.
+func (e *Emacs) awaitEmacsExit(asked bool) {
+	started := time.Now()
+	// Logged here rather than through `record'/`reportPhases': t.Cleanup
+	// unwinds LIFO, so reportPhases -- registered last -- has already run by
+	// the time teardown reaches this. The line matches its format so the
+	// same grep reads both, and it is emitted on a PASSING run, because a
+	// passing run is where this bound's numbers come from.
+	defer func() {
+		e.t.Logf("emacs phase emacs-exit took %s (bound %s)",
+			time.Since(started).Round(time.Millisecond), emacsExitBound)
+	}()
+
+	// THE GROUP IS TAKEN FIRST, WHILE EMACS IS STILL ALIVE TO NAME IT. Once
+	// the process is gone its /proc entry is gone with it, and the children
+	// it left cannot be tied to it by anything else: they carry the
+	// scenario's HOME, which says whose scenario they are, and their process
+	// group, which says whose EMACS they are.
+	groups := e.emacsGroups()
+	if len(groups) == 0 {
+		// Emacs was already gone before teardown reached this. Nothing was
+		// left to wait for, and there is no group to escalate against.
+		return
+	}
+
+	if asked {
+		if left := e.awaitGroupsGone(groups, emacsExitBound); len(left) == 0 {
+			e.noteTeardownStep(fmt.Sprintf("emacs and its process group exited on (kill-emacs) within %s",
+				time.Since(started).Round(time.Millisecond)))
+			return
+		}
+		e.noteTeardownStep(fmt.Sprintf("waited %s for (kill-emacs) to be honored", emacsExitBound))
+		e.t.Logf("emacs teardown: %s did not exit within %s of (kill-emacs); escalating to process group(s) %v",
+			pidList(e.groupStrays(groups)), emacsExitBound, groups)
+	}
+	// THE GROUP, NOT THE PID, and it is measured rather than assumed to
+	// matter: `script' runs Emacs in a session of its own, so Emacs leads a
+	// group that also holds the WebKit network and web processes its panel's
+	// webview starts -- both of which have been observed outliving Emacs and
+	// reaching the reaper. The daemon and the shims are NOT in it; each of
+	// those is spawned into a group of its own, so signalling here cannot
+	// reach them.
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
+		live := e.groupStrays(groups)
+		if len(live) == 0 {
+			return
+		}
+		for _, g := range groups {
+			e.signalGroup(g, sig)
+		}
+		e.noteTeardownStep(fmt.Sprintf("sent %v to process group(s) %v, holding %s", sig, groups, pidList(live)))
+		if left := e.awaitGroupsGone(groups, emacsSignalBound); len(left) == 0 {
+			return
+		}
+		e.noteTeardownStep(fmt.Sprintf("waited %s after %v", emacsSignalBound, sig))
+	}
+	// Anything still alive here is the reaper's to REPORT. Nothing is
+	// swallowed and nothing is retried silently: reapStrays runs last, finds
+	// it, kills it, and fails this scenario with the list of steps above.
+}
+
+// emacsGroups answers the process groups this scenario's Emacsen lead.
+//
+// A group that reads back as the test binary's own -- or as init's -- is
+// DROPPED and reported: `script' puts Emacs in a session of its own, so such
+// a reading means the /proc read was wrong, and signalling it would signal
+// the suite.
+func (e *Emacs) emacsGroups() []int {
+	self := syscall.Getpgrp()
+	var out []int
+	for _, p := range e.emacsProcs() {
+		pgid, err := procPGID(p.pid)
+		if err != nil {
+			e.t.Logf("emacs teardown: cannot read the process group of pid %d (%v); it can only be signalled by pid", p.pid, err)
+			out = append(out, p.pid)
+			continue
+		}
+		if pgid <= 1 || pgid == self {
+			e.t.Logf("emacs teardown: pid %d reports process group %d, which is not a group this scenario owns; it can only be signalled by pid",
+				p.pid, pgid)
+			out = append(out, p.pid)
+			continue
+		}
+		if !containsInt(out, pgid) {
+			out = append(out, pgid)
+		}
+	}
+	return out
+}
+
+// groupStrays answers this scenario's live processes that belong to one of
+// the given process groups.
+func (e *Emacs) groupStrays(groups []int) []stray {
+	var out []stray
+	for _, s := range e.findStrays() {
+		pgid, err := procPGID(s.pid)
+		if err != nil {
+			// The process exited between the walk and this read. Not a
+			// member of anything any more.
+			continue
+		}
+		if containsInt(groups, pgid) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// awaitGroupsGone polls until no process of this scenario remains in the
+// given groups or the bound expires, answering whatever is left.
+func (e *Emacs) awaitGroupsGone(groups []int, bound time.Duration) []stray {
+	return awaitGone(bound, func() []stray { return e.groupStrays(groups) })
+}
+
+// signalGroup sends one signal to one process group, reporting anything but
+// "it is already gone".
+func (e *Emacs) signalGroup(pgid int, sig syscall.Signal) {
+	if err := syscall.Kill(-pgid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+		e.t.Logf("emacs teardown: sending %v to process group %d failed: %v", sig, pgid, err)
+	}
+}
+
+// containsInt reports whether a small int slice holds one value.
+func containsInt(list []int, want int) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// emacsProcs answers the live processes of this scenario that are Emacs
+// itself, as opposed to the daemon, the shims or anything else the reaper
+// matches on the same paths.
+//
+// The discriminator is `comm', not the argv: Emacs is started as bare `emacs'
+// through `env', which execs, so its argv carries no path at all and only its
+// ENVIRONMENT ties it to this scenario -- which is exactly what findStrays
+// matches on.
+func (e *Emacs) emacsProcs() []stray {
+	var out []stray
+	for _, s := range e.findStrays() {
+		if procField(strconv.Itoa(s.pid), "comm") == "emacs" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// procPGID reads the process group id of one pid from /proc.
+func procPGID(pid int) (int, error) {
+	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, err
+	}
+	text := strings.TrimSpace(string(raw))
+	// The comm field is parenthesized and may itself contain spaces, so the
+	// fields that matter start after the last ")": state, ppid, pgrp.
+	idx := strings.LastIndex(text, ")")
+	if idx < 0 {
+		return 0, fmt.Errorf("no comm field in /proc/%d/stat", pid)
+	}
+	fields := strings.Fields(text[idx+1:])
+	if len(fields) < 3 {
+		return 0, fmt.Errorf("/proc/%d/stat has %d fields after comm, want at least 3", pid, len(fields))
+	}
+	pgid, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return 0, fmt.Errorf("process group of pid %d is not a number (%q): %w", pid, fields[2], err)
+	}
+	return pgid, nil
+}
+
+// pidList renders a stray list as pids, for one teardown message.
+func pidList(list []stray) string {
+	if len(list) == 0 {
+		return "no process"
+	}
+	parts := make([]string, 0, len(list))
+	for _, s := range list {
+		parts = append(parts, "pid "+strconv.Itoa(s.pid))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// noteTeardownStep records one thing teardown tried, so a stray the reaper
+// finds afterwards is reported with what had already been done to it rather
+// than as an unexplained survivor.
+func (e *Emacs) noteTeardownStep(step string) {
+	e.teardownMu.Lock()
+	defer e.teardownMu.Unlock()
+	e.teardownSteps = append(e.teardownSteps, step)
+}
+
+// teardownTried renders those steps for the reaper's failure message.
+func (e *Emacs) teardownTried() string {
+	e.teardownMu.Lock()
+	defer e.teardownMu.Unlock()
+	if len(e.teardownSteps) == 0 {
+		return "nothing (teardown never reached the exit wait)"
+	}
+	return strings.Join(e.teardownSteps, "; ")
 }
 
 func (e *Emacs) isWedged() bool {
@@ -1934,8 +2269,16 @@ func (e *Emacs) reapStrays() {
 	if len(strays) == 0 {
 		return
 	}
+	tried := e.teardownTried()
 	for _, s := range strays {
-		e.t.Logf("emacs teardown: reaping a stray this scenario left behind: pid %d %s", s.pid, s.argv)
+		// A FAILURE, NOT A LOG LINE. Teardown is ordered and every step of
+		// it is waited on, so a process still alive at this point is a
+		// guarantee that did not hold -- and a scenario that ends owning a
+		// live process of its own is precisely what produced this layer's
+		// shared-socket failure and its 3 GiB peak. The reaping below still
+		// happens: a failing scenario must not leak into the next one.
+		e.reportFailure("emacs teardown: this scenario left a stray behind: pid %d %s (state %s, wchan %s); teardown had already tried: %s",
+			s.pid, s.argv, s.state, s.wchan, tried)
 		_ = syscall.Kill(s.pid, syscall.SIGTERM)
 	}
 	if left := e.awaitStraysGone(strayTermBound); len(left) > 0 {
@@ -1945,11 +2288,21 @@ func (e *Emacs) reapStrays() {
 		}
 		if stuck := e.awaitStraysGone(strayKillBound); len(stuck) > 0 {
 			for _, s := range stuck {
-				e.t.Errorf("emacs teardown: pid %d survived SIGKILL and is still holding this scenario's resources: %s",
+				e.reportFailure("emacs teardown: pid %d survived SIGKILL and is still holding this scenario's resources: %s",
 					s.pid, s.argv)
 			}
 		}
 	}
+}
+
+// reportFailure fails the scenario for a teardown guarantee that did not
+// hold.
+func (e *Emacs) reportFailure(format string, args ...any) {
+	if e.fail != nil {
+		e.fail(format, args...)
+		return
+	}
+	e.t.Errorf(format, args...)
 }
 
 // stray is one leaked process.
@@ -1969,9 +2322,16 @@ type stray struct {
 // awaitStraysGone polls until no stray remains or the bound expires,
 // answering whatever is left.
 func (e *Emacs) awaitStraysGone(bound time.Duration) []stray {
+	return awaitGone(bound, e.findStrays)
+}
+
+// awaitGone polls one finder until it comes up empty or the bound expires,
+// answering whatever is left. It is shared by the stray reaper and the Emacs
+// exit wait so the two cannot drift in how they wait.
+func awaitGone(bound time.Duration, find func() []stray) []stray {
 	deadline := time.Now().Add(bound)
 	for {
-		left := e.findStrays()
+		left := find()
 		if len(left) == 0 || time.Now().After(deadline) {
 			return left
 		}
