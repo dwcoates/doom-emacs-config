@@ -42,5 +42,15 @@ if ! preflight_out="$("$SANDBOX" preflight 2>&1)"; then
 fi
 printf '%s\n' "$preflight_out"
 
+# `--dir e2e`, AND `./` RATHER THAN `./e2e/`. The cross-system suite is its OWN
+# Go module (e2e/go.mod) and there is no go.mod at the module root, so the
+# command this script used to run --- `go test ./e2e/` from the module root ---
+# died before a single test was built:
+#
+#   go: go.mod file not found in current directory or any parent directory
+#
+# The sandbox entrypoint documents `--dir` for precisely this, and
+# `bin/test-e2e.sh` already `cd`s into `e2e` for the unsandboxed half; this is
+# the sandboxed half saying the same thing the way the container understands.
 printf '[e2e-emacs] running the Emacs client layer inside the sandbox\n'
-exec "$SANDBOX" run go test ./e2e/ -run 'TestEmacs' -v "$@"
+exec "$SANDBOX" run --dir e2e go test ./ -run 'TestEmacs' -v "$@"
