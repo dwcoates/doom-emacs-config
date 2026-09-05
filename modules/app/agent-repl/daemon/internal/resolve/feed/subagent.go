@@ -401,17 +401,42 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		}
 	case *conversationv1.AgentBash_Update:
-		// The offset is a GAP DETECTOR: it must equal what the consumer has
-		// already accumulated. Anything else means bytes were lost, and the
-		// frame is REFUSED rather than concatenated across a hole.
-		if frame.Update.GetFromOffset() != sh.nextOffset {
+		// The offset is a GAP DETECTOR: bytes must arrive contiguously, and a
+		// frame that does not continue the spool is REFUSED rather than
+		// concatenated across a hole.
+		//
+		// A RE-DELIVERY IS NOT A HOLE. Two producers write this run's frames
+		// under one upsert key — the shim from the live stream, the sidecar
+		// from the spool file — so the consumer legitimately sees bytes it has
+		// already accumulated a second time. Those are dropped as a replay
+		// once they are shown to AGREE with what is held; a frame that starts
+		// past the spool's end, or that restates already-held bytes
+		// DIFFERENTLY, is real loss and stays an error.
+		from, out := frame.Update.GetFromOffset(), frame.Update.GetNewOutput()
+		if from > sh.nextOffset {
 			log.Error("daemon.feed.spool_gap",
 				"a detached shell's output frame did not continue the spool; the frame was refused",
-				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": frame.Update.GetFromOffset()})
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
 			return
 		}
-		sh.spool += frame.Update.GetNewOutput()
-		sh.nextOffset += uint64(len(frame.Update.GetNewOutput()))
+		if from < sh.nextOffset {
+			overlap := sh.nextOffset - from
+			if overlap > uint64(len(out)) {
+				overlap = uint64(len(out))
+			}
+			if sh.spool[from:from+overlap] != out[:overlap] {
+				log.Error("daemon.feed.spool_gap",
+					"a detached shell's output frame restated held bytes differently; the frame was refused",
+					dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
+				return
+			}
+			log.Debug("daemon.feed.spool_replay",
+				"a detached shell's output frame re-delivered bytes the spool already holds",
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from, "replayed": overlap})
+			out = out[overlap:]
+		}
+		sh.spool += out
+		sh.nextOffset += uint64(len(out))
 		sh.lastProgressMs = r.deps.Now().UnixMilli()
 	case *conversationv1.AgentBash_Progress:
 		sh.lastProgressMs = frame.Progress.GetLastProgressAtMs()
