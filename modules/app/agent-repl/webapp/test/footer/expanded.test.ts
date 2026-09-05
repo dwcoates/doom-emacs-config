@@ -529,3 +529,50 @@ describe("the crons panel", () => {
     expect(panel.querySelector("[data-empty]")?.textContent).toBe("nothing scheduled");
   });
 });
+
+describe("an arm this build has no case for", () => {
+  it("refuses a PANEL selection the bundle has no drawing for", () => {
+    // ARRANGE
+    const h = harness();
+    // ACT / ASSERT
+    expect(() =>
+      drawFooterExpanded(expanded(), "sessions" as FooterPanel, {
+        ctx: h.ctx,
+        revealRow: async () => true,
+      }),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a TOKENS VERDICT arm the bundle cannot name", () => {
+    // ARRANGE — legal, then poked: `create` drops an unknown case.
+    const view = expanded({
+      tokens: {
+        input: {},
+        cacheRead: {},
+        cacheWrite: {},
+        output: {},
+        thinking: {},
+        firstToken: {},
+        verdict: { verdict: { case: "complete", value: {} } },
+      },
+    });
+    (
+      view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
+    ).verdict.verdict = { case: "unaudited", value: {} };
+    // ACT / ASSERT
+    expect(() => drawPanel("tokens", {}, true, view)).toThrow(MalformedView);
+  });
+
+  it("refuses a TASK STATUS arm the bundle cannot name", () => {
+    const view = expanded({
+      tasks: [{ status: { status: { case: "pending", value: {} } }, subject: { text: "x" } }],
+    });
+    const row = (
+      view.tasks as unknown as {
+        rows: { status: { status: { case: string; value: unknown } } }[];
+      }
+    ).rows[0];
+    row.status.status = { case: "abandoned", value: {} };
+    expect(() => drawPanel("tasks", {}, true, view)).toThrow(MalformedView);
+  });
+});

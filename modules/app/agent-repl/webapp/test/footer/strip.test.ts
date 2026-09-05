@@ -691,3 +691,56 @@ describe("drawFooterLiveWorkChips", () => {
     expect(row.querySelector('[data-chip="shells"]')?.hasAttribute("data-selected")).toBe(false);
   });
 });
+
+// ---- arms a newer daemon set that this bundle cannot draw -------------------
+//
+// Each of these is the run-time half of an exhaustive switch: the compiler
+// cannot see an arm whose descriptor this bundle does not carry, so the
+// `default` refuses the frame instead of drawing something else.
+
+describe("an arm this build has no case for", () => {
+  it("refuses a STATUS arm the bundle cannot name", () => {
+    // ARRANGE — a legal frame, then the arm a NEWER daemon set, poked in: the
+    // generated `create` drops a case its descriptors do not know, which would
+    // trip the unset-oneof refusal instead of the exhaustive switch's default.
+    const h = harness();
+    const view = strip();
+    (view.status as unknown as { status: { case: string; value: unknown } }).status = {
+      case: "hibernated",
+      value: {},
+    };
+    // ACT / ASSERT
+    expect(() =>
+      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses an ACTIVITY KIND the bundle cannot name", () => {
+    const h = harness();
+    const view = strip({
+      status: withActivity("idle", null, "notification", { text: "a line" }),
+    });
+    const activity = (
+      view.status as unknown as {
+        status: { value: { activity: { kind: { case: string; value: unknown } } } };
+      }
+    ).status.value.activity;
+    activity.kind = { case: "teleporting", value: {} };
+    expect(() =>
+      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a TOKENS VERDICT arm the bundle cannot name", () => {
+    const h = harness();
+    const view = strip({
+      tokens: { input: { text: "x" }, verdict: { verdict: { case: "complete", value: {} } } },
+    });
+    (
+      view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
+    ).verdict.verdict = { case: "unaudited", value: {} };
+    expect(() =>
+      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+    ).toThrow(MalformedView);
+  });
+});

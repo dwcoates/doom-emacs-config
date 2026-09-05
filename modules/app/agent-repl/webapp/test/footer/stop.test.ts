@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
+import {
+  InterruptResponseSchema,
+  type InterruptSuccess,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   STOP_GLYPH,
@@ -299,5 +302,18 @@ describe("drawInterruptSuccess: the arm is what the stop DID", () => {
         "InterruptSuccess",
       ),
     ).toThrow(MalformedView);
+  });
+});
+
+describe("an outcome arm this build has no case for", () => {
+  it("refuses a SUCCESS outcome arm the bundle cannot name", () => {
+    // ARRANGE — legal, then poked: `create` drops a case its descriptors lack.
+    const success = interruptSuccess("interruptedTurn").result.value as InterruptSuccess;
+    (success as unknown as { outcome: { case: string; value: unknown } }).outcome = {
+      case: "paused",
+      value: {},
+    };
+    // ACT / ASSERT
+    expect(() => drawInterruptSuccess(success, "InterruptSuccess")).toThrow(MalformedView);
   });
 });
