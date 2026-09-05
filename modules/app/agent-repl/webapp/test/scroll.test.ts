@@ -905,3 +905,109 @@ describe("a load-more prepend does not jump the viewport", () => {
     expect(feedTopChanged("b-tail", null)).toBe(false);
   });
 });
+
+describe("redirectsToFeed default gutter", () => {
+  it("falls back to EDGE_PX when the caller names no gutter width", () => {
+    // Arrange — a pointer one px inside the default gutter, with edgePx omitted
+    // so only the `?? EDGE_PX` fallback can decide the answer.
+    const scroller = { left: 100, right: 500 };
+    // Act
+    const redirected = redirectsToFeed({
+      scroller,
+      clientX: 100 + EDGE_PX - 1,
+      feedScrollable: true,
+    });
+    // Assert — the pointer is in the gutter, so the section keeps the wheel.
+    expect(redirected).toBe(false);
+  });
+});
+
+describe("wheelAction default gutter", () => {
+  it("falls back to EDGE_PX when the caller names no gutter width", () => {
+    // Arrange — a pointer well clear of the default gutters, edgePx omitted.
+    // Act
+    const delta = wheelAction({
+      scroller: { left: 100, right: 500 },
+      clientX: 300,
+      deltaY: 7,
+      deltaMode: 0,
+      feedScrollable: true,
+      feedHeight: 600,
+    });
+    // Assert — redirected to the feed, carrying the pixel delta verbatim.
+    expect(delta).toBe(7);
+  });
+});
+
+describe("sectionFor detached box", () => {
+  it("falls back to the box when the chain runs out before reaching the feed", () => {
+    // Arrange — a box whose ancestors end at a root that is NOT the feed, the
+    // shape a section removed from the document leaves mid-render.
+    const feed = node("feed");
+    const orphanRoot = node("orphan-root");
+    const output = node("bare-output", { parentElement: orphanRoot });
+    // Act + Assert — no card was found and the walk still terminated.
+    expect(sectionFor(output, feed, isSection).name).toBe("bare-output");
+  });
+});
+
+describe("captureFeedAnchor exhausted scan", () => {
+  it("captures nothing when every item sits above the viewport top", () => {
+    // Arrange — a reader scrolled past the last item, so the walk runs off the
+    // end without ever finding an item still on screen.
+    const box: AnchorBox = {
+      scrollTop: 900,
+      scrollHeight: 1000,
+      clientHeight: 300,
+      querySelector: () => null,
+    };
+    const items = [
+      { key: "a", offsetTop: 0 },
+      { key: "b", offsetTop: 400 },
+    ];
+    // Act
+    const anchor = captureFeedAnchor(box, items, false);
+    // Assert
+    expect(anchor).toBeNull();
+  });
+});
+
+describe("TailFollow on a box shorter than its viewport", () => {
+  it("clamps the reconcile baseline at zero rather than a negative reach", () => {
+    // Arrange — a feed with less content than viewport: scrollHeight minus
+    // clientHeight is NEGATIVE, so only the Math.max floor keeps the baseline
+    // inside the box's real range.
+    const box: ReanchorBox = { scrollTop: 0, scrollHeight: 120, clientHeight: 300 };
+    const tail = new TailFollow(box);
+    // Act — content arrives, still short of the viewport; nothing moved.
+    box.scrollHeight = 200;
+    // Assert — the follow survives, unclamped arithmetic would have ended it.
+    expect(tail.isFollowing()).toBe(true);
+  });
+});
+
+describe("restoreFeedAnchor key escaping", () => {
+  it("escapes a quote in the anchor key instead of building a broken selector", () => {
+    // Arrange — a key carrying the one character that would end the selector's
+    // attribute string early.
+    const seen: string[] = [];
+    const box: AnchorBox = {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      clientHeight: 300,
+      querySelector: (sel: string) => {
+        seen.push(sel);
+        return { offsetTop: 500 };
+      },
+    };
+    const placed: number[] = [];
+    // Act
+    restoreFeedAnchor(box, { key: 'a"b', offsetPx: 20, pinned: false }, {
+      park: () => {},
+      place: (top: number) => placed.push(top),
+    });
+    // Assert
+    expect(seen).toEqual(['[data-key="a\\"b"]']);
+    expect(placed).toEqual([480]);
+  });
+});
