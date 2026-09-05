@@ -75,6 +75,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  // A global stubbed away here must not outlive the test: the unit run shares
+  // one jsdom across files, so a missing `requestAnimationFrame` would silently
+  // change how every later suite paints.
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
 
@@ -407,5 +411,35 @@ describe("a malformed response", () => {
     const u = response({});
     (u as { result: unknown }).result = { case: "teleported", value: {} };
     expect(() => drawFeedResponse(u, rowContext())).toThrow(MalformedView);
+  });
+});
+
+describe("a host with no animation frames", () => {
+  it("draws the arriving prose whole rather than not at all", () => {
+    // Arrange: an embedder (or a test host) that offers no frame scheduler.
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    // Act
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "hello world" } } } }),
+      rowContext(),
+    );
+    // Assert: the whole prose is on screen with no frame ever having run,
+    // where a frame host would have shown nothing yet.
+    expect([
+      el.querySelector(".bubble-body")?.textContent?.trim(),
+      el.getAttribute(REVEALED_ATTRIBUTE),
+    ]).toEqual(["hello world", String("hello world".length)]);
+  });
+
+  it("still wears the arriving indicator, since the prose has not settled", () => {
+    // Arrange
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    // Act
+    const el = drawFeedResponse(
+      response({ result: { case: "update", value: { prose: { markdown: "typing" } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
   });
 });

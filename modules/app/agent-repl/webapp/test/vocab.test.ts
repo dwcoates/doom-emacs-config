@@ -230,3 +230,21 @@ describe("paintClass", () => {
     expect(lines.filter(([level]) => level === "warn")).toHaveLength(1);
   });
 });
+
+describe("failureSideColor: a side the color table does not name", () => {
+  it("refuses a side with no row rather than painting it a default", () => {
+    // ARRANGE / ACT / ASSERT
+    expect(() => failureSideColor("nonesuch" as never)).toThrow(MalformedView);
+  });
+
+  it("names the vocab file and the side in the refusal", () => {
+    // ARRANGE / ACT
+    try {
+      failureSideColor("nonesuch" as never);
+      expect.unreachable();
+    } catch (err) {
+      // ASSERT
+      expect((err as MalformedView).path).toBe("render-colors.json#failure_sides");
+    }
+  });
+});

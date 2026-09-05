@@ -190,3 +190,46 @@ describe("scheduleWakeupConverter.settle", () => {
     expect(failure.failure?.settledAt?.atMs).toBe(1_700_000_000_100n);
   });
 });
+
+describe("scheduleWakeupConverter defaults for fields the vendor left unstated", () => {
+  it("states a zero delay when the schedule call named none", () => {
+    // Arrange.
+    const call = callWith({ reason: "no delay stated" });
+
+    // Act.
+    const act = startOf(call).act;
+
+    // Assert.
+    expect((act.value as conversationv1.AgentScheduleWakeupSchedule).delaySeconds).toBe(0);
+  });
+
+  it("records a stop that stated no cancelled count as zero", () => {
+    // Arrange, Act.
+    const success = successOf({ stopped: true });
+
+    // Assert.
+    expect(
+      (success.outcome.value as conversationv1.AgentScheduleWakeupStopped).cancelledWakeups,
+    ).toBe(0);
+  });
+
+  it("records a zero clamped delay when the runtime stated none", () => {
+    // Arrange, Act.
+    const success = successOf({ scheduledFor: 1784408640000, wasClamped: true });
+
+    // Assert.
+    expect(
+      (success.outcome.value as conversationv1.AgentScheduleWakeupScheduled).clampedDelaySeconds,
+    ).toBe(0);
+  });
+
+  it("records an unclamped wakeup when the runtime stated no clamp flag", () => {
+    // Arrange, Act.
+    const success = successOf({ scheduledFor: 1784408640000, clampedDelaySeconds: 1200 });
+
+    // Assert.
+    expect(
+      (success.outcome.value as conversationv1.AgentScheduleWakeupScheduled).wasClamped,
+    ).toBe(false);
+  });
+});

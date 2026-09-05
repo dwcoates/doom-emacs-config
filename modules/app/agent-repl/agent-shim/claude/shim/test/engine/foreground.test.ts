@@ -129,3 +129,18 @@ describe("ForegroundUnitTable", () => {
     expect(table.inFlightCount).toBe(0);
   });
 });
+
+describe("settling a unit twice", () => {
+  it("keeps the FIRST settled record, so a repeated terminal cannot restate the unit's kind", () => {
+    // Arrange: settled once as a tool call, which reads as `settled`.
+    const table = new ForegroundUnitTable();
+    table.note("act-1", "bash", false);
+    table.note("act-1", "bash", true);
+
+    // Act: the same terminal arrives again, this time calling it prose.
+    table.note("act-1", "thinking", true);
+
+    // Assert: the record did not change, so the verdict did not either.
+    expect(table.verdict("act-1")).toEqual({ kind: "settled" });
+  });
+});

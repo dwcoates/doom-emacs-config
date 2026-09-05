@@ -23,6 +23,8 @@ import { createAppContext } from "../../../src/rpc/context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedFindings,
+  drawFindingOutcome,
+  drawFindingVerdict,
   FINDINGS_OUTCOME_ARMS,
   FINDINGS_VERDICT_ARMS,
   NOTHING_FOUND_TEXT,
@@ -367,5 +369,50 @@ describe("drawFeedFindings malformed input", () => {
       value: {},
     };
     expect(() => drawFeedFindings(findings([row]), harness().rc)).toThrow(MalformedView);
+  });
+});
+
+// The two badge drawers are exported, and their `?? "unset"` fallbacks are
+// reachable ONLY through a direct call: `drawFeedFindingsRow` guards on
+// `case !== undefined` before it calls either.
+describe("a badge drawn from an unset arm", () => {
+  it("names the verdict as unset rather than drawing a badge", () => {
+    // Arrange
+    const row = document.createElement("div");
+    // Act
+    const thrown = (() => {
+      try {
+        drawFindingVerdict({ case: undefined }, row, "FeedFindingsRow.verdict");
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).path,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "FeedFindingsRow.verdict", "arm 'unset' is not one this build can draw"]);
+  });
+
+  it("names the outcome as unset rather than drawing a badge", () => {
+    // Arrange
+    const row = document.createElement("div");
+    // Act
+    const thrown = (() => {
+      try {
+        drawFindingOutcome({ case: undefined }, row, "FeedFindingsRow.outcome");
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).path,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "FeedFindingsRow.outcome", "arm 'unset' is not one this build can draw"]);
   });
 });

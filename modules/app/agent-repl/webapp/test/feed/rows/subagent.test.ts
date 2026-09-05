@@ -393,3 +393,4 @@ describe("drawFeedSubagent: the stop control", () => {
     expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
   });
 });
+

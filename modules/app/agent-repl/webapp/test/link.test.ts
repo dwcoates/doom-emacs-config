@@ -18,8 +18,14 @@ import { WorkspaceRefSchema } from "../../proto/gen/ts/workspace/v1/workspace_pb
 import { createTicker } from "../src/clock.js";
 import type { FailureSink } from "../src/failure/sink.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
-import { renderEditorLink, renderExternalLink } from "../src/link.js";
+import {
+  openExternalRefusal,
+  openInEditorRefusal,
+  renderEditorLink,
+  renderExternalLink,
+} from "../src/link.js";
 import { createAgentReplClient } from "../src/rpc/client.js";
+import { MalformedView } from "../src/rpc/malformed.js";
 import { createAppContext, type AppContext } from "../src/rpc/context.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/home/u/w" });
@@ -492,5 +498,40 @@ describe("renderEditorLink", () => {
     a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
     await settle();
     expect(editor).toHaveLength(0);
+  });
+});
+
+describe("openExternalRefusal: an arm this build has no words for", () => {
+  it("refuses an arm a newer daemon added rather than drawing a generic sentence", () => {
+    // ARRANGE / ACT / ASSERT
+    expect(() =>
+      openExternalRefusal({ case: "somethingNewer", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it("names OpenExternalError.cause as the path of the arm it could not draw", () => {
+    try {
+      openExternalRefusal({ case: "somethingNewer", value: {} } as never);
+      expect.unreachable();
+    } catch (err) {
+      expect((err as MalformedView).path).toBe("OpenExternalError.cause");
+    }
+  });
+});
+
+describe("openInEditorRefusal: an arm this build has no words for", () => {
+  it("refuses an arm a newer daemon added rather than drawing a generic sentence", () => {
+    expect(() =>
+      openInEditorRefusal({ case: "somethingNewer", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it("names OpenInEditorError.cause as the path of the arm it could not draw", () => {
+    try {
+      openInEditorRefusal({ case: "somethingNewer", value: {} } as never);
+      expect.unreachable();
+    } catch (err) {
+      expect((err as MalformedView).path).toBe("OpenInEditorError.cause");
+    }
   });
 });
