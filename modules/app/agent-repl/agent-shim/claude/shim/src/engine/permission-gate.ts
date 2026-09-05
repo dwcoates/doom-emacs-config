@@ -420,7 +420,7 @@ interface PermissionGateDeps {
   persist(entries: PersistEntry[]): void;
   /** True while the open turn is a keep-alive. */
   keepalive(): boolean;
-  nowMs(): number;
+  readonly nowMs: () => number;
   /** A standing grant carried a mode change; the session restates it authoritatively. */
   onPermissionModeSet(mode: conversationv1.AgentPermissionMode): void;
 }

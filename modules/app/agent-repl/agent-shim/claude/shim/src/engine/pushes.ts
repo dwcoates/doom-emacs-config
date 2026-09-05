@@ -140,15 +140,16 @@ export class SessionPushes {
     this.subscribers.add(subscriber);
     LOGGER.log({ subscribers: this.subscribers.size }, "opened a WatchSession stream; diagnostics pushed first");
     if (this.standingDown) subscriber.close();
-    const self = this;
     return {
-      [Symbol.asyncIterator](): AsyncIterator<conversationv1.SessionUpdate> {
+      // An ARROW, not a method: the teardown below has to reach this table's
+      // subscriber set, and a method's own `this` is the returned literal.
+      [Symbol.asyncIterator]: (): AsyncIterator<conversationv1.SessionUpdate> => {
         const iterator = subscriber.iterator();
         return {
           next: () => iterator.next(),
           return: async () => {
-            self.subscribers.delete(subscriber);
-            LOGGER.log({ subscribers: self.subscribers.size }, "a WatchSession consumer went away");
+            this.subscribers.delete(subscriber);
+            LOGGER.log({ subscribers: this.subscribers.size }, "a WatchSession consumer went away");
             return iterator.return === undefined
               ? { value: undefined, done: true as const }
               : iterator.return();

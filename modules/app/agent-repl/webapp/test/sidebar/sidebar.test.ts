@@ -37,7 +37,18 @@ function memoryStorage(seed: Record<string, string> = {}): Storage {
     key: (index) => [...map.keys()][index] ?? null,
     removeItem: (key) => void map.delete(key),
     setItem: (key, value) => void map.set(key, value),
-  } as Storage;
+  };
+}
+
+/** The prefs record as it was actually persisted, typed rather than `any`. */
+function storedPrefs(storage: Storage): {
+  grouping?: string;
+  folded?: Record<string, boolean>;
+  expanded?: Record<string, boolean>;
+} {
+  const raw = storage.getItem(PREFS_KEY);
+  if (raw === null) throw new Error("no prefs were written");
+  return JSON.parse(raw) as ReturnType<typeof storedPrefs>;
 }
 
 function throwingStorage(): Storage {
@@ -60,7 +71,7 @@ function throwingStorage(): Storage {
     setItem: () => {
       throw new Error("site data is disabled");
     },
-  } as unknown as Storage;
+  };
 }
 
 function ctxFor(rosters = [roster()]): AppContext {
@@ -99,19 +110,19 @@ describe("the rail's preferences", () => {
   it("persist a grouping change", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setGrouping("task");
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).grouping).toBe("task");
+    expect(storedPrefs(storage).grouping).toBe("task");
   });
 
   it("persist a fold", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setFolded("repo:one", true);
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).folded["repo:one"]).toBe(true);
+    expect(storedPrefs(storage).folded?.["repo:one"]).toBe(true);
   });
 
   it("persist a row's expansion", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setExpanded("ws-1", true);
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).expanded["ws-1"]).toBe(true);
+    expect(storedPrefs(storage).expanded?.["ws-1"]).toBe(true);
   });
 
   it("keep a fold's own default for a section never folded", () => {
@@ -325,7 +336,7 @@ describe("the page's own storage, when no storage was injected", () => {
 
   it("persists a preference into the page's localStorage", () => {
     createSidebarPrefs().setGrouping("task");
-    expect(JSON.parse(globalThis.localStorage.getItem(PREFS_KEY) as string).grouping).toBe("task");
+    expect(storedPrefs(globalThis.localStorage).grouping).toBe("task");
   });
 
   it("reads a preference back out of the page's localStorage", () => {

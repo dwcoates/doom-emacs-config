@@ -131,7 +131,7 @@ function make<Desc extends DescMessage>(
   defaults: MessageInitShape<Desc>,
   overrides?: Partial<MessageInitShape<Desc>>,
 ): ReturnType<typeof create<Desc>> {
-  return create(schema, { ...defaults, ...(overrides ?? {}) } as MessageInitShape<Desc>);
+  return create(schema, { ...defaults, ...(overrides ?? {}) });
 }
 
 // ---------------------------------------------------------------------------

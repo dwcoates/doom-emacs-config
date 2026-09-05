@@ -189,7 +189,7 @@ export interface ScenarioContext {
   /** Mint a uuid. Injected so goldens are stable. */
   newUuid(): string;
   /** Milliseconds since the epoch. Injected so goldens are stable. */
-  nowMs(): number;
+  readonly nowMs: () => number;
   /** The current instant as the vendor's ISO-8601 timestamp. */
   nowIso(): string;
 

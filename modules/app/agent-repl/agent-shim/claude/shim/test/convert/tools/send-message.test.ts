@@ -117,7 +117,7 @@ describe("sendMessageConverter.settle", () => {
   it("resolves the corpus send's recipient from resumedAgentId", () => {
     // Arrange, Act.
     const success = successOf(
-      sendMessageConverter.settle(call({ to: "a1", message: "go" }), outcome(toolUseResult("send_message")))!,
+      sendMessageConverter.settle(call({ to: "a1", message: "go" }), outcome(toolUseResult("send_message"))),
     );
 
     // Assert.
@@ -127,7 +127,7 @@ describe("sendMessageConverter.settle", () => {
   it("reads the corpus send as a RESUMED recipient, the only structured discriminator", () => {
     // Arrange, Act.
     const success = successOf(
-      sendMessageConverter.settle(call({ to: "a1", message: "go" }), outcome(toolUseResult("send_message")))!,
+      sendMessageConverter.settle(call({ to: "a1", message: "go" }), outcome(toolUseResult("send_message"))),
     );
 
     // Assert.
@@ -139,7 +139,7 @@ describe("sendMessageConverter.settle", () => {
     const structured = { success: true, pin: { id: "b7c", name: "vetter", ref: "21" } };
 
     // Act.
-    const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured))!);
+    const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured)));
 
     // Assert.
     expect(success.recipientAgentId?.value).toBe("b7c");
@@ -150,7 +150,7 @@ describe("sendMessageConverter.settle", () => {
     const structured = { success: true, pin: { id: "b7c" } };
 
     // Act.
-    const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured))!);
+    const success = successOf(sendMessageConverter.settle(call({ to: "vetter" }), outcome(structured)));
 
     // Assert.
     expect(success.delivery.case).toBe("queuedToLive");
@@ -159,7 +159,7 @@ describe("sendMessageConverter.settle", () => {
   it("stamps the settle instant", () => {
     // Arrange, Act.
     const success = successOf(
-      sendMessageConverter.settle(call({ to: "a1" }), outcome(toolUseResult("send_message")))!,
+      sendMessageConverter.settle(call({ to: "a1" }), outcome(toolUseResult("send_message"))),
     );
 
     // Assert.
@@ -180,7 +180,7 @@ describe("sendMessageConverter.settle", () => {
 
   it("settles a vendor-marked error as the failure arm", () => {
     // Arrange, Act.
-    const arm = armOf(sendMessageConverter.settle(call({ to: "v" }), outcome(undefined, true))!);
+    const arm = armOf(sendMessageConverter.settle(call({ to: "v" }), outcome(undefined, true)));
 
     // Assert.
     expect(arm.case).toBe("failure");

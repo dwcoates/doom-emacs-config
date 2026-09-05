@@ -9,6 +9,7 @@
  * release the turn is the gate's own re-check.
  */
 import { describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
@@ -30,7 +31,6 @@ describe("the turn gate without its edge", () => {
     // Arrange
     const { mkdtempSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
     const dir = mkdtempSync(join(tmpdir(), "fake-gate-lost-edge-"));
     const gate = join(dir, "open");
     process.env[TURN_GATE_PATH_ENV] = gate;
@@ -64,7 +64,6 @@ describe("a parked turn that is killed", () => {
     // shim reported a stopped turn with no terminal behind it.
     const { mkdtempSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
     const dir = mkdtempSync(join(tmpdir(), "fake-gate-killed-"));
     process.env[TURN_GATE_PATH_ENV] = join(dir, "open");
     process.env[TURN_GATE_TEXT_ENV] = "gated turn";

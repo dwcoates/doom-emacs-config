@@ -43,7 +43,7 @@ function startOf(call: PendingCall): conversationv1.AgentCronStart {
 }
 
 function successOf(toolName: string, structured: unknown): conversationv1.AgentCronSuccess {
-  const cron = cronOf(cronConverter.settle(callNamed(toolName), outcomeWith(structured))!);
+  const cron = cronOf(cronConverter.settle(callNamed(toolName), outcomeWith(structured)));
   expect(cron.state.case).toBe("success");
   return cron.state.value as conversationv1.AgentCronSuccess;
 }
@@ -184,7 +184,7 @@ describe("cronConverter.settle", () => {
     const success = successOf("CronList", { jobs: [{ id: "job_2", cron: "* * * * *", prompt: "p" }] });
 
     // Assert.
-    const job = (success.act.value as conversationv1.AgentCronListed).jobs[0]!;
+    const job = (success.act.value as conversationv1.AgentCronListed).jobs[0];
     expect([job.recurring, job.durable]).toEqual([false, false]);
   });
 
@@ -248,7 +248,7 @@ describe("cronConverter.settle", () => {
 
   it("settles an errored call as the failure arm", () => {
     // Arrange, Act.
-    const cron = cronOf(cronConverter.settle(callNamed("CronCreate"), outcomeWith(undefined, true))!);
+    const cron = cronOf(cronConverter.settle(callNamed("CronCreate"), outcomeWith(undefined, true)));
 
     // Assert.
     const failure = cron.state.value as conversationv1.AgentCronFailure;

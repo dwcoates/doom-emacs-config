@@ -125,7 +125,7 @@ interface Harness {
 
 function mount(
   answer: () => SubmitPromptResponse = turnSuccess,
-  opts: { composerEnabled?: boolean; feed?: typeof FEED; throws?: unknown } = {},
+  opts: { composerEnabled?: boolean; feed?: typeof FEED; throws?: Error } = {},
 ): Harness {
   const seen: SubmitPromptRequest[] = [];
   const panels: SubmitPromptCommandPanel[] = [];

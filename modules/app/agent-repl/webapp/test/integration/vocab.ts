@@ -86,6 +86,15 @@ export const isKnownPaintClass = (name: string): boolean =>
 export const expectedPaintClass = (name: string): string | undefined =>
   name === "" || !isKnownPaintClass(name) ? undefined : `paint-${name}`;
 
+/**
+ * The class an element ACTUALLY carries, in the same vocabulary
+ * `expectedPaintClass` answers in: an element with no class at all reads as
+ * `undefined`, not as the empty string, so an unstyled span and a missing span
+ * compare the same way against an expectation of "no class".
+ */
+export const drawnPaintClass = (el: Element | undefined): string | undefined =>
+  el === undefined || el.className === "" ? undefined : el.className;
+
 function lookup(table: Record<string, string>, arm: string, which: string): string {
   const key = snake(arm);
   const found = table[key];

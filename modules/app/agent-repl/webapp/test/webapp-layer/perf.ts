@@ -55,11 +55,7 @@ import type { MountedApp } from "../integration/harness";
  * evaluation, which ESM guarantees happens before any test body runs and so
  * before `mountApp` calls `vi.useFakeTimers`.
  */
-export const realNow: () => number = ((): (() => number) => {
-  const perf = globalThis.performance;
-  const now = perf.now;
-  return () => now.call(perf);
-})();
+export const realNow: () => number = globalThis.performance.now.bind(globalThis.performance);
 
 /**
  * The REAL microtask queue, captured for the same reason and at the same
@@ -105,7 +101,7 @@ export class PerfRecorder {
     if (this.samples.length === 0) return 0;
     const sorted = [...this.samples].sort((a, b) => a - b);
     const rank = Math.min(Math.max(Math.ceil(q * sorted.length), 1), sorted.length);
-    return sorted[rank - 1] as number;
+    return sorted[rank - 1];
   }
 
   p50(): number {
@@ -170,8 +166,13 @@ export class ApplyProbe {
     // behavior — the inner call still runs, in order, before `onPush`.
     const ctx = app.ctx as unknown as { notePush: () => void };
     const inner = ctx.notePush.bind(ctx);
-    let probe: ApplyProbe;
+    // Assigned below, and the wrap is handed to `ctx` before that happens: a push that
+    // arrived in between would find no probe, so it says so rather than reading undefined.
+    let probe: ApplyProbe | undefined = undefined;
     ctx.notePush = (): void => {
+      if (probe === undefined) {
+        throw new Error("perf: a push reached notePush before the probe was constructed");
+      }
       probe.onFrame();
       inner();
     };

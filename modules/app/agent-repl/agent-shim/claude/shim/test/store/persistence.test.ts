@@ -8,6 +8,7 @@
  * than silently degrading. This pins that every verb does exactly that.
  */
 import { describe, expect, it } from "vitest";
+import { containing } from "../expect-shapes.js";
 
 import { PersistenceError, unavailablePersistence } from "../../src/store/persistence.js";
 
@@ -16,7 +17,7 @@ describe("unavailablePersistence", () => {
 
   it("write throws store_unavailable synchronously", () => {
     expect(() => persistence.write({} as never)).toThrowError(
-      expect.objectContaining({ kind: "store_unavailable" }),
+      containing({ kind: "store_unavailable" }) as Error,
     );
   });
 

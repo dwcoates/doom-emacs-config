@@ -14,5 +14,5 @@ export interface TopbarContext {
   /** The one reveal layer under the strip. */
   readonly reveals: RevealLayer;
   /** Raise the login overlay (the logged-out account chip's click). */
-  openLogin(control: HTMLElement): void;
+  readonly openLogin: (control: HTMLElement) => void;
 }

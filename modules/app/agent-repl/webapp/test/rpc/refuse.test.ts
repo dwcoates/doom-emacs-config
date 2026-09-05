@@ -23,7 +23,7 @@ function recordingSink(): FailureSink & { reports: FailureKind[] } {
 /** The arms an endpoint words for itself. */
 const OWN: SentenceTable = {
   askNotStanding: () => "that ask is no longer standing",
-} as unknown as SentenceTable;
+};
 
 const installed: Array<() => void> = [];
 afterEach(() => {
@@ -116,7 +116,7 @@ describe("drawTypedRefusal", () => {
       "SetModelError.cause",
       "SetModel",
       { case: "unknownWorkspace", value: {} },
-      {} as SentenceTable,
+      {},
     );
     expect(host.querySelector(".refusal")?.textContent).toBe(
       "the daemon does not know this workspace",
@@ -130,7 +130,7 @@ describe("drawTypedRefusal", () => {
       "SetModelError.cause",
       "SetModel",
       { case: "notYetAdopted", value: {} },
-      {} as SentenceTable,
+      {},
     );
     expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("notYetAdopted");
   });
@@ -143,7 +143,7 @@ describe("drawTypedRefusal", () => {
       "SetModelError.cause",
       "SetModel",
       { case: "notYetAdopted", value: {} },
-      {} as SentenceTable,
+      {},
     );
     expect(host.querySelectorAll(".refusal")).toHaveLength(1);
   });
@@ -155,7 +155,7 @@ describe("drawTypedRefusal", () => {
       "SetModelError.cause",
       "SetModel",
       { case: "transferringAway", value: { address: "127.0.0.1:9940" } },
-      {} as SentenceTable,
+      {},
     );
     expect(seen).toEqual(["127.0.0.1:9940"]);
   });

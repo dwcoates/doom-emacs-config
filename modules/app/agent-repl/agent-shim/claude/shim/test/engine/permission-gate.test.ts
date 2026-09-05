@@ -63,7 +63,7 @@ function callOptions(overrides: Record<string, unknown> = {}): Parameters<Permis
     toolUseID: "toolu_1",
     requestId: "req_1",
     ...overrides,
-  } as Parameters<PermissionGate["canUseTool"]>[2];
+  };
 }
 
 function answers(chosen: string[], freeText?: string): conversationv1.AgentQuestionAnswers {
