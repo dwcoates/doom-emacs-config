@@ -215,3 +215,37 @@ describe("webFetchConverter.settle", () => {
     expect(item).toBeUndefined();
   });
 });
+
+describe("webFetchConverter defaults for fields the vendor left unstated", () => {
+  /** The success arm for one typed output, against a fixed call. */
+  function successOf(output: Record<string, unknown>): conversationv1.AgentWebFetchSuccess {
+    const call = callWith({ url: "https://example.test/" });
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    expect(fetch.result.case).toBe("success");
+    return fetch.result.value as conversationv1.AgentWebFetchSuccess;
+  }
+
+  it("states a zero status code when the output named none", () => {
+    // Arrange, Act.
+    const success = successOf({ codeText: "no code stated" });
+
+    // Assert.
+    expect(success.status?.code).toBe(0);
+  });
+
+  it("states zero bytes when the output named none", () => {
+    // Arrange, Act.
+    const success = successOf({ code: 200, durationMs: 12 });
+
+    // Assert.
+    expect(success.bytes).toBe(0n);
+  });
+
+  it("states a zero duration when the output named none", () => {
+    // Arrange, Act.
+    const success = successOf({ code: 200, bytes: 12 });
+
+    // Assert.
+    expect(success.durationMs).toBe(0n);
+  });
+});
