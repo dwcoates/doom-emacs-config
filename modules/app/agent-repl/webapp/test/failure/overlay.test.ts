@@ -12,7 +12,7 @@ import {
   staleBundle,
   workspaceGone,
 } from "../../src/failure/sink.js";
-import { mountFailureOverlay } from "../../src/failure/overlay.js";
+import { drawFailureCard, mountFailureOverlay } from "../../src/failure/overlay.js";
 
 let host: HTMLElement;
 
@@ -348,5 +348,19 @@ describe("mountFailureOverlay: suppress", () => {
     overlay.report(daemonUnreachable(1006, "gone"));
     // ASSERT
     expect(arms()).toEqual(["daemonUnreachable"]);
+  });
+});
+
+describe("drawFailureCard: evidence for an arm it has no rows for", () => {
+  it("draws the card's headline with no evidence rows at all", () => {
+    // ARRANGE — a DAEMON-minted arm, which `evidenceRows` deliberately has no
+    // case for: neither producer may set the other's arms.
+    const foreign = create(FailureKindSchema, {
+      kind: { case: "shimDegraded", value: { component: "stdout" } },
+    });
+    // ACT
+    const card = drawFailureCard(foreign, "bootFailed");
+    // ASSERT
+    expect(card.querySelectorAll(".failure-detail")).toHaveLength(0);
   });
 });
