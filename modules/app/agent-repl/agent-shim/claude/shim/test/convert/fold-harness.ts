@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { conversationv1 } from "../../src/proto.js";
-import type { FoldContext, LiveTask, PendingAsk } from "../../src/convert/fold-context.js";
+import type { FoldContext, LastChange, LiveTask, PendingAsk } from "../../src/convert/fold-context.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 
@@ -53,7 +53,7 @@ export interface ContextOverrides {
   readonly liveTask?: (taskId: string) => LiveTask | undefined;
   readonly subagentFor?: (toolUseId: string) => conversationv1.AgentId | undefined;
   readonly mcpServerNames?: readonly string[];
-  readonly lastWriteOrEditUnit?: conversationv1.AgentActivityId;
+  readonly lastChange?: LastChange;
   readonly reportFault?: (kind: "converter_defect", detail: string) => void;
 }
 
@@ -69,7 +69,7 @@ export function foldContext(overrides: ContextOverrides = {}): FoldContext {
     liveTask: overrides.liveTask ?? (() => undefined),
     subagentFor: overrides.subagentFor ?? (() => undefined),
     mcpServerNames: () => overrides.mcpServerNames ?? [],
-    lastWriteOrEditUnit: overrides.lastWriteOrEditUnit,
+    lastChange: overrides.lastChange,
     ...(overrides.reportFault === undefined ? {} : { reportFault: overrides.reportFault }),
   };
 }
