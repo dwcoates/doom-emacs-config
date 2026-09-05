@@ -820,6 +820,39 @@ describe("waiting for the wire to go quiet", () => {
     expect([settledAfterFirst, quietSettled]).toEqual([false, true]);
   });
 
+  // THE REGRESSION THIS FILE EXISTS FOR, over h2c: `quiet` resolving is not
+  // the same as the answer being on the wire. A response's `close` means its
+  // frames reached the http2 session; the session writes them on a LATER turn,
+  // and the exit's `close()` used to destroy the socket before that turn came
+  // — 30 of 30 answers lost in this shape, and in the e2e suite a `KillSession`
+  // the shim had performed reaching the daemon as `unexpected EOF`.
+  it("delivers the answer of a call that ends the process, though the exit closes in the same breath", async () => {
+    // Arrange — main.ts's endProcess exactly: the exit is requested from
+    // inside the handler, BEFORE the response is returned.
+    const sock = socketPath();
+    const engine = new NotImplementedEngine();
+    // The server is reachable from the handler through a holder, because the
+    // handler is built before the listener it ends.
+    const exiting: { server?: ShimServer } = {};
+    engine.killSession = async (): Promise<shimv1.KillSessionResponse> => {
+      void (async (): Promise<void> => {
+        await exiting.server?.quiet(30_000);
+        await exiting.server?.close();
+      })();
+      return create(shimv1.KillSessionResponseSchema, {});
+    };
+    exiting.server = await serve(sock, shimRoutes(engine));
+    started.push(exiting.server);
+
+    // Act.
+    const answer = client(sock, "2").killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+
+    // Assert — the answer arrives whole rather than as a cut connection.
+    await expect(answer).resolves.toBeDefined();
+  });
+
   it("REPORTS giving up and returns once the budget is spent on a response that never closes", async () => {
     // A stream that never ends must not keep a killed shim alive forever.
     // Arrange.
