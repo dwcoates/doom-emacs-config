@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
+import { viteCacheDir } from "./vite-cache";
 
 /**
  * Vitest stubs CSS imports out to an empty module by default, which would
@@ -9,6 +10,12 @@ import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
  * Vite's own build reads vite.config.ts, so this file is test-only.
  */
 export default defineConfig({
+  // OUT OF `node_modules`, WHICH IS A READ-ONLY SYMLINK IN THE E2E SANDBOX
+  // AND A GARBAGE-COLLECTED SHARED TREE ON THE HOST. Vite's default
+  // `cacheDir` is `node_modules/.vite`; see vite-cache.ts for the whole
+  // account, and test/vite-cache.test.ts for the check that keeps every
+  // config in this package on it.
+  cacheDir: viteCacheDir,
   resolve: { alias: protobufRuntimeAliases },
   test: {
     css: true,
