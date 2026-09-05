@@ -304,6 +304,114 @@ wedged Emacs looks exactly like a slow one.
   clears itself is still the recursion defect.
 - The heartbeat is armed for the whole life of the Emacs process, including
   teardown, because the recursion defect fired during close/kill.
+- A wedge also hands over a **native backtrace of every thread**, taken from
+  outside the process with gdb while the stall is still live. It is the only
+  witness that survives an Emacs answering nothing at all; the section below
+  is the stall that made it necessary and what it found.
+
+### Each scenario's elisp log has its own root
+
+`agent-repl-log-file-name` defaults to one uid-keyed file under
+`temporary-file-directory`, and every scenario in this container runs as the
+same uid: four parallel Emacsen appended to the one file and rotated it out
+from under each other, so a failure's own records were interleaved with three
+unrelated scenarios' and truncated mid-scenario. `writeSettings` aims it at
+`<state root>/logs/doom-agent-repl.log`, which the failure artifacts already
+copy.
+
+### The native backtrace, and the stall that made it necessary (RESOLVED)
+
+Every witness this layer had was a **lisp** witness: the server socket, a
+nested eval, `debug-on-event`'s SIGUSR2, a plain SIGINT. All four need Emacs
+to reach a QUIT check. `TestEmacsPermissionAskFiresTheAttentionMarker` stalled
+in roughly **one run in sixteen** with Emacs `state=R wchan=0` answering none
+of them, so nothing in the layer could say what it was doing.
+
+`sandbox/Dockerfile` therefore carries **`gdb`**, the sandbox runs with
+**`--cap-add SYS_PTRACE`** (the harness's gdb is a *sibling* of Emacs, not an
+ancestor, which Yama's `ptrace_scope=1` refuses without it), and the Emacs it
+builds is compiled with **`-g`**. On a wedge — before anything that waits for
+Emacs to come back, and before `breakStall` — `nativeBacktrace` attaches,
+unwinds every thread and files the capture as `emacs.native-backtrace.txt` in
+the failure artifacts.
+
+The first capture settled the whole question in eight frames:
+
+```
+Thread 1 (LWP 13697) "emacs":
+#0  pselect () from libc.so.6
+#4  xg_select (...) at xgselect.c:205
+#5  wait_reading_process_output (... read_kbd=-1 ...) at process.c:5748
+#6  kbd_buffer_get_event (...) at keyboard.c:4094
+#9  read_char (commandflag=1, ...) at keyboard.c:3015
+#11 command_loop_1 () at keyboard.c:1429
+#16 recursive_edit_1 () at keyboard.c:754
+#17 read_minibuf (...) at minibuf.c:905
+#18 Fread_from_minibuffer (...) at minibuf.c:1394
+#20 F792d6f722d6e2d70_y_or_n_p_0 () from subr-...eln
+#22 F6d616769742d737461747573_magit_status_0 () from magit-status-...eln
+```
+
+It is not a C loop at all. It is `magit-status` calling **`y-or-n-p`**: the
+reader enters a *recursive edit*, the command loop stops running the
+scenario's forms, and — measured — the process answers no emacsclient at all
+while it stands there. A prompt-aware heartbeat probe cannot see it, because
+seeing it requires an answer.
+
+**Root cause.** `magit-status` is `interactive-only`; magit names
+`magit-status-setup-buffer` as the Lisp entry point precisely because
+`magit-status` carries the interactive fallback:
+
+```elisp
+(let ((toplevel (magit-toplevel directory)))
+  (setq directory (file-name-as-directory (expand-file-name directory)))
+  (if (and toplevel (file-equal-p directory toplevel))
+      (magit-status-setup-buffer directory)
+    (when (y-or-n-p ...) (magit-init directory))))
+```
+
+`file-equal-p` (`lisp/files.el`, Emacs 30.2) does **not** compare device and
+inode. It stats each path separately and compares the whole `file-attributes`
+list — mtime, ctime and size included — with one `equal`; files.el already
+documents the same fragility for Haiku's atime and special-cases only that.
+So a write landing in the directory **between the two stats** makes one
+identical path compare unequal to itself.
+
+Our side supplies exactly that write: `agent-repl-add-project-workspace`
+registers the workspace with the daemon and switches to it, and the
+registration writes `.claude/emacs/` into the same project root magit is
+opening. The recorded conversation shows it — `rev-parse --show-toplevel`
+answered `exit 0` with the directory's own path, and `add-project-registered`
+lands *after* `magit-status-same-window`. The prompt that stood was
+
+```
+/tmp/emacs-e2e-.../repo-other/ is a repository.  Create another in /tmp/emacs-e2e-.../repo-other/?
+```
+
+— the same directory, twice.
+
+**Fix, at the trigger.** `agent-repl--magit-status-same-window` now calls
+`magit-status-setup-buffer`, magit's own Lisp entry point, which has no prompt
+in it: the question cannot be asked, whatever `file-equal-p` says on any
+given schedule. A directory that genuinely is not a repository signals loudly
+from magit's refresh instead, which is what this module wants. `lisp/magit.el`
+carries the reasoning at the call site and `lisp/test-magit.el` pins that the
+prompting entry point is never called.
+
+The `file-equal-p` weakness itself is upstream Emacs's and is left alone; it
+is recorded here with the backtrace above so a future stall of the same shape
+is recognized rather than re-derived.
+
+**Two witnesses were added alongside**, because the diagnosis needed both:
+
+- an unanswerable prompt is now **refused loudly** by the layer's own
+  settings (`y-or-n-p`/`yes-or-no-p` are advised to signal, naming the
+  prompt), so this class of defect can never again present as a missed
+  heartbeat. Scenarios that drive a prompting command stub the reader with
+  `cl-letf`, which wins over the advice.
+- the scripted git records **what it answered** — exit status and clipped
+  streams — not only what was asked, since the caller's next move is a
+  reaction to the answer.
 
 ## Emacs spawns the daemon -- and that is the point
 

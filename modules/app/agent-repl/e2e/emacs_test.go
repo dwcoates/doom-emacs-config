@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -243,6 +244,10 @@ type Emacs struct {
 	// state root is the cross-system contract, so the daemon Emacs spawns
 	// and the Go client that cross-checks frames read the same tree.
 	StateDir string
+	// LogFile is where the MODULE's own elisp log goes for this scenario.
+	// Under the state root, so the failure artifacts already carry it, and
+	// per scenario, so no other Emacs in this container writes to it.
+	LogFile string
 	// DefaultConfigDir and MultiRepoConfigDir are the two account roots the
 	// launcher is given, and the same two the sidecar is told to watch.
 	DefaultConfigDir   string
@@ -285,6 +290,20 @@ type Emacs struct {
 	// multiple of this number across healthy runs, never a guess. Reported
 	// once per test by reportPhases.
 	heartbeatMax atomic.Int64
+	// artifactDirOnce and artifactRoot name the ONE directory this Emacs's
+	// evidence lands in, claimed on first use. See artifactDir.
+	artifactDirOnce sync.Once
+	artifactRoot    string
+
+	// nativeOnce guards the gdb capture. ONE capture per Emacs: gdb attaching
+	// STOPS the inferior for the duration, so a second attach would describe
+	// a process the first one already perturbed, and the stall this exists
+	// for is a permanent loop whose first sample is its whole story.
+	nativeOnce sync.Once
+	// nativeStack is what that one capture said, so both the wedge report and
+	// a stuck eval can quote it without racing to take it.
+	nativeStack string
+
 	// phases are the boot durations this Emacs observed, in the order they
 	// happened. They MEASURE emacsBootBound, doomBootBound and
 	// doomStageBound the same way.
@@ -393,6 +412,7 @@ func StartEmacs(t *testing.T, box sandbox, opts EmacsOpts) *Emacs {
 		EmacsDir:           filepath.Join(root, ".emacs.d"),
 		ReadyStamp:         filepath.Join(root, "doom-ready.json"),
 		StateDir:           filepath.Join(root, "state"),
+		LogFile:            filepath.Join(root, "state", "logs", "doom-agent-repl.log"),
 		DefaultConfigDir:   filepath.Join(root, "account-default"),
 		MultiRepoConfigDir: filepath.Join(root, "account-multi"),
 		MultiRepoRoot:      filepath.Join(root, "multi-repo"),
@@ -563,6 +583,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 		e.DefaultConfigDir,
 		e.MultiRepoConfigDir,
 		e.MultiRepoRoot,
+		filepath.Dir(e.LogFile),
 		filepath.Join(e.Root, "eval"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -598,6 +619,41 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
+;; NOTHING IN THIS LAYER CAN ANSWER A QUESTION.
+;;
+;; A y-or-n-p nobody answers does not fail, it HANGS: the reader enters a
+;; recursive edit, the command loop stops running the scenario's forms, and
+;; the process stops answering emacsclient -- so the layer reports "emacs did
+;; not answer a heartbeat probe", which names neither the prompt nor the call
+;; that raised it.  Measured: a native backtrace of that stall showed
+;; magit-status calling y-or-n-p directly, and nothing above it in the elisp
+;; log said so.
+;;
+;; Every scenario that drives a prompting command stubs the reader for the
+;; duration (cl-letf on the symbol-function, which wins over this advice), so
+;; a prompt that reaches here is by definition one nobody will ever answer.
+;; Refusing it loudly turns a permanent stall into a named failure.
+(defun agent-repl-e2e--refuse-prompt (prompt &rest _)
+  (let ((text (format "%%s" prompt)))
+    (message "agent-repl-e2e: UNANSWERABLE PROMPT: %%s" text)
+    (when (fboundp 'agent-repl--warn)
+      (agent-repl--warn nil "elisp.e2e.unanswerable-prompt prompt=%%s" text))
+    (error "agent-repl-e2e: no scenario can answer this prompt: %%s" text)))
+(advice-add 'y-or-n-p :override #'agent-repl-e2e--refuse-prompt)
+(advice-add 'yes-or-no-p :override #'agent-repl-e2e--refuse-prompt)
+
+;; THE MODULE'S OWN LOG GETS A PER-SCENARIO ROOT.
+;; The agent-repl-log-file-name default is
+;; <temporary-file-directory>/doom-agent-repl-<uid>/doom-agent-repl.log --
+;; ONE file, keyed by uid and nothing else.  Every scenario in this container
+;; runs as the same uid, so in a parallel run every Emacs appended to that
+;; one file and rotated it out from under the others: the records a failure
+;; needed were interleaved with three unrelated scenarios' and then truncated
+;; mid-scenario by whichever of them hit the size cap first.  Pointing it
+;; under this scenario's own state root makes the log this scenario's alone,
+;; and the state root is already what dumpArtifacts copies on a failure.
+(setq agent-repl-log-file-name %q)
+
 (setq agent-repl-daemon-command (list %s)
       agent-repl-daemon-build-script %q
       agent-repl-daemon-default-config-dir %q
@@ -607,6 +663,7 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 (provide 'agent-repl-e2e-settings)
 ;;; e2e-settings.el ends here
 `,
+		e.LogFile,
 		elispStringList(append([]string{opts.DaemonBinary}, opts.DaemonArgs...)),
 		buildScript,
 		e.DefaultConfigDir,
@@ -756,8 +813,13 @@ func (e *Emacs) awaitDoom() {
 			// The Emacs has no readiness stamp and therefore no pid the Go
 			// side knows, but the reaper finds it the same way it always
 			// does: by this scenario's own paths in its environment.
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s; pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(), e.proc.Output())
+			// AND THE NATIVE STACK. A boot that misses this bound is an
+			// Emacs that is ALIVE and has published no server socket, so
+			// there is nothing to ask it with: the breadcrumb says which
+			// step it was in and only the debugger can say where inside it.
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s%s; pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(),
+				e.nativeBacktrace(), e.proc.Output())
 		case <-ticker.C:
 		}
 	}
@@ -904,7 +966,14 @@ func (e *Emacs) declareWedged(cause string) {
 	e.wedgeOnce.Do(func() {
 		e.wedgeCause.Store(&cause)
 		close(e.wedged)
-		e.t.Errorf("EMACS WEDGED: %s%s", cause, e.processSnapshot())
+		// THE NATIVE STACK IS TAKEN FIRST, and it is taken before anything
+		// that could end the stall. `processSnapshot` reads /proc and costs
+		// microseconds; the gdb attach after it is the only witness that
+		// survives an Emacs answering nothing at all, and it is worthless
+		// once `breakStall` has unwound the loop it exists to name.
+		snapshot := e.processSnapshot()
+		native := e.nativeBacktrace()
+		e.t.Errorf("EMACS WEDGED: %s%s%s", cause, snapshot, native)
 		e.dumpArtifacts()
 		// LAST, because it waits for Emacs to come back. A wedged Emacs
 		// answers nothing at all -- not the server socket, not a nested eval,
@@ -925,9 +994,8 @@ func (e *Emacs) dumpArtifacts() {
 			ArtifactsEnv, tailBytes([]byte(e.proc.Output()), artifactTailBytes))
 		return
 	}
-	out := filepath.Join(dir, artifactDirName(e.t.Name()))
-	if err := os.MkdirAll(out, 0o755); err != nil {
-		e.t.Logf("preserve emacs artifacts under %s: %v", out, err)
+	out := e.artifactDir(dir)
+	if out == "" {
 		return
 	}
 	path := filepath.Join(out, "emacs.pty.log")
@@ -951,6 +1019,44 @@ func (e *Emacs) dumpArtifacts() {
 			e.t.Logf("preserve %s: %v", extra, err)
 		}
 	}
+}
+
+// artifactDirName is not unique enough on its own, and this is what makes it
+// so. A `-count=N` run repeats ONE test name, so every repetition resolved to
+// the same directory and each failure ERASED the one before it -- which for a
+// defect that fires once in twenty-four runs means the evidence collected is
+// the evidence of whichever repetition happened to fail last. The first free
+// suffix is claimed with `os.Mkdir`, the one filesystem operation that is
+// atomic and fails if the name exists, so two Emacsen failing at once cannot
+// both believe they own the same directory. Memoized, because one Emacs's
+// wedge report and its teardown dump belong together.
+//
+// Answers "" when no directory could be made, having said why.
+func (e *Emacs) artifactDir(root string) string {
+	e.artifactDirOnce.Do(func() {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			e.t.Logf("preserve emacs artifacts under %s: %v", root, err)
+			return
+		}
+		base := filepath.Join(root, artifactDirName(e.t.Name()))
+		for n := 0; ; n++ {
+			dir := base
+			if n > 0 {
+				dir = fmt.Sprintf("%s.%d", base, n)
+			}
+			err := os.Mkdir(dir, 0o755)
+			if err == nil {
+				e.artifactRoot = dir
+				return
+			}
+			if os.IsExist(err) {
+				continue
+			}
+			e.t.Logf("preserve emacs artifacts under %s: %v", dir, err)
+			return
+		}
+	})
+	return e.artifactRoot
 }
 
 // copyTree copies a file or a directory tree; a missing source is not an
@@ -1115,7 +1221,12 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		// the other order would describe the machine a second and a half
 		// after the moment being diagnosed.
 		snapshot := e.processSnapshot()
-		return zero, fmt.Errorf("emacsclient: %w%s%s%s", err, snapshot, e.stackWhenStuck(), e.profileWhenStuck())
+		// The NATIVE stack comes before the two lisp witnesses: both of those
+		// are round trips a stalled Emacs cannot answer, and the second one
+		// deliberately breaks the stall to get its answer, which destroys the
+		// very loop the debugger would otherwise have named.
+		native := e.nativeBacktrace()
+		return zero, fmt.Errorf("emacsclient: %w%s%s%s%s", err, snapshot, native, e.stackWhenStuck(), e.profileWhenStuck())
 	}
 
 	body, readErr := os.ReadFile(out)
@@ -1127,6 +1238,135 @@ func (e *Emacs) eval(form string) (evalResult, error) {
 		return zero, fmt.Errorf("decode the eval response %q: %w", string(body), err)
 	}
 	return res, nil
+}
+
+// nativeBacktraceBound is how long gdb is given to attach, unwind every
+// thread and detach. It is not a healthy-phase measurement: the process it
+// attaches to is by then already reported as failed, and this is the budget
+// for the evidence about it. Measured on a healthy Emacs in this image, the
+// whole capture takes about a second; the bound is a small multiple.
+const nativeBacktraceBound = 20 * time.Second
+
+// nativeBacktraceFile is where the full capture lands in the failure
+// artifacts. The error message carries a trimmed head; the file carries every
+// frame of every thread.
+const nativeBacktraceFile = "emacs.native-backtrace.txt"
+
+// nativeBacktraceHeadFrames is how much of the capture the failure message
+// quotes inline. Enough to name the loop without burying the failure.
+const nativeBacktraceHeadFrames = 40
+
+// nativeBacktrace is the LAST witness this layer has.
+//
+// An Emacs looping in C answers nothing a lisp witness can reach: not the
+// server socket, not a nested eval, not `debug-on-event”s SIGUSR2, not a
+// plain SIGINT. Every one of those needs Emacs to reach a QUIT check, and a C
+// loop without one never does. What is still true is that the kernel holds
+// the process's registers and stack, so a debugger attaching from OUTSIDE can
+// say exactly which C function is spinning -- which is the one fact a stall
+// like that turns on.
+//
+// It is taken WHILE THE STALL IS LIVE, which is why it is called from
+// `declareWedged` before anything that waits for Emacs to come back.
+func (e *Emacs) nativeBacktrace() string {
+	e.nativeOnce.Do(func() { e.nativeStack = e.captureNativeBacktrace() })
+	return e.nativeStack
+}
+
+// captureNativeBacktrace runs the debugger once. It never fails a test on its
+// own: it is evidence about a failure that has already been reported, so
+// every way it can come up empty is REPORTED IN PLACE OF the backtrace rather
+// than swallowed.
+func (e *Emacs) captureNativeBacktrace() string {
+	pid := e.emacsPID()
+	if pid == 0 {
+		return "\n  (no native backtrace: no emacs pid, from the readiness stamp or from /proc)"
+	}
+	gdb, err := exec.LookPath("gdb")
+	if err != nil {
+		return fmt.Sprintf("\n  (no native backtrace: gdb is not on PATH here: %v)", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), nativeBacktraceBound)
+	defer cancel()
+	// `-batch` runs the -ex list and quits; `-nx` keeps a stray ~/.gdbinit
+	// out of it. `detach` before `quit` is explicit rather than relied upon:
+	// gdb kills only inferiors IT started and detaches the ones it attached
+	// to, but this one must never be the thing that ends the process the
+	// test is still tearing down.
+	cmd := exec.CommandContext(ctx, gdb,
+		"-nx", "-batch",
+		"-ex", "set pagination off",
+		"-ex", "set confirm off",
+		"-ex", "info threads",
+		"-ex", "thread apply all bt",
+		"-ex", "detach",
+		"-ex", "quit",
+		"-p", strconv.Itoa(pid))
+	out, runErr := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if runErr != nil && text == "" {
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d failed: %v)", pid, runErr)
+	}
+	if text == "" {
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d said nothing)", pid)
+	}
+	// gdb's own exit status is reported alongside the output rather than
+	// instead of it: a partial unwind still names the frame that matters.
+	if runErr != nil {
+		text += fmt.Sprintf("\n(gdb exited with: %v)", runErr)
+	}
+	e.writeNativeBacktrace(text)
+	lines := strings.Split(text, "\n")
+	head := lines
+	if len(head) > nativeBacktraceHeadFrames {
+		head = append(head[:nativeBacktraceHeadFrames:nativeBacktraceHeadFrames],
+			fmt.Sprintf("... %d more lines in %s", len(lines)-nativeBacktraceHeadFrames, nativeBacktraceFile))
+	}
+	return "\n  emacs's native stack, from outside the process:\n    " +
+		strings.Join(head, "\n    ")
+}
+
+// emacsPID answers the Emacs this scenario owns.
+//
+// The readiness stamp is the authority once it exists, but a boot that never
+// PUBLISHES one is exactly a case the native backtrace is for -- so the
+// kernel's own view is the fallback, found the same way the reaper finds
+// strays: by this scenario's paths in the process's environment.
+func (e *Emacs) emacsPID() int {
+	if e.Doom.PID != 0 {
+		return e.Doom.PID
+	}
+	for _, p := range e.findStrays() {
+		// `argv` is /proc/<pid>/cmdline with NULs turned into spaces, and
+		// this layer starts Emacs as a bare `emacs` with every path in its
+		// environment -- so the whole argv IS the program name. The `script`
+		// and `sh` wrappers above it carry the full env-prefixed command
+		// line, which is why an exact match is the right test and a prefix
+		// one would catch the wrapper instead.
+		if p.argv == "emacs" {
+			return p.pid
+		}
+	}
+	return 0
+}
+
+// writeNativeBacktrace files the full capture with the failure artifacts,
+// where dumpArtifacts's other evidence for the same test already lands.
+func (e *Emacs) writeNativeBacktrace(text string) {
+	dir := os.Getenv(ArtifactsEnv)
+	if dir == "" {
+		return
+	}
+	out := e.artifactDir(dir)
+	if out == "" {
+		return
+	}
+	path := filepath.Join(out, nativeBacktraceFile)
+	if err := os.WriteFile(path, []byte(text+"\n"), 0o644); err != nil {
+		e.t.Logf("write %s: %v", path, err)
+		return
+	}
+	e.t.Logf("emacs native backtrace preserved at %s", path)
 }
 
 // stackWhenStuck answers what Emacs is standing in, formatted for an error

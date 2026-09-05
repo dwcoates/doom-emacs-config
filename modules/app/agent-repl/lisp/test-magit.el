@@ -178,16 +178,16 @@ metacharacters are never reachable as shell syntax."
 ;;;; ---- Tests: +dwc/magit-status-workspace (always-replace-current-buffer) ----
 
 (ert-deftest agent-repl-test-magit-status-workspace-calls-magit-status-with-ws-dir ()
-  "Calls `magit-status' with the workspace's project directory."
+  "Calls magit's status setup with the workspace's project directory."
   (agent-repl-test--with-clean-state
     (let ((magit-status-args nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status)
+                ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest args) (setq magit-status-args args))))
         (+dwc/magit-status-workspace)
-        (should (equal magit-status-args '("/tmp/proj")))))))
+        (should (equal magit-status-args '("/tmp/proj/")))))))
 
 (ert-deftest agent-repl-test-magit-status-workspace-never-splits ()
   "Never calls `split-window' -- magit always replaces the current buffer."
@@ -196,7 +196,7 @@ metacharacters are never reachable as shell syntax."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status) #'ignore)
+                ((symbol-function 'magit-status-setup-buffer) #'ignore)
                 ((symbol-function 'split-window)
                  (lambda (&rest _) (cl-incf split-calls) 'should-not-happen)))
         (+dwc/magit-status-workspace)
@@ -210,7 +210,7 @@ buffer means claude is no longer fullscreen."
     (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-              ((symbol-function 'magit-status) #'ignore))
+              ((symbol-function 'magit-status-setup-buffer) #'ignore))
       (+dwc/magit-status-workspace)
       (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
@@ -223,7 +223,7 @@ window via the default traditional display behavior."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status)
+                ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest _)
                    (setq observed-fn magit-display-buffer-function))))
         (+dwc/magit-status-workspace)
@@ -238,7 +238,7 @@ is unchanged -- other magit buffers (diffs, logs) keep normal display."
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/tmp/proj"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (eq magit-display-buffer-function 'global-default))))))
 
@@ -256,7 +256,7 @@ buffer rather than failing on the dedicated side window."
                 ((symbol-function 'window-main-window) (lambda (&rest _) 'fake-main))
                 ((symbol-function 'select-window)
                  (lambda (w) (setq selected-window-arg w)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (eq selected-window-arg 'fake-main))))))
 
@@ -271,7 +271,7 @@ buffer rather than failing on the dedicated side window."
                  (lambda (_win _param) nil))
                 ((symbol-function 'select-window)
                  (lambda (_w) (cl-incf select-calls)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= select-calls 0))))))
 
@@ -285,7 +285,7 @@ hash entry has been killed."
           (default-directory "/tmp/fallback-dir/"))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "untracked-ws"))
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-                ((symbol-function 'magit-status)
+                ((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest args) (setq magit-status-args args))))
         (+dwc/magit-status-workspace)
         (should (equal magit-status-args '("/tmp/fallback-dir/")))))))
@@ -300,7 +300,7 @@ so no STUB-CREATE entry leaks into the workspace state table."
                 ((symbol-function 'window-parameter) (lambda (_w _p) nil))
                 ((symbol-function 'agent-repl--ws-put)
                  (lambda (&rest _) (cl-incf ws-put-calls)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= ws-put-calls 0))))))
 
@@ -312,7 +312,7 @@ Guards against the untracked-fallback regressing the tracked path."
     (agent-repl--ws-put "test-ws" :fullscreen-config 'fake-config)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'window-parameter) (lambda (_w _p) nil))
-              ((symbol-function 'magit-status) #'ignore))
+              ((symbol-function 'magit-status-setup-buffer) #'ignore))
       (+dwc/magit-status-workspace)
       (should (null (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
@@ -334,7 +334,7 @@ Guards against the untracked-fallback regressing the tracked path."
                  (lambda (_buf) 'fake-webview-win))
                 ((symbol-function 'set-window-dedicated-p) #'ignore)
                 ((symbol-function 'select-window) #'ignore)
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (memq 'fake-input-buf closed-bufs))))))
 
@@ -354,7 +354,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'set-window-dedicated-p)
                  (lambda (win dedicated) (setq dedicate-args (list win dedicated))))
                 ((symbol-function 'select-window) #'ignore)
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (equal dedicate-args '(fake-webview-win nil)))))))
 
@@ -374,7 +374,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'set-window-dedicated-p) #'ignore)
                 ((symbol-function 'select-window)
                  (lambda (w) (push w selected-wins)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (memq 'fake-webview-win selected-wins))))))
 
@@ -389,7 +389,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
                 ((symbol-function 'agent-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= close-calls 0))))))
 
@@ -404,7 +404,7 @@ Guards against the untracked-fallback regressing the tracked path."
                 ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
                 ((symbol-function 'agent-repl--close-buffer-window)
                  (lambda (_buf) (cl-incf close-calls)))
-                ((symbol-function 'magit-status) #'ignore))
+                ((symbol-function 'magit-status-setup-buffer) #'ignore))
         (+dwc/magit-status-workspace)
         (should (= close-calls 0))))))
 
@@ -427,20 +427,36 @@ so the buffer replaces the selected window's content."
 
 ;;;; ---- Tests: agent-repl--magit-status-same-window ----
 
-(ert-deftest agent-repl-test-magit-status-same-window-calls-magit-status-with-dir ()
-  "Passes DIR straight through to `magit-status'."
+(ert-deftest agent-repl-test-magit-status-same-window-passes-dir-to-the-setup-entry-point ()
+  "Passes DIR, as a directory name, to `magit-status-setup-buffer'."
   (let ((magit-status-args nil))
-    (cl-letf (((symbol-function 'magit-status)
+    (cl-letf (((symbol-function 'magit-status-setup-buffer)
                (lambda (&rest args) (setq magit-status-args args))))
       (agent-repl--magit-status-same-window "/tmp/proj")
-      (should (equal magit-status-args '("/tmp/proj"))))))
+      (should (equal magit-status-args '("/tmp/proj/"))))))
+
+(ert-deftest agent-repl-test-magit-status-same-window-never-calls-the-prompting-entry-point ()
+  "Never calls `magit-status', whose Lisp path can ask an unanswerable question.
+
+`magit-status' is `interactive-only': on a `file-equal-p' mismatch between
+DIR and the toplevel it re-derives, it asks `y-or-n-p' whether to create a
+repository.  `file-equal-p' compares two separate stats' whole
+`file-attributes' lists, so a write landing in DIR between them — the
+daemon's own registration writes `.claude/emacs/' there — makes one path
+compare unequal to itself and raises that prompt.  Nothing in a workspace
+bring-up can answer it, and the reader's recursive edit stops the command
+loop for good."
+  (cl-letf (((symbol-function 'magit-status)
+             (lambda (&rest _) (error "agent-repl called the prompting magit-status")))
+            ((symbol-function 'magit-status-setup-buffer) #'ignore))
+    (agent-repl--magit-status-same-window "/tmp/proj")))
 
 (ert-deftest agent-repl-test-magit-status-same-window-binds-same-window-display-fn ()
   "Binds `magit-display-buffer-function' to the same-window helper for the
 `magit-status' call, so the status buffer replaces the current window
 instead of splitting via Doom's traditional display behavior."
   (let ((observed-fn nil))
-    (cl-letf (((symbol-function 'magit-status)
+    (cl-letf (((symbol-function 'magit-status-setup-buffer)
                (lambda (&rest _)
                  (setq observed-fn magit-display-buffer-function))))
       (agent-repl--magit-status-same-window "/tmp/proj")
@@ -450,7 +466,7 @@ instead of splitting via Doom's traditional display behavior."
   "Restores the global `magit-display-buffer-function' after returning, so
 other magit buffers (diffs, logs) keep their normal display behavior."
   (let ((magit-display-buffer-function 'global-default))
-    (cl-letf (((symbol-function 'magit-status) #'ignore))
+    (cl-letf (((symbol-function 'magit-status-setup-buffer) #'ignore))
       (agent-repl--magit-status-same-window "/tmp/proj")
       (should (eq magit-display-buffer-function 'global-default)))))
 
@@ -465,7 +481,7 @@ the first-restored-workspace splash-screen bug."
                (lambda (feature &optional _file noerror)
                  (push (list 'require feature noerror) order)
                  nil))
-              ((symbol-function 'magit-status)
+              ((symbol-function 'magit-status-setup-buffer)
                (lambda (&rest _) (push '(status) order))))
       (agent-repl--magit-status-same-window "/tmp/proj")
       (should (equal (nreverse order)
