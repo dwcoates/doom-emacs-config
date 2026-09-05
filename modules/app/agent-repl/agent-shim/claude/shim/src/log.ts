@@ -163,11 +163,23 @@ export function clearRequestId(): void {
   delete runtime.request_id;
 }
 
+/**
+ * A value as an error message can name it.
+ *
+ * `String(x)` renders any object as "[object Object]", which is the one thing a
+ * message about an unrecognized value must not do. JSON names the shape; the
+ * fallback covers what JSON declines to encode (a symbol, a function).
+ */
+function describe(value: unknown): string {
+  const encoded = typeof value === "string" ? value : JSON.stringify(value);
+  return encoded ?? typeof value;
+}
+
 function logLevel(fields: LogFields, verbosity: ShimLogRecord["verbosity"]): LogLevel {
   const value = fields.level;
   if (value === undefined) return verbosity === "verbose" ? "debug" : "info";
   if (value === "debug" || value === "info" || value === "warn" || value === "error") return value;
-  throw new Error(`shim log record has invalid level ${String(value)}`);
+  throw new Error(`shim log record has invalid level ${describe(value)}`);
 }
 
 function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
@@ -176,6 +188,11 @@ function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "undefined" || typeof value === "function" || typeof value === "symbol") return String(value);
   if (value instanceof Error) return { name: value.name, message: value.message, ...(value.stack === undefined ? {} : { stack: value.stack }) };
+  // An unreachable backstop, kept deliberately: every `typeof` result but "object" is answered
+  // above, so nothing narrows the static type here and eslint reads this as stringifying an
+  // object. A runtime that grows a new `typeof` must land in the log as SOMETHING rather than
+  // throwing inside the logger.
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- see above
   if (typeof value !== "object") return String(value);
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
