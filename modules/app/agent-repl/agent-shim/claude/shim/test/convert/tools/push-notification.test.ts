@@ -79,7 +79,7 @@ describe("pushNotificationConverter.start", () => {
     const call = callWith({ message: "m", status: "proactive" });
 
     // Act, Assert: a constant is not a fact.
-    const serialized = JSON.stringify(startOf(call), (_key, value) =>
+    const serialized = JSON.stringify(startOf(call), (_key: string, value: unknown) =>
       typeof value === "bigint" ? value.toString() : value,
     );
     expect(serialized).not.toContain("proactive");

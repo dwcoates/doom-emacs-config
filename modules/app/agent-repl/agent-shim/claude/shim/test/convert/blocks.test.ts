@@ -69,7 +69,7 @@ describe("images", () => {
     const result = (Array.isArray(outer) ? outer : []).find(
       (block) => (block as { type?: string }).type === "tool_result",
     ) as { content?: unknown } | undefined;
-    const inner = Array.isArray(result?.content) ? result.content : [];
+    const inner: unknown[] = Array.isArray(result?.content) ? (result.content as unknown[]) : [];
     const image = inner.find((block) => (block as { type?: string }).type === "image");
 
     expect(imageBlock(image as never)?.mediaType).toBe("image/png");

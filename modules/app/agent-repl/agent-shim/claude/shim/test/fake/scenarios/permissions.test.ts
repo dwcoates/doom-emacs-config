@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { CanUseToolLike, PermissionResultLike, PermissionUpdateLike } from "../../../src/sdk/types.js";
+import type { CanUseToolLike } from "../../../src/sdk/types.js";
 import { driveScenario, ofType, theResult, toolUseResults } from "../harness.js";
 
 const allowOnce: CanUseToolLike = async (_n, input) =>

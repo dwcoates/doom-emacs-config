@@ -11,7 +11,6 @@
 import { describe, expect, it } from "vitest";
 import { producerId } from "../../../src/store/keys.js";
 import { entryWriteId } from "../../../src/store/writer.js";
-import type { PersistEntry } from "../../../src/store/persistence.js";
 import { activityOf, foldScenario } from "./harness.js";
 
 /** One scenario, folded twice, is the whole subject here. */

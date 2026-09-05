@@ -4,6 +4,7 @@
  * description, spawning call and spawn depth.
  */
 import { describe, expect, it } from "vitest";
+import { matching } from "../../expect-shapes.js";
 
 import { driveScenario, ofType, toolUseResults } from "../harness.js";
 
@@ -14,7 +15,10 @@ const agentIdOf = (driven: Awaited<ReturnType<typeof driveScenario>>): string =>
   const launched = toolUseResults(driven.transcript()).find(
     (r) => typeof (r as { agentId?: unknown }).agentId === "string",
   ) as { agentId?: string } | undefined;
-  return String(attributed?.agent_id ?? launched?.agentId ?? "");
+  const named = attributed?.agent_id ?? launched?.agentId;
+  // Both sources are checked for `typeof === "string"` above, so a non-string
+  // here would be a defect in this reader rather than an id to stringify.
+  return typeof named === "string" ? named : "";
 };
 
 describe("a synchronous subagent", () => {
@@ -27,7 +31,7 @@ describe("a synchronous subagent", () => {
     expect(driven.subagentMeta(agentId)).toEqual({
       agentType: "general-purpose",
       description: "Explore the module",
-      toolUseId: expect.stringMatching(/^toolu_fake_/),
+      toolUseId: matching(/^toolu_fake_/),
       spawnDepth: 1,
     });
   });

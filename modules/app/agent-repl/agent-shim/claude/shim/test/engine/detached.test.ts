@@ -10,9 +10,7 @@ import { describe, expect, it } from "vitest";
 import { LiveWorkTable } from "../../src/engine/detached.js";
 import type {
   SdkBackgroundTasksChangedMessage,
-  SdkTaskNotificationMessage,
   SdkTaskStartedMessage,
-  SdkTaskUpdatedMessage,
 } from "../../src/sdk/types.js";
 
 function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStartedMessage {

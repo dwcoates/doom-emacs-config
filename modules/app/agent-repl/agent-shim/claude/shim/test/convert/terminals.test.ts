@@ -12,6 +12,7 @@
  * `result` message naming it via `terminal_reason` directly.
  */
 import { describe, expect, it } from "vitest";
+import { containing } from "../expect-shapes.js";
 
 import { convertResult } from "../../src/convert/terminals.js";
 import type { conversationv1 } from "../../src/proto.js";
@@ -137,7 +138,7 @@ describe("an api_error terminal the taxonomy does not model", () => {
     // Assert
     expect(failed.kind).toEqual({
       case: "unmodeled",
-      value: expect.objectContaining({ type: "unknown" }),
+      value: containing({ type: "unknown" }),
     });
   });
 
