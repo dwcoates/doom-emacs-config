@@ -18,6 +18,11 @@ export function containing(shape: object): unknown {
   return expect.objectContaining(shape);
 }
 
+/** `expect.stringContaining`, without the `any`. */
+export function textContaining(part: string): unknown {
+  return expect.stringContaining(part);
+}
+
 /** `expect.stringMatching`, without the `any`. */
 export function matching(pattern: RegExp | string): unknown {
   return expect.stringMatching(pattern);

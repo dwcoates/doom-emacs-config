@@ -336,7 +336,7 @@ describe("the page's own storage, when no storage was injected", () => {
 
   it("persists a preference into the page's localStorage", () => {
     createSidebarPrefs().setGrouping("task");
-    expect(JSON.parse(globalThis.localStorage.getItem(PREFS_KEY) as string).grouping).toBe("task");
+    expect(storedPrefs(globalThis.localStorage).grouping).toBe("task");
   });
 
   it("reads a preference back out of the page's localStorage", () => {

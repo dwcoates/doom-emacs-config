@@ -253,7 +253,6 @@ describe("mountLoginOverlay", () => {
       {
         terminalFactory: async () => fakeTerminal(),
         link: scriptedLink([], {
-          // eslint-disable-next-line require-yield
           attach: async function* () {
             throw new Error("the pipe broke");
           },
@@ -713,7 +712,6 @@ describe("pump: the stream's own conclusions", () => {
     const terminal = fakeTerminal();
     const controller = new AbortController();
     const link = scriptedLink([], {
-      // eslint-disable-next-line require-yield
       attach: async function* () {
         throw "the pipe broke";
       },
@@ -731,7 +729,6 @@ describe("pump: the stream's own conclusions", () => {
     const controller = new AbortController();
     controller.abort();
     const link = scriptedLink([], {
-      // eslint-disable-next-line require-yield
       attach: async function* () {
         throw new Error("aborted");
       },
@@ -748,7 +745,6 @@ describe("pump: the stream's own conclusions", () => {
     const controller = new AbortController();
     controller.abort();
     const link = scriptedLink([], {
-      // eslint-disable-next-line require-yield
       attach: async function* () {
         throw new Error("aborted");
       },
