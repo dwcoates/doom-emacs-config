@@ -184,3 +184,35 @@ describe("the refusal message", () => {
     expect([cold.reason.case, cold.requestedModel?.name]).toEqual(["modelSwitch", "claude-sonnet-5"]);
   });
 });
+
+describe("reading facts off a transcript that cannot be read", () => {
+  it("RAISES a read failure that is not a missing file, rather than judging the cache from nothing", () => {
+    // Arrange: a directory where a transcript file is expected.
+    const dir = mkdtempSync(path.join(os.tmpdir(), "shim-cold-eisdir-"));
+
+    // Act + Assert: EISDIR is a broken state dir, not an absent conversation.
+    expect(() => readTranscriptFacts(dir)).toThrow(/EISDIR|illegal operation/);
+  });
+
+  it("skips an assistant record that states no usage, because it says nothing about the cache", () => {
+    // Arrange: the usage-bearing record comes FIRST, the usageless one after.
+    const file = transcript([
+      assistant(),
+      { type: "assistant", timestamp: "2026-08-29T13:00:00.000Z", message: { model: "other" } },
+    ]);
+
+    // Act.
+    const facts = readTranscriptFacts(file);
+
+    // Assert: the earlier record's numbers survive untouched.
+    expect([facts?.contextTokens, facts?.lastModel]).toEqual([1102, "claude-opus-5"]);
+  });
+
+  it("leaves the model unstated when no assistant record named one", () => {
+    const file = transcript([
+      { type: "assistant", timestamp: "2026-08-29T12:00:00.000Z", message: { usage: { input_tokens: 7 } } },
+    ]);
+
+    expect(readTranscriptFacts(file)?.lastModel).toBeUndefined();
+  });
+});
