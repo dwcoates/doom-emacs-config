@@ -620,7 +620,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		t.Fatalf("build the surface: %v", err)
 	}
 	h.Server = surface
-	h.HTTP = httptest.NewServer(H2C(surface))
+	h.HTTP = httptest.NewServer(H2C(surface, h.Surfaces.Global()))
 	t.Cleanup(func() {
 		h.HTTP.Close()
 		_ = surface.Close()
