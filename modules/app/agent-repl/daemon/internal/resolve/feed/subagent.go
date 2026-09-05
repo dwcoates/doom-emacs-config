@@ -17,8 +17,12 @@ import (
 // drawSubagent draws a spawn's bubble head. detached selects the placement
 // wrapper — sync-vs-detached is PLACEMENT, never a second drawing.
 //
-// A FRAME THAT ARRIVES BEFORE THE START DRAWS NOTHING YET. See subagentState.held:
-// the row's identity carries the created agent, and only the start states it.
+// A FRAME THAT NAMES NO CREATED AGENT, BEFORE ANY FRAME HAS, DRAWS NOTHING YET.
+// See subagentState.held: the row's identity carries the created agent. The
+// start always states it, and a success MAY (AgentSubagentSuccess.created_agent_id),
+// which is what lets a settled-only delivery — a replayed history, a transcript
+// read with no live producer watching — draw an addressable row with no start
+// ever arriving.
 func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.AgentActivity, spawn *conversationv1.AgentSubagent, detached bool) (*frontendv1.FeedRow, error) {
 	unitID := act.GetActivityId().GetValue()
 	state, ok := s.subagents[unitID]
@@ -39,7 +43,12 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 	}
 
 	_, isStart := spawn.GetResult().(*conversationv1.AgentSubagent_Start)
-	if !isStart && state.created.GetValue() == "" {
+	// A START IS TAKEN AS NAMING THE AGENT WHATEVER IT CARRIES: created_agent_id
+	// is not optional there, so a start with an empty one is a producer fault
+	// that still retires the hold rather than joining it — a start held against
+	// itself would wait for a frame that has already arrived.
+	namesAgent := isStart || namedCreatedAgent(spawn).GetValue() != ""
+	if !namesAgent && state.created.GetValue() == "" {
 		if !subagentArmDraws(spawn) {
 			return nil, errNotARow
 		}
@@ -49,30 +58,58 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		state.feed = at
 		state.held = append(state.held, spawn)
 		r.logger(s.id).Debug("daemon.feed.subagent_held",
-			"a spawn's frame arrived before its start named the created agent; it is held until the start lands",
+			"a spawn's frame arrived before any frame named the created agent; it is held until one does",
 			dlog.Context{"unit": unitID, "held": len(state.held)})
 		return nil, nil
 	}
 
+	// THE NAMING FRAME RETIRES THE HOLD, and the frames are folded in the order
+	// THE RUN happened rather than the order they arrived: a start is the run's
+	// first frame however late it lands, so it folds before what was held; any
+	// other naming frame is later than everything held, so it folds after. Fold
+	// a settled terminal before a held update and the update would draw the
+	// finished bubble live again.
+	held := state.held
+	state.held = nil
+	if !isStart {
+		r.foldHeldSubagentFrames(s, unitID, state, held, "when a later frame named the created agent")
+		held = nil
+	}
 	if err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil {
+		// THE HOLD IS PUT BACK rather than lost with the frame that failed:
+		// this frame drew nothing, so nothing has named the created agent yet
+		// and what was waiting is still waiting.
+		state.held = held
 		return nil, err
 	}
-	// THE START RETIRES THE HOLD. The frames are folded in the order the run
-	// happened — the start first, then whatever had already landed — so a
-	// terminal that arrived early still settles the bubble it settles.
-	if isStart {
-		held := state.held
-		state.held = nil
-		for _, frame := range held {
-			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
-				r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
-					"a held spawn frame could not be folded once its start landed",
-					dlog.Context{"unit": unitID, "cause": err.Error()})
-			}
-		}
-	}
+	r.foldHeldSubagentFrames(s, unitID, state, held, "once its start landed")
 
 	return r.composeSubagent(s, at, unitID, state, commissionOf(spawn)), nil
+}
+
+// namedCreatedAgent answers the created agent this frame states, if its arm
+// states one at all. The start always does; a success does when its producer
+// knew the id, which is what makes a settled-only delivery addressable.
+func namedCreatedAgent(spawn *conversationv1.AgentSubagent) *conversationv1.AgentId {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		return frame.Start.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetCreatedAgentId()
+	}
+	return nil
+}
+
+// foldHeldSubagentFrames folds frames released from the hold, reporting any
+// that cannot be folded rather than dropping them silently.
+func (r *resolver) foldHeldSubagentFrames(s *wsState, unitID string, state *subagentState, held []*conversationv1.AgentSubagent, occasion string) {
+	for _, frame := range held {
+		if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+			r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
+				"a held spawn frame could not be folded "+occasion,
+				dlog.Context{"unit": unitID, "cause": err.Error()})
+		}
+	}
 }
 
 // subagentArmDraws reports whether a spawn frame carries an arm this family
@@ -119,6 +156,14 @@ func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentS
 			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
 		}}
 	case *conversationv1.AgentSubagent_Success:
+		// A SETTLED FRAME MAY NAME THE CREATED AGENT, and when it does this is
+		// the only place the row's identity can come from — no start is coming
+		// on a settled-only delivery. It never OVERWRITES with nothing: a
+		// producer that did not know the id leaves it unset, and whatever the
+		// start already told us stands.
+		if created := frame.Success.GetCreatedAgentId(); created.GetValue() != "" {
+			state.created = created
+		}
 		applyPrompt(bubble, frame.Success.GetPrompt())
 		applyTotals(bubble, frame.Success.GetTotals())
 		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
@@ -172,10 +217,13 @@ func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, stat
 	return row
 }
 
-// retireHeldSpawns draws every spawn whose frames are still waiting for a
-// start, and empties the hold.
+// retireHeldSpawns draws every spawn whose frames are still waiting for one
+// that names the created agent, and empties the hold.
 //
-// A START THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the spawn:
+// AN IDENTITY THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the
+// spawn. A settled-only delivery is no longer such a fault — the success arm
+// can name the agent itself — so what reaches here is a spawn where neither a
+// start nor a naming terminal ever arrived:
 // the bubble is drawn from what did arrive, and it is warned, because its row
 // carries no created agent and so addresses no sub-feed. Nothing is left held
 // afterwards — a hold that outlived the delivery it was waiting on would sit
@@ -189,7 +237,7 @@ func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
 		held := state.held
 		state.held = nil
 		log.Warn("daemon.feed.subagent_without_start",
-			"a spawn's frames arrived with no start naming the created agent; its bubble is drawn but addresses no sub-feed",
+			"a spawn's frames arrived with none of them naming the created agent; its bubble is drawn but addresses no sub-feed",
 			dlog.Context{"unit": unitID, "frames": len(held), "occasion": occasion})
 		var commission *conversationv1.AgentSubagentPrompt
 		for _, frame := range held {
