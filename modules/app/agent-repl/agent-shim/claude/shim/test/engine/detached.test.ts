@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { LiveWorkTable } from "../../src/engine/detached.js";
 import type {
   SdkBackgroundTasksChangedMessage,
+  SdkTaskNotificationMessage,
   SdkTaskStartedMessage,
 } from "../../src/sdk/types.js";
 
@@ -233,7 +234,7 @@ describe("a task update that renames the work", () => {
       patch: { description: "run the tests" },
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskUpdatedMessage);
+    });
 
     expect(table.get("b01")?.description).toBe("run the tests");
   });
@@ -260,7 +261,7 @@ describe("what the retired-handle memory holds", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000003",
       session_id: "s-1",
-    }) as SdkTaskNotificationMessage;
+    });
 
   it("remembers a handle whose work concluded, so a stop can say `already ended`", () => {
     const table = new LiveWorkTable();
