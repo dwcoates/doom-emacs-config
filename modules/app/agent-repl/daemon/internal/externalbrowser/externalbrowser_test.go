@@ -2,11 +2,14 @@ package externalbrowser_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -242,3 +245,178 @@ func killRecordedPID(t *testing.T, pidFile string) {
 // fmtSscan is fmt.Sscan, named here so the import list stays honest about why
 // the test parses a pid at all.
 func fmtSscan(s string, a ...any) (int, error) { return fmt.Sscan(s, a...) }
+
+// TestOpenDefaultRaisesTheBrowserBeforeHandingOverTheURL pins the ORDER the
+// default path exists for: Chrome raises the profile window it puts the tab
+// in but does not bring itself to the front, so activating afterwards would
+// restore whichever window was frontmost before — routinely the other
+// profile's.
+func TestOpenDefaultRaisesTheBrowserBeforeHandingOverTheURL(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	order := filepath.Join(dir, "order")
+	activate := writeScript(t, dir, "activate", "echo activate >> "+shellQuote(order))
+	launch := writeScript(t, dir, "launch", "echo launch >> "+shellQuote(order))
+	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
+
+	// Act.
+	err := o.Open(context.Background(), "https://example.com/page")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+	if got := readFile(t, order); got != "activate\nlaunch\n" {
+		t.Fatalf("order = %q, want the raise before the hand-off", got)
+	}
+}
+
+// TestOpenDefaultHandsThePinnedProfileArgv pins the invocation the default
+// path exists for: the url goes to the browser executable directly, together
+// with the profile it must land in.
+func TestOpenDefaultHandsThePinnedProfileArgv(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	record := filepath.Join(dir, "argv")
+	activate := writeScript(t, dir, "activate", "exit 0")
+	launch := writeScript(t, dir, "launch", `printf '%s\n' "$@" > `+shellQuote(record))
+	o := newOpener(t, externalbrowser.Config{
+		ActivateBin: activate, DefaultLauncherBin: launch, Profile: "Profile 9",
+	})
+
+	// Act.
+	if err := o.Open(context.Background(), "https://example.com/page"); err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+
+	// Assert.
+	want := "--profile-directory=Profile 9\nhttps://example.com/page\n"
+	if got := readFile(t, record); got != want {
+		t.Fatalf("launch argv = %q, want %q", got, want)
+	}
+}
+
+// TestOpenDefaultSurfacesAFailedRaise pins that a raise that failed is its own
+// loud error, distinct from a failed hand-off.
+func TestOpenDefaultSurfacesAFailedRaise(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	activate := writeScript(t, dir, "activate", "exit 1")
+	launch := writeScript(t, dir, "launch", "exit 0")
+	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
+
+	// Act.
+	err := o.Open(context.Background(), "https://example.com")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Open() = nil error, want the failed raise surfaced")
+	}
+	if !strings.Contains(err.Error(), externalbrowser.DefaultApp) {
+		t.Fatalf("err = %v, want it to name the app it could not raise", err)
+	}
+}
+
+// TestOpenDefaultDoesNotHandOverAfterAFailedRaise pins that a launch whose
+// raise failed is abandoned rather than half-performed.
+func TestOpenDefaultDoesNotHandOverAfterAFailedRaise(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "handed-over")
+	activate := writeScript(t, dir, "activate", "exit 1")
+	launch := writeScript(t, dir, "launch", "touch "+shellQuote(marker))
+	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
+
+	// Act.
+	if err := o.Open(context.Background(), "https://example.com"); err == nil {
+		t.Fatal("Open() = nil error, want the failed raise surfaced")
+	}
+
+	// Assert.
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("the url was handed over after the raise failed")
+	}
+}
+
+// TestOpenDefaultSurfacesAFailedHandOff pins the second half: the browser was
+// raised but refused the url, which names the profile it was meant for.
+func TestOpenDefaultSurfacesAFailedHandOff(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	activate := writeScript(t, dir, "activate", "exit 0")
+	launch := writeScript(t, dir, "launch", "exit 4")
+	o := newOpener(t, externalbrowser.Config{
+		ActivateBin: activate, DefaultLauncherBin: launch, Profile: "Profile 9",
+	})
+
+	// Act.
+	err := o.Open(context.Background(), "https://example.com")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Open() = nil error, want the failed hand-off surfaced")
+	}
+	if !strings.Contains(err.Error(), "Profile 9") {
+		t.Fatalf("err = %v, want it to name the profile the url was meant for", err)
+	}
+}
+
+// TestOpenDefaultSurfacesAnAbsentBrowser pins the host where the pinned binary
+// is not installed: the launch fails synchronously and loudly.
+func TestOpenDefaultSurfacesAnAbsentBrowser(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	activate := writeScript(t, dir, "activate", "exit 0")
+	o := newOpener(t, externalbrowser.Config{
+		ActivateBin: activate, DefaultLauncherBin: filepath.Join(dir, "not-installed"),
+	})
+
+	// Act.
+	err := o.Open(context.Background(), "https://example.com")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Open() = nil error, want the absent browser surfaced")
+	}
+}
+
+// TestOpenAbandonsALaunchTheCallerCancels pins the third arm of the launch
+// window: neither the launcher exiting nor the window elapsing, but the caller
+// giving up while the launcher is still running.
+func TestOpenAbandonsALaunchTheCallerCancels(t *testing.T) {
+	// Arrange: the launcher announces itself down a fifo — a blocking write
+	// the test's read completes — so the cancellation lands while the launch
+	// is genuinely in flight, with nothing polled and nothing slept on.
+	dir := t.TempDir()
+	started := filepath.Join(dir, "started")
+	if err := syscall.Mkfifo(started, 0o600); err != nil {
+		t.Fatalf("Mkfifo() = %v", err)
+	}
+	pidFile := filepath.Join(dir, "pid")
+	script := writeScript(t, dir, "slow-launcher", `echo $$ > `+shellQuote(pidFile)+`
+echo up > `+shellQuote(started)+`
+exec tail -f /dev/null`)
+	t.Cleanup(func() { killRecordedPID(t, pidFile) })
+	o := newOpener(t, externalbrowser.Config{LauncherCmd: script, LaunchWindow: time.Minute})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act.
+	done := make(chan error, 1)
+	go func() { done <- o.Open(ctx, "https://example.com") }()
+	fifo, err := os.Open(started) //nolint:gosec // test-owned path
+	if err != nil {
+		t.Fatalf("open the fifo: %v", err)
+	}
+	if _, err := io.ReadAll(fifo); err != nil {
+		t.Fatalf("read the fifo: %v", err)
+	}
+	if err := fifo.Close(); err != nil {
+		t.Fatalf("close the fifo: %v", err)
+	}
+	cancel()
+
+	// Assert.
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Open() = %v, want context.Canceled", err)
+	}
+}

@@ -3,6 +3,9 @@ package boot
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -484,5 +487,120 @@ func TestTheOrphanCloseIsStampedWithTheInjectedInstant(t *testing.T) {
 	}
 	if len(turns) != 0 {
 		t.Fatalf("OpenTurns = %v, want the orphan closed at %v", turns, stamp)
+	}
+}
+
+// TestRunRefusesWhenTheWorkspaceRegistryCannotBeRead pins the first step's
+// failure: a boot that could not read the registry does not start degraded,
+// because it would go on to answer for state it never read.
+func TestRunRefusesWhenTheWorkspaceRegistryCannotBeRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps, h *harness) {
+		d.DB = failingList{DB: h.db, err: errBoom}
+	})
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run() = %v, want the registry read failure surfaced", err)
+	}
+	if h.merge.recoveries() != 0 {
+		t.Fatal("the boot went on reconciling after the registry could not be read")
+	}
+}
+
+// TestRunRefusesWhenAStaleSocketCannotBeCleared pins the adopt path's clear:
+// a socket path the boot could not clear fails the BOOT, rather than leaving a
+// path the next spawn will trip over for a reason that no longer exists.
+func TestRunRefusesWhenAStaleSocketCannotBeCleared(t *testing.T) {
+	// Arrange: nothing holds the lock and nothing listens, so the path is
+	// swept — but what sits there is an ordinary FILE, which is not ours to
+	// unlink and is never read as free.
+	h := newHarness(t)
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+	socket := h.deps.Layout.ShimSocket(string(ws.ID))
+	if err := os.MkdirAll(filepath.Dir(socket), 0o755); err != nil {
+		t.Fatalf("mkdir %q: %v", filepath.Dir(socket), err)
+	}
+	if err := os.WriteFile(socket, []byte("not a socket"), 0o600); err != nil {
+		t.Fatalf("write %q: %v", socket, err)
+	}
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Run() = nil error, want the uncleanable socket path to fail the boot")
+	}
+	if !strings.Contains(err.Error(), string(ws.ID)) {
+		t.Fatalf("err = %v, want it to name the workspace whose socket could not be cleared", err)
+	}
+}
+
+// TestRunRefusesWhenAClientLessWorkspacesTurnsCannotBeClosed pins the orphan
+// close: a turn left without a terminal is a conversation the daemon would
+// answer for as if it were still running.
+func TestRunRefusesWhenAClientLessWorkspacesTurnsCannotBeClosed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps, h *harness) {
+		d.DB = failingCloseOrphans{DB: h.db, err: errBoom}
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run() = %v, want the orphan close failure surfaced", err)
+	}
+	if !strings.Contains(err.Error(), string(ws.ID)) {
+		t.Fatalf("err = %v, want it to name the workspace whose turns could not be closed", err)
+	}
+}
+
+// TestRunRefusesWhenAWorkspacesLeaseCannotBeRead pins the merge recovery's
+// first half: the leases say which merges were in flight across the crash, and
+// a lease that could not be read is never guessed at.
+func TestRunRefusesWhenAWorkspacesLeaseCannotBeRead(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps, h *harness) {
+		d.DB = failingLease{DB: h.db, err: errBoom}
+	})
+	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	_, err := h.seq.Run(context.Background())
+
+	// Assert.
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("Run() = %v, want the lease read failure surfaced", err)
+	}
+	if !strings.Contains(err.Error(), string(ws.ID)) {
+		t.Fatalf("err = %v, want it to name the workspace whose lease could not be read", err)
+	}
+}
+
+// TestRunDoesNotRecoverMergesAfterAnUnreadableLease pins that the recovery
+// itself never runs on a lease set the boot could not read: re-queueing a
+// merge whose in-flight set is unknown is worse than refusing the boot.
+func TestRunDoesNotRecoverMergesAfterAnUnreadableLease(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, func(d *Deps, h *harness) {
+		d.DB = failingLease{DB: h.db, err: errBoom}
+	})
+	h.register(t, t.TempDir(), sessionlock.StateFree)
+
+	// Act.
+	if _, err := h.seq.Run(context.Background()); err == nil {
+		t.Fatal("Run() = nil error, want the lease read failure surfaced")
+	}
+
+	// Assert.
+	if got := h.merge.recoveries(); got != 0 {
+		t.Fatalf("Recover calls = %d, want 0", got)
 	}
 }

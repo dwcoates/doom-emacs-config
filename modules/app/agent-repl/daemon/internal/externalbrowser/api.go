@@ -36,7 +36,16 @@ const EnvBrowserCmd = "AGENT_REPL_BROWSER_CMD"
 // url to, and OpenExternal answers no_browser_configured instead of pretending
 // a launch and failing.
 func DefaultLauncherConfigured() bool {
-	info, err := os.Stat(DefaultBinary)
+	return DefaultLauncherConfiguredAt(DefaultBinary)
+}
+
+// DefaultLauncherConfiguredAt is DefaultLauncherConfigured against a named
+// path. The pinned default is an absolute macOS application path, so the
+// question "is this launcher present" has no seam at all otherwise; this is
+// that seam, and DefaultLauncherConfigured is exactly this function applied to
+// DefaultBinary.
+func DefaultLauncherConfiguredAt(path string) bool {
+	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
 
@@ -57,6 +66,15 @@ type Config struct {
 	// Profile is the pinned browser profile directory, used only on the
 	// default path. Empty takes DefaultProfileDirectory.
 	Profile string
+	// DefaultLauncherBin is the browser executable the DEFAULT path hands a
+	// url to. Empty takes DefaultBinary. It exists for the same reason
+	// LauncherCmd does — the launcher's spelling is injected rather than
+	// hardcoded — and it is the only way a test drives the default path,
+	// whose binary is an absolute macOS application path.
+	DefaultLauncherBin string
+	// ActivateBin is the command that raises the browser before the url is
+	// handed over on the DEFAULT path. Empty takes osascript.
+	ActivateBin string
 	// LaunchWindow is how long the launcher is given to hand the url off and
 	// exit before it is presumed to have BECOME the browser (a cold Chrome
 	// launch runs the browser in the invoked process, which never exits).

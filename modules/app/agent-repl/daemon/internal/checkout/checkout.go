@@ -39,6 +39,15 @@ const marker = "modules/app/agent-repl"
 // returns a loud error naming exePath and Env rather than a guessed or
 // relative path.
 func Root(exePath string) (string, error) {
+	return resolveRoot(exePath, compiledRoot)
+}
+
+// resolveRoot is Root with its LAST RESORT injected. The compiled-in source
+// path is the one input the caller cannot supply and the process cannot
+// change, so the refusal that follows a walk finding nothing is unreachable
+// without a seam here; production passes compiledRoot and behaves exactly as
+// Root's documentation says.
+func resolveRoot(exePath string, compiled func() (string, bool)) (string, error) {
 	if env, ok := os.LookupEnv(Env); ok {
 		return filepath.Clean(env), nil
 	}
@@ -69,7 +78,7 @@ func Root(exePath string) (string, error) {
 	// scratch directory does. The path this source file was COMPILED from is
 	// still inside the checkout, so it names the tree the binary was built
 	// from — the same tree a deployed binary would have been copied out of.
-	if root, ok := compiledRoot(); ok {
+	if root, ok := compiled(); ok {
 		return root, nil
 	}
 
@@ -85,10 +94,20 @@ func Root(exePath string) (string, error) {
 // longer exists — which is exactly what the existence check below catches.
 func compiledRoot() (string, bool) {
 	_, file, _, ok := runtime.Caller(0)
-	if !ok {
+	return compiledRootFrom(file, ok)
+}
+
+// compiledRootFrom answers the checkout containing sourceFile, walking up from
+// its directory. known is runtime.Caller's own ok: an unknown caller frame
+// yields no root rather than a walk from an empty path. It is separated from
+// compiledRoot so the two answers a MISSING compiled path can give — a
+// checkout that moved after it was built, and a source path in no checkout at
+// all — are reachable without moving this package's own source.
+func compiledRootFrom(sourceFile string, known bool) (string, bool) {
+	if !known {
 		return "", false
 	}
-	dir := filepath.Dir(file)
+	dir := filepath.Dir(sourceFile)
 	for {
 		if hasMarkerSuffix(dir) {
 			if info, err := os.Stat(dir); err == nil && info.IsDir() {

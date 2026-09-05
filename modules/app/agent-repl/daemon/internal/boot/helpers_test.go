@@ -273,3 +273,44 @@ func userSaid(text string) *conversationv1.UserSaid {
 
 // errBoom is the failure every scripted collaborator answers with.
 var errBoom = errors.New("boom")
+
+// minimalDeps is one harness's Deps, for the constructor's own tests: they
+// vary a single optional collaborator and never run the sequence.
+func minimalDeps(t *testing.T) Deps {
+	t.Helper()
+	return newHarness(t).deps
+}
+
+// failingList is a state client whose workspace registry cannot be read, which
+// is the first thing a boot does and the one failure that stops it before any
+// reconciliation runs.
+type failingList struct {
+	wsm.DB
+	err error
+}
+
+func (d failingList) ListWorkspaces(context.Context) ([]wsm.Workspace, error) {
+	return nil, d.err
+}
+
+// failingCloseOrphans is a state client whose orphan-closing transaction
+// fails: a client-less workspace's turns would be left without a terminal.
+type failingCloseOrphans struct {
+	wsm.DB
+	err error
+}
+
+func (d failingCloseOrphans) CloseOrphans(context.Context, wsm.WorkspaceID, time.Time) (wsm.OrphanReport, error) {
+	return wsm.OrphanReport{}, d.err
+}
+
+// failingLease is a state client whose occupancy lease cannot be read, which
+// is how a boot fails to tell whether a merge was in flight across the crash.
+type failingLease struct {
+	wsm.DB
+	err error
+}
+
+func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, error) {
+	return wsm.Lease{}, false, d.err
+}
