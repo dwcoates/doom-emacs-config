@@ -229,3 +229,50 @@ describe("msOf", () => {
     expect(msOf(-1000n, "A.b")).toBe(-1000);
   });
 });
+
+describe("assertNoUnknownFields: a map walked to its end", () => {
+  it("accepts a map<string, message> whose every value is clean", () => {
+    // ARRANGE: Struct is the contract's one map-of-message; the existing map
+    // tests all throw on the first entry, so the arm's own completion is what
+    // this one exercises.
+    const struct = create(StructSchema, {
+      fields: {
+        first: create(ValueSchema, { kind: { case: "stringValue", value: "x" } }),
+        second: create(ValueSchema, { kind: { case: "numberValue", value: 1 } }),
+      },
+    });
+    // ACT / ASSERT
+    expect(() => assertNoUnknownFields(StructSchema, struct)).not.toThrow();
+  });
+
+  it("refuses the SECOND map entry when only it is unreadable, naming its key", () => {
+    // ARRANGE
+    const dirty = create(ValueSchema, { kind: { case: "stringValue", value: "y" } });
+    dirty.$unknown = UNKNOWN;
+    const struct = create(StructSchema, {
+      fields: {
+        first: create(ValueSchema, { kind: { case: "stringValue", value: "x" } }),
+        second: dirty,
+      },
+    });
+    // ACT / ASSERT
+    expect(() => assertNoUnknownFields(StructSchema, struct)).toThrow(
+      /google\.protobuf\.Struct\.fields\[second\]/,
+    );
+  });
+});
+
+describe("requireCase: the null oneof", () => {
+  it("refuses a null oneof rather than reading a case off it", () => {
+    // ARRANGE / ACT / ASSERT
+    expect(() => requireCase(null as unknown as { case?: string }, "X.cause")).toThrow(
+      MalformedView,
+    );
+  });
+});
+
+describe("requireMessage: the null field", () => {
+  it("refuses a null message field, as protobuf presence never yields one", () => {
+    expect(() => requireMessage(null, "X.footer")).toThrow(MalformedView);
+  });
+});

@@ -134,3 +134,29 @@ describe("notePush", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 });
+
+describe("onQuiesced after the page has already gone quiet", () => {
+  it("runs a late subscriber AT ONCE, so a stream opened in the window is not stranded", () => {
+    // ARRANGE
+    const c = ctx();
+    c.quiesce();
+    const told = vi.fn();
+    // ACT
+    c.onQuiesced(told);
+    // ASSERT
+    expect(told).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands a late subscriber an unsubscriber that is inert, never a second call", () => {
+    // ARRANGE
+    const c = ctx();
+    c.quiesce();
+    const told = vi.fn();
+    // ACT
+    const unsubscribe = c.onQuiesced(told);
+    unsubscribe();
+    c.quiesce();
+    // ASSERT
+    expect(told).toHaveBeenCalledTimes(1);
+  });
+});
