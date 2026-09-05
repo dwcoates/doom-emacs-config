@@ -348,6 +348,13 @@ type ShimFleet interface {
 	// Adopt dials the workspace's ALREADY RUNNING shim without spawning — the
 	// successor's half of a transfer, and a crash boot's surviving process.
 	Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, error)
+	// StandDown ends the workspace's session and stops its shim, THROUGH THE
+	// FLEET rather than through the client. The fleet is what tells the
+	// session watcher first, and a watcher that has not been told reads this
+	// daemon's own act as a transport fault: it records a severing at ERROR,
+	// marks the link degraded, and reopens watches at a shim the next line is
+	// about to stop.
+	StandDown(ctx context.Context, ws ids.WorkspaceID) error
 	// Resume runs StartSession(resume) on c. A cold context is an ANSWER, not
 	// an error: it comes back on Resumed.Cold for the ordinary cold gate.
 	Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) (Resumed, error)
