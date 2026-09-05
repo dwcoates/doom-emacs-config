@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -193,5 +194,64 @@ func TestShortStateRootKeepsTheLockDirectoryOffTheSharedTempRoot(t *testing.T) {
 	}
 	if parent := filepath.Dir(stateRoot); parent == os.TempDir() {
 		t.Fatalf("shortStateRoot minted %q directly under the OS temp root; its lock sibling would be shared", stateRoot)
+	}
+}
+
+// THE WEBAPP LAYER'S WRITABILITY PRECONDITION.
+//
+// The layer went red in eleven places at once, in the sandbox only, because
+// vite's default cache directory sat inside a read-only `node_modules`. The
+// cache moved out (webapp/vite-cache.ts); wlWebappWritable is what makes the
+// NEXT such move say so once, by name, instead of eleven times in a node
+// process. These two tests are its guarantee and its violation.
+
+func TestWebappWritableAcceptsAWritablePackageDirectory(t *testing.T) {
+	t.Parallel()
+	// Arrange: an ordinary writable directory, as a checkout is.
+	dir := t.TempDir()
+
+	// Act.
+	err := wlWebappWritable(dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("wlWebappWritable(%s) = %v, want nil", dir, err)
+	}
+}
+
+func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
+	t.Parallel()
+	// root writes through a mode bit, so the read-only case cannot be staged
+	// as this uid. It is recorded rather than silently passed over: a run that
+	// did not exercise this must not look like one that did.
+	if os.Geteuid() == 0 {
+		noteEnvironmentSkip(t, "e2e/webapp-layer: the read-only-directory probe cannot be staged as root, "+
+			"which writes through the mode bit; the sandbox runs as uid 1000, where it does run")
+	}
+
+	// Arrange: a directory nothing may create inside, which is what a
+	// read-only working copy (or a link into a read-only image layer) is.
+	dir := t.TempDir()
+	readonly := filepath.Join(dir, "readonly")
+	if err := os.Mkdir(readonly, 0o555); err != nil {
+		t.Fatalf("make the read-only dir: %v", err)
+	}
+	t.Cleanup(func() {
+		// Restored so t.TempDir's own cleanup can remove it.
+		if err := os.Chmod(readonly, 0o755); err != nil {
+			t.Fatalf("restore the mode on %s: %v", readonly, err)
+		}
+	})
+
+	// Act.
+	err := wlWebappWritable(readonly)
+
+	// Assert: the failure names the directory, because that name is the whole
+	// value of catching this here.
+	if err == nil {
+		t.Fatalf("wlWebappWritable(%s) = nil, want a failure naming the directory", readonly)
+	}
+	if !strings.Contains(err.Error(), readonly) {
+		t.Fatalf("wlWebappWritable(%s) = %v, want the message to name the directory", readonly, err)
 	}
 }
