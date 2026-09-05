@@ -159,6 +159,10 @@ func TestBubbleRefusedNotDeliverable(t *testing.T) {
 	// Arrange: drive a synchronous subagent to completion, then find its
 	// settled bubble row.
 	w := NewWorld(t, WorldOpts{})
+	// THE SHIM'S REFUSAL IS THE ASSERTION BELOW. A prompt addressed to a
+	// subagent has no SDK route at all, the shim answers `not_deliverable`,
+	// and the delivery path records that refusal on its way to the caller.
+	w.ExpectWarnings("daemon.promptqueue.deliver")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
@@ -205,6 +209,10 @@ func TestBubbleRefusedAgentBusy(t *testing.T) {
 	// Arrange: drive the never-settling detached subagent, then find its
 	// still-live bubble row.
 	w := NewWorld(t, WorldOpts{})
+	// THE SHIM'S REFUSAL IS THE ASSERTION BELOW. The prompt is addressed at a
+	// subagent whose own turn is open, the shim answers `agent_busy`, and the
+	// delivery path records that refusal on its way to the caller.
+	w.ExpectWarnings("daemon.promptqueue.deliver")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
@@ -274,6 +282,12 @@ func TestUnknownAgentOnUpdateAgent(t *testing.T) {
 	// Arrange: raise a permission ask under a detached subagent, then stop
 	// that subagent out from under its own still-open ask.
 	w := NewWorld(t, WorldOpts{})
+	// THE UNLANDED ARM IS THIS TEST'S ASSERTION. AnswerPermissionError carries
+	// no `unknown_agent` arm (endpoint_answer_permission.proto), the gap is a
+	// ledgered row in daemon/ERROR-ARMS.md, and server.UnlandedArm records
+	// every such refusal under this operation so the ledger reconciles against
+	// the log. The assertion below pins that exact spelling.
+	w.ExpectWarnings("daemon.refusal.unlanded_arm")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
@@ -397,7 +411,9 @@ func rfAwaitVendorStartFailed(t *testing.T, w *World, ws *workspacev1.WorkspaceR
 // immediately, did not. An undeclared fault whose observation is a race is a
 // flake, and the cure is to state the fault the arrangement causes, not to
 // hope the sweep runs first.
-var rfVendorStartFaultWarnings = []string{"daemon.health.open_fault"}
+// `daemon.workspace.open` is the same refusal on the verb's own side: the
+// session did not come up, which is precisely what the lever asked for.
+var rfVendorStartFaultWarnings = []string{"daemon.health.open_fault", "daemon.workspace.open"}
 
 func TestStartSessionVendorStartFailed(t *testing.T) {
 	t.Parallel()
@@ -416,7 +432,10 @@ func TestStartSessionVendorStartFailedRecovers(t *testing.T) {
 	t.Parallel()
 	// Arrange: a world whose FIRST StartSession only is refused.
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{ExtraEnv: []string{"AGENT_REPL_FAKE_REFUSE=start-once"}}})
-	w.ExpectWarnings(rfVendorStartFaultWarnings...)
+	// The retry's own bring-up path is the RECOVERY this test is named for:
+	// the refused start left the shim process up and inert, so the second
+	// open attaches to that survivor rather than spawning a second one.
+	w.ExpectWarnings(append(rfVendorStartFaultWarnings, "daemon.workspace.bring_up")...)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 

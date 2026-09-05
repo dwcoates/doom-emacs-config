@@ -340,6 +340,11 @@ func TestCompactionFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
+	// THE FAILED COMPACTION IS THE SUBJECT. `!compact-failed` asks the vendor
+	// to reject the summarizing request, and both records below are the
+	// daemon stating that outcome: the feed's divider says nothing was cut,
+	// and the footer says the context is still too large.
+	w.ExpectWarnings("daemon.feed.compaction_failed", "daemon.footer.on_context_cut")
 	ws, configDir := cpNewWorkspace(t, w)
 	const wantError = "the summarizing request was rejected"
 

@@ -245,8 +245,24 @@ func TestHibernateOnIdleCutoff(t *testing.T) {
 	}})
 	// Standing the shim down at the idle cutoff leaves the session with no
 	// producer, which opens a health fault; that park is this test's
-	// subject.
-	w.ExpectWarnings("daemon.health.open_fault")
+	// subject. The link records beside it are the same act seen from the
+	// connectivity layer: the shim PROCESS goes, so the client's socket drops
+	// and it redials until the reap tells it the process is gone.
+	//
+	// THE STAND-DOWN'S KILL ROUND TRIP IS DECLARED TOO, for the reason
+	// refusals_e2e_test.go's rfVendorStartFaultWarnings states: the sweep
+	// bounds that call at drain.DefaultStandBound, and a saturated parallel
+	// run can spend it (observed once). Fleet.KillSession already handles the
+	// silence — "a shim that will not answer is not a reason to leave the
+	// process running", so it stops the process anyway and records the
+	// refusal as evidence — and an undeclared record whose observation is a
+	// race is a flake, not a finding. `daemon.shimclient.exit` is the same
+	// act at the process reaper: the shim can exit as its session ends,
+	// ahead of the kill this stand-down sends it.
+	w.ExpectWarnings("daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
+		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
+		"daemon.shimclient.exit")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	host := w.WatchHost(ws)
@@ -371,8 +387,16 @@ func TestRevivalAfterHibernate(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{IdleCutoffMS: hibernationIdleCutoffMS}})
 	// Standing a shim down and reviving it opens a health fault while the
-	// session has no producer; that is what this test provokes.
-	w.ExpectWarnings("daemon.health.open_fault")
+	// session has no producer; that is what this test provokes. The link
+	// records are the same stand-down seen from the connectivity layer — the
+	// shim process really is gone, and it goes twice here.
+	// The kill round trip is declared for the same reason
+	// TestHibernateOnIdleCutoff declares it: the sweep bounds it, and a
+	// saturated run can spend that bound.
+	w.ExpectWarnings("daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
+		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
+		"daemon.shimclient.exit")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	host := w.WatchHost(ws)
