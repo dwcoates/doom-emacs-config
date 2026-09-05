@@ -18,7 +18,7 @@ function corpusOutput(): Record<string, unknown> {
   const path = fileURLToPath(
     new URL("../../../../../../testdata/corpus/tool-results/web_search.jsonl", import.meta.url),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { toolUseResult: Record<string, unknown> }).toolUseResult;
 }
 
@@ -27,7 +27,7 @@ function corpusInput(): Record<string, unknown> {
   const path = fileURLToPath(
     new URL("../../../../../../testdata/corpus/tool-inputs/web_search.jsonl", import.meta.url),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { input: Record<string, unknown> }).input;
 }
 
@@ -61,7 +61,7 @@ function successOf(
   call: PendingCall,
   structured: unknown,
 ): conversationv1.AgentWebSearchSuccess {
-  const search = searchOf(webSearchConverter.settle(call, outcomeWith(structured))!);
+  const search = searchOf(webSearchConverter.settle(call, outcomeWith(structured)));
   expect(search.result.case).toBe("success");
   return search.result.value as conversationv1.AgentWebSearchSuccess;
 }
@@ -248,7 +248,7 @@ describe("webSearchConverter.settle", () => {
     const call = callWith({ query: "refused" });
 
     // Act.
-    const search = searchOf(webSearchConverter.settle(call, outcomeWith(undefined, true))!);
+    const search = searchOf(webSearchConverter.settle(call, outcomeWith(undefined, true)));
 
     // Assert.
     const failure = search.result.value as conversationv1.AgentWebSearchFailure;

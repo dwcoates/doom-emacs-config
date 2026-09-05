@@ -133,6 +133,9 @@ describe("normalizeApiUsage refuses values a protobuf Struct cannot carry", () =
 
   it("rejects an array hole, which JSON cannot preserve", () => {
     // Arrange: a sparse array — index 0 is absent, not undefined.
+    // The hole is the fixture: this test exists to prove the normalizer refuses one, and
+    // there is no other way to write one.
+    // eslint-disable-next-line no-sparse-arrays -- see above
     const sparse = [, 1] as unknown[];
 
     // Act + Assert

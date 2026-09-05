@@ -912,7 +912,7 @@ describe("main", () => {
       logMainLifecycle: (fields: Record<string, unknown>, message: string): void => {
         const record = { fields, message };
         lifecycle.push(record);
-        const outcome = String(fields["outcome"] ?? "");
+        const outcome = typeof fields["outcome"] === "string" ? fields["outcome"] : "";
         waiters.get(outcome)?.(record);
       },
       reportFatal: (err: unknown): void => {
@@ -947,7 +947,7 @@ describe("main", () => {
     vi.spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
       stdout.push(String(chunk));
       return true;
-    }) as typeof process.stdout.write);
+    }));
     vi.spyOn(process, "on").mockImplementation(((name: string, handler: () => void) => {
       signals.set(name, handler);
       return process;
@@ -1106,7 +1106,7 @@ describe("main", () => {
 
     // Assert — closing first would destroy the socket carrying the
     // KillSession response itself.
-    expect(h.quiet.mock.invocationCallOrder[0]!).toBeLessThan(h.close.mock.invocationCallOrder[0]!);
+    expect(h.quiet.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
     expect(record.fields).toMatchObject({ exit_code: 0 });
     expect(record.fields["level"]).toBeUndefined();
     expect(h.exits).toEqual([0]);

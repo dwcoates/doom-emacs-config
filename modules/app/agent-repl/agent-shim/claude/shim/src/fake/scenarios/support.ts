@@ -69,6 +69,19 @@ export function visibleThinking(text: string): {
   return { type: "thinking", thinking: text, signature: FAKE_SIGNATURE };
 }
 
+
+/**
+ * The path or command a suggested rule is ABOUT, when the call names one.
+ *
+ * A tool's input is an untyped bag: `String(...)` over it renders any object
+ * as "[object Object]", which would put that literal text in a permission rule.
+ * A non-string target is no target.
+ */
+export function ruleTarget(input: Record<string, unknown>): string {
+  const named = input.command ?? input.file_path;
+  return typeof named === "string" ? named : "";
+}
+
 /**
  * Ask the shim's gate about one tool call.
  *
@@ -133,7 +146,7 @@ export async function askPermission(
       ...(extra.suggestions ?? [
         {
           type: "addRules",
-          rules: [{ toolName: call.name, ruleContent: String(call.input.command ?? call.input.file_path ?? "") }],
+          rules: [{ toolName: call.name, ruleContent: ruleTarget(call.input) }],
           behavior: "allow",
           destination: "localSettings",
         },

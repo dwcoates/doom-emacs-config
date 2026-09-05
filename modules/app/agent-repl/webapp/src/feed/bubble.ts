@@ -63,7 +63,7 @@ export interface BubbleOptions {
   /** The body: the default row list, or the merge tab strip. */
   body: BubbleBodyRenderer;
   renderers: RowRenderers;
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
   /** How a bubble nested INSIDE this sub-feed is built. */
   bubble: BubbleFactory;
   /** The per-bubble composer, when this build has one (R7). */

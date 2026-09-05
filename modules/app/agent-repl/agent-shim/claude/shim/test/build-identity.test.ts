@@ -38,16 +38,16 @@ describe("sdkVersion", () => {
     // Arrange.
     const { createRequire } = await import("node:module");
     const require = createRequire(import.meta.url);
-    const { default: pkg } = await import(
+    const { default: pkg } = (await import(
       `${require.resolve("@anthropic-ai/claude-agent-sdk").replace(/[^/]+$/, "")}package.json`,
       { with: { type: "json" } }
-    );
+    )) as { default: { version: string } };
 
     // Act.
     const version = sdkVersion();
 
     // Assert.
-    expect(version).toBe((pkg as { version: string }).version);
+    expect(version).toBe((pkg).version);
   });
 });
 

@@ -8,6 +8,7 @@
  * one and the daemon's whole bring-up blocks on it.
  */
 import { create } from "@bufbuild/protobuf";
+import { nextPush } from "../next-push.js";
 import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import { SessionPushes, SUBSCRIBER_QUEUE_LIMIT } from "../../src/engine/pushes.js";
@@ -424,7 +425,7 @@ describe("a session fact carrying no arm", () => {
 
     pushes.push(create(conversationv1.SessionUpdateSchema, {}));
 
-    expect((await stream.next()).value?.update.case).toBeUndefined();
+    expect((await nextPush(stream)).update.case).toBeUndefined();
   });
 });
 

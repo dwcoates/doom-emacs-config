@@ -79,7 +79,7 @@ export interface FeedDeps {
 
 export interface FeedHandle extends Handle {
   /** Bring a row into view, opening whatever bubbles stand above it. */
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
 }
 
 /** Mount the root feed into HOST. */

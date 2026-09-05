@@ -91,7 +91,7 @@ describe("skillUseConverter.settle", () => {
 
   it("settles a vendor-stated error as the failure arm, since nothing further will arrive", () => {
     // Arrange, Act.
-    const arm = armOf(skillUseConverter.settle(call({ skill: "nope" }), outcome(undefined, true))!);
+    const arm = armOf(skillUseConverter.settle(call({ skill: "nope" }), outcome(undefined, true)));
 
     // Assert.
     expect(arm.case).toBe("failure");

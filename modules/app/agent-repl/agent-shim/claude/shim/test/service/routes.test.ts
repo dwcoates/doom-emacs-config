@@ -304,7 +304,6 @@ describe("shimRoutes unanticipated exceptions", () => {
     const { engine } = recordingEngine();
     return {
       ...engine,
-      // eslint-disable-next-line require-yield
       async *watchSession(): AsyncIterable<shimv1.WatchSessionResponse> {
         throw thrown;
       },

@@ -16,7 +16,7 @@ import { FeedRowSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 
 /** A row context whose only interesting part is `previous`. */
 function rc(previous?: HTMLElement): RowContext {
-  return rowContext(harness().ctx, create(FeedRowSchema, {}), { previous }) as RowContext;
+  return rowContext(harness().ctx, create(FeedRowSchema, {}), { previous });
 }
 
 /** A fold section over a marked body. */

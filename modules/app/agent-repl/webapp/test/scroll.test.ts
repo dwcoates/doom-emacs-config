@@ -811,6 +811,7 @@ describe("the tail-follow decision has exactly one owner", () => {
   // `**` rather than `*`: the rebuilt webapp puts each component in its own
   // `src/<component>/` directory, and a flat glob would stop scanning exactly
   // the modules most likely to re-open the question.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
   const sources = import.meta.glob("../src/**/*.ts", {
     query: "?raw",
     import: "default",

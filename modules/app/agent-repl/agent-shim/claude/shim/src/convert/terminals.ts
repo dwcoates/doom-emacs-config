@@ -236,10 +236,10 @@ const SUBTYPE_ARMS: Readonly<Record<string, () => conversationv1.AgentFailure["f
     case: "executionError",
     value: create(conversationv1.AgentExecutionErrorSchema, {}),
   }),
-  error_max_turns: FAILURE_ARMS.max_turns as () => conversationv1.AgentFailure["failure"],
-  error_max_budget_usd: FAILURE_ARMS.budget_exhausted as () => conversationv1.AgentFailure["failure"],
+  error_max_turns: FAILURE_ARMS.max_turns,
+  error_max_budget_usd: FAILURE_ARMS.budget_exhausted,
   error_max_structured_output_retries:
-    FAILURE_ARMS.structured_output_retry_exhausted as () => conversationv1.AgentFailure["failure"],
+    FAILURE_ARMS.structured_output_retry_exhausted,
 };
 
 /** The result record, read loosely for the fields the SDK declares optionally. */

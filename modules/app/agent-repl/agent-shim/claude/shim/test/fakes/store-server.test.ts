@@ -5,6 +5,8 @@
  * while the real shim is broken.
  */
 import { create } from "@bufbuild/protobuf";
+import { containing } from "../expect-shapes.js";
+import { nextPush } from "../next-push.js";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
@@ -442,8 +444,8 @@ describe("OpenAgentSession", () => {
     // Assert.
     expect(success.page?.boundary).toEqual({
       case: "more",
-      value: expect.objectContaining({
-        lastItem: expect.objectContaining({ value: "2" }),
+      value: containing({
+        lastItem: containing({ value: "2" }),
       }),
     });
   });
@@ -501,10 +503,10 @@ describe("WatchAgentSession", () => {
 
     // Act.
     await write(client, pageLineEntry("a", "prompt:t1", "after-open"));
-    const first = await tail.next();
+    const first = await nextPush(tail);
 
     // Assert.
-    const item = first.value?.line?.line?.agentItem?.item;
+    const item = first.line?.line?.agentItem?.item;
     expect(item?.case === "agentPrompt" ? item.value.id?.value : undefined).toBe("after-open");
   });
 
@@ -519,10 +521,10 @@ describe("WatchAgentSession", () => {
 
     // Act.
     await write(client, pageLineEntry("a", "prompt:t2", "after-open"));
-    const first = await tail.next();
+    const first = await nextPush(tail);
 
     // Assert.
-    expect(first.value?.line?.at?.value).toBe("2");
+    expect(first.line?.at?.value).toBe("2");
   });
 
   it("delivers an UPSERT OF A ROW THE OPENING PAGE ALREADY CARRIED", async () => {
@@ -540,10 +542,10 @@ describe("WatchAgentSession", () => {
 
     // Act.
     await write(client, pageLineEntry("a", "prompt:t1", "settled"));
-    const first = await tail.next();
+    const first = await nextPush(tail);
 
     // Assert.
-    expect(first.value?.line?.at?.value).toBe("1");
+    expect(first.line?.at?.value).toBe("1");
   });
 
   it("serves an upserted row at its ORIGINAL pointer, not a fresh one", async () => {
@@ -558,11 +560,14 @@ describe("WatchAgentSession", () => {
 
     // Act.
     await write(client, pageLineEntry("a", "prompt:t1", "settled"));
-    const first = await tail.next();
+    const first = await nextPush(tail);
 
     // Assert.
-    expect(first.value?.line?.at?.value).toBe("1");
-    expect(first.value?.line?.line?.agentItem?.item.value?.id?.value).toBe("settled");
+    expect(first.line?.at?.value).toBe("1");
+    // Narrowed on the arm, not read through it: only an `agentPrompt` carries an id,
+    // and reading one off an unchecked value is what the `any` here used to allow.
+    const settled = first.line?.line?.agentItem?.item;
+    expect(settled?.case === "agentPrompt" ? settled.value.id?.value : undefined).toBe("settled");
   });
 
   it("delivers a NEW row written after the open down the tail", async () => {
@@ -576,10 +581,10 @@ describe("WatchAgentSession", () => {
 
     // Act.
     await write(client, pageLineEntry("a", "prompt:t2", "second"));
-    const first = await tail.next();
+    const first = await nextPush(tail);
 
     // Assert.
-    expect(first.value?.line?.at?.value).toBe("2");
+    expect(first.line?.at?.value).toBe("2");
   });
 
   it("refuses an unknown token with NotFound, since a stream cannot say it otherwise", async () => {

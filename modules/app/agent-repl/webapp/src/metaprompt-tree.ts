@@ -176,8 +176,8 @@ export function findTreeRegion(text: string): TreeRegion | null {
   const lines = text.split("\n");
   const n = lines.length;
   // core[i]: a connector/root line outside any fence. head[i]: the header.
-  const core: boolean[] = new Array(n).fill(false);
-  const head: boolean[] = new Array(n).fill(false);
+  const core: boolean[] = new Array<boolean>(n).fill(false);
+  const head: boolean[] = new Array<boolean>(n).fill(false);
   let inFence = false;
   for (let i = 0; i < n; i++) {
     const line = lines[i];

@@ -47,7 +47,7 @@ function startOf(call: PendingCall): conversationv1.AgentPushNotificationStart {
 
 function successOf(structured: unknown): conversationv1.AgentPushNotificationSuccess {
   const push = pushOf(
-    pushNotificationConverter.settle(callWith({ message: "m", status: "proactive" }), outcomeWith(structured))!,
+    pushNotificationConverter.settle(callWith({ message: "m", status: "proactive" }), outcomeWith(structured)),
   );
   expect(push.state.case).toBe("success");
   return push.state.value as conversationv1.AgentPushNotificationSuccess;
@@ -79,7 +79,7 @@ describe("pushNotificationConverter.start", () => {
     const call = callWith({ message: "m", status: "proactive" });
 
     // Act, Assert: a constant is not a fact.
-    const serialized = JSON.stringify(startOf(call), (_key, value) =>
+    const serialized = JSON.stringify(startOf(call), (_key: string, value: unknown) =>
       typeof value === "bigint" ? value.toString() : value,
     );
     expect(serialized).not.toContain("proactive");
@@ -223,7 +223,7 @@ describe("pushNotificationConverter.settle", () => {
   it("settles an errored call as the failure arm", () => {
     // Arrange, Act.
     const push = pushOf(
-      pushNotificationConverter.settle(callWith({ message: "m" }), outcomeWith(undefined, true))!,
+      pushNotificationConverter.settle(callWith({ message: "m" }), outcomeWith(undefined, true)),
     );
 
     // Assert.

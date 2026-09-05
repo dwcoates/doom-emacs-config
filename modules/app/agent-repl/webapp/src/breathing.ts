@@ -71,7 +71,7 @@ export class AnimationEpoch {
 
   /** Time since the epoch, stamping it on first read. Never negative. */
   elapsedMs(nowMs: number): number {
-    if (this.epochMs === null) this.epochMs = nowMs;
+    this.epochMs ??= nowMs;
     return Math.max(0, nowMs - this.epochMs);
   }
 }

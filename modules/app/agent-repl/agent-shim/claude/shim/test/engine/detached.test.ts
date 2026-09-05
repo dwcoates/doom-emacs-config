@@ -12,7 +12,6 @@ import type {
   SdkBackgroundTasksChangedMessage,
   SdkTaskNotificationMessage,
   SdkTaskStartedMessage,
-  SdkTaskUpdatedMessage,
 } from "../../src/sdk/types.js";
 
 function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStartedMessage {
@@ -26,7 +25,7 @@ function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStarted
     uuid: "00000000-0000-4000-8000-000000000001",
     session_id: "s-1",
     ...overrides,
-  } as SdkTaskStartedMessage;
+  };
 }
 
 function level(tasks: { task_id: string; task_type: string; description: string }[]): SdkBackgroundTasksChangedMessage {
@@ -36,7 +35,7 @@ function level(tasks: { task_id: string; task_type: string; description: string 
     tasks,
     uuid: "00000000-0000-4000-8000-000000000002",
     session_id: "s-1",
-  } as SdkBackgroundTasksChangedMessage;
+  };
 }
 
 describe("a task that started", () => {
@@ -98,7 +97,7 @@ describe("a task update", () => {
       patch: { status: "running" },
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskUpdatedMessage);
+    });
 
     expect(table.get("b01")?.status).toBe("running");
   });
@@ -114,7 +113,7 @@ describe("a task update", () => {
       patch: { is_backgrounded: true },
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskUpdatedMessage);
+    });
 
     expect(table.get("b01")?.backgrounded).toBe(true);
   });
@@ -130,7 +129,7 @@ describe("a task update", () => {
         patch: {},
         uuid: "00000000-0000-4000-8000-000000000000",
         session_id: "s",
-      } as SdkTaskUpdatedMessage),
+      }),
     ).toBeUndefined();
   });
 });
@@ -149,7 +148,7 @@ describe("a task notification", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskNotificationMessage);
+    });
 
     expect(table.get("b01")).toBeUndefined();
   });
@@ -235,7 +234,7 @@ describe("a task update that renames the work", () => {
       patch: { description: "run the tests" },
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    } as SdkTaskUpdatedMessage);
+    });
 
     expect(table.get("b01")?.description).toBe("run the tests");
   });
@@ -262,7 +261,7 @@ describe("what the retired-handle memory holds", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000003",
       session_id: "s-1",
-    }) as SdkTaskNotificationMessage;
+    });
 
   it("remembers a handle whose work concluded, so a stop can say `already ended`", () => {
     const table = new LiveWorkTable();

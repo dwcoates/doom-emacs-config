@@ -291,9 +291,9 @@ describe("drawFooterStatusActivity", () => {
     ["closing", "blocked", "closeBlocked", { text: "a turn is in flight" }, "a turn is in flight"],
   ])("draws the %s/%s %s line verbatim", (statusCase, subCase, kindCase, value, expected) => {
     const { row } = drawStrip({
-      status: withActivity(statusCase, subCase, kindCase, value as Record<string, unknown>),
+      status: withActivity(statusCase, subCase, kindCase, value),
     });
-    expect(row.querySelector(".footer-activity")?.textContent).toContain(expected as string);
+    expect(row.querySelector(".footer-activity")?.textContent).toContain(expected);
   });
 
   it("names the activity's kind on the cell", () => {

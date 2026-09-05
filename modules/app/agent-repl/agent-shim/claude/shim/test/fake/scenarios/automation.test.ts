@@ -66,7 +66,7 @@ describe("report findings", () => {
 
   it("reports the count and the effort level the review ran at", async () => {
     // Arrange + Act
-    const reported = (await results("!findings"))[0] as Record<string, unknown>;
+    const reported = (await results("!findings"))[0];
 
     // Assert
     expect({ count: reported.count, level: reported.level }).toEqual({ count: 3, level: "high" });
@@ -76,7 +76,7 @@ describe("report findings", () => {
 describe("worktrees", () => {
   it("reports a kept worktree with action keep and no discard counts", async () => {
     // Arrange + Act
-    const exit = (await results("!worktree-keep"))[1] as Record<string, unknown>;
+    const exit = (await results("!worktree-keep"))[1];
 
     // Assert
     expect({ action: exit.action, files: exit.discardedFiles }).toEqual({
@@ -87,7 +87,7 @@ describe("worktrees", () => {
 
   it("reports a removed worktree with the discarded file and commit counts", async () => {
     // Arrange + Act
-    const exit = (await results("!worktree-remove"))[1] as Record<string, unknown>;
+    const exit = (await results("!worktree-remove"))[1];
 
     // Assert
     expect({ action: exit.action, files: exit.discardedFiles, commits: exit.discardedCommits }).toEqual({
@@ -109,7 +109,7 @@ describe("cron", () => {
 
   it("reports the created job as recurring with a human schedule", async () => {
     // Arrange + Act
-    const created = (await results("!cron"))[0] as Record<string, unknown>;
+    const created = (await results("!cron"))[0];
 
     // Assert
     expect({ recurring: created.recurring, human: created.humanSchedule }).toEqual({
@@ -122,7 +122,7 @@ describe("cron", () => {
 describe("push notifications", () => {
   it("reports a sent notification with no disabled reason", async () => {
     // Arrange + Act
-    const sent = (await results("!push-sent"))[0] as Record<string, unknown>;
+    const sent = (await results("!push-sent"))[0];
 
     // Assert
     expect({ sent: sent.pushSent, reason: sent.disabledReason }).toEqual({
@@ -135,7 +135,7 @@ describe("push notifications", () => {
     // Arrange + Act
     const reasons: unknown[] = [];
     for (const prompt of ["!push-config-off", "!push-user-present", "!push-no-transport"]) {
-      reasons.push(((await results(prompt))[0] as Record<string, unknown>).disabledReason);
+      reasons.push(((await results(prompt))[0]).disabledReason);
     }
 
     // Assert
@@ -146,7 +146,7 @@ describe("push notifications", () => {
 describe("monitors", () => {
   it("reports a deadline monitor with a finite timeout", async () => {
     // Arrange + Act
-    const monitor = (await results("!monitor-deadline"))[0] as Record<string, unknown>;
+    const monitor = (await results("!monitor-deadline"))[0];
 
     // Assert
     expect({ ms: monitor.timeoutMs, persistent: monitor.persistent }).toEqual({
@@ -157,7 +157,7 @@ describe("monitors", () => {
 
   it("reports a persistent monitor with a zero timeout", async () => {
     // Arrange + Act
-    const monitor = (await results("!monitor-persistent"))[0] as Record<string, unknown>;
+    const monitor = (await results("!monitor-persistent"))[0];
 
     // Assert. Zero and `persistent: true` together are the arm; either alone
     // would be ambiguous.
@@ -221,7 +221,7 @@ describe("what a Monitor call itself states", () => {
 describe("scheduled wakeups", () => {
   it("reports a scheduled wakeup with its unclamped delay", async () => {
     // Arrange + Act
-    const wakeup = (await results("!wakeup-schedule"))[0] as Record<string, unknown>;
+    const wakeup = (await results("!wakeup-schedule"))[0];
 
     // Assert
     expect({ delay: wakeup.clampedDelaySeconds, clamped: wakeup.wasClamped }).toEqual({
@@ -232,7 +232,7 @@ describe("scheduled wakeups", () => {
 
   it("reports a stop with the count it cancelled", async () => {
     // Arrange + Act
-    const stopped = (await results("!wakeup-stop"))[0] as Record<string, unknown>;
+    const stopped = (await results("!wakeup-stop"))[0];
 
     // Assert
     expect({ stopped: stopped.stopped, cancelled: stopped.cancelledWakeups }).toEqual({
@@ -245,7 +245,7 @@ describe("scheduled wakeups", () => {
 describe("artifacts", () => {
   it("reports a publish with the url and the source path", async () => {
     // Arrange + Act
-    const published = (await results("!artifact-publish"))[0] as Record<string, unknown>;
+    const published = (await results("!artifact-publish"))[0];
 
     // Assert
     expect({ hasUrl: typeof published.url === "string", path: published.path }).toEqual({
@@ -283,7 +283,7 @@ describe("an unmodeled MCP tool", () => {
 
   it("answers with an opaque payload rather than a modeled shape", async () => {
     // Arrange + Act
-    const echoed = (await results("!unmodeled"))[0] as Record<string, unknown>;
+    const echoed = (await results("!unmodeled"))[0];
 
     // Assert
     expect(Object.keys(echoed).sort()).toEqual(["content", "isError"].sort());

@@ -8,6 +8,7 @@
  * name the consumer holds.
  */
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { containing } from "../expect-shapes.js";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -164,7 +165,7 @@ describe("a vendor id rotation", () => {
 
     expect(update.update).toEqual({
       case: "identityRotated",
-      value: expect.objectContaining({
+      value: containing({
         previousVendorSessionId: "original-1",
         vendorSessionId: "rotated-2",
       }),
