@@ -121,6 +121,24 @@ func usageSample(fiveHour, sevenDay float64, observedAtMs int64) *conversationv1
 	}
 }
 
+// unavailableUsageSample is one sample that could read no figure at all.
+func unavailableUsageSample(observedAtMs int64) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_AccountUsage{
+			AccountUsage: &conversationv1.SessionAccountUsage{
+				ObservedAtMs: observedAtMs,
+				Outcome: &conversationv1.SessionAccountUsage_Unavailable{
+					Unavailable: &conversationv1.SessionAccountUsageUnavailable{
+						Reason: &conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable{
+							ServiceUnavailable: &conversationv1.SessionUsageServiceUnavailable{},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // bothAllowances files a usage sample carrying both windows' figures, which is
 // what makes the line drawable.
 func bothAllowances(h *harness, fiveHour, sevenDay float64) {
@@ -455,35 +473,76 @@ func TestTheOverageWindowIsLoggedAndDrawnNowhere(t *testing.T) {
 	}
 }
 
-func TestANewerEventUtilizationWinsOverTheSample(t *testing.T) {
+func TestAnEarlierSampleDoesNotOverwriteALaterEvent(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(-time.Minute).UnixMilli()))
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
-	// Act: the resolver's clock reads `instant`, so the event is the newer fact.
+	// Act: the event arrives after the sample, so its figure is the newest
+	// sighting.
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 99, 5*time.Hour))
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
 	if got.GetUtilization() != 0.99 {
-		t.Fatalf("utilization = %v, want the newer event's figure", got.GetUtilization())
+		t.Fatalf("utilization = %v, want the event's figure, which arrived last", got.GetUtilization())
 	}
 }
 
-func TestAnOlderEventUtilizationDoesNotWin(t *testing.T) {
+// A LATER SAMPLE OVERWRITES AN EARLIER EVENT'S FIGURE. This is the shape the
+// footer got wrong: the sample's `observed_at_ms` is stamped by the shim
+// before the update crosses the pipe, the event carried no stamp at all and so
+// was stamped by the DAEMON on receipt, and comparing the two kept the event's
+// retired 0.82 standing over every later sample.
+func TestALaterSampleOverwritesAnEarlierEventsFigure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(time.Minute).UnixMilli()))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 82, time.Hour))
 
-	// Act: the sample was observed after the clock the event is stamped with.
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+	// Act: the shim sampled just before the daemon received the event, and the
+	// sample arrived after it.
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(-5*time.Millisecond).UnixMilli()))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetUtilization() != 0.95 {
+		t.Fatalf("utilization = %v, want the sample's figure, which arrived last", got.GetUtilization())
+	}
+}
+
+// Two samples ARE comparable: both stamps come from the one shim's clock.
+func TestAStaleSampleDoesNotOverwriteANewerSample(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act: a sample the shim observed a minute earlier arrives out of order.
+	h.r.OnSessionUpdate(testWS, usageSample(81, 90, instant.Add(-time.Minute).UnixMilli()))
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
 	if got.GetUtilization() != 0.95 {
 		t.Fatalf("utilization = %v, want the newer sample's figure kept", got.GetUtilization())
+	}
+}
+
+// The unavailable arm states no figure, so it retires none either.
+func TestAnUnavailableSampleLeavesTheStandingFiguresAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.Add(time.Minute).UnixMilli()))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetUtilization() != 0.95 {
+		t.Fatalf("utilization = %v, want the standing figures left alone", got.GetUtilization())
 	}
 }
 
@@ -539,20 +598,7 @@ func TestAnUnavailableUsageSampleDrawsNothing(t *testing.T) {
 	connected(h)
 
 	// Act: a sample that could read no figure leaves the line undrawn.
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{
-			AccountUsage: &conversationv1.SessionAccountUsage{
-				ObservedAtMs: instant.UnixMilli(),
-				Outcome: &conversationv1.SessionAccountUsage_Unavailable{
-					Unavailable: &conversationv1.SessionAccountUsageUnavailable{
-						Reason: &conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable{
-							ServiceUnavailable: &conversationv1.SessionUsageServiceUnavailable{},
-						},
-					},
-				},
-			},
-		},
-	})
+	h.r.OnSessionUpdate(testWS, unavailableUsageSample(instant.UnixMilli()))
 
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
