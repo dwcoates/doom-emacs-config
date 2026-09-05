@@ -75,6 +75,18 @@ actually asserting rather than by the tick that has to catch them."
      (unwind-protect (progn ,@body)
        (ignore-errors (delete-directory ,dir t)))))
 
+(defun agent-repl-itest-daemon--record-shell (command path)
+  "Return shell that runs COMMAND and lands its stdout at PATH ATOMICALLY.
+
+A PLAIN REDIRECT CREATES THE FILE BEFORE THE CONTENT REACHES IT, and every
+reader here waits on the file APPEARING and then asserts on its whole
+content -- so a reader arriving inside that window sees an empty file or a
+prefix of the answer and fails on a mismatch that has nothing to do with
+what the scenario is testing.  Writing beside the target and renaming makes
+the file's existence and its completeness the same fact, because a rename
+within one directory is atomic."
+  (format "%s > %s.partial\nmv %s.partial %s" command path path path))
+
 (defun agent-repl-itest-daemon--ran-p (dir name)
   "Return non-nil when the stub NAME recorded a run in DIR."
   (file-exists-p (expand-file-name name dir)))
@@ -275,8 +287,9 @@ inherited a different one would publish its address where nobody looks."
                          (expand-file-name "build.sh" boot-dir) "exit 0"))
                  (start (agent-repl-itest-daemon--write-script
                          (expand-file-name "start.sh" boot-dir)
-                         (format "printf '%%s' \"$AGENT_REPL_STATE_DIR\" > %sstate-dir"
-                                 boot-dir)))
+                         (agent-repl-itest-daemon--record-shell
+                          "printf '%s' \"$AGENT_REPL_STATE_DIR\""
+                          (expand-file-name "state-dir" boot-dir))))
                  (agent-repl-daemon-build-script build)
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 2)
@@ -452,7 +465,9 @@ spawn without the roots exits 2 before the daemon ever serves."
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                (start (agent-repl-itest-daemon--write-script
                        (expand-file-name "start.sh" boot-dir)
-                       (format "printf '%%s\\n' \"$@\" > %sargv" boot-dir)))
+                       (agent-repl-itest-daemon--record-shell
+                        "printf '%s\\n' \"$@\""
+                        (expand-file-name "argv" boot-dir))))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                (agent-repl-daemon-boot-timeout-seconds 2)
