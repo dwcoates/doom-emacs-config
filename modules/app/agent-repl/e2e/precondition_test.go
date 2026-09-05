@@ -117,8 +117,18 @@ func requireDependency(t *testing.T, format string, args ...any) {
 func noteEnvironmentSkip(t *testing.T, format string, args ...any) {
 	t.Helper()
 	reason := fmt.Sprintf(format, args...)
-	recordSkip(skipEnvironment, t.Name(), reason)
-	t.Skip(reason)
+	noteEnvironmentSkipAs(t, reason, "%s", reason)
+}
+
+// noteEnvironmentSkipAs is noteEnvironmentSkip when the message the TEST gets
+// is per-test (it names the one `-run` command that would run that scenario)
+// while the summary's reason is the one shared sentence. The summary groups by
+// reason, so a per-test string there would print forty identical paragraphs
+// instead of one line naming forty tests.
+func noteEnvironmentSkipAs(t *testing.T, summaryReason, format string, args ...any) {
+	t.Helper()
+	recordSkip(skipEnvironment, t.Name(), summaryReason)
+	t.Skip(fmt.Sprintf(format, args...))
 }
 
 // reportSkipSummary prints the loud end-of-run block naming every test that
@@ -131,11 +141,31 @@ func reportSkipSummary() {
 	if len(records) == 0 {
 		return
 	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].kind != records[j].kind {
-			return records[i].kind < records[j].kind
+	// GROUPED BY REASON, because one absent node_modules is one problem with
+	// one fix, not two hundred. An ungrouped block repeats the same sentence
+	// per test and buries the very thing it exists to make unmissable.
+	type group struct {
+		kind   skipKind
+		reason string
+		tests  []string
+	}
+	var groups []*group
+	index := map[string]*group{}
+	for _, r := range records {
+		key := fmt.Sprintf("%d\x00%s", r.kind, r.reason)
+		g, ok := index[key]
+		if !ok {
+			g = &group{kind: r.kind, reason: r.reason}
+			index[key] = g
+			groups = append(groups, g)
 		}
-		return records[i].test < records[j].test
+		g.tests = append(g.tests, r.test)
+	}
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].kind != groups[j].kind {
+			return groups[i].kind < groups[j].kind
+		}
+		return len(groups[i].tests) > len(groups[j].tests)
 	})
 
 	var b strings.Builder
@@ -143,13 +173,15 @@ func reportSkipSummary() {
 	b.WriteString("================================================================\n")
 	b.WriteString(fmt.Sprintf("e2e: THIS RUN DID NOT EXERCISE EVERYTHING — %d test(s) skipped\n", len(records)))
 	b.WriteString("================================================================\n")
-	for _, r := range records {
+	for _, g := range groups {
 		label := "ENVIRONMENT"
-		if r.kind == skipDependency {
+		if g.kind == skipDependency {
 			label = "MISSING DEPENDENCY"
 		}
-		b.WriteString(fmt.Sprintf("  [%s] %s\n      %s\n", label, r.test,
-			strings.ReplaceAll(r.reason, "\n", "\n      ")))
+		sort.Strings(g.tests)
+		b.WriteString(fmt.Sprintf("  [%s] %d test(s)\n      %s\n", label, len(g.tests),
+			strings.ReplaceAll(g.reason, "\n", "\n      ")))
+		b.WriteString("      tests: " + namesLine(g.tests) + "\n")
 	}
 	if allowMissingDeps() {
 		b.WriteString(fmt.Sprintf(
@@ -177,4 +209,14 @@ func writeWhereItCannotBeMissed(msg string) {
 		}
 	}
 	fmt.Fprint(os.Stderr, msg)
+}
+
+// namesLine renders a group's test names on one line, truncated so a
+// two-hundred-test group stays readable while still naming enough to search.
+func namesLine(tests []string) string {
+	const shown = 8
+	if len(tests) <= shown {
+		return strings.Join(tests, ", ")
+	}
+	return fmt.Sprintf("%s, ... and %d more", strings.Join(tests[:shown], ", "), len(tests)-shown)
 }
