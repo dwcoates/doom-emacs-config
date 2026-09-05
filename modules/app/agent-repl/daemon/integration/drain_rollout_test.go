@@ -285,10 +285,12 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 		"daemon.health.session", "daemon.health.open_fault",
 	)
 
-	opened := make(chan error, 1)
+	opened := make(chan *agentreplv1.OpenWorkspaceResponse, 1)
+	openFailed := make(chan error, 1)
 	go func() {
-		_, err := f.openRaw()
-		opened <- err
+		msg, err := f.openRaw()
+		opened <- msg
+		openFailed <- err
 	}()
 	// The fake binds its control listener at startup, so this returns as soon
 	// as the PROCESS is up — long before any diagnostics it is withholding.
@@ -314,9 +316,16 @@ func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *tes
 		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim spawned and not yet registered is nothing but the supervisor's to stand down", len(left), left)
 	}
 	// The bring-up its process was stood down under does not succeed, and the
-	// caller is told rather than left holding a session that never came up.
-	if err := <-opened; err == nil {
-		t.Fatal("OpenWorkspace succeeded after its shim was stood down mid-bring-up")
+	// caller is TOLD — through the verb's own refusal arm, which is how this
+	// daemon says no. A transport error is what it must NOT be: that would be
+	// the answer being cut off by the exit rather than produced by it, and the
+	// caller would have no idea whether a session came up.
+	answer := <-opened
+	if err := <-openFailed; err != nil {
+		t.Fatalf("OpenWorkspace during the stand-down = transport error %v, want the daemon's own refusal", err)
+	}
+	if answer.GetError().GetSpawnFailed() == nil {
+		t.Fatalf("OpenWorkspace after its shim was stood down mid-bring-up = %v, want OpenWorkspaceError.spawn_failed", answer)
 	}
 }
 
