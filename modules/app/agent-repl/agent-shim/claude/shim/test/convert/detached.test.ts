@@ -27,6 +27,15 @@ import {
 import { toolResultText } from "../../src/convert/entries.js";
 import { activityOf, foldContext, MAIN_AGENT } from "./fold-harness.js";
 
+/**
+ * Run a converter for its SIDE EFFECT on the registry, discarding what it
+ * yields. Spelled as a call rather than a bare `[...gen]` statement, so it
+ * cannot be mistaken for an expression whose value someone forgot to use.
+ */
+function drain(entries: Iterable<unknown>): void {
+  for (const _entry of entries) void _entry;
+}
+
 const RUN = create(conversationv1.AgentActivityIdSchema, { value: "run-1" });
 
 /** The start a lost shell run's terminal restates. */
@@ -215,7 +224,7 @@ describe("a settling task's KIND decides whether it settles a subagent", () => {
     // Arrange.
     const registry = createTaskKindRegistry();
     const context = foldContext();
-    [...convertDetached(taskStarted("local_agent"), context, registry)];
+    drain(convertDetached(taskStarted("local_agent"), context, registry));
 
     // Act.
     const entries = [...convertDetached(taskNotification(), context, registry)];

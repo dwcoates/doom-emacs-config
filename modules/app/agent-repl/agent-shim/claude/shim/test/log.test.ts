@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { containing } from "./expect-shapes.js";
 import { writeSync } from "node:fs";
 
 const priorVerbose = process.env.AGENT_REPL_LOG_VERBOSE;
@@ -7,6 +8,11 @@ const mockedWriteSync = vi.mocked(writeSync);
 async function freshLog() {
   vi.resetModules();
   return import("../src/log.js");
+}
+
+/** One emergency-stderr line, parsed as the record it is. */
+function record(line: string): { message?: string } {
+  return JSON.parse(line) as { message?: string };
 }
 
 function persisted(): Record<string, unknown>[] {
@@ -157,13 +163,13 @@ describe("shim runtime logging", () => {
     const terminal = stderr();
     mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
     log.bindLog({ operation: "shim.test.throw" }).log({}, "nope");
-    expect(JSON.parse(terminal[0]).message).toContain("bad fd");
+    expect(record(terminal[0]).message).toContain("bad fd");
     vi.clearAllMocks();
     const overLog = await configured();
     const overTerminal = stderr();
     mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1));
     overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope");
-    expect(JSON.parse(overTerminal[0]).message).toContain("invalid write length");
+    expect(record(overTerminal[0]).message).toContain("invalid write length");
   });
 
   it("reports fatal errors canonically after configuration and through bootstrap stderr before it", async () => {
@@ -178,19 +184,19 @@ describe("shim runtime logging", () => {
     expect(JSON.parse(bootstrapTerminal[0])).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
     });
-    expect(JSON.parse(bootstrapTerminal[0]).message).toContain("bootstrap");
+    expect(record(bootstrapTerminal[0]).message).toContain("bootstrap");
     vi.clearAllMocks();
-    await bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
+    bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
     bootstrapFatal(new Error("configured"));
     expect(persisted()[0]).toMatchObject({
       level: "error",
       operation: "shim.main.fatal",
-      context: expect.objectContaining({
+      context: containing({
         cause_class: "unrecoverable_entrypoint_failure",
         cause_type: "Error",
         exit_outcome: "process_exit_1",
-        cause: expect.objectContaining({ name: "Error", message: "configured" }),
+        cause: containing({ name: "Error", message: "configured" }),
       }),
     });
     expect(configuredTerminal).toHaveLength(1);
@@ -237,7 +243,7 @@ describe("shim runtime logging", () => {
 
     // The mirror is gone and the durable sink has just died, so the emergency
     // path is the only channel left -- and it still carries the cause.
-    expect(JSON.parse(terminal[0]).message).toContain("bad fd");
+    expect(record(terminal[0]).message).toContain("bad fd");
   });
 
   it("tells a registered observer that the sink is poisoned", async () => {

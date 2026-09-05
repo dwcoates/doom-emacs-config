@@ -7,6 +7,7 @@
  * (which asserts what the scenario said, not how the engine said it).
  */
 import { describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 import { writeSync } from "node:fs";
 
 import {
@@ -22,7 +23,7 @@ import {
   TURN_GATE_PATH_ENV,
   TURN_GATE_TEXT_ENV,
 } from "../../src/fake/index.js";
-import type { CanUseToolLike, PermissionResultLike, SdkUserMessage } from "../../src/sdk/types.js";
+import type { CanUseToolLike, SdkUserMessage } from "../../src/sdk/types.js";
 import { driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
@@ -781,7 +782,6 @@ describe("the turn gate", () => {
     // Arrange
     const { mkdtempSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
     const dir = mkdtempSync(join(tmpdir(), "fake-gate-"));
     const gate = join(dir, "open");
     process.env[TURN_GATE_PATH_ENV] = gate;
@@ -840,7 +840,6 @@ describe("the spool root", () => {
     // Arrange
     const { mkdtempSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
     const root = mkdtempSync(join(tmpdir(), "fake-spool-env-"));
     process.env[SPOOL_ROOT_ENV] = root;
 

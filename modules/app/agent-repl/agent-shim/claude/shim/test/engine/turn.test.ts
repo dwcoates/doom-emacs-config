@@ -30,7 +30,7 @@ import { RecordingPersistence, ScriptedQuery } from "./fakes.js";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { SdkTaskNotificationMessage, SdkTaskStartedMessage } from "../../src/sdk/types.js";
+import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
 
 const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
 

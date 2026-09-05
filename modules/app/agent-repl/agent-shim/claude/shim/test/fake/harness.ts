@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
 import { cwdSlug } from "../../src/fake/vendor-files.js";
-import type { CanUseToolLike, PermissionResultLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
+import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 
 /** A record on either plane, as a plain object. */
 export type Line = Record<string, unknown>;
@@ -216,7 +216,8 @@ export async function driveScenario(
  */
 export function expectDroveCleanly(driven: Driven): Driven {
   if (driven.failure !== undefined) {
-    const detail = driven.failure instanceof Error ? driven.failure.message : String(driven.failure);
+    const detail =
+      driven.failure instanceof Error ? driven.failure.message : JSON.stringify(driven.failure);
     throw new Error(`the fake vendor drive REJECTED before the scenario finished: ${detail}`);
   }
   return driven;

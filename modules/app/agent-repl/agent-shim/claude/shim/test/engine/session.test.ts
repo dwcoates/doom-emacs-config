@@ -8,6 +8,7 @@
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { nextPush } from "../next-push.js";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1395,9 +1396,9 @@ describe("the teardown's waits are bounded", () => {
     const h = harness({ watcherConclusionBudgetMs: 5 });
     await started(h);
     h.persistence.standingTail = true;
-    const watching = h.engine
-      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
-      [Symbol.asyncIterator]();
+    const watching = h.engine.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+    )[Symbol.asyncIterator]();
     await watching.next();
     h.persistence.openHangs = true;
 
@@ -1670,10 +1671,10 @@ describe("WatchSession", () => {
       }),
     );
 
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
-    expect(second.value?.frame.case).toBe("update");
+    expect(second.frame.case).toBe("update");
   });
 
   it("re-announces the session's opening right AFTER the diagnostics", async () => {
@@ -1702,12 +1703,12 @@ describe("WatchSession", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.vendorSessionId
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.vendorSessionId
         : undefined,
     ).toBe(announced);
   });
@@ -1730,12 +1731,12 @@ describe("WatchSession", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.turnInFlight?.value !== undefined
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.turnInFlight?.value !== undefined
         : undefined,
     ).toBe(true);
   });
@@ -1900,12 +1901,12 @@ describe("GetLiveWork reconciliation", () => {
       Symbol.asyncIterator
     ]();
     await iterator.next();
-    const second = await iterator.next();
+    const second = await nextPush(iterator);
     await iterator.return?.();
 
     expect(
-      second.value?.frame.case === "sessionStarted"
-        ? second.value.frame.value.liveWork.map(
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.liveWork.map(
             (work: conversationv1.AgentDetachedWork) => work.work?.value,
           )
         : undefined,

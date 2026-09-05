@@ -178,7 +178,7 @@ export function rawStreamOpenH2(
     let sawData = false;
     let firstByteAt: bigint | null = null;
     stream.on("data", () => {
-      if (firstByteAt === null) firstByteAt = process.hrtime.bigint();
+      firstByteAt ??= process.hrtime.bigint();
       sawData = true;
       finish();
     });
