@@ -469,6 +469,27 @@ describe("clearProducer", () => {
     expect(() => plane.setProducer("vendor-session-2")).not.toThrow();
   });
 
+  it("stays a no-op on a writer that was never named, even after rows were attempted", async () => {
+    // The early return comes BEFORE the already-wrote check, so an unnamed
+    // writer whose rows never made it past the name check is still free.
+    // Arrange.
+    const started = await startFakeStore(socketPathForTest("clear-never-named"));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: undefined,
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [0, 0, 0, 0] },
+    });
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // Act, Assert. The rows never landed under any name, so nothing is claimed.
+    expect(() => plane.clearProducer()).not.toThrow();
+    expect(() => plane.setProducer("vendor-session-1")).not.toThrow();
+  });
+
   it("refuses to un-name a producer that already wrote rows", async () => {
     const { persistence: plane } = await persistence("clear-after-write");
     plane.setProducer("vendor-session-1");
