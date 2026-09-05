@@ -64,7 +64,7 @@ import (
 // AN EARLIER DRAFT CARRIED 60s, THEN 20s, on the theory that a cold Vite
 // transform dominated and could not be measured. That theory was wrong: the
 // transform is ~400ms on every run, cache or no cache (clearing
-// node_modules/.vite changes nothing — vitest transforms sources per run),
+// the vite cache changes nothing — vitest transforms sources per run),
 // so there is no hidden cold-start term to leave headroom for.
 //
 // It bounds a HANG, not a synchronization wait: nothing here sleeps, the
@@ -190,7 +190,62 @@ func wlRequireWebappDeps(t *testing.T) string {
 		requireDependency(t, "e2e/webapp-layer: %s/node_modules is absent; run `npm ci --prefix %s` first",
 			webappDir, webappDir)
 	}
+	wlRequireWebappWritable(t, webappDir)
 	return webappDir
+}
+
+// wlRequireWebappWritable fails the calling test, by name and before a world
+// is built, when the vitest child could not write what it must write.
+//
+// WHY THIS EXISTS, and it is a defect this suite already paid for once. The
+// e2e sandbox links `webapp/node_modules` at a READ-ONLY image layer (the
+// trees are baked once and shared, because materializing them per run cost
+// ~730 MiB of tmpfs and OOM-killed concurrent sandboxes). Vite's default
+// `cacheDir` is `node_modules/.vite`, so vitest's first act failed with a
+// filesystem error and ALL ELEVEN areas of this layer went red — inside the
+// container, which is the environment this layer exists for, while staying
+// green on the host. Eleven confusing failures named the symptom eleven times
+// and the cause not once.
+//
+// The cache now lives in the webapp package directory instead
+// (webapp/vite-cache.ts; webapp/test/vite-cache.test.ts holds every config to
+// it). That directory being writable is what the whole layer rests on, so it
+// is CHECKED HERE rather than assumed: if it stops being writable — a
+// read-only mount, a staging change, a sandbox that starts linking the package
+// directory too — the run says the layer cannot run, instead of eleven areas
+// failing somewhere deep in a node process.
+//
+// It is a hard failure, never a skip and never the missing-dependency opt-out:
+// no command the reader could run supplies this, and a layer that could not
+// run must never read as one that did.
+func wlRequireWebappWritable(t *testing.T, webappDir string) {
+	t.Helper()
+	if err := wlWebappWritable(webappDir); err != nil {
+		t.Fatalf("e2e/webapp-layer: THE WEBAPP LAYER CANNOT RUN HERE.\n"+
+			"  %v\n"+
+			"  vite and vitest keep their cache in that directory (webapp/vite-cache.ts),\n"+
+			"  so the vitest child cannot start and no area of this layer would exercise anything.\n"+
+			"  In the e2e sandbox this is what a read-only working copy looks like; on the host,\n"+
+			"  check the permissions on the checkout.", err)
+	}
+}
+
+// wlWebappWritable answers whether the webapp package directory can hold the
+// cache vite and vitest write there, by actually creating and removing one —
+// a stat of the mode bits would answer for the wrong uid on a mount that
+// disagrees with them.
+//
+// A DIRECTORY, not a file: what vite creates is a directory, and a filesystem
+// can refuse that while a file write would have succeeded.
+func wlWebappWritable(webappDir string) error {
+	probe, err := os.MkdirTemp(webappDir, ".vite-cache-writeprobe-")
+	if err != nil {
+		return fmt.Errorf("%s is not writable: %w", webappDir, err)
+	}
+	if err := os.RemoveAll(probe); err != nil {
+		return fmt.Errorf("could not remove the write probe %s: %w", probe, err)
+	}
+	return nil
 }
 
 // ONE GO TEST PER AREA (project-lead ruling). Each area gets its OWN world,

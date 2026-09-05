@@ -293,14 +293,35 @@ Mounted / materialized at **run** time:
   checkout's lockfile hashes to the digest the image installed from. On a
   mismatch the run says so, prints both digests, and falls back to a real
   `npm ci --offline` — the shortcut can never silently test an older
-  dependency tree. `SANDBOX_NODE_MODULES=copy` gives a writable per-run copy
-  (vitest writes inside `node_modules`), `=install` forces the install;
+  dependency tree. The linked tree is **read-only**, so nothing a run does may
+  write inside `node_modules` — see "Nothing writes inside `node_modules`"
+  below. `SANDBOX_NODE_MODULES=copy` gives a writable per-run copy, `=install`
+  forces the install; both are forwarded from the caller's environment;
 - the Go build cache, copied out of the image into `$GOCACHE` (`go` writes to
   its cache on every invocation, and the image layer is read-only). Seeding it
   cannot be *wrong*, only useless: the cache is content-addressed, so an entry
   compiled from different bytes is simply not found;
 - the Doom module symlink pointing `:app agent-repl` at the checked-out
   source, replacing the build-time snapshot of the loader files.
+
+### Nothing writes inside `node_modules`
+
+The baked trees are an image layer, so the `node_modules` a run sees is
+read-only. That is the price of not paying ~730 MiB of tmpfs per container,
+and it is a real constraint on the suites: a tool that writes inside
+`node_modules` works on the host and fails only in here.
+
+One did. Vite's default `cacheDir` is `node_modules/.vite`, and vitest creates
+it before it runs anything, so all eleven `TestWebappLayer*` areas failed
+inside the container while passing on the host — with a filesystem error
+nowhere near the config that caused it. The fix is not `SANDBOX_NODE_MODULES=copy`
+(that buys the write back at the price the bake exists to avoid); every vite
+and vitest config in `webapp/` now points `cacheDir` at `webapp/.vite-cache`,
+a directory that is writable in the container and on the host alike. See
+`webapp/vite-cache.ts` for the whole account, `webapp/test/vite-cache.test.ts`
+for the check that holds every config to it, and `wlRequireWebappWritable` in
+`e2e/webapplayer_e2e_test.go` for the precondition that fails the layer loudly,
+by name, if the place it writes ever stops being writable again.
 
 ### The webapp dist
 
