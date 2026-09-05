@@ -1185,7 +1185,18 @@ func cursorOffsetsUnder(cursors []*storev1.CursorState, projectDir string) map[s
 // sidecar has committed the turn's resulting facts.
 func awaitCursorAdvance(t *testing.T, w *World, projectDir string, baseline map[string]int64) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	awaitCursorAdvanceWithin(t, w, projectDir, baseline, DefaultTimeout)
+}
+
+// awaitCursorAdvanceWithin is awaitCursorAdvance on a caller-supplied bound,
+// for the one wait whose budget is its OWN measured window rather than this
+// suite's ordinary one (hibernation_e2e_test.go's keepAliveObservationWindow).
+// It exists because that constant used to bound only the BASELINE read beside
+// this call, leaving the wait it documents running on DefaultTimeout — a bound
+// stated at a site that was not the bound in force.
+func awaitCursorAdvanceWithin(t *testing.T, w *World, projectDir string, baseline map[string]int64, bound time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(w.Ctx(), bound)
 	defer cancel()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
