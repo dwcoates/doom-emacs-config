@@ -122,17 +122,61 @@ call answers only what has happened since the first."
       (insert (json-encode payload)))
     (rename-file tmp path t)))
 
+(defun agent-repl-e2e--unblind-server-errors ()
+  "Stop a failed `emacsclient --eval' from freezing Emacs for ten seconds.
+
+WHAT THIS IS FOR. `server-execute' answers a form that SIGNALS by calling
+`server-return-error', which sends the error to the client, deletes the
+connection -- and then calls `sit-for' to give the socket time to drain.
+`sit-for' is a wait on input: for its whole duration Emacs serves NOTHING,
+not the next scenario step and not the heartbeat probe, whose bound is
+`HeartbeatBound' and is a small fraction of it.
+
+So in this layer one signalling eval did not READ as a signalling eval.  It
+read as a wedged editor: the heartbeat missed, `declareWedged' fired, the
+scenario was reported as the sentinel-recursion hang this layer exists to
+catch, and the error that actually caused it reached the log only afterwards
+as \"signal: killed\".  Measured 2026-09-04 on
+TestEmacsHistoryRecallRestoresTheLastPrompt, whose native backtrace stood in
+`sit-for' under `server-return-error' with `seconds=10'.
+
+The drain the `sit-for' buys is worth nothing here -- the Go side reads the
+error off `emacsclient''s own exit, and the process it would drain to is
+already being torn down -- while the blindness it buys is total.  So the
+wait is dropped for the duration of that one function and nothing else:
+errors are still returned, still logged, and still fail their scenario, as
+themselves."
+  (require 'cl-lib)
+  (advice-add
+   'server-return-error :around
+   (lambda (fn &rest args)
+     (cl-letf (((symbol-function 'sit-for) (lambda (&rest _) t)))
+       (apply fn args)))
+   '((name . agent-repl-e2e--no-sit-for))))
+
 (defun agent-repl-e2e--boot ()
   "Arm the e2e server and publish the readiness stamp.
 Runs after Doom has finished initializing, which is the earliest moment at
 which `map!' bindings, popup rules and every module's `config.el' are all in
 effect."
   (agent-repl-e2e--breadcrumb "boot hook entered")
-  (require 'server)
   (let ((ready (getenv "AGENT_REPL_E2E_READY"))
         (socket (getenv "AGENT_REPL_E2E_SERVER")))
+    ;; THE HANDLER IS `t', NOT `error', AND `(require 'server)' IS INSIDE IT.
+    ;;
+    ;; A boot that leaves this hook by ANY non-local exit publishes no stamp
+    ;; and writes no further breadcrumb, and the Go side then reports only
+    ;; "no readiness stamp" for a socket that is never coming -- the exact
+    ;; blindness the stamp's failed arm exists to prevent. Two ways out were
+    ;; still uncovered: `(require 'server)' sat OUTSIDE the guard entirely,
+    ;; and a `quit' -- which is a signal but not an `error' -- would have
+    ;; walked straight through an `error' handler. Both now land in the arm
+    ;; that names what happened.
     (condition-case err
         (progn
+          (require 'server)
+          (agent-repl-e2e--breadcrumb "server feature loaded")
+          (agent-repl-e2e--unblind-server-errors)
           (unless (and socket (not (string-empty-p socket)))
             (error "AGENT_REPL_E2E_SERVER is unset"))
           ;; A real frame with a tab-bar: the layer asserts window and tab
@@ -185,8 +229,13 @@ effect."
           ;; phase it exists to explain.
           (require 'profiler)
           (profiler-start 'cpu))
-      (error
+      (t
        ;; Never leave the Go side waiting on a socket that is not coming.
+       ;; The breadcrumb is written FIRST and separately from the stamp: the
+       ;; stamp write is itself a way this can come up empty, and the
+       ;; breadcrumb file is one `write-region' with nothing else to fail.
+       (agent-repl-e2e--breadcrumb
+        (format "boot hook aborted: %s" (error-message-string err)))
        (when ready
          (ignore-errors
            (agent-repl-e2e--write-stamp
