@@ -114,6 +114,38 @@ call answers only what has happened since the first."
      (seq-take entries n)
      "\n")))
 
+(defun agent-repl-e2e--socket-occupant (path)
+  "Describe whatever already occupies PATH, or nil when nothing does.
+
+WHY THIS EXISTS, and it is a measurement rather than a precaution.
+`server-start' answers EXACTLY ONE failure with \"Cannot bind server
+socket: Address already in use\", and it is not the one a reader assumes.
+A stale socket at the path is deleted by `server-stop' and rebound; a LIVE
+socket -- even one another process owns -- is reported as a warning
+(\"There is an existing Emacs server\") and never as that error.  The bind
+only fails that way when the entry could not be deleted, which
+`server-stop' swallows in an `ignore-errors': a DIRECTORY at the path, or
+an entry this user may not unlink.  Verified against Emacs 30's own
+`server.el' by running all three cases.
+
+So the error names nothing, and the one fact that would explain it -- what
+is actually sitting there -- is discarded.  This reads it BEFORE the bind,
+while it is still there to read.  The scratch root is unique per scenario,
+so anything at all at this path is a defect in this harness and the
+description is the whole of the evidence for it."
+  (let ((attrs (file-attributes path 'string)))
+    (when attrs
+      (format "type=%s mode=%s owner=%s size=%s modified=%s"
+              (cond ((eq (file-attribute-type attrs) t) "directory")
+                    ((stringp (file-attribute-type attrs))
+                     (format "symlink->%s" (file-attribute-type attrs)))
+                    ((file-attribute-type attrs) "other")
+                    (t "regular-or-socket"))
+              (file-attribute-modes attrs)
+              (file-attribute-user-id attrs)
+              (file-attribute-size attrs)
+              (format-time-string "%FT%T" (file-attribute-modification-time attrs))))))
+
 (defun agent-repl-e2e--write-stamp (path payload)
   "Write PAYLOAD as JSON to PATH, atomically via a rename."
   (require 'json)
@@ -199,7 +231,27 @@ effect."
           (agent-repl-e2e--breadcrumb "persp-mode loaded")
           (tab-bar-mode 1)
           (setq server-name socket)
-          (server-start)
+          ;; THE OCCUPANT IS READ BEFORE THE BIND, AND THE BIND STILL RUNS.
+          ;; `server-start' RECOVERS from a stale socket by deleting it, so an
+          ;; occupant is not by itself a failure and this must not turn one
+          ;; into a failure.  What it must not do is let the one failure it
+          ;; cannot recover from report nothing: the occupant is only readable
+          ;; while it is still there, and `server-start' deletes it on the way
+          ;; past.  So it is read here and reported only if the bind then
+          ;; fails -- at which point it is the whole of the evidence, because
+          ;; the scratch root is unique per scenario and nothing outside this
+          ;; run can have written to it.
+          (let ((occupant (agent-repl-e2e--socket-occupant socket)))
+            (when occupant
+              (agent-repl-e2e--breadcrumb
+               (format "server socket path is already occupied: %s -- %s" socket occupant)))
+            (condition-case bind-err
+                (server-start)
+              (error
+               (signal (car bind-err)
+                       (list (format "%s [socket %s; occupant before the bind: %s]"
+                                     (error-message-string bind-err) socket
+                                     (or occupant "nothing")))))))
           (agent-repl-e2e--breadcrumb "server started")
           (when ready
             (agent-repl-e2e--write-stamp

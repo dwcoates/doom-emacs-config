@@ -893,6 +893,20 @@ The reason it is not a skip: a skip is a thing a reader's eye passes over,
 and the failure mode this guard exists to prevent — a perf suite that quietly
 stopped asserting — looks exactly like a skip.
 
+**AN AREA WHOSE SAMPLES COME FROM A CHILD DECLINES BEFORE IT STARTS THE CHILD.**
+The three bullets above are written for a measurement already in hand: report
+it, assert nothing. `TestPerfWebappLayer` has no measurement at calibration
+time — it has a vitest child that drives 80 real chain traversals under
+`WebappLayerPerfTimeout`. MEASURED, on a box saturated enough to decline: the
+guard DECLINED, the area started the child anyway, the child did not finish
+inside the 60 s bound, and the area FAILED on `child.WaitFor` — a red reported
+by a phase that had already decided it would assert nothing. A decline that can
+produce a failure is not a decline. So `perfDeclineArea` (`perf_harness_test.go`)
+ends such an area at the calibration, before the child is started: it records
+one `DECLINED` summary row per assertion the area owns — so the phase summary
+says exactly what it would have said had the child run — and skips with the
+probe numbers in the reason. Covered by `perf_decline_test.go`.
+
 ### D3. Baselines and the regression check
 
 - One file per assertion, under `e2e/testdata/perf/<assertion>.json`, holding

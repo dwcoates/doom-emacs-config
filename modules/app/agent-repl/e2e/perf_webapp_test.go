@@ -65,6 +65,37 @@ const (
 	wlPerfWorkspaceDirBEnv = "AGENT_REPL_E2E_WORKSPACE_DIR_B"
 )
 
+// wlPerfRow is one shipped assertion and the budget it meets.
+type wlPerfRow struct {
+	name      string
+	p50Budget time.Duration
+	p95Budget time.Duration
+}
+
+// wlPerfRows is the area's five assertions, in one place.
+//
+// ONE TABLE, TWO READERS: the subtests below assert against it, and
+// `wlPerfAssertions` names the same rows to `perfDeclineArea` when the
+// calibration guard declines before the child is started. A declined area that
+// summarized a different set of names than the one it would have measured
+// would be reporting on assertions that do not exist.
+var wlPerfRows = []wlPerfRow{
+	{"perf-prompt-bubble", perfBudgetPromptBubbleP50, perfBudgetPromptBubbleP95},
+	{"perf-response-bubble", perfBudgetResponseBubbleP50, perfBudgetResponseBubbleP95},
+	{"perf-interrupt-footer", perfBudgetInterruptFooterP50, perfBudgetInterruptFooterP95},
+	{"perf-question-card", perfBudgetQuestionCardP50, perfBudgetQuestionCardP95},
+	{"perf-sidebar-selected", perfBudgetSidebarSelectedP50, perfBudgetSidebarSelectedP95},
+}
+
+// wlPerfAssertions names every assertion this area owns.
+func wlPerfAssertions() []string {
+	names := make([]string, 0, len(wlPerfRows))
+	for _, row := range wlPerfRows {
+		names = append(names, row.name)
+	}
+	return names
+}
+
 // TestPerfWebappLayer drives the perf area and asserts its shipped numbers.
 func TestPerfWebappLayer(t *testing.T) {
 	perfRequire(t)
@@ -80,6 +111,21 @@ func TestPerfWebappLayer(t *testing.T) {
 	ws := harness.Register(t, w.Daemon, repoA.Dir)
 	wsB := harness.Register(t, w.Daemon, repoB.Dir)
 	perfCalibrate(t, w)
+
+	// A DECLINE ENDS THE AREA HERE, BEFORE THE CHILD IS STARTED.
+	//
+	// The child drives 80 real chain traversals under WebappLayerPerfTimeout.
+	// On a box saturated enough to decline, it does not finish inside that
+	// bound — measured: a declined run spent the whole 60s and then failed on
+	// `child.WaitFor`, reporting a RED for a phase that had already decided it
+	// would assert nothing. §D2 says a decline is neither a pass nor a
+	// failure, so it must not be able to produce one.
+	//
+	// The five assertions below are named to `perfDeclineArea` so the phase
+	// summary carries the same DECLINED rows the subtests would have recorded.
+	if perfDeclined() {
+		perfDeclineArea(t, wlPerfAssertions()...)
+	}
 
 	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE — the same hold wlDriveArea
 	// takes, and for the same reason: without it the footer resolves
@@ -113,17 +159,7 @@ func TestPerfWebappLayer(t *testing.T) {
 		"the perf child's shipped percentiles",
 		func(r harness.LogRecord) bool { return r.Operation == wlPerfSamplesOperation })
 
-	for _, tc := range []struct {
-		name      string
-		p50Budget time.Duration
-		p95Budget time.Duration
-	}{
-		{"perf-prompt-bubble", perfBudgetPromptBubbleP50, perfBudgetPromptBubbleP95},
-		{"perf-response-bubble", perfBudgetResponseBubbleP50, perfBudgetResponseBubbleP95},
-		{"perf-interrupt-footer", perfBudgetInterruptFooterP50, perfBudgetInterruptFooterP95},
-		{"perf-question-card", perfBudgetQuestionCardP50, perfBudgetQuestionCardP95},
-		{"perf-sidebar-selected", perfBudgetSidebarSelectedP50, perfBudgetSidebarSelectedP95},
-	} {
+	for _, tc := range wlPerfRows {
 		// ONE SUBTEST EACH, so a DECLINED calibration's skip scopes to one
 		// assertion instead of abandoning the four after it.
 		t.Run(tc.name, func(t *testing.T) {
