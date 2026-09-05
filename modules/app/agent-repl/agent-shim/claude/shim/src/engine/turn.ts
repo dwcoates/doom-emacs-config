@@ -73,7 +73,7 @@ export interface SessionContext {
   identity(): SessionIdentity | undefined;
   /** The one live query, or absence when it is dead or not yet started. */
   query(): QueryLike | undefined;
-  nowMs(): number;
+  readonly nowMs: () => number;
   openTurn(): OpenTurn | undefined;
   /**
    * Deliver a prompt to the vendor.
