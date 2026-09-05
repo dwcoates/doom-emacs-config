@@ -1016,7 +1016,23 @@ Every step is now waited on:
    in that session with it. A group id that reads back as the test binary's
    own is refused and the bare pid is signalled instead, so a bad `/proc` read
    can never signal the suite;
-5. the pty parent is killed last.
+5. the pty parent is killed last;
+6. **teardown waits for the stopped daemon to leave `/proc` too**, bounded by
+   `daemonExitBound`. Step 1's ack says the orderly exit was STARTED, not that
+   it finished: `drain.ShutdownNow` announces, stands every session down,
+   calls `Exit` and answers. Everything after that ack is separately bounded by
+   the daemon itself — `shutdownGrace` (2s) for the in-flight requests,
+   `merge.TerminalDrainBound` (2s) for a merge terminal's durable stamps, and
+   `loopJoinBound` (2s) for the background loops — so the wait's bound is
+   their sum, six seconds, and a daemon still standing afterwards has missed a
+   bound it states itself. Without this wait there was a race the scenario
+   could only lose, because the daemon's shutdown grace is held open by the
+   standing streams of the very Emacs step 4 has just killed: the slower Emacs
+   was to go, the more of that grace was still running when the reaper looked.
+   Observed on a loaded host with Emacs's own exit escalating (1.06s against
+   the 500ms bound), the reaper reported a `claude-repld` that was exiting
+   exactly as designed. `go test -v` prints `emacs phase daemon-exit` for every
+   scenario; on a quiet box it is one poll interval.
 
 A stray the reaper still finds after all of that **fails the scenario that
 left it**, naming the pid, its `/proc` state and wchan, and the steps teardown
@@ -1025,8 +1041,10 @@ leak a process into the next one.
 
 `emacs_teardown_test.go` holds teardown's own tests — that the wait does not
 return before the process is gone, that a process refusing `SIGTERM` is
-escalated to its group (proved by a child of that group dying with it), and
-that a survivor is reported as a failure and still reaped.
+escalated to its group (proved by a child of that group dying with it), that
+the daemon wait does not return before the stopped daemon is gone and does not
+run at all for a stop nobody made, and that a survivor is reported as a failure
+and still reaped.
 
 ### What the proof-of-life test reaches today, and what blocks it
 
