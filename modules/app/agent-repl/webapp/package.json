@@ -12,7 +12,7 @@
     "pretest": "npm run ensure-deps",
     "test": "vitest run",
     "precoverage": "npm run ensure-deps",
-    "coverage": "vitest run --coverage",
+    "coverage": "vitest run --coverage --isolate",
     "pretypecheck": "npm run ensure-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "pretest:integration": "npm run ensure-deps",

@@ -51,6 +51,15 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       reportsDirectory: "coverage",
       // WHY: Establish the baseline before coverage-closing work enforces 90%.
+      //
+      // `npm run coverage` passes `--isolate` back, overriding the `isolate:
+      // false` above, because the v8 provider attributes a module's execution
+      // to the file run that instantiated it. When files share a worker the
+      // module is instantiated once and later files' exercise of it goes
+      // unattributed: src/rpc/streams.ts measured 130 covered lines isolated
+      // and 115 un-isolated, differing run to run. A number that moves without
+      // the code moving is not a measurement, so the reported figure is taken
+      // the slow, accurate way.
     },
   },
 });
