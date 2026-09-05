@@ -377,10 +377,10 @@ func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.Session
 	at := usage.GetObservedAtMs()
 	moved := false
 	if five := available.Available.GetFiveHour(); five != nil {
-		moved = s.rate.session.observeFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+		moved = s.rate.session.observeSampledFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
 	}
 	if seven := available.Available.GetSevenDay(); seven != nil {
-		moved = s.rate.weekly.observeFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+		moved = s.rate.weekly.observeSampledFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
 	}
 	if moved {
 		s.rate.at = r.opts.clock.Now()
@@ -391,8 +391,10 @@ func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.Session
 // window it is about: five_hour is the session allowance; seven_day and its
 // per-model and overage-included aliases are all the weekly one. The event is
 // the VERDICT's only source, so filing it is what lets an allowance's status
-// arm join. An event whose utilization is NEWER than the figures on hand also
-// wins for the figure. The overage window has no cell in the contract, so it
+// arm join. An event that carries a utilization also supplies the figure, and
+// as the newest sighting to arrive it is the one drawn — see `fileFigures`,
+// which states why arrival rather than a timestamp orders the two sources.
+// The overage window has no cell in the contract, so it
 // is logged and dropped rather than drawn against a window it is not about;
 // a status naming no window is not filable at all.
 func (r *resolver) observeRateLimitStatus(ws ids.WorkspaceID, s *wsState, status *conversationv1.SessionRateLimitStatus) {
@@ -418,7 +420,7 @@ func (r *resolver) observeRateLimitStatus(ws ids.WorkspaceID, s *wsState, status
 	}
 	window.verdict = status
 	if status.UtilizationPercent != nil {
-		window.observeFigures(status.GetUtilizationPercent(), status.GetResetsAtMs(), r.opts.clock.Now().UnixMilli())
+		window.observeEventFigures(status.GetUtilizationPercent(), status.GetResetsAtMs())
 	}
 	s.rate.at = r.opts.clock.Now()
 }
