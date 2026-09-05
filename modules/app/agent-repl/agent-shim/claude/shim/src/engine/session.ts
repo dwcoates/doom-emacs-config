@@ -67,7 +67,7 @@ import {
   startSessionStarted,
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
-import type { EngineFold, FoldContext } from "./fold-context.js";
+import type { EngineFold, FoldContext, LastChange } from "./fold-context.js";
 import { SYNTHETIC_MODEL } from "../model.js";
 import { fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
@@ -329,7 +329,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   const announcedAgents = new Set<string>();
   /**
-   * The last write or edit unit this session folded.
+   * The last write or edit this session folded, and which of the two it was.
    *
    * THE IDE-DIAGNOSTICS JOIN. The vendor's `diagnostics` attachment carries no
    * tool id at all, so `convert/attachments.ts` joins it to the change it
@@ -339,9 +339,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    *
    * ONE remembered value, per the fold context's contract, and it is remembered
    * where every other cross-message observation is: from the entries the fold
-   * produced.
+   * produced. It carries the KIND as well as the id, because the report lands
+   * on that unit's own arm -- a write's findings on `AgentWrite.diagnostics`,
+   * an edit's on `AgentEdit.diagnostics` -- and nothing else in the diagnostics
+   * record states which.
    */
-  let lastWriteOrEdit: conversationv1.AgentActivityId | undefined;
+  let lastChange: LastChange | undefined;
   /**
    * Cuts produced BEFORE the session had an identity to key them to.
    *
@@ -430,7 +433,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       ...(open === undefined ? {} : { turnId: open.id }),
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
-      ...(lastWriteOrEdit === undefined ? {} : { lastWriteOrEditUnit: lastWriteOrEdit }),
+      ...(lastChange === undefined ? {} : { lastChange }),
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
       deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
       reportFault: (_kind, detail) => {
@@ -1216,7 +1219,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // name -- the unit a consumer was shown.
       if (item.case === "write" || item.case === "edit") {
         const activityId = activity.activityId;
-        if (activityId !== undefined && activityId.value !== "") lastWriteOrEdit = activityId;
+        // THE KIND IS REMEMBERED WITH THE ID. The report rides the remembered
+        // unit's OWN arm, so a write's findings can only reach
+        // `AgentWrite.diagnostics` if this says the change was a write.
+        if (activityId !== undefined && activityId.value !== "") {
+          lastChange = { unit: activityId, kind: item.case };
+        }
       }
       const inner = item.value as { result?: { case?: string } } | undefined;
       const settled =

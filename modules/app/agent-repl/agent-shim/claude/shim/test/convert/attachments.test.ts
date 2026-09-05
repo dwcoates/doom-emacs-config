@@ -21,7 +21,14 @@ import { activityOf, corpusLine, foldContext, residueOf } from "./fold-harness.j
 import { join } from "node:path";
 
 const UNIT = create(conversationv1.AgentActivityIdSchema, { value: "injected-1" });
-const LAST_CHANGE = create(conversationv1.AgentActivityIdSchema, { value: "toolu_edit" });
+const LAST_EDIT = {
+  unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_edit" }),
+  kind: "edit",
+} as const;
+const LAST_WRITE = {
+  unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_write" }),
+  kind: "write",
+} as const;
 
 /** One attachment fixture from the corpus, as the record the converter reads. */
 function attachment(name: string): AttachmentRecord {
@@ -74,17 +81,27 @@ describe("IDE diagnostics", () => {
   it("attaches the report to the last change unit, by adjacency", () => {
     const entries = convertAttachment(
       attachment("diagnostics"),
-      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      foldContext({ lastChange: LAST_EDIT }),
       UNIT,
     );
 
     expect(activityOf(entries[0])?.activityId?.value).toBe("toolu_edit");
   });
 
+  it("rides the edit arm when the last change was an edit", () => {
+    const entries = convertAttachment(
+      attachment("diagnostics"),
+      foldContext({ lastChange: LAST_EDIT }),
+      UNIT,
+    );
+
+    expect(activityOf(entries[0])?.item.case).toBe("edit");
+  });
+
   it("carries the findings as the change unit's post-terminal consequence arm", () => {
     const entries = convertAttachment(
       attachment("diagnostics"),
-      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      foldContext({ lastChange: LAST_EDIT }),
       UNIT,
     );
 
@@ -95,7 +112,7 @@ describe("IDE diagnostics", () => {
   it("carries each finding's file, message and zero-based lines", () => {
     const entries = convertAttachment(
       attachment("diagnostics"),
-      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      foldContext({ lastChange: LAST_EDIT }),
       UNIT,
     );
 
@@ -256,7 +273,7 @@ describe("reading one diagnostics report", () => {
 
   /** The report the converter built, off the entry it produced. */
   function reportOf(record: AttachmentRecord): conversationv1.AgentDiagnosticsReport {
-    const entries = convertAttachment(record, foldContext({ lastWriteOrEditUnit: LAST_CHANGE }), UNIT);
+    const entries = convertAttachment(record, foldContext({ lastChange: LAST_EDIT }), UNIT);
     const edit = activityOf(entries[0])?.item.value as conversationv1.AgentEdit;
     return edit.result.value as conversationv1.AgentDiagnosticsReport;
   }
@@ -316,7 +333,7 @@ describe("reading one diagnostics report", () => {
   it("stands a uuid-less diagnostics record on the unit it attaches to", () => {
     const entries = convertAttachment(
       report([]),
-      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      foldContext({ lastChange: LAST_EDIT }),
       UNIT,
     );
 
@@ -458,28 +475,52 @@ describe("a uuid-less context-budget warning", () => {
 });
 
 /**
- * THE WRITE ARM OF THE DIAGNOSTICS REPORT IS UNREACHABLE.
+ * THE WRITE ARM OF THE DIAGNOSTICS REPORT.
  *
- * `convertDiagnostics` takes an `isEdit` flag whose comment says "which arm the
- * report rides is the unit's own kind", but the ONE call site
- * (src/convert/attachments.ts:365) passes `true` unconditionally, and
- * `context.lastWriteOrEditUnit` is a bare `AgentActivityId` that states no kind.
- * So an IDE diagnostics report following a `Write` lands on
- * `AgentEdit.diagnostics` rather than on `AgentWrite.diagnostics`, and
- * src/convert/attachments.ts:134-139 can never execute.
- *
- * UNFIXED PRODUCTION DEFECT — src/convert/attachments.ts:365. Reproduced by the
- * skipped test below, which would need the fold to remember the KIND of the
- * last change alongside its unit id.
+ * `convertDiagnostics` puts the report on the remembered unit's OWN arm, and
+ * the kind comes from `FoldContext.lastChange` rather than from a guess at the
+ * call site. It used to be hardcoded to the edit arm, which attributed a new
+ * file's findings to an edit that never happened.
  */
-describe.skip("IDE diagnostics after a Write", () => {
+describe("IDE diagnostics after a Write", () => {
   it("rides the write arm rather than the edit arm", () => {
     const entries = convertAttachment(
       attachment("diagnostics"),
-      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      foldContext({ lastChange: LAST_WRITE }),
       UNIT,
     );
 
     expect(activityOf(entries[0])?.item.case).toBe("write");
+  });
+
+  it("attaches the report to the write's own unit", () => {
+    const entries = convertAttachment(
+      attachment("diagnostics"),
+      foldContext({ lastChange: LAST_WRITE }),
+      UNIT,
+    );
+
+    expect(activityOf(entries[0])?.activityId?.value).toBe("toolu_write");
+  });
+
+  it("carries the findings as the write unit's post-terminal consequence arm", () => {
+    const entries = convertAttachment(
+      attachment("diagnostics"),
+      foldContext({ lastChange: LAST_WRITE }),
+      UNIT,
+    );
+
+    const write = activityOf(entries[0])?.item.value as conversationv1.AgentWrite;
+    expect(write.result.case).toBe("diagnostics");
+  });
+
+  it("keys the row under the write arm, so an edit's row never absorbs it", () => {
+    const entries = convertAttachment(
+      attachment("diagnostics"),
+      foldContext({ lastChange: LAST_WRITE }),
+      UNIT,
+    );
+
+    expect(entries[0]?.source.discriminator).toBe("activity.write.diagnostics");
   });
 });
