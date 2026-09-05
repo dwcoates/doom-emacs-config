@@ -219,6 +219,12 @@ func TestMcpUnmodeledTool(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
+	// THE UNMODELED ACTIVITY IS WHAT THIS TEST DRIVES. `AgentActivity.unmodeled`
+	// is a modeled arm, the watcher routes it to the topbar's warning dropdown
+	// (asserted below) and records it on the way past; the scenario runs twice
+	// and both planes carry each frame, so the record is repeated while the
+	// dropdown still holds exactly one warning per distinct name.
+	w.ExpectWarnings("daemon.sessionwatcher.unmodeled_activity")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	topbar := w.WatchTopbar(ws)

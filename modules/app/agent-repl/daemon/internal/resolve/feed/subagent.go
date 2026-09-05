@@ -272,6 +272,17 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 		if r.detachForegroundShell(s, at, unitID, workID) {
 			return
 		}
+		// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
+		// A monitor is footer-only and always detached, so its announcement
+		// has no row to continue and never will; holding it would report the
+		// footer's own bookkeeping as a producer fault at the turn's
+		// terminal.
+		if s.undrawable(unitID) {
+			log.Debug("daemon.feed.detachment_draws_nothing",
+				"a detachment named a unit whose kind draws no feed row; the footer carries the work",
+				dlog.Context{"unit": unitID, "work": workID})
+			return
+		}
 		// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
 		// against its identity so the unit lands through the detached
 		// placement when it does draw; a mark still standing when the turn
@@ -342,6 +353,20 @@ func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) 
 	s.markDetached(unitID, work)
 }
 
+// retireDetachment drops a detachment held against a unit whose kind draws no
+// feed row. The mark exists so a row can ride the detached wrapper when it
+// draws; a unit that will never draw one has nothing to hand it to, and a mark
+// left standing is reported at the turn's terminal as a producer fault.
+func (r *resolver) retireDetachment(s *wsState, unitID string) {
+	work, held := s.claimDetached(unitID)
+	if !held {
+		return
+	}
+	r.logger(s.id).Debug("daemon.feed.detachment_retired",
+		"a held detachment named a unit whose kind draws no feed row; the mark is retired",
+		dlog.Context{"unit": unitID, "work": work})
+}
+
 // republishSubagent re-pushes a bubble whose placement wrapper changed.
 func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentState) {
 	row := &frontendv1.FeedRow{Id: state.row}
@@ -376,17 +401,42 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
 		}
 	case *conversationv1.AgentBash_Update:
-		// The offset is a GAP DETECTOR: it must equal what the consumer has
-		// already accumulated. Anything else means bytes were lost, and the
-		// frame is REFUSED rather than concatenated across a hole.
-		if frame.Update.GetFromOffset() != sh.nextOffset {
+		// The offset is a GAP DETECTOR: bytes must arrive contiguously, and a
+		// frame that does not continue the spool is REFUSED rather than
+		// concatenated across a hole.
+		//
+		// A RE-DELIVERY IS NOT A HOLE. Two producers write this run's frames
+		// under one upsert key — the shim from the live stream, the sidecar
+		// from the spool file — so the consumer legitimately sees bytes it has
+		// already accumulated a second time. Those are dropped as a replay
+		// once they are shown to AGREE with what is held; a frame that starts
+		// past the spool's end, or that restates already-held bytes
+		// DIFFERENTLY, is real loss and stays an error.
+		from, out := frame.Update.GetFromOffset(), frame.Update.GetNewOutput()
+		if from > sh.nextOffset {
 			log.Error("daemon.feed.spool_gap",
 				"a detached shell's output frame did not continue the spool; the frame was refused",
-				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": frame.Update.GetFromOffset()})
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
 			return
 		}
-		sh.spool += frame.Update.GetNewOutput()
-		sh.nextOffset += uint64(len(frame.Update.GetNewOutput()))
+		if from < sh.nextOffset {
+			overlap := sh.nextOffset - from
+			if overlap > uint64(len(out)) {
+				overlap = uint64(len(out))
+			}
+			if sh.spool[from:from+overlap] != out[:overlap] {
+				log.Error("daemon.feed.spool_gap",
+					"a detached shell's output frame restated held bytes differently; the frame was refused",
+					dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
+				return
+			}
+			log.Debug("daemon.feed.spool_replay",
+				"a detached shell's output frame re-delivered bytes the spool already holds",
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from, "replayed": overlap})
+			out = out[overlap:]
+		}
+		sh.spool += out
+		sh.nextOffset += uint64(len(out))
 		sh.lastProgressMs = r.deps.Now().UnixMilli()
 	case *conversationv1.AgentBash_Progress:
 		sh.lastProgressMs = frame.Progress.GetLastProgressAtMs()
