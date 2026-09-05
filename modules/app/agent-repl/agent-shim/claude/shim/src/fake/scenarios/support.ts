@@ -77,7 +77,7 @@ export function visibleThinking(text: string): {
  * as "[object Object]", which would put that literal text in a permission rule.
  * A non-string target is no target.
  */
-function ruleTarget(input: Record<string, unknown>): string {
+export function ruleTarget(input: Record<string, unknown>): string {
   const named = input.command ?? input.file_path;
   return typeof named === "string" ? named : "";
 }

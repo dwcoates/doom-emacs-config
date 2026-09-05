@@ -120,6 +120,16 @@ describe("shim runtime logging", () => {
     expect(terminal).toEqual([]);
   });
 
+  it("names an object level by its shape rather than as [object Object]", async () => {
+    // A level is `unknown` on the way in, and the refusal exists to say WHICH
+    // value was refused. `String()` renders every object identically, which is
+    // the one answer that tells the reader nothing.
+    const log = await configured();
+    expect(() => log.bindLog({ operation: "shim.test.shaped" }).log({ level: { want: "trace" } }, "nope")).toThrow(
+      '{"want":"trace"}',
+    );
+  });
+
   it("serializes Error and circular evidence in one valid JSONL record", async () => {
     const log = await configured();
     const circular: Record<string, unknown> = { count: 9n };
