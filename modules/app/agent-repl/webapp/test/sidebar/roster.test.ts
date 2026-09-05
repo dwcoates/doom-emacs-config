@@ -502,3 +502,115 @@ describe("a malformed roster", () => {
     ).toThrow(MalformedView);
   });
 });
+
+describe("a task section's verb menu", () => {
+  /** A roster in the task grouping, drawn over IMPL. */
+  function drawn(impl = {}): HTMLElement {
+    const sc = sidebarContext(appContext(impl), memoryPrefs({ grouping: "task" }));
+    return drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }), sc);
+  }
+
+  it("stays folded until the actions control is clicked", () => {
+    expect((taskHead(drawn()).querySelector(".sb-menu") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("opens when the actions control is clicked", async () => {
+    const head = taskHead(drawn());
+    await click(head.querySelector(".sb-more") as Element);
+    expect((head.querySelector(".sb-menu") as HTMLElement).hidden).toBe(false);
+  });
+
+  it("folds away again on a second click of the actions control", async () => {
+    const head = taskHead(drawn());
+    await click(head.querySelector(".sb-more") as Element);
+    await click(head.querySelector(".sb-more") as Element);
+    expect((head.querySelector(".sb-menu") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("retitles on Enter in the rename field, without reaching for the button", async () => {
+    let title = "";
+    const head = taskHead(
+      drawn({
+        updateTask: (request: { change: { case?: string; value?: { title: string } } }) => {
+          title = request.change.case === "setTitle" ? (request.change.value?.title ?? "") : "";
+          return UPDATE_OK;
+        },
+      }),
+    );
+    const input = head.querySelector("[data-task-rename]") as HTMLInputElement;
+    input.value = "renamed by keyboard";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    expect(title).toBe("renamed by keyboard");
+  });
+
+  it("ignores a key that is not Enter in the rename field", async () => {
+    let calls = 0;
+    const head = taskHead(
+      drawn({
+        updateTask: () => {
+          calls += 1;
+          return UPDATE_OK;
+        },
+      }),
+    );
+    const input = head.querySelector("[data-task-rename]") as HTMLInputElement;
+    input.value = "half typed";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    expect(calls).toBe(0);
+  });
+
+  it("marks a task done through the set_done arm", async () => {
+    let arm = "";
+    const head = taskHead(
+      drawn({
+        updateTask: (request: { change: { case?: string } }) => {
+          arm = request.change.case ?? "";
+          return UPDATE_OK;
+        },
+      }),
+    );
+    await click(head.querySelector("[data-task-change='setDone']") as Element);
+    expect(arm).toBe("setDone");
+  });
+
+  it("reopens a task through the set_open arm", async () => {
+    let arm = "";
+    const head = taskHead(
+      drawn({
+        updateTask: (request: { change: { case?: string } }) => {
+          arm = request.change.case ?? "";
+          return UPDATE_OK;
+        },
+      }),
+    );
+    await click(head.querySelector("[data-task-change='setOpen']") as Element);
+    expect(arm).toBe("setOpen");
+  });
+
+  it("words a menu refusal from the task verbs' own table, at that control", async () => {
+    const head = taskHead(
+      drawn({
+        updateTask: () =>
+          create(UpdateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "noChange", value: {} } } },
+          }),
+      }),
+    );
+    const button = head.querySelector("[data-task-change='setDone']") as HTMLElement;
+    await click(button);
+    expect(button.nextElementSibling?.textContent).toContain("exactly as it is");
+  });
+});
+
+describe("a recently-merged section with no rows box", () => {
+  it("is a malformed view, never an empty band", () => {
+    const malformed = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+      recentlyMerged: { header: { label: { text: "Recently Merged" } } },
+    });
+    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
+  });
+});
