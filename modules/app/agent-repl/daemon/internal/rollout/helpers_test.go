@@ -285,6 +285,9 @@ type fakeShim struct {
 	// killAnswer is what KillSession answers; the zero value is success.
 	killAnswer *shimv1.KillSessionResponse
 	killErr    error
+	// forceErr is what Kill answers, so a test can drive the branch where a
+	// process refuses to go down.
+	forceErr error
 	// exited carries the one ExitInfo the test reaps it with.
 	exited chan shimclient.ExitInfo
 	// forced announces every force-kill, so a test synchronizes on one having
@@ -345,10 +348,19 @@ func (s *fakeShim) KillRequests() []*shimv1.KillSessionRequest {
 func (s *fakeShim) Kill(attr shimclient.KillAttribution) error {
 	s.mu.Lock()
 	s.killed = append(s.killed, attr)
+	err := s.forceErr
 	s.mu.Unlock()
 	s.order.record("force_kill")
 	s.forced <- attr
-	return nil
+	return err
+}
+
+// SetForceError makes the next force-kill fail, the way a shim the kernel will
+// not let go of does.
+func (s *fakeShim) SetForceError(err error) {
+	s.mu.Lock()
+	s.forceErr = err
+	s.mu.Unlock()
 }
 
 func (s *fakeShim) ForceKills() []shimclient.KillAttribution {
