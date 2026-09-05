@@ -288,58 +288,48 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
 ;; per call was measurably the largest single cost in the integration run
 ;; (471 calls, 3.3s of a 9.4s roster run).  A `make-network-process' to
 ;; 127.0.0.1 costs microseconds and pulls one more external binary out of the
-;; harness besides; production's own transport still spawns `curl', through
-;; `agent-repl-connect--spawn-curl', and that is the boundary the suite
+;; harness besides.  Production's transport now dials the same way, through
+;; `agent-repl-connect--open-socket', and that is the boundary the suite
 ;; deliberately runs for real.
+;;
+;; THE RESPONSE DECODING IS PRODUCTION'S.  `agent-repl-connect--reader' is
+;; the one HTTP/1.1 response reader in this repository -- status line, then a
+;; body under whichever framing the Go server picked -- and the harness calls
+;; it rather than carrying a second copy that can drift from the one the
+;; editor actually uses.
 
 (defun agent-repl-itest--http-read-body (raw path)
   "Return the status and payload of RAW, one whole HTTP/1.1 response.
-PATH names the request in any failure message.  Handles both a
-`Content-Length' body and a `Transfer-Encoding: chunked' one, because the
-Go server picks between them by how the handler wrote its answer."
-  (let ((split (string-search "\r\n\r\n" raw)))
-    (unless split
-      (error "agent-repl-itest: %s answered with no complete header block: %S" path raw))
-    (let* ((head (substring raw 0 split))
-           (payload (substring raw (+ split 4)))
-           (status (if (string-match "\\`HTTP/1\\.[01] \\([0-9]+\\)" head)
-                       (string-to-number (match-string 1 head))
-                     (error "agent-repl-itest: %s answered with no status line: %S" path head))))
-      (when (string-match-p "^[Tt]ransfer-[Ee]ncoding:[ \t]*chunked" head)
-        (setq payload (agent-repl-itest--http-dechunk payload path)))
-      (cons status payload))))
-
-(defun agent-repl-itest--http-dechunk (payload path)
-  "Return PAYLOAD with its HTTP chunked framing removed.
-PATH names the request in any failure message."
-  (let ((out "")
-        (pos 0))
-    (catch 'agent-repl-itest--dechunked
-      (while t
-        (let ((eol (string-search "\r\n" payload pos)))
-          (unless eol
-            (error "agent-repl-itest: %s answered with a truncated chunk header" path))
-          (let ((size (string-to-number (substring payload pos eol) 16)))
-            (when (zerop size)
-              (throw 'agent-repl-itest--dechunked out))
-            (setq out (concat out (substring payload (+ eol 2) (+ eol 2 size)))
-                  ;; past the chunk and its trailing CRLF
-                  pos (+ eol 2 size 2))))))))
+PATH names the request in any failure message.  Decoding is
+`agent-repl-connect--reader''s, so a `Content-Length' body and a
+`Transfer-Encoding: chunked' one are both handled by the same code
+production reads the daemon with."
+  (let* ((reader (agent-repl-connect--reader-create))
+         (payload (agent-repl-connect--reader-feed reader raw))
+         (breach (agent-repl-connect--reader-breach reader))
+         (status (agent-repl-connect--reader-status reader)))
+    (when breach
+      (error "agent-repl-itest: %s answered with unreadable framing: %s" path breach))
+    (unless status
+      (error "agent-repl-itest: %s answered with no complete status line: %S" path raw))
+    (cons status payload)))
 
 (defun agent-repl-itest--http-request (address path body)
   "Send one HTTP/1.1 request for PATH at ADDRESS and return (STATUS . PAYLOAD).
 With BODY (a string) the request is a POST, otherwise a GET.  The request
-asks for `Connection: close', so the whole answer is exactly what arrives
-before end-of-file and no response framing has to be guessed at."
-  (let* ((host-port (split-string address ":"))
-         (host (car host-port))
-         (port (string-to-number (cadr host-port)))
-         (chunks nil)
+asks for `Connection: close', so an answer with no declared framing still
+ends at the end-of-file."
+  (let* ((host-port (agent-repl-connect--split-address address))
+         (reader (agent-repl-connect--reader-create))
+         (payload "")
          (proc (make-network-process
                 :name "agent-repl-itest-control"
-                :host host :service port
+                :host (car host-port) :service (cdr host-port)
                 :coding 'binary :noquery t
-                :filter (lambda (_p text) (push text chunks)))))
+                :filter (lambda (_p text)
+                          (setq payload
+                                (concat payload
+                                        (agent-repl-connect--reader-feed reader text)))))))
     (unwind-protect
         (progn
           (process-send-string
@@ -354,13 +344,18 @@ before end-of-file and no response framing has to be guessed at."
                      "")
                    "\r\n"
                    (or body "")))
-          ;; The server closes once it has answered, so the sentinel-free wait
-          ;; is simply "until the process is no longer open".
-          (while (process-live-p proc)
+          ;; The reader knows when a framed body is whole; a body delimited by
+          ;; the close is whole when the socket is.  Neither is a sleep.
+          (while (and (process-live-p proc)
+                      (not (agent-repl-connect--reader-complete-p reader)))
             (accept-process-output proc 1))
-          (agent-repl-itest--http-read-body
-           (decode-coding-string (apply #'concat (nreverse chunks)) 'utf-8)
-           path))
+          (let ((breach (agent-repl-connect--reader-breach reader))
+                (status (agent-repl-connect--reader-status reader)))
+            (when breach
+              (error "agent-repl-itest: %s answered with unreadable framing: %s" path breach))
+            (unless status
+              (error "agent-repl-itest: %s answered with no complete header block" path))
+            (cons status (decode-coding-string payload 'utf-8))))
       (when (process-live-p proc) (delete-process proc)))))
 
 (defun agent-repl-itest--control (daemon path &optional body)
@@ -674,7 +669,7 @@ suite asserting on a log line waits for it rather than racing it."
 ;;;; ---- Link teardown ----
 
 (defconst agent-repl-itest--transport-process-prefix "agent-repl-connect-"
-  "Name prefix every child `agent-repl-connect--spawn-curl' starts carries.
+  "Name prefix every socket `agent-repl-connect--open-socket' opens carries.
 `connect.el' names a unary exchange `agent-repl-connect-<method>' and a
 stream `agent-repl-connect-stream-<method>'; both are matched by this.")
 
@@ -853,11 +848,11 @@ must not be reachable by accident."
     (or (cdr cell)
         (error "agent-repl-itest: no original captured for `%s'" symbol))))
 
-(defun agent-repl-itest--real-spawn-curl ()
-  "Return the REAL `agent-repl-connect--spawn-curl' captured before guarding.
-The transport's ONE spawn point is the boundary the integration suite
+(defun agent-repl-itest--real-open-socket ()
+  "Return the REAL `agent-repl-connect--open-socket' captured before guarding.
+The transport's ONE dial point is the boundary the integration suite
 exists to exercise, against a fake daemon on loopback."
-  (agent-repl-itest--real-boundary 'agent-repl-connect--spawn-curl))
+  (agent-repl-itest--real-boundary 'agent-repl-connect--open-socket))
 
 (defvar agent-repl-itest-notifications nil
   "Desktop notifications the fake notifier backend recorded, newest first.
@@ -891,7 +886,7 @@ Inside BODY:
 - `AGENT_REPL_FORBID_VENDOR_CALLS' is set, in this process too;
 - the production JSONL log sink is ON and writes into that private dir,
   which is what `agent-repl-itest--log-entries' reads;
-- the ONE external boundary the transport spawns through is restored to
+- the ONE external boundary the transport dials through is restored to
   its real implementation, and every other guard stays armed;
 - the notifier backend and the webview factory record into
   `agent-repl-itest-notifications' and `agent-repl-itest-webview-urls'.
@@ -940,8 +935,8 @@ signals."
                 (agent-repl-log-to-file t)
                 (agent-repl-log-file-name (agent-repl-itest--log-file ,var))
                 (agent-repl--log-write-counter 0))
-           (cl-letf (((symbol-function 'agent-repl-connect--spawn-curl)
-                      (agent-repl-itest--real-spawn-curl))
+           (cl-letf (((symbol-function 'agent-repl-connect--open-socket)
+                      (agent-repl-itest--real-open-socket))
                      ((symbol-function 'agent-repl--ws-forget-emacs-log-target)
                       (let ((real (symbol-function
                                    'agent-repl--ws-forget-emacs-log-target)))
