@@ -118,7 +118,21 @@ what the suite costs to run.
   dials the same way now, through `agent-repl-connect--open-socket`; that is
   the one boundary these suites run for real on purpose, and it was the
   largest remaining per-scenario cost (~270 spawns, ~3.7s, in a host run)
-  until it stopped being a spawn at all.
+  until it stopped being a spawn at all. Measured on one box, alternating
+  branch point and tip: a unary round trip 60.1ms -> 3.5ms, composer
+  3.1/3.1s -> 2.1/2.2s, host 3.8/3.9s -> 3.0/3.1s, verbs 3.8/4.3s ->
+  2.8/2.8s, connect 1.5/1.5s -> 0.90/0.90s.
+
+  ITS CONNECT BLOCKS, AND THAT IS NOT A TUNING CHOICE. The peer is a
+  loopback listener that answers in a fraction of a millisecond or refuses
+  on the spot. A `:nowait` dial would have to wait for the connection
+  before it could write, and every way of waiting -- an explicit
+  `accept-process-output`, or the 20ms retry Emacs performs on the write's
+  own EAGAIN -- runs the event loop. These dials happen INSIDE PROCESS
+  FILTERS (daemon-link attaches a successor from the `WatchDaemon` filter),
+  and running the event loop from inside a filter cost the e2e handover its
+  `transferred` pushes outright: sockets open, daemon pushing, Emacs
+  delivering nothing, no workspace adopted, no promotion.
 
   THE RESPONSE DECODING IS SHARED, NOT COPIED. `agent-repl-connect--reader` —
   status line, then a body under a `Content-Length`, `Transfer-Encoding:
