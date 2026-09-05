@@ -191,6 +191,17 @@ describe("webSearchConverter.settle", () => {
     expect(success.results).toEqual([]);
   });
 
+  it("records an EMPTY answer when the engine stated no results array at all", () => {
+    // Arrange.
+    const call = callWith({ query: "q" });
+
+    // Act.
+    const success = successOf(call, { durationSeconds: 1 });
+
+    // Assert.
+    expect(success.results).toEqual([]);
+  });
+
   it("drops a hit that named no url rather than drawing a dead link", () => {
     // Arrange.
     const call = callWith({ query: "q" });

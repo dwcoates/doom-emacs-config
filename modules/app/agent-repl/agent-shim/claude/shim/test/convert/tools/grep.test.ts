@@ -225,6 +225,66 @@ describe("grepConverter.settle", () => {
     expect((item?.value as conversationv1.AgentGrep).result.case).toBe("success");
   });
 
+  it("produces NO frame for a filenames answer that stated no file count", () => {
+    // Arrange.
+    const pending = call({ pattern: "TODO" });
+
+    // Act.
+    const item = grepConverter.settle(pending, outcome({ mode: "files_with_matches" }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("lists NO paths when a filenames answer stated a count but no filenames array", () => {
+    // Arrange.
+    const pending = call({ pattern: "TODO" });
+
+    // Act.
+    const item = grepConverter.settle(
+      pending,
+      outcome({ mode: "files_with_matches", numFiles: 0 }),
+    );
+
+    // Assert.
+    const files = successOf(item).matches.value as conversationv1.AgentGrepFiles;
+    expect(files.paths).toEqual([]);
+    expect(files.extent.case).toBe("all");
+  });
+
+  it("produces NO frame for a count answer that stated no match count", () => {
+    // Arrange.
+    const pending = call({ pattern: "TODO" });
+
+    // Act.
+    const item = grepConverter.settle(pending, outcome({ mode: "count" }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when a search settled with no typed output at all", () => {
+    // Arrange.
+    const pending = call({ pattern: "TODO" });
+
+    // Act.
+    const item = grepConverter.settle(pending, outcome("3 matches"));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when a settled search has no pattern to restate", () => {
+    // Arrange.
+    const pending = call({});
+
+    // Act.
+    const item = grepConverter.settle(pending, outcome({ mode: "count", numMatches: 1 }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the search could not run", () => {
     // Arrange, Act.
     const item = grepConverter.settle(call({ pattern: "(" }), outcome("regex parse error", true));

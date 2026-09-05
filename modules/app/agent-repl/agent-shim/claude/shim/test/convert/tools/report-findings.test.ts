@@ -256,6 +256,40 @@ describe("one finding", () => {
     // Arrange, Act, Assert.
     expect(oneFinding(FINDING).outcome.case).toBeUndefined();
   });
+
+  it("leaves the verdict UNSET for a verdict this contract has no arm for", () => {
+    // Arrange, Act, Assert.
+    expect(oneFinding({ ...FINDING, verdict: "MAYBE" }).verdict.case).toBeUndefined();
+  });
+
+  it("leaves the outcome UNSET for an outcome this contract has no arm for", () => {
+    // Arrange, Act, Assert.
+    expect(oneFinding({ ...FINDING, outcome: "deferred" }).outcome.case).toBeUndefined();
+  });
+
+  it("carries an EMPTY file when the tool anchored the finding to none", () => {
+    // Arrange.
+    const { file: _file, ...rest } = FINDING;
+
+    // Act, Assert.
+    expect(oneFinding(rest).file).toBe("");
+  });
+
+  it("carries an EMPTY summary when the tool stated none", () => {
+    // Arrange.
+    const { summary: _summary, ...rest } = FINDING;
+
+    // Act, Assert.
+    expect(oneFinding(rest).summary).toBe("");
+  });
+
+  it("carries an EMPTY failure scenario when the tool stated none", () => {
+    // Arrange.
+    const { failure_scenario: _scenario, ...rest } = FINDING;
+
+    // Act, Assert.
+    expect(oneFinding(rest).failureScenario).toBe("");
+  });
 });
 
 describe("effortLevelOf", () => {

@@ -242,6 +242,137 @@ describe("readConverter.settle", () => {
     expect(item).toBeUndefined();
   });
 
+  it("produces NO frame when a text read carried no content at all", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+    const result = textOutput({ filePath: "/tmp/a.txt", numLines: 2, startLine: 1, totalLines: 2 });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(result));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("is a RANGE when a short read began PAST line 1 with no offset asked", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+    const result = textOutput({
+      filePath: "/tmp/a.txt",
+      content: "mid",
+      numLines: 3,
+      startLine: 40,
+      totalLines: 500,
+    });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(result));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.extent.case).toBe("range");
+    const range = success.extent.value as conversationv1.AgentReadRange;
+    expect(range.firstLine).toBe(40);
+    expect(range.lineCount).toBe(3);
+    expect(range.totalLines).toBe(500);
+  });
+
+  it("is a HEAD cut at the LINE cap when a short read began at line 1 with NO limit asked", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+    const result = textOutput({
+      filePath: "/tmp/a.txt",
+      content: "lead",
+      numLines: 4,
+      startLine: 1,
+      totalLines: 90,
+    });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(result));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.extent.case).toBe("head");
+    const head = success.extent.value as conversationv1.AgentReadHead;
+    expect(head.cut.case).toBe("lineCap");
+    expect(head.totalLines).toBe(90);
+  });
+
+  it("produces NO frame when a text read carried no file object", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome({ type: "text" }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when a text read states no path and the caller named none", () => {
+    // Arrange.
+    const pending = call({});
+
+    // Act.
+    const item = readConverter.settle(pending, outcome(textOutput({ content: "x" })));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when a read settled with no typed output at all", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome("just prose"));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("settles a non-text read carrying NO file object on the CALLER's path", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/doc.pdf" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome({ type: "pdf" }));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.path?.path).toBe("/tmp/doc.pdf");
+    expect(success.extent.case).toBeUndefined();
+  });
+
+  it("settles a read whose type the vendor left UNSTATED as an extentless success", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/mystery.bin" });
+
+    // Act.
+    const item = readConverter.settle(pending, outcome({ file: { size: 12 } }));
+
+    // Assert.
+    const success = (item?.value as conversationv1.AgentRead).result
+      .value as conversationv1.AgentReadSuccess;
+    expect(success.path?.path).toBe("/tmp/mystery.bin");
+    expect(success.extent.case).toBeUndefined();
+  });
+
+  it("produces NO frame when an UNSTATED-type read names no path anywhere", () => {
+    // Arrange.
+    const pending = call({});
+
+    // Act.
+    const item = readConverter.settle(pending, outcome({ file: { size: 12 } }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the vendor marked the result an error", () => {
     // Arrange.
     const pending = call({ file_path: "/tmp/a.txt" });
