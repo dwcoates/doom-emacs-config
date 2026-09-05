@@ -70,6 +70,28 @@ describe("unmodeledConverter.start", () => {
     expect(startOf(item).mcpServer).toBeUndefined();
   });
 
+  it("NAMES the MCP server when the session knows one the qualified name matches", () => {
+    // Arrange.
+    const environment = { mcpServerNames: ["claude_ai_Gmail"] };
+
+    // Act.
+    const item = unmodeledConverter.start(call("mcp__claude_ai_Gmail__send_message"), environment);
+
+    // Assert.
+    expect(startOf(item).mcpServer).toBe("claude_ai_Gmail");
+  });
+
+  it("leaves mcp_server UNSET when the qualified name matches no server the session knows", () => {
+    // Arrange.
+    const environment = { mcpServerNames: ["other_server"] };
+
+    // Act.
+    const item = unmodeledConverter.start(call("mcp__claude_ai_Gmail__send_message"), environment);
+
+    // Assert.
+    expect(startOf(item).mcpServer).toBeUndefined();
+  });
+
   it("leaves the arguments UNSET when they cannot be represented as JSON", () => {
     // Arrange.
     const cyclic: Record<string, unknown> = {};
