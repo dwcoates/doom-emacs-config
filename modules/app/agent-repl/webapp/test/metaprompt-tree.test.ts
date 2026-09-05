@@ -248,3 +248,27 @@ describe("looksLikeIntendedTree", () => {
     expect(looksLikeIntendedTree("Just prose here.\nMore prose.")).toBe(false);
   });
 });
+
+describe("dotted labels with more than one level", () => {
+  it("keeps a `2.1` label whole rather than stopping at its first dot", () => {
+    // Arrange
+    const text = [
+      "Response (✏️ changes made)",
+      "",
+      "1.1 🔧 Fixed the thing in module.ts",
+      "├── 1.1.1 First supporting detail",
+      "└── 1.1.2 Second supporting detail",
+      "",
+      "1.2 ✅ Tests pass",
+    ].join("\n");
+    // Act + Assert
+    expect(isMetapromptTree(text)).toBe(true);
+  });
+});
+
+describe("looksLikeIntendedTree: nothing to judge", () => {
+  it("is false for text that is entirely blank, having no first line to read", () => {
+    // Act + Assert
+    expect(looksLikeIntendedTree("\n   \n\n")).toBe(false);
+  });
+});

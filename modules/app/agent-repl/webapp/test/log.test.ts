@@ -468,3 +468,43 @@ describe("pendingCount", () => {
     expect(h.logger.pendingCount()).toBe(0);
   });
 });
+
+describe("the default console, when no console function is injected", () => {
+  it("routes an error record to console.error", () => {
+    // ARRANGE
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logger = new ForwardingLogger(async () => {});
+    // ACT
+    logger.write("error", "m", { operation: "op" });
+    // ASSERT
+    expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
+    spy.mockRestore();
+  });
+
+  it("routes a warn record to console.warn", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logger = new ForwardingLogger(async () => {});
+    logger.write("warn", "m", { operation: "op" });
+    expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
+    spy.mockRestore();
+  });
+
+  it("routes an info record to console.log, the level having no console of its own", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logger = new ForwardingLogger(async () => {});
+    logger.write("info", "m", { operation: "op" });
+    expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
+    spy.mockRestore();
+  });
+});
+
+describe("the level a record must carry", () => {
+  it("refuses a level outside the four, rather than forwarding it", () => {
+    // ARRANGE
+    install();
+    // ACT / ASSERT
+    expect(() => log("trace" as ClientLogLevel, "m", { operation: "op" })).toThrow(
+      "webapp log record has invalid level trace",
+    );
+  });
+});
