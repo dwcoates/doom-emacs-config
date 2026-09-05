@@ -314,3 +314,8 @@ type failingLease struct {
 func (d failingLease) Lease(context.Context, wsm.WorkspaceID) (wsm.Lease, bool, error) {
 	return wsm.Lease{}, false, d.err
 }
+
+// StandDownEverySpawn is the supervisor's own sweep of processes it started
+// and still owns. These fakes spawn no process, so there is never one to
+// sweep.
+func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
