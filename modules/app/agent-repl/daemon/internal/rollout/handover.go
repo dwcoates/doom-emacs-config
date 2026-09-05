@@ -8,11 +8,9 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -333,11 +331,13 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 // spent inside the announced outage. By here every transfer has landed and the
 // only thing left to do is leave cleanly.
 //
-// THE SESSION IS ENDED BEFORE THE PROCESS IS, exactly as Fleet.KillSession
-// does it: the shim writes its own terminals as the session ends, and a signal
-// alone gives it no chance to. A shim that will not answer is not a reason to
-// leave the process running, so the kill below is unconditional and the
-// refusal is evidence.
+// IT GOES THROUGH THE FLEET, never through the client directly. The fleet ends
+// the SESSION before the process -- the shim writes its own terminals as the
+// session ends, and a signal alone gives it no chance to -- and, before either,
+// it tells the session watcher. A watcher that has not been told reads this
+// daemon's own act as a transport fault: it records a severing at ERROR, marks
+// the link degraded, and reopens watches at a shim the next line is about to
+// stop.
 //
 // NOTHING HERE MAY STOP THE EXIT, so each failure is recorded at ERROR and the
 // walk continues: a shim that would not go is a leaked process the caller
@@ -346,20 +346,11 @@ func (c *controller) served(ctx context.Context) (transfer, untransferable []wsm
 func (c *controller) standDownTheUntransferred(ctx context.Context, workspaces []wsm.Workspace) {
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "dir": ws.Dir}
-		client, live := c.deps.Shims.Client(ws.ID)
-		if !live {
+		if _, live := c.deps.Shims.Client(ws.ID); !live {
 			c.log.Debug(opHandover, "the untransferred workspace has no live shim to stand down", fields)
 			continue
 		}
-		if _, err := client.KillSession(ctx, &shimv1.KillSessionRequest{Force: true}); err != nil {
-			c.log.Warn(opHandover, "the untransferred workspace's session kill did not answer; stopping the process anyway",
-				withCause(fields, err))
-		}
-		if err := client.Kill(shimclient.KillAttribution{
-			Actor:  "rollout.handover",
-			Reason: "the workspace is not handed over and this daemon is exiting",
-			Force:  true,
-		}); err != nil {
+		if err := c.deps.Shims.StandDown(ctx, ws.ID); err != nil {
 			c.log.Error(opHandover, "an untransferred workspace's shim would not stand down; it will outlive this daemon and hold the workspace lock",
 				withCause(fields, err))
 			continue
