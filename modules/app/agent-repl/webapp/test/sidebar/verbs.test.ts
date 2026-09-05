@@ -61,6 +61,8 @@ import {
   openWorkspaceRefusal,
   restartWorkspaceRefusal,
   fireVerb,
+  refusalCause,
+  refusalDetail,
   runVerb,
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
@@ -673,5 +675,322 @@ describe("a response with no outcome arm", () => {
         schema: OpenWorkspaceResponseSchema,
       }),
     ).rejects.toThrow(MalformedView);
+  });
+});
+
+describe("the menu's own controls, clicked", () => {
+  it("merges through MergeWorkspace with the row's echoed identity", async () => {
+    // Arrange
+    let seen: unknown = null;
+    const t = target({
+      mergeWorkspace: (req: unknown) => {
+        seen = (req as { workspace?: unknown }).workspace;
+        return create(MergeWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const menu = drawRowMenu(t);
+    // Act
+    await click(menu.querySelector("[data-verb='merge']") as Element);
+    // Assert
+    expect(seen).toEqual(TARGET_WS);
+  });
+
+  it("draws a merge refusal at the merge control itself", async () => {
+    const t = target({
+      mergeWorkspace: () =>
+        create(MergeWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "alreadyMerging", value: {} } } },
+        }),
+    });
+    const menu = drawRowMenu(t);
+    const button = menu.querySelector("[data-verb='merge']") as HTMLElement;
+    await click(button);
+    expect(button.nextElementSibling?.textContent).toBe("this workspace is already merging");
+  });
+
+  it("restarts gracefully from the plain restart entry", async () => {
+    let force: unknown = null;
+    const t = target({
+      restartWorkspace: (req: unknown) => {
+        force = (req as { force?: unknown }).force;
+        return create(RestartWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const menu = drawRowMenu(t);
+    await click(menu.querySelector("[data-verb='restart']") as Element);
+    expect(force).toBe(false);
+  });
+
+  it("forces the restart from the forced entry", async () => {
+    let force: unknown = null;
+    const t = target({
+      restartWorkspace: (req: unknown) => {
+        force = (req as { force?: unknown }).force;
+        return create(RestartWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const menu = drawRowMenu(t);
+    await click(menu.querySelector("[data-verb='restartForce']") as Element);
+    expect(force).toBe(true);
+  });
+
+  it("draws a restart refusal at the restart control itself", async () => {
+    const t = target({
+      restartWorkspace: () =>
+        create(RestartWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+        }),
+    });
+    const menu = drawRowMenu(t);
+    const button = menu.querySelector("[data-verb='restart']") as HTMLElement;
+    await click(button);
+    expect(button.nextElementSibling?.textContent).toBe("this workspace has no session to restart");
+  });
+
+  it("keeps the nuke confirmation folded until its entry is opened", () => {
+    const menu = drawRowMenu(target());
+    const confirm = menu.querySelector(".sb-confirm-nuke") as HTMLElement;
+    expect(confirm.hidden).toBe(true);
+  });
+
+  it("reveals the nuke confirmation when its entry is clicked", async () => {
+    const menu = drawRowMenu(target());
+    const entry = (menu.querySelector("[data-verb='nuke']") as HTMLElement).closest(
+      ".sb-menu-row",
+    ) as HTMLElement;
+    await click(entry.querySelector(".sb-menu-item") as Element);
+    expect((entry.querySelector(".sb-confirm-nuke") as HTMLElement).hidden).toBe(false);
+  });
+
+  it("folds the nuke confirmation away again on a second click", async () => {
+    const menu = drawRowMenu(target());
+    const entry = (menu.querySelector("[data-verb='nuke']") as HTMLElement).closest(
+      ".sb-menu-row",
+    ) as HTMLElement;
+    const disclosure = entry.querySelector(".sb-menu-item") as Element;
+    await click(disclosure);
+    await click(disclosure);
+    expect((entry.querySelector(".sb-confirm-nuke") as HTMLElement).hidden).toBe(true);
+  });
+
+  it("nukes through NukeWorkspace with the row's echoed identity", async () => {
+    let seen: unknown = null;
+    const t = target({
+      nukeWorkspace: (req: unknown) => {
+        seen = (req as { workspace?: unknown }).workspace;
+        return create(NukeWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const confirm = drawNukeConfirm(t);
+    await click(confirm.querySelector("[data-verb='nuke']") as Element);
+    expect(seen).toEqual(TARGET_WS);
+  });
+
+  it("draws a nuke refusal at the go button that made the call", async () => {
+    const t = target({
+      nukeWorkspace: () =>
+        create(NukeWorkspaceResponseSchema, {
+          result: {
+            case: "error",
+            value: { cause: { case: "gitFailed", value: { detail: "worktree is dirty" } } },
+          },
+        }),
+    });
+    const confirm = drawNukeConfirm(t);
+    const go = confirm.querySelector("[data-verb='nuke']") as HTMLElement;
+    await click(go);
+    expect(go.nextElementSibling?.textContent).toBe(
+      "git refused to remove the worktree: worktree is dirty",
+    );
+  });
+
+  it("kills through KillWorkspace with the row's echoed identity", async () => {
+    let seen: unknown = null;
+    const t = target({
+      killWorkspace: (req: unknown) => {
+        seen = (req as { workspace?: unknown }).workspace;
+        return create(KillWorkspaceResponseSchema, { result: { case: "success", value: {} } });
+      },
+    });
+    const confirm = drawKillConfirm(t);
+    await click(confirm.querySelector("[data-verb='kill']") as Element);
+    expect(seen).toEqual(TARGET_WS);
+  });
+
+  it("reveals the priority levels when their entry is clicked", async () => {
+    const menu = drawRowMenu(target());
+    const submenu = (menu.querySelector("[data-verb='priority']") as HTMLElement)
+      .parentElement as HTMLElement;
+    await click(submenu.previousElementSibling as Element);
+    expect(submenu.hidden).toBe(false);
+  });
+
+  it.each(["p05", "p1", "p2", "p3"] as const)(
+    "sends the %s level from its own choice button",
+    async (choice) => {
+      let level: unknown = null;
+      const t = target({
+        setWorkspacePriority: (req: unknown) => {
+          level = (req as { priority?: { level: { case?: string } } }).priority?.level.case;
+          return create(SetWorkspacePriorityResponseSchema, {
+            result: { case: "success", value: {} },
+          });
+        },
+      });
+      const menu = drawRowMenu(t);
+      const entry = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].find(
+        (el) => el.value === choice,
+      ) as HTMLElement;
+      await click(entry);
+      expect(level).toBe(choice);
+    },
+  );
+
+  it("clears the priority by omitting the field from the Clear choice", async () => {
+    let priority: unknown = "unset-was-not-read";
+    const t = target({
+      setWorkspacePriority: (req: unknown) => {
+        priority = (req as { priority?: unknown }).priority;
+        return create(SetWorkspacePriorityResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+    });
+    const menu = drawRowMenu(t);
+    const entry = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].find(
+      (el) => el.value === "clear",
+    ) as HTMLElement;
+    await click(entry);
+    expect(priority).toBeUndefined();
+  });
+
+  it("reveals the assignment choices when their entry is clicked", async () => {
+    const t = target();
+    const menu = drawRowMenu(t);
+    const submenu = (menu.querySelector("[data-assign-task]") as HTMLElement)
+      .parentElement as HTMLElement;
+    await click(submenu.previousElementSibling as Element);
+    expect(submenu.hidden).toBe(false);
+  });
+
+  it("rebuilds the assignment choices from the last push each time it opens", async () => {
+    const t = target();
+    const menu = drawRowMenu(t);
+    const submenu = (menu.querySelector("[data-assign-task]") as HTMLElement)
+      .parentElement as HTMLElement;
+    // Arrange: a roster push landed a task AFTER the menu was drawn.
+    t.sc.tasks.push({ id: "task-9", label: "land the rail" });
+    // Act
+    await click(submenu.previousElementSibling as Element);
+    // Assert
+    expect([...submenu.querySelectorAll("[data-assign-task]")].map((el) => el.textContent)).toEqual(
+      ["Unassign", "land the rail"],
+    );
+  });
+
+  it("assigns the task the clicked choice names", async () => {
+    let id: unknown = null;
+    const t = target({
+      assignWorkspaceTask: (req: unknown) => {
+        id = (req as { task?: { id: string } }).task?.id;
+        return create(AssignWorkspaceTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+    });
+    t.sc.tasks.push({ id: "task-3", label: "ship the rail" });
+    const submenu = document.createElement("div");
+    fillAssignSubmenu(submenu, t);
+    await click(submenu.querySelector("[data-assign-task='task-3']") as Element);
+    expect(id).toBe("task-3");
+  });
+
+  it("unassigns by omitting the task from the Unassign choice", async () => {
+    let task: unknown = "unset-was-not-read";
+    const t = target({
+      assignWorkspaceTask: (req: unknown) => {
+        task = (req as { task?: unknown }).task;
+        return create(AssignWorkspaceTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+    });
+    const submenu = document.createElement("div");
+    fillAssignSubmenu(submenu, t);
+    await click(submenu.querySelector("[data-assign-task='']") as Element);
+    expect(task).toBeUndefined();
+  });
+
+  it("draws an assignment refusal at the choice that made the call", async () => {
+    const t = target({
+      assignWorkspaceTask: () =>
+        create(AssignWorkspaceTaskResponseSchema, {
+          result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
+        }),
+    });
+    t.sc.tasks.push({ id: "task-3", label: "ship the rail" });
+    const submenu = document.createElement("div");
+    fillAssignSubmenu(submenu, t);
+    const entry = submenu.querySelector("[data-assign-task='task-3']") as HTMLElement;
+    await click(entry);
+    expect(entry.nextElementSibling?.textContent).toBe("the daemon does not know that task");
+  });
+});
+
+describe("an arm no wording table knows", () => {
+  /** Each per-endpoint wording function, with an arm none of them declares. */
+  const WORDINGS: ReadonlyArray<readonly [string, (cause: never) => string]> = [
+    ["OpenWorkspaceError.cause", openWorkspaceRefusal],
+    ["CloseWorkspaceError.cause", closeWorkspaceRefusal],
+    ["NukeWorkspaceError.cause", nukeWorkspaceRefusal],
+    ["MergeWorkspaceError.cause", mergeWorkspaceRefusal],
+    ["RestartWorkspaceError.cause", restartWorkspaceRefusal],
+    ["AssignWorkspaceTaskError.cause", assignWorkspaceTaskRefusal],
+  ];
+
+  it.each(WORDINGS)("refuses %s rather than inventing a sentence", (path, word) => {
+    expect(() => word({ case: "aFutureArm", value: {} } as never)).toThrow(
+      new MalformedView(path, "arm 'aFutureArm' is not one this build can draw"),
+    );
+  });
+});
+
+describe("the cause behind a refusal", () => {
+  it("is a malformed view when the error message itself is absent", () => {
+    // Arrange / Act / Assert: the `?? {}` side — nothing to require a case of.
+    expect(() => refusalCause("OpenWorkspace", undefined)).toThrow(MalformedView);
+  });
+});
+
+describe("the facts drawn under a refusal sentence", () => {
+  it("draws no list for an arm that carries no paths", () => {
+    expect(refusalDetail({ case: "spawnFailed", value: { detail: "x" } } as never)).toBeNull();
+  });
+
+  it("draws no list when the search-paths field was never set", () => {
+    expect(refusalDetail({ case: "transcriptMissing", value: {} } as never)).toBeNull();
+  });
+
+  it("draws no empty list when the daemon searched nowhere", () => {
+    expect(
+      refusalDetail({ case: "transcriptMissing", value: { searchedPaths: [] } } as never),
+    ).toBeNull();
+  });
+});
+
+describe("the open control, refused", () => {
+  it("draws OpenWorkspace's own sentence at the open control itself", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "sessionDeleted", value: {} } } },
+        }),
+    });
+    const menu = drawRowMenu(t);
+    const button = menu.querySelector("[data-verb='open']") as HTMLElement;
+    await click(button);
+    expect(button.nextElementSibling?.textContent).toBe(
+      "this workspace's session has been deleted",
+    );
   });
 });

@@ -4,8 +4,14 @@ import { create } from "@bufbuild/protobuf";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import { RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { drawRosterRow, drawStatusMark } from "../../src/sidebar/row.js";
+import {
+  drawRosterRow,
+  drawRosterRowWhen,
+  drawStatusMark,
+  toggleRowMenu,
+} from "../../src/sidebar/row.js";
 import { ROSTER_ARM_CLASS, ROSTER_STATUS_CASES } from "../../src/sidebar/tones.js";
+import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   NOW,
   appContext,
@@ -534,5 +540,47 @@ describe("a malformed row", () => {
     });
     const parent = row({ id: "ws-1", children: [malformed] });
     expect(() => drawRosterRow(parent, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+});
+
+describe("a when-column arm this build has never heard of", () => {
+  it("is a malformed view, never a blank column", () => {
+    expect(() =>
+      drawRosterRowWhen(
+        { shown: { case: "aFutureArm", value: {} } } as never,
+        sidebarContext(),
+        "R.when",
+      ),
+    ).toThrow(new MalformedView("R.when.shown", "arm 'aFutureArm' is not one this build can draw"));
+  });
+});
+
+describe("the row menu toggle", () => {
+  const TARGET = {
+    sc: sidebarContext(),
+    workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w/one" }),
+    name: "one",
+  };
+
+  it("reveals the menu the row owns", () => {
+    const ws = document.createElement("div");
+    const menu = document.createElement("div");
+    menu.className = "sb-menu";
+    menu.hidden = true;
+    ws.appendChild(menu);
+    toggleRowMenu(ws, TARGET);
+    expect(menu.hidden).toBe(false);
+  });
+
+  it("leaves a nested row's menu alone, because the menu must be this row's own", () => {
+    const ws = document.createElement("div");
+    const child = document.createElement("div");
+    const menu = document.createElement("div");
+    menu.className = "sb-menu";
+    menu.hidden = true;
+    child.appendChild(menu);
+    ws.appendChild(child);
+    toggleRowMenu(ws, TARGET);
+    expect(menu.hidden).toBe(true);
   });
 });
