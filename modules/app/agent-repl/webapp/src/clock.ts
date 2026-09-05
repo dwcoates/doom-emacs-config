@@ -42,7 +42,7 @@ export function createTicker(intervalMs: number = DEFAULT_TICK_MS): Ticker {
   return {
     subscribe(fn: (nowMs: number) => void): () => void {
       subscribers.add(fn);
-      if (handle === null) handle = setInterval(step, intervalMs);
+      handle ??= setInterval(step, intervalMs);
       return () => {
         if (!subscribers.delete(fn)) return;
         if (subscribers.size > 0 || handle === null) return;
