@@ -1503,7 +1503,7 @@ describe("UpdateAgent.answer's own guards", () => {
       signal: new AbortController().signal,
       toolUseID: "toolu_open",
       requestId: "r",
-    } as Parameters<PermissionGate["canUseTool"]>[2]);
+    });
     await Promise.resolve();
     const answer = create(conversationv1.AgentAnswerSchema, {
       answer: {
@@ -1710,7 +1710,7 @@ describe("StopBash's remaining arms", () => {
       description: "",
       uuid: "00000000-0000-4000-8000-000000000000",
       session_id: "s",
-    }) as SdkTaskStartedMessage;
+    });
 
   it("RAISES when StopBash reaches the engine with no work id", async () => {
     const h = await harness();
@@ -1732,7 +1732,7 @@ describe("StopBash's remaining arms", () => {
       summary: "",
       uuid: "00000000-0000-4000-8000-000000000001",
       session_id: "s",
-    } as SdkTaskNotificationMessage);
+    });
 
     expect(failureKind(await h.turns.stopBash(stopRequest("t")))).toBe("alreadyEnded");
   });
