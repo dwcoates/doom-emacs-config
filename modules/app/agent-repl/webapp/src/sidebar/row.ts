@@ -107,7 +107,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   });
 
   line.appendChild(drawExpandChevron(ws, sc, workspace.id));
-  line.appendChild(drawStatusMark(status.case as RosterStatusCase, `${path}.status`));
+  line.appendChild(drawStatusMark(status.case, `${path}.status`));
 
   const label = document.createElement("span");
   label.className = "name";

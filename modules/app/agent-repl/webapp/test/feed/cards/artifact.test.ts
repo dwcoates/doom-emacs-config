@@ -109,12 +109,12 @@ describe("drawFeedArtifact", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the bubble's state`, () => {
-      const el = drawFeedArtifact(artifact(c.state as InitOfFeedArtifact), harness().rc);
+      const el = drawFeedArtifact(artifact(c.state), harness().rc);
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedArtifact(artifact(c.state as InitOfFeedArtifact), harness().rc);
+      const el = drawFeedArtifact(artifact(c.state), harness().rc);
       expect(el.querySelector(".badge")?.textContent).toBe(c.badge);
     });
   }

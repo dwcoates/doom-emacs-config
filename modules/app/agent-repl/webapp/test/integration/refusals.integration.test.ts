@@ -248,7 +248,7 @@ const UNSET_CAUSE_CASES = [
     arrange: (h: Harness) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
     // The options live in the picker's reveal, so the picker is opened first —
     // the same step the REFUSAL_SITES table below takes for this control.
-    before: async (h: Harness) => await h.click(".topbar-model"),
+    before: async (h: Harness) => h.click(".topbar-model"),
     click: '[data-model-option="sonnet"]',
     site: ".topbar-model",
   },
@@ -626,7 +626,7 @@ const REFUSAL_SITES: RefusalSite[] = [
     click: '[data-model-option="sonnet"]',
     site: ".topbar-model",
     arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
-    before: async (h) => await h.click(".topbar-model"),
+    before: async (h) => h.click(".topbar-model"),
   },
   {
     name: "SetPermissionMode",
@@ -634,7 +634,7 @@ const REFUSAL_SITES: RefusalSite[] = [
     click: '[data-mode-option="plan"]',
     site: ".topbar-mode",
     arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
-    before: async (h) => await h.click(".topbar-mode"),
+    before: async (h) => h.click(".topbar-mode"),
   },
   {
     name: "OpenLogin",

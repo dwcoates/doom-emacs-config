@@ -466,7 +466,7 @@ async function died(scenario: string): Promise<HTMLElement> {
     () => rows(app, "turnEnded").length > before,
   );
   const drawn = rows(app, "turnEnded");
-  return drawn[drawn.length - 1] as HTMLElement;
+  return drawn[drawn.length - 1];
 }
 
 /**

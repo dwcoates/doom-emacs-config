@@ -86,7 +86,7 @@ it(
       await submit(app, "another one to wait");
       await awaitDrawn(app, "the held prompt", () => app.$$("[data-held-turn]").length > 0);
     }
-    const card = app.$$("[data-held-turn]")[0] as HTMLElement;
+    const card = app.$$("[data-held-turn]")[0];
     const turn = card.dataset.heldTurn;
     const action = card.querySelector<HTMLElement>("[data-held-action]");
     expect(action, "the held card drew no action to take").not.toBeNull();

@@ -52,7 +52,7 @@ beforeAll(async () => {
   expect(response.result.case, `MergeWorkspace answered ${response.result.case}`).toBe("success");
   await awaitDrawn(app, "the merge bubble", () => mergeRows().length > 0);
   const drawn = mergeRows();
-  const id = (drawn[drawn.length - 1] as HTMLElement).dataset.feedRow;
+  const id = (drawn[drawn.length - 1]).dataset.feedRow;
   if (id === undefined || id === "") throw new Error("the merge bubble carries no FeedId");
   bubbleId = id;
   await awaitDrawn(
