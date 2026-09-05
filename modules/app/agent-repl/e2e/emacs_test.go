@@ -778,8 +778,13 @@ func (e *Emacs) awaitDoom() {
 			// The Emacs has no readiness stamp and therefore no pid the Go
 			// side knows, but the reaper finds it the same way it always
 			// does: by this scenario's own paths in its environment.
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s; pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(), e.proc.Output())
+			// AND THE NATIVE STACK. A boot that misses this bound is an
+			// Emacs that is ALIVE and has published no server socket, so
+			// there is nothing to ask it with: the breadcrumb says which
+			// step it was in and only the debugger can say where inside it.
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s%s; pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(),
+				e.nativeBacktrace(), e.proc.Output())
 		case <-ticker.C:
 		}
 	}
@@ -1231,8 +1236,9 @@ func (e *Emacs) nativeBacktrace() string {
 // every way it can come up empty is REPORTED IN PLACE OF the backtrace rather
 // than swallowed.
 func (e *Emacs) captureNativeBacktrace() string {
-	if e.Doom.PID == 0 {
-		return "\n  (no native backtrace: the readiness stamp carried no pid)"
+	pid := e.emacsPID()
+	if pid == 0 {
+		return "\n  (no native backtrace: no emacs pid, from the readiness stamp or from /proc)"
 	}
 	gdb, err := exec.LookPath("gdb")
 	if err != nil {
@@ -1253,14 +1259,14 @@ func (e *Emacs) captureNativeBacktrace() string {
 		"-ex", "thread apply all bt",
 		"-ex", "detach",
 		"-ex", "quit",
-		"-p", strconv.Itoa(e.Doom.PID))
+		"-p", strconv.Itoa(pid))
 	out, runErr := cmd.CombinedOutput()
 	text := strings.TrimSpace(string(out))
 	if runErr != nil && text == "" {
-		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d failed: %v)", e.Doom.PID, runErr)
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d failed: %v)", pid, runErr)
 	}
 	if text == "" {
-		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d said nothing)", e.Doom.PID)
+		return fmt.Sprintf("\n  (no native backtrace: gdb -p %d said nothing)", pid)
 	}
 	// gdb's own exit status is reported alongside the output rather than
 	// instead of it: a partial unwind still names the frame that matters.
@@ -1276,6 +1282,30 @@ func (e *Emacs) captureNativeBacktrace() string {
 	}
 	return "\n  emacs's native stack, from outside the process:\n    " +
 		strings.Join(head, "\n    ")
+}
+
+// emacsPID answers the Emacs this scenario owns.
+//
+// The readiness stamp is the authority once it exists, but a boot that never
+// PUBLISHES one is exactly a case the native backtrace is for -- so the
+// kernel's own view is the fallback, found the same way the reaper finds
+// strays: by this scenario's paths in the process's environment.
+func (e *Emacs) emacsPID() int {
+	if e.Doom.PID != 0 {
+		return e.Doom.PID
+	}
+	for _, p := range e.findStrays() {
+		// `argv` is /proc/<pid>/cmdline with NULs turned into spaces, and
+		// this layer starts Emacs as a bare `emacs` with every path in its
+		// environment -- so the whole argv IS the program name. The `script`
+		// and `sh` wrappers above it carry the full env-prefixed command
+		// line, which is why an exact match is the right test and a prefix
+		// one would catch the wrapper instead.
+		if p.argv == "emacs" {
+			return p.pid
+		}
+	}
+	return 0
 }
 
 // writeNativeBacktrace files the full capture with the failure artifacts,
