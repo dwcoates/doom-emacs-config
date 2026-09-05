@@ -754,3 +754,135 @@ func dbExpectNoDetachedShell(t *testing.T, stream *harness.Stream[*frontendv1.Fe
 		}
 	}
 }
+
+// ===========================================================================
+// Coverage extension — `!vendor-backgrounded`: a foreground shell the vendor
+// tracks as a task and has not detached.
+// ===========================================================================
+
+// TestVendorBackgroundedTaskStartIsNoDetachment drives "!vendor-backgrounded"
+// (shell.ts's VENDOR_BACKGROUNDED): a FOREGROUND `Bash` — no
+// `run_in_background`, no startTask-first launch — that the vendor
+// nonetheless announces as a live `local_bash` task (`task_started` +
+// `background_tasks_changed`) and whose spool it begins filling, then PARKS
+// on `ctx.awaitBackgrounded(toolUseId)` until a caller's DetachForeground
+// actually moves it.
+//
+// # THE DETACHMENT ITSELF IS NOT REACHABLE FROM THIS LAYER — GAP RECORDED
+//
+// The park is released only by shim.v1's DetachForeground
+// (proto/src/shim/v1/service.proto:107). Nothing in agentrepl.v1 exposes it
+// and the daemon never issues it (SCENARIO-MATRIX.md's own
+// "DetachForeground applied to a foreground subagent" entry, and
+// PROTO-CHANGES.md Landing 8's RULED-no-proto). So the second half of the
+// scenario — the `backgroundedByUser: true` result, its `by_user`
+// detachment, and AgentSuccess.backgrounded — cannot be provoked by a test
+// that speaks only the daemon's caller-facing API, and this test does not
+// reach into the shim to fake one up.
+//
+// # WHAT IS REACHABLE IS THE HALF THE PARK EXISTS TO EXPOSE
+//
+// The first half is a contract claim nothing else in the suite can provoke,
+// because no other scenario announces a `local_bash` task for a call that
+// has NOT left the turn. convert/detached.ts's `task_started` handler is
+// written against exactly this shape:
+//
+//	"A SHELL TASK IS NOT A DETACHMENT YET. The vendor tracks a FOREGROUND
+//	 shell as a task the moment it starts ... so `task_started` says nothing
+//	 about whether the work left the turn, let alone why. The Bash result is
+//	 the one record that states the cause ... Announcing `requested` here
+//	 instead put a WRONG-CAUSE announcement on the stream ahead of the right
+//	 one".
+//
+// Two facts follow, and both are asserted:
+//
+//  1. NO detached_shell row is drawn for the command. A resolver fed a
+//     `requested` announcement off `task_started` would draw one here, with
+//     the wrong cause, ahead of the vendor's own account — the precise
+//     regression that comment names. `!bash-hold` pins the same negative for
+//     a call the vendor never announced at all; this pins it for one it DID,
+//     which is the harder half.
+//  2. The unit's fate is UNSETTLED and FOREGROUND: it stays a running
+//     FeedSimpleToolCall for the whole probe window. The work in flight is
+//     neither concluded nor handed to a detached row — it is exactly where
+//     the vendor left it, waiting on a detach this layer cannot issue.
+func TestVendorBackgroundedTaskStartIsNoDetachment(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w := NewWorld(t, WorldOpts{})
+	ws := dbWorkspace(t, w)
+
+	initial, stream := dbOpenRootFeed(t, w, ws)
+	defer stream.Close()
+
+	// Act
+	turn := SubmitPrompt(t, w, ws, "!vendor-backgrounded")
+
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+
+	// Assert: the unit is drawn as a live FOREGROUND tool call of this turn.
+	const command = "tail -f /var/log/system.log"
+	running := func(row *frontendv1.FeedRow) bool {
+		call := row.GetActivity().GetSimpleToolCall()
+		return row.GetTurn().GetValue() == turn.GetValue() &&
+			call.GetName().GetText() == "Bash" &&
+			strings.Contains(call.GetInput().GetText(), command) &&
+			call.GetRunning() != nil
+	}
+	sawRunning := false
+	for _, row := range initial {
+		if running(row) {
+			sawRunning = true
+		}
+	}
+	if !sawRunning {
+		harness.AwaitView(t, ctx, stream, "the live FOREGROUND Bash unit the vendor is tracking as a task", running)
+	}
+
+	// Assert: for one probe window past that, the announced `local_bash`
+	// task draws NO detached row and the unit never settles.
+	//
+	// The window is harness.ProbeWindow (500ms), the suite's standing bound
+	// for a negative, and it is the right one here: `task_started` and
+	// `background_tasks_changed` are emitted synchronously right behind the
+	// tool_use whose row the wait above already observed round-tripping the
+	// whole stack, so they are in the pipe ahead of this drain rather than
+	// racing it.
+	dbExpectForegroundUnitHolds(t, stream, command)
+}
+
+// dbExpectForegroundUnitHolds drains the feed for one probe window and fails
+// if the named command is ever drawn as detached work, or if its foreground
+// tool call leaves the running state. The two halves of "the vendor tracks it
+// but has not moved it", checked together so one drain covers both.
+func dbExpectForegroundUnitHolds(t *testing.T, stream *harness.Stream[*frontendv1.FeedRow], commandSubstring string) {
+	t.Helper()
+	timer := time.NewTimer(harness.ProbeWindow)
+	defer timer.Stop()
+	for {
+		select {
+		case row, ok := <-stream.C:
+			if !ok {
+				return
+			}
+			if sh := row.GetDetachedShell().GetShell(); sh != nil &&
+				strings.Contains(sh.GetCommand().GetText(), commandSubstring) {
+				t.Fatalf("a detached_shell row was drawn for %q from the vendor's `task_started` alone: "+
+					"a shell task is not a detachment yet, and the Bash result is the one record that states "+
+					"the cause (convert/detached.ts)", commandSubstring)
+			}
+			call := row.GetActivity().GetSimpleToolCall()
+			if call == nil || !strings.Contains(call.GetInput().GetText(), commandSubstring) {
+				continue
+			}
+			if call.GetRunning() == nil {
+				t.Fatalf("the foreground Bash unit %q settled with %v, want it to stay running: the vendor "+
+					"parked it awaiting a DetachForeground no caller-facing rpc can issue, so nothing has "+
+					"ended it", commandSubstring, call.GetOutcome())
+			}
+		case <-timer.C:
+			return
+		}
+	}
+}
