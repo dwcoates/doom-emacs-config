@@ -77,8 +77,11 @@ func TestRosterNeverPublishesReadyAfterAnAcceptedPrompt(t *testing.T) {
 		return raArm(r, ws.GetId()) == "ready"
 	})
 
-	// Act.
-	turn := SubmitPrompt(t, w, ws, "!hello")
+	// Act. Plain prose, deliberately with NO `!` prefix: this test wants the
+	// ordinary default turn, and a `!`-prefixed prompt that names no
+	// registered scenario reaches the same prose scenario while reading like
+	// a scenario selection that has gone stale.
+	turn := SubmitPrompt(t, w, ws, "hello")
 
 	// Assert: every arm from the ack to the turn's end is a busy one.
 	walk := raWalkUntil(t, w, roster, ws, func(arm string) bool { return arm == "done" || arm == "interrupted" })
