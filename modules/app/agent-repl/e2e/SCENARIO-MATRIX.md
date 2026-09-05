@@ -22,18 +22,18 @@ as `!(default prose)`).
 
 | Scenario | Grounded? | Go e2e | Webapp layer | Emacs e2e | Strongest assertion | Verdict |
 |---|---|---|---|---|---|---|
-| `!api-400` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-401` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-403` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-404` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-413` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-429` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-500` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-529` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-billing` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-max-output` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-oauth-org` | ungrounded | — | — | — | no covering test in any layer | uncovered |
-| `!api-unmodeled` | ungrounded | — | — | — | no covering test in any layer | uncovered |
+| `!api-400` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/InvalidRequest asserts the named arm `FeedTurnEndedErrored.invalid_request` (feed.proto:887-888, 400), the EXACT per-arm headline “the vendor refused the request as malformed” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The request was invalid.”. | covered |
+| `!api-401` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/AuthenticationFailed asserts the named arm `FeedTurnEndedErrored.authentication_failed` (feed.proto:883-884, 401), the EXACT per-arm headline “the credential was rejected — sign in again” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “Authentication failed.”. | covered |
+| `!api-403` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/PermissionDenied asserts the named arm `FeedTurnEndedErrored.permission_denied` (feed.proto:885-886, 403), the EXACT per-arm headline “the credential lacks permission for this request” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “Permission denied for this request.”. | covered |
+| `!api-404` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/NotFound asserts the named arm `FeedTurnEndedErrored.not_found` (feed.proto:891-892, 404), the EXACT per-arm headline “the model or resource does not exist” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The requested model was not found.”. | covered |
+| `!api-413` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/RequestTooLarge asserts the named arm `FeedTurnEndedErrored.request_too_large` (feed.proto:889-890, 413), the EXACT per-arm headline “the request exceeded the vendor's size limit” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The request was too large.”. | covered |
+| `!api-429` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/RateLimited asserts the named arm `FeedTurnEndedErrored.rate_limited` (feed.proto:879-880, 429), the EXACT per-arm headline “rate limited by the vendor” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “Rate limited; retry after 30 seconds.”. TestApiRateLimitedCarriesTheVendorWait additionally pins `FeedTurnErrorRateLimited.retry_after_ms == 549`, the exact wait the vendor stated. | covered |
+| `!api-500` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/Internal asserts the named arm `FeedTurnEndedErrored.internal` (feed.proto:893-894, 500), the EXACT per-arm headline “the vendor API hit its own internal error” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The service raised.”. | covered |
+| `!api-529` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/Overloaded asserts the named arm `FeedTurnEndedErrored.overloaded` (feed.proto:881-882, 529), the EXACT per-arm headline “the vendor API is overloaded” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The API is overloaded.”. | covered |
+| `!api-billing` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/BillingError asserts the named arm `FeedTurnEndedErrored.billing_error` (feed.proto:904-905, 402 + the vendor class), the EXACT per-arm headline “the account could not be charged — check your billing” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The account has a billing problem.”. | covered |
+| `!api-max-output` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/MaxOutputTokens asserts the named arm `FeedTurnEndedErrored.max_output_tokens` (feed.proto:911-913, no status — the vendor class alone), the EXACT per-arm headline “the request asked for more output than the model will produce” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “The response hit the max output tokens.”. | covered |
+| `!api-oauth-org` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/OauthOrgNotAllowed asserts the named arm `FeedTurnEndedErrored.oauth_org_not_allowed` (feed.proto:909-910, 403 + the vendor class), the EXACT per-arm headline “your organization does not allow this OAuth access” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “This organization is not permitted to use OAuth here.”. | covered |
+| `!api-unmodeled` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/VendorUnmodeled asserts the named arm `FeedTurnEndedErrored.vendor_unmodeled` (feed.proto:895-896), the EXACT per-arm headline “the vendor reported an error class we do not model yet” (equality is also a specific negative — no mid-turn evidence clause), and the exact vendor message “An error class this build does not model.”. TestApiUnmodeledKeepsTheVendorClassByName additionally pins `FeedTurnErrorVendorUnmodeled.type == "unknown"` — the class kept BY NAME, not collapsed. | covered |
 | `!artifact-list` | declared-only | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestArtifactPublishAndList asserts only listTurn.GetValue()!= (turn minted); contract says list produces no row (weak). Web: feed-families.layer asserts a specific negative — artifact row count unchanged (strong). | covered |
 | `!artifact-publish` | declared-only | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestArtifactPublishAndList asserts FeedArtifact.Published non-nil, non-empty Heading.Text/Url.Url. Web: feed-families.layer asserts .artifact-url element. | covered |
 | `!ask-free` | grounded | questions_e2e_test.go | cards.layer.test.ts | — | Go: TestQuestionFreeText asserts exact free-text echo in OtherText, single_select arm. Web: cards.layer answers via [data-question-other], asserts submit control removed. | covered |
@@ -173,13 +173,13 @@ as `!(default prose)`).
 
 ## (b) Counts
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **76**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **88**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **14**
-- Uncovered (no counted layer drives the scenario at all): **58**
+- Uncovered (no counted layer drives the scenario at all): **46**
 - Total canonical scenarios: 148
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 90 scenarios referenced across 19 files
+- Go e2e (non-emacs): at least 102 scenarios referenced across 20 files (`failurearms_e2e_test.go` also references the fourteen non-api scenarios whose own owners have yet to record a verdict here)
 - Webapp layer (10 `.layer.test.ts` files): 33 scenarios referenced
 - Emacs e2e (9 files): 5 scenarios referenced (`hold`, `interrupt`, `perm-hold`, `prose-streamed`-token, plus the plain gated-prompt tests that use no `!` scenario at all)
 
@@ -206,7 +206,7 @@ Fully covered: `!compact`, `!compact-auto`, `!compact-failed`, `!context-budget-
 Fully covered: `!hold`, `!perm-hold`, `!cancel-all` all have Go coverage; `!hold`/`!perm-hold` also have webapp and (for `!hold`, `!perm-hold`) Emacs coverage.
 
 ### Failure arms — api-error classes, model refusal, max turns/budget, execution error, stop hook (28)
-- Every `!api-*` class is uncovered: `!api-400`, `!api-401`, `!api-403`, `!api-404`, `!api-413`, `!api-429`, `!api-500`, `!api-529`, `!api-billing`, `!api-max-output`, `!api-oauth-org`, `!api-unmodeled`. None of the twelve `AgentFailure.api_request_failed` sub-arms is exercised by any counted e2e test, despite each having a fully declared shape in the mocked vendor.
+- Every `!api-*` class is now COVERED by `failurearms_e2e_test.go`: `!api-400`, `!api-401`, `!api-403`, `!api-404`, `!api-413`, `!api-429`, `!api-500`, `!api-529`, `!api-billing`, `!api-max-output`, `!api-oauth-org`, `!api-unmodeled`. Each of the twelve `AgentFailure.api_request_failed` sub-arms is driven by its own subtest of `TestApiRequestFailedArms`, which asserts the named `FeedTurnEndedErrored` arm, the exact per-arm headline the client draws verbatim, and the exact vendor message. Two arms carry a field of their own and get a second test each: `!api-429`'s `retry_after_ms` and `!api-unmodeled`'s `type`. All twelve remain ungrounded — the capture harness quarantines failed runs, so every asserted vendor shape is the fake's declaration.
 - Model-refusal recovery: `!refusal-fallback`, `!refusal-no-fallback` — neither the fallback-model recovery nor the no-fallback dead-end is driven.
 - `terminal_reason` failure arms with no capture AND no e2e test: `!fail-aborted-tools`, `!fail-blocking-limit`, `!fail-continuation-prevented`, `!fail-hook-stopped`, `!fail-image`, `!fail-malformed-tool-use`, `!fail-model`, `!fail-prompt-too-long`, `!fail-rapid-refill`, `!fail-tool-deferred`, `!fail-tool-deferred-unavailable`, `!fail-turn-setup`. (Contrast with the SAME family's covered members — `!fail-execution`, `!fail-max-turns`, `!fail-budget`, `!fail-stop-hook`, `!fail-structured-output` — all driven by `turnlifecycle_e2e_test.go`, which evidently stops short of the full terminal-reason enumeration.)
 - Converter-defect / recovery pair: `!fault-converter`, `!fault-recover` — the `SessionFault.converter_defect`/recovery arm and its degraded-window open/close pair are undriven.
