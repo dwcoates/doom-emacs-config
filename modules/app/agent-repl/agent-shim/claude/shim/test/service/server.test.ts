@@ -1040,3 +1040,42 @@ describe("a connection that closes without ever speaking", () => {
     expect(rejection?.code).toBe(Code.Unimplemented);
   });
 });
+
+describe("an h2c stream this server resets", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  // THE SHIM WAS SILENT ABOUT ITS OWN RESETS, and that silence cost a whole
+  // investigation: the daemon recorded "a standing stream ended without the
+  // session ending" and opened a link_severed fault, while the shim's log —
+  // the only place that could say whether the reset came from here — held
+  // nothing at all.
+  it("records the reset code and the path it was serving", async () => {
+    // Arrange: a standing stream the client then cancels.
+    const sock = socketPath();
+    const { engine, entered } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "2")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}), { signal: AbortSignal.timeout(1) })
+      .catch(() => undefined);
+    await entered;
+
+    // Act
+    await pending;
+
+    // Assert
+    await vi.waitFor(() => {
+      const reset = mirroredRecords(written).find(
+        (record) => record.level === "error" && record.context.rst_code !== undefined,
+      );
+      expect(reset?.context.path).toBe("/shim.v1.Shim/Hibernate");
+    });
+  });
+});
