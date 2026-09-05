@@ -100,11 +100,65 @@ func TestAFragmentAfterTheTerminalCannotReopenTheBubble(t *testing.T) {
 		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: " and more"}, nil), noAddress())
 
 	// Assert: the settled whole stands, and the arrival is recorded.
+	//
+	// AT DEBUG, NOT WARN. The two store planes that feed one block's fold —
+	// the shim's stream and the sidecar's transcript — share an upsert key and
+	// are not ordered against one another, so a delta behind a settled whole
+	// is a routine interleave rather than a producer fault, and the daemon
+	// cannot tell the two cases apart.
 	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "done" {
 		t.Fatalf("prose = %q, want the settled whole unchanged", got)
 	}
-	if !h.hasRecord("warn", "daemon.feed.response_fragment_after_settle") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.response_fragment_after_settle", h.records())
+	if !h.hasRecord("debug", "daemon.feed.response_fragment_after_settle") {
+		t.Fatalf("records = %+v, want a DEBUG daemon.feed.response_fragment_after_settle", h.records())
+	}
+}
+
+// The cross-plane interleave the debug level exists for, in the order it was
+// measured on the wire: the sidecar's settled whole lands between the shim's
+// block start and the shim's own trailing deltas.
+func TestASettledWholeFromOnePlaneOutrunsTheOthersTrailingDeltas(t *testing.T) {
+	// Arrange: the stream plane opens the block.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), noAddress())
+
+	// Act: the file plane settles the whole, then the stream plane's deltas
+	// for that same block arrive behind it.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "Here is what I found."},
+		}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "t I found."}, nil), noAddress())
+
+	// Assert: the bubble reads as the settled whole, with nothing doubled.
+	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "Here is what I found." {
+		t.Fatalf("prose = %q, want the settled whole with no delta folded in behind it", got)
+	}
+}
+
+// The same interleave raises no warning: the sweep that fails a test on an
+// unexpected warning must not fire on two planes racing.
+func TestACrossPlaneInterleaveRaisesNoWarning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseStart{}, nil), noAddress())
+
+	// Act.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "Here is what I found."},
+		}, nil), noAddress())
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseUpdate{NewMarkdown: "Here is wha"}, nil), noAddress())
+
+	// Assert.
+	if h.hasRecord("warn", "daemon.feed.response_fragment_after_settle") {
+		t.Fatalf("records = %+v, want no WARN for a cross-plane interleave", h.records())
 	}
 }
 
