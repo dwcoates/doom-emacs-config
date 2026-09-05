@@ -45,8 +45,27 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		if fold.settled {
 			// A fragment after the terminal cannot re-open a closed bubble;
 			// the settled whole is authoritative.
-			log.Warn("daemon.feed.response_fragment_after_settle",
-				"a prose fragment arrived after the block settled and was not folded in",
+			//
+			// THIS IS ORDINARY, NOT A FAULT, AND IT IS RECORDED AT DEBUG.
+			// One block's frames reach this fold from TWO STORE PLANES that
+			// share an upsert key and are not ordered against one another:
+			// the shim's stream plane pays out `start` and delta `update`s as
+			// the vendor emits them, while the sidecar's file plane converts
+			// the same assistant message out of the transcript into a single
+			// settled `success`. The sidecar's success routinely lands
+			// BETWEEN the shim's start and its own trailing deltas — measured
+			// on 2026-09-04 in TestPerfSubmitPromptAck, where the live order
+			// was start, success (file plane), update, update, success
+			// (stream plane) for one prose block.
+			//
+			// Nothing is lost when it happens: a settled frame restates the
+			// WHOLE, so the dropped delta was already inside the text on
+			// screen. The daemon cannot tell this apart from a single
+			// producer disordering its own stream — HistoryEntryAt carries no
+			// plane — so warning here can only ever be a false alarm, and a
+			// warning that is always false is worse than no warning.
+			log.Debug("daemon.feed.response_fragment_after_settle",
+				"a prose fragment arrived after the block settled and was not folded in; the settled whole stands",
 				dlog.Context{"unit": unit})
 			return nil, errNotARow
 		}
