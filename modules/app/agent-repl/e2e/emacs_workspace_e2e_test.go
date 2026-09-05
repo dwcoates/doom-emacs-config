@@ -615,16 +615,34 @@ func TestEmacsKillWorkspaceNeverBlocks(t *testing.T) {
 // directory; the explicit probe below is the same claim asked once more after
 // the verbs have settled, so the test cannot pass by finishing before the
 // heartbeat noticed.
+//
+// THE KILL NAMES ITS WORKSPACE INSTEAD OF BEING PICKED FOR. `SPC j x' with no
+// argument resolves its target through `agent-repl-verbs--target-ws', which
+// reads the LIVE registry — and the close that just ran tombstones this name
+// the moment the daemon's roster push lands with the row `closed'. Which side
+// of that push the kill falls on is the daemon's schedule, not this
+// scenario's subject: measured on 2026-09-04 the picker was still holding the
+// name when the layer ran one scenario at a time, and had already lost it
+// when five ran at once, so the keystroke form made the verb refuse with "No
+// agent-repl workspaces registered" instead of running. Naming the target
+// makes BOTH verbs run on every schedule, which is what "both commands back
+// to back" (EMACS-LAYER-SPEC.md scenario 13) asks for; that `SPC j x' is this
+// command is scenario 12's assertion, made again here so the keystroke path
+// is not lost.
 func TestEmacsCloseThenKillDoesNotWedgeEmacs(t *testing.T) {
 	t.Parallel()
 	box := requireSandbox(t)
 	f := newEmacsWorkspaceFixture(t, box)
 	e := f.Emacs
 
+	if want, got := "agent-repl-kill-workspace", e.LeaderBinding("j x"); got != want {
+		t.Fatalf("SPC j x resolves to %q, want %q", got, want)
+	}
+
 	f.openPanel()
 
 	e.Leader("j d")
-	e.Leader("j x")
+	e.Eval(`(progn (agent-repl-kill-workspace ` + elispString(f.Name) + `) t)`)
 
 	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after close-then-kill",
 		`(emacs-pid)`,
