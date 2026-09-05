@@ -288,3 +288,29 @@ func TestResumeDoesNotRetryAHardVendorStartFailure(t *testing.T) {
 		t.Fatalf("StartSession calls = %d, want exactly one; there is no retry machinery", len(f.client.requests))
 	}
 }
+
+// TestKillSessionTellsTheWatcherBeforeItEndsTheSession covers the ordering the
+// stand-down rests on: the shim closes its standing streams as the session
+// ends, so a watcher told afterwards would have already read the daemon's own
+// act as a severed link and redialed a shim this call is about to stop.
+func TestKillSessionTellsTheWatcherBeforeItEndsTheSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	*f.standDown = nil
+
+	// Act.
+	if err := f.fleet.KillSession(context.Background(), ws.ID, false); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	// Assert.
+	got := *f.standDown
+	want := []string{"watcher.SessionEnding", "shim.KillSession"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("stand-down order = %v, want %v", got, want)
+	}
+}

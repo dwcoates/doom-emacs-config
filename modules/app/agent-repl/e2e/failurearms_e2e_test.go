@@ -49,6 +49,14 @@ func faNewWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	return harness.Register(t, w.Daemon, repo.Dir)
 }
 
+// faApiErrorWarnings are the two records a MID-TURN vendor request failure
+// legitimately leaves, and they are this file's own subject: every scenario
+// here asks the fake vendor to fail a request mid-turn, the watcher routes
+// that failure, and the feed files it as the turn's evidence. Declared for the
+// same reason the query-death area declares its own trail — a fault the
+// arrangement provokes is a fault the daemon is RIGHT to record.
+var faApiErrorWarnings = []string{"daemon.sessionwatcher.api_error", "daemon.feed.api_error"}
+
 // faDriveErrored drives one named failure scenario to completion and answers
 // the turn's FeedTurnEndedErrored, failing loudly if the turn ended on any
 // other outcome. The headline is checked here for every arm because Landing 8
@@ -214,6 +222,7 @@ func TestApiRequestFailedArms(t *testing.T) {
 			t.Parallel()
 			// Arrange
 			w := NewWorld(t, WorldOpts{})
+			w.ExpectWarnings(faApiErrorWarnings...)
 			ws := faNewWorkspace(t, w)
 
 			// Act
@@ -246,6 +255,7 @@ func TestApiRateLimitedCarriesTheVendorWait(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
+	w.ExpectWarnings(faApiErrorWarnings...)
 	ws := faNewWorkspace(t, w)
 
 	// Act

@@ -98,6 +98,15 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 		// the topbar's warning dropdown. Every other kind that draws nowhere
 		// (thinking, task acts, monitors, wakeups, cron, notifications,
 		// injected context) answers the same way.
+		//
+		// THE KIND IS RECORDED, because a detachment naming this unit has to
+		// be able to tell "nothing has drawn it YET" from "nothing will ever
+		// draw it". A monitor is always detached and is footer-only by the
+		// proto's own word, so its announcement would otherwise sit held
+		// until the turn's terminal reported it as work detached from a unit
+		// the resolver never drew.
+		s.markUndrawable(unit)
+		r.retireDetachment(s, unit)
 		err = errNotARow
 	}
 

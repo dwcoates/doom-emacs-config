@@ -40,6 +40,11 @@ type unitState struct {
 	// restates the addressed string, and the address line prefers a name a
 	// reader recognizes.
 	sendAddressedTo string
+	// drawsNoRow records that this unit's KIND draws no feed row at all —
+	// a monitor, a wakeup, an unmodeled tool. It is not "has not drawn yet":
+	// nothing will ever draw it, so a detachment naming it can never be
+	// claimed by a row and is retired rather than held.
+	drawsNoRow bool
 	// sendSummary is the one-line preview a send's caller supplied. Kept
 	// because it arrives only on the start arm and the row is recomposed from
 	// scratch on every later frame. EMPTY MEANS NONE WAS GIVEN, which draws no
@@ -197,6 +202,17 @@ type subagentState struct {
 // already left the turn, and under which handle the work is addressed.
 func (s *wsState) markDetached(unit, work string) {
 	s.detachedUnits[unit] = work
+}
+
+// markUndrawable records that a unit's kind draws no feed row, ever.
+func (s *wsState) markUndrawable(unit string) {
+	s.unit(unit).drawsNoRow = true
+}
+
+// undrawable reports whether a unit's kind is one the feed never draws.
+func (s *wsState) undrawable(unit string) bool {
+	u, ok := s.units[unit]
+	return ok && u.drawsNoRow
 }
 
 // claimDetached answers the work handle a detachment announced for this unit

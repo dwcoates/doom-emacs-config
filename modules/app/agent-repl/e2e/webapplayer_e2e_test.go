@@ -206,7 +206,10 @@ func TestWebappLayer(t *testing.T) {
 // `daemon.health.open_fault` records.
 func TestWebappLayerFeedFamilies(t *testing.T) {
 	t.Parallel()
-	wlDriveArea(t, "feed-families.layer.test.ts", "daemon.health.open_fault")
+	// The query-death records beside it are the SAME act: the death is
+	// routed at the watcher and drawn as the turn's terminal.
+	wlDriveArea(t, "feed-families.layer.test.ts", "daemon.health.open_fault",
+		"daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 }
 
 // TestWebappLayerQueryDeath is section F2's SECOND query-death cause arm.
@@ -220,7 +223,8 @@ func TestWebappLayerQueryDeath(t *testing.T) {
 	t.Parallel()
 	// THE DECLARED FAULT IS THIS AREA'S WHOLE SUBJECT: the vendor query dies,
 	// and `daemon.health.open_fault` is the daemon recording exactly that.
-	wlDriveArea(t, "query-death.layer.test.ts", "daemon.health.open_fault")
+	wlDriveArea(t, "query-death.layer.test.ts", "daemon.health.open_fault",
+		"daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 }
 
 // TestWebappLayerSubfeeds is section F3: sub-feed open/collapse lifecycle.
@@ -238,7 +242,10 @@ func TestWebappLayerCards(t *testing.T) {
 // TestWebappLayerSurfaces is section F5: footer and topbar surfaces.
 func TestWebappLayerSurfaces(t *testing.T) {
 	t.Parallel()
-	wlDriveArea(t, "surfaces.layer.test.ts")
+	// The area drives `unmodeled` to prove the warning dropdown is an
+	// unmodeled tool's only home, so the watcher's own record of that
+	// activity is this file's evidence, not a surprise.
+	wlDriveArea(t, "surfaces.layer.test.ts", "daemon.sessionwatcher.unmodeled_activity")
 }
 
 // TestWebappLayerPanels is section F6: daemon-answered command panels.
@@ -311,7 +318,9 @@ func TestWebappLayerMergeTabs(t *testing.T) {
 	// section F7 is about. The conflict is scripted into the FAKE git's state;
 	// no real repository is involved.
 	repo.ScriptConflict(repo.Dir, filepath.Base(ws.GetDir()), "conflict.txt")
-	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+	// The parked conflict is scripted above ON PURPOSE, so the merge parking
+	// on it is this area's own subject rather than an unexplained warning.
+	w.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.conflicts")
 
 	host := w.Daemon.WatchHost(ws)
 	defer host.Close()
