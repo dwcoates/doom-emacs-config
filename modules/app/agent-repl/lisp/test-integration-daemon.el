@@ -544,6 +544,12 @@ any more and the \"no automatic retry\" ruling is broken; any less and
           (agent-repl-itest--wait-until
            (lambda () (file-exists-p counter))
            nil "the build script to run")
+          ;; THE COUNTER IS NOT THE FAILURE.  The script appends its line and
+          ;; only THEN exits; the segment is set by the sentinel behind that
+          ;; exit, so it is its own fact and has to be waited for as one.
+          (agent-repl-itest--wait-until
+           (lambda () (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))
+           nil "the build-failure mode-line segment")
           ;; Assert: "the mode-line segment \"daemon: build failed\"" —
           ;; the exact text.
           (should (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))
