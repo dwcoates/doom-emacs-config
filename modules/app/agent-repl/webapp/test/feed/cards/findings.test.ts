@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
@@ -107,6 +107,12 @@ async function settle(): Promise<void> {
 
 beforeEach(() => {
   vi.useFakeTimers();
+});
+
+// The fake clock is this file's own; hand the real one back so a
+// later file sharing this worker never inherits a frozen timer.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("drawFeedFindings", () => {

@@ -1,7 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { registerWorkspaceMoved, workspaceMoved } from "../../src/rpc/moved.js";
 
 describe("workspaceMoved", () => {
+  // The handler is one module-level slot, so a test that leaves one
+  // installed would decide the answer for whichever test runs next.
+  // Registering a handler and immediately uninstalling it empties the slot
+  // through the module's own lifecycle.
+  afterEach(() => {
+    registerWorkspaceMoved(() => undefined)();
+  });
+
   it("answers false when no lifecycle is mounted to say so", () => {
     expect(workspaceMoved("127.0.0.1:9931")).toBe(false);
   });
@@ -31,9 +39,10 @@ describe("workspaceMoved", () => {
   it("leaves a successor's handler installed when a late dispose uninstalls", () => {
     const seen: string[] = [];
     const stale = registerWorkspaceMoved(() => seen.push("stale"));
-    registerWorkspaceMoved(() => seen.push("current"));
+    const current = registerWorkspaceMoved(() => seen.push("current"));
     stale();
     workspaceMoved("127.0.0.1:9931");
+    current();
     expect(seen).toEqual(["current"]);
   });
 });

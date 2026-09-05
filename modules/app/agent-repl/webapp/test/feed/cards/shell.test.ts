@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   InterruptErrorSchema,
@@ -102,6 +102,12 @@ async function settle(): Promise<void> {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
+});
+
+// The fake clock is this file's own; hand the real one back so a
+// later file sharing this worker never inherits a frozen timer.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("drawFeedShell head", () => {
