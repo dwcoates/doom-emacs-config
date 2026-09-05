@@ -272,6 +272,17 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 		if r.detachForegroundShell(s, at, unitID, workID) {
 			return
 		}
+		// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
+		// A monitor is footer-only and always detached, so its announcement
+		// has no row to continue and never will; holding it would report the
+		// footer's own bookkeeping as a producer fault at the turn's
+		// terminal.
+		if s.undrawable(unitID) {
+			log.Debug("daemon.feed.detachment_draws_nothing",
+				"a detachment named a unit whose kind draws no feed row; the footer carries the work",
+				dlog.Context{"unit": unitID, "work": workID})
+			return
+		}
 		// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
 		// against its identity so the unit lands through the detached
 		// placement when it does draw; a mark still standing when the turn
@@ -340,6 +351,20 @@ func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) 
 	// NOT DRAWABLE AS A SHELL AND NOT A SPAWN: the mark goes back, so the
 	// turn's terminal still reports a detachment that never found its unit.
 	s.markDetached(unitID, work)
+}
+
+// retireDetachment drops a detachment held against a unit whose kind draws no
+// feed row. The mark exists so a row can ride the detached wrapper when it
+// draws; a unit that will never draw one has nothing to hand it to, and a mark
+// left standing is reported at the turn's terminal as a producer fault.
+func (r *resolver) retireDetachment(s *wsState, unitID string) {
+	work, held := s.claimDetached(unitID)
+	if !held {
+		return
+	}
+	r.logger(s.id).Debug("daemon.feed.detachment_retired",
+		"a held detachment named a unit whose kind draws no feed row; the mark is retired",
+		dlog.Context{"unit": unitID, "work": work})
 }
 
 // republishSubagent re-pushes a bubble whose placement wrapper changed.

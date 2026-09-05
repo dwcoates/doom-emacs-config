@@ -1313,3 +1313,56 @@ func TestShellSettledWithAnUnsetLostArmIsNotDrawnAsLost(t *testing.T) {
 		t.Fatalf("outcome = lost with how %T, want no lost claim", settled.GetLost().GetHow())
 	}
 }
+
+// monitorActivity is a footer-only unit: proto/src/conversation/v1's
+// AgentMonitor is "FOOTER-ONLY: no feed bubble exists", and it is "Always
+// detached", so its announcement always names a unit the feed never draws.
+func monitorActivity(unit string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: unit},
+		Item: &conversationv1.AgentActivity_Monitor{Monitor: &conversationv1.AgentMonitor{
+			Result: &conversationv1.AgentMonitor_Start{Start: &conversationv1.AgentMonitorStart{
+				Description: "build log",
+				StartedAtMs: 1_000,
+			}},
+		}},
+	}
+}
+
+func TestADetachmentNamingAFooterOnlyUnitIsNotWarnedWhenTheTurnEnds(t *testing.T) {
+	// Arrange: the monitor's own unit arrives first, then its detachment.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
+	h.detachWork("work-1", "monitor-1")
+
+	// Act.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: the footer carries the watch, so nothing was lost and the
+	// terminal reports no producer fault.
+	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
+		t.Fatalf("records = %+v, want NO detached_unknown_unit for a footer-only unit", h.records())
+	}
+}
+
+func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
+	// Arrange: the announcement beats the unit, so it is held first.
+	h := newHarness(t)
+	h.detachWork("work-1", "monitor-1")
+
+	// Act: the unit arrives, and its kind draws no row.
+	h.resolver.OnActivity(testWorkspace, mainAgent(), monitorActivity("monitor-1"), noAddress())
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert.
+	if !h.hasRecord("debug", "daemon.feed.detachment_retired") {
+		t.Fatalf("records = %+v, want the held mark retired", h.records())
+	}
+	if h.hasRecord("warn", "daemon.feed.detached_unknown_unit") {
+		t.Fatalf("records = %+v, want NO detached_unknown_unit once the mark is retired", h.records())
+	}
+}
