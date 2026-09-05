@@ -259,6 +259,67 @@ func awaitNoStrays(t *testing.T, d *harness.Daemon, bound time.Duration) []int {
 	}
 }
 
+// TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp is the
+// leak the test above CANNOT reach: its workspace has a registered session, so
+// the walk over the workspaces finds it. A shim that has been spawned and has
+// not finished coming up is in no session map at all — Fleet.Stop answers nil
+// for such a workspace — so the walk steps past it and the process outlives
+// the daemon holding the workspace lock and ~95 MiB. Measured before the fix:
+// a shim spawned at 18:02:54.268 outlived a daemon whose serving lifetime
+// ended 21 ms later, and was still there when a 10 second grace expired.
+//
+// The bring-up is held open by withholding the fake's opening diagnostics,
+// which is exactly the window the real spawn spends dialing its shim.
+func TestUpdateShutdownScheduleNowLeavesNoShimBehindThatIsStillBringingUp(t *testing.T) {
+	t.Parallel()
+	// Arrange: a shim that withholds its opening diagnostics, so OpenWorkspace
+	// blocks inside bring-up and the process reaches no session map.
+	f := newRegistered(t, harness.Opts{})
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
+	// The daemon is stood down mid-bring-up on purpose; these are that act's
+	// own trail, on both sides of the abandoned spawn.
+	f.d.ExpectWarnings(
+		"daemon.shimclient.standdown", "daemon.shimclient.spawn",
+		"daemon.shimclient.exit", "daemon.shimclient.redial",
+		"daemon.workspace.bring_up", "daemon.workspace.open",
+		"daemon.health.session", "daemon.health.open_fault",
+	)
+
+	opened := make(chan error, 1)
+	go func() {
+		_, err := f.openRaw()
+		opened <- err
+	}()
+	// The fake binds its control listener at startup, so this returns as soon
+	// as the PROCESS is up — long before any diagnostics it is withholding.
+	shimPID := f.d.Shim(f.ws).Info().PID
+	if shimPID == 0 {
+		t.Fatal("the fake shim reported no pid; this test has no process to observe")
+	}
+
+	// Act
+	resp, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: drainReasonOperator("emacs"),
+		}},
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} with a spawn in flight = (%v, %v), want a success", resp, err)
+	}
+	harness.AwaitProcessGone(t, f.d.Ctx(), shimPID)
+	f.d.AwaitExit()
+	if left := awaitNoStrays(t, f.d, strayReclaimBound); len(left) > 0 {
+		t.Fatalf("the host's stop left %d process(es) alive: %v — a shim spawned and not yet registered is nothing but the supervisor's to stand down", len(left), left)
+	}
+	// The bring-up its process was stood down under does not succeed, and the
+	// caller is told rather than left holding a session that never came up.
+	if err := <-opened; err == nil {
+		t.Fatal("OpenWorkspace succeeded after its shim was stood down mid-bring-up")
+	}
+}
+
 // TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause is
 // critique 15: strengthens the shutdown-announcement assertions onto the ONE
 // cause no other test in this file reaches — a schedule that actually fires

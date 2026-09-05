@@ -48,6 +48,14 @@ type client struct {
 	pgid   int
 	stderr *ring
 
+	// release takes this client out of the supervisor's spawn registry. It is
+	// armed by supervisor.hold at cmd.Start and fired exactly once, from the
+	// two places supervision of the PROCESS ends: its death (publishExit) and
+	// its handover to a successor (Detach). Nil for an adopted client, which
+	// the supervisor never started and therefore never held.
+	release     func()
+	releaseOnce sync.Once
+
 	link *linkFeed
 	exit chan ExitInfo
 	dead chan struct{}
@@ -288,6 +296,10 @@ func (c *client) Detach() {
 
 	c.cancelMonitor()
 	c.link.close()
+	// THE HANDOVER LEAVES THE SUPERVISOR'S REGISTRY TOO. This process is now
+	// the successor's to adopt, and a `now` shutdown's sweep must not find it:
+	// the registry is what tells a transferred shim from an in-flight spawn.
+	c.releaseHold()
 	c.log.Info("daemon.shimclient.detach", "supervision handed over; process left running", dlog.Context{
 		"workspace_id": string(c.ws), "pid": pid,
 	})
@@ -363,6 +375,41 @@ func (c *client) publishExit(info ExitInfo) {
 	c.exit <- info
 	close(c.exit)
 	c.cancelMonitor()
+	// The process is gone, so the supervisor no longer owns one.
+	c.releaseHold()
+}
+
+// releaseHold fires the supervisor's deregistration exactly once. A client
+// that was never held (an adopted one) has nothing to fire.
+func (c *client) releaseHold() {
+	if c.release == nil {
+		return
+	}
+	c.releaseOnce.Do(c.release)
+}
+
+// killWithin forces the process down and waits for the reaper, on a bound.
+//
+// Kill's own last step is an UNBOUNDED wait on the reap, which is correct for
+// its callers -- the process has been SIGKILLed and the kernel does not
+// negotiate -- but the immediate shutdown cannot stake the whole exit on that:
+// a child stopped in the kernel (a ptrace stop, an uninterruptible D state)
+// does not reap, and an exit that waited on one is a daemon that never leaves.
+// So the kill runs on its own goroutine and this waits on bound, whose value
+// the caller states; the goroutine's channel is buffered, so a kill that lands
+// after the bound has passed still completes and never leaks a blocked writer.
+func (c *client) killWithin(ctx context.Context, bound time.Duration, attr KillAttribution) error {
+	done := make(chan error, 1)
+	go func() { done <- c.Kill(attr) }()
+
+	within, cancel := context.WithTimeout(ctx, bound)
+	defer cancel()
+	select {
+	case err := <-done:
+		return err
+	case <-within.Done():
+		return fmt.Errorf("shimclient: pid %d did not go down within %s: %w", c.PID(), bound, within.Err())
+	}
 }
 
 // exitedAlready reports whether death has already been decided.

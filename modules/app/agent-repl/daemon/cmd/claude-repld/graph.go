@@ -443,9 +443,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	drainController, err = drain.New(drain.Deps{
-		DB:           p.DB,
-		IdleCutoff:   p.Opts.idleCutoff,
-		Stand:        fleet,
+		DB:         p.DB,
+		IdleCutoff: p.Opts.idleCutoff,
+		Stand:      fleet,
+		// THE SUPERVISOR ITSELF, not the fleet: an immediate shutdown must
+		// also reach the shims that were spawned and have not yet reached the
+		// fleet's session map, and the supervisor is the only thing that knows
+		// one exists.
+		Spawns:       supervisor,
 		Freeness:     fleet.Freeness(),
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,

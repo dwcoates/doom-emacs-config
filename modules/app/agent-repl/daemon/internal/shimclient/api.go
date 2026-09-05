@@ -77,6 +77,17 @@ type Supervisor interface {
 	// be the invariant violation) and because the adopted-death witness is
 	// keyed on the workspace's kernel lock.
 	Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir, udsPath string) (Client, error)
+	// StandDownEverySpawn force-kills every process this supervisor STARTED
+	// and still owns, and returns every kill that failed joined together.
+	//
+	// It exists for the one caller that cannot go through the workspace fleet:
+	// the immediate shutdown. A shim enters the fleet's session map only once
+	// bring-up has returned healthy and StartSession has answered, so a spawn
+	// still inside that window is known to NOBODY but this supervisor, and the
+	// fleet's own stand-down walk steps straight past it. A BOUNCE is not this
+	// case and must not call this: its shims are handed to a successor through
+	// Client.Detach, which takes them out of the registry this sweeps.
+	StandDownEverySpawn(ctx context.Context, reason string) error
 }
 
 // Client is one shim connection. Every verb is mutex-guarded by the internal
