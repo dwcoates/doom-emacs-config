@@ -114,7 +114,7 @@ export class PromptFeeder {
 }
 
 const ALLOW: CanUseToolLike = async (_name, input) =>
-  ({ behavior: "allow", updatedInput: input }) as PermissionResultLike;
+  ({ behavior: "allow", updatedInput: input });
 
 /**
  * Run a fake query over a fixed list of prompts and collect both planes.
@@ -171,7 +171,7 @@ export async function driveScenario(
     }
   })();
 
-  if (options.during !== undefined) await options.during(query, feeder, messages as unknown as Line[]);
+  if (options.during !== undefined) await options.during(query, feeder, messages);
   feeder.close();
   await collect;
 
@@ -248,7 +248,7 @@ export function theResult(driven: Driven): Line {
   if (results.length !== 1) {
     throw new Error(`expected exactly one result message, saw ${results.length}`);
   }
-  return results[0]!;
+  return results[0];
 }
 
 /** The `toolUseResult` values the transcript's user records carried, in order. */

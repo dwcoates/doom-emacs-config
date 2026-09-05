@@ -177,7 +177,7 @@ export function initMessage(overrides: Partial<{ sessionId: string; model: strin
     plugins: [],
     uuid: "11111111-1111-4111-8111-111111111111",
     session_id: overrides.sessionId ?? "session-1",
-  } as SdkMessage;
+  };
 }
 
 /** A turn terminal. */

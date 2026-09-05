@@ -26,7 +26,7 @@ import type { CanUseToolLike, PermissionResultLike, SdkUserMessage } from "../..
 import { driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
-  ({ behavior: "allow", updatedInput: input }) as PermissionResultLike;
+  ({ behavior: "allow", updatedInput: input });
 
 const emptyPrompt = (async function* (): AsyncGenerator<SdkUserMessage> {})();
 
@@ -362,7 +362,7 @@ describe("setPermissionMode", () => {
     const query = createFakeQuery(emptyPrompt, ALLOW, { sessionId: "s", newUuid: () => "u" });
     const seen: Record<string, unknown>[] = [];
     const drain = (async () => {
-      for await (const m of query) seen.push(m as unknown as Record<string, unknown>);
+      for await (const m of query) seen.push(m);
     })();
 
     // Act

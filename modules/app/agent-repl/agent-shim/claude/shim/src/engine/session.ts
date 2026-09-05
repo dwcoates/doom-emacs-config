@@ -1435,7 +1435,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const created = await deps.createQuery({
       binding,
       permissionMode: toVendorPermissionMode(permissionMode),
-      canUseTool: gate.canUseTool as CanUseToolLike,
+      canUseTool: gate.canUseTool,
       abortController: controller,
       prompt: queue,
       ...(effectiveModel === "" ? {} : { model: effectiveModel }),
@@ -1759,7 +1759,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       throwaway = await deps.createQuery({
         binding: { kind: "resume", resumeSessionId: vendorSessionId },
         permissionMode: "plan",
-        canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })) as CanUseToolLike,
+        canUseTool: (() => Promise.resolve({ behavior: "deny", message: "compaction takes no tools" })),
         abortController: controller,
         prompt: queue,
         ...(model === "" ? {} : { model }),

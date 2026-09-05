@@ -537,7 +537,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
                 resolve(line);
               };
               const onAbort = (): void => settle(null);
-              state.waiters.push(settle as (line: storev1.StoreLineAt) => void);
+              state.waiters.push(settle);
               context.signal.addEventListener("abort", onAbort, { once: true });
               if (state.closed || context.signal.aborted) settle(null);
             });

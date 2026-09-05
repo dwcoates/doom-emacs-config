@@ -878,7 +878,7 @@ describe("rotation, on the FILE plane", () => {
 
     const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
     expect(links).toHaveLength(1);
-    const newId = links[0]!.replace(/\.json$/, "");
+    const newId = links[0].replace(/\.json$/, "");
     expect(newId).not.toBe(started.vendorSessionId);
     // The NEW file exists under the post-clear init id...
     expect(existsSync(sessionTranscriptPath(shim.dirs, newId))).toBe(true);
@@ -907,7 +907,7 @@ describe("rotation, on the FILE plane", () => {
 
     const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
     expect(links).toHaveLength(1);
-    const newId = links[0]!.replace(/\.json$/, "");
+    const newId = links[0].replace(/\.json$/, "");
     const link = JSON.parse(
       readFileSync(vendorLinkPath(shim.dirs.stateDir, keyOf(shim), newId), "utf8"),
     ) as Record<string, unknown>;
@@ -940,7 +940,7 @@ describe("rotation, on the FILE plane", () => {
     // it. What IS assertable is that it is the vendor's uuid rather than a
     // shim-minted counter, and that it names no line either file holds.
     const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
-    const newId = links[0]!.replace(/\.json$/, "");
+    const newId = links[0].replace(/\.json$/, "");
     const fileUuids = new Set([
       ...recordUuids(readTranscript(shim.dirs, started.vendorSessionId)),
       ...recordUuids(readTranscript(shim.dirs, newId)),

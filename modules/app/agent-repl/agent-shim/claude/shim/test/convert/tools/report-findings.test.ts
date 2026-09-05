@@ -56,9 +56,9 @@ function successOf(
 
 function oneFinding(entry: Record<string, unknown>): conversationv1.AgentFinding {
   const success = successOf(
-    reportFindingsConverter.settle(call(), outcome({ count: 1, findings: [entry] }))!,
+    reportFindingsConverter.settle(call(), outcome({ count: 1, findings: [entry] })),
   );
-  return success.findings[0]!;
+  return success.findings[0];
 }
 
 describe("reportFindingsConverter.start", () => {
@@ -77,7 +77,7 @@ describe("reportFindingsConverter.settle", () => {
     const structured = { count: 2, findings: [FINDING, { ...FINDING, summary: "second" }] };
 
     // Act.
-    const success = successOf(reportFindingsConverter.settle(call(), outcome(structured))!);
+    const success = successOf(reportFindingsConverter.settle(call(), outcome(structured)));
 
     // Assert.
     expect(success.findings.map((finding) => finding.summary)).toEqual([FINDING.summary, "second"]);
@@ -86,7 +86,7 @@ describe("reportFindingsConverter.settle", () => {
   it("carries an empty report, which is a review that found nothing", () => {
     // Arrange, Act.
     const success = successOf(
-      reportFindingsConverter.settle(call(), outcome({ count: 0, findings: [] }))!,
+      reportFindingsConverter.settle(call(), outcome({ count: 0, findings: [] })),
     );
 
     // Assert.
@@ -96,7 +96,7 @@ describe("reportFindingsConverter.settle", () => {
   it("reads the findings back off the call when the tool echoed nothing", () => {
     // Arrange, Act.
     const success = successOf(
-      reportFindingsConverter.settle(call({ findings: [FINDING] }), outcome({ count: 1 }))!,
+      reportFindingsConverter.settle(call({ findings: [FINDING] }), outcome({ count: 1 })),
     );
 
     // Assert.
@@ -110,7 +110,7 @@ describe("reportFindingsConverter.settle", () => {
 
   it("stamps the settle instant", () => {
     // Arrange, Act.
-    const success = successOf(reportFindingsConverter.settle(call(), outcome({ findings: [] }))!);
+    const success = successOf(reportFindingsConverter.settle(call(), outcome({ findings: [] })));
 
     // Assert.
     expect(success.settledAt?.atMs).toBe(11_000n);
@@ -119,7 +119,7 @@ describe("reportFindingsConverter.settle", () => {
   it("takes the effort level from the result", () => {
     // Arrange, Act.
     const success = successOf(
-      reportFindingsConverter.settle(call(), outcome({ findings: [], level: "xhigh" }))!,
+      reportFindingsConverter.settle(call(), outcome({ findings: [], level: "xhigh" })),
     );
 
     // Assert.
@@ -129,7 +129,7 @@ describe("reportFindingsConverter.settle", () => {
   it("falls back to the call's own level when the result stated none", () => {
     // Arrange, Act.
     const success = successOf(
-      reportFindingsConverter.settle(call({ level: "max" }), outcome({ findings: [] }))!,
+      reportFindingsConverter.settle(call({ level: "max" }), outcome({ findings: [] })),
     );
 
     // Assert.
@@ -139,7 +139,7 @@ describe("reportFindingsConverter.settle", () => {
   it("drops an entry that is not a finding at all rather than half-building one", () => {
     // Arrange, Act.
     const success = successOf(
-      reportFindingsConverter.settle(call(), outcome({ findings: [FINDING, "oops"] }))!,
+      reportFindingsConverter.settle(call(), outcome({ findings: [FINDING, "oops"] })),
     );
 
     // Assert.
@@ -148,7 +148,7 @@ describe("reportFindingsConverter.settle", () => {
 
   it("settles a vendor-marked error as the failure arm", () => {
     // Arrange, Act.
-    const arm = armOf(reportFindingsConverter.settle(call(), outcome(undefined, true))!);
+    const arm = armOf(reportFindingsConverter.settle(call(), outcome(undefined, true)));
 
     // Assert.
     expect(arm.case).toBe("failure");
@@ -156,7 +156,7 @@ describe("reportFindingsConverter.settle", () => {
 
   it("carries what the call said when it failed", () => {
     // Arrange, Act.
-    const arm = armOf(reportFindingsConverter.settle(call(), outcome(undefined, true))!);
+    const arm = armOf(reportFindingsConverter.settle(call(), outcome(undefined, true)));
 
     // Assert.
     const failure = arm.value as conversationv1.AgentReportFindingsFailure;

@@ -18,7 +18,7 @@ function corpusOutput(): Record<string, unknown> {
   const path = fileURLToPath(
     new URL("../../../../../../testdata/corpus/tool-results/web_fetch.jsonl", import.meta.url),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { toolUseResult: Record<string, unknown> }).toolUseResult;
 }
 
@@ -27,7 +27,7 @@ function corpusInput(): Record<string, unknown> {
   const path = fileURLToPath(
     new URL("../../../../../../testdata/corpus/tool-inputs/web_fetch.jsonl", import.meta.url),
   );
-  const line = readFileSync(path, "utf8").trim().split("\n")[0] as string;
+  const line = readFileSync(path, "utf8").trim().split("\n")[0];
   return (JSON.parse(line) as { input: Record<string, unknown> }).input;
 }
 
@@ -128,7 +128,7 @@ describe("webFetchConverter.settle", () => {
     const output = corpusOutput();
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output)));
 
     // Assert.
     const success = fetch.result.value as conversationv1.AgentWebFetchSuccess;
@@ -145,7 +145,7 @@ describe("webFetchConverter.settle", () => {
     const call = callWith({ url: "https://api.slack.com/methods" });
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(corpusOutput()))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(corpusOutput())));
 
     // Assert.
     expect((fetch.result.value as conversationv1.AgentWebFetchSuccess).target?.url).toBe(
@@ -159,7 +159,7 @@ describe("webFetchConverter.settle", () => {
     const output = { code: 200, codeText: "OK", result: "page", bytes: 10, durationMs: 5, artifactRead: { slug: "x" } };
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output)));
 
     // Assert.
     expect((fetch.result.value as conversationv1.AgentWebFetchSuccess).artifactRead).toBe(true);
@@ -171,7 +171,7 @@ describe("webFetchConverter.settle", () => {
     const output = { code: 200, codeText: "OK", result: "page", bytes: 10, durationMs: 5 };
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output)));
 
     // Assert.
     expect((fetch.result.value as conversationv1.AgentWebFetchSuccess).artifactRead).toBe(false);
@@ -183,7 +183,7 @@ describe("webFetchConverter.settle", () => {
     const output = { code: 200, codeText: "OK", result: "page", bytes: 10, durationMs: 1234 };
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output)));
 
     // Assert.
     expect((fetch.result.value as conversationv1.AgentWebFetchSuccess).durationMs).toBe(1234n);
@@ -195,7 +195,7 @@ describe("webFetchConverter.settle", () => {
     const outcome = outcomeWith(undefined, true);
 
     // Act.
-    const fetch = fetchOf(webFetchConverter.settle(call, outcome)!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcome));
 
     // Assert.
     const failure = fetch.result.value as conversationv1.AgentWebFetchFailure;
@@ -220,7 +220,7 @@ describe("webFetchConverter defaults for fields the vendor left unstated", () =>
   /** The success arm for one typed output, against a fixed call. */
   function successOf(output: Record<string, unknown>): conversationv1.AgentWebFetchSuccess {
     const call = callWith({ url: "https://example.test/" });
-    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output))!);
+    const fetch = fetchOf(webFetchConverter.settle(call, outcomeWith(output)));
     expect(fetch.result.case).toBe("success");
     return fetch.result.value as conversationv1.AgentWebFetchSuccess;
   }
