@@ -206,3 +206,48 @@ describe("UpdateTask's typed refusal", () => {
     );
   });
 });
+
+describe("the new-task field's keyboard", () => {
+  it("creates the task on Enter, without reaching for the submit button", async () => {
+    // Arrange
+    let title = "";
+    const sc = sidebarContext(
+      appContext({
+        createTask: (request) => {
+          title = request.title;
+          return create(CreateTaskResponseSchema, {
+            result: { case: "success", value: { task: { id: "task-1" } } },
+          });
+        },
+      }),
+    );
+    const host = drawCreateTaskControl(sc);
+    const input = host.querySelector("[data-task-title]") as HTMLInputElement;
+    input.value = "ship the rail";
+    // Act
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    // Assert
+    expect(title).toBe("ship the rail");
+  });
+
+  it("sends nothing for a key that is not Enter", async () => {
+    let calls = 0;
+    const sc = sidebarContext(
+      appContext({
+        createTask: () => {
+          calls += 1;
+          return create(CreateTaskResponseSchema, {
+            result: { case: "success", value: { task: { id: "task-1" } } },
+          });
+        },
+      }),
+    );
+    const host = drawCreateTaskControl(sc);
+    const input = host.querySelector("[data-task-title]") as HTMLInputElement;
+    input.value = "ship the rai";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+    expect(calls).toBe(0);
+  });
+});
