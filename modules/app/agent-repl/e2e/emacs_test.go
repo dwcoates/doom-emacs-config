@@ -770,6 +770,15 @@ func (e *Emacs) stageEmacsDir() {
 // deleted and rebound, and a LIVE one is reported as a warning, so the error
 // says nothing about which of the two it hit and the listing says everything.
 //
+// AND AN EMPTY LISTING IS ITSELF A FINDING, which is how the defect this
+// comment used to point away from was caught. A bind error with no `server`
+// entry in the root means the socket that failed to bind was NOT this
+// scenario's: it was /tmp/emacs<uid>/server, bound under the DEFAULT
+// `server-name` by Doom's own `use-package! server` before the boot hook had
+// set the name, at a path every scenario in the container shares. See the
+// header of `sandbox/doom/init.el`, which now pins `server-name` and
+// `server-socket-dir` before anything can load the feature.
+//
 // It is a listing and never a walk: the root holds a staged Doom tree and a
 // whole state root, and printing those would bury the one line that matters.
 func (e *Emacs) rootListing() string {

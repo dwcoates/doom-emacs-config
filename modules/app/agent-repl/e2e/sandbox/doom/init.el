@@ -69,6 +69,68 @@
 
 (agent-repl-e2e--breadcrumb "init.el reached")
 
+;; ---------------------------------------------------------------------------
+;; THE SERVER SOCKET IS CLAIMED HERE, BEFORE ANYTHING CAN LOAD `server'.
+;; ---------------------------------------------------------------------------
+;;
+;; THIS IS NOT A PRECAUTION, IT IS THE FIX FOR A MEASURED FAILURE. Doom's own
+;; `lisp/doom-editor.el' carries
+;;
+;;   (use-package! server
+;;     :when (display-graphic-p)
+;;     :after-call doom-first-input-hook doom-first-file-hook
+;;     :defer 1
+;;     :config (unless (server-running-p) (server-start)))
+;;
+;; and this layer's frame IS graphical (the panel is an xwidget webview, so
+;; `StartEmacs' runs Emacs on an Xvfb). That `:config' is a
+;; `with-eval-after-load' on `server', so it fires the instant ANY code loads
+;; the feature -- including `config.el''s own boot hook, whose first act is
+;; `(require 'server)' -- and it fires BEFORE that hook sets `server-name'.
+;; Its `:defer 1' timer can also load the feature on its own, at one second,
+;; which is inside the boot the hook is still finishing.
+;;
+;; So the socket Doom binds is `server-socket-dir' plus the DEFAULT name
+;; "server", and `server-socket-dir' is derived from XDG_RUNTIME_DIR or
+;; TMPDIR -- both EMPTY in this container, leaving /tmp/emacs<uid> -- never
+;; from HOME. HOME is what this layer makes unique per scenario; /tmp is
+;; shared by every scenario in the container. Concurrent boots therefore raced
+;; between that `server-running-p' and its `bind', and the loser died with
+;;
+;;   Doom failed to initialize: Cannot bind server socket: Address already in use
+;;
+;; naming a path in NO scenario's scratch root -- which is exactly why the
+;; boot hook's occupant pre-flight and the Go side's root listing both
+;; reported nothing: both were reading the scenario's own socket path, which
+;; the boot had not reached yet. Measured 2026-09-05: 2 of 45 scenarios on a
+;; quiet box, both dead at boot with an empty root listing and a breadcrumb
+;; that stops at "boot hook entered".
+;;
+;; Two settings close it, and both must land before any load of `server',
+;; which is why they are here in init.el and not in the boot hook:
+;;
+;;   * `server-name' is the scenario's own ABSOLUTE socket path, so
+;;     `server--file-name' resolves to it no matter who calls `server-start'.
+;;     An absolute name makes `server-socket-dir' irrelevant to the bind.
+;;   * `server-socket-dir' is moved under this scenario's root anyway, so a
+;;     default-named server started by anything else this profile loads --
+;;     magit's `with-editor', an interactive `M-x server-start' -- still
+;;     cannot reach a path another scenario shares.
+;;
+;; Gated on AGENT_REPL_E2E_SERVER, which only the Go layer sets: an
+;; interactive `e2e-sandbox.sh shell' keeps stock Doom behavior.
+(let ((socket (getenv "AGENT_REPL_E2E_SERVER")))
+  (when (and socket (not (string-empty-p socket)))
+    (unless (file-name-absolute-p socket)
+      (error "AGENT_REPL_E2E_SERVER=%s must be absolute: a relative `server-name' resolves against `server-socket-dir', which every scenario in this container shares"
+             socket))
+    ;; `setq' ahead of server.el's own `defvar's, which is the ordinary way
+    ;; to pin a library's variable before it loads: `defvar' leaves an
+    ;; already-bound variable alone.
+    (setq server-name socket
+          server-socket-dir (expand-file-name
+                             "server-sockets" (file-name-directory socket)))))
+
 (setq native-comp-jit-compilation nil
       ;; The Emacs 29 spelling, kept so the profile does not silently stop
       ;; working on an older Emacs than the image's 30.2.
