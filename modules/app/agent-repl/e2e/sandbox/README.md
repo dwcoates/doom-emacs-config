@@ -160,6 +160,14 @@ Everything there is kept, except where it means nothing on linux:
 - `-DFD_SETSIZE=10000` → **kept**. glibc's `select()` honors `FD_SETSIZE` at
   compile time, and harmless where unused.
 - `-O3` → **kept**; generic and architecture-neutral.
+- `-g` → **added**, the one flag the host's line does not carry. This Emacs
+  exists to be diagnosed: when it stalls it answers no lisp witness at all, so
+  the only account left is a native backtrace, which the harness takes with
+  `gdb` and files with the failure artifacts. Without `-g` those frames carry
+  bare function names and nothing about where inside a long C function the
+  loop is spinning. It changes no code generation — the same `-O3` objects,
+  with DWARF beside them — so nothing this Emacs *does* differs because of it;
+  the cost is image size, paid once per image.
 - `--with-native-compilation=aot`, `--with-tree-sitter`, `--with-modules`,
   `--with-gnutls`, `--with-xml2`, `--with-xwidgets`,
   `--disable-gc-mark-trace` → **kept verbatim**; none is platform-specific.
@@ -495,7 +503,7 @@ Desktop). Everything below was OBSERVED, not reasoned about:
   system-configuration-options:
     --prefix=/usr/local --with-native-compilation=aot --with-tree-sitter
     --with-modules --with-gnutls --with-xml2 --with-pgtk --with-xwidgets
-    --disable-gc-mark-trace 'CFLAGS=-O3 -DFD_SETSIZE=10000'
+    --disable-gc-mark-trace 'CFLAGS=-O3 -g -DFD_SETSIZE=10000'
   ```
 
   `configure`'s own summary reported "Does Emacs support Xwidgets? yes" and

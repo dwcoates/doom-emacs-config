@@ -23,7 +23,7 @@
 (declare-function magit-insert-heading "magit-section")
 (declare-function magit-insert-unpushed-to-upstream-or-recent "magit-status")
 (declare-function magit-refresh "magit-mode")
-(declare-function magit-status "magit-status")
+(declare-function magit-status-setup-buffer "magit-status")
 (defvar magit-diff-visit-previous-blob)
 (defvar magit-display-buffer-function)
 (defvar magit-file-section-map)
@@ -398,18 +398,45 @@ session's first workspace came up with no magit (Doom splash instead)
 and its snapshot-load await burned the full ready-watchdog timeout.
 
 The `require' is NOERROR on purpose: when magit is genuinely
-unavailable the `magit-status' call below is the canonical entry point
-and still signals loudly, so no failure is swallowed — the quiet
-require only exists to get magit's `defvar' evaluated before the
+unavailable the `magit-status-setup-buffer' call below is the canonical
+entry point and still signals loudly, so no failure is swallowed — the
+quiet require only exists to get magit's `defvar' evaluated before the
 `let'.  (In the batch test harness magit is not installable at all;
-test-helpers.el declares the variable special instead.)"
+test-helpers.el declares the variable special instead.)
+
+IT IS `magit-status-setup-buffer', NOT `magit-status', AND THAT IS A
+FIX, NOT A STYLE CHOICE.  magit marks `magit-status' `interactive-only'
+and names `magit-status-setup-buffer' as the entry point Lisp callers
+are to use, because `magit-status' carries the INTERACTIVE fallback: it
+re-derives the toplevel, compares it to DIR with `file-equal-p', and on
+a mismatch ASKS \\=`y-or-n-p' whether to create a repository there.
+
+That question is unanswerable here and the comparison behind it is
+racy.  `file-equal-p' does not compare device and inode; it stats each
+path separately and compares the WHOLE `file-attributes' list, mtime,
+ctime and size included (files.el, which already documents the same
+fragility for Haiku's atime).  Every workspace bring-up opens magit on
+a directory the daemon's registration is concurrently writing into
+— `.claude/emacs/' lands in the project root — so a write landing
+BETWEEN those two stats makes one identical path compare unequal to
+itself.  Measured in the e2e Emacs layer at roughly one bring-up in
+sixteen: magit then asked \"<dir> is a repository.  Create another in
+<dir>? \" of the same directory twice, nothing could answer, the reader
+entered a recursive edit and Emacs stopped answering its server socket
+entirely — a permanent stall whose only witness was a native backtrace
+(see e2e/EMACS-LAYER-SPEC.md).
+
+`magit-status-setup-buffer' has no prompt in it, so the question cannot
+be asked at all; a directory that is genuinely not a repository signals
+loudly from magit's own refresh instead, which is what this module
+wants anyway."
   (let* ((ws (agent-repl--ws-current-name))
          (require-result (require 'magit nil t)))
     (agent-repl--log ws "magit-status-same-window: ws=%s dir=%s require-result=%S magit-loaded=%s selected-window=%S"
                       ws dir require-result (featurep 'magit) (selected-window))
     (let ((magit-display-buffer-function
            #'agent-repl--magit-display-buffer-same-window))
-      (magit-status dir)
+      (magit-status-setup-buffer (file-name-as-directory (expand-file-name dir)))
       (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
                         ws dir (selected-window)))))
 

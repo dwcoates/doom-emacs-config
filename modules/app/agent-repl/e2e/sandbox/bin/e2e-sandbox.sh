@@ -507,6 +507,17 @@ do_run() {
     --network none
     --user 1000:1000
     --read-only
+    # A WEDGED EMACS IS DIAGNOSED FROM OUTSIDE OR NOT AT ALL. When Emacs
+    # loops in C it answers no server socket, no nested eval, no SIGUSR2 and
+    # no SIGINT, so the only remaining account of the stall is a native
+    # backtrace, and taking one means `gdb` attaching with ptrace. The
+    # harness's gdb is a SIBLING of Emacs (both are children of `go test`),
+    # not an ancestor, so under the host's Yama `ptrace_scope=1` the attach
+    # is refused without CAP_SYS_PTRACE. The capability is scoped to this
+    # container, whose whole process tree this run already owns; it grants
+    # nothing over the host, which `--network none`, `--read-only`, the
+    # non-root uid and the read-only source bind all still hold.
+    --cap-add SYS_PTRACE
     # EVERY writable tmpfs carries uid/gid=1000 EXPLICITLY. Docker mounts a
     # tmpfs root:root 0755, so without this the container's non-root uid
     # cannot create anything in /work at all and the entrypoint's rsync dies

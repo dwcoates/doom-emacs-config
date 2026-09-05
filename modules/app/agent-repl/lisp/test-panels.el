@@ -388,18 +388,18 @@ layout."
 ;;;; ---- Tests: drain-pending-magit ----
 
 (ert-deftest agent-repl-test-panels-drain-pending-magit-when-set ()
-  "drain-pending-magit calls magit-status with :project-dir and clears the flag."
+  "drain-pending-magit opens magit on :project-dir and clears the flag."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pending-magit t)
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
     (let ((magit-path nil)
           (dash-called nil))
-      (cl-letf (((symbol-function 'magit-status)
+      (cl-letf (((symbol-function 'magit-status-setup-buffer)
                  (lambda (path) (setq magit-path path)))
                 ((symbol-function 'agent-repl--remove-doom-dashboard)
                  (lambda () (setq dash-called t))))
         (agent-repl--drain-pending-magit "test-ws")
-        (should (equal magit-path "/tmp/my-worktree"))
+        (should (equal magit-path "/tmp/my-worktree/"))
         (should dash-called)
         (should-not (agent-repl--ws-get "test-ws" :pending-magit))))))
 
@@ -409,7 +409,7 @@ layout."
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
     (let ((magit-called nil)
           (dash-called nil))
-      (cl-letf (((symbol-function 'magit-status)
+      (cl-letf (((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest _) (setq magit-called t)))
                 ((symbol-function 'agent-repl--remove-doom-dashboard)
                  (lambda () (setq dash-called t))))
@@ -423,7 +423,7 @@ layout."
     (agent-repl--ws-put "test-ws" :pending-magit t)
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
     (let ((magit-call-count 0))
-      (cl-letf (((symbol-function 'magit-status)
+      (cl-letf (((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest _) (cl-incf magit-call-count)))
                 ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
         (agent-repl--drain-pending-magit "test-ws")
@@ -440,7 +440,7 @@ created without a window."
     (agent-repl--ws-put "test-ws" :pending-show-panels t)
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
     (let ((windows-before (length (window-list))))
-      (cl-letf (((symbol-function 'magit-status)
+      (cl-letf (((symbol-function 'magit-status-setup-buffer)
                  (lambda (_path) (split-window)))
                 ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
         (agent-repl--drain-pending-magit "test-ws")
@@ -455,7 +455,7 @@ remains the workspace's visible main buffer."
     (agent-repl--ws-put "test-ws" :project-dir "/tmp/my-worktree")
     (let ((windows-before (length (window-list))))
       (unwind-protect
-          (cl-letf (((symbol-function 'magit-status)
+          (cl-letf (((symbol-function 'magit-status-setup-buffer)
                      (lambda (_path) (split-window)))
                     ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
             (agent-repl--drain-pending-magit "test-ws")
@@ -470,7 +470,7 @@ path must not error."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pending-magit t)
     (let ((magit-called nil))
-      (cl-letf (((symbol-function 'magit-status)
+      (cl-letf (((symbol-function 'magit-status-setup-buffer)
                  (lambda (&rest _) (setq magit-called t)))
                 ((symbol-function 'agent-repl--remove-doom-dashboard) #'ignore))
         (agent-repl--drain-pending-magit "test-ws")

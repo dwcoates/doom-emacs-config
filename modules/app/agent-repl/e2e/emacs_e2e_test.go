@@ -219,12 +219,16 @@ func NewEmacsWorld(t *testing.T, box sandbox, options ...EmacsWorldOption) *Emac
 		}
 	})
 
-	// The module's workspace-agnostic elisp log lives under Emacs's
-	// temporary-file-directory (core.el, agent-repl--default-log-file-name);
-	// workspace-owned records go to each repo's .claude/emacs, which a test
+	// The module's workspace-agnostic elisp log is aimed at THIS scenario's
+	// own state root by `writeSettings' (e.LogFile), so it is already inside
+	// the state tree dumpArtifacts copies and needs no entry here. It used to
+	// be the uid-keyed default under `temporary-file-directory', one file for
+	// every Emacs in this container, which interleaved four scenarios'
+	// records and rotated them away mid-scenario.
+	//
+	// Workspace-owned records go to each repo's .claude/emacs, which a test
 	// adds once it has a repo.
-	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir,
-		filepath.Join(os.TempDir(), fmt.Sprintf("doom-agent-repl-%d", os.Getuid())))
+	e.ArtifactPaths = append(e.ArtifactPaths, git.StateFile, logsDir)
 	return &EmacsWorld{Emacs: e, Store: store, Sidecar: sidecar, Git: git}
 }
 
