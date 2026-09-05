@@ -117,6 +117,20 @@ describe("pushNotificationConverter.settle", () => {
     });
   });
 
+  it("defaults both transport flags to false when the vendor reported neither", () => {
+    // Arrange, Act.
+    const success = successOf({ message: "m" });
+
+    // Assert.
+    expect(success.outcome).toEqual({
+      case: "sent",
+      value: create(conversationv1.AgentPushNotificationSentSchema, {
+        pushSent: false,
+        localSent: false,
+      }),
+    });
+  });
+
   it("parses the vendor's ISO send instant into epoch millis", () => {
     // Arrange, Act.
     const success = successOf({ message: "m", pushSent: true, sentAt: "2026-08-29T12:00:00.000Z" });

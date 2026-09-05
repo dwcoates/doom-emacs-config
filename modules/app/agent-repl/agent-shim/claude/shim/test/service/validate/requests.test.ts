@@ -341,3 +341,139 @@ describe("validateReadHistoryRequest", () => {
     expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
   });
 });
+
+describe("validateStartSessionRequest cold remediation", () => {
+  /** The refusal's message, so a field path can be asserted. */
+  function messageOf(act: () => void): string | undefined {
+    try {
+      act();
+      return undefined;
+    } catch (err) {
+      return ConnectError.from(err).message;
+    }
+  }
+
+  /** A resume naming a vendor session, with whatever remediation is given. */
+  function resumeWith(
+    coldRemediation: conversationv1.SessionColdRemediation | undefined,
+  ): shimv1.StartSessionRequest {
+    return create(shimv1.StartSessionRequestSchema, {
+      source: {
+        case: "resume",
+        value: create(shimv1.StartSessionResumeSchema, {
+          vendorSessionId: "vendor-1",
+          coldRemediation,
+        }),
+      },
+    });
+  }
+
+  it("accepts a resume whose remediation names an arm", () => {
+    // Arrange.
+    const request = resumeWith(
+      create(conversationv1.SessionColdRemediationSchema, {
+        remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+      }),
+    );
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBeUndefined();
+  });
+
+  it("refuses a resume whose remediation has no arm set", () => {
+    // Arrange.
+    const request = resumeWith(create(conversationv1.SessionColdRemediationSchema, {}));
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("names the resume's own remediation path so the refusal is actionable", () => {
+    // Arrange.
+    const request = resumeWith(create(conversationv1.SessionColdRemediationSchema, {}));
+
+    // Act, Assert.
+    expect(messageOf(() => validate.validateStartSessionRequest(request))).toContain(
+      "start_session.resume.cold_remediation",
+    );
+  });
+});
+
+describe("validateWatchAgentRequest known_through", () => {
+  it("refuses a known_through pointer that is present but empty", () => {
+    // Arrange.
+    const request = create(shimv1.WatchAgentRequestSchema, {
+      pageSize: 5,
+      knownThrough: create(conversationv1.HistoryPointerSchema, { value: "" }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateWatchAgentRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts a known_through pointer the store served", () => {
+    // Arrange.
+    const request = create(shimv1.WatchAgentRequestSchema, {
+      pageSize: 5,
+      knownThrough: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateWatchAgentRequest(request))).toBeUndefined();
+  });
+});
+
+describe("validateUpdateAgentRequest target", () => {
+  it("refuses a target that is present but empty", () => {
+    // An empty id is a sentinel, not the unset that addresses the main agent.
+    // Arrange.
+    const request = create(shimv1.UpdateAgentRequestSchema, {
+      target: create(conversationv1.AgentIdSchema, { value: "" }),
+      input: create(conversationv1.AgentInputSchema, {
+        input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) },
+      }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateUpdateAgentRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts a named sub-agent target", () => {
+    // Arrange.
+    const request = create(shimv1.UpdateAgentRequestSchema, {
+      target: create(conversationv1.AgentIdSchema, { value: "a-1" }),
+      input: create(conversationv1.AgentInputSchema, {
+        input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) },
+      }),
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateUpdateAgentRequest(request))).toBeUndefined();
+  });
+});
+
+describe("validateReadHistoryRequest target", () => {
+  it("refuses a target that is present but empty", () => {
+    // Arrange.
+    const request = create(shimv1.ReadHistoryRequestSchema, {
+      target: create(conversationv1.AgentIdSchema, { value: "" }),
+      pageSize: 5,
+      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts a read scoped to a named sub-agent", () => {
+    // Arrange.
+    const request = create(shimv1.ReadHistoryRequestSchema, {
+      target: create(conversationv1.AgentIdSchema, { value: "a-1" }),
+      pageSize: 5,
+      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateReadHistoryRequest(request))).toBeUndefined();
+  });
+});

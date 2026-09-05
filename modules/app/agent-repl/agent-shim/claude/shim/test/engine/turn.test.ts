@@ -49,10 +49,11 @@ interface Harness {
   readonly storeFaults: string[];
   /** What this session's `knowsAgent` answers. */
   knows: boolean;
+  /** When set, `SessionContext.query()` answers absence, as a dead query does. */
+  queryDead: boolean;
 }
 
-async function harness(): Promise<Harness> {
-  const persistence = new RecordingPersistence();
+async function harness(persistence: RecordingPersistence = new RecordingPersistence()): Promise<Harness> {
   const foreground = new ForegroundUnitTable();
   const query = new ScriptedQuery();
   const live = new LiveWorkTable();
@@ -81,6 +82,7 @@ async function harness(): Promise<Harness> {
     submitRejects: undefined,
     storeFaults: [] as string[],
     knows: true,
+    queryDead: false,
   };
   const context: SessionContext = {
     persistence,
@@ -88,7 +90,7 @@ async function harness(): Promise<Harness> {
     gate,
     live,
     identity: () => state.identity,
-    query: () => query,
+    query: () => (state.queryDead ? undefined : query),
     nowMs: () => 1,
     openTurn: () => state.open,
     watcherOpened: () => () => undefined,
@@ -1254,5 +1256,521 @@ describe("WatchBash's announcement predicate", () => {
     }
 
     expect(h.persistence.lastAnnouncement?.()).toBe("unknown");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The refusals and guards a healthy session never reaches: a dead query, a
+// malformed request the wire validator would have caught, and the record
+// plane failing in a way that is not a PersistenceError.
+// ---------------------------------------------------------------------------
+
+/** A record plane whose `openAgentPage` rejects with something that is not an Error. */
+class NonErrorPageStore extends RecordingPersistence {
+  override openAgentPage(): Promise<never> {
+    return Promise.reject("the store threw a string");
+  }
+}
+
+/** A record plane whose `openBashRun` rejects with a failure the suite chooses. */
+class FailingBashStore extends RecordingPersistence {
+  constructor(private readonly failure: unknown) {
+    super();
+  }
+  override openBashRun(): Promise<never> {
+    return Promise.reject(this.failure);
+  }
+}
+
+const AGENT = create(conversationv1.AgentIdSchema, { value: "agent-1" });
+
+function unsupportedSaid(): conversationv1.UserSaid {
+  return create(conversationv1.UserSaidSchema, {
+    content: create(conversationv1.UserContentSchema, {
+      blocks: [create(conversationv1.UserContentBlockSchema, {})],
+    }),
+  });
+}
+
+describe("what the user said, at the edges of the block union", () => {
+  const imageSaid = (
+    location: conversationv1.ImageBlock["location"],
+  ): conversationv1.UserSaid =>
+    create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: {
+              case: "image",
+              value: create(conversationv1.ImageBlockSchema, { mediaType: "image/png", location }),
+            },
+          }),
+        ],
+      }),
+    });
+
+  it("carries an image hosted at a url by that url", () => {
+    const said = imageSaid({
+      case: "url",
+      value: create(conversationv1.ImageBlockUrlSchema, { url: "https://example.invalid/a.png" }),
+    });
+
+    expect(saidText(said)).toBe("https://example.invalid/a.png");
+  });
+
+  it("contributes an empty line for an image that states no location at all", () => {
+    // Neither arm set: the block says an image is here and does not say where.
+    expect(saidText(imageSaid({ case: undefined }))).toBe("");
+  });
+
+  it("RAISES on a content block carrying no arm, rather than delivering a prompt short one block", () => {
+    expect(() => saidText(unsupportedSaid())).toThrow(/carries no arm/);
+  });
+});
+
+describe("the prompt row's own guard", () => {
+  it("REFUSES to record a prompt that carries no turn id", () => {
+    const prompt = create(conversationv1.AgentPromptSchema, { agent: AGENT, said: textSaid("x") });
+
+    expect(() => promptEntry(prompt, AGENT, false)).toThrow(/no turn id cannot be recorded/);
+  });
+});
+
+describe("StartTurn against a dead query", () => {
+  it("refuses query_dead rather than writing a prompt row nothing can deliver", async () => {
+    const h = await harness();
+    h.queryDead = true;
+
+    expect(failureKind(await h.turns.startTurn(startTurn()))).toBe("queryDead");
+  });
+
+  it("writes no prompt row at all when the query is dead", async () => {
+    const h = await harness();
+    h.queryDead = true;
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.persistence.durable).toEqual([]);
+  });
+
+  it("RAISES when a StartTurn reaches the engine with no turn id", async () => {
+    const h = await harness();
+    const request = create(shimv1.StartTurnRequestSchema, { said: textSaid("x"), pageSize: 10 });
+
+    await expect(h.turns.startTurn(request)).rejects.toThrow(/without a turn id or a prompt/);
+  });
+
+  it("RAISES when a StartTurn reaches the engine with no prompt", async () => {
+    const h = await harness();
+    const request = create(shimv1.StartTurnRequestSchema, { turn: TURN, pageSize: 10 });
+
+    await expect(h.turns.startTurn(request)).rejects.toThrow(/without a turn id or a prompt/);
+  });
+
+  it("still refuses turn_already_open when the second StartTurn names no turn of its own", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    const response = await h.turns.startTurn(
+      create(shimv1.StartTurnRequestSchema, { said: textSaid("again"), pageSize: 10 }),
+    );
+
+    expect(failureKind(response)).toBe("turnAlreadyOpen");
+  });
+
+  it("reports a non-Error submission failure by its string value", async () => {
+    const h = await harness();
+    h.submitRejects = "the vendor threw a string" as unknown as Error;
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(response.result.case === "failure" ? response.result.value.detail : undefined).toBe(
+      "the vendor threw a string",
+    );
+  });
+
+  it("answers an empty page when the store rejects the opening read with a non-Error", async () => {
+    const h = await harness(new NonErrorPageStore());
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(
+      response.result.case === "success" ? response.result.value.page?.entries.length : undefined,
+    ).toBe(0);
+  });
+});
+
+describe("UpdateAgent's own guards", () => {
+  it("refuses no_session before it looks at the input", async () => {
+    const h = await harness();
+    h.identity = undefined;
+
+    const response = await h.turns.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(failureKind(response)).toBe("noSession");
+  });
+
+  it("RAISES when UpdateAgent reaches the engine with no input", async () => {
+    const h = await harness();
+
+    await expect(h.turns.updateAgent(create(shimv1.UpdateAgentRequestSchema, {}))).rejects.toThrow(
+      /with no input/,
+    );
+  });
+
+  it("RAISES when the input carries no arm", async () => {
+    const h = await harness();
+    const request = create(shimv1.UpdateAgentRequestSchema, {
+      input: create(conversationv1.AgentInputSchema, {}),
+    });
+
+    await expect(h.turns.updateAgent(request)).rejects.toThrow(/with no input arm/);
+  });
+
+  it("refuses a stop with nothing_running when the vendor query is dead", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.queryDead = true;
+
+    const response = await h.turns.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(failureKind(response)).toBe("nothingRunning");
+  });
+});
+
+describe("UpdateAgent.answer's own guards", () => {
+  const answerRequest = (
+    answer: conversationv1.AgentAnswer,
+  ): shimv1.UpdateAgentRequest =>
+    create(shimv1.UpdateAgentRequestSchema, {
+      input: create(conversationv1.AgentInputSchema, { input: { case: "answer", value: answer } }),
+    });
+
+  it("RAISES when a question answer carries no ask", async () => {
+    const h = await harness();
+    const answer = create(conversationv1.AgentAnswerSchema, {
+      answer: {
+        case: "questionAnswer",
+        value: create(conversationv1.AgentQuestionAnswerSchema, {
+          answers: create(conversationv1.AgentQuestionAnswersSchema, {}),
+        }),
+      },
+    });
+
+    await expect(h.turns.updateAgent(answerRequest(answer))).rejects.toThrow(
+      /carries no ask or no answers/,
+    );
+  });
+
+  it("RAISES when an answer carries no arm", async () => {
+    const h = await harness();
+
+    await expect(
+      h.turns.updateAgent(answerRequest(create(conversationv1.AgentAnswerSchema, {}))),
+    ).rejects.toThrow(/an answer carries no arm/);
+  });
+
+  it("routes a question answer to the gate, which refuses an ask it is not holding", async () => {
+    const h = await harness();
+    const answer = create(conversationv1.AgentAnswerSchema, {
+      answer: {
+        case: "questionAnswer",
+        value: create(conversationv1.AgentQuestionAnswerSchema, {
+          ask: create(conversationv1.AgentQuestionIdSchema, { value: "q-1" }),
+          answers: create(conversationv1.AgentQuestionAnswersSchema, {}),
+        }),
+      },
+    });
+
+    expect(failureKind(await h.turns.updateAgent(answerRequest(answer)))).toBe("noOpenAsk");
+  });
+
+  it("refuses answer_mismatch when a permission IS open and the answer names another", async () => {
+    const h = await harness();
+    void h.gate.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_open",
+      requestId: "r",
+    } as Parameters<PermissionGate["canUseTool"]>[2]);
+    await Promise.resolve();
+    const answer = create(conversationv1.AgentAnswerSchema, {
+      answer: {
+        case: "permissionDecision",
+        value: create(conversationv1.AgentPermissionDecisionSchema, {
+          ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_other" }),
+          decision: {
+            case: "denied",
+            value: create(conversationv1.AgentPermissionDeniedByUserSchema, {}),
+          },
+        }),
+      },
+    });
+
+    expect(failureKind(await h.turns.updateAgent(answerRequest(answer)))).toBe("answerMismatch");
+  });
+
+  it("refuses no_open_ask for a permission decision that names no ask at all", async () => {
+    const h = await harness();
+    const answer = create(conversationv1.AgentAnswerSchema, {
+      answer: {
+        case: "permissionDecision",
+        value: create(conversationv1.AgentPermissionDecisionSchema, {
+          decision: {
+            case: "denied",
+            value: create(conversationv1.AgentPermissionDeniedByUserSchema, {}),
+          },
+        }),
+      },
+    });
+
+    expect(failureKind(await h.turns.updateAgent(answerRequest(answer)))).toBe("noOpenAsk");
+  });
+});
+
+describe("KillTurn and DetachForeground without a session", () => {
+  it("KillTurn refuses no_session", async () => {
+    const h = await harness();
+    h.identity = undefined;
+
+    expect(
+      failureKind(await h.turns.killTurn(create(shimv1.KillTurnRequestSchema, { turn: TURN }))),
+    ).toBe("noSession");
+  });
+
+  it("KillTurn refuses no_turn_open for a request that names no turn at all", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.killTurn(create(shimv1.KillTurnRequestSchema, {})))).toBe(
+      "noTurnOpen",
+    );
+  });
+
+  it("DetachForeground refuses no_session", async () => {
+    const h = await harness();
+    h.identity = undefined;
+
+    expect(
+      failureKind(
+        await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {})),
+      ),
+    ).toBe("noSession");
+  });
+
+  it("DetachForeground refuses already_concluded when the vendor query is dead", async () => {
+    const h = await harness();
+    h.queryDead = true;
+
+    expect(
+      failureKind(
+        await h.turns.detachForeground(
+          create(shimv1.DetachForegroundRequestSchema, {
+            unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_1" }),
+          }),
+        ),
+      ),
+    ).toBe("alreadyConcluded");
+  });
+});
+
+describe("WatchAgent's non-persistence failures", () => {
+  it("lets a failure that is not a store refusal out as itself, not as NotFound", async () => {
+    const h = await harness(new NonErrorPageStore());
+
+    await expect(
+      (async () => {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          break;
+        }
+      })(),
+    ).rejects.toBe("the store threw a string");
+  });
+});
+
+describe("ReadHistory's remaining arms", () => {
+  it("refuses unknown_agent when no session has been started", async () => {
+    const h = await harness();
+    h.identity = undefined;
+
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 10,
+        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+      }),
+    );
+
+    expect(failureKind(response)).toBe("unknownAgent");
+  });
+
+  it("serves the page a cursored read answers with", async () => {
+    const h = await harness();
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [create(conversationv1.HistoryEntryAtSchema, {})],
+    });
+
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 10,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    expect(
+      response.result.case === "success" ? response.result.value.page?.entries.length : undefined,
+    ).toBe(1);
+  });
+
+  it("lets a failure that is not a store refusal out rather than mapping it to an arm", async () => {
+    const h = await harness(new NonErrorPageStore());
+
+    await expect(
+      h.turns.readHistory(
+        create(shimv1.ReadHistoryRequestSchema, {
+          pageSize: 10,
+          position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+        }),
+      ),
+    ).rejects.toBe("the store threw a string");
+  });
+});
+
+describe("WatchBash's failure arms", () => {
+  const request = create(shimv1.WatchBashRequestSchema, {
+    work: create(conversationv1.DetachedWorkIdSchema, { value: "b01" }),
+  });
+
+  const drain = async (stream: AsyncIterable<shimv1.WatchBashResponse>): Promise<void> => {
+    for await (const _ of stream) {
+      // The failure surfaces from the iteration itself.
+    }
+  };
+
+  it("RAISES when WatchBash reaches the engine with no work id", async () => {
+    const h = await harness();
+
+    await expect(drain(h.turns.watchBash(create(shimv1.WatchBashRequestSchema, {})))).rejects.toThrow(
+      /no work id/,
+    );
+  });
+
+  it("closes the stream with NotFound when the store refuses the run", async () => {
+    const h = await harness(
+      new FailingBashStore(new PersistenceError("unknown_agent", "no such run")),
+    );
+
+    await expect(drain(h.turns.watchBash(request))).rejects.toBeInstanceOf(ConnectError);
+  });
+
+  it("names the run in the NotFound it closes with", async () => {
+    const h = await harness(
+      new FailingBashStore(new PersistenceError("unknown_agent", "no such run")),
+    );
+
+    await expect(drain(h.turns.watchBash(request))).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
+  });
+
+  it("lets a failure that is not a store refusal out as itself", async () => {
+    const boom = new Error("the reader blew up");
+    const h = await harness(new FailingBashStore(boom));
+
+    await expect(drain(h.turns.watchBash(request))).rejects.toBe(boom);
+  });
+});
+
+describe("StopBash's remaining arms", () => {
+  const stopRequest = (work: string): shimv1.StopBashRequest =>
+    create(shimv1.StopBashRequestSchema, {
+      work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    });
+
+  const started = (taskId: string, toolUseId: string): SdkTaskStartedMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: taskId,
+      tool_use_id: toolUseId,
+      description: "",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    }) as SdkTaskStartedMessage;
+
+  it("RAISES when StopBash reaches the engine with no work id", async () => {
+    const h = await harness();
+
+    await expect(h.turns.stopBash(create(shimv1.StopBashRequestSchema, {}))).rejects.toThrow(
+      /no work id/,
+    );
+  });
+
+  it("refuses already_ended for a handle the live table watched RETIRE", async () => {
+    const h = await harness();
+    h.live.onTaskStarted(started("b01", "t"));
+    h.live.onTaskNotification({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "b01",
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-000000000001",
+      session_id: "s",
+    } as SdkTaskNotificationMessage);
+
+    expect(failureKind(await h.turns.stopBash(stopRequest("t")))).toBe("alreadyEnded");
+  });
+
+  it("refuses already_ended when the vendor query is dead under a live handle", async () => {
+    const h = await harness();
+    h.live.onTaskStarted(started("b01", "t"));
+    h.queryDead = true;
+
+    expect(failureKind(await h.turns.stopBash(stopRequest("t")))).toBe("alreadyEnded");
+  });
+});
+
+describe("DetachForeground's kind-before-state answer", () => {
+  it("refuses not_detachable for a live unit whose KIND can never be backgrounded", async () => {
+    const h = await harness();
+    h.foreground.note("toolu_read", "read", false);
+
+    const response = await h.turns.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_read" }),
+      }),
+    );
+
+    expect(failureKind(response)).toBe("notDetachable");
+  });
+
+  it("refuses unknown_unit for a request that addresses no unit at all", async () => {
+    const h = await harness();
+
+    expect(
+      failureKind(await h.turns.detachForeground(create(shimv1.DetachForegroundRequestSchema, {}))),
+    ).toBe("unknownUnit");
+  });
+});
+
+describe("what the user said, with no content at all", () => {
+  it("is the empty string for a prompt carrying no content message", () => {
+    expect(saidText(create(conversationv1.UserSaidSchema, {}))).toBe("");
   });
 });

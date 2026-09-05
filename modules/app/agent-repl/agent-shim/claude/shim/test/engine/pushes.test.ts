@@ -397,3 +397,68 @@ describe("the default clock", () => {
     expect(Number(window.beganAtMs)).toBeGreaterThanOrEqual(before);
   });
 });
+
+describe("pushing after the stand-down", () => {
+  it("REPORTS the undeliverable fact as a degraded window rather than dropping it silently", () => {
+    // A stream opened after the stand-down is closed on arrival but still
+    // attached, so the next fact cannot reach it — and a consumer's view having
+    // a hole is exactly what a degraded window states.
+    const pushes = new SessionPushes(() => 1);
+    pushes.standDown();
+    pushes.subscribe();
+
+    pushes.push(compacting());
+
+    const diagnostics = pushes.diagnostics().update;
+    expect(
+      diagnostics.case === "diagnostics" ? diagnostics.value.degradedWindows.length : undefined,
+    ).toBe(1);
+  });
+});
+
+describe("a session fact carrying no arm", () => {
+  it("still reaches an attached consumer rather than being swallowed as unchanged", async () => {
+    const pushes = new SessionPushes(() => 1);
+    const stream = pushes.subscribe()[Symbol.asyncIterator]();
+    await stream.next();
+
+    pushes.push(create(conversationv1.SessionUpdateSchema, {}));
+
+    expect((await stream.next()).value?.update.case).toBeUndefined();
+  });
+});
+
+describe("a fault that names no kind", () => {
+  it("is still recorded, and still makes the session unhealthy", () => {
+    const pushes = new SessionPushes(() => 1);
+
+    pushes.fault(create(conversationv1.SessionFaultSchema, { component: "test", detail: "why" }));
+
+    const diagnostics = pushes.diagnostics().update;
+    expect(diagnostics.case === "diagnostics" ? diagnostics.value.health.case : undefined).toBe(
+      "unhealthy",
+    );
+  });
+});
+
+describe("recovering a component whose window is already closed", () => {
+  it("answers false, so the caller does not restate an unchanged verdict", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.recordDegradedWindow(
+      create(conversationv1.SessionDegradedWindowSchema, {
+        component: "store-writer",
+        reason: "already over",
+        beganAtMs: 1n,
+        extent: {
+          case: "closed",
+          value: create(conversationv1.SessionDegradedClosedSchema, {
+            endedAtMs: 2n,
+            droppedCount: 0n,
+          }),
+        },
+      }),
+    );
+
+    expect(pushes.resolveComponent("store-writer", 0)).toBe(false);
+  });
+});

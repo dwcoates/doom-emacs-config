@@ -12,6 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import {
   CALL_REGISTRY_CAPACITY,
+  convertProgressBeat,
   convertToolResult,
   convertToolUse,
   ENGINE_OWNED_TOOLS,
@@ -21,6 +22,7 @@ import {
   dispositionOf,
   environmentOf,
   type PendingCall,
+  type ToolConverter,
   type ToolOutcome,
 } from "../../src/convert/tool-calls.js";
 import { TOOL_CONVERTERS } from "../../src/convert/tools/registry.js";
@@ -272,5 +274,124 @@ describe("a start with no announcement frame", () => {
 
     // Assert.
     expect(entries).toHaveLength(1);
+  });
+});
+
+/**
+ * THE UNMODELED FALLBACK IS NOT OPTIONAL. Every tool this contract does not
+ * model routes through the one converter filed under {@link UNMODELED_KEY}, so
+ * a registry missing it cannot silently drop a call — it FAILS, loudly, where
+ * the wiring is wrong rather than where the row is missing.
+ */
+describe("a registry with no unmodeled converter", () => {
+  it("refuses a call it cannot model rather than dropping it", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    const empty = new Map<string, ToolConverter>();
+
+    // Act + Assert
+    expect(() =>
+      convertToolUse(empty, foldContext(), registry, call("toolu_x", "mcp__Slack__send"), {
+        agentId: MAIN_AGENT,
+        vendorUuid: "uuid-1",
+      }),
+    ).toThrow(/unmodeled converter is missing/);
+  });
+
+  it("refuses the RESULT of a call it cannot model too", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_x", "mcp__Slack__send"));
+    const empty = new Map<string, ToolConverter>();
+
+    // Act + Assert
+    expect(() =>
+      convertToolResult(empty, foldContext(), registry, "toolu_x", outcome(), {
+        vendorUuid: "uuid-1",
+      }),
+    ).toThrow(/unmodeled converter is missing/);
+  });
+});
+
+describe("an unmodeled converter that announces nothing", () => {
+  it("refuses the call, since an unmodeled unit ALWAYS has a start arm", () => {
+    // Arrange: a stub that declines to announce, which the contract forbids here.
+    const silent: ToolConverter = {
+      kind: "unmodeled",
+      carriesProgress: false,
+      start: () => undefined,
+      settle: () => undefined,
+    };
+    const registry = createCallRegistry();
+
+    // Act + Assert
+    expect(() =>
+      convertToolUse(
+        new Map([[UNMODELED_KEY, silent]]),
+        foldContext(),
+        registry,
+        call("toolu_x", "mcp__Slack__send"),
+        { agentId: MAIN_AGENT, vendorUuid: "uuid-1" },
+      ),
+    ).toThrow(/produced no start frame/);
+  });
+});
+
+describe("a progress beat", () => {
+  it("is consumed for a tool the fold does not own at all", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_e", "TaskList"));
+
+    // Act
+    const entries = convertProgressBeat(TOOL_CONVERTERS, foldContext(), registry, "toolu_e", 11, {
+      vendorUuid: "uuid-1",
+    });
+
+    // Assert
+    expect(entries).toEqual([]);
+  });
+
+  it("is consumed for a unit kind that declares no progress arm", () => {
+    // Arrange: a monitor is armed and then ends; the proto gives it no progress.
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_m", "Monitor"));
+
+    // Act
+    const entries = convertProgressBeat(TOOL_CONVERTERS, foldContext(), registry, "toolu_m", 11, {
+      vendorUuid: "uuid-1",
+    });
+
+    // Assert
+    expect(entries).toEqual([]);
+  });
+
+  it("is consumed for a call this shim never saw announced", () => {
+    // Arrange + Act
+    const entries = convertProgressBeat(
+      TOOL_CONVERTERS,
+      foldContext(),
+      createCallRegistry(),
+      "toolu_never",
+      11,
+      { vendorUuid: "uuid-1" },
+    );
+
+    // Assert
+    expect(entries).toEqual([]);
+  });
+
+  it("relays the beat on a kind that DOES declare the arm", () => {
+    // Arrange
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_r"));
+
+    // Act
+    const entries = convertProgressBeat(TOOL_CONVERTERS, foldContext(), registry, "toolu_r", 11, {
+      vendorUuid: "uuid-1",
+    });
+
+    // Assert
+    expect(entries[0]?.source.discriminator).toBe("activity.read.progress");
   });
 });

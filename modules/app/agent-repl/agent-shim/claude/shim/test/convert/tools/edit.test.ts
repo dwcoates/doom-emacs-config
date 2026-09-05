@@ -128,6 +128,17 @@ describe("editConverter.settle", () => {
     expect(item).toBeUndefined();
   });
 
+  it("produces NO frame when neither the result nor the call names a path", () => {
+    // Arrange.
+    const pending = call({ old_string: "a", new_string: "b" });
+
+    // Act.
+    const item = editConverter.settle(pending, outcome({ structuredPatch: [] }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the matched text was absent", () => {
     // Arrange, Act.
     const item = editConverter.settle(

@@ -12,7 +12,9 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
+import type { PersistEntry } from "../../src/store/persistence.js";
 import {
+  bashDetachmentEntry,
   convertDetached,
   createTaskKindRegistry,
   TASK_KIND_CAPACITY,
@@ -23,7 +25,7 @@ import {
   wentSilent,
 } from "../../src/convert/detached.js";
 import { toolResultText } from "../../src/convert/entries.js";
-import { foldContext, MAIN_AGENT } from "./fold-harness.js";
+import { activityOf, foldContext, MAIN_AGENT } from "./fold-harness.js";
 
 const RUN = create(conversationv1.AgentActivityIdSchema, { value: "run-1" });
 
@@ -259,5 +261,431 @@ describe("a settling task's KIND decides whether it settles a subagent", () => {
       registry.remember(`task-${index}`, "local_bash");
     }
     expect(registry.settlesAsSubagent("oldest")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The BASH RESULT is the one record that states WHY a shell left the turn
+// ---------------------------------------------------------------------------
+
+/** The detachment announcement one Bash result produces, if it produces one. */
+function bashDetachment(
+  structured: unknown,
+  resultContent?: conversationv1.ToolResultContent,
+  registry = createTaskKindRegistry(),
+) {
+  return bashDetachmentEntry(
+    foldContext(),
+    MAIN_AGENT,
+    "uuid-result",
+    "toolu_bash",
+    structured,
+    resultContent,
+    registry,
+  );
+}
+
+/** The `detached` origin a detachment row carries. */
+function detachedOrigin(entry: PersistEntry | undefined): conversationv1.DetachedWorkDetached {
+  const frame = entry?.item.kind === "frame" ? entry.item.frame : undefined;
+  const work = frame?.result.value as conversationv1.AgentDetachedWork;
+  return work.origin.value as conversationv1.DetachedWorkDetached;
+}
+
+/** The announcement a detachment row carries. */
+function announcement(entry: PersistEntry | undefined): conversationv1.AgentDetachedWork {
+  const frame = entry?.item.kind === "frame" ? entry.item.frame : undefined;
+  return frame?.result.value as conversationv1.AgentDetachedWork;
+}
+
+describe("bashDetachmentEntry", () => {
+  it("announces nothing for a result the vendor never backgrounded", () => {
+    expect(bashDetachment({ stdout: "done" })).toBeUndefined();
+  });
+
+  it("announces nothing when the vendor named an EMPTY background task id", () => {
+    expect(bashDetachment({ backgroundTaskId: "" })).toBeUndefined();
+  });
+
+  it("states `requested` for a run_in_background launch, which nobody interrupted", () => {
+    expect(detachedOrigin(bashDetachment({ backgroundTaskId: "bt-1" })).cause.case).toBe("requested");
+  });
+
+  it("states `by_user` when the vendor said a person backgrounded it", () => {
+    const entry = bashDetachment({ backgroundTaskId: "bt-1", backgroundedByUser: true });
+
+    expect(detachedOrigin(entry).cause.case).toBe("byUser");
+  });
+
+  it("states `timed_out` when the vendor reported the limit it exceeded", () => {
+    const entry = bashDetachment({ backgroundTaskId: "bt-1", timedOutAfterMs: 120_000 });
+
+    const cause = detachedOrigin(entry).cause;
+    expect(cause.case).toBe("timedOut");
+    expect((cause.value as conversationv1.DetachedCauseTimedOut).timeoutMs).toBe(120_000n);
+  });
+
+  it("carries THE CONFIGURED LIMIT, not the work's runtime, on the timed-out arm", () => {
+    // The work is still running, so its runtime is not yet a fact.
+    const entry = bashDetachment({ backgroundTaskId: "bt-1", timedOutAfterMs: 0 });
+
+    const cause = detachedOrigin(entry).cause;
+    expect((cause.value as conversationv1.DetachedCauseTimedOut).timeoutMs).toBe(0n);
+  });
+
+  it("prefers the vendor's DECLARED output path over its prose", () => {
+    // A declared field outranks a sentence: a SPILLED foreground result sets it.
+    const entry = bashDetachment(
+      { backgroundTaskId: "bt-1", persistedOutputPath: "/tmp/declared.output" },
+      toolResultText("Output is being written to: /tmp/prose.output."),
+    );
+
+    expect(announcement(entry).output?.path).toBe("/tmp/declared.output");
+  });
+
+  it("falls back to the prose path when the vendor declared no field", () => {
+    const entry = bashDetachment(
+      { backgroundTaskId: "bt-1" },
+      toolResultText("Output is being written to: /tmp/prose.output."),
+    );
+
+    expect(announcement(entry).output?.path).toBe("/tmp/prose.output");
+  });
+
+  it("announces the detachment with NO output when neither field nor sentence names one", () => {
+    const entry = bashDetachment({ backgroundTaskId: "bt-1" });
+
+    expect(announcement(entry).output).toBeUndefined();
+  });
+
+  it("marks the named file READABLE, since the vendor tells the model to open it", () => {
+    const entry = bashDetachment(
+      { backgroundTaskId: "bt-1", persistedOutputPath: "/tmp/a.output" },
+      undefined,
+    );
+
+    expect(announcement(entry).output?.readability.case).toBe("readable");
+  });
+
+  it("remembers the stated cause so the later notification cannot overwrite it", () => {
+    const registry = createTaskKindRegistry();
+    bashDetachment({ backgroundTaskId: "bt-1", backgroundedByUser: true }, undefined, registry);
+
+    expect(registry.causeOf("bt-1")).toBe("by_user");
+  });
+
+  it("announces even with no cause registry to remember into", () => {
+    const entry = bashDetachmentEntry(
+      foldContext(),
+      MAIN_AGENT,
+      "uuid-result",
+      "toolu_bash",
+      { backgroundTaskId: "bt-1" },
+      undefined,
+      undefined,
+    );
+
+    expect(entry?.source.discriminator).toBe("agent_frame.detached_work.detached.requested");
+  });
+});
+
+describe("outputPathFromProse skips the blocks that are not words", () => {
+  it("ignores a non-text block rather than reading a path out of it", () => {
+    // Arrange. An image block beside the sentence: the path is still the
+    // sentence's, and the image contributes nothing.
+    const content = create(conversationv1.ToolResultContentSchema, {
+      blocks: [
+        create(conversationv1.ToolResultContentBlockSchema, {
+          block: {
+            case: "unsupported",
+            value: create(conversationv1.UnsupportedBlockSchema, {}),
+          },
+        }),
+        create(conversationv1.ToolResultContentBlockSchema, {
+          block: { case: "text", value: create(conversationv1.TextBlockSchema, {
+            text: "Output is being written to: /tmp/b.output.",
+          }) },
+        }),
+      ],
+    });
+
+    // Act, Assert.
+    expect(outputPathFromProse(content)).toBe("/tmp/b.output");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The task stream
+// ---------------------------------------------------------------------------
+
+/** One vendor task-stream record. */
+function taskMessage(fields: Record<string, unknown>): Extract<SdkMessage, { type: "system" }> {
+  return {
+    type: "system",
+    uuid: "uuid-task",
+    session_id: "session-1",
+    ...fields,
+  } as unknown as Extract<SdkMessage, { type: "system" }>;
+}
+
+/** What one task message converts to. */
+function convert(
+  fields: Record<string, unknown>,
+  overrides: Parameters<typeof foldContext>[0] = {},
+  registry = createTaskKindRegistry(),
+): readonly PersistEntry[] {
+  return convertDetached(taskMessage(fields), foldContext(overrides), registry);
+}
+
+describe("convertDetached: the level and the ambient task", () => {
+  it("produces nothing from the background-task LEVEL, which the engine owns", () => {
+    expect(convert({ subtype: "background_tasks_changed" })).toEqual([]);
+  });
+
+  it("drops an ambient housekeeping task from every announcement", () => {
+    expect(
+      convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", skip_transcript: true }),
+    ).toEqual([]);
+  });
+});
+
+describe("convertDetached: a task message that names no task", () => {
+  it("lands as residue, since nothing can be addressed by it", () => {
+    const entries = convert({ subtype: "task_started", tool_use_id: "toolu_1" });
+
+    expect(entries[0]?.source.discriminator).toBe("residue.unparsed");
+  });
+
+  it("lands as residue when the task id is the EMPTY string", () => {
+    const entries = convert({ subtype: "task_started", task_id: "" });
+
+    expect(entries[0]?.source.discriminator).toBe("residue.unparsed");
+  });
+});
+
+describe("convertDetached: task_started", () => {
+  it("lands as residue when no originating call is known, rather than inventing one", () => {
+    const entries = convert({ subtype: "task_started", task_id: "t1", task_type: "local_agent" });
+
+    expect(entries[0]?.source.discriminator).toBe("residue.unknown.task_started");
+  });
+
+  it("recovers the originating call from the engine's live-task table", () => {
+    // The vendor's own record names no `tool_use_id`; the engine's join does.
+    const entries = convert(
+      { subtype: "task_started", task_id: "t1", task_type: "local_agent" },
+      { liveTask: () => ({ toolUseId: "toolu_join" }) },
+    );
+
+    expect(detachedOrigin(entries[0]).detachedFromId?.value).toBe("toolu_join");
+  });
+
+  it("books the announcement against the SUBAGENT the engine knows is running it", () => {
+    const subagent = create(conversationv1.AgentIdSchema, { value: "sub-1" });
+    const entries = convert(
+      { subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1", task_type: "local_agent" },
+      { liveTask: () => ({ toolUseId: "toolu_1", agentId: subagent }) },
+    );
+
+    expect(entries[0]?.agentId.value).toBe("sub-1");
+  });
+
+  it("announces an agent task whose kind the vendor left unstated", () => {
+    const entries = convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" });
+
+    expect(entries[0]?.source.discriminator).toBe("agent_frame.detached_work.detached.requested");
+  });
+
+  it("remembers `requested` for an agent task, so its notification upserts that cause", () => {
+    const registry = createTaskKindRegistry();
+    convert({ subtype: "task_started", task_id: "t1", tool_use_id: "toolu_1" }, {}, registry);
+
+    expect(registry.causeOf("t1")).toBe("requested");
+  });
+});
+
+describe("convertDetached: task_updated", () => {
+  it("produces nothing from a patch that states no detachment", () => {
+    expect(
+      convert({ subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { status: "running" } }),
+    ).toEqual([]);
+  });
+
+  it("upserts nothing when a hand-backgrounded task names no originating call", () => {
+    expect(
+      convert({ subtype: "task_updated", task_id: "t1", patch: { is_backgrounded: true } }),
+    ).toEqual([]);
+  });
+
+  it("announces `by_user` when a person backgrounded running work by hand", () => {
+    const entries = convert({
+      subtype: "task_updated",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      patch: { is_backgrounded: true },
+    });
+
+    expect(detachedOrigin(entries[0]).cause.case).toBe("byUser");
+  });
+
+  it("remembers `by_user`, so the notification does not restate it as requested", () => {
+    const registry = createTaskKindRegistry();
+    convert(
+      { subtype: "task_updated", task_id: "t1", tool_use_id: "toolu_1", patch: { is_backgrounded: true } },
+      {},
+      registry,
+    );
+
+    expect(registry.causeOf("t1")).toBe("by_user");
+  });
+});
+
+describe("convertDetached: task_progress", () => {
+  it("is consumed; the unit's own frames are the account", () => {
+    expect(convert({ subtype: "task_progress", task_id: "t1" })).toEqual([]);
+  });
+});
+
+describe("convertDetached: task_notification", () => {
+  it("upserts the announcement with the REMEMBERED cause, never a fresh requested", () => {
+    const registry = createTaskKindRegistry();
+    registry.rememberCause("t1", "timed_out");
+    const entries = convert(
+      {
+        subtype: "task_notification",
+        task_id: "t1",
+        tool_use_id: "toolu_1",
+        output_file: "/tmp/t1.output",
+        status: "completed",
+      },
+      {},
+      registry,
+    );
+
+    expect(detachedOrigin(entries[0]).cause.case).toBe("timedOut");
+  });
+
+  it("falls back to `requested` when no cause was ever stated for the task", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      output_file: "/tmp/t1.output",
+      status: "completed",
+    });
+
+    expect(detachedOrigin(entries[0]).cause.case).toBe("requested");
+  });
+
+  it("upserts no announcement when the notification names no output file", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "completed",
+    });
+
+    expect(entries.map((entry) => entry.source.discriminator)).toEqual([
+      "activity.subagent.success",
+    ]);
+  });
+
+  it("settles nothing when the notification names no originating call", () => {
+    expect(convert({ subtype: "task_notification", task_id: "t1", status: "completed" })).toEqual([]);
+  });
+
+  it("settles a STOPPED run as stopped_by_user rather than as an error", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "stopped",
+    });
+
+    expect(entries[0]?.source.discriminator).toBe("activity.subagent.failure.stopped_by_user");
+  });
+
+  it("settles a FAILED run as a subagent failure carrying the vendor's summary", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "failed",
+      summary: "the run blew up",
+    });
+
+    const activity = activityOf(entries[0]);
+    const subagent = activity?.item.value as conversationv1.AgentSubagent;
+    const failure = subagent.result.value as conversationv1.AgentSubagentFailure;
+    expect(failure.error?.content?.blocks[0]?.block.value).toMatchObject({
+      text: "the run blew up",
+    });
+  });
+
+  it("leaves a failed run's error content UNSET when the vendor stated no summary", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "failed",
+    });
+
+    const activity = activityOf(entries[0]);
+    const subagent = activity?.item.value as conversationv1.AgentSubagent;
+    const failure = subagent.result.value as conversationv1.AgentSubagentFailure;
+    expect(failure.error?.content).toBeUndefined();
+  });
+
+  it("carries the vendor's token TOTAL, the only usage an async run reports", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "completed",
+      usage: { total_tokens: 4_242 },
+    });
+
+    const activity = activityOf(entries[0]);
+    const subagent = activity?.item.value as conversationv1.AgentSubagent;
+    const success = subagent.result.value as conversationv1.AgentSubagentSuccess;
+    const usage = success.totals?.usage.value as conversationv1.AgentSubagentAsyncUsage;
+    expect(usage.totalTokens).toBe(4_242n);
+  });
+
+  it("leaves the token total UNSET when the notification reported no usage", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "completed",
+    });
+
+    const activity = activityOf(entries[0]);
+    const subagent = activity?.item.value as conversationv1.AgentSubagent;
+    const success = subagent.result.value as conversationv1.AgentSubagentSuccess;
+    const usage = success.totals?.usage.value as conversationv1.AgentSubagentAsyncUsage;
+    expect(usage.totalTokens).toBeUndefined();
+  });
+
+  it("reports an empty summary rather than omitting the report entirely", () => {
+    const entries = convert({
+      subtype: "task_notification",
+      task_id: "t1",
+      tool_use_id: "toolu_1",
+      status: "completed",
+    });
+
+    const activity = activityOf(entries[0]);
+    const subagent = activity?.item.value as conversationv1.AgentSubagent;
+    const success = subagent.result.value as conversationv1.AgentSubagentSuccess;
+    expect(success.report?.prose?.markdown).toBe("");
+  });
+});
+
+describe("convertDetached: a task subtype no converter owns", () => {
+  it("lands as residue named for the subtype", () => {
+    const entries = convert({ subtype: "task_teleported", task_id: "t1" });
+
+    expect(entries[0]?.source.discriminator).toBe("unknown.task_teleported");
   });
 });

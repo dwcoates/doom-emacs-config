@@ -176,3 +176,50 @@ describe("residueEntry", () => {
     expect(first.upsertKey === second.upsertKey).toBe(false);
   });
 });
+
+describe("a record that cannot be represented at all", () => {
+  it("degrades an unrepresentable UNKNOWN record to unparsed rather than losing it", () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+
+    expect(unknownResidue("newkind", "type", cyclic).unservedItem.case).toBe("unparsed");
+  });
+
+  it("answers nothing from rawStruct when the record's own serializer throws a non-Error", () => {
+    const hostile = {
+      toJSON() {
+        throw "the serializer refused";
+      },
+    };
+
+    expect(rawStruct(hostile)).toBeUndefined();
+  });
+});
+
+describe("an unparsable record with no JSON form", () => {
+  it("keeps the value's string form, so the arm is never empty", () => {
+    // `JSON.stringify(undefined)` is itself undefined; the record still has to
+    // land as SOMETHING investigable.
+    const residue = unparsedResidue("stream", "nothing to read", undefined);
+    const unparsed = residue.unservedItem.value as { raw: string };
+
+    expect(unparsed.raw).toBe("undefined");
+  });
+});
+
+describe("which FIELD the discriminator was read from", () => {
+  it("is `type` for a record that states no subtype", () => {
+    const residue = residueForMessage({ type: "prompt_suggestion", uuid: "u" });
+    const unknown = residue.unservedItem.value as { discriminatorField: string };
+
+    expect(unknown.discriminatorField).toBe("type");
+  });
+});
+
+describe("the CROSS-PLANE spelling for a subtyped record that is neither system nor attachment", () => {
+  it("spells it <type>/<subtype>, so both planes name it the same way", () => {
+    expect(residueKind({ type: "user", subtype: "compact_boundary" })).toBe(
+      "user/compact_boundary",
+    );
+  });
+});

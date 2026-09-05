@@ -215,3 +215,45 @@ describe("resolving a vendor id to its book, from files alone", () => {
     expect(resolveOriginal(scratch(), WORKSPACE, "never-rotated")).toBe("never-rotated");
   });
 });
+
+describe("forgetting an identity a failed start minted", () => {
+  it("succeeds silently when there is nothing persisted to forget", async () => {
+    const store = createAgentIdentityStore(scratch(), WORKSPACE);
+
+    await expect(store.forget()).resolves.toBeUndefined();
+  });
+
+  it("removes the persisted record so the next start mints afresh", async () => {
+    const state = scratch();
+    const store = createAgentIdentityStore(state, WORKSPACE);
+    await store.write("original-1");
+
+    await store.forget();
+
+    expect(await store.read()).toBeUndefined();
+  });
+
+  it("RAISES when the record cannot be removed, rather than reporting it forgotten", async () => {
+    // A non-empty directory where the record file belongs: the un-recursive
+    // rmSync refuses it with something that is not ENOENT.
+    const state = scratch();
+    const file = agentIdPath(state, WORKSPACE);
+    mkdirSync(file, { recursive: true });
+    writeFileSync(path.join(file, "held"), "", "utf8");
+
+    await expect(createAgentIdentityStore(state, WORKSPACE).forget()).rejects.toThrow();
+  });
+});
+
+describe("resolving a vendor id when its link cannot be read", () => {
+  it("RAISES rather than answering the id with itself, which would split the book", () => {
+    // A directory where the link file belongs: readFileSync refuses with
+    // EISDIR, and answering `vendorSessionId` there would silently start a
+    // second book for a conversation that already has one.
+    const state = scratch();
+    const link = vendorLinkPath(state, WORKSPACE, "rotated-2");
+    mkdirSync(link, { recursive: true });
+
+    expect(() => resolveOriginal(state, WORKSPACE, "rotated-2")).toThrow();
+  });
+});

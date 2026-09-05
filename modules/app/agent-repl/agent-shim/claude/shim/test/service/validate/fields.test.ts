@@ -289,3 +289,17 @@ describe("validatePageSize", () => {
     expect(codeOf(() => fields.validatePageSize(0, "p"))).toBe(Code.InvalidArgument);
   });
 });
+
+describe("validateHistoryPointer", () => {
+  it("refuses an UNSET pointer rather than reading from an unstated place", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateHistoryPointer(undefined, "p"))).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("validateUserContent", () => {
+  it("refuses UNSET content, which is not the same as an empty utterance", () => {
+    // Arrange, Act, Assert.
+    expect(codeOf(() => fields.validateUserContent(undefined, "p"))).toBe(Code.InvalidArgument);
+  });
+});
