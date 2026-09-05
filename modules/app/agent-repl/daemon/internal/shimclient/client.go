@@ -162,6 +162,10 @@ func (c *client) Occupy(holder string) (func(), error) {
 
 // Kill stops the process group, recording who asked and why: SIGTERM, a
 // bounded wait, then SIGKILL, and the reaper decodes the exit either way.
+//
+// AN ADOPTED SHIM IS STOPPED TOO, down its own path — see killAdopted. It used
+// to be refused with ErrNoProcess, which made a successor daemon unable to
+// stand down the very shims a handover had just given it.
 func (c *client) Kill(attr KillAttribution) error {
 	c.mu.Lock()
 	switch {
@@ -174,7 +178,14 @@ func (c *client) Kill(attr KillAttribution) error {
 			"workspace_id": string(c.ws), "actor": attr.Actor,
 		})
 		return nil
-	case c.cmd == nil || c.pgid == 0:
+	case c.cmd == nil:
+		// ADOPTED: no child handle exists to signal, so the pid is read from
+		// the socket's peer credential at the moment of the kill.
+		c.attribution = &attr
+		grace := c.grace
+		c.mu.Unlock()
+		return c.killAdopted(attr, grace)
+	case c.pgid == 0:
 		c.mu.Unlock()
 		return ErrNoProcess
 	}
@@ -223,6 +234,170 @@ func (c *client) Kill(attr KillAttribution) error {
 	}
 	<-c.dead
 	return nil
+}
+
+// adoptedGonePoll is how often an adopted process is re-checked for having
+// gone. It is a poll because the daemon is NOT its parent and therefore has no
+// wait(2) to block in; kill(pgid, 0) is the only observation available, and
+// 25ms is the same interval the rollout's adoption look uses for the same kind
+// of "somebody else's process changed state" question.
+const adoptedGonePoll = 25 * time.Millisecond
+
+// killAdopted stops a shim this daemon did not spawn: the successor's half of
+// a handover, and a crash boot's surviving process.
+//
+// WHY IT EXISTS. Kill answered ErrNoProcess for every adopted client, because
+// the only pid it knew was cmd.Process.Pid and an adopted client has no cmd.
+// So a successor that took a handover could not stand down the shims the
+// handover had just given it: Fleet.Stop returned the error, the immediate
+// shutdown recorded it and exited anyway, and the shim ran on holding the
+// workspace lock that refuses the next session plus ~95 MiB. Measured on the
+// Emacs e2e layer's handover scenario: one node shim and two `shim-lock'
+// holders outliving every daemon in the scenario. The same hole swallowed the
+// idle sweeper's hibernation and the kill verb for any adopted workspace.
+//
+// THE SIGNAL IS THE ONLY WAY, and that is the shim's own contract rather than
+// this package's preference: "SIGTERM is the ONE authorized process-level
+// shutdown ... It cannot be an rpc-only path because the daemon may already be
+// dead" (agent-shim/claude/shim/src/main.ts). KillSession ends the SESSION; it
+// does not end the process.
+//
+// THE PID IS READ FROM THE KERNEL AT THE MOMENT OF THE KILL, off a fresh
+// connection to the shim's own socket, so what is signalled is by construction
+// the process serving that socket right now. A pid remembered from adoption
+// could have been recycled in between; this one cannot be, because a recycled
+// pid is not bound to the socket. The group is then required to be led by that
+// same pid — the spawn contract sets Setpgid, so a shim always leads its own
+// group — and a peer that does not is REFUSED rather than signalled, because
+// signalling a group we cannot account for could reach the daemon's own.
+func (c *client) killAdopted(attr KillAttribution, grace time.Duration) error {
+	pid, err := socketPeerPID(c.udsPath)
+	if err != nil {
+		if isSocketGone(err) {
+			// The socket refuses or is absent: the shim the caller asked to
+			// stop is already gone. That is the state they asked for.
+			c.log.Info("daemon.shimclient.kill", "the adopted shim's socket is gone; nothing to stop", dlog.Context{
+				"workspace_id": string(c.ws), "uds": c.udsPath, "actor": attr.Actor,
+			})
+			c.publishExit(ExitInfo{
+				Code:   -1,
+				Stderr: "adopted shim: the socket was already gone when the daemon went to stop it",
+			})
+			return nil
+		}
+		c.log.Error("daemon.shimclient.kill", "could not learn the adopted shim's pid; it cannot be stopped", dlog.Context{
+			"workspace_id": string(c.ws), "uds": c.udsPath, "error": err.Error(),
+		})
+		return fmt.Errorf("shimclient: stop the adopted shim for %q: %w", c.ws, err)
+	}
+	pgid, err := syscall.Getpgid(pid)
+	if err != nil {
+		c.log.Error("daemon.shimclient.kill", "could not read the adopted shim's process group", dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "error": err.Error(),
+		})
+		return fmt.Errorf("shimclient: process group of the adopted shim %d for %q: %w", pid, c.ws, err)
+	}
+	if pgid != pid {
+		c.log.Error("daemon.shimclient.kill", "refused to signal an adopted shim that does not lead its own process group", dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "pgid": pgid,
+		})
+		return fmt.Errorf("shimclient: adopted shim %d for %q leads no process group of its own (pgid %d)", pid, c.ws, pgid)
+	}
+	// AND IT IS NEVER THE DAEMON'S OWN GROUP. The two checks together make
+	// signalling ourselves unrepresentable rather than merely unlikely: a peer
+	// that is this process passes the leadership check only when this process
+	// leads its group, and that is exactly the case this refuses. A daemon
+	// that SIGKILLs its own group takes down every shim on the machine and
+	// itself, so the answer is a loud refusal, never a signal sent hopefully.
+	if pgid == syscall.Getpgrp() {
+		c.log.Error("daemon.shimclient.kill", "refused to signal the daemon's own process group as an adopted shim", dlog.Context{
+			"workspace_id": string(c.ws), "pid": pid, "pgid": pgid, "self": os.Getpid(),
+		})
+		return fmt.Errorf("shimclient: the peer of %q's socket (pid %d) is in this daemon's own process group %d", c.ws, pid, pgid)
+	}
+
+	c.mu.Lock()
+	c.pid = pid
+	c.mu.Unlock()
+
+	c.log.Info("daemon.shimclient.kill", "stopping an adopted shim", dlog.Context{
+		"workspace_id": string(c.ws), "pid": pid, "pgid": pgid,
+		"actor": attr.Actor, "reason": attr.Reason, "force": attr.Force,
+	})
+
+	signal := syscall.SIGKILL
+	if !attr.Force {
+		signal = syscall.SIGTERM
+	}
+	if err := c.signalAdoptedGroup(signal, pgid); err != nil {
+		return err
+	}
+	if c.awaitAdoptedGone(pgid, grace) {
+		c.publishAdoptedKill(pid, signal)
+		return nil
+	}
+	if signal == syscall.SIGKILL {
+		// SIGKILL is not negotiable, so a group still standing after the
+		// grace is a process the kernel is holding (an uninterruptible wait),
+		// not one that declined. It is REPORTED: the caller's record is the
+		// only thing that will ever say the workspace lock is still held.
+		return fmt.Errorf("shimclient: adopted shim %d for %q did not go down within %s of SIGKILL", pid, c.ws, grace)
+	}
+	c.log.Warn("daemon.shimclient.kill", "the adopted shim ignored SIGTERM; escalating", dlog.Context{
+		"workspace_id": string(c.ws), "pid": pid, "pgid": pgid, "grace_ms": grace.Milliseconds(),
+	})
+	if err := c.signalAdoptedGroup(syscall.SIGKILL, pgid); err != nil {
+		return err
+	}
+	if !c.awaitAdoptedGone(pgid, grace) {
+		return fmt.Errorf("shimclient: adopted shim %d for %q did not go down within %s of SIGKILL", pid, c.ws, grace)
+	}
+	c.publishAdoptedKill(pid, syscall.SIGKILL)
+	return nil
+}
+
+// signalAdoptedGroup sends one signal to an adopted shim's process group. A
+// group that is already gone is SUCCESS — the caller asked for it to stop —
+// and every other errno is returned.
+func (c *client) signalAdoptedGroup(sig syscall.Signal, pgid int) error {
+	if err := syscall.Kill(-pgid, sig); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return nil
+		}
+		c.log.Error("daemon.shimclient.kill", "signalling the adopted shim's process group failed", dlog.Context{
+			"workspace_id": string(c.ws), "pgid": pgid, "signal": sig.String(), "error": err.Error(),
+		})
+		return fmt.Errorf("shimclient: %s the adopted process group %d for %q: %w", sig, pgid, c.ws, err)
+	}
+	return nil
+}
+
+// awaitAdoptedGone polls until the process group holds nothing, or the bound
+// expires. It reports whether the group is gone.
+func (c *client) awaitAdoptedGone(pgid int, bound time.Duration) bool {
+	deadline := time.Now().Add(bound)
+	for {
+		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(adoptedGonePoll)
+	}
+}
+
+// publishAdoptedKill records the death of a shim the daemon stopped but never
+// parented. There is no wait status to decode — the kernel gave it to init —
+// so the SIGNAL this daemon sent is the whole of the evidence, and the exit
+// says exactly that rather than inventing a code.
+func (c *client) publishAdoptedKill(pid int, sig syscall.Signal) {
+	c.publishExit(ExitInfo{
+		PID:    pid,
+		Code:   -1,
+		Signal: sig.String(),
+		Stderr: "adopted shim: stopped by this daemon; no wait status, the process was never its child",
+	})
 }
 
 // signalGroup signals the supervised child's process group, and can only ever

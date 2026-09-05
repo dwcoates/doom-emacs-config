@@ -233,6 +233,22 @@ func (s *supervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir
 		})
 		return nil, err
 	}
+	// THE PID IS LEARNED HERE, from the socket's peer credential, so every
+	// record this client writes names the process it is actually driving. The
+	// KILL does not trust this number — it reads a fresh one at the instant it
+	// signals, because a remembered pid can be recycled — so a platform that
+	// cannot answer costs observability here and a loud refusal there, never a
+	// silently unstoppable shim.
+	if pid, pidErr := socketPeerPID(udsPath); pidErr != nil {
+		log.Warn("daemon.shimclient.adopt", "could not learn the adopted shim's pid from its socket", dlog.Context{
+			"uds": udsPath, "error": pidErr.Error(),
+		})
+	} else {
+		c.mu.Lock()
+		c.pid = pid
+		c.mu.Unlock()
+		log.Info("daemon.shimclient.adopt", "adopted a running shim", dlog.Context{"uds": udsPath, "pid": pid})
+	}
 	return c, nil
 }
 

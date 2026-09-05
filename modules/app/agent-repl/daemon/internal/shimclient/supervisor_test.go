@@ -3,6 +3,7 @@ package shimclient
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -327,8 +328,13 @@ func TestSpawnValidatesSpec(t *testing.T) {
 	}
 }
 
-// TestAdoptDoesNotSpawn asserts an adopted shim is dialed, never started: no
-// child exists, so no pid is known.
+// TestAdoptDoesNotSpawn asserts an adopted shim is dialed, never started.
+//
+// THE PID IT REPORTS IS THE SOCKET'S PEER, not a child's. An adopted client
+// used to answer 0, which was honest about having no child and useless about
+// everything else: nothing could name the process in a record, and nothing
+// could stop it. It now comes from the kernel's peer credential, so here —
+// where the fake shim is served in-process — it is this very test's pid.
 func TestAdoptDoesNotSpawn(t *testing.T) {
 	// Arrange.
 	dir := shortDir(t)
@@ -338,17 +344,24 @@ func TestAdoptDoesNotSpawn(t *testing.T) {
 	client := adoptReady(t, f, dir, uds)
 
 	// Assert.
-	if got := client.PID(); got != 0 {
-		t.Fatalf("PID() = %d, want 0 for an adopted shim", got)
+	if got, want := client.PID(), os.Getpid(); got != want {
+		t.Fatalf("PID() = %d, want the socket's peer %d", got, want)
 	}
 	if f.count("WatchSession") == 0 {
 		t.Fatal("WatchSession was never opened; the adopted shim was not dialed")
 	}
 }
 
-// TestAdoptKillIsRefusedWithoutAProcess asserts an adopted client refuses to
-// kill what it does not supervise.
-func TestAdoptKillIsRefusedWithoutAProcess(t *testing.T) {
+// TestAdoptKillRefusesTheDaemonsOwnProcessGroup asserts the guard that keeps a
+// stop of an adopted shim from ever becoming a stop of the daemon.
+//
+// IT REPLACES A TEST THAT PINNED THE DEFECT. An adopted client used to refuse
+// EVERY kill with ErrNoProcess, which is why a successor daemon could not
+// stand down the shims a handover had just handed it. Now it signals the
+// process its socket's peer credential names — and the one process it must
+// never signal is itself, which is exactly what this fake, served in-process,
+// makes it try.
+func TestAdoptKillRefusesTheDaemonsOwnProcessGroup(t *testing.T) {
 	// Arrange.
 	dir := shortDir(t)
 	f, uds := startFakeShim(t, dir)
@@ -358,8 +371,11 @@ func TestAdoptKillIsRefusedWithoutAProcess(t *testing.T) {
 	err := client.Kill(KillAttribution{Actor: "test", Reason: "no process"})
 
 	// Assert.
-	if !errors.Is(err, ErrNoProcess) {
-		t.Fatalf("Kill() error = %v, want ErrNoProcess", err)
+	if err == nil {
+		t.Fatal("Kill() error = nil, want a refusal: the socket's peer is this very process")
+	}
+	if !strings.Contains(err.Error(), "process group") {
+		t.Fatalf("Kill() error = %v, want it to name the process group it refused", err)
 	}
 }
 
@@ -509,17 +525,25 @@ func TestStandDownEverySpawnLeavesADetachedShimRunning(t *testing.T) {
 // be performed is RETURNED, never swallowed: a leaked shim holds the workspace
 // lock, and this error is the only thing that will ever say so.
 func TestStandDownEverySpawnReportsAKillThatFailed(t *testing.T) {
-	// Arrange: a held client with no process handle, which Kill refuses.
+	// Arrange: a held client whose socket is served by a process leading no
+	// group of its own, which is the one shape the kill refuses to signal.
+	// (An absent socket no longer serves here: a shim whose socket is gone is
+	// the state the caller asked for, and the sweep says so with nil.)
+	leader := startPeer(t, 0)
+	p := startPeer(t, leader.pid)
 	sup := newSupervisor(t).(*supervisor)
-	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), "/tmp/absent.sock", defaultBackoff, nil)
+	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), p.uds, defaultBackoff, nil)
 	sup.hold(c)
 
 	// Act.
 	err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested")
 
 	// Assert.
-	if !errors.Is(err, ErrNoProcess) {
-		t.Fatalf("StandDownEverySpawn() error = %v, want ErrNoProcess", err)
+	if err == nil {
+		t.Fatal("StandDownEverySpawn() error = nil, want the refused kill reported")
+	}
+	if !strings.Contains(err.Error(), "process group") {
+		t.Fatalf("StandDownEverySpawn() error = %v, want it to carry the kill's own refusal", err)
 	}
 }
 
