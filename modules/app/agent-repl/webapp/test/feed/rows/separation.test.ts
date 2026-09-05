@@ -270,3 +270,51 @@ describe("drawFeedSessionSeparation: the worktree arms", () => {
     expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
   });
 });
+
+describe("drawFeedSessionSeparation: arms this build has no case for", () => {
+  it("refuses a divider kind a NEWER daemon set, quoting the arm it could not draw", () => {
+    // Arrange
+    const msg = separation({ case: "cleared", value: {} });
+    (msg as unknown as { kind: unknown }).kind = { case: "modelSwapped", value: {} };
+
+    // Act
+    let thrown: unknown;
+    try {
+      drawFeedSessionSeparation(msg, ctxFor());
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedSessionSeparation.kind");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'modelSwapped' is not one this build can draw",
+    );
+  });
+
+  it("refuses a left tree's outcome arm a NEWER daemon set, quoting that arm", () => {
+    // Arrange
+    const msg = separation({
+      case: "worktreeLeft",
+      value: { outcome: { case: "removed", value: {} } },
+    });
+    const left = (msg.kind as { value: { outcome: unknown } }).value;
+    left.outcome = { case: "archived", value: {} };
+
+    // Act
+    let thrown: unknown;
+    try {
+      drawFeedSessionSeparation(msg, ctxFor());
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedSessionSeparation.worktree_left.outcome");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'archived' is not one this build can draw",
+    );
+  });
+});

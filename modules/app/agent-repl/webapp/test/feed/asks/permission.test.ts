@@ -4,12 +4,20 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   AnswerPermissionErrorSchema,
   AnswerPermissionResponseSchema,
+  type AnswerPermissionResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import {
+  FeedIdSchema,
   FeedPermissionAnsweredSchema,
   FeedPermissionSchema,
+  FeedRowSchema,
   type FeedPermission,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FailureKind } from "../../../../proto/gen/ts/frontend/v1/failure_pb";
+import { createTicker } from "../../../src/clock.js";
+import type { AgentReplClient } from "../../../src/rpc/client.js";
+import { createAppContext } from "../../../src/rpc/context.js";
+import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedPermission,
@@ -492,5 +500,82 @@ describe("drawFeedPermission malformed input", () => {
       value: {},
     };
     expect(() => drawFeedPermission(u, askHarness().rc)).toThrow(MalformedView);
+  });
+});
+
+/**
+ * A row context whose AnswerPermission hands ANSWER back UNALTERED, and a sink
+ * that keeps what was filed.
+ *
+ * `createRouterTransport` re-encodes the response through the frozen schema,
+ * which DROPS an arm no descriptor knows and turns "an arm this build cannot
+ * draw" into "a oneof sets no arm" — a different refusal from the one under
+ * test. A fake client is how an arm a NEWER daemon set actually reaches the
+ * renderer.
+ */
+function unalteredPermission(answer: AnswerPermissionResponse): {
+  rc: RowContext;
+  filed: FailureKind[];
+} {
+  const filed: FailureKind[] = [];
+  return {
+    filed,
+    rc: {
+      ctx: createAppContext({
+        client: {
+          answerPermission: () => Promise.resolve(answer),
+        } as unknown as AgentReplClient,
+        workspace: WORKSPACE,
+        ticker: createTicker(1000),
+        failures: { report: (kind) => filed.push(kind), retract: () => {} },
+        composerEnabled: false,
+      }),
+      feed: "root",
+      row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: ROW_ID }) }),
+      revealRow: async () => false,
+    },
+  };
+}
+
+describe("an answer this build cannot read", () => {
+  it("files the unknown result arm by name rather than drawing a refusal", async () => {
+    // Arrange: a newer daemon answers with a result arm this build has no case for.
+    const answer = create(AnswerPermissionResponseSchema, {
+      result: { case: "success", value: {} },
+    });
+    (answer as unknown as { result: { case: string; value: unknown } }).result = {
+      case: "deferred",
+      value: {},
+    };
+    const h = unalteredPermission(answer);
+    const el = drawFeedPermission(permission({ case: "open", value: {} }), h.rc);
+    // Act
+    el.querySelector<HTMLButtonElement>('[data-permission="allowOnce"]')?.click();
+    await settle();
+    // Assert
+    const kind = h.filed[0]?.kind;
+    expect(
+      kind?.case === "frameUndecodable" ? [kind.value.frameHead, kind.value.cause] : null,
+    ).toEqual([
+      "AnswerPermissionResponse.result",
+      "arm 'deferred' is not one this build can draw",
+    ]);
+  });
+});
+
+describe("an answered verdict this build cannot read", () => {
+  it("refuses an answer arm this build does not know, by name", () => {
+    // Arrange
+    const u = permission({
+      case: "answered",
+      value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
+    });
+    (
+      u.state as unknown as { value: { answer: { case: string; value: unknown } } }
+    ).value.answer = { case: "allowedForSession", value: {} };
+    // Act / Assert
+    expect(() => drawFeedPermission(u, askHarness().rc)).toThrow(
+      "malformed view at FeedPermission.answered.answer: arm 'allowedForSession' is not one this build can draw",
+    );
   });
 });

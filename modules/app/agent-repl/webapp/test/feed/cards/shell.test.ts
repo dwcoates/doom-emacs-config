@@ -12,6 +12,8 @@ import {
   FeedShellSchema,
   type FeedShell,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { createTicker } from "../../../src/clock.js";
+import { createAppContext } from "../../../src/rpc/context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedShell,
@@ -555,5 +557,90 @@ describe("drawFeedShell malformed input", () => {
     (u.state as unknown as { value: { outcome: { case: string; value: unknown } } }).value.outcome =
       { case: "evicted", value: {} };
     expect(() => drawFeedShell(u, ctxFor().rc)).toThrow(MalformedView);
+  });
+});
+
+/**
+ * The stop's answer, handed over UNALTERED.
+ *
+ * A fabricated arm cannot travel through `createRouterTransport`: the router
+ * re-encodes the response through the frozen schema, which drops a case no
+ * descriptor knows and turns the arm this test is about into "a oneof sets no
+ * arm". A fake client hands `drawAnswer` the message as written, which is the
+ * only way to reach the unknown-arm refusals a NEWER daemon would produce.
+ */
+function ctxAnswering(answer: InterruptResponse): {
+  rc: RowContext;
+  reported: { cause: string; frameHead: string }[];
+} {
+  const reported: { cause: string; frameHead: string }[] = [];
+  const ctx = createAppContext({
+    client: {
+      interrupt: () => Promise.resolve(answer),
+    } as unknown as Parameters<typeof createAppContext>[0]["client"],
+    workspace: WORKSPACE,
+    ticker: createTicker(1000),
+    failures: {
+      report: (kind) => {
+        if (kind.kind.case === "frameUndecodable") {
+          reported.push({
+            cause: kind.kind.value.cause,
+            frameHead: kind.kind.value.frameHead,
+          });
+        }
+      },
+      retract: () => {},
+    },
+    composerEnabled: false,
+  });
+  const row = create(FeedRowSchema, {
+    id: feedId(ROW),
+    row: { case: "detachedShell", value: { shell: {} } },
+  });
+  return { rc: rowContext(ctx, row) as RowContext, reported };
+}
+
+describe("the stop's unreadable answers", () => {
+  it("refuses a success outcome arm this build has no word for", async () => {
+    // Arrange: the shape a NEWER daemon's outcome arrives in.
+    const answer = create(InterruptResponseSchema, {
+      result: { case: "success", value: { outcome: { case: "nothingRunning", value: {} } } },
+    });
+    (answer.result.value as { outcome: unknown }).outcome = { case: "quiesced", value: {} };
+    const { rc, reported } = ctxAnswering(answer);
+    const el = drawFeedShell(shell(), rc);
+    // Act
+    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    await settle();
+    // Assert: reported once by path and arm, with no outcome word invented.
+    expect([reported, el.querySelector(".shell-stop-outcome")]).toEqual([
+      [
+        {
+          cause: "arm 'quiesced' is not one this build can draw",
+          frameHead: "InterruptSuccess.outcome",
+        },
+      ],
+      null,
+    ]);
+  });
+
+  it("refuses a result arm this build has no case for", async () => {
+    // Arrange
+    const answer = create(InterruptResponseSchema, {
+      result: { case: "success", value: { outcome: { case: "nothingRunning", value: {} } } },
+    });
+    (answer as { result: unknown }).result = { case: "deferred", value: {} };
+    const { rc, reported } = ctxAnswering(answer);
+    const el = drawFeedShell(shell(), rc);
+    // Act
+    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    await settle();
+    // Assert
+    expect(reported).toEqual([
+      {
+        cause: "arm 'deferred' is not one this build can draw",
+        frameHead: "InterruptResponse.result",
+      },
+    ]);
   });
 });
