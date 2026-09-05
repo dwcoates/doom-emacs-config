@@ -71,6 +71,15 @@ const SETTLE_STABLE_ROUNDS = 4;
 /** How much markup the non-convergence diagnostic quotes. */
 const SETTLE_DIAGNOSTIC_LIMIT = 2000;
 
+/**
+ * Every request whose response head has not landed yet, each as a promise
+ * that resolves (never rejects) when it does. `settle()` treats a non-empty
+ * set as "not settled" and waits on it rather than spinning.
+ */
+interface InFlight {
+  heads: Set<Promise<void>>;
+}
+
 interface Handle {
   dispose(): void;
 }
@@ -93,7 +102,7 @@ interface Handle {
  */
 function fetchAcceptingJsdomSignals(
   underlying: typeof globalThis.fetch,
-  inFlight: { count: number },
+  inFlight: InFlight,
   dispatcher: Agent | undefined,
 ): typeof globalThis.fetch {
   return (input, init) => {
@@ -120,9 +129,18 @@ function fetchAcceptingJsdomSignals(
     // accept (the server flushes headers there) rather than the stream's end —
     // so a watch never holds settle open, and a call that has not answered yet
     // always does.
-    inFlight.count += 1;
+    // The head is also HELD AS A PROMISE, so a settle round that finds a
+    // request outstanding can wait for the answer instead of spinning: it
+    // resolves (never rejects) the moment the response head lands or the
+    // request fails, and leaves the set at the same moment.
+    let landed!: () => void;
+    const head = new Promise<void>((resolve) => {
+      landed = resolve;
+    });
+    inFlight.heads.add(head);
     const settled = (): void => {
-      inFlight.count -= 1;
+      inFlight.heads.delete(head);
+      landed();
     };
     return underlying(input, bridged).then(
       (response) => {
@@ -411,7 +429,7 @@ async function mountApp(
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
-  const inFlight = { count: 0 };
+  const inFlight: InFlight = { heads: new Set() };
   const transport = createDaemonTransport(baseUrl, {
     fetch: fetchAcceptingJsdomSignals(globalThis.fetch, inFlight, dispatcher),
   });
@@ -603,9 +621,19 @@ async function mountApp(
       await vi.advanceTimersByTimeAsync(0);
       await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
+      // AN OUTSTANDING REQUEST IS WAITED FOR, NOT SPUN ON. A round used to
+      // cost ~7ms of serialization, which made the round cap a wall-clock
+      // allowance of ~400ms as a side effect, and a loopback unary under
+      // parallel load always answered inside it. With the observer fast path
+      // a quiet round costs ~1ms, sixty of them ~60ms, and a unary that took
+      // longer — measured: the ClientLog flush in client-log.integration.test.ts,
+      // 3 runs in 6 under a sibling suite's load — exhausted the cap on a page
+      // that was merely waiting for its answer. So the round blocks on the
+      // first head to land; the cap counts DOM churn, never the network.
+      if (inFlight.heads.size > 0) await Promise.race(inFlight.heads);
       // An unanswered request is a change that has not happened YET, so a
       // quiet DOM with one outstanding is not settled — it is early.
-      stable = !markupMoved() && inFlight.count === 0 ? stable + 1 : 0;
+      stable = !markupMoved() && inFlight.heads.size === 0 ? stable + 1 : 0;
       if (stable >= SETTLE_STABLE_ROUNDS) return;
     }
     // NON-CONVERGENCE IS A FAULT, NEVER A QUIET RETURN. A settle that gave up
