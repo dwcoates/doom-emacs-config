@@ -222,3 +222,94 @@ describe("the live set as the wire names it", () => {
     expect(table.get("b99")).toBeDefined();
   });
 });
+
+describe("a task update that renames the work", () => {
+  it("applies the patched description", () => {
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started());
+
+    table.onTaskUpdated({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "b01",
+      patch: { description: "run the tests" },
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    } as SdkTaskUpdatedMessage);
+
+    expect(table.get("b01")?.description).toBe("run the tests");
+  });
+});
+
+describe("a task that named no spawning call", () => {
+  it("carries no wire handle at all", () => {
+    const table = new LiveWorkTable();
+
+    const entry = table.onTaskStarted(started({ tool_use_id: undefined }));
+
+    expect(entry.toolUseId).toBeUndefined();
+  });
+});
+
+describe("what the retired-handle memory holds", () => {
+  const notified = (taskId: string): SdkTaskNotificationMessage =>
+    ({
+      type: "system",
+      subtype: "task_notification",
+      task_id: taskId,
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-000000000003",
+      session_id: "s-1",
+    }) as SdkTaskNotificationMessage;
+
+  it("remembers a handle whose work concluded, so a stop can say `already ended`", () => {
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started());
+
+    table.onTaskNotification(notified("b01"));
+
+    expect(table.retired("toolu_1")).toBe(true);
+  });
+
+  it("remembers nothing for work that named no spawning call, which has no handle to remember", () => {
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ tool_use_id: undefined }));
+
+    table.onTaskNotification(notified("b01"));
+
+    expect(table.retired("")).toBe(false);
+  });
+
+  it("remembers nothing for work whose spawning call is the empty handle", () => {
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started({ tool_use_id: "" }));
+
+    table.onTaskNotification(notified("b01"));
+
+    expect(table.retired("")).toBe(false);
+  });
+
+  it("still remembers a handle that retired twice, rather than holding it twice", () => {
+    const table = new LiveWorkTable();
+    for (let round = 0; round < 2; round += 1) {
+      table.onTaskStarted(started());
+      table.onTaskNotification(notified("b01"));
+    }
+
+    expect(table.retired("toolu_1")).toBe(true);
+  });
+
+  it("FORGETS the oldest handle once the remembered window is full", () => {
+    // The memory is bounded so it can never become a second conversation
+    // history; past the bound the oldest handle answers `unknown_work` again.
+    const table = new LiveWorkTable();
+    for (let index = 0; index < 65; index += 1) {
+      table.onTaskStarted(started({ task_id: `b${index}`, tool_use_id: `toolu_${index}` }));
+      table.onTaskNotification(notified(`b${index}`));
+    }
+
+    expect([table.retired("toolu_0"), table.retired("toolu_64")]).toEqual([false, true]);
+  });
+});

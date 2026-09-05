@@ -150,6 +150,20 @@ describe("planModeConverter.settle", () => {
     );
   });
 
+  it("defaults every unstated flag to false when the vendor stated only the plan", () => {
+    // Arrange, Act.
+    const success = successOf("ExitPlanMode", { plan: "p" });
+
+    // Assert.
+    const exited = success.act.value as conversationv1.AgentPlanModeExited;
+    expect([
+      exited.planWasEdited,
+      exited.isAgent,
+      exited.hasTaskTool,
+      exited.awaitingLeaderApproval,
+    ]).toEqual([false, false, false, false]);
+  });
+
   it("does NOT carry the vendor's requestId: vendor identity spaces do not cross", () => {
     // Arrange, Act.
     const success = successOf("ExitPlanMode", { plan: "p", isAgent: false, requestId: "req_01ABC" });

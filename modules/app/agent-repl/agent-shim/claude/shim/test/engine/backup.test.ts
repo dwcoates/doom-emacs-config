@@ -101,3 +101,23 @@ describe("pruning", () => {
     expect(() => pruneBackups(path.join(scratch(), "absent"), 1)).not.toThrow();
   });
 });
+
+describe("pruning what it cannot delete", () => {
+  it("keeps going past a copy it cannot remove, rather than abandoning the prune", () => {
+    // Arrange: `b.jsonl` is a non-empty directory, so the un-recursive rmSync
+    // the prune uses refuses it — the same shape a copy held open or owned by
+    // another user has.
+    const dir = scratch();
+    writeFileSync(path.join(dir, "a.jsonl"), "", "utf8");
+    mkdirSync(path.join(dir, "b.jsonl"), { recursive: true });
+    writeFileSync(path.join(dir, "b.jsonl", "held"), "", "utf8");
+    writeFileSync(path.join(dir, "c.jsonl"), "", "utf8");
+
+    // Act.
+    pruneBackups(dir, 1);
+
+    // Assert: the deletable doomed copy went, the undeletable one stayed, and
+    // the newest copy the bound protects is untouched.
+    expect(readdirSync(dir).sort()).toEqual(["b.jsonl", "c.jsonl"]);
+  });
+});

@@ -146,6 +146,46 @@ describe("globConverter.settle", () => {
     expect(successOf(item).paths).toEqual([]);
   });
 
+  it("claims ZERO omitted when a truncated walk's total trails the returned count", () => {
+    // Arrange.
+    const pending = call({ pattern: "*.go" });
+    const result = { numFiles: 100, filenames: [], truncated: true, totalMatches: 42, countIsComplete: true };
+
+    // Act.
+    const success = successOf(globConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    const partial = success.extent.value as conversationv1.AgentGlobPartial;
+    expect((partial.omitted.value as conversationv1.AgentGlobOmittedExact).filesOmitted).toBe(0);
+  });
+
+  it("lists NO paths when the walk stated a count but no filenames array", () => {
+    // Arrange.
+    const pending = call({ pattern: "*.go" });
+
+    // Act.
+    const success = successOf(globConverter.settle(pending, outcome({ numFiles: 0 })));
+
+    // Assert.
+    expect(success.paths).toEqual([]);
+  });
+
+  it("produces NO frame when a walk settled with no typed output at all", () => {
+    // Arrange, Act.
+    const item = globConverter.settle(call({ pattern: "*.go" }), outcome("a.go\nb.go"));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when a settled walk has no pattern to restate", () => {
+    // Arrange, Act.
+    const item = globConverter.settle(call({}), outcome({ numFiles: 0, filenames: [] }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the walk could not run", () => {
     // Arrange, Act.
     const item = globConverter.settle(call({ pattern: "[" }), outcome("bad pattern", true));

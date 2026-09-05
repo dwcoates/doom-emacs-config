@@ -456,3 +456,30 @@ describe("a uuid-less context-budget warning", () => {
     expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:context-budget-warning");
   });
 });
+
+/**
+ * THE WRITE ARM OF THE DIAGNOSTICS REPORT IS UNREACHABLE.
+ *
+ * `convertDiagnostics` takes an `isEdit` flag whose comment says "which arm the
+ * report rides is the unit's own kind", but the ONE call site
+ * (src/convert/attachments.ts:365) passes `true` unconditionally, and
+ * `context.lastWriteOrEditUnit` is a bare `AgentActivityId` that states no kind.
+ * So an IDE diagnostics report following a `Write` lands on
+ * `AgentEdit.diagnostics` rather than on `AgentWrite.diagnostics`, and
+ * src/convert/attachments.ts:134-139 can never execute.
+ *
+ * UNFIXED PRODUCTION DEFECT — src/convert/attachments.ts:365. Reproduced by the
+ * skipped test below, which would need the fold to remember the KIND of the
+ * last change alongside its unit id.
+ */
+describe.skip("IDE diagnostics after a Write", () => {
+  it("rides the write arm rather than the edit arm", () => {
+    const entries = convertAttachment(
+      attachment("diagnostics"),
+      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      UNIT,
+    );
+
+    expect(activityOf(entries[0])?.item.case).toBe("write");
+  });
+});

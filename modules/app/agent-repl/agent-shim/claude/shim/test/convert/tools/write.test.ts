@@ -159,6 +159,28 @@ describe("writeConverter.settle", () => {
     expect(item).toBeUndefined();
   });
 
+  it("produces NO frame when a write settled with no typed output at all", () => {
+    // Arrange.
+    const pending = call({ file_path: "/tmp/a.txt", content: "x" });
+
+    // Act.
+    const item = writeConverter.settle(pending, outcome("File created successfully"));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame when neither the result nor the call names a path", () => {
+    // Arrange.
+    const pending = call({ content: "x" });
+
+    // Act.
+    const item = writeConverter.settle(pending, outcome({ type: "create", content: "x" }));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
   it("carries the failure arm when the vendor marked the result an error", () => {
     // Arrange, Act.
     const item = writeConverter.settle(call({ file_path: "/tmp/a.txt" }), outcome("nope", true));
