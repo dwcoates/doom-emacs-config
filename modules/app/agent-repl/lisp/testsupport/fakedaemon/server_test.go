@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 	"connectrpc.com/connect"
 )
 
@@ -330,5 +331,152 @@ func TestRequestRefusedForAnUnsetNestedField(t *testing.T) {
 	// Assert: validation is recursive, so a hole one level down is still loud.
 	if status != http.StatusBadRequest || !strings.Contains(body, "reason") {
 		t.Fatalf("schedule without a reason = %d %s, want 400 naming reason", status, body)
+	}
+}
+
+// Every stream in the schema that belongs to the WEBAPP is refused, not
+// stubbed: this fake mocks Emacs's neighbor and never composes another
+// system, so a wrong caller has to fail loudly rather than hang on silence.
+func TestEveryWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(context.Context, agentreplv1connectClient) (interface{ Err() error }, func() error)
+	}{
+		{
+			name: "WatchFeed",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{}))
+				if err != nil {
+					t.Fatalf("open WatchFeed: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
+			name: "WatchTopbar",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.WatchTopbar(ctx, connect.NewRequest(&agentreplv1.WatchTopbarRequest{}))
+				if err != nil {
+					t.Fatalf("open WatchTopbar: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
+			name: "WatchDaemonHolds",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.WatchDaemonHolds(ctx, connect.NewRequest(&agentreplv1.WatchDaemonHoldsRequest{}))
+				if err != nil {
+					t.Fatalf("open WatchDaemonHolds: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
+			name: "WatchWebWorkspace",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.WatchWebWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{}))
+				if err != nil {
+					t.Fatalf("open WatchWebWorkspace: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+		{
+			name: "WatchLoginTerminal",
+			open: func(ctx context.Context, c agentreplv1connectClient) (interface{ Err() error }, func() error) {
+				s, err := c.WatchLoginTerminal(ctx, connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{}))
+				if err != nil {
+					t.Fatalf("open WatchLoginTerminal: %v", err)
+				}
+				s.Receive()
+				return s, s.Close
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			_, baseURL := newTestServer(t)
+			client := newTestClient(t, baseURL)
+
+			// Act.
+			stream, closeStream := tc.open(context.Background(), client)
+			defer closeStream()
+
+			// Assert: the refusal is typed, and the attempt is still recorded
+			// so a suite can see WHICH wrong stream a client reached for.
+			if connect.CodeOf(stream.Err()) != connect.CodeUnimplemented {
+				t.Fatalf("%s error = %v, want unimplemented", tc.name, stream.Err())
+			}
+			_, listing := controlGet(t, baseURL, "/_fake/calls")
+			calls := decodeCalls(t, listing)
+			if len(calls) != 1 || calls[0].Method != tc.name {
+				t.Fatalf("recorded calls = %v, want one %s", calls, tc.name)
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceMintsRefFromTheRepositoryDir(t *testing.T) {
+	// Arrange: the daemon names and creates everything, so the answer's ref
+	// is minted from the REPOSITORY dir the caller asked to create in.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	resp, err := client.CreateWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+			Repository: &workspacev1.RepositoryRef{Dir: "/tmp/repo/./one"},
+			Form: &agentreplv1.CreateWorkspaceRequest_Standard{
+				Standard: &agentreplv1.CreateWorkspaceStandard{},
+			},
+		}))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Assert.
+	got := resp.Msg.GetSuccess().GetWorkspace()
+	if got.GetDir() != "/tmp/repo/one" {
+		t.Fatalf("dir = %q, want the cleaned repository dir", got.GetDir())
+	}
+	if got.GetId() == "" {
+		t.Fatalf("id is empty; the daemon mints the created workspace's identity")
+	}
+}
+
+// A CREATED workspace is a different workspace from the one REGISTERED at the
+// same dir, so the two must never mint the same id.
+func TestCreateWorkspaceIdIsDistinctFromTheRegisteredIdForOneDir(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+	client := newTestClient(t, baseURL)
+
+	// Act.
+	created, err := client.CreateWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+			Repository: &workspacev1.RepositoryRef{Dir: "/tmp/repo/one"},
+			Form: &agentreplv1.CreateWorkspaceRequest_Standard{
+				Standard: &agentreplv1.CreateWorkspaceStandard{},
+			},
+		}))
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	registered, err := client.RegisterWorkspace(context.Background(),
+		connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: "/tmp/repo/one"}))
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+
+	// Assert.
+	if created.Msg.GetSuccess().GetWorkspace().GetId() == registered.Msg.GetSuccess().GetWorkspace().GetId() {
+		t.Fatalf("create and register minted one id for one dir: %q",
+			created.Msg.GetSuccess().GetWorkspace().GetId())
 	}
 }

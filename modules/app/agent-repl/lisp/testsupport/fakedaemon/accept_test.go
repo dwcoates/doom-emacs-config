@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -185,5 +186,90 @@ func TestStreamRequestRefusalIsNotAccepted(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte("workspace")) && resp.StatusCode == http.StatusOK {
 		t.Fatalf("refusal = %d %s, want the invalid-argument answer", resp.StatusCode, body)
+	}
+}
+
+// Once a stream is ACCEPTED, its status is settled: a later WriteHeader
+// cannot retract it, because the client already read the 200 as acceptance.
+func TestASecondWriteHeaderCannotRetractAnAcceptedStatus(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+	writer.accept("application/connect+json")
+
+	// Act: connect-go's own lazy header write, disagreeing with acceptance.
+	writer.WriteHeader(http.StatusInternalServerError)
+
+	// Assert.
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want the accepted %d to stand", recorder.Code, http.StatusOK)
+	}
+}
+
+// The ordinary case connect-go always hits: a second WriteHeader agreeing
+// with the accepted status is swallowed without a word.
+func TestASecondWriteHeaderAgreeingWithAcceptanceIsSwallowed(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+	writer.accept("application/connect+json")
+
+	// Act.
+	writer.WriteHeader(http.StatusOK)
+
+	// Assert.
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "application/connect+json" {
+		t.Fatalf("content type = %q, want the accepted streaming type", got)
+	}
+}
+
+// Acceptance happens ONCE: a second accept must not re-send headers, or a
+// stream handler that accepts defensively would corrupt its own response.
+func TestAcceptIsIdempotent(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+	writer.accept("application/connect+json")
+
+	// Act.
+	writer.accept("text/plain")
+
+	// Assert.
+	if got := recorder.Header().Get("Content-Type"); got != "application/connect+json" {
+		t.Fatalf("content type = %q, want the first acceptance's type", got)
+	}
+}
+
+// Unwrap is what lets connect-go's http.NewResponseController set write
+// deadlines through this wrapper; without it every streaming deadline would
+// silently be a no-op.
+func TestUnwrapReachesTheRealResponseWriter(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+
+	// Act.
+	got := writer.Unwrap()
+
+	// Assert.
+	if got != http.ResponseWriter(recorder) {
+		t.Fatalf("Unwrap returned %T, want the wrapped recorder", got)
+	}
+}
+
+func TestAcceptWriterFromAnswersNothingForAnUnwrappedContext(t *testing.T) {
+	// Arrange: a context that never passed through withAcceptWriter, which is
+	// what a unary handler's context is.
+	ctx := context.Background()
+
+	// Act.
+	got := acceptWriterFrom(ctx)
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("acceptWriterFrom = %v, want nil outside a wrapped request", got)
 	}
 }
