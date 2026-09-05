@@ -178,3 +178,20 @@ describe("the quiet window", () => {
     expect(response.result.case).toBe("success");
   });
 });
+
+describe("the result oneof lookup", () => {
+  it("logs a schema that has NO result oneof as answered, rather than refusing it", async () => {
+    // ARRANGE: WorkspaceRef carries no `result` oneof, as the login duplex
+    // stream's messages do not, so there is no outcome arm to name.
+    const lines = captureLog();
+    const ctx: UnaryContext = {
+      client: createAgentReplClient(createRouterTransport(() => {})),
+      isQuiesced: () => false,
+    };
+    // ACT
+    await callUnary(ctx, "Echo", async () => WORKSPACE, WorkspaceRefSchema);
+    // ASSERT
+    const answered = lines.find(([, line]) => line.includes("rpc.unary-answered"));
+    expect(answered?.[1]).toContain('"outcome":"answered"');
+  });
+});
