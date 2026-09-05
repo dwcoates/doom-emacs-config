@@ -43,19 +43,32 @@ export default tseslint.config(
       },
     },
     rules: {
-      // THE CONVERSION RULE, MECHANIZED. Every SDK message kind and every
-      // protobuf oneof in here is dispatched by a `switch`, and the failure
-      // mode that matters is an arm that exists on the wire and nowhere in the
-      // switch. `considerDefaultExhaustiveForUnions` stays at its default of
-      // false, so a `default:` clause does NOT excuse an unnamed arm — that is
-      // the whole point: when the SDK or the proto grows a kind, the switch
-      // that has to convert it fails this lint instead of quietly routing the
-      // new kind into a catch-all that answers "unknown". `case undefined:` is
-      // named alongside the rest, because an unset oneof is a real wire state
-      // and gets a real arm.
+      // THE CONVERSION RULE, MECHANIZED: an arm nobody converted must not
+      // fall through in silence. Which of this rule's two modes delivers that
+      // was MEASURED here, not assumed.
+      //
+      // At `considerDefaultExhaustiveForUnions: false` — a `default:` does not
+      // excuse an unnamed arm — the rule reports 28 sites in this package and
+      // not one is a defect: every partial switch already ends in a default
+      // that throws `unsetOneof`, raises a `PersistenceError`, or logs at warn
+      // and records the message as residue. Worse, the two largest are
+      // switches over the SDK's own `subtype` union, which grows on the
+      // vendor's schedule: pinning twenty-four case labels there would turn
+      // every SDK bump into a lint failure in a file that already handles the
+      // unknown kind correctly.
+      //
+      // At `true` — the setting used here — a switch that ends in a default
+      // has made a decision, and a switch that does NOT and misses an arm is
+      // an error. That is the silent fall-through: the conversion that returns
+      // `undefined` because nobody wrote its case and nobody wrote a default.
+      // Zero sites violate it today; the rule is the ratchet that keeps it so.
+      //
+      // Where a switch really is total and must stay total, the stronger tool
+      // is a `const _exhaustive: never = arm` in its default — a compile
+      // error, not a lint one.
       "@typescript-eslint/switch-exhaustiveness-check": [
         "error",
-        { requireDefaultForNonUnion: true },
+        { requireDefaultForNonUnion: true, considerDefaultExhaustiveForUnions: true },
       ],
 
       // `a || b` substitutes b for "" and 0. On this side of the wire that
