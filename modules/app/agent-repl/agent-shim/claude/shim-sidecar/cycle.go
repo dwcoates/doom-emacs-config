@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -1134,10 +1135,47 @@ func nextBackoff(d, min, max time.Duration) time.Duration {
 // unavailable. The kernel interface that answers it is per-platform (see
 // boottime_darwin.go and boottime_linux.go); the "unavailable is 0" contract
 // the boot sweep reads is stated once, here.
+//
+// DERIVED ONCE, AND ONCE IS THE POINT. The machine's boot instant is a FIXED
+// FACT that cannot change while this process runs, and the sweep compares it
+// against file mtimes, which are fixed too — so the comparison is only
+// well-defined if the boot side is one value.
+//
+// Re-deriving it per sweep made it a MOVING quantity on linux, where there is
+// no latched kern.boottime and the instant is computed as `time.Now() -
+// sysinfo.Uptime`: `Uptime` is whole SECONDS, so two derivations a moment apart
+// legitimately differ by up to a second, and any wall-clock step between them
+// moves it by the whole step. A run's `swept_up` eligibility
+// (internal/stale/stale.go) is `mtime < bootMs`, so a file sitting near the
+// boundary flipped between "still running" and LOST across passes with nothing
+// in the world having changed — and a `lost.swept_up` terminal is written over
+// work that may still be producing. Darwin's kern.boottime is already latched
+// at boot, so the latch costs nothing there and fixes linux.
+//
+// ONLY A SUCCESSFUL DERIVATION IS LATCHED. Latching a failure would disable the
+// boot sweep for the life of the process off one bad syscall; a failure is
+// returned as the same 0 as before, and the next call tries again — which is
+// also what keeps BootSweep's "boot time unavailable" warning reachable.
+var bootTime struct {
+	mu sync.Mutex
+	ms int64
+}
+
+// derivePlatformBootTime is the kernel interface bootTimeMillis latches. It is
+// a variable so a test can substitute a DRIFTING derivation and prove the latch
+// holds one answer; production never reassigns it.
+var derivePlatformBootTime = platformBootTimeMillis
+
 func bootTimeMillis() int64 {
-	ms, err := platformBootTimeMillis()
+	bootTime.mu.Lock()
+	defer bootTime.mu.Unlock()
+	if bootTime.ms > 0 {
+		return bootTime.ms
+	}
+	ms, err := derivePlatformBootTime()
 	if err != nil || ms < 0 {
 		return 0
 	}
+	bootTime.ms = ms
 	return ms
 }
