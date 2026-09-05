@@ -478,3 +478,79 @@ describe("subagentConverter.settle", () => {
     expect(subagentConverter.carriesProgress).toBe(false);
   });
 });
+
+describe("subagentPrompt isolation the contract has no arm for", () => {
+  it("carries none for an isolation this contract does not model", () => {
+    // Arrange, Act.
+    const prompt = subagentPrompt(call({ prompt: "p", isolation: "moonbase" }));
+
+    // Assert.
+    expect(prompt.isolation.case).toBe("none");
+  });
+});
+
+describe("subagentConverter.settle for facts the vendor left unstated", () => {
+  /** The corpus completion, with the named keys replaced. */
+  function completionWith(patch: Record<string, unknown>): Record<string, unknown> {
+    return { ...toolUseResult("agent"), ...patch };
+  }
+
+  it("still carries the report when the completion named no agent id", () => {
+    // Arrange.
+    const structured = completionWith({});
+    delete structured["agentId"];
+
+    // Act.
+    const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+
+    // Assert.
+    expect(success.report?.prose?.markdown).toBe(
+      (structured["content"] as { text: string }[])[0]!.text,
+    );
+  });
+
+  const USAGE_DEFAULTS: [string, (usage: conversationv1.TokenUsage) => bigint][] = [
+    ["cache reads", (usage) => usage.inputHits!.read],
+    ["cache writes", (usage) => usage.inputMisses!.written],
+    ["uncached input tokens", (usage) => usage.inputMisses!.unwritten],
+    ["output tokens", (usage) => usage.outputTokens],
+    ["thinking tokens", (usage) => usage.outputThinkingTokens],
+  ];
+
+  for (const [name, read] of USAGE_DEFAULTS) {
+    it(`counts zero ${name} when the reported usage stated none`, () => {
+      // Arrange.
+      const structured = completionWith({ usage: {} });
+
+      // Act.
+      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+
+      // Assert.
+      expect(read(success.totals!.usage.value as conversationv1.TokenUsage)).toBe(0n);
+    });
+  }
+
+  const TOOL_STAT_DEFAULTS: [string, (stats: conversationv1.AgentSubagentToolStats) => number][] = [
+    ["reads", (stats) => stats.readCount],
+    ["searches", (stats) => stats.searchCount],
+    ["bash runs", (stats) => stats.bashCount],
+    ["file edits", (stats) => stats.editFileCount],
+    ["lines added", (stats) => stats.linesAdded],
+    ["lines removed", (stats) => stats.linesRemoved],
+    ["other tool calls", (stats) => stats.otherToolCount],
+    ["frames", (stats) => stats.frameCount],
+  ];
+
+  for (const [name, read] of TOOL_STAT_DEFAULTS) {
+    it(`counts zero ${name} when the reported tool stats stated none`, () => {
+      // Arrange.
+      const structured = completionWith({ toolStats: {} });
+
+      // Act.
+      const success = successOf(subagentConverter.settle(call({ prompt: "p" }), outcome(structured))!);
+
+      // Assert.
+      expect(read(success.totals!.toolStats!)).toBe(0);
+    });
+  }
+});

@@ -713,3 +713,399 @@ describe("whose book an ask lands on", () => {
     expect(written[0]?.agentId.value).toBe(AGENT.value);
   });
 });
+
+/**
+ * The refusal arms and the unlanded oneof paths.
+ *
+ * Every case below is a REFUSAL or a shape the happy-path scenarios never
+ * produce: a vocabulary word the vendor added that this build has no spelling
+ * for, an echo that is not the offer, a decision with no arm. Each one asserts
+ * the observable outcome — the thrown message, the returned outcome word, or
+ * the exact field written — rather than merely reaching the line.
+ */
+describe("the standing token, on words this build does not know", () => {
+  it("marks a destination this build has no spelling for UNSPECIFIED rather than guessing one", () => {
+    // Arrange: a destination word from a vendor newer than this build.
+    const suggestion = {
+      type: "addRules",
+      destination: "enterpriseSettings",
+      behavior: "allow",
+      rules: [{ toolName: "Bash" }],
+    } as unknown as PermissionUpdateLike;
+
+    // Act.
+    const standing = toStanding([suggestion]);
+
+    // Assert.
+    expect(standing.changes[0]?.destination).toBe(conversationv1.AgentPermissionDestination.UNSPECIFIED);
+  });
+
+  it("marks a behavior this build has no spelling for UNSPECIFIED rather than guessing one", () => {
+    // Arrange.
+    const suggestion = {
+      type: "addRules",
+      destination: "session",
+      behavior: "confirm",
+      rules: [{ toolName: "Bash" }],
+    } as unknown as PermissionUpdateLike;
+
+    // Act.
+    const change = toStanding([suggestion]).changes[0]?.change;
+
+    // Assert.
+    expect(change?.case === "addRules" ? change.value.behavior : undefined).toBe(
+      conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+    );
+  });
+
+  it("round-trips replaced rules", () => {
+    const update: PermissionUpdateLike[] = [
+      { type: "replaceRules", destination: "projectSettings", behavior: "deny", rules: [{ toolName: "Write" }] },
+    ];
+
+    expect(fromStanding(toStanding(update))).toEqual(update);
+  });
+
+  it("round-trips removed rules", () => {
+    const update: PermissionUpdateLike[] = [
+      { type: "removeRules", destination: "cliArg", behavior: "ask", rules: [{ toolName: "Read" }] },
+    ];
+
+    expect(fromStanding(toStanding(update))).toEqual(update);
+  });
+
+  it("round-trips removed directories", () => {
+    const update: PermissionUpdateLike[] = [
+      { type: "removeDirectories", destination: "userSettings", directories: ["/tmp/y"] },
+    ];
+
+    expect(fromStanding(toStanding(update))).toEqual(update);
+  });
+});
+
+describe("reading an echoed standing token back", () => {
+  it("refuses a destination with no vendor spelling rather than picking one", () => {
+    // Arrange: UNSPECIFIED is exactly what toStanding writes for an unknown word.
+    const standing = create(conversationv1.AgentPermissionStandingSchema, {
+      changes: [
+        create(conversationv1.AgentPermissionChangeSchema, {
+          destination: conversationv1.AgentPermissionDestination.UNSPECIFIED,
+          change: {
+            case: "addRules",
+            value: create(conversationv1.AgentPermissionRulesAddedSchema, {}),
+          },
+        }),
+      ],
+    });
+
+    // Act + Assert.
+    expect(() => fromStanding(standing)).toThrow(/has no vendor spelling/);
+  });
+
+  it("falls back to ask for a behavior with no vendor spelling, the most restrictive of the three", () => {
+    const standing = create(conversationv1.AgentPermissionStandingSchema, {
+      changes: [
+        create(conversationv1.AgentPermissionChangeSchema, {
+          destination: conversationv1.AgentPermissionDestination.SESSION,
+          change: {
+            case: "addRules",
+            value: create(conversationv1.AgentPermissionRulesAddedSchema, {
+              behavior: conversationv1.AgentPermissionBehavior.UNSPECIFIED,
+            }),
+          },
+        }),
+      ],
+    });
+
+    expect(fromStanding(standing)[0]?.type === "addRules" ? fromStanding(standing)[0] : undefined).toMatchObject({
+      behavior: "ask",
+    });
+  });
+
+  it("refuses a set_mode change that carries no mode", () => {
+    const standing = create(conversationv1.AgentPermissionStandingSchema, {
+      changes: [
+        create(conversationv1.AgentPermissionChangeSchema, {
+          destination: conversationv1.AgentPermissionDestination.SESSION,
+          change: { case: "setMode", value: create(conversationv1.AgentPermissionModeSetSchema, {}) },
+        }),
+      ],
+    });
+
+    expect(() => fromStanding(standing)).toThrow(/carries no mode/);
+  });
+
+  it("refuses a change with no arm at all", () => {
+    const standing = create(conversationv1.AgentPermissionStandingSchema, {
+      changes: [
+        create(conversationv1.AgentPermissionChangeSchema, {
+          destination: conversationv1.AgentPermissionDestination.SESSION,
+        }),
+      ],
+    });
+
+    expect(() => fromStanding(standing)).toThrow(/carries no arm/);
+  });
+});
+
+describe("the question batch, on inputs that do not have the shape", () => {
+  it("refuses a question with no header rather than asking a question nobody asked", () => {
+    expect(() => toQuestionBatch({ questions: [{ question: "why?" }] })).toThrow(
+      /no question text or header/,
+    );
+  });
+
+  it("refuses an option with no description", () => {
+    const input = {
+      questions: [{ question: "why?", header: "Why", options: [{ label: "because" }] }],
+    };
+
+    expect(() => toQuestionBatch(input)).toThrow(/no label or description/);
+  });
+
+  it("carries an option's preview when the vendor stated one", () => {
+    const input = {
+      questions: [
+        {
+          question: "why?",
+          header: "Why",
+          options: [{ label: "because", description: "d", preview: "a diff" }],
+        },
+      ],
+    };
+
+    const choices = toQuestionBatch(input).questions[0]?.choices;
+
+    expect(choices?.case === "singleSelect" ? choices.value.options[0]?.preview : undefined).toBe("a diff");
+  });
+
+  it("treats a question with no options array as a question with no options", () => {
+    const choices = toQuestionBatch({ questions: [{ question: "why?", header: "Why" }] }).questions[0]?.choices;
+
+    expect(choices?.case === "singleSelect" ? choices.value.options.length : undefined).toBe(0);
+  });
+});
+
+describe("serializing an answer that names nothing", () => {
+  it("refuses an answer whose question carries no text", () => {
+    const empty = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [create(conversationv1.AgentQuestionSelectionSchema, {})],
+    });
+
+    expect(() => toVendorAnswers(empty)).toThrow(/names no question/);
+  });
+
+  it("serializes a chosen option that carries no label as the empty string", () => {
+    const unlabelled = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [
+        create(conversationv1.AgentQuestionSelectionSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "q" }),
+          chosen: [create(conversationv1.AgentQuestionChoiceSchema, {})],
+        }),
+      ],
+    });
+
+    expect(toVendorAnswers(unlabelled)).toEqual({ q: "" });
+  });
+});
+
+describe("validating an echo, on the shapes the happy path never produces", () => {
+  it("accepts two labels on a MULTI-select, which is what multi-select means", () => {
+    const batch = toQuestionBatch({ questions: [{ ...QUESTION_INPUT.questions[0], multiSelect: true }] });
+
+    expect(validateAnswers(batch, answers(["Pepperoni", "Margherita"]))).toBeUndefined();
+  });
+
+  it("refuses an answer whose question carries no text, reporting the empty text", () => {
+    const batch = toQuestionBatch(QUESTION_INPUT);
+    const nameless = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [create(conversationv1.AgentQuestionSelectionSchema, {})],
+    });
+
+    expect(validateAnswers(batch, nameless)).toBe('no question with the text "" is open');
+  });
+
+  it("refuses every label against a question whose choices arm is unset, because it offers none", () => {
+    // Arrange: a batch built by hand — the vendor's own inputs always set an arm.
+    const batch = create(conversationv1.AgentQuestionBatchSchema, {
+      questions: [
+        create(conversationv1.AgentQuestionAskedSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "q" }),
+          header: "Q",
+        }),
+      ],
+    });
+    const answer = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [
+        create(conversationv1.AgentQuestionSelectionSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "q" }),
+          chosen: [
+            create(conversationv1.AgentQuestionChoiceSchema, {
+              label: create(conversationv1.AgentQuestionOptionLabelSchema, { label: "anything" }),
+            }),
+          ],
+        }),
+      ],
+    });
+
+    expect(validateAnswers(batch, answer)).toBe('"anything" is not an option of "q"');
+  });
+
+  it("treats a chosen choice with no label as the empty label, which no option offers", () => {
+    const batch = toQuestionBatch(QUESTION_INPUT);
+    const answer = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [
+        create(conversationv1.AgentQuestionSelectionSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, {
+            text: "What type of pizza do you want?",
+          }),
+          chosen: [create(conversationv1.AgentQuestionChoiceSchema, {})],
+        }),
+      ],
+    });
+
+    expect(validateAnswers(batch, answer)).toBe(
+      '"" is not an option of "What type of pizza do you want?"',
+    );
+  });
+
+  it("treats an OPTION with no label as offering the empty label, so an empty choice matches it", () => {
+    const batch = create(conversationv1.AgentQuestionBatchSchema, {
+      questions: [
+        create(conversationv1.AgentQuestionAskedSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "q" }),
+          header: "Q",
+          choices: {
+            case: "singleSelect",
+            value: create(conversationv1.AgentQuestionSingleSelectSchema, {
+              options: [create(conversationv1.AgentQuestionOptionSchema, {})],
+            }),
+          },
+        }),
+      ],
+    });
+    const answer = create(conversationv1.AgentQuestionAnswersSchema, {
+      answers: [
+        create(conversationv1.AgentQuestionSelectionSchema, {
+          question: create(conversationv1.AgentQuestionTextSchema, { text: "q" }),
+          chosen: [create(conversationv1.AgentQuestionChoiceSchema, {})],
+        }),
+      ],
+    });
+
+    expect(validateAnswers(batch, answer)).toBeUndefined();
+  });
+});
+
+describe("the bound on the denial memory", () => {
+  it("forgets the oldest denial once the bound is passed, so it never becomes a second history", () => {
+    // Arrange: the bound is 256; note one more than that.
+    const { gate } = gateWith();
+
+    // Act.
+    for (let index = 0; index <= 256; index += 1) gate.noteVendorDenial(`toolu_${index}`);
+
+    // Assert.
+    expect([gate.deniedCall("toolu_0"), gate.deniedCall("toolu_1"), gate.deniedCall("toolu_256")]).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  });
+});
+
+describe("a permission decision the gate cannot apply", () => {
+  it("reports no_open_ask for a decision that names no ask at all", () => {
+    const { gate } = gateWith();
+
+    expect(
+      gate.decidePermission(create(conversationv1.AgentPermissionDecisionSchema, {})),
+    ).toBe("no_open_ask");
+  });
+
+  it("REFUSES a standing allow that carries no standing", async () => {
+    // Arrange.
+    const { gate } = gateWith();
+    void gate.canUseTool(
+      "Bash",
+      {},
+      callOptions({ suggestions: [{ type: "addRules", destination: "session", behavior: "allow", rules: [{ toolName: "Bash" }] }] }),
+    );
+    await Promise.resolve();
+
+    // Act.
+    const outcome = gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: {
+          case: "allowed",
+          value: create(conversationv1.AgentPermissionAllowedSchema, {
+            scope: {
+              case: "standing",
+              value: create(conversationv1.AgentPermissionAllowedStandingSchema, {}),
+            },
+          }),
+        },
+      }),
+    );
+
+    // Assert: the ask is still open, so the vendor is still blocked on a real answer.
+    expect([outcome, gate.pendingCount]).toEqual(["answer_mismatch", 1]);
+  });
+
+  it("REFUSES a decision with no arm rather than inventing one", async () => {
+    const { gate } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    const outcome = gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+      }),
+    );
+
+    expect([outcome, gate.pendingCount]).toEqual(["answer_mismatch", 1]);
+  });
+});
+
+describe("the trigger facts, one arm at a time", () => {
+  async function triggerOf(overrides: Record<string, unknown>): Promise<conversationv1.AgentPermissionTrigger | undefined> {
+    const { gate, written } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions(overrides));
+    await Promise.resolve();
+    const item = written[0]?.item;
+    const update =
+      item?.kind === "frame" && item.frame.result.case === "update" ? item.frame.result.value.update : undefined;
+    return update?.case === "permission" && update.value.result.case === "start"
+      ? update.value.result.value.trigger
+      : undefined;
+  }
+
+  it("states the matched ask rule and its content when the vendor named one", async () => {
+    const trigger = await triggerOf({
+      matchedAskRule: { source: "projectSettings", toolName: "Bash", ruleContent: "git push" },
+    });
+
+    expect([trigger?.askRule?.source, trigger?.askRule?.toolName, trigger?.askRule?.ruleContent]).toEqual([
+      "projectSettings",
+      "Bash",
+      "git push",
+    ]);
+  });
+
+  it("leaves the rule content unset when the matched rule named none", async () => {
+    const trigger = await triggerOf({ matchedAskRule: { source: "cliArg", toolName: "Bash" } });
+
+    expect(trigger?.askRule?.ruleContent).toBeUndefined();
+  });
+
+  it("states the vendor's decision reason as the trigger note", async () => {
+    const trigger = await triggerOf({ decisionReason: "the classifier could not decide" });
+
+    expect([trigger?.note?.text, trigger?.blockedPath, trigger?.askRule]).toEqual([
+      "the classifier could not decide",
+      undefined,
+      undefined,
+    ]);
+  });
+});

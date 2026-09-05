@@ -596,3 +596,95 @@ describe("watchStream: the link's health, published page-wide", () => {
     expect(noted).not.toHaveBeenCalled();
   });
 });
+
+describe("watchStream: cancelling mid-run", () => {
+  /**
+   * A stream whose producer is a local generator rather than the transport, so
+   * a frame is still waiting when the handle is cancelled. The signal is
+   * deliberately ignored: the loop's own `cancelled` check is what this
+   * exercises, not the abort.
+   */
+  function openLocal(
+    ctx: AppContext,
+    frames: readonly WatchFooterResponse[],
+    onPush: (r: WatchFooterResponse) => void,
+    onEnd?: (e: StreamEnd) => void,
+  ) {
+    return watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: async function* () {
+        for (const frame of frames) yield await Promise.resolve(frame);
+      },
+      onPush,
+      onEnd,
+      backoff: BACKOFF,
+    });
+  }
+
+  it("stops drawing the frames still queued behind the cancel", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    const seen: WatchFooterResponse[] = [];
+    let handle: { cancel(): void } | undefined;
+    // ACT
+    handle = openLocal(contextFor(client, sink), [push(), push()], (r) => {
+      seen.push(r);
+      handle?.cancel();
+    });
+    await settle();
+    // ASSERT
+    expect(seen).toHaveLength(1);
+  });
+
+  it("reports the run as CANCELLED, not as a producer that ended on its own", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    const ends: StreamEnd[] = [];
+    let handle: { cancel(): void } | undefined;
+    // ACT
+    handle = openLocal(
+      contextFor(client, sink),
+      [push(), push()],
+      () => handle?.cancel(),
+      (end) => ends.push(end),
+    );
+    await settle();
+    // ASSERT
+    expect(ends.map((e) => e.kind)).toEqual(["cancelled"]);
+  });
+
+  it("files no unreachable card for a run its own cancel ended", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    let handle: { cancel(): void } | undefined;
+    // ACT
+    handle = openLocal(contextFor(client, sink), [push(), push()], () => handle?.cancel());
+    await settle();
+    // ASSERT
+    expect(sink.reported).toEqual([]);
+  });
+});
+
+describe("watchStream: quiescing a stream that was already cancelled", () => {
+  it("says nothing about the move, the stream having already stopped", async () => {
+    // ARRANGE
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const ctx = contextFor(client, sink);
+    const handle = open(ctx, () => {});
+    await settle();
+    handle.cancel();
+    lines.length = 0;
+    // ACT
+    ctx.quiesce();
+    await settle();
+    // ASSERT
+    expect(lines.some(([, line]) => line.includes("rpc.stream-quiesced"))).toBe(false);
+  });
+});

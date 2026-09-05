@@ -228,3 +228,231 @@ describe("anything else", () => {
     expect(residueOf(entries[0])?.unservedItem.case).toBe("unparsed");
   });
 });
+
+describe("the LSP severity vocabulary", () => {
+  const CASES: readonly (readonly [string, conversationv1.AgentDiagnosticSeverity])[] = [
+    ["warning", conversationv1.AgentDiagnosticSeverity.WARNING],
+    ["information", conversationv1.AgentDiagnosticSeverity.INFORMATION],
+    ["info", conversationv1.AgentDiagnosticSeverity.INFORMATION],
+    ["hint", conversationv1.AgentDiagnosticSeverity.HINT],
+  ];
+
+  for (const [literal, expected] of CASES) {
+    it(`maps the vendor's \`${literal}\` onto its own arm`, () => {
+      expect(diagnosticSeverity(literal)).toBe(expected);
+    });
+  }
+});
+
+describe("reading one diagnostics report", () => {
+  /** A diagnostics attachment carrying exactly the files a test wants read. */
+  function report(files: unknown, uuid?: string): AttachmentRecord {
+    return {
+      type: "attachment",
+      ...(uuid === undefined ? {} : { uuid }),
+      attachment: { type: "diagnostics", files },
+    };
+  }
+
+  /** The report the converter built, off the entry it produced. */
+  function reportOf(record: AttachmentRecord): conversationv1.AgentDiagnosticsReport {
+    const entries = convertAttachment(record, foldContext({ lastWriteOrEditUnit: LAST_CHANGE }), UNIT);
+    const edit = activityOf(entries[0])?.item.value as conversationv1.AgentEdit;
+    return edit.result.value as conversationv1.AgentDiagnosticsReport;
+  }
+
+  it("carries no files at all when the record's `files` is not a list", () => {
+    expect(reportOf(report("not-a-list")).files).toHaveLength(0);
+  });
+
+  it("drops a file entry that names no uri, rather than reporting a pathless file", () => {
+    expect(reportOf(report([{ diagnostics: [] }])).files).toHaveLength(0);
+  });
+
+  it("drops a file entry whose uri is the empty string", () => {
+    expect(reportOf(report([{ uri: "", diagnostics: [] }])).files).toHaveLength(0);
+  });
+
+  it("reads a file whose `diagnostics` is not a list as having no findings", () => {
+    const files = reportOf(report([{ uri: "/a.ts", diagnostics: "none" }])).files;
+
+    expect(files[0]?.path).toBe("/a.ts");
+    expect(files[0]?.diagnostics).toHaveLength(0);
+  });
+
+  it("reads a non-numeric line as zero rather than inventing a position", () => {
+    const files = reportOf(
+      report([{ uri: "/a.ts", diagnostics: [{ range: { start: { line: "9" }, end: {} } }] }]),
+    ).files;
+
+    expect(files[0]?.diagnostics[0]?.startLine).toBe(0);
+    expect(files[0]?.diagnostics[0]?.endLine).toBe(0);
+  });
+
+  it("truncates a fractional line rather than carrying it", () => {
+    const files = reportOf(
+      report([{ uri: "/a.ts", diagnostics: [{ range: { start: { line: 3.7 }, end: { line: 4.2 } } }] }]),
+    ).files;
+
+    expect(files[0]?.diagnostics[0]?.startLine).toBe(3);
+    expect(files[0]?.diagnostics[0]?.endLine).toBe(4);
+  });
+
+  it("reads a finding with no message as an empty message, never as undefined", () => {
+    const files = reportOf(report([{ uri: "/a.ts", diagnostics: [{ severity: "error" }] }])).files;
+
+    expect(files[0]?.diagnostics[0]?.message).toBe("");
+  });
+
+  it("leaves a finding's source and code unset when the vendor stated neither as a string", () => {
+    const files = reportOf(
+      report([{ uri: "/a.ts", diagnostics: [{ message: "m", source: 7, code: 42 }] }]),
+    ).files;
+
+    expect(files[0]?.diagnostics[0]?.source).toBeUndefined();
+    expect(files[0]?.diagnostics[0]?.code).toBeUndefined();
+  });
+
+  it("stands a uuid-less diagnostics record on the unit it attaches to", () => {
+    const entries = convertAttachment(
+      report([]),
+      foldContext({ lastWriteOrEditUnit: LAST_CHANGE }),
+      UNIT,
+    );
+
+    expect(entries[0]?.source.vendorUuid).toBe("diagnostics:toolu_edit");
+  });
+});
+
+describe("reading one injected-context record", () => {
+  /** A context-injection attachment, exactly as the fixture would carry it. */
+  function injectedRecord(attachment: Record<string, unknown>, uuid?: string): AttachmentRecord {
+    return { type: "attachment", ...(uuid === undefined ? {} : { uuid }), attachment };
+  }
+
+  it("takes the memory file's path off the nested content when the record states none itself", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "nested_memory", content: { path: "/nested/CLAUDE.md", content: "x" } }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    expect((injected.injected.value as conversationv1.AgentInjectedMemory).path).toBe(
+      "/nested/CLAUDE.md",
+    );
+  });
+
+  it("produces no unit at all when an injected memory file names no path", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "nested_memory", content: { content: "x" } }),
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries).toHaveLength(0);
+  });
+
+  it("produces no unit when the memory file's path is the empty string", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "nested_memory", path: "" }),
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries).toHaveLength(0);
+  });
+
+  it("reads a memory file with no string content as empty content, never as undefined", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "nested_memory", path: "/CLAUDE.md" }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    expect((injected.injected.value as conversationv1.AgentInjectedMemory).content).toBe("");
+  });
+
+  it("reads an invoked-skills record whose `skills` is not a list as injecting no skills", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "invoked_skills", skills: "one" }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    expect((injected.injected.value as conversationv1.AgentInjectedSkills).skills).toHaveLength(0);
+  });
+
+  it("names an invoked skill the empty string, and leaves its path and content unset, when none is a string", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "invoked_skills", skills: [{ name: 1, path: 2, content: 3 }] }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    const skill = (injected.injected.value as conversationv1.AgentInjectedSkills).skills[0];
+    expect(skill?.name).toBe("");
+    expect(skill?.path).toBeUndefined();
+    expect(skill?.content).toBeUndefined();
+  });
+
+  it("reads a dynamic-discovery delta whose `skillNames` is not a list as injecting no skills", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "dynamic_skill", skillNames: "a" }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    expect((injected.injected.value as conversationv1.AgentInjectedSkills).skills).toHaveLength(0);
+  });
+
+  it("drops a non-string entry from a dynamic-discovery delta's listing", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "dynamic_skill", skillNames: ["real", 7] }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    const skills = (injected.injected.value as conversationv1.AgentInjectedSkills).skills;
+    expect(skills.map((skill) => skill.name)).toEqual(["real"]);
+  });
+
+  it("leaves a dynamic-discovery skill's path unset when the record named no directory", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "dynamic_skill", skillNames: ["real"], skillDir: 7 }),
+      foldContext(),
+      UNIT,
+    );
+
+    const injected = activityOf(entries[0])?.item.value as conversationv1.AgentContextInjected;
+    const skills = (injected.injected.value as conversationv1.AgentInjectedSkills).skills;
+    expect(skills[0]?.path).toBeUndefined();
+  });
+
+  it("stands a uuid-less injection on the activity id the caller minted", () => {
+    const entries = convertAttachment(
+      injectedRecord({ type: "nested_memory", path: "/CLAUDE.md" }),
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries[0]?.source.vendorUuid).toBe("injected:injected-1");
+  });
+});
+
+describe("a uuid-less context-budget warning", () => {
+  it("keys the warning under the stand-in uuid, so a replay still absorbs", () => {
+    const entries = convertAttachment(
+      { type: "attachment", attachment: { type: "context_budget_warning", text: "filling" } },
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:context-budget-warning");
+  });
+});

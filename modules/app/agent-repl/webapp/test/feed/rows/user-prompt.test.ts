@@ -72,3 +72,26 @@ describe("drawFeedUserPrompt: refusals", () => {
     expect(() => drawFeedUserPrompt(msg)).toThrow(MalformedView);
   });
 });
+
+describe("drawFeedUserPrompt: an arm this build has no case for", () => {
+  it("refuses a result arm a NEWER daemon set, quoting the arm it could not draw", () => {
+    // Arrange: one arm today, so a second one can only come from a newer schema.
+    const msg = create(FeedUserPromptSchema, { author: { label: "You" } });
+    (msg as unknown as { result: unknown }).result = { case: "redacted", value: {} };
+
+    // Act
+    let thrown: unknown;
+    try {
+      drawFeedUserPrompt(msg);
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedUserPrompt.result");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'redacted' is not one this build can draw",
+    );
+  });
+});

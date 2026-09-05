@@ -292,3 +292,33 @@ describe("the body cleans up after itself", () => {
     expect(host.children.length).toBe(0);
   });
 });
+
+describe("drawLooseRows: a row that belongs to no drawn tab", () => {
+  it("draws a row parented to an id no tab carries beneath the strip", () => {
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "tests", state: "live" }),
+      childRow("r1", "gone", "orphan"),
+    ]);
+    const { host, dispose } = mount(view);
+
+    const loose = host.querySelector(".merge-loose-rows");
+
+    expect([...(loose?.children ?? [])].map((e) => e.getAttribute("data-feed-row"))).toEqual([
+      "r1",
+    ]);
+    dispose();
+  });
+
+  it("leaves a row parented to a drawn tab out of the loose host", () => {
+    const view = new FakeSubfeed([
+      tabRow("t1", { kind: "tests", state: "live" }),
+      childRow("r1", "t1", "placed"),
+    ]);
+    const { host, dispose } = mount(view);
+
+    const loose = host.querySelector(".merge-loose-rows");
+
+    expect(loose?.children.length).toBe(0);
+    dispose();
+  });
+});
