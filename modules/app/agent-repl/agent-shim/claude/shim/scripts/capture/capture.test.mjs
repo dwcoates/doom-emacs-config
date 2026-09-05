@@ -1516,7 +1516,7 @@ describe("resuming a session captured on an earlier run", () => {
   });
 
   it("seeds the transcript into a scratch account root, and recreates the cwd", () => {
-    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const { corpus } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
     const seed = readCapturedSession(corpus, "old");
     const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
     const { target } = seedResumableSession(SCRATCH_AUTH, accountRoot, seed);
@@ -1529,7 +1529,7 @@ describe("resuming a session captured on an earlier run", () => {
     // ~/.claude is bind-mounted and shared; a synthetic transcript seeded there
     // would outlive the run in a tree a stray write has damaged before. The
     // refusal is what makes "scratch only" structural instead of a note.
-    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const { corpus } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
     const seed = readCapturedSession(corpus, "old");
     const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
     expect(() => seedResumableSession({ mode: AUTH_CONFIG_ROOT }, accountRoot, seed)).toThrow(
@@ -1539,7 +1539,7 @@ describe("resuming a session captured on an earlier run", () => {
   });
 
   it("refuses to overwrite a transcript already sitting at the target", () => {
-    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const { corpus } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
     const seed = readCapturedSession(corpus, "old");
     const accountRoot = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-root-")));
     seedResumableSession(SCRATCH_AUTH, accountRoot, seed);
@@ -1549,7 +1549,7 @@ describe("resuming a session captured on an earlier run", () => {
   });
 
   it("gives a resumed world the captured cwd instead of a fresh scratch one", () => {
-    const { corpus, cwd } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
+    const { corpus } = corpusWith((dir) => [{ type: "attachment", cwd: dir }]);
     const seed = readCapturedSession(corpus, "old");
     const world = createWorld(WORLD_AUTH, "cold-resume", seed.cwd);
     expect(world.cwd).toBe(seed.cwd);

@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import type { CanUseToolLike, PermissionResultLike } from "../../../src/sdk/types.js";
+import type { CanUseToolLike } from "../../../src/sdk/types.js";
 import { driveScenario, theResult, toolUseResults, toolUses } from "../harness.js";
 
 /** A gate that answers every question with its first option's label. */

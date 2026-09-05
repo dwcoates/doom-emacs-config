@@ -255,7 +255,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
   const child = spawn(process.execPath, [SHIM_BUNDLE, ...argv], {
     cwd: dirs.workspace,
     env,
-    stdio: ["ignore", "pipe", "pipe", logFd === undefined ? "pipe" : logFd],
+    stdio: ["ignore", "pipe", "pipe", logFd ?? "pipe"],
   });
   if (logFd !== undefined) closeSync(logFd);
 

@@ -256,7 +256,6 @@ export class RecordingPersistence implements Persistence {
     if (this.openHangs) return new Promise<AgentPageSession>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     const entries = this.tail;
-    const self = this;
     const standing = this.standingTail;
     return Promise.resolve({
       page: this.page,
@@ -267,10 +266,10 @@ export class RecordingPersistence implements Persistence {
         },
       },
       concludeThrough: (through) => {
-        self.concludedThrough.push(through?.value ?? "");
+        this.concludedThrough.push(through?.value ?? "");
       },
       close: () => {
-        self.closedPages++;
+        this.closedPages++;
       },
     });
   }

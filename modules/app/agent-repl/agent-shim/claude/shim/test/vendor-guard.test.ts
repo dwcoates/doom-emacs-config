@@ -96,7 +96,7 @@ describe("fake mode", () => {
     expect({
       built,
       forbidden: raised instanceof VendorCallsForbiddenError,
-      message: raised === undefined ? "" : String(raised),
+      message: raised instanceof Error ? raised.message : JSON.stringify(raised) ?? "",
     }).toEqual({ built: true, forbidden: false, message: "" });
   });
 });

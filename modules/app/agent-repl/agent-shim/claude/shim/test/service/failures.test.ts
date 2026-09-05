@@ -9,6 +9,7 @@
  * an arm nobody constructs shows up as a missing row.
  */
 import { create } from "@bufbuild/protobuf";
+import { containing } from "../expect-shapes.js";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
@@ -69,7 +70,7 @@ describe("startSessionStarted", () => {
     // Assert.
     expect(response.result).toEqual({
       case: "success",
-      value: expect.objectContaining({ session }),
+      value: containing({ session }),
     });
   });
 });
@@ -144,7 +145,7 @@ describe("hibernateError", () => {
     // Assert.
     expect(error.kind).toEqual({
       case: "compactionFailed",
-      value: expect.objectContaining({ error: "context too big" }),
+      value: containing({ error: "context too big" }),
     });
   });
 });
@@ -215,7 +216,7 @@ describe("killSessionClosed", () => {
     // Assert.
     expect(response.result).toEqual({
       case: "success",
-      value: expect.objectContaining({ closed }),
+      value: containing({ closed }),
     });
   });
 });
@@ -256,7 +257,7 @@ describe("startTurnAccepted", () => {
     // Assert.
     expect(response.result).toEqual({
       case: "success",
-      value: expect.objectContaining({ prompt }),
+      value: containing({ prompt }),
     });
   });
 
@@ -363,7 +364,7 @@ describe("killTurnKilled", () => {
     // Assert.
     expect(response.result).toEqual({
       case: "success",
-      value: expect.objectContaining({ killed }),
+      value: containing({ killed }),
     });
   });
 });
@@ -469,7 +470,7 @@ describe("readHistoryPage", () => {
     // Assert.
     expect(response.result).toEqual({
       case: "success",
-      value: expect.objectContaining({ page }),
+      value: containing({ page }),
     });
   });
 });
