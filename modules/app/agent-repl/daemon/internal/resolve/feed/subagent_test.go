@@ -1366,3 +1366,46 @@ func TestADetachmentHeldBeforeAFooterOnlyUnitDrawsIsRetired(t *testing.T) {
 		t.Fatalf("records = %+v, want NO detached_unknown_unit once the mark is retired", h.records())
 	}
 }
+
+func TestARedeliveredSpoolPrefixIsAReplayRatherThanAGap(t *testing.T) {
+	// Arrange: the stream plane's first chunk is already held.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Act: the file plane re-delivers the same bytes and carries the next
+	// ones with them.
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\nready\n", FromOffset: 0})
+
+	// Assert: the overlap is dropped, the new tail lands, and nothing errors.
+	if got := h.shellRow().GetSpool().GetText(); got != "compiling\nready\n" {
+		t.Fatalf("spool = %q, want the replayed prefix folded rather than doubled", got)
+	}
+	if h.hasRecord("error", "daemon.feed.spool_gap") {
+		t.Fatalf("records = %+v, want NO spool_gap for a re-delivered prefix", h.records())
+	}
+}
+
+func TestASpoolFrameThatRestatesHeldBytesDifferentlyIsRefused(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Act: a frame that overlaps the held bytes but disagrees with them.
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "COMPILING\nready\n", FromOffset: 0})
+
+	// Assert: a disagreement is real loss, so the frame is refused loudly.
+	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+		t.Fatalf("spool = %q, want the frame refused", got)
+	}
+	if !h.hasRecord("error", "daemon.feed.spool_gap") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_gap", h.records())
+	}
+}
