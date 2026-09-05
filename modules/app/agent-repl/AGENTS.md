@@ -110,14 +110,37 @@ what the suite costs to run.
   call) and so cannot announce itself. It was 20ms, and at 20ms nearly every
   wait in the suite slept a whole slot: 454 waits, 10.0s of an 11.5s host run.
 
-- **The control plane never spawns a process.**
+- **Nothing here spawns a process to speak HTTP, production included.**
   `agent-repl-itest--control` speaks HTTP/1.1 over `make-network-process` to
   127.0.0.1. It is called several times by every scenario — twice by the reset
   alone, then once per turn of every `--await-*` poll — so a `curl` child per
   call cost 471 spawns and 3.3s of a 9.4s roster run. Production's transport
-  still spawns `curl`, through `agent-repl-connect--spawn-curl`; that is the
-  one boundary these suites run for real on purpose, and it is now the largest
-  remaining per-scenario cost (~270 spawns, ~3.7s, in a host run).
+  dials the same way now, through `agent-repl-connect--open-socket`; that is
+  the one boundary these suites run for real on purpose, and it was the
+  largest remaining per-scenario cost (~270 spawns, ~3.7s, in a host run)
+  until it stopped being a spawn at all. Measured on one box, alternating
+  branch point and tip: a unary round trip 60.1ms -> 3.5ms, composer
+  3.1/3.1s -> 2.1/2.2s, host 3.8/3.9s -> 3.0/3.1s, verbs 3.8/4.3s ->
+  2.8/2.8s, connect 1.5/1.5s -> 0.90/0.90s.
+
+  ITS CONNECT BLOCKS, AND THAT IS NOT A TUNING CHOICE. The peer is a
+  loopback listener that answers in a fraction of a millisecond or refuses
+  on the spot. A `:nowait` dial would have to wait for the connection
+  before it could write, and every way of waiting -- an explicit
+  `accept-process-output`, or the 20ms retry Emacs performs on the write's
+  own EAGAIN -- runs the event loop. These dials happen INSIDE PROCESS
+  FILTERS (daemon-link attaches a successor from the `WatchDaemon` filter),
+  and running the event loop from inside a filter cost the e2e handover its
+  `transferred` pushes outright: sockets open, daemon pushing, Emacs
+  delivering nothing, no workspace adopted, no promotion.
+
+  THE RESPONSE DECODING IS SHARED, NOT COPIED. `agent-repl-connect--reader` —
+  status line, then a body under a `Content-Length`, `Transfer-Encoding:
+  chunked`, or the close — is production's, and the harness calls it rather
+  than keeping a second decoder of its own. curl used to do that decoding on
+  the transport's behalf; when it went, the harness's copy became the only
+  other one, and two HTTP readers for one daemon is exactly the drift this
+  rule exists to prevent.
 
 - **A duration a scenario WRITES is a fixture, not a contract.**
   An announced `expected_outage_ms`, a rebound
@@ -167,7 +190,7 @@ The batch harness replaces every entry of
 stays true for `test-integration-*.el` too — with one sanctioned exception.
 An integration scenario exists precisely to drive one external boundary
 against a real, harmless, test-owned target: the transport's
-`agent-repl-connect--spawn-curl` against a fake daemon on loopback, and cold
+`agent-repl-connect--open-socket` against a fake daemon on loopback, and cold
 start's `agent-repl--frontend-run-build-script` /
 `agent-repl--frontend-spawn-daemon` / `agent-repl--frontend-artifact-exists-p`
 against stub scripts in the scenario's own temp dir. Those are restored
