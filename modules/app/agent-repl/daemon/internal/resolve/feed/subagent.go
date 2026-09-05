@@ -590,9 +590,36 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 		}
 		sh.spool += out
 		sh.nextOffset += uint64(len(out))
+		// SPOOL GROWTH IS THE BEAT, and the daemon stamps it on the append it
+		// just observed. FeedShellLive says so in the contract: the drawn
+		// instant is "the last output the daemon observed", so this ONE
+		// observer at this ONE point is the whole of it.
 		sh.lastProgressMs = r.deps.Now().UnixMilli()
 	case *conversationv1.AgentBash_Progress:
-		sh.lastProgressMs = frame.Progress.GetLastProgressAtMs()
+		// A BEAT MOVES NOTHING HERE, deliberately.
+		//
+		// This used to overwrite lastProgressMs with
+		// AgentToolCallProgress.last_progress_at_ms, which is not a value that
+		// belongs in this field. That instant is the PRODUCER's — when the shim
+		// or the sidecar observed the vendor report the call alive — while the
+		// appends above are stamped by the DAEMON on receipt. Two observers
+		// stamping at two points in the pipeline are not one timeline, so
+		// last-write-wins between them made the drawn instant jump, and jump
+		// BACKWARDS whenever a beat carrying an older producer instant arrived
+		// after an append the daemon had already stamped. The client ticks
+		// "quiet for N" off that instant, so the row's age ran backwards.
+		//
+		// The contract settles which of the two the field means: FeedShellLive
+		// is "spool growth IS the beat — the daemon stamps it on each append it
+		// observes", and AgentBash.progress is explicitly "NOT an update — no
+		// growth is reported". A frame that reports no growth therefore has
+		// nothing to say about the last growth, and the beat is still what
+		// re-pushes the row.
+		//
+		// This is NOT the tool-call rule: FeedToolCallLastProgress is "when the
+		// vendor last reported this call alive", so toolcall.go rightly carries
+		// the producer's instant through. Two fields, two meanings, one
+		// observer each.
 	case *conversationv1.AgentBash_Success:
 		sh.stateCommand(frame.Success.GetCommand().GetLine())
 		settled = shellSettled(log, workID, frame.Success)
