@@ -1790,3 +1790,49 @@ func TestAnUpdateHeldBeforeANamingSuccessIsStillFoldedIn(t *testing.T) {
 		t.Fatalf("tokens = %q, want the held update's running sum folded in", got)
 	}
 }
+
+func TestABeatCarryingAnOlderProducerInstantDoesNotWindTheShellsAgeBackwards(t *testing.T) {
+	// Arrange: an append the daemon stamps on receipt. This is the drawn
+	// instant the contract names — FeedShellLive is "spool growth IS the beat,
+	// the daemon stamps it on each append it observes".
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	appended := h.nowMs
+
+	// Act: a liveness beat whose PRODUCER instant predates that append, which
+	// is routine — the shim stamps when it observed the vendor's beat, the
+	// daemon stamps when the bytes reached it, and the two are different
+	// observers at different points in the pipe.
+	h.bash("work-1", &conversationv1.AgentToolCallProgress{LastProgressAtMs: appended - 30_000})
+
+	// Assert: the drawn instant is still the daemon's own append stamp. The
+	// beat reports no growth, so it has nothing to say about the last growth,
+	// and the client's "quiet for N" never runs backwards.
+	shell := h.shellRow()
+	if got := shell.GetLive().GetLastProgress().GetAtMs(); got != appended {
+		t.Fatalf("last_progress = %d, want the daemon's own append stamp %d", got, appended)
+	}
+}
+
+func TestABeatBeforeAnyOutputLeavesTheShellsLastProgressUnset(t *testing.T) {
+	// Arrange: a shell that has announced but printed nothing.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: a beat arrives with a producer instant on it.
+	h.bash("work-1", &conversationv1.AgentToolCallProgress{LastProgressAtMs: 5_000})
+
+	// Assert: UNSET, because the field is "the last output the daemon
+	// observed" and no output has been observed. A beat must not manufacture
+	// one out of a producer's stamp for a different fact.
+	if h.shellRow().GetLive().GetLastProgress() != nil {
+		t.Fatalf("last_progress = %v, want unset before the first byte", h.shellRow().GetLive().GetLastProgress())
+	}
+}
