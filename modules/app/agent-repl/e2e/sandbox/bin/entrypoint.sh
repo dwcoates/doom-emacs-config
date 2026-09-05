@@ -132,6 +132,11 @@ stage_excludes=(
   # host used, against the same sources.
   --include '/webapp/dist/***'
   --exclude 'dist/'
+  # The host's vite/vitest cache (webapp/.vite-cache -- see
+  # webapp/vite-cache.ts). It is a rebuildable cache keyed to the host's
+  # own absolute paths and platform, so carrying it in buys nothing and
+  # could only confuse a container run with a macOS checkout's bookkeeping.
+  --exclude '.vite-cache/'
   --exclude '.worktree'
   --exclude 'worktrees/'
   --exclude '.venv/'
@@ -236,10 +241,20 @@ fi
 # the mismatch is announced with both digests and the run falls back to the
 # real `npm ci --offline` out of the npm cache the same bake primed, so a
 # checkout that has moved its dependencies on can never be silently tested
-# against the image's older tree. SANDBOX_NODE_MODULES=copy forces a writable
-# per-run copy for a caller that needs to write inside node_modules (vitest's
-# own `node_modules/.vite` cache is the case that wants it); `install` forces
-# the `npm ci` path outright.
+# against the image's older tree.
+#
+# THE LINKED TREE IS READ-ONLY, and that is a constraint on the suites rather
+# than a caveat on this comment: nothing a run does may write inside
+# `node_modules`. One thing did. Vite's default cache directory is
+# `node_modules/.vite`, so every `TestWebappLayer*` area failed in here -- and
+# only in here -- until the webapp's configs moved their cache into the package
+# directory (see webapp/vite-cache.ts). Copying the tree instead would have
+# bought that write back at exactly the price this bake exists to avoid.
+#
+# SANDBOX_NODE_MODULES=copy still forces a writable per-run copy, for a caller
+# that has some other reason to write in there and accepts the ~108 MiB
+# (webapp) or ~621 MiB (shim) of tmpfs it costs; `install` forces the `npm ci`
+# path outright. e2e-sandbox.sh forwards both from the caller's environment.
 sandbox_npm_cache_ready=0
 prepare_npm_cache() {
   (( sandbox_npm_cache_ready )) && return 0

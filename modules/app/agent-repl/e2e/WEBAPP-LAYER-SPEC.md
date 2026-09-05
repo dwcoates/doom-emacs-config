@@ -205,6 +205,19 @@ so taken is reprinted in the end-of-run summary block (`precondition_test.go`).
   - the world's own prerequisites (node, shim bundle, store and sidecar
     binaries) are already loud skips inside `requireNode`,
     `requireShimBundle`, `requireStoreBinary`, `requireSidecarBinary`.
+  - the webapp package directory not writable (`wlRequireWebappWritable`,
+    over the pure `wlWebappWritable` that `harness_selftest_test.go` covers in
+    both directions). This one is a hard failure and NOT the
+    `AGENT_REPL_E2E_ALLOW_MISSING_DEPS` opt-out: no command the reader could
+    run supplies it. It exists because the layer already paid for its absence
+    — the e2e sandbox links `webapp/node_modules` at a read-only image layer,
+    vite's default `cacheDir` is `node_modules/.vite`, and all eleven areas
+    failed in the container (and only there) with a filesystem error nowhere
+    near the config that caused it. The cache moved to `webapp/.vite-cache`
+    (`webapp/vite-cache.ts`, held there by `webapp/test/vite-cache.test.ts`);
+    this precondition is what makes the next such regression say "the layer
+    cannot run here" once, by name, instead of eleven times from inside a node
+    process.
 - **Vitest side** (`real-daemon.ts`): if `AGENT_REPL_WEBAPP_LAYER` is unset
   the config's own setup THROWS naming that the layer is Go-driven and must
   be run through `go test ./e2e -run TestWebappLayer`, so a stray
@@ -232,7 +245,7 @@ rather than guessing:
 - `WebappLayerTimeout` was drafted at 60 s and then 20 s on the theory that a
   COLD Vite transform dominated and could not be measured. The theory was
   wrong: the transform is ~400 ms on every run, cache or none (clearing
-  `node_modules/.vite` changes nothing — vitest transforms sources per run),
+  the vite cache changes nothing — vitest transforms sources per run),
   so there was no hidden cold-start term. 10 s, from measurement.
 - The §F7 merge area briefly carried a 15 s "merge chain" bound. That was
   covering a HARNESS FAULT — a missing `AGENT_REPL_TEST_ALL_SCRIPT` made the

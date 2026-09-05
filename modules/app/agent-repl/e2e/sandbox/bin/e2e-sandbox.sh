@@ -545,6 +545,24 @@ do_run() {
   args+=(--tmpfs "/sandbox/home:rw,exec,size=8g,uid=1000,gid=1000,mode=0755")
   args+=(--tmpfs "/sandbox/doom/modules:rw,size=64m,uid=1000,gid=1000,mode=0755")
 
+  # THE ENTRYPOINT'S OWN KNOBS, FORWARDED WHEN THE CALLER SET THEM.
+  #
+  # `docker run` starts a container with an EMPTY environment but for what the
+  # image and these flags put there, so a caller who exported
+  # SANDBOX_NODE_MODULES or SANDBOX_SKIP_NPM saw it silently ignored -- a
+  # documented escape hatch that could not actually be reached. Only these two
+  # are forwarded, by name: a blanket passthrough would leak the host's whole
+  # environment into a sandbox whose entire point is that it carries nothing of
+  # the host in with it. Unset stays unset, so the entrypoint's defaults are
+  # untouched.
+  local knob
+  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM; do
+    if [[ -n ${!knob:-} ]]; then
+      args+=(--env "$knob=${!knob}")
+      log "forwarding $knob=${!knob} to the container"
+    fi
+  done
+
   if [[ -n ${AGENT_REPL_E2E_ARTIFACTS:-} ]]; then
     mkdir -p "$AGENT_REPL_E2E_ARTIFACTS"
     args+=(--mount "type=bind,source=$AGENT_REPL_E2E_ARTIFACTS,target=/artifacts")

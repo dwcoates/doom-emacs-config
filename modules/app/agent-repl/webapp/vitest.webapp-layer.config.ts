@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
+import { viteCacheDir } from "./vite-cache";
 
 /**
  * THE WEBAPP E2E LAYER — the real app against the REAL daemon.
@@ -24,6 +25,12 @@ import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
  * would find the flag.
  */
 export default defineConfig({
+  // OUT OF `node_modules`, WHICH IS A READ-ONLY SYMLINK IN THE E2E SANDBOX
+  // AND A GARBAGE-COLLECTED SHARED TREE ON THE HOST. Vite's default
+  // `cacheDir` is `node_modules/.vite`; see vite-cache.ts for the whole
+  // account, and test/vite-cache.test.ts for the check that keeps every
+  // config in this package on it.
+  cacheDir: viteCacheDir,
   resolve: { alias: protobufRuntimeAliases },
   test: {
     environment: "jsdom",
