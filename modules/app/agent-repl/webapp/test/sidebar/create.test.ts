@@ -12,6 +12,7 @@ import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspac
 import {
   buildCreateWorkspaceRequest,
   collect,
+  drawCreateWorkspaceControl,
   drawCreateWorkspaceForm,
   type CreateWorkspaceSpec,
 } from "../../src/sidebar/create.js";
@@ -439,5 +440,87 @@ describe("CreateWorkspace's typed refusal", () => {
     expect(() => createWorkspaceRefusal({ case: "somethingNewer", value: {} } as never)).toThrow(
       MalformedView,
     );
+  });
+});
+
+describe("what the form collects, for the fields a blank form drops", () => {
+  it("keeps a model the user typed", () => {
+    expect(collect(raw({ model: "opus" }))?.model).toBe("opus");
+  });
+
+  it("keeps a priority the user picked", () => {
+    expect(collect(raw({ priority: "p1" }))?.priority).toBe("p1");
+  });
+});
+
+describe("the request the spec becomes, for the fields a blank form drops", () => {
+  const standard = (over: Record<string, unknown> = {}): CreateWorkspaceSpec => ({
+    repository: REPO,
+    form: { case: "standard", ...over },
+    allowUngated: false,
+  });
+
+  it("carries the base ref the user named", () => {
+    const form = buildCreateWorkspaceRequest(standard({ baseRef: "origin/main" })).form;
+    expect(form.case === "standard" ? form.value.baseRef : null).toBe("origin/main");
+  });
+
+  it("carries the name the user chose", () => {
+    const form = buildCreateWorkspaceRequest(standard({ name: "ship-the-rail" })).form;
+    expect(form.case === "standard" ? form.value.name : null).toBe("ship-the-rail");
+  });
+
+  it("carries the model the user named", () => {
+    const spec: CreateWorkspaceSpec = { ...standard(), model: "opus" };
+    expect(buildCreateWorkspaceRequest(spec).model).toBe("opus");
+  });
+
+  it("sets the priority level the user picked", () => {
+    const spec: CreateWorkspaceSpec = { ...standard(), priority: "p2" };
+    expect(buildCreateWorkspaceRequest(spec).priority?.level.case).toBe("p2");
+  });
+});
+
+describe("the section's create control", () => {
+  /** A repository section with a header, the shape the roster draws. */
+  function section(): { section: HTMLElement; header: HTMLElement } {
+    const host = document.createElement("div");
+    host.className = "sb-section";
+    const header = document.createElement("div");
+    header.className = "repo-head";
+    host.appendChild(header);
+    return { section: host, header };
+  }
+
+  it("names the repository it would create in", () => {
+    const { section: host } = section();
+    expect(drawCreateWorkspaceControl(REPO, host, sidebarContext()).title).toBe(
+      "new workspace in /repo/one",
+    );
+  });
+
+  it("opens the form directly under the section's header", () => {
+    const { section: host, header } = section();
+    const button = drawCreateWorkspaceControl(REPO, host, sidebarContext());
+    header.appendChild(button);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(header.nextElementSibling?.getAttribute("data-create-form")).toBe("");
+  });
+
+  it("appends the form to the section when there is no header to open under", () => {
+    const host = document.createElement("div");
+    const button = drawCreateWorkspaceControl(REPO, host, sidebarContext());
+    host.appendChild(button);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(host.lastElementChild?.getAttribute("data-create-form")).toBe("");
+  });
+
+  it("closes an open form rather than drawing a second one", () => {
+    const { section: host, header } = section();
+    const button = drawCreateWorkspaceControl(REPO, host, sidebarContext());
+    header.appendChild(button);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(host.querySelectorAll("[data-create-form]").length).toBe(0);
   });
 });

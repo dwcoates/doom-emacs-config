@@ -10,6 +10,7 @@ import {
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   bindSessionReveal,
+  bindTitleSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
   drawTopbarSessionLine,
@@ -57,6 +58,84 @@ describe("drawTopbarAccount", () => {
   it("refuses an account naming no arm", () => {
     const { tc } = topbarContext();
     expect(() => drawTopbarAccount(create(TopbarAccountSchema, {}), tc)).toThrow(MalformedView);
+  });
+
+  it("refuses an account arm this build cannot draw, rather than drawing a blank chip", () => {
+    // ARRANGE: a newer daemon's arm, reaching a build that has no case for it.
+    const { tc } = topbarContext();
+    const future = loggedOut();
+    (future.state as { case: string }).case = "loggedInAsRobot";
+    // ACT / ASSERT
+    expect(() => drawTopbarAccount(future, tc)).toThrow(
+      /TopbarAccount.state.*loggedInAsRobot/,
+    );
+  });
+});
+
+describe("bindTitleSessionReveal", () => {
+  it("opens the same session line the chip does, the title being the session's own door", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    // ACT
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)?.textContent).toBe("session abc");
+  });
+
+  it("marks the title as the reveal's anchor, so an outside click spares it", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    expect(title.getAttribute("data-reveal-anchor")).toBe("session");
+  });
+
+  it("closes the open reveal on a second click of the title", () => {
+    // ARRANGE
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session abc" }), tc);
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ACT
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ASSERT
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("registers the line as drawn, so a refresh re-opens THIS push's line", () => {
+    // ARRANGE: the reveal is opened off the first push, then a second push
+    // registers a newer line and the layer is refreshed.
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session one" }), tc);
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // ACT
+    bindTitleSessionReveal(title, create(TopbarSessionLineSchema, { text: "session two" }), tc);
+    tc.reveals.refresh();
+    // ASSERT
+    expect(openPanel(host)?.textContent).toBe("session two");
+  });
+
+  it("binds nothing when the view carries no session line", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, undefined, tc);
+    title.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(openPanel(host)).toBeNull();
+  });
+
+  it("leaves an unbound title without an anchor mark", () => {
+    const { host, tc } = topbarContext();
+    const title = drawTopbarTitle(create(TopbarTitleSchema, { text: "DWC/fix" }));
+    host.append(title);
+    bindTitleSessionReveal(title, undefined, tc);
+    expect(title.getAttribute("data-reveal-anchor")).toBeNull();
   });
 });
 
