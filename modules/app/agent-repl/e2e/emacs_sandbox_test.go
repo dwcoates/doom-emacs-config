@@ -108,7 +108,10 @@ func requireSandbox(t *testing.T) sandbox {
 	s := &localSandbox{t: t}
 	ok, reason := s.Available()
 	if !ok {
-		noteEnvironmentSkip(t, "emacs client layer needs the e2e sandbox: %s", reason)
+		noteEnvironmentSkipAs(t,
+			"the Emacs client layer runs only INSIDE the e2e sandbox container "+
+				"(`"+sandboxScriptRel+" run go test ./e2e/ -run <name> -v`); it was not exercised by this run",
+			"emacs client layer needs the e2e sandbox: %s", reason)
 	}
 	ok, version := s.HasEmacs()
 	if !ok {
