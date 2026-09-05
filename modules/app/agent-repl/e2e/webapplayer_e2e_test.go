@@ -156,35 +156,38 @@ var (
 	npmErr  error
 )
 
-// wlRequireNPM answers the `npm` binary on PATH, skipping the calling test
-// loudly if there is none.
+// wlRequireNPM answers the `npm` binary on PATH, failing the calling test
+// loudly if there is none (a skip only under the opt-out; see
+// precondition_test.go).
 func wlRequireNPM(t *testing.T) string {
 	t.Helper()
 	npmOnce.Do(func() {
 		npmBin, npmErr = exec.LookPath("npm")
 	})
 	if npmErr != nil {
-		t.Skip("e2e/webapp-layer: npm not found on PATH; the webapp layer needs it to run the vitest child")
+		requireDependency(t, "e2e/webapp-layer: npm not found on PATH; the webapp layer needs it to run the vitest child")
 	}
 	return npmBin
 }
 
-// wlRequireWebappDeps answers the webapp directory, skipping the calling test
+// wlRequireWebappDeps answers the webapp directory, failing the calling test
 // loudly when its node_modules is absent.
 //
 // THE HARNESS INSTALLS NOTHING, exactly as main_test.go's own builders do not:
 // a network `npm ci` inside an e2e test is not this suite's business, so the
-// skip names the command and directory that supply the prerequisite instead of
-// running it. (The webapp's own `pretest` hooks self-bootstrap; the layer's
+// failure names the command and directory that supply the prerequisite instead
+// of running it. It is a failure rather than a skip for the reason vitest's own
+// webapp-layer config states: a run that found nothing must never look like a
+// pass (precondition_test.go carries the opt-out). (The webapp's own `pretest` hooks self-bootstrap; the layer's
 // `test:webapp-layer` script deliberately has no such hook.)
 func wlRequireWebappDeps(t *testing.T) string {
 	t.Helper()
 	webappDir := filepath.Join(repo.repoDir, "webapp")
 	if _, err := os.Stat(webappDir); err != nil {
-		t.Skipf("e2e/webapp-layer: webapp not found at %s: %v", webappDir, err)
+		requireDependency(t, "e2e/webapp-layer: webapp not found at %s: %v", webappDir, err)
 	}
 	if _, err := os.Stat(filepath.Join(webappDir, "node_modules")); err != nil {
-		t.Skipf("e2e/webapp-layer: %s/node_modules is absent; run `npm ci --prefix %s` first",
+		requireDependency(t, "e2e/webapp-layer: %s/node_modules is absent; run `npm ci --prefix %s` first",
 			webappDir, webappDir)
 	}
 	return webappDir
