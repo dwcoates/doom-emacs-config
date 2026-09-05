@@ -12,7 +12,7 @@
 //     announcement carries no address — so each one was left holding the
 //     workspace's two kernel claims with nothing to adopt it; and
 //  2. the Emacs teardown fired the stop and killed Emacs in the same breath,
-//     taking the curl child carrying the request with it (fixed in
+//     taking the exchange carrying the request with it (fixed in
 //     emacs_test.go's `daemonStopForm`).
 //
 // This file covers (1) against the real thing: the real store, the real

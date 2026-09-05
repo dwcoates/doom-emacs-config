@@ -113,9 +113,10 @@ const evalBound = 1250 * time.Millisecond
 // daemonStopForm is the teardown's stop, WAITED ON.
 //
 // THE DEFECT IT FIXES. `agent-repl-frontend-daemon-stop` is asynchronous: it
-// hands the `UpdateShutdownSchedule{now}` to a curl child and returns `t` the
+// hands the `UpdateShutdownSchedule{now}` to an in-flight exchange and returns
+// `t` the
 // same instant. The teardown's very next act was `(kill-emacs)`, which takes
-// that child down with it — so the request the daemon never received could not
+// that exchange down with it — so the request the daemon never received could not
 // possibly have made it exit, and the reaper found the whole tree standing with
 // nothing to blame. Measured over one 24-scenario run: 17 surviving
 // `claude-repld` processes, 24 shims and 48 `shim-lock` holders.
