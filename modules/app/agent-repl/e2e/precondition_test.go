@@ -157,5 +157,24 @@ func reportSkipSummary() {
 				"  A green line from this run does not mean those layers passed.\n", allowMissingDepsEnv))
 	}
 	b.WriteString("================================================================\n")
-	fmt.Fprint(os.Stderr, b.String())
+	writeWhereItCannotBeMissed(b.String())
+}
+
+// writeWhereItCannotBeMissed prints the summary somewhere a reader of a GREEN
+// run will actually see it.
+//
+// `go test` pipes a test binary's stderr and prints it only when the package
+// fails or `-v` is passed — which is exactly the case this block exists for: a
+// run that skipped everything and still printed `ok`. So the controlling
+// terminal is the primary channel when there is one, and stderr is the
+// fallback for a run with no tty (CI, a redirect), where the captured log is
+// the only place left to put it.
+func writeWhereItCannotBeMissed(msg string) {
+	if tty, err := os.OpenFile("/dev/tty", os.O_WRONLY, 0); err == nil {
+		defer tty.Close()
+		if _, err := fmt.Fprint(tty, msg); err == nil {
+			return
+		}
+	}
+	fmt.Fprint(os.Stderr, msg)
 }
