@@ -164,3 +164,46 @@ func TestCompactionWithNoSummaryStillStatesTheCut(t *testing.T) {
 		t.Fatalf("summary = %q, want empty rather than invented", got)
 	}
 }
+
+// The harness writes the summary either as a bare string or as content blocks,
+// and the cut has to carry the text in both spellings — the summary IS the
+// discarded history, so losing it to a shape difference loses the history.
+func TestACompactionSummaryWrittenAsContentBlocksIsStillCarried(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	boundary := `{"type":"system","subtype":"compact_boundary","uuid":"b1","isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","compactMetadata":{"trigger":"auto","preTokens":100,"postTokens":10}}`
+	summary := `{"type":"user","uuid":"s1","isCompactSummary":true,"isSidechain":false,` +
+		`"timestamp":"` + ts1 + `","message":{"role":"user","content":[` +
+		`{"type":"text","text":"first half"},` +
+		`{"type":"thinking","thinking":"ignored"},` +
+		`{"type":"text","text":"second half"}]}}`
+
+	// Act.
+	entries := convertLines(t, c, boundary, summary)
+
+	// Assert: both text blocks, joined, and nothing from the non-text block.
+	got := frameOf(entryByKey(t, entries, SessionKey("context_cut", "b1"))).
+		GetUpdate().GetContextCut().GetCompacted().GetSummary().GetMarkdown()
+	if got != "first half\nsecond half" {
+		t.Fatalf("summary = %q, want both text blocks joined", got)
+	}
+}
+
+// An UNTERMINATED command tag is not an element, so the envelope never parses
+// and the prompt stays an ordinary prompt rather than being read as a command
+// whose name happens to be the rest of the line.
+func TestAnUnterminatedCommandTagIsNotACommandEnvelope(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, clearEnvelope("u1", "<command-name>/clear"))
+
+	// Assert.
+	for _, entry := range entries {
+		if frameOf(entry).GetUpdate().GetContextCut() != nil {
+			t.Fatal("an unterminated command tag was read as a /clear")
+		}
+	}
+}
