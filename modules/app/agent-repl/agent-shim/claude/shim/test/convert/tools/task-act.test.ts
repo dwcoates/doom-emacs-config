@@ -126,7 +126,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("is the `rejected` arm when the tracker refused a create", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true)),
     );
 
     // Assert.
@@ -136,7 +136,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("carries what the tracker said was wrong with a refused create", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true)),
     );
 
     // Assert.
@@ -147,7 +147,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("falls back to the INPUT subject when the tracker echoed none", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { subject: "from input" }), outcome({ task: { id: "9" } }))!,
+      taskActConverter.settle(call("TaskCreate", { subject: "from input" }), outcome({ task: { id: "9" } })),
     );
 
     // Assert.
@@ -157,7 +157,7 @@ describe("taskActConverter.settle — TaskCreate", () => {
   it("records an EMPTY subject when neither the tracker nor the input named one", () => {
     // Arrange, Act.
     const act = actOf(
-      taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } }))!,
+      taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } })),
     );
 
     // Assert. The create still lands — an unnamed task is a real row, not a

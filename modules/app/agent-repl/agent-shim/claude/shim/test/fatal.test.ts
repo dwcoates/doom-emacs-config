@@ -24,7 +24,7 @@ function persisted(): Record<string, unknown>[] {
 function onlyRecord(): Record<string, unknown> {
   const records = persisted();
   expect(records).toHaveLength(1);
-  return records[0]!;
+  return records[0];
 }
 
 beforeEach(() => {

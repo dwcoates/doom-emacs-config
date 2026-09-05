@@ -462,7 +462,7 @@ describe("an arm this build has no case for", () => {
     const view = create(TodosPanelViewSchema, {
       rows: [{ status: { case: "pending", value: {} }, subject: "ship it" }],
     });
-    poke(view.rows[0] as object, "status", "abandoned");
+    poke(view.rows[0], "status", "abandoned");
     expect(() => drawCommandPanel(panel({ case: "todos", value: view }), appContext())).toThrow(
       MalformedView,
     );
@@ -472,7 +472,7 @@ describe("an arm this build has no case for", () => {
     const view = create(McpPanelViewSchema, {
       rows: [{ name: "github", status: { case: "connected", value: {} } }],
     });
-    poke(view.rows[0] as object, "status", "degraded");
+    poke(view.rows[0], "status", "degraded");
     expect(() => drawCommandPanel(panel({ case: "mcp", value: view }), appContext())).toThrow(
       MalformedView,
     );

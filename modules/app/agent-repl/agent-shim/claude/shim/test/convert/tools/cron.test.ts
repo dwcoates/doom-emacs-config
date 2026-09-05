@@ -184,7 +184,7 @@ describe("cronConverter.settle", () => {
     const success = successOf("CronList", { jobs: [{ id: "job_2", cron: "* * * * *", prompt: "p" }] });
 
     // Assert.
-    const job = (success.act.value as conversationv1.AgentCronListed).jobs[0]!;
+    const job = (success.act.value as conversationv1.AgentCronListed).jobs[0];
     expect([job.recurring, job.durable]).toEqual([false, false]);
   });
 

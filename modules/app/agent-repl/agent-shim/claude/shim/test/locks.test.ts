@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { textContaining } from "./expect-shapes.js";
 import fs from "node:fs";
 import { EventEmitter } from "node:events";
 import os from "node:os";
@@ -374,6 +375,9 @@ describe("the claim protocol over a synthetic holder", () => {
     const claim = locks.acquireSessionLock("s_epipe");
     child.stdout.emit("data", "locked\n");
     await claim;
+    // Captured to READ `.mock.calls` off, never invoked through this reference, so there is
+    // no `this` to lose.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- see above
     const mirror = vi.mocked(process.stderr.write);
     const before = mirror.mock.calls.length;
 
@@ -386,7 +390,7 @@ describe("the claim protocol over a synthetic holder", () => {
       .slice(before)
       .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
     expect(recorded).toHaveLength(1);
-    expect(recorded[0]).toMatchObject({ level: "warn", message: expect.stringContaining("stdin failed") });
+    expect(recorded[0]).toMatchObject({ level: "warn", message: textContaining("stdin failed") });
   });
 
   it("closes the holder's stdin exactly once however often the release is called", async () => {
