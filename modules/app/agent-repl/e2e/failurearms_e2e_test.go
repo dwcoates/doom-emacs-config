@@ -103,6 +103,58 @@ func faAssertHeadline(t *testing.T, errored *frontendv1.FeedTurnEndedErrored, wa
 	}
 }
 
+// faPartialWork is the prose every failures.ts stopScenario emits BEFORE its
+// terminal. The fake states why in its own comment — "A TURN DOES NOT STOP
+// BEFORE IT HAS DONE ANYTHING ... the mock used to emit the bare result, which
+// is a shape no capture shows and which left the stop arms asserted over an
+// empty turn" — so this string IS the work already in flight when the stop
+// landed.
+const faPartialWork = "Working on it…"
+
+// faResponseProse answers the settled prose of every response activity on the
+// workspace's root feed, in feed order.
+//
+// A STOP IS NOT ONLY A NOTICE. The work the turn HAD reached is a separate
+// fact from the failure arm, and a terminal that swept it off the feed would
+// be telling the user nothing happened. Reading the whole feed rather than one
+// named row is what lets a test state the strong form of that — this many
+// response rows, saying exactly this — and equally lets a test state the
+// negative, that a turn which produced nothing had nothing fabricated for it.
+//
+// A response row still LIVE after the terminal fails here rather than being
+// skipped: an unsettled bubble under a finished turn is a spinner that never
+// stops, which is precisely the fate-of-in-flight-work defect these tests are
+// for.
+func faResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []string {
+	t.Helper()
+	prose := []string{}
+	for _, row := range tlOpenRows(t, w, ws) {
+		resp := row.GetActivity().GetResponse()
+		if resp == nil {
+			continue
+		}
+		success := resp.GetSuccess()
+		if success == nil {
+			t.Fatalf("response row %s never settled (result=%v); the turn ended, so its work must not still be live",
+				row.GetId().GetValue(), resp.GetResult())
+		}
+		prose = append(prose, success.GetProse().GetMarkdown())
+	}
+	return prose
+}
+
+// faAssertPartialWorkSurvives asserts the turn's ALREADY-REACHED work is still
+// on the feed, settled, after the stop — exactly one response row carrying the
+// fake's partial answer, and nothing invented alongside it.
+func faAssertPartialWorkSurvives(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, scenario string) {
+	t.Helper()
+	prose := faResponseProse(t, w, ws)
+	if len(prose) != 1 || prose[0] != faPartialWork {
+		t.Fatalf("!%s: settled response prose = %q, want exactly one row %q — the work in flight when the stop landed must survive it",
+			scenario, prose, faPartialWork)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The twelve AgentFailure.api_request_failed sub-arms
 // ---------------------------------------------------------------------------
@@ -361,14 +413,27 @@ func TestApiUnmodeledKeepsTheVendorClassByName(t *testing.T) {
 // schema does not model". So a producer terminal with no arm of its own is
 // `turn_failed` carrying its reason verbatim, never `vendor_unmodeled`.
 //
-// EXPECTED TO FAIL for every row: daemon/internal/resolve/feed/turnended.go
-// (producerErrorArm) routes each of these to `unmodeledArm(<reason>)`
-// instead, which puts a producer terminal into the API-class arm and leaves
-// `turn_failed`'s "every other unclassified abnormal end" contract
-// unimplemented. `prompt_too_long` is a second, distinct violation: the
-// daemon draws it as `request_too_large`, whose proto comment (feed.proto:889-890)
-// says "413 — the request exceeded the size limit", an API status this
-// producer terminal never carried.
+// THE DAEMON NOW DRAWS THAT. `producerErrorArm`
+// (daemon/internal/resolve/feed/turnended.go) routes each of these through
+// `turnFailedArm(<reason>)`, and its own comment states the rule this file
+// asserts: "A PRODUCER TERMINAL WITH NO DRAWN COUNTERPART IS `turn_failed`,
+// never `vendor_unmodeled`". `prompt_too_long` is spelled out separately
+// there for the same reason it is here — it is NOT `request_too_large`, which
+// is the vendor's 413, an API status this producer terminal never carried.
+//
+// EACH ROW IS ASSERTED BY NAME, THREE WAYS. `stop_reason` is the vendor's own
+// word for this stop and nothing else's; `headline` is the daemon's own
+// sentence for THAT arm, drawn verbatim by the client, so it is literally what
+// the user reads; `message` is the vendor's wording carried through. A
+// collapsed sentence shared between arms — the thing daemon/ERROR-ARMS.md
+// forbids — cannot satisfy all three at once for ten different scenarios.
+//
+// AND THE WORK IN FLIGHT SURVIVES. Every one of these stops arrives AFTER the
+// fake has already produced a partial answer, so each row also asserts that
+// partial answer is still on the feed and settled. `tool_deferred` and
+// `hook_stopped` are the pointed cases: both stop the turn over work that was
+// mid-air, and a terminal that discarded the reached prose would tell the user
+// the turn did nothing.
 func TestTerminalReasonTurnFailedArms(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -376,66 +441,84 @@ func TestTerminalReasonTurnFailedArms(t *testing.T) {
 		scenario string
 		reason   string
 		message  string
+		headline string
 	}{
 		{
 			name:     "BlockingLimit",
 			scenario: "fail-blocking-limit",
 			reason:   "blocking_limit",
 			message:  "the account's blocking limit was reached",
+			headline: "an account-level block stopped the run",
 		},
 		{
 			name:     "RapidRefillBreaker",
 			scenario: "fail-rapid-refill",
 			reason:   "rapid_refill_breaker",
 			message:  "the rapid-refill breaker tripped",
+			headline: "the account's refill-rate breaker tripped — this is a wait, not a fault",
 		},
 		{
 			name:     "PromptTooLong",
 			scenario: "fail-prompt-too-long",
 			reason:   "prompt_too_long",
 			message:  "the prompt exceeded the context window",
+			headline: "the prompt was too long to send — the context must be cut first",
 		},
 		{
 			name:     "ImageError",
 			scenario: "fail-image",
 			reason:   "image_error",
 			message:  "an attached image was rejected",
+			headline: "an image in the request could not be processed",
 		},
 		{
 			name:     "ModelError",
 			scenario: "fail-model",
 			reason:   "model_error",
 			message:  "the requested model is unavailable",
+			// NOT the refusal sentence: feed.proto's `refusal` arm is reached
+			// only when the turn's OWN response frame witnessed a refusal, and
+			// this scenario's response is an ordinary partial answer.
+			headline: "the model errored in a way the API did not classify",
 		},
 		{
 			name:     "MalformedToolUseExhausted",
 			scenario: "fail-malformed-tool-use",
 			reason:   "malformed_tool_use_exhausted",
 			message:  "the model produced malformed tool input on every retry",
+			headline: "the model's tool calls could not be parsed and the attempts ran out",
 		},
 		{
 			name:     "ToolDeferred",
 			scenario: "fail-tool-deferred",
 			reason:   "tool_deferred",
 			message:  "the turn deferred a tool call to the host",
+			headline: "the run ended waiting on a deferred tool call",
 		},
 		{
 			name:     "ToolDeferredUnavailable",
 			scenario: "fail-tool-deferred-unavailable",
 			reason:   "tool_deferred_unavailable",
 			message:  "the deferred tool is not available to this host",
+			headline: "the run ended on a tool call deferred to something unavailable",
 		},
 		{
 			name:     "TurnSetupFailed",
 			scenario: "fail-turn-setup",
 			reason:   "turn_setup_failed",
 			message:  "the turn could not be set up",
+			headline: "the run could not be set up and never reached the model",
 		},
 		{
 			name:     "HookStopped",
 			scenario: "fail-hook-stopped",
 			reason:   "hook_stopped",
 			message:  "a hook stopped the turn",
+			// DISTINCT FROM the Stop hook's own sentence ("a Stop hook ended
+			// the run", asserted by TestTurnStopContinuationPrevented): a hook
+			// that is not the Stop hook reaches a different arm, and the two
+			// sentences are how a reader tells them apart.
+			headline: "a hook ended the run",
 		},
 	}
 	for _, test := range tests {
@@ -456,7 +539,9 @@ func TestTerminalReasonTurnFailedArms(t *testing.T) {
 			if got := failed.GetStopReason(); got != test.reason {
 				t.Fatalf("!%s: FailureVendorTurnFailed.StopReason = %q, want the vendor's own word %q", test.scenario, got, test.reason)
 			}
+			faAssertHeadline(t, errored, test.headline)
 			faAssertMessage(t, errored, test.message)
+			faAssertPartialWorkSurvives(t, w, ws, test.scenario)
 		})
 	}
 }
@@ -476,6 +561,19 @@ func TestTerminalReasonTurnFailedArms(t *testing.T) {
 // This is the sibling of turnlifecycle's TestTurnStopHookStop, which drives
 // `!fail-stop-hook`: same arm, reached from the informational-message signal
 // rather than from the hook summary alone.
+//
+// THE ARM'S OWN SENTENCE IS ASSERTED, not merely a non-empty headline, and it
+// is deliberately a DIFFERENT sentence from `hook_stopped`'s: a configured
+// Stop hook forbidding continuation and some other hook ending the run are two
+// stops with two remedies, and the headline is the only place the reader is
+// told which one happened.
+//
+// AND NOTHING IS FABRICATED FOR IT. Unlike the stopScenario family, this fake
+// emits NO assistant content at all — its whole output is the informational
+// message, the hook summary and the terminal — so the honest feed carries no
+// response row. Asserting the absence is what makes the fate-of-in-flight-work
+// claim two-sided: work that happened survives, work that never happened is
+// not invented.
 func TestTurnStopContinuationPrevented(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -489,7 +587,11 @@ func TestTurnStopContinuationPrevented(t *testing.T) {
 	if errored.GetStopHookPrevented() == nil {
 		t.Fatalf("FeedTurnEndedErrored.Error = %T, want StopHookPrevented (feed.proto:928-930)", errored.GetError())
 	}
+	faAssertHeadline(t, errored, "a Stop hook ended the run")
 	faAssertMessage(t, errored, "continuation was prevented")
+	if prose := faResponseProse(t, w, ws); len(prose) != 0 {
+		t.Fatalf("!fail-continuation-prevented drew response prose %q; the fake emitted no assistant content, so an empty bubble would be invented", prose)
+	}
 }
 
 // TestTurnAbortedWhileToolsRunning drives `!fail-aborted-tools`, the one
@@ -502,6 +604,20 @@ func TestTurnStopContinuationPrevented(t *testing.T) {
 // specifically NOT an Errored row: an abort through the tools is the same
 // user stop as an abort through the stream. Ungrounded — the emitted shape is
 // the fake's declaration, not a capture.
+//
+// THE FATE OF THE WORK IS THE OTHER HALF OF THIS SCENARIO. `aborted_tools`
+// names an abort that landed WHILE work was in flight, and conversation.v1's
+// AgentInterrupted says of it that "Units open when the stop landed have
+// ALREADY received their own failure frames on this stream". So the assertion
+// is not only that the turn reads as interrupted: the partial answer the fake
+// had already produced is still on the feed AND settled — neither swept away
+// as though the turn did nothing, nor left live as a bubble that spins under a
+// finished turn.
+//
+// It is also asserted specifically NOT Errored: an abort reached through the
+// tools is the same user stop as an abort reached through the stream, and
+// drawing it as a failure would accuse the system of breaking when a person
+// pressed stop.
 func TestTurnAbortedWhileToolsRunning(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -520,6 +636,10 @@ func TestTurnAbortedWhileToolsRunning(t *testing.T) {
 	if ended.GetInterrupted() == nil {
 		t.Fatalf("FeedTurnEnded.Outcome = %v, want Interrupted (feed.proto:853-854) for a tools-phase abort", ended)
 	}
+	if errored := ended.GetErrored(); errored != nil {
+		t.Fatalf("FeedTurnEnded.Outcome = Errored{%T}, want Interrupted: a tools-phase abort is a user stop, not a failure", errored.GetError())
+	}
+	faAssertPartialWorkSurvives(t, w, ws, "fail-aborted-tools")
 }
 
 // ---------------------------------------------------------------------------
