@@ -48,8 +48,12 @@ type supervisor struct {
 	grace     time.Duration
 	lockProbe func(workspaceDir string) (free bool, err error)
 
-	// mu guards held.
+	// mu guards held and standingDown, and it is held ACROSS a spawn's
+	// cmd.Start so the latch and the registry cannot be raced: see Spawn.
 	mu sync.Mutex
+	// standingDown latches at the first sweep and never clears. The process is
+	// exiting; there is no state after it in which a new spawn is wanted.
+	standingDown bool
 	// held is EVERY process this supervisor started and still owns, entered
 	// the instant cmd.Start returns and left only when the process is gone or
 	// has been handed to a successor.
@@ -70,11 +74,16 @@ type supervisor struct {
 // its handover without anyone having to remember to.
 func (s *supervisor) hold(c *client) {
 	s.mu.Lock()
+	s.holdLocked(c)
+	s.mu.Unlock()
+}
+
+// holdLocked is hold's body, for the spawn that already holds the lock.
+func (s *supervisor) holdLocked(c *client) {
 	if s.held == nil {
 		s.held = make(map[*client]struct{})
 	}
 	s.held[c] = struct{}{}
-	s.mu.Unlock()
 	c.release = func() {
 		s.mu.Lock()
 		delete(s.held, c)
@@ -82,8 +91,8 @@ func (s *supervisor) hold(c *client) {
 	}
 }
 
-// heldNow is a snapshot of the registry, taken so the sweep below never holds
-// the supervisor's lock while it signals and waits.
+// heldNow is a snapshot of the registry. The sweep below takes its own under
+// the same lock that latches it; this is the read every other caller uses.
 func (s *supervisor) heldNow() []*client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,7 +125,22 @@ func (s *supervisor) heldNow() []*client {
 // workspace lock that refuses the next session, and the caller's record is the
 // only thing that will ever say so.
 func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) error {
-	held := s.heldNow()
+	// THE LATCH AND THE SNAPSHOT ARE TAKEN TOGETHER, and that is what closes
+	// the window a sweep on its own leaves open. A bring-up that had not yet
+	// reached cmd.Start when the snapshot was taken would otherwise start its
+	// shim just after this walked past, and nothing would ever stand it down:
+	// measured on the Emacs e2e layer, a SubmitPrompt whose spawn was still
+	// probing the workspace lock when the shutdown landed left a node shim
+	// running with no daemon left to own it. Under one lock there are exactly
+	// two cases and no third: a spawn that has started is in `held' and is
+	// swept here, and a spawn that has not is refused with ErrStandingDown.
+	s.mu.Lock()
+	s.standingDown = true
+	held := make([]*client, 0, len(s.held))
+	for c := range s.held {
+		held = append(held, c)
+	}
+	s.mu.Unlock()
 	if len(held) == 0 {
 		return nil
 	}
@@ -169,25 +193,43 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		"node": spec.NodeBin, "argv": args, "cwd": spec.WorkspaceDir,
 		"uds": spec.UDSPath, "store_socket": spec.StoreSocket, "fake": spec.Fake,
 	})
+	// THE LATCH IS READ, THE PROCESS IS STARTED, AND THE REGISTRY IS ENTERED
+	// UNDER ONE LOCK. Each of those alone is not enough:
+	//
+	//   - the LATCH, because a daemon that has begun standing down must not
+	//     start a process nothing will be left to stop;
+	//   - the REGISTRY BEFORE THE REAPER and before bring-up, because from
+	//     cmd.Start onward this process exists and the supervisor is the only
+	//     thing that knows it — the other order is a window in which a death
+	//     deregisters nothing;
+	//   - and the two TOGETHER, because a check that released the lock before
+	//     starting would let the sweep's snapshot fall between them, which is
+	//     precisely the leak this closes.
+	//
+	// The lock is held across a fork+exec, which is the only reason to accept
+	// that cost: it is contended by nothing but other spawns and the sweep.
+	s.mu.Lock()
+	if s.standingDown {
+		s.mu.Unlock()
+		log.Warn("daemon.shimclient.spawn", "refused a spawn: this daemon is standing down", dlog.Context{
+			"node": spec.NodeBin, "uds": spec.UDSPath,
+		})
+		return nil, ErrStandingDown
+	}
 	if err := cmd.Start(); err != nil {
+		s.mu.Unlock()
 		log.Error("daemon.shimclient.spawn", "spawn failed", dlog.Context{
 			"node": spec.NodeBin, "error": err.Error(),
 		})
 		return nil, fmt.Errorf("shimclient: start %q: %w", spec.NodeBin, err)
 	}
-
 	c.mu.Lock()
 	c.cmd = cmd
 	c.pid = cmd.Process.Pid
 	c.pgid = cmd.Process.Pid
 	c.mu.Unlock()
-
-	// THE REGISTRY IS ENTERED BEFORE THE REAPER IS STARTED, and before
-	// bring-up, because from cmd.Start onward this process exists and the
-	// supervisor is the only thing that knows it. Held first, released by the
-	// reaper: the other order is a window in which a death deregisters
-	// nothing.
-	s.hold(c)
+	s.holdLocked(c)
+	s.mu.Unlock()
 
 	log.Info("daemon.shimclient.spawn", "shim spawned", dlog.Context{
 		"pid": cmd.Process.Pid, "uds": spec.UDSPath,
@@ -232,6 +274,22 @@ func (s *supervisor) Adopt(ctx context.Context, ws ids.WorkspaceID, workspaceDir
 			"uds": udsPath, "error": err.Error(),
 		})
 		return nil, err
+	}
+	// THE PID IS LEARNED HERE, from the socket's peer credential, so every
+	// record this client writes names the process it is actually driving. The
+	// KILL does not trust this number — it reads a fresh one at the instant it
+	// signals, because a remembered pid can be recycled — so a platform that
+	// cannot answer costs observability here and a loud refusal there, never a
+	// silently unstoppable shim.
+	if pid, pidErr := socketPeerPID(udsPath); pidErr != nil {
+		log.Warn("daemon.shimclient.adopt", "could not learn the adopted shim's pid from its socket", dlog.Context{
+			"uds": udsPath, "error": pidErr.Error(),
+		})
+	} else {
+		c.mu.Lock()
+		c.pid = pid
+		c.mu.Unlock()
+		log.Info("daemon.shimclient.adopt", "adopted a running shim", dlog.Context{"uds": udsPath, "pid": pid})
 	}
 	return c, nil
 }

@@ -977,12 +977,74 @@ zero boot-bound misses**, worst 1.10s against a mean of 796ms.
 | primed npm cache copied into HOME | 196 MiB | 0 — only copied on a lockfile mismatch |
 | Go build cache | 331 MiB, compiled from cold every run | 479 MiB, copied from the image |
 | webapp `dist` built in-container (`tsc` alone ~1 GiB peak) | ~1 GiB transient | 0 — host-staged |
-| leaked Emacs / shim / shim-lock processes | grew to ~1.7 GiB over a run | 0 — reaped and reported |
+| leaked Emacs / shim / shim-lock processes | grew to ~1.7 GiB over a run | 0 Emacs — waited for, escalated to, and fatal if left |
 | **whole-run peak** | **3.08 GiB** | **1.22 GiB** |
 
 Peak RSS by process, inside one container: Emacs with its GUI frame 206 MiB,
 the Node shim 95 MiB, Xvfb / daemon / store / sidecar / `shim-lock` single-digit
 to low-tens of MiB each.
+
+### Teardown is ordered, and a survivor is a failure
+
+Teardown used to ask and assume. It sent `(kill-emacs)` over `emacsclient`,
+killed the pty parent, and returned. Killing the pty parent is not killing
+Emacs: `script` forks its child into a session of its own — `setsid` plus
+`TIOCSCTTY`, which is how the child gets a controlling terminal — so the wait
+reaped the wrapper and the 206 MiB Emacs was reparented to init. The fallback
+reaper found it afterwards and logged
+
+    emacs teardown: reaping a stray this scenario left behind: pid N emacs
+
+on scenarios that otherwise passed. That log line was the layer's only notice
+that a scenario had ended owning a live Emacs — the same shape that produced
+this layer's shared-server-socket failure and its 3 GiB peak.
+
+Every step is now waited on:
+
+1. the daemon is asked to stop through Emacs's own command, bounded by
+   `teardownStopBound`, with both the transport failure and a REFUSED stop
+   reported;
+2. Emacs is asked to exit with `(kill-emacs)`;
+3. **teardown waits for the process to leave `/proc`**, bounded by
+   `emacsExitBound`. MEASURED over a full 47-scenario run instrumented at a
+   30s bound: every healthy Emacs was gone on the first 50ms poll after the
+   ask — 51ms, 52ms, 53ms, 54ms, the spread being poll quantization rather
+   than variance. The bound is 500ms, ten times the worst of those;
+4. an Emacs that misses that bound is escalated to its **process GROUP** —
+   `SIGTERM`, then `SIGKILL`, each waited on for `emacsSignalBound` — because
+   Emacs under a pty parent leads its own session and whatever it spawned is
+   in that session with it. A group id that reads back as the test binary's
+   own is refused and the bare pid is signalled instead, so a bad `/proc` read
+   can never signal the suite;
+5. the pty parent is killed last;
+6. **teardown waits for the stopped daemon to leave `/proc` too**, bounded by
+   `daemonExitBound`. Step 1's ack says the orderly exit was STARTED, not that
+   it finished: `drain.ShutdownNow` announces, stands every session down,
+   calls `Exit` and answers. Everything after that ack is separately bounded by
+   the daemon itself — `shutdownGrace` (2s) for the in-flight requests,
+   `merge.TerminalDrainBound` (2s) for a merge terminal's durable stamps, and
+   `loopJoinBound` (2s) for the background loops — so the wait's bound is
+   their sum, six seconds, and a daemon still standing afterwards has missed a
+   bound it states itself. Without this wait there was a race the scenario
+   could only lose, because the daemon's shutdown grace is held open by the
+   standing streams of the very Emacs step 4 has just killed: the slower Emacs
+   was to go, the more of that grace was still running when the reaper looked.
+   Observed on a loaded host with Emacs's own exit escalating (1.06s against
+   the 500ms bound), the reaper reported a `claude-repld` that was exiting
+   exactly as designed. `go test -v` prints `emacs phase daemon-exit` for every
+   scenario; on a quiet box it is one poll interval.
+
+A stray the reaper still finds after all of that **fails the scenario that
+left it**, naming the pid, its `/proc` state and wchan, and the steps teardown
+had already tried. The reaping itself stays: a failing scenario must still not
+leak a process into the next one.
+
+`emacs_teardown_test.go` holds teardown's own tests — that the wait does not
+return before the process is gone, that a process refusing `SIGTERM` is
+escalated to its group (proved by a child of that group dying with it), that
+the daemon wait does not return before the stopped daemon is gone and does not
+run at all for a stop nobody made, and that a survivor is reported as a failure
+and still reaped.
 
 ### What the proof-of-life test reaches today, and what blocks it
 

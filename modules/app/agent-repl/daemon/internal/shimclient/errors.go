@@ -12,6 +12,16 @@ import (
 // yield. The caller stops it through the shim's own KillSession verb instead.
 var ErrNoProcess = errors.New("shimclient: no supervised process")
 
+// ErrStandingDown refuses a spawn on a supervisor that has already begun
+// standing its processes down. It is the LATCH the immediate shutdown's sweep
+// sets, and it exists because a sweep alone is not enough: a bring-up that had
+// not yet reached cmd.Start when the sweep took its snapshot would start a
+// shim the sweep had already walked past, and this daemon is the only thing
+// that would ever know that process existed. The prompt behind such a spawn is
+// not lost -- it is durably HELD before the bring-up begins, and the next
+// daemon restores it -- so the refusal costs a restart, never work.
+var ErrStandingDown = errors.New("shimclient: the supervisor is standing down; no new shim may be spawned")
+
 // ErrDetached is returned by a supervision verb on a client that has already
 // handed its process over. A detached client supervises nothing.
 var ErrDetached = errors.New("shimclient: client is detached")
