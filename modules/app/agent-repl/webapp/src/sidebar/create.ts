@@ -275,7 +275,7 @@ export function drawCreateWorkspaceForm(
       submit.after(missingPromptNote());
       return;
     }
-    fireVerb(submit, {
+    void fireVerb(submit, {
       sc,
       rpc: "CreateWorkspace",
       call: (client) => client.createWorkspace(buildCreateWorkspaceRequest(spec)),
