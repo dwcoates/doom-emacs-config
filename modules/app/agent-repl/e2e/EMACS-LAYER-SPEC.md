@@ -500,7 +500,7 @@ no container name, and no `exec` verb. Its documented usage runs the whole
 test binary inside the container:
 
 ```bash
-modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh run go test ./e2e/...
+modules/app/agent-repl/e2e/sandbox/bin/e2e-sandbox.sh run --dir e2e go test -run TestEmacs .
 ```
 
 ### Consequence: the layer runs INSIDE, and does not drive the container
@@ -531,7 +531,7 @@ different answers and a reader of a skipped run must tell them apart:
 | situation | detected by | skip says |
 |---|---|---|
 | inside the sandbox | `AGENT_REPL_SANDBOX_SHA` set **and** `/repo-src` is a directory | nothing; it runs |
-| on the host, image usable | `preflight` exits 0 | the exact `e2e-sandbox.sh run go test ...` command to use instead |
+| on the host, image usable | `preflight` exits 0 | the exact `e2e-sandbox.sh run --dir e2e go test ...` command to use instead |
 | on the host, image unusable | `preflight` exits non-zero | preflight's own output, **verbatim** |
 
 Both in-container signals are required: a stray environment variable on the
