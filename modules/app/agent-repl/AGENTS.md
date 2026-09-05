@@ -99,6 +99,20 @@ what the suite costs to run.
   subscribe goes through `agent-repl-itest--await-subscriber` first. Three
   scenarios were relying on the old 20ms poll to hide the window.
 
+What those rules bought, measured by running each suite at the branch point
+and at the tip alternately on one host, so both sides met the same load
+(ERT's own reported suite time, seconds):
+
+| suite | before | after |
+|---|---|---|
+| `test-agent-repl.el` (everything, 3695 -> 3701 tests) | 209.7 | 58.8 |
+| `test-integration-link.el` | 64.3 | 5.7 |
+| `test-integration-host.el` | 33.7 | 7.9 |
+| `test-integration-composer.el` | 30.4 | 9.7 |
+| `test-integration-verbs.el` | 26.7 | 5.5 |
+| `test-integration-daemon.el` | 10.6 | 4.6 |
+| `test-integration-roster.el` | 9.8 | 3.4 |
+
 - **A sentinel outlives the scenario that armed it.**
   Emacs runs a sentinel from the event loop, never at the moment the process
   dies, so a stub build script's exit is delivered after `cl-letf` has put the
