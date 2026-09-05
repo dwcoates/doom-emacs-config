@@ -13,6 +13,17 @@ export default defineConfig({
   test: {
     css: true,
     setupFiles: ["./test/setup.ts"],
+    // The unit suite spent far more wall time standing a fresh jsdom up for
+    // each of its 97 files than running the 3369 tests inside them: ~13.5s
+    // isolated against ~5.5s here, with the tests themselves unchanged.
+    // Reusing one environment per worker is only safe because no file leaves
+    // global state behind for the next one — test/setup.ts hands back the real
+    // clock and empties the page before every test, and each file uninstalls
+    // what it installs. `npx vitest run --no-isolate --sequence.shuffle
+    // --sequence.seed=<n>` is how that is checked; it must stay green for any
+    // seed, so a new order dependency is a bug in the file that leaks, never a
+    // reason to turn isolation back on.
+    isolate: false,
     // The integration suite has its own config (vitest.integration.config.ts):
     // it boots the app against a real loopback Connect server, so it must not
     // ride along in the fast unit run. The webapp e2e layer
@@ -40,6 +51,15 @@ export default defineConfig({
       reporter: ["text", "json", "json-summary", "html"],
       reportsDirectory: "coverage",
       // WHY: Establish the baseline before coverage-closing work enforces 90%.
+      //
+      // `npm run coverage` passes `--isolate` back, overriding the `isolate:
+      // false` above, because the v8 provider attributes a module's execution
+      // to the file run that instantiated it. When files share a worker the
+      // module is instantiated once and later files' exercise of it goes
+      // unattributed: src/rpc/streams.ts measured 130 covered lines isolated
+      // and 115 un-isolated, differing run to run. A number that moves without
+      // the code moving is not a measurement, so the reported figure is taken
+      // the slow, accurate way.
     },
   },
 });

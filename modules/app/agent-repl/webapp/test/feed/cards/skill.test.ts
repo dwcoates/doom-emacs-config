@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   FeedRowSchema,
@@ -43,6 +43,12 @@ function loaded(markdown: string, allowances?: string): InitOfFeedSkill {
 
 beforeEach(() => {
   vi.useFakeTimers();
+});
+
+// The fake clock is this file's own; hand the real one back so a
+// later file sharing this worker never inherits a frozen timer.
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("drawFeedSkill", () => {
