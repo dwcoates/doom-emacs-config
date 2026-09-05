@@ -11,6 +11,15 @@ const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 export default defineConfig({
   server: { fs: { allow: [agentReplRoot] } },
   test: {
+    // WORKER COUNT IS CAPPED. Vitest defaults to one worker per CPU, which is
+    // a claim on the whole machine; measured on a 16-CPU host that is 2-5 GiB
+    // for one run, and several concurrent runs took the box to a load average
+    // of 253 and cost a whole Emacs layer run its evidence. `bin/suite-slot.sh`
+    // at the module root is the gate that stops suites overlapping; this cap
+    // is the second half of the same promise. minWorkers travels with it
+    // because vitest refuses a max below the default min.
+    minWorkers: 1,
+    maxWorkers: "50%",
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
     setupFiles: ["./test/setup.ts", "./test/log-setup.ts"],

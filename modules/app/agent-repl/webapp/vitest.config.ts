@@ -24,6 +24,20 @@ export default defineConfig({
     // seed, so a new order dependency is a bug in the file that leaks, never a
     // reason to turn isolation back on.
     isolate: false,
+    // WORKER COUNT IS CAPPED, because the default is "one per CPU" and that
+    // is a claim on the WHOLE machine. Measured on a 16-CPU host: 16 workers
+    // at a 116 MiB mean and a 333 MiB peak, so one `npm test` alone holds
+    // 2-5 GiB. That is fine when a suite runs alone and ruinous when several
+    // do -- four concurrent runs took this box to a load average of 253 and
+    // made an Emacs layer run fail 37 of 45 scenarios on boot alone.
+    // `bin/suite-slot.sh` is the gate that stops suites overlapping; this cap
+    // is the second half of the same promise, for the runs that slip past it.
+    // Half the CPUs measured at 5.3s against 5.2s for all sixteen: the suite
+    // is not CPU-bound at this size, so the cap costs nothing to buy back.
+    // minWorkers travels with it: vitest refuses a max below the default min.
+    minWorkers: 1,
+    maxWorkers: "50%",
+
     // The integration suite has its own config (vitest.integration.config.ts):
     // it boots the app against a real loopback Connect server, so it must not
     // ride along in the fast unit run. The webapp e2e layer
