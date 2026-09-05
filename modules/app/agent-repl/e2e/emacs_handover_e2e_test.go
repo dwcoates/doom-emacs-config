@@ -48,17 +48,40 @@ const daemonStopBound = 6 * time.Second
 const handoverAnnounceBound = 2 * time.Second
 
 // handoverPromoteBound is how long the attached successor may take to be
-// PROMOTED once attached -- the outgoing daemon transferring each workspace
-// and the last one reaching freeness.
+// PROMOTED once attached -- the outgoing daemon transferring each workspace,
+// the last one reaching freeness, and the outgoing daemon then EXITING.
 //
-// NOT YET MEASURED, deliberately: no healthy promotion has been observed.
-// The successor daemon never adopts (the outgoing daemon's
-// `daemon.rollout.adoption_window` expires and records the workspace's own
-// fault, and `daemon.server.transferred` is never published), so the only
-// promotion this scenario has produced is the 32s fault path. A bound taken
-// from that would enshrine the defect as the expectation. It stays generous
-// until the handover completes at freeness and a healthy number exists.
-const handoverPromoteBound = 60 * time.Second
+// THE EXIT IS THE EDGE, and that is why this phase costs what it costs.
+// Emacs does not promote on a transfer: `agent-repl-link--handle-close'
+// (`lisp/daemon-link.el') promotes when the PRIMARY stream closes while a
+// successor is held. So this phase is the rollout plus exactly the phase
+// `daemonStopBound' above measures -- the daemon flushing its writes and
+// exiting, the kernel closing the socket, curl seeing EOF and Emacs's
+// sentinel running -- which is why the two numbers agree to a millisecond.
+//
+// MEASURED, and it replaces a bound that was deliberately left unmeasured
+// because no healthy promotion had ever been seen. Six samples on a quiet
+// box (load average 6): 2.021s, 2.022s, 2.022s, 2.023s, 2.030s, 2.041s.
+//
+// THE MULTIPLE IS 10x, NOT 3x, for exactly the reason `handoverAnnounceBound`
+// above already gives: the phase contains a whole daemon PROCESS lifecycle --
+// there, a spawn; here, an orderly exit -- and that cost is the machine's
+// rather than this module's. Taking 3x (7s) was tried and it reds on a box
+// with a sibling suite running, on a run whose every upstream phase was
+// healthy and whose successor attached in 225ms. A bound that fails on load
+// alone is a flake, and this suite does not ship one.
+//
+// THE 60s IT REPLACES WAS HIDING A REGRESSION, which is the reason to
+// tighten it rather than merely to record the number. The old comment named
+// a 32s fault path as the only outcome this scenario produced; 32s is
+// 30s + 2.02s, and the 30s is `rollout.DefaultAdoptionWindow' -- the
+// outgoing daemon waiting out the whole window for a headless workspace its
+// successor failed to adopt and would never retry, delaying `windows.Wait()'
+// and therefore the exit this phase waits on. That defect is fixed in
+// `daemon/internal/rollout/adopt.go' (`retryHeadless'); a bound of 60s would
+// have let it come back silently. 21s still fails that 32s regression by a
+// wide margin, which is the whole reason to move off 60s.
+const handoverPromoteBound = 21 * time.Second
 
 // emHOTabOrderForm reads the tab order as data — `agent-repl-roster--tab-order`
 // and the tab bar's own tab names, which EMACS-LAYER-SPEC.md's readback
