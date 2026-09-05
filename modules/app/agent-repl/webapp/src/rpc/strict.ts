@@ -114,14 +114,26 @@ export function requireCase<T extends { case?: string | undefined }>(
 }
 
 /**
- * The `default:` of an exhaustive arm switch.
+ * The `default:` of an arm switch: an arm this build cannot draw.
  *
- * The `never` parameter is the compile-time half: adding an arm to a proto
- * breaks the build at every switch that does not handle it. The throw is the
- * run-time half, for an arm a NEWER daemon set that this bundle's descriptors
- * do not name.
+ * The parameter WAS declared `never | string`, which reads as a compile-time
+ * exhaustiveness check and is not one — `never | string` collapses to `string`,
+ * so every call site type-checked no matter which arms its switch handled. It
+ * is spelled `string` now, because that is what it always was.
+ *
+ * There is no compile-time half to have here: the callers that reach this are
+ * exactly the switches that are NOT total (a verb's own refusal arms, with the
+ * cross-cutting four peeled off upstream; a renderer's drawable subset), and
+ * each widens its scrutinee to `{ case: string }` on purpose to say so. A
+ * switch that really is total gets its compile-time half by putting
+ * `const _exhaustive: never = arm;` in its own default, which this cannot do
+ * on its behalf.
+ *
+ * What it is, then, is the run-time half: an arm a NEWER daemon set that this
+ * bundle's descriptors do not name refuses the view loudly rather than drawing
+ * something made up.
  */
-export function unreachableArm(path: string, arm: never | string): never {
+export function unreachableArm(path: string, arm: string): never {
   throw new MalformedView(path, `arm '${String(arm)}' is not one this build can draw`);
 }
 
