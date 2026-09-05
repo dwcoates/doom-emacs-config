@@ -57,8 +57,9 @@ Two further limits, stated rather than hidden:
   (`webapp/test/webapp-layer/*.layer.test.ts`) and Emacs (`e2e/emacs_*`).**
   Per the owner's ruling, daemon/integration, shim test/integration and
   sidecar integration tests do NOT count as e2e coverage even where they
-  exercise the same scenario. Sections (d) and (e) below, and the reconciliation
-  sections after them, are hand-written context and are not derived.
+  exercise the same scenario. Section (d) below and the reconciliation
+  sections at the end are hand-written context and are not derived; section
+  (e), dead triggers, IS enforced.
 
 ## (a) Full matrix
 
