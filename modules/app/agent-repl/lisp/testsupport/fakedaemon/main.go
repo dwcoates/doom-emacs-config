@@ -94,6 +94,12 @@ func run() error {
 		logInfo("fakedaemon.exit.addr-removed", "removed daemon.addr", map[string]any{"addr_file": addrFilePath(dir)})
 	}
 
+	// Standing streams never return on their own, so `Shutdown' would wait out
+	// its whole grace period on them and then `Close' would drop them anyway.
+	// Dropping them here reaches the SAME observable end (an abrupt close with
+	// no end frame) without spending the grace period discovering it.
+	server.abortAllStreams()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
