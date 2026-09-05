@@ -64,7 +64,7 @@ import (
 // AN EARLIER DRAFT CARRIED 60s, THEN 20s, on the theory that a cold Vite
 // transform dominated and could not be measured. That theory was wrong: the
 // transform is ~400ms on every run, cache or no cache (clearing
-// node_modules/.vite changes nothing — vitest transforms sources per run),
+// the vite cache changes nothing — vitest transforms sources per run),
 // so there is no hidden cold-start term to leave headroom for.
 //
 // It bounds a HANG, not a synchronization wait: nothing here sleeps, the
