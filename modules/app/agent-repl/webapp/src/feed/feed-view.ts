@@ -96,7 +96,7 @@ export interface FeedControllerOptions {
   renderers: RowRenderers;
   /** How the rows are laid out — the default body, or the merge tab strip. */
   body: BubbleBodyRenderer;
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
   bubble: BubbleFactory;
   /**
    * The row context the BODY renderer is handed. A bubble passes its own
