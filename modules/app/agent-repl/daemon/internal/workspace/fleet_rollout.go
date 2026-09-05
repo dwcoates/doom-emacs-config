@@ -479,6 +479,16 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 // unconditional and the refusal is evidence.
 func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
 	if shim, live := f.Shim(ws); live {
+		// THE WATCHER IS TOLD BEFORE THE VERB GOES. The shim ends its standing
+		// streams as the session ends, and a watcher that has not been told
+		// reads this daemon's own act as a transport fault: it records a
+		// severing at ERROR, marks the link degraded, and reopens watches at a
+		// shim the next line is about to stop. It stays OPEN, though — the
+		// shim writes its terminals as the session ends, and Stop below is
+		// what closes it.
+		if watcher, ok := f.sessionWatcher(ws); ok {
+			watcher.SessionEnding("the daemon is ending the session")
+		}
 		if err := shim.KillSession(ctx, force); err != nil {
 			if record, recErr := f.deps.DB.Workspace(ctx, ws); recErr == nil {
 				if log, logErr := f.deps.Log.Workspace(record.Dir); logErr == nil {
