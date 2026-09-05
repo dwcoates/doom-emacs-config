@@ -214,14 +214,14 @@ describe("the drain banner", () => {
     harness.fake.cancelDrain();
     await harness.settle();
     // Assert
-    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() || "").toBe("");
+    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() ?? "").toBe("");
   });
 
   it("draws no banner before any drain is scheduled", async () => {
     // Arrange / Act
     harness = await startHarness();
     // Assert
-    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() || "").toBe("");
+    expect(harness.$('[data-component="drain-banner"]')?.textContent?.trim() ?? "").toBe("");
   });
 });
 

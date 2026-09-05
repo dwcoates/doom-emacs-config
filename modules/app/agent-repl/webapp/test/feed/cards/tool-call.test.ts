@@ -65,10 +65,8 @@ function rowContext(): RowContext {
  */
 function card(init: MessageInitShape<typeof FeedSimpleToolCallSchema>): FeedSimpleToolCall {
   const built = create(FeedSimpleToolCallSchema, init);
-  if (built.name === undefined) built.name = create(FeedToolCallNameSchema, { text: "Bash" });
-  if (built.input === undefined) {
-    built.input = create(FeedToolCallInputSchema, { text: "$ go test ./..." });
-  }
+  built.name ??= create(FeedToolCallNameSchema, { text: "Bash" });
+  built.input ??= create(FeedToolCallInputSchema, { text: "$ go test ./..." });
   return built;
 }
 

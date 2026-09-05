@@ -35,7 +35,7 @@ import {
 
 import { HARNESS_EPOCH_MS, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
-import { expectedPaintClass } from "./vocab";
+import { drawnPaintClass, expectedPaintClass } from "./vocab";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
 import {
   ARTIFACT_STATES,
@@ -508,7 +508,7 @@ describe("paint-class spans", () => {
     const drawn = [...row.querySelectorAll("span")].find((el) => el.textContent === span.text);
     // Assert
     const expected = expectedPaintClass(span.paintClass);
-    expect(drawn?.className || undefined).toBe(expected);
+    expect(drawnPaintClass(drawn)).toBe(expected);
   });
 
   it("still draws the text of a span whose class is unknown", async () => {

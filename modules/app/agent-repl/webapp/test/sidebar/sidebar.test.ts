@@ -40,6 +40,17 @@ function memoryStorage(seed: Record<string, string> = {}): Storage {
   };
 }
 
+/** The prefs record as it was actually persisted, typed rather than `any`. */
+function storedPrefs(storage: Storage): {
+  grouping?: string;
+  folded?: Record<string, boolean>;
+  expanded?: Record<string, boolean>;
+} {
+  const raw = storage.getItem(PREFS_KEY);
+  if (raw === null) throw new Error("no prefs were written");
+  return JSON.parse(raw) as ReturnType<typeof storedPrefs>;
+}
+
 function throwingStorage(): Storage {
   return {
     get length(): number {
@@ -99,19 +110,19 @@ describe("the rail's preferences", () => {
   it("persist a grouping change", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setGrouping("task");
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).grouping).toBe("task");
+    expect(storedPrefs(storage).grouping).toBe("task");
   });
 
   it("persist a fold", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setFolded("repo:one", true);
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).folded["repo:one"]).toBe(true);
+    expect(storedPrefs(storage).folded?.["repo:one"]).toBe(true);
   });
 
   it("persist a row's expansion", () => {
     const storage = memoryStorage();
     createSidebarPrefs(storage).setExpanded("ws-1", true);
-    expect(JSON.parse(storage.getItem(PREFS_KEY) as string).expanded["ws-1"]).toBe(true);
+    expect(storedPrefs(storage).expanded?.["ws-1"]).toBe(true);
   });
 
   it("keep a fold's own default for a section never folded", () => {

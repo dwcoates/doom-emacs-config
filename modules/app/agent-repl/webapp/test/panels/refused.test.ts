@@ -51,7 +51,7 @@ const errorResponse = refusalResponse("blankCommand");
 function rowContext(
   answer: () => RequestCommandSupportResponse = successResponse,
   seen: RequestCommandSupportRequest[] = [],
-  throws?: unknown,
+  throws?: Error,
 ): { rc: RowContext; seen: RequestCommandSupportRequest[] } {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
