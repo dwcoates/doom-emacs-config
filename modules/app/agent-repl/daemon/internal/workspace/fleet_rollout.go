@@ -501,6 +501,15 @@ func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool)
 	return f.Stop(ctx, ws, force)
 }
 
+// StandDown is the rollout's stand-down: end the session, then stop the
+// process, forced. It is KillSession under the name the rollout's contract
+// gives it, so a handover that must stop a workspace it cannot transfer takes
+// the same path -- watcher told first, terminals written, then the process --
+// as every other stand-down in the daemon.
+func (f *Fleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
+	return f.KillSession(ctx, ws, true)
+}
+
 // The fleet IS the rollout's shim fleet, the drain's stand and the verbs'
 // session surface. The assertions are here so a signature drift is a compile
 // error at the definition rather than a nil interface at the composition root.

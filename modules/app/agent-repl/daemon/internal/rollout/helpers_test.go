@@ -484,6 +484,20 @@ func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Cli
 	return c, nil
 }
 
+// StandDown mirrors the real fleet's: the session is ended, then the process.
+func (f *fakeFleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	shim := f.live[ws]
+	f.mu.Unlock()
+	if shim == nil {
+		return nil
+	}
+	if _, err := shim.KillSession(ctx, &shimv1.KillSessionRequest{Force: true}); err != nil {
+		return err
+	}
+	return shim.Kill(shimclient.KillAttribution{Actor: "test.standdown", Reason: "stand down", Force: true})
+}
+
 func (f *fakeFleet) Resume(_ context.Context, ws ids.WorkspaceID, _ shimclient.Client) (Resumed, error) {
 	f.order.record("resume")
 	f.mu.Lock()
