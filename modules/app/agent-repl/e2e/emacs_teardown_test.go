@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -163,8 +164,9 @@ func TestEmacsTeardownEscalatesToTheProcessGroup(t *testing.T) {
 	if left := e.emacsProcs(); len(left) != 0 {
 		t.Fatalf("awaitEmacsExit left %s alive after escalating", pidList(left))
 	}
-	if err := syscall.Kill(child, 0); err == nil {
-		t.Fatalf("the child in the process group (pid %d) survived: the escalation signalled the pid, not the group", child)
+	if state := liveProcessState(child); state != "" {
+		t.Fatalf("the child in the process group (pid %d) is still running (/proc state %q): the escalation signalled the pid, not the group",
+			child, state)
 	}
 	tried := e.teardownTried()
 	for _, want := range []string{"process group", "terminated", "killed"} {
@@ -204,6 +206,26 @@ func TestEmacsTeardownReportsAStrayAsAFailure(t *testing.T) {
 	if left := e.findStrays(); len(left) != 0 {
 		t.Fatalf("reapStrays failed the scenario but left %s running, leaking it into the next one", pidList(left))
 	}
+}
+
+// liveProcessState answers the /proc state letter of a RUNNING process, or
+// "" when the pid names nothing runnable any more.
+//
+// A killed grandchild of this test is reparented rather than reaped by it, so
+// it can linger as a zombie for as long as the container's init takes to
+// collect it: `kill(pid, 0)` still succeeds on one, which would report a
+// process that holds nothing as a survivor. A zombie has no cmdline, which is
+// the same discriminator findStrays uses.
+func liveProcessState(pid int) string {
+	raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	state := procField(strconv.Itoa(pid), "stat")
+	if state == "Z" {
+		return ""
+	}
+	return state
 }
 
 // awaitPIDFile waits for a stand-in to record its child's pid.
