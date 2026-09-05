@@ -146,7 +146,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
       operation: "sidebar.tasks.create",
       context: { length: title.length },
     });
-    fireVerb(submit, {
+    void fireVerb(submit, {
       sc,
       rpc: "CreateTask",
       call: (client) => client.createTask(buildCreateTaskRequest(title)),
