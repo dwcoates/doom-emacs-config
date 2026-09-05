@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,81 @@ func TestAddrFilePathIsUnderStateDir(t *testing.T) {
 	// Assert: every client discovers the daemon at <state dir>/daemon.addr.
 	if got != filepath.Join(dir, "daemon.addr") {
 		t.Fatalf("addrFilePath = %q", got)
+	}
+}
+
+func TestStateDirAnswersTheConfiguredRoot(t *testing.T) {
+	// Arrange.
+	t.Setenv(stateDirEnv, "/tmp/some-state-root")
+
+	// Act.
+	got, err := stateDir()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("stateDir: %v", err)
+	}
+	if got != "/tmp/some-state-root" {
+		t.Fatalf("stateDir = %q, want the configured root", got)
+	}
+}
+
+func TestWriteAddrFileFailsWhenTheStateDirCannotBeCreated(t *testing.T) {
+	// Arrange: a regular file standing where the state root would go.
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("writing the blocker: %v", err)
+	}
+
+	// Act.
+	err := writeAddrFile(filepath.Join(blocker, "state"), "127.0.0.1:1")
+
+	// Assert: discovery failing is loud; a fake nobody can find is useless.
+	if err == nil {
+		t.Fatal("writeAddrFile into an uncreatable state dir returned no error")
+	}
+	if !strings.Contains(err.Error(), "create state dir") {
+		t.Fatalf("error = %v, want the state-dir failure named", err)
+	}
+}
+
+func TestWriteAddrFileFailsWhenTheTempFileCannotBeCreated(t *testing.T) {
+	// Arrange: the state dir exists but is not writable, so MkdirAll succeeds
+	// and the atomic write's temp file is what cannot be made.
+	dir := filepath.Join(t.TempDir(), "readonly")
+	if err := os.Mkdir(dir, 0o555); err != nil {
+		t.Fatalf("making the read-only state dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	// Act.
+	err := writeAddrFile(dir, "127.0.0.1:1")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("writeAddrFile into a read-only state dir returned no error")
+	}
+	if !strings.Contains(err.Error(), "create temp addr file") {
+		t.Fatalf("error = %v, want the temp-file failure named", err)
+	}
+}
+
+func TestRemoveAddrFileSurfacesAFailureThatIsNotAbsence(t *testing.T) {
+	// Arrange: daemon.addr is a non-empty DIRECTORY, so the remove fails for a
+	// reason that is not "someone else already replaced it".
+	dir := t.TempDir()
+	if err := os.Mkdir(addrFilePath(dir), 0o755); err != nil {
+		t.Fatalf("planting the directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(addrFilePath(dir), "child"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("populating the directory: %v", err)
+	}
+
+	// Act.
+	err := removeAddrFile(dir)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("removeAddrFile over an undeletable path returned no error")
 	}
 }

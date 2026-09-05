@@ -395,3 +395,102 @@ func TestParseANSIRefusesAClassOutsideTheInventory(t *testing.T) {
 		t.Fatal("ParseANSI emitted a class outside the inventory")
 	}
 }
+
+// A truncated or unmodeled extended-color continuation must leave the text
+// unpainted rather than swallow the following parameters as a color.
+func TestParseANSILeavesATruncatedExtendedColorUnpainted(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "a 256-color selector with no index", input: "\x1b[38;5mx"},
+		{name: "a truecolor selector missing its blue", input: "\x1b[38;2;10;20mx"},
+		{name: "a selector form this parser does not model", input: "\x1b[38;7mx"},
+		{name: "a 256-color index outside the range", input: "\x1b[38;5;300mx"},
+	}
+	p := newPainter(t)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			spans, err := p.ParseANSI(tc.input)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ParseANSI: %v", err)
+			}
+			if len(spans) != 1 || spans[0].Class != "" {
+				t.Fatalf("spans = %+v, want one plain span", spans)
+			}
+		})
+	}
+}
+
+// The colon-subparameter spelling (38:5:1) is the other form terminals emit,
+// and it reduces to the same parameters as the semicolon spelling.
+func TestParseANSIReadsTheColonSubparameterSpelling(t *testing.T) {
+	// Arrange.
+	p := newPainter(t)
+
+	// Act.
+	spans, err := p.ParseANSI("\x1b[38:5:1mx")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ParseANSI: %v", err)
+	}
+	if len(spans) != 1 || spans[0].Class != "ansi-fg-red" {
+		t.Fatalf("spans = %+v, want one ansi-fg-red span", spans)
+	}
+}
+
+// A parameter that is not a number is read as 0, which is how a terminal reads
+// an empty one — so an empty leading field is a reset, not a syntax error.
+func TestParseANSIReadsANonNumericParameterAsZero(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "an empty field before the reset", input: "\x1b[1mx\x1b[;mx"},
+		{name: "a field that is not a number", input: "\x1b[1mx\x1b[<mx"},
+		{name: "a non-numeric colon subparameter", input: "\x1b[1mx\x1b[<:>mx"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			p := newPainter(t)
+
+			// Act.
+			spans, err := p.ParseANSI(tc.input)
+
+			// Assert: the bold from the first escape is cleared by the zero the
+			// unreadable parameter resolves to.
+			if err != nil {
+				t.Fatalf("ParseANSI: %v", err)
+			}
+			if len(spans) == 0 {
+				t.Fatal("ParseANSI emitted no spans")
+			}
+			if last := spans[len(spans)-1]; last.Class != "" {
+				t.Fatalf("last span = %+v, want the attributes reset", last)
+			}
+		})
+	}
+}
+
+// An unterminated CSI has no end to resume from, so the remainder is dropped
+// rather than emitted as text that was never meant to be shown.
+func TestParseANSIDropsAnUnterminatedControlSequence(t *testing.T) {
+	// Arrange.
+	p := newPainter(t)
+
+	// Act.
+	spans, err := p.ParseANSI("keep\x1b[38;5")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ParseANSI: %v", err)
+	}
+	if len(spans) != 1 || spans[0].Text != "keep" {
+		t.Fatalf("spans = %+v, want only the text before the unterminated sequence", spans)
+	}
+}

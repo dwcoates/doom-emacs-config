@@ -578,3 +578,136 @@ func TestClassifyBlamesAFullEnvelopePath(t *testing.T) {
 		t.Fatalf("the refusal blames field %q, want the full envelope path %q", got, want)
 	}
 }
+
+// A oneof arm that is SET but carries a nil message is a distinct breach from
+// an arm that was never set: protobuf's getters hand back a zero value for
+// both, so a validator that only checked the getter would accept the nil one
+// and then route an entry with no content at all.
+func TestClassifyRefusesAnArmSetToANilMessage(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry *storev1.StoreEntry
+	}{
+		{
+			name:  "session_update arm set to nil",
+			entry: agentEntryWithSessionUpdate("w", "u", nil),
+		},
+		{
+			name:  "agent_update arm set to nil",
+			entry: agentUpdateEntry("w", "u", nil),
+		},
+		{
+			name: "serveable_frame arm set to nil",
+			entry: agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{
+				AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: nil},
+			}),
+		},
+		{
+			name:  "agent_item arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", nil),
+		},
+		{
+			name: "agent_prompt arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", &storev1.StoreAgentItem{
+				Item: &storev1.StoreAgentItem_AgentPrompt{AgentPrompt: nil},
+			}),
+		},
+		{
+			name:  "agent_frame arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", frameItem(nil)),
+		},
+		{
+			name: "agent_frame.update arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", frameItem(&conversationv1.AgentFrame{
+				AgentId: &conversationv1.AgentId{Value: "agent-1"},
+				Result:  &conversationv1.AgentFrame_Update{Update: nil},
+			})),
+		},
+		{
+			name: "activity arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", frameItem(&conversationv1.AgentFrame{
+				AgentId: &conversationv1.AgentId{Value: "agent-1"},
+				Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{
+					Update: &conversationv1.AgentUpdate_Activity{Activity: nil},
+				}},
+			})),
+		},
+		{
+			name:  "unserved_item arm set to nil",
+			entry: unservedEntry("w", "u", nil),
+		},
+		{
+			name: "bash arm set to nil",
+			entry: agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{
+				AgentInfo: &storev1.StoreAgentUpdate_Bash{Bash: nil},
+			}),
+		},
+		{
+			name: "workflow arm set to nil",
+			entry: agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{
+				AgentInfo: &storev1.StoreAgentUpdate_Workflow{Workflow: nil},
+			}),
+		},
+		{
+			name: "detached_work arm set to nil",
+			entry: pageEntry("w", "u", "agent-1", frameItem(&conversationv1.AgentFrame{
+				AgentId: &conversationv1.AgentId{Value: "agent-1"},
+				Result:  &conversationv1.AgentFrame_DetachedWork{DetachedWork: nil},
+			})),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Act
+			_, err := classify(test.entry, 7)
+
+			// Assert
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}
+
+// The workflow arm carries the same two identity obligations as the bash arm —
+// a run to join on and a result arm to state — and had neither refusal proven.
+func TestClassifyRefusesAWorkflowMissingItsIdentityOrResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		workflow *storev1.StoreAgentWorkflow
+	}{
+		{
+			name: "no run identity",
+			workflow: &storev1.StoreAgentWorkflow{
+				Frame: &conversationv1.AgentWorkflow{Result: &conversationv1.AgentWorkflow_Start{
+					Start: &conversationv1.AgentWorkflowStart{Name: "nightly"},
+				}},
+			},
+		},
+		{
+			name: "no result arm",
+			workflow: &storev1.StoreAgentWorkflow{
+				Run:   &conversationv1.AgentId{Value: "run-1"},
+				Frame: &conversationv1.AgentWorkflow{},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			entry := agentUpdateEntry("w", "u", &storev1.StoreAgentUpdate{
+				AgentInfo: &storev1.StoreAgentUpdate_Workflow{Workflow: test.workflow},
+			})
+
+			// Act
+			_, err := classify(entry, 7)
+
+			// Assert
+			if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("error = %v, want ErrInvalid", err)
+			}
+		})
+	}
+}

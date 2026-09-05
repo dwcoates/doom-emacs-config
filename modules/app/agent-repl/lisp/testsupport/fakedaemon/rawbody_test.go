@@ -54,3 +54,37 @@ func TestRawBodyDistinguishesAnOmittedBoolFromAnExplicitFalse(t *testing.T) {
 		t.Fatalf("raw named `force' although the client omitted it: %s", calls[0].Raw)
 	}
 }
+
+// A body over the recording cap is passed through UNTOUCHED — the handler
+// still sees every byte — and simply records no raw. Truncating the request
+// to fit the recording would corrupt the very round-trip this fake exists to
+// check.
+func TestAnOversizedBodyReachesTheHandlerButRecordsNoRaw(t *testing.T) {
+	// Arrange: a valid RestartWorkspace request padded past the cap with a
+	// name field long enough that the whole body exceeds maxRecordedRawBody.
+	_, baseURL := newTestServer(t)
+	padding := strings.Repeat("p", maxRecordedRawBody)
+	sent := `{"workspace":{"id":"ws-a","dir":"/tmp/` + padding + `"}}`
+	if len(sent) <= maxRecordedRawBody {
+		t.Fatalf("the fixture body is %d bytes, which does not exceed the cap", len(sent))
+	}
+
+	// Act.
+	if status, body := rawUnary(t, baseURL, "RestartWorkspace", sent); status != 200 {
+		t.Fatalf("RestartWorkspace answered %d: %s", status, body)
+	}
+	_, listing := controlGet(t, baseURL, "/_fake/calls")
+	calls := decodeCalls(t, listing)
+
+	// Assert: the handler decoded the whole body, and raw is absent rather
+	// than a truncated lie.
+	if len(calls) != 1 {
+		t.Fatalf("want 1 recorded call, got %d", len(calls))
+	}
+	if calls[0].Raw != "" {
+		t.Fatalf("raw = %q, want nothing recorded for an oversized body", calls[0].Raw)
+	}
+	if !strings.Contains(string(calls[0].Body), padding) {
+		t.Fatalf("body lost the padding, so the handler did not see every byte: %s", calls[0].Body)
+	}
+}
