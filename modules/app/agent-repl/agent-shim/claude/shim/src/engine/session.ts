@@ -129,7 +129,7 @@ interface EngineDeps {
     readonly configDir: string;
     readonly cwd: string;
   };
-  nowMs(): number;
+  readonly nowMs: () => number;
   /** Injected so a suite never waits on a clock. */
   readonly scheduler?: KeepaliveScheduler;
   /** Injected so a suite substitutes a temp directory without a state dir. */
