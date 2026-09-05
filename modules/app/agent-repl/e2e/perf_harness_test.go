@@ -208,6 +208,38 @@ func (r *PerfRecorder) Assert(t *testing.T, p50Budget, p95Budget time.Duration) 
 	}
 }
 
+// perfDeclineArea ends an area the calibration guard DECLINED, before the area
+// spends anything on a measurement it may not assert.
+//
+// WHY AN AREA NEEDS THIS AND A LOCALLY MEASURED ASSERTION DOES NOT.
+// `PerfRecorder.Assert` and `PerfShipped.Assert` both handle a decline at the
+// END: they report the samples and assert nothing (§D2). That works when the
+// samples are already in hand. It does not work for an area whose samples are
+// produced by a CHILD PROCESS under its own wall-clock bound: on the box that
+// declined, `webapp/test/webapp-layer/perf.layer.test.ts` drives 80 real chain
+// traversals, and the run that produced this helper spent its whole
+// `WebappLayerPerfTimeout` doing so and then FAILED on the bound — a red
+// reported by a phase that had already decided it would assert nothing.
+//
+// A decline must skip loudly, never run into a wall bound, so the area ends
+// HERE: no child is started, and therefore no child has to be waited out.
+//
+// It is loud in both of the two ways §D2 requires. Every assertion the area
+// would have made is recorded as a DECLINED summary row, so the phase summary
+// carries the same "measured nothing" line it would have carried had the child
+// run; and the skip names the calibration numbers that tripped it.
+//
+// The caller passes the assertion names the area owns, so the summary is
+// identical in shape to the one the area's own subtests would have produced.
+func perfDeclineArea(t *testing.T, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		perfRecordSummary(perfSummaryRow{Name: name, Verdict: perfVerdictDeclined})
+	}
+	t.Skipf("PERF DECLINED: the whole area is skipped before its child starts — %s",
+		perfCalibrationSummary())
+}
+
 // ===========================================================================
 // D3. Baselines and the regression check.
 // ===========================================================================

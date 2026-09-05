@@ -757,6 +757,39 @@ func (e *Emacs) stageEmacsDir() {
 	}
 }
 
+// rootListing renders the top level of this Emacs's scratch root: one line per
+// entry, with its type and mode.
+//
+// WHY A BOOT FAILURE CARRIES IT. The root is minted per scenario and deleted
+// with the test, so anything unexpected in it exists only for as long as the
+// failure does. It is the deciding evidence for a whole family of boot
+// failures whose message names none of it -- most sharply `server-start`'s
+// "Cannot bind server socket: Address already in use", which Emacs raises for
+// EXACTLY ONE cause: an entry at the socket path that `server-stop` could not
+// delete (a directory, or one this user may not unlink). A stale socket is
+// deleted and rebound, and a LIVE one is reported as a warning, so the error
+// says nothing about which of the two it hit and the listing says everything.
+//
+// It is a listing and never a walk: the root holds a staged Doom tree and a
+// whole state root, and printing those would bury the one line that matters.
+func (e *Emacs) rootListing() string {
+	entries, err := os.ReadDir(e.Root)
+	if err != nil {
+		return fmt.Sprintf("\n(the scratch root %s could not be listed: %v)", e.Root, err)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\nthe scratch root %s holds:", e.Root)
+	for _, entry := range entries {
+		info, statErr := entry.Info()
+		if statErr != nil {
+			fmt.Fprintf(&b, "\n  %-24s (could not stat: %v)", entry.Name(), statErr)
+			continue
+		}
+		fmt.Fprintf(&b, "\n  %-24s %s", entry.Name(), info.Mode())
+	}
+	return b.String()
+}
+
 // awaitDoom waits for the readiness stamp `sandbox/doom/config.el` writes.
 //
 // The stamp is the layer's Doom-initialized edge, and it is written AFTER
@@ -781,7 +814,20 @@ func (e *Emacs) awaitDoom() {
 				e.t.Fatalf("decode the Doom readiness stamp %q: %v", string(body), jsonErr)
 			}
 			if !ready.OK {
-				e.t.Fatalf("Doom failed to initialize: %s; pty output:\n%s", ready.Error, e.proc.Output())
+				// THE ROOT'S OWN CONTENTS COME WITH IT. A boot error names
+				// what Emacs could not do; several of them -- a server socket
+				// that will not bind, a settings file that will not load, a
+				// Doom tree Emacs refuses as unsafe -- are explained only by
+				// what is actually sitting in the scratch root, which is
+				// deleted with the test.
+				// THE BREADCRUMB COMES WITH IT, exactly as it does for a boot
+				// that never stamps at all. A GUI Emacs writes its messages
+				// to the frame rather than the pty, so a failed stamp is
+				// routinely accompanied by an EMPTY pty -- measured -- and
+				// the breadcrumb is then the only record of which boot step
+				// the error came out of.
+				e.t.Fatalf("Doom failed to initialize: %s%s%s; pty output:\n%s",
+					ready.Error, e.bootBreadcrumb(), e.rootListing(), e.proc.Output())
 			}
 			// The whole reason for booting Doom rather than `-Q` is that
 			// these are real. A stamp that says otherwise means the profile
@@ -817,9 +863,9 @@ func (e *Emacs) awaitDoom() {
 			// Emacs that is ALIVE and has published no server socket, so
 			// there is nothing to ask it with: the breadcrumb says which
 			// step it was in and only the debugger can say where inside it.
-			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s%s; pty output:\n%s",
-				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.processSnapshot(),
-				e.nativeBacktrace(), e.proc.Output())
+			e.t.Fatalf("Doom did not finish initializing within %s (no readiness stamp at %s)%s%s%s%s; pty output:\n%s",
+				doomBootBound, e.ReadyStamp, e.bootBreadcrumb(), e.rootListing(),
+				e.processSnapshot(), e.nativeBacktrace(), e.proc.Output())
 		case <-ticker.C:
 		}
 	}
