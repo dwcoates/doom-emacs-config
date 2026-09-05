@@ -76,6 +76,10 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		held = nil
 	}
 	if err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil {
+		// THE HOLD IS PUT BACK rather than lost with the frame that failed:
+		// this frame drew nothing, so nothing has named the created agent yet
+		// and what was waiting is still waiting.
+		state.held = held
 		return nil, err
 	}
 	r.foldHeldSubagentFrames(s, unitID, state, held, "once its start landed")
