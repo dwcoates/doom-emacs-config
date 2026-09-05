@@ -673,14 +673,49 @@ suite asserting on a log line waits for it rather than racing it."
 
 ;;;; ---- Link teardown ----
 
+(defconst agent-repl-itest--transport-process-prefix "agent-repl-connect-"
+  "Name prefix every child `agent-repl-connect--spawn-curl' starts carries.
+`connect.el' names a unary exchange `agent-repl-connect-<method>' and a
+stream `agent-repl-connect-stream-<method>'; both are matched by this.")
+
+(defun agent-repl-itest--reap-transport-children ()
+  "Reap every transport child still running, sentinel dropped first.
+
+A SCENARIO OWNS EVERY PROCESS IT STARTED, AND AN EXCHANGE'S ANSWER IS A
+CONTINUATION.  connect.el delivers a Connect answer -- including a
+transport FAILURE, which is what an unanswered probe eventually is --
+from its curl child's sentinel, and Emacs runs a sentinel from the event
+loop rather than at the moment the process dies.  An exchange still in
+flight when the scenario returns therefore resumes AFTER `cl-letf' has
+put the external-boundary guards back and after the scenario's own
+scratch bindings have unwound: cold start's probe answers `nothing is
+listening', builds with the DEFAULT build script, spawns the DEFAULT
+binary, and errors out of a sentinel -- which aborts the whole batch run
+and names whichever test happened to be running.
+
+Dropping the sentinel before the reap is what makes the resumption
+impossible rather than unlikely; killing without it would simply deliver
+the same answer one line earlier."
+  (dolist (process (process-list))
+    (when (string-prefix-p agent-repl-itest--transport-process-prefix
+                           (process-name process))
+      (set-process-sentinel process #'ignore)
+      (set-process-filter process #'ignore)
+      (when (process-live-p process)
+        (delete-process process)))))
+
 (defun agent-repl-itest--teardown-link ()
-  "Close any standing daemon link and cancel its reconnect timer.
+  "Close any standing daemon link, cancel its reconnect, reap its children.
 `agent-repl-link-teardown\=' closes the connections and forgets the link
 state; the reconnect timer is armed separately by the close handler, so
 it is cancelled here too -- a timer that survives the scenario reconnects
-into the NEXT one\='s daemon."
+into the NEXT one\='s daemon.  The transport children are reaped last,
+because a close is not a reap: an exchange the teardown did not know
+about is still holding a curl child whose sentinel would answer into the
+next scenario."
   (ignore-errors (agent-repl-link-teardown))
-  (ignore-errors (agent-repl-link--cancel-reconnect)))
+  (ignore-errors (agent-repl-link--cancel-reconnect))
+  (agent-repl-itest--reap-transport-children))
 
 ;;;; ---- The ONE fake daemon a suite run shares ----
 ;;
@@ -967,10 +1002,22 @@ address is already published and recorded before it is replaced."
 (defconst agent-repl-itest--cold-start-boundaries
   '(agent-repl--frontend-run-build-script
     agent-repl--frontend-spawn-daemon
-    agent-repl--frontend-artifact-exists-p)
+    agent-repl--frontend-artifact-exists-p
+    agent-repl--frontend-run-log-tail)
   "The external boundaries a cold-start scenario exercises for real.
 Their targets are all test-owned: a stub script and a stub argv written
-into the scenario's own temp dir, and `file-exists-p' on those paths.")
+into the scenario's own temp dir, `file-exists-p' on those paths, and the
+run log under the scenario's own private `AGENT_REPL_STATE_DIR'.
+
+`--run-log-tail' is on the list because THE STUB DAEMON EXITS.  Every
+cold-start stub here is a shell script that does its one job and returns,
+and `agent-repl-daemon--await-address' polls once INLINE before arming
+its timer -- so whenever the stub has already exited by that first tick,
+production takes its `boot-exited' branch and reads the run log to say
+WHY, which is the whole point of that branch.  Which side of the tick the
+exit lands on is a race with the scheduler, so leaving this boundary
+guarded made the guard fire on a slow host and not on a fast one: a flake
+whose cause is the harness's own list, not the scenario.")
 
 (defvar agent-repl-daemon--ensure-in-flight)
 (defvar agent-repl-daemon--build-in-flight)
@@ -1034,7 +1081,17 @@ them."
     (set-process-sentinel agent-repl--frontend-daemon-process #'ignore)
     (when (process-live-p agent-repl--frontend-daemon-process)
       (delete-process agent-repl--frontend-daemon-process)))
-  (agent-repl-link-teardown)
+  ;; THE RECONNECT TIMER IS A COLD-START TRIGGER, not just a link detail.
+  ;; `agent-repl-daemon-ensure' is registered on
+  ;; `agent-repl-link-no-daemon-functions' at load time, so a reconnect that
+  ;; fires after this window and finds no `daemon.addr' starts a WHOLE cold
+  ;; start -- default build script, default binary, a fresh boot poll -- with
+  ;; the external-boundary guards armed again, and the boot tick then errors
+  ;; out of a timer and aborts the batch run.  A bare
+  ;; `agent-repl-link-teardown' does not cancel that timer; the harness's own
+  ;; teardown does, and reaps the transport children the same way (the
+  ;; cold-start probe is asynchronous, so its answer can still be in flight).
+  (agent-repl-itest--teardown-link)
   (dolist (name '("*agent-repl-health*" "*agent-repl-build-frontend*"))
     (when (get-buffer name) (kill-buffer name))))
 
