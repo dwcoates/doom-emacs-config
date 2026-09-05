@@ -154,6 +154,17 @@ describe("taskActConverter.settle — TaskCreate", () => {
     expect(act.state?.subject).toBe("from input");
   });
 
+  it("records an EMPTY subject when neither the tracker nor the input named one", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskCreate", { description: "d" }), outcome({ task: { id: "9" } }))!,
+    );
+
+    // Assert. The create still lands — an unnamed task is a real row, not a
+    // reason to drop the tracker's own identity.
+    expect(act.state?.subject).toBe("");
+  });
+
   it("produces NO frame when the tracker returned no identity", () => {
     // Arrange, Act, Assert.
     expect(taskActConverter.settle(call("TaskCreate", {}), outcome({ task: {} }))).toBeUndefined();

@@ -389,6 +389,20 @@ describe("shimRoutes unanticipated exceptions", () => {
     ).toBe(true);
   });
 
+  it("records NO stack when what was thrown was not an Error and has none", async () => {
+    // Arrange: a bare string thrown mid-stream carries no stack to record.
+    const client = clientFor(throwingStreamEngine("the fold came apart"));
+
+    // Act.
+    await drain(client.watchSession(requests.watchSessionRequest())).catch(() => undefined);
+
+    // Assert. The rpc is still named — the record stays useful without a stack.
+    const unhandled = records(written).filter(
+      (record) => record.level === "error" && record.context.rpc === "WatchSession",
+    );
+    expect(unhandled.map((record) => record.context.stack)).toEqual([undefined]);
+  });
+
   it("passes a ConnectError the shim MEANT to throw straight through", async () => {
     // Arrange.
     const client = clientFor(
