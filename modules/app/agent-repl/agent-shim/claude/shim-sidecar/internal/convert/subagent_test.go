@@ -57,6 +57,25 @@ func TestSettledSpawnCarriesTheCreatedAgentIdAndTheOriginalInstant(t *testing.T)
 	}
 }
 
+func TestSettledSpawnNamesTheCreatedAgentOnItsSuccessArm(t *testing.T) {
+	// Arrange. A SIDECAR DELIVERY IS THE CASE THE FIELD EXISTS FOR: a transcript
+	// read after the fact carries this conclusion and no start, so a consumer
+	// that could not name the created agent here would draw a bubble addressing
+	// nothing.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	result := toolResultLine("u1", "toolu_spawn", ts2, `[{"type":"text","text":"r"}]`, agentResult)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert: the spawning call's own id, never the vendor's `agentId` locator.
+	success := activityOf(entryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetSuccess()
+	if got := success.GetCreatedAgentId().GetValue(); got != "toolu_spawn" {
+		t.Fatalf("created_agent_id = %q, want the spawning call's own id", got)
+	}
+}
+
 func TestSyncSpawnCarriesTheFullBilledBreakdown(t *testing.T) {
 	// Arrange. THE SET ARM IS THE SPAWN PATH'S HONESTY: a sync completion carries
 	// the full breakdown; an async one carries at most a total-tokens scalar, so a
