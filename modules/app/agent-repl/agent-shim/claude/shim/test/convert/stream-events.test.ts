@@ -430,3 +430,75 @@ describe("an aborted response", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// A stream event that omits its block index.
+// ---------------------------------------------------------------------------
+
+/** Fold a message_start, then the events a test wants, over one fold. */
+function foldStream(...events: Record<string, unknown>[]): PersistEntry[] {
+  const fold = createFold();
+  const context = foldContext();
+  fold.onSdkMessage(
+    streamEvent({ type: "message_start", message: { id: MESSAGE_ID } }, "u-start"),
+    context,
+  );
+  return events.flatMap((event, at) => [
+    ...fold.onSdkMessage(streamEvent(event, `u-ev-${String(at)}`), context).entries,
+  ]);
+}
+
+describe("a content_block_start the vendor sent with no index", () => {
+  it("reads it as block ZERO, so the unit is the first block and not an unnumbered one", () => {
+    // Arrange, Act.
+    const entries = foldStream({ type: "content_block_start", content_block: { type: "text" } });
+
+    // Assert.
+    expect(entries[0]?.source.blockIndex).toBe(0);
+  });
+});
+
+describe("a content_block_delta the vendor sent with no index", () => {
+  it("lands the text on block ZERO's unit rather than on an unnumbered one", () => {
+    // Arrange, Act.
+    const entries = foldStream(
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", delta: { type: "text_delta", text: "hi" } },
+    );
+
+    // Assert.
+    expect(entries[1]?.source.blockIndex).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The vendor's own synthesized notices.
+// ---------------------------------------------------------------------------
+
+/** The notice subject the settled prose block ended up carrying. */
+function noticeSubjectOf(record: Record<string, unknown>): string | undefined {
+  const entries = [
+    ...createFold().onSdkMessage(
+      {
+        ...(assistantMessage({
+          id: "msg_notice",
+          content: [{ type: "text", text: "API Error" }],
+        }) as unknown as Record<string, unknown>),
+        ...record,
+      } as unknown as SdkMessage,
+      foldContext(),
+    ).entries,
+  ];
+  const item = activityOf(entries[0])?.item;
+  const result = item?.case === "response" ? item.value.result : undefined;
+  const authorship = result?.case === "success" ? result.value.authorship : undefined;
+  return authorship?.case === "synthesizedNotice"
+    ? authorship.value.subject.case
+    : undefined;
+}
+
+describe("prose the vendor synthesized for a rate limit", () => {
+  it("classifies the notice as a USAGE LIMIT, not as an unclassified failure", () => {
+    expect(noticeSubjectOf({ error: "rate_limit" })).toBe("usageLimit");
+  });
+});

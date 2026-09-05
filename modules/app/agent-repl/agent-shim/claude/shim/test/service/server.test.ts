@@ -902,3 +902,108 @@ describe("reading an encoding out of a flat-array head", () => {
     ).toBe(true);
   });
 });
+
+describe("a flat-array head that announces no encoding at all", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("says NOTHING, so an ordinary array head does not raise a false alarm", () => {
+    // The object form of this case is already guarded; the array form walks a
+    // different arm of the reader, and a false positive there would put an
+    // ERROR on every stream whose adapter passes its headers flat.
+    // Arrange.
+    const res = {
+      headersSent: false,
+      writeHead(_status: number, _headers: Record<string, string> | string[]): unknown {
+        return res;
+      },
+    };
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    // Act.
+    res.writeHead(200, ["x-request-id", "r-1", "x-trace", "t-1"]);
+
+    // Assert.
+    expect(
+      mirroredRecords(written).some(
+        (record) => record.context.content_encoding !== undefined,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("an h2c session that fails at the SESSION level", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("keeps serving after a DATA frame on stream 0, which is a connection error", async () => {
+    // Arrange: the preface, then a DATA frame addressed to stream 0. That is a
+    // PROTOCOL_ERROR the session raises as an 'error' -- an unhandled one would
+    // end the whole shim rather than the one bad connection.
+    const sock = socketPath();
+    await start(sock);
+    const dataOnStreamZero = Buffer.from([0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+    // Act: the server answers a connection error with a GOAWAY (frame type 7
+    // at offset 3) and then closes.
+    await new Promise<void>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      let seen = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        seen = Buffer.concat([seen, chunk]);
+        for (let at = 0; at + 9 <= seen.length; at += 9 + seen.readUIntBE(at, 3)) {
+          if (seen[at + 3] === 7) {
+            socket.destroy();
+            resolve();
+            return;
+          }
+        }
+      });
+      socket.on("error", reject);
+      socket.write(Buffer.concat([Buffer.from(HTTP2_PREFACE, "latin1"), dataOnStreamZero]));
+    });
+
+    // Assert: the listener is still serving.
+    const rejection = await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
+
+describe("a connection that closes without ever speaking", () => {
+  it("keeps serving after a client that connects and hangs up with no bytes", async () => {
+    // A half-close with nothing written makes the socket readable with NOTHING
+    // to read; a peek that treated that as a first chunk would sniff an empty
+    // buffer and hand a dead connection to the HTTP/1.1 server.
+    // Arrange.
+    const sock = socketPath();
+    await start(sock);
+
+    // Act.
+    await new Promise<void>((resolve, reject) => {
+      const socket = netConnect({ path: sock });
+      socket.on("error", reject);
+      socket.on("close", () => resolve());
+      socket.on("connect", () => socket.end());
+    });
+
+    // Assert: the listener is still serving.
+    const rejection = await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
