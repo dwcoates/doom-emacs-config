@@ -143,3 +143,25 @@ func TestSinkFailedIsFalseWhileEveryRecordLands(t *testing.T) {
 		t.Fatal("a successful write was reported as a sink failure")
 	}
 }
+
+func TestAnUnmarshallableContextStillEmitsTheBranchItWasReporting(t *testing.T) {
+	// Arrange: a context value encoding/json cannot represent. The branch being
+	// reported must survive the encoder's failure rather than vanish with it.
+	var sink bytes.Buffer
+	log, _ := pinned(&sink)
+
+	// Act
+	log.Error("shim-lock.acquire", "flock failed", Context{"unencodable": make(chan int)})
+
+	// Assert
+	line := sink.String()
+	if !strings.Contains(line, `"operation":"shim-lock.acquire"`) {
+		t.Fatalf("record = %q, want the operation preserved", line)
+	}
+	if !strings.Contains(line, "record could not be marshalled") {
+		t.Fatalf("record = %q, want the marshalling failure named", line)
+	}
+	if !strings.Contains(line, "flock failed") {
+		t.Fatalf("record = %q, want the original message preserved", line)
+	}
+}

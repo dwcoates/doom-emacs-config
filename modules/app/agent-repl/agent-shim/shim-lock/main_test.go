@@ -333,3 +333,68 @@ func TestRunReportsAStderrSinkThatSwallowedItsRecords(t *testing.T) {
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("sink is gone") }
+
+func TestRunFailsLoudlyWhenTheLockPathIsADirectory(t *testing.T) {
+	// Arrange: the lock path itself already exists as a DIRECTORY, so the
+	// directory creation succeeds and the OPEN is what fails. That refusal
+	// must stay distinct from "another process holds this".
+	lockPath := filepath.Join(t.TempDir(), "already-a-dir.lock")
+	if err := os.Mkdir(lockPath, 0o755); err != nil {
+		t.Fatalf("planting the directory: %v", err)
+	}
+	var stdout, stderr strings.Builder
+
+	// Act
+	code := run([]string{lockPath}, strings.NewReader(""), &stdout, &stderr)
+
+	// Assert
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "lock file could not be opened") {
+		t.Fatalf("stderr = %q, want the open diagnostic", stderr.String())
+	}
+}
+
+func TestRunFailsWhenTheReadyLineCannotBeWritten(t *testing.T) {
+	// Arrange: the lock is takeable, but stdout is gone. A claim the shim can
+	// never be told about is a failure, not a hold.
+	lockPath := filepath.Join(t.TempDir(), "unannounceable.lock")
+	var stderr strings.Builder
+
+	// Act
+	code := run([]string{lockPath}, strings.NewReader(""), failingWriter{}, &stderr)
+
+	// Assert
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "ready line could not be written") {
+		t.Fatalf("stderr = %q, want the ready-line diagnostic", stderr.String())
+	}
+}
+
+func TestRunFailsWhenTheHoldingReadOfStdinFails(t *testing.T) {
+	// Arrange: the lock is held and announced, then the stdin pipe errors
+	// rather than reaching EOF. That is not a deliberate release.
+	lockPath := filepath.Join(t.TempDir(), "broken-stdin.lock")
+	var stdout, stderr strings.Builder
+
+	// Act
+	code := run([]string{lockPath}, failingReader{}, &stdout, &stderr)
+
+	// Assert
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if strings.TrimSpace(stdout.String()) != ReadyLine {
+		t.Fatalf("stdout = %q, want the ready line to have gone out first", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "reading stdin failed") {
+		t.Fatalf("stderr = %q, want the stdin diagnostic", stderr.String())
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("stdin pipe is gone") }
