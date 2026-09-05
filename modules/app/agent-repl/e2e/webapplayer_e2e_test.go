@@ -28,13 +28,16 @@ package e2e
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -727,6 +730,13 @@ func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string
 		filepath.Join("test", "webapp-layer", vitestFile))
 	cmd.Dir = webappDir
 	cmd.Env = env
+	// THE CHILD LEADS ITS OWN PROCESS GROUP, so a kill reaches the whole tree.
+	// `npm run` is a wrapper: it spawns vitest, which spawns a POOL of node
+	// workers. Signalling cmd.Process alone signals npm and nothing else, and
+	// every worker is reparented to init and keeps running — CPU-bound, on a
+	// box that is by then running the rest of a `-parallel 8` suite. Its own
+	// group is what makes wlKillTree's negative-pid kill possible.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("vitest stdout pipe: %w", err)
@@ -740,6 +750,11 @@ func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string
 	}
 
 	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
+	// UNCONDITIONAL, so no path out of this test leaves a worker pool behind:
+	// the Go side failing its own assertion, a t.Fatal on the way to Wait, a
+	// panic, or the bound firing. Killing an already-exited group is a no-op
+	// (ESRCH), which is exactly what the ordinary path wants.
+	t.Cleanup(child.killTree)
 	tail := &child.tailOnly
 
 	var mirrored sync.WaitGroup
@@ -798,10 +813,9 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 	case <-time.After(bound):
 		// The child is killed, not abandoned: a leaked vitest holds this
 		// daemon's streams open and the world's teardown would then observe
-		// state the test never caused.
-		if c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
-		}
+		// state the test never caused. THE WHOLE GROUP GOES, not the npm
+		// wrapper alone — see killTree.
+		c.killTree()
 		tail.Lock()
 		defer tail.Unlock()
 		return fmt.Errorf("vitest did not exit within %s; last output:\n%s",
@@ -812,9 +826,32 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 // Kill stops a still-running child, for the Go side failing before the page's
 // own assertions could conclude. A killed child's output is already in the
 // test log.
-func (c *wlChild) Kill() {
-	if c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
+func (c *wlChild) Kill() { c.killTree() }
+
+// killTree SIGKILLs the child's whole process group.
+//
+// `npm run` is a wrapper around vitest, and vitest runs its files in a POOL of
+// forked node workers. Killing cmd.Process kills npm and leaves every one of
+// those workers alive, reparented to init, spinning on a box that is still
+// running the rest of a `-parallel 8` suite — the load that then expires
+// bounds in unrelated tests. wlStartVitest puts the child in its own group
+// precisely so the negative pid below reaches all of them.
+//
+// Idempotent and quiet on an already-dead group: ESRCH is the ordinary answer
+// on the clean path, where the child exited on its own and this runs at
+// cleanup. Any OTHER error is a fault to report, never one to swallow.
+func (c *wlChild) killTree() {
+	if c.cmd.Process == nil {
+		return
+	}
+	// The group id IS the child's pid: Setpgid with no Pgid makes the child a
+	// group leader.
+	err := syscall.Kill(-c.cmd.Process.Pid, syscall.SIGKILL)
+	switch {
+	case err == nil, errors.Is(err, syscall.ESRCH):
+		return
+	default:
+		c.t.Errorf("killing the vitest process group %d: %v (its worker pool may still be running)", c.cmd.Process.Pid, err)
 	}
 }
 
@@ -822,3 +859,69 @@ func (c *wlChild) Kill() {
 // full stream is already in the test log via t.Logf; this is the excerpt that
 // rides the failure message itself.
 const wlTailLines = 40
+
+// TestWlKillTreeReapsAGrandchild pins the reason wlStartVitest puts its child
+// in its own process group.
+//
+// `npm run` is a wrapper: the process the Go side holds is not the one doing
+// the work, and vitest's own worker pool is a further generation down. A kill
+// aimed at cmd.Process alone left every worker alive and reparented to init,
+// spinning on the box for the rest of the suite. This drives the exact shape
+// with a shell standing in for npm: the parent exits immediately, and only a
+// group-wide kill can reach the grandchild it left behind.
+func TestWlKillTreeReapsAGrandchild(t *testing.T) {
+	t.Parallel()
+	// Arrange: a shell that spawns a long-lived grandchild, writes its pid,
+	// and waits — the npm/vitest shape.
+	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
+	cmd := exec.Command("/bin/sh", "-c",
+		fmt.Sprintf("sleep 600 & echo $! > %s; wait", pidFile))
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the stand-in child: %v", err)
+	}
+	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
+	go func() { child.done <- cmd.Wait() }()
+
+	grandchild := wlAwaitPidFile(t, pidFile)
+	if err := syscall.Kill(grandchild, 0); err != nil {
+		t.Fatalf("the grandchild %d is not running before the kill: %v", grandchild, err)
+	}
+
+	// Act.
+	child.killTree()
+
+	// Assert: the grandchild is gone, not merely its parent.
+	deadline := time.Now().Add(DefaultTimeout)
+	for {
+		if err := syscall.Kill(grandchild, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(grandchild, syscall.SIGKILL)
+			t.Fatalf("the grandchild %d survived killTree for %s; the kill reached the parent only", grandchild, DefaultTimeout)
+		}
+		time.Sleep(pollInterval)
+	}
+}
+
+// wlAwaitPidFile reads the pid the stand-in child wrote, polling a file the
+// child creates rather than sleeping for a fixed guess at its startup.
+func wlAwaitPidFile(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(DefaultTimeout)
+	for {
+		body, err := os.ReadFile(path)
+		if err == nil {
+			if pid, convErr := strconv.Atoi(strings.TrimSpace(string(body))); convErr == nil && pid > 0 {
+				return pid
+			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the stand-in child never wrote its grandchild's pid to %s within %s", path, DefaultTimeout)
+		}
+		time.Sleep(pollInterval)
+	}
+}
