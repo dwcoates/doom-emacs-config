@@ -263,3 +263,75 @@ func TestUnnamedGrepScopeStaysUnsetRatherThanInvented(t *testing.T) {
 		t.Fatal("absent filters must stay UNSET, which is different from a filter matching everything")
 	}
 }
+
+// A sandbox the vendor reported AS ENABLED is stated too, not merely inferred
+// from the absence of a disable. The three states — sandboxed, disabled, and
+// unreported — are what a consent reader has to be able to tell apart.
+func TestTheReportedSandboxStateIsCarriedThrough(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  func(*conversationv1.AgentBashCommand) bool
+	}{
+		{
+			name:  "the vendor reported the sandbox on",
+			input: `{"command":"ls","sandbox":true}`,
+			want:  func(c *conversationv1.AgentBashCommand) bool { return c.GetSandboxed() != nil },
+		},
+		{
+			name:  "the vendor reported the sandbox off",
+			input: `{"command":"ls","sandbox":false}`,
+			want:  func(c *conversationv1.AgentBashCommand) bool { return c.GetSandboxDisabled() != nil },
+		},
+		{
+			name:  "the vendor wrote something that is not a bool",
+			input: `{"command":"ls","sandbox":"maybe"}`,
+			want:  func(c *conversationv1.AgentBashCommand) bool { return c.GetSandbox() == nil },
+		},
+		{
+			name:  "an explicit disable overrides a reported sandbox",
+			input: `{"command":"ls","sandbox":true,"dangerouslyDisableSandbox":true}`,
+			want:  func(c *conversationv1.AgentBashCommand) bool { return c.GetSandboxDisabled() != nil },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+
+			// Act.
+			entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+				toolCall("toolu_b", "Bash", tc.input)))
+
+			// Assert.
+			command := activityOf(entryByKey(t, entries, ActivityKey("toolu_b"))).GetBash().GetStart().GetCommand()
+			if !tc.want(command) {
+				t.Fatalf("sandbox arm = %v, which is not what the vendor reported", command.GetSandbox())
+			}
+		})
+	}
+}
+
+// An Artifact LISTING reads its own fields and ignores the publish's, which is
+// exactly why the two are exclusive arms rather than one flat message.
+func TestAnArtifactListingLandsOnTheListArmWithItsOwnFields(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+
+	// Act.
+	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1,
+		toolCall("toolu_a", "Artifact", `{"action":"list","limit":25,"scope":"shared"}`)))
+
+	// Assert.
+	start := activityOf(entryByKey(t, entries, ActivityKey("toolu_a"))).GetArtifact().GetStart()
+	listing := start.GetList()
+	if listing == nil {
+		t.Fatalf("a list action landed on %v, not the list arm", start.GetAct())
+	}
+	if listing.GetLimit() != 25 {
+		t.Fatalf("limit = %d, want 25", listing.GetLimit())
+	}
+	if listing.GetScope() != "shared" {
+		t.Fatalf("scope = %q, want %q", listing.GetScope(), "shared")
+	}
+}
