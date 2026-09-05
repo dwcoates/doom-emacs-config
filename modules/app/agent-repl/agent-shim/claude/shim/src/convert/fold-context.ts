@@ -15,12 +15,12 @@
  */
 import { bindLog } from "../log.js";
 import type { conversationv1 } from "../proto.js";
-import type { FoldContext } from "../engine/fold-context.js";
+import type { FoldContext, LastChange } from "../engine/fold-context.js";
 import { subagentId } from "./ids.js";
 
 const LOGGER = bindLog({ component: "shim-convert-context", operation: "shim.convert.context" });
 
-export type { FoldContext };
+export type { FoldContext, LastChange };
 
 /** What kind of ask the engine's permission gate is holding open for a call. */
 export interface PendingAsk {
