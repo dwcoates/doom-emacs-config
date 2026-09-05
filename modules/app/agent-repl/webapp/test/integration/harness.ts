@@ -528,38 +528,92 @@ async function mountApp(
    * observable thing a test asserts on, and never sleeps a fixed interval.
    */
   /**
-   * The markup, with THE CLOCKS MASKED.
+   * DID THE DOM MOVE THIS ROUND? — answered by observation, not by comparison.
    *
+   * This used to clone `document.body` and serialize it to markup once per
+   * settle round, then diff the two strings. That is O(the whole page) on
+   * every round of every settle: profiled across the suite it was 6.8ms a
+   * round and HALF of all time the integration tests spent, because a page
+   * with a long feed is serialized dozens of times to answer a question about
+   * whether anything changed.
+   *
+   * A `MutationObserver` answers the same question at O(the changes), which
+   * is usually zero. It is also STRICTLY MORE PRECISE than the markup diff:
+   * two edits that cancel out within one round (a row removed and re-added,
+   * an attribute toggled and restored) serialize identically but are
+   * genuinely a page still moving, and the observer sees them.
+   *
+   * THE CLOCKS ARE MASKED, exactly as the markup diff masked them.
    * `shouldAdvanceTime` is on, so real seconds pass while `settle()` drains —
    * and a page holding a ticking row (a permission's "waiting 0s", a tool
    * call's "quiet for N", a cold gate's lapse) rewrites that one string every
-   * real second. Under load a drain round can take longer than the gap between
-   * two ticks, and a settle that compares raw markup then never sees four quiet
-   * rounds in a row and fails a page that is in fact idle.
+   * real second. Under load a drain round can take longer than the gap
+   * between two ticks, and a settle that counted those would never see four
+   * quiet rounds in a row and would fail a page that is in fact idle.
    *
    * Every such element marks itself `data-ticking` (src/feed/ticking.ts), so
-   * their text is blanked in the comparison and nowhere else: a test that
-   * asserts a clock moved still reads the live DOM, and any OTHER change — a
-   * redraw, a new row, an attribute — still counts as the DOM moving.
+   * a record that only rewrites the TEXT inside one is dropped — and nothing
+   * else is. A test that asserts a clock moved still reads the live DOM, and
+   * any OTHER change (a redraw, a new row, an attribute, the ticking element
+   * itself appearing or leaving) still counts as the DOM moving.
    */
-  const quietMarkup = (): string => {
-    const clone = document.body.cloneNode(true) as HTMLElement;
-    for (const clock of clone.querySelectorAll("[data-ticking]")) clock.textContent = "";
-    return clone.innerHTML;
+  const isTickingText = (record: MutationRecord): boolean => {
+    const host = ((): Element | null => {
+      const { target } = record;
+      return target.nodeType === Node.ELEMENT_NODE
+        ? (target as Element)
+        : target.parentElement;
+    })();
+    if (host === null || host.closest("[data-ticking]") === null) return false;
+    if (record.type === "characterData") return true;
+    // A ticking row usually rewrites its label by REPLACING the text node
+    // rather than editing it, which arrives as a childList record whose added
+    // and removed nodes are all text. Anything structural is not that.
+    if (record.type !== "childList") return false;
+    const isText = (node: Node): boolean => node.nodeType === Node.TEXT_NODE;
+    return [...record.addedNodes].every(isText) && [...record.removedNodes].every(isText);
+  };
+
+  let moved = false;
+  const observer = new MutationObserver((records) => {
+    if (!moved && records.some((record) => !isTickingText(record))) moved = true;
+  });
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: true,
+  });
+  // NOT pushed onto `handles`: those are disposed by `disposeMounts()`, which
+  // then settles to observe what the app's own teardown does. The observer has
+  // to still be watching for that, so it is disconnected only by `stop()`.
+
+  /**
+   * Whether the page moved since the last call, clearing the flag.
+   *
+   * `takeRecords()` drains what the observer has queued but not yet delivered,
+   * so a round never reads a change the NEXT round would have been told about.
+   */
+  const pageMoved = (): boolean => {
+    const pending = observer.takeRecords();
+    const changed = moved || pending.some((record) => !isTickingText(record));
+    moved = false;
+    return changed;
   };
 
   const settle = async (): Promise<void> => {
-    let previous = "";
+    // The flag is cleared before the first round so a change that landed
+    // BEFORE this settle was called (the mount's own drawing, a push the
+    // previous assertion already read) does not count against this one.
+    pageMoved();
     let stable = 0;
     for (let round = 0; round < SETTLE_ROUND_CAP; round += 1) {
       await vi.advanceTimersByTimeAsync(0);
       await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
-      const current = quietMarkup();
       // An unanswered request is a change that has not happened YET, so a
       // quiet DOM with one outstanding is not settled — it is early.
-      stable = current === previous && inFlight.count === 0 ? stable + 1 : 0;
-      previous = current;
+      stable = !pageMoved() && inFlight.count === 0 ? stable + 1 : 0;
       if (stable >= SETTLE_STABLE_ROUNDS) return;
     }
     // NON-CONVERGENCE IS A FAULT, NEVER A QUIET RETURN. A settle that gave up
@@ -610,6 +664,7 @@ async function mountApp(
       // which is a dependency between tests and not a fact about the app.
       // The page's claim on the turns IT submitted dies with the page, the
       // same way it does on a reload (R14: nothing is persisted).
+      observer.disconnect();
       forgetOwnTurns();
       try {
         window.localStorage.clear();
