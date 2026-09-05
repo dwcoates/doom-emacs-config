@@ -96,6 +96,43 @@ the run that produced each number, and a bound that creeps back up without a
 new measurement behind it is exactly the kind of unexamined slack this table
 exists to prevent.
 
+### The scenario coverage matrix is generated, never hand-edited
+
+`e2e/SCENARIO-MATRIX.md` is the inventory of which mocked-vendor scenarios
+have e2e coverage, and people plan work from it. It was hand-maintained until
+it was caught lying in both directions on one day — twelve `!api-*` rows
+reading `uncovered` while a single file drove every one of them, twenty
+session and tool rows reading `uncovered` with strong tests already behind
+nineteen, its own summary counts disagreeing with its own table, and section
+(c) disagreeing with section (a). Two agents nearly wrote duplicate tests off
+it.
+
+So it is now derived and enforced by `e2e/scenariomatrix_test.go`
+(`TestScenarioMatrixMatchesReality`), which runs with the e2e package, spawns
+nothing and drives no scenario:
+
+```bash
+AGENT_REPL_MATRIX_WRITE=1 go test ./e2e -run TestScenarioMatrixMatchesReality
+```
+
+- The canonical scenario list comes from `src/fake/scenarios/*.ts`,
+  cross-checked against the registry-generated prompt table in the shim's
+  AGENTS.md. Add or rename a scenario and the check fails until the matrix
+  follows.
+- Which test drives which scenario comes from the tests, by the vendor's own
+  `selectScenario` rule over their string literals plus the bare-name drive
+  helpers. An argument shape the extractor cannot read FAILS rather than
+  counting as zero.
+- A `!name` literal in a counted layer that names no registered scenario is a
+  dead trigger and fails the check.
+- The counts and the uncovered/weak lists are computed from the table.
+
+What it deliberately does not decide: whether an assertion is STRONG or WEAK.
+That is a reading of the test body, so the `Grounded?` and
+`Strongest assertion` columns and the covered-vs-weak choice stay
+hand-written, and a newly-derived row defaults to `weak` with a TODO for a
+human to raise.
+
 ### What a scenario is allowed to spend time on
 
 The bounds above are ceilings on failure. These are the rules about what a
