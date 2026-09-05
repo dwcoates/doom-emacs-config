@@ -11,6 +11,11 @@
 ;; Every scenario here is self-contained: it runs two consecutive fixtures in
 ;; one test and asserts across them, so the guarantee is pinned without any
 ;; dependence on the order ERT happens to run tests in.
+;;
+;; The harness's own CONTROL-PLANE CLIENT is pinned here too, for the same
+;; reason: every scenario in every integration suite reaches the fake through
+;; it, so a response it decodes wrongly would misreport what the fake saw
+;; rather than fail.
 
 ;;; Code:
 
@@ -149,6 +154,77 @@ primary re-publishes its own address on the way out of the handover."
   (agent-repl-itest--with-fake-daemon daemon
     (should (equal (agent-repl-connect-read-daemon-addr)
                    (agent-repl-itest-daemon-address daemon)))))
+
+;;;; ---- The control-plane client ----
+;;
+;; `agent-repl-itest--control' speaks HTTP/1.1 over a native loopback socket
+;; instead of spawning `curl'.  These pin the response decoding, which `curl'
+;; used to do on the harness's behalf.
+
+(ert-deftest agent-repl-itest-fixture-control-reads-a-content-length-body ()
+  "A response framed by `Content-Length' decodes to its status and payload."
+  ;; Arrange.
+  (let ((raw (concat "HTTP/1.1 200 OK\r\n"
+                     "Content-Type: application/json\r\n"
+                     "Content-Length: 9\r\n\r\n"
+                     "{\"ok\":1}\n")))
+    ;; Act.
+    (let ((answer (agent-repl-itest--http-read-body raw "/_fake/probe")))
+      ;; Assert.
+      (should (equal (car answer) 200))
+      (should (equal (string-trim (cdr answer)) "{\"ok\":1}")))))
+
+(ert-deftest agent-repl-itest-fixture-control-reads-a-chunked-body ()
+  "A response framed by `Transfer-Encoding: chunked' is de-chunked.
+Go picks the framing by how the handler wrote its answer, so the client
+cannot assume one."
+  ;; Arrange.
+  (let ((raw (concat "HTTP/1.1 200 OK\r\n"
+                     "Transfer-Encoding: chunked\r\n\r\n"
+                     "4\r\n{\"ok\r\n"
+                     "4\r\n\":1}\r\n"
+                     "0\r\n\r\n")))
+    ;; Act.
+    (let ((answer (agent-repl-itest--http-read-body raw "/_fake/probe")))
+      ;; Assert.
+      (should (equal (cdr answer) "{\"ok\":1}")))))
+
+(ert-deftest agent-repl-itest-fixture-control-carries-a-non-200-status ()
+  "A refusal's status reaches the caller rather than being read as success.
+Several scenarios assert on a deliberate 400."
+  ;; Arrange.
+  (let ((raw "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"))
+    ;; Act / Assert.
+    (should (equal (car (agent-repl-itest--http-read-body raw "/_fake/probe")) 400))))
+
+(ert-deftest agent-repl-itest-fixture-control-refuses-a-headerless-answer ()
+  "An answer with no complete header block signals instead of decoding.
+A truncated read that silently produced `nil' would look to every caller
+like a fake that answered nothing."
+  ;; Arrange.
+  (let ((raw "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"))
+    ;; Act / Assert.
+    (should-error (agent-repl-itest--http-read-body raw "/_fake/probe"))))
+
+(ert-deftest agent-repl-itest-fixture-control-round-trips-against-the-fake ()
+  "A real control call reaches the fake and its parsed body comes back.
+`/_fake/reset' answers the counts it cleared, so a decoded `calls' key is
+the fake's own answer and not an echo of the request."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-fixture--register daemon)
+    (let ((answer (agent-repl-itest--control daemon "/_fake/reset" "{}")))
+      ;; Assert.
+      (should (equal (car answer) 200))
+      (should (equal (alist-get 'calls (cdr answer)) 1)))))
+
+(ert-deftest agent-repl-itest-fixture-control-round-trips-a-refusal ()
+  "A control call the fake refuses comes back as its status, not an error."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((answer (agent-repl-itest--control daemon "/_fake/reset" "{\"nope\":true}")))
+      ;; Assert.
+      (should (equal (car answer) 400)))))
 
 (provide 'test-integration-fixture)
 ;;; test-integration-fixture.el ends here

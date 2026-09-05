@@ -270,13 +270,87 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
     (ignore-errors (delete-directory (agent-repl-itest-daemon-state-dir daemon) t))))
 
 ;;;; ---- The control plane ----
+;;
+;; The control plane rides a NATIVE loopback socket rather than a `curl'
+;; child.  It is called several times by every scenario -- twice by the reset
+;; alone, then once per turn of every `--await-*' poll -- and a process spawn
+;; per call was measurably the largest single cost in the integration run
+;; (471 calls, 3.3s of a 9.4s roster run).  A `make-network-process' to
+;; 127.0.0.1 costs microseconds and pulls one more external binary out of the
+;; harness besides; production's own transport still spawns `curl', through
+;; `agent-repl-connect--spawn-curl', and that is the boundary the suite
+;; deliberately runs for real.
 
-(defun agent-repl-itest--curl-program ()
-  "Return `curl', which the control plane rides.
-This is the TEST's own use of curl, not production's: production reaches
-curl only through `agent-repl-connect--spawn-curl'."
-  (or (executable-find "curl")
-      (error "agent-repl-itest: no `curl' on PATH — the control plane needs it")))
+(defun agent-repl-itest--http-read-body (raw path)
+  "Return the status and payload of RAW, one whole HTTP/1.1 response.
+PATH names the request in any failure message.  Handles both a
+`Content-Length' body and a `Transfer-Encoding: chunked' one, because the
+Go server picks between them by how the handler wrote its answer."
+  (let ((split (string-search "\r\n\r\n" raw)))
+    (unless split
+      (error "agent-repl-itest: %s answered with no complete header block: %S" path raw))
+    (let* ((head (substring raw 0 split))
+           (payload (substring raw (+ split 4)))
+           (status (if (string-match "\\`HTTP/1\\.[01] \\([0-9]+\\)" head)
+                       (string-to-number (match-string 1 head))
+                     (error "agent-repl-itest: %s answered with no status line: %S" path head))))
+      (when (string-match-p "^[Tt]ransfer-[Ee]ncoding:[ \t]*chunked" head)
+        (setq payload (agent-repl-itest--http-dechunk payload path)))
+      (cons status payload))))
+
+(defun agent-repl-itest--http-dechunk (payload path)
+  "Return PAYLOAD with its HTTP chunked framing removed.
+PATH names the request in any failure message."
+  (let ((out "")
+        (pos 0))
+    (catch 'agent-repl-itest--dechunked
+      (while t
+        (let ((eol (string-search "\r\n" payload pos)))
+          (unless eol
+            (error "agent-repl-itest: %s answered with a truncated chunk header" path))
+          (let ((size (string-to-number (substring payload pos eol) 16)))
+            (when (zerop size)
+              (throw 'agent-repl-itest--dechunked out))
+            (setq out (concat out (substring payload (+ eol 2) (+ eol 2 size)))
+                  ;; past the chunk and its trailing CRLF
+                  pos (+ eol 2 size 2))))))))
+
+(defun agent-repl-itest--http-request (address path body)
+  "Send one HTTP/1.1 request for PATH at ADDRESS and return (STATUS . PAYLOAD).
+With BODY (a string) the request is a POST, otherwise a GET.  The request
+asks for `Connection: close', so the whole answer is exactly what arrives
+before end-of-file and no response framing has to be guessed at."
+  (let* ((host-port (split-string address ":"))
+         (host (car host-port))
+         (port (string-to-number (cadr host-port)))
+         (chunks nil)
+         (proc (make-network-process
+                :name "agent-repl-itest-control"
+                :host host :service port
+                :coding 'binary :noquery t
+                :filter (lambda (_p text) (push text chunks)))))
+    (unwind-protect
+        (progn
+          (process-send-string
+           proc
+           (concat (if body "POST " "GET ") path " HTTP/1.1\r\n"
+                   "Host: " address "\r\n"
+                   "Connection: close\r\n"
+                   (if body
+                       (concat "Content-Type: application/json\r\n"
+                               "Content-Length: "
+                               (number-to-string (string-bytes body)) "\r\n")
+                     "")
+                   "\r\n"
+                   (or body "")))
+          ;; The server closes once it has answered, so the sentinel-free wait
+          ;; is simply "until the process is no longer open".
+          (while (process-live-p proc)
+            (accept-process-output proc 1))
+          (agent-repl-itest--http-read-body
+           (decode-coding-string (apply #'concat (nreverse chunks)) 'utf-8)
+           path))
+      (when (process-live-p proc) (delete-process proc)))))
 
 (defun agent-repl-itest--control (daemon path &optional body)
   "Call DAEMON's control-plane PATH and return (STATUS . PARSED).
@@ -285,28 +359,16 @@ is the HTTP status as an integer and PARSED the decoded JSON body (an
 alist with symbol keys, `list' arrays), or the raw string when the body
 is not JSON.  A non-2xx status is returned rather than signalled: several
 scenarios assert on a deliberate 400."
-  (let* ((curl (agent-repl-itest--curl-program))
-         (url (format "http://%s%s" (agent-repl-itest-daemon-address daemon) path))
-         (args (append (list "-sS" "--http1.1" "-w" "\n%{http_code}")
-                       (when body (list "-X" "POST" "--data-binary" body))
-                       (list url))))
-    (with-temp-buffer
-      (let ((status (apply #'call-process curl nil t nil args)))
-        (unless (eq status 0)
-          (error "agent-repl-itest: curl failed (exit %s) for %s: %s"
-                 status path (buffer-string))))
-      (goto-char (point-max))
-      (forward-line -1)
-      (let* ((http-status (string-to-number (string-trim
-                                             (buffer-substring (point) (point-max)))))
-             (payload (string-trim (buffer-substring (point-min) (point)))))
-        (cons http-status
-              (if (string-empty-p payload)
-                  nil
-                (condition-case nil
-                    (json-parse-string payload :object-type 'alist :array-type 'list
-                                       :null-object :null :false-object :false)
-                  (error payload))))))))
+  (let* ((answer (agent-repl-itest--http-request
+                  (agent-repl-itest-daemon-address daemon) path body))
+         (payload (string-trim (cdr answer))))
+    (cons (car answer)
+          (if (string-empty-p payload)
+              nil
+            (condition-case nil
+                (json-parse-string payload :object-type 'alist :array-type 'list
+                                   :null-object :null :false-object :false)
+              (error payload))))))
 
 (defun agent-repl-itest--control-ok (daemon path &optional body)
   "Call DAEMON's control-plane PATH and return the parsed body, or signal.
