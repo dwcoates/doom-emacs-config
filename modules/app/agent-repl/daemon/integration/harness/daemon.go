@@ -211,12 +211,12 @@ type Daemon struct {
 	client     agentreplv1connect.AgentReplClient
 	http       *http.Client
 
-	mu            sync.Mutex
-	exited        bool
-	exitErr       error
-	waitOnce      sync.Once
-	expected      map[string]bool
-	shims         map[string]*ShimControl
+	mu       sync.Mutex
+	exited   bool
+	exitErr  error
+	waitOnce sync.Once
+	expected map[string]bool
+	shims    map[string]*ShimControl
 }
 
 // installFakeGit copies the scripted `git` into the directory that leads the
