@@ -245,7 +245,7 @@ rather than guessing:
 - `WebappLayerTimeout` was drafted at 60 s and then 20 s on the theory that a
   COLD Vite transform dominated and could not be measured. The theory was
   wrong: the transform is ~400 ms on every run, cache or none (clearing
-  `node_modules/.vite` changes nothing — vitest transforms sources per run),
+  the vite cache changes nothing — vitest transforms sources per run),
   so there was no hidden cold-start term. 10 s, from measurement.
 - The §F7 merge area briefly carried a 15 s "merge chain" bound. That was
   covering a HARNESS FAULT — a missing `AGENT_REPL_TEST_ALL_SCRIPT` made the
