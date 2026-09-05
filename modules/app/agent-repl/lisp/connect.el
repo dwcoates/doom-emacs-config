@@ -96,15 +96,6 @@ and are never timed out here."
   :type 'number
   :group 'agent-repl)
 
-(defcustom agent-repl-connect-dial-timeout-seconds 2
-  "Seconds a connect to the daemon's loopback listener may take to land.
-A loopback connect costs a fraction of a millisecond; this is the
-backstop against a socket that neither completes nor fails, and no
-healthy dial comes near it.  Reaching it is logged at ERROR and reported
-to the caller as a `:transport' failure, never waited out further."
-  :type 'number
-  :group 'agent-repl)
-
 (defconst agent-repl-connect--service-path "/agentrepl.v1.AgentRepl/"
   "Path prefix of every `agentrepl.v1.AgentRepl' rpc.
 The Connect URL of a method is this prefix plus the bare method name.")
@@ -488,70 +479,61 @@ into a generic silence."
 
 (defun agent-repl-connect--open-socket (name host port request filter sentinel)
   "Open a socket to HOST:PORT as process NAME and send REQUEST on it.
-FILTER receives raw response bytes and SENTINEL every status change but
-the connection completing.  Returns the process immediately; the connect
-is non-blocking, so a daemon that is slow or gone never stalls the
-command loop.
+FILTER receives raw response bytes and SENTINEL every status change.
+Returns the process, or nil when the connect never happened at all.
 
 This IS the one external-boundary wrapper of connect.el: every Connect
 exchange, unary or streaming, dials here and nowhere else.  Registered in
 `agent-repl--external-boundary-functions' (core.el) so the batch
 harness's guard fails any test that reaches a real listener.
 
-THE REQUEST IS WRITTEN SYNCHRONOUSLY, IN CALLER ORDER.  The connect is
-non-blocking, but the write is issued before this returns, so two
-exchanges started one after the other reach the daemon in that order —
-which is exactly what a prompt queue replaying its held prompts oldest
-first depends on.  Deferring the write to the `open' event instead would
-hand that ordering to whichever connection the event loop noticed first,
-and the order the user typed in would come out of the transport shuffled.
+THE CONNECT IS BLOCKING, AND THAT IS THE POINT.  The peer is the daemon's
+own loopback listener: connecting to it costs a fraction of a
+millisecond, and it either lands or is refused on the spot -- there is no
+network in between to stall on.  What a non-blocking connect costs
+instead is not latency but RE-ENTRANCY, and that is a correctness
+problem, not a tuning one.  A `:nowait' dial has to wait for the
+connection somewhere before it can write, and every way of waiting --
+`accept-process-output', or the 20ms retry Emacs itself does when the
+write gets EAGAIN -- runs the event loop.  These dials happen INSIDE
+PROCESS FILTERS: daemon-link attaches a successor from the `WatchDaemon'
+filter.  Running the event loop from inside a filter cost the handover
+its `transferred' pushes outright -- the outgoing daemon pushed them, the
+sockets were open, and Emacs never delivered a byte of them, so no
+workspace was ever adopted and the successor was never promoted.
 
-THE CONNECT IS WAITED OUT FIRST, at 1ms, and that wait is not optional
-slack.  Writing to a socket the kernel has not finished connecting gets
-EAGAIN, and Emacs's own answer to EAGAIN is a 20ms sleep before it
-retries — so an immediate write cost ~14ms per exchange, and the whole
-saving of dropping `curl' went straight back into it.  Measured over the
-integration suites: 3.0s to 8.8s on composer, 3.8s to 9.8s on host.
-Waiting for the connection to land costs ~0.3ms on loopback instead, and
-`accept-process-output' keeps serving every other process while it does.
+THE REQUEST IS WRITTEN IN CALLER ORDER, before this returns, so two
+exchanges started one after the other reach the daemon in that order --
+which is what a prompt queue replaying its held prompts oldest first
+depends on.
 
-The wait is bounded by `agent-repl-connect-dial-timeout-seconds' —
-thousands of times a loopback connect's real cost, and there as a
-backstop against a socket that never resolves either way, not as a
-number any healthy dial approaches.
+A connect the kernel refuses, and a write that cannot be issued, are NOT
+swallowed: each is logged at ERROR here and handed to SENTINEL as the
+death it is.
 
-A connect that never lands, and one the kernel refuses on the spot
-\(which is what a dead daemon on loopback does), are both NOT swallowed:
-each is logged at ERROR here and handed to SENTINEL as the death it is.
-
-THEY ARE HANDED OVER ASYNCHRONOUSLY, THOUGH, and deliberately.  Emacs
-runs the sentinel from inside a failing write, so a caller would be told
-its exchange had already failed before this function returned — before
-the stream it is opening exists to be closed, and out of the middle of
-its own constructor.  A death is delivered on the next turn of the event
-loop instead, exactly where every other death arrives from."
-  (let ((process
-         (make-network-process ;; ALLOW-EXTERNAL-BOUNDARY
-          :name name
-          :host host
-          :service port
-          :nowait t
-          :coding 'binary
-          :noquery t
-          :filter filter
-          :sentinel #'ignore))
+THEY ARE HANDED OVER ASYNCHRONOUSLY, THOUGH, and deliberately.  A caller
+told its exchange had already failed before this function returned would
+be answered before the stream it is opening exists to be closed, and out
+of the middle of its own constructor.  A death is delivered on the next
+turn of the event loop instead, exactly where every other death arrives
+from."
+  (let ((process nil)
         (refusal nil))
-    (let ((deadline (+ (float-time) agent-repl-connect-dial-timeout-seconds)))
-      (while (and (eq (process-status process) 'connect)
-                  (< (float-time) deadline))
-        (accept-process-output process 0.001)))
-    (if (eq (process-status process) 'connect)
-        (progn
-          (setq refusal (format "connect to %s:%s did not complete within %ss"
-                                host port agent-repl-connect-dial-timeout-seconds))
-          (agent-repl--error nil "elisp.connect.dial-timeout name=%S host=%S port=%S"
-                             name host port)
-          (agent-repl-connect--close-socket process))
+    (condition-case err
+        (setq process
+              (make-network-process ;; ALLOW-EXTERNAL-BOUNDARY
+               :name name
+               :host host
+               :service port
+               :coding 'binary
+               :noquery t
+               :filter filter
+               :sentinel #'ignore))
+      (error
+       (setq refusal (error-message-string err))
+       (agent-repl--error nil "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
+                          name host port err)))
+    (when process
       (condition-case err
           (process-send-string process request)
         (error
@@ -561,7 +543,7 @@ loop instead, exactly where every other death arrives from."
          (agent-repl-connect--close-socket process))))
     (if (process-live-p process)
         (set-process-sentinel process sentinel)
-      (let ((event (or refusal (format "%s" (process-status process)))))
+      (let ((event (or refusal (format "%s" (and process (process-status process))))))
         (run-at-time 0 nil (lambda () (funcall sentinel process event)))))
     process))
 
