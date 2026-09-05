@@ -26,27 +26,38 @@
 ;;   clean end or `{"error": {"code": ..., "message": ...}}' for a failure.
 ;;   Bit 0x01 (compression) is never negotiated and never expected.
 ;;
-;; HTTP STATUS MECHANISM (the implementer's documented choice, per the
-;; fanout spec §3): `curl -D -' dumps the response header block onto
-;; stdout ahead of the body, and ONE reader state machine
-;; (`agent-repl-connect--reader') consumes that block before handing the
-;; rest through as body bytes.  The same mechanism serves unary and
-;; streaming, so there is one status path rather than two: `-w' would only
-;; work for unary (it prints at completion), and a stream must know its
-;; status the moment the headers land, long before the process exits.
-;; `-H "Expect:"' suppresses curl's 100-continue negotiation so exactly one
-;; header block ever arrives, and no `-L' is passed so no redirect can add
-;; another.
+;; THE SOCKET, NOT A CHILD PROCESS.  Every exchange here rides a native
+;; `make-network-process' to the daemon's loopback listener.  It used to
+;; spawn a `curl' child per call, which cost ~14ms of process setup on
+;; every daemon round trip — user-visible latency in the editor, and the
+;; floor under every Emacs integration suite.  A loopback socket costs
+;; about a millisecond, pulls one more external binary out of the
+;; dependency set, and puts the HTTP/1.1 response framing under this
+;; file's own tests rather than under curl's behavior.
+;;
+;; HTTP RESPONSE READING.  ONE reader state machine
+;; (`agent-repl-connect--reader') consumes the response header block, then
+;; decodes the body under whichever framing the server chose — a
+;; `Content-Length', `Transfer-Encoding: chunked', or a body delimited by
+;; the close.  curl used to do that decoding on the transport's behalf; it
+;; is production code now, and the test harness's own control plane shares
+;; it rather than carrying a second copy that can drift.  The same reader
+;; serves unary and streaming, so there is one status path rather than
+;; two, and a stream knows its status the moment the headers land.
+;;
+;; Every request asks for `Connection: close', so an answer is always
+;; terminated by an end-of-file the sentinel sees, whatever framing the
+;; server picked.
 ;;
 ;; CLOSING, EXACTLY ONCE, IN ONE OF THREE WAYS.  A terminal envelope runs
 ;; ON-CLOSE from the FILTER, the instant the producer said how the stream
-;; ended, and kills curl afterwards — a consumer is never made to wait on
-;; a process exit for a fact it has already been sent.  A client cancel
-;; kills curl and the sentinel reports `(:cancelled)'.  A death with no
-;; terminal envelope is reported by the sentinel as an error.  CLOSED-P
-;; makes the three mutually exclusive and each of them singular, and a
-;; frame arriving after the end frame is logged at WARNING, never
-;; delivered.
+;; ended, and closes the socket afterwards — a consumer is never made to
+;; wait on a socket teardown for a fact it has already been sent.  A
+;; client cancel deletes the socket and the sentinel reports
+;; `(:cancelled)'.  A death with no terminal envelope is reported by the
+;; sentinel as an error.  CLOSED-P makes the three mutually exclusive and
+;; each of them singular, and a frame arriving after the end frame is
+;; logged at WARNING, never delivered.
 ;;
 ;; STANDING-STREAM ACCEPTANCE.  The daemon flushes its response headers on
 ;; accept, so the HTTP 200 header block IS the acceptance of a
@@ -55,11 +66,11 @@
 ;; exposes that instant as its optional ON-OPEN, and daemon-link, host and
 ;; roster key "subscribed" on it rather than on a spawn or a first frame.
 ;;
-;; EVERY process spawn in this file goes through the single boundary
-;; wrapper `agent-repl-connect--spawn-curl', registered in
+;; EVERY socket in this file is opened through the single boundary wrapper
+;; `agent-repl-connect--open-socket', registered in
 ;; `agent-repl--external-boundary-functions' (core.el) so batch tests are
-;; guarded against reaching a real `curl'.  The argv it is handed is built
-;; by the pure `agent-repl-connect--curl-argv'.
+;; guarded against reaching a real listener.  The request bytes it is
+;; handed are built by the pure `agent-repl-connect--request-bytes'.
 
 ;;; Code:
 
@@ -76,13 +87,6 @@
 
 (define-error 'agent-repl-connect-error
   "agent-repl Connect transport failure")
-
-(defcustom agent-repl-connect-curl-program "curl"
-  "Program used to speak HTTP/1.1 to the daemon.
-The default resolves `curl' on `exec-path'.  Set to an absolute path when
-the ambient `curl' is not the one that should be used."
-  :type 'string
-  :group 'agent-repl)
 
 (defcustom agent-repl-connect-unary-timeout-seconds 10
   "Seconds a unary Connect call may run before it is failed as timed out.
@@ -154,9 +158,10 @@ at ERROR and signals `agent-repl-connect-error'."
 (cl-defun agent-repl-connect--failure (kind message &key code status)
   "Return the failure plist handed to ON-FAILURE / ON-CLOSE `(:error D)'.
 KIND is the transport-level classification keyword: `:http' (the daemon
-answered with a non-200 and a Connect error body), `:transport' (curl
-could not complete the exchange), `:timeout', `:malformed' (a 200 whose
-body is not the JSON it must be), `:malformed-addr', or `:no-end-frame'
+answered with a non-200 and a Connect error body), `:transport' (the
+socket could not carry the exchange through), `:timeout', `:malformed'
+\(a 200 whose body is not the JSON it must be), `:malformed-addr', or
+`:no-end-frame'
 \(the producer closed a stream without its terminal envelope).  MESSAGE is
 the human-facing text.  CODE is the Connect error code string when the
 daemon supplied one; STATUS is the HTTP status when one was read."
@@ -266,109 +271,292 @@ both handled.  Frames come back in arrival order."
 (cl-defstruct (agent-repl-connect--reader
                (:constructor agent-repl-connect--reader-create)
                (:copier nil))
-  "State machine consuming curl's `-D -' header block ahead of the body.
+  "State machine consuming one HTTP/1.1 response off the wire.
 PHASE is `:headers' until the blank line separating the header block from
-the body has been seen, `:body' thereafter.  PENDING holds the header
-bytes accumulated so far.  STATUS is the parsed HTTP status integer, nil
-while it is still unknown."
+the body has been seen, `:body' while the body is arriving, and `:done'
+once the body is whole.  PENDING holds the bytes received that do not yet
+form anything deliverable.  STATUS is the parsed HTTP status integer, nil
+while it is still unknown.
+
+FRAMING is how the server said the body ends — `:length' (a
+`Content-Length'), `:chunked' (a `Transfer-Encoding: chunked'), or
+`:until-close' (neither, so the close IS the end).  REMAINING counts the
+`:length' bytes still owed.  COMPLETE-P is set the moment the body is
+whole, which is what lets a caller answer without waiting on the socket
+teardown.  BREACH holds the text of a framing violation — a chunk header
+that is not a hexadecimal length — so the exchange fails loudly with its
+own reason instead of decoding garbage."
   (phase :headers)
   (pending "")
-  (status nil))
+  (status nil)
+  (framing nil)
+  (remaining nil)
+  (complete-p nil)
+  (breach nil))
 
 (defun agent-repl-connect--parse-status-line (block)
   "Return the HTTP status integer of header BLOCK, or nil when unparsable."
   (when (string-match "\\`HTTP/[0-9.]+ +\\([0-9]\\{3\\}\\)" block)
     (string-to-number (match-string 1 block))))
 
+(defun agent-repl-connect--reader-read-head (reader block)
+  "Record the status line and the body framing named by header BLOCK.
+`Transfer-Encoding: chunked' outranks a `Content-Length', per RFC 9112 —
+a server that sends both is chunking.  Neither header means the body is
+delimited by the close, which is what a `Connection: close' answer with
+no length looks like."
+  (setf (agent-repl-connect--reader-status reader)
+        (agent-repl-connect--parse-status-line block))
+  (cond
+   ((string-match-p "^[Tt]ransfer-[Ee]ncoding:[ \t]*chunked" block)
+    (setf (agent-repl-connect--reader-framing reader) :chunked))
+   ((string-match "^[Cc]ontent-[Ll]ength:[ \t]*\\([0-9]+\\)" block)
+    (setf (agent-repl-connect--reader-framing reader) :length
+          (agent-repl-connect--reader-remaining reader)
+          (string-to-number (match-string 1 block)))
+    (when (zerop (agent-repl-connect--reader-remaining reader))
+      (setf (agent-repl-connect--reader-complete-p reader) t
+            (agent-repl-connect--reader-phase reader) :done)))
+   (t (setf (agent-repl-connect--reader-framing reader) :until-close))))
+
+(defun agent-repl-connect--reader-dechunk (reader)
+  "Consume every whole chunk in READER's pending bytes and return their payload.
+A partial chunk stays pending for the next feed.  The terminal `0' chunk
+ends the body; its trailers, which this protocol never sends, are
+discarded with it.  A chunk header that is not a hexadecimal length is
+recorded as a BREACH rather than guessed at."
+  (let ((out "")
+        (done nil))
+    (while (not done)
+      (let* ((pending (agent-repl-connect--reader-pending reader))
+             (eol (string-search "\r\n" pending)))
+        (if (null eol)
+            (setq done t)
+          (let* ((header (substring pending 0 eol))
+                 (semicolon (string-search ";" header))
+                 (size-text (if semicolon (substring header 0 semicolon) header)))
+            (cond
+             ((not (string-match-p "\\`[0-9A-Fa-f]+\\'" size-text))
+              (setf (agent-repl-connect--reader-breach reader)
+                    (format "unreadable chunk header %S" size-text)
+                    (agent-repl-connect--reader-phase reader) :done
+                    (agent-repl-connect--reader-pending reader) "")
+              (setq done t))
+             ((zerop (string-to-number size-text 16))
+              (setf (agent-repl-connect--reader-pending reader) ""
+                    (agent-repl-connect--reader-complete-p reader) t
+                    (agent-repl-connect--reader-phase reader) :done)
+              (setq done t))
+             (t
+              (let ((size (string-to-number size-text 16)))
+                (if (< (length pending) (+ eol 2 size 2))
+                    (setq done t)
+                  (setq out (concat out (substring pending (+ eol 2) (+ eol 2 size))))
+                  (setf (agent-repl-connect--reader-pending reader)
+                        (substring pending (+ eol 2 size 2)))))))))))
+    out))
+
+(defun agent-repl-connect--reader-decode (reader)
+  "Return the body bytes READER's framing lets it release from PENDING now."
+  (pcase (agent-repl-connect--reader-framing reader)
+    (:chunked (agent-repl-connect--reader-dechunk reader))
+    (:length
+     (let* ((pending (agent-repl-connect--reader-pending reader))
+            (take (min (length pending) (agent-repl-connect--reader-remaining reader)))
+            (out (substring pending 0 take)))
+       (setf (agent-repl-connect--reader-pending reader) (substring pending take)
+             (agent-repl-connect--reader-remaining reader)
+             (- (agent-repl-connect--reader-remaining reader) take))
+       (when (zerop (agent-repl-connect--reader-remaining reader))
+         (setf (agent-repl-connect--reader-complete-p reader) t
+               (agent-repl-connect--reader-phase reader) :done))
+       out))
+    (_
+     (let ((out (agent-repl-connect--reader-pending reader)))
+       (setf (agent-repl-connect--reader-pending reader) "")
+       out))))
+
+(defun agent-repl-connect--reader-truncated-p (reader)
+  "Return non-nil when READER's body was cut short by an end-of-file.
+Only a body whose framing DECLARED its length can be found short: a body
+delimited by the close ends exactly when the close arrives."
+  (and (memq (agent-repl-connect--reader-framing reader) '(:length :chunked))
+       (not (agent-repl-connect--reader-complete-p reader))))
+
 (defun agent-repl-connect--reader-feed (reader chunk)
   "Feed CHUNK into READER and return the BODY bytes it newly exposes.
 While the header block is still arriving this returns the empty string and
-records nothing but progress; the call that completes the block parses the
-status line and returns whatever body bytes trailed it in the same chunk."
-  (if (eq (agent-repl-connect--reader-phase reader) :body)
-      chunk
-    (let ((pending (concat (agent-repl-connect--reader-pending reader) chunk)))
-      (setf (agent-repl-connect--reader-pending reader) pending)
-      (let ((separator (cond ((string-match "\r\n\r\n" pending) (match-end 0))
-                             ((string-match "\n\n" pending) (match-end 0)))))
-        (if (not separator)
-            ""
-          (let ((block (substring pending 0 separator)))
-            (setf (agent-repl-connect--reader-status reader)
-                  (agent-repl-connect--parse-status-line block))
-            (setf (agent-repl-connect--reader-phase reader) :body)
-            (setf (agent-repl-connect--reader-pending reader) "")
-            (substring pending separator)))))))
+records nothing but progress; the call that completes the block reads the
+status line and the framing, and returns whatever body bytes the framing
+lets it release from the same chunk.  Bytes arriving after a whole body
+are not part of it and are dropped."
+  (pcase (agent-repl-connect--reader-phase reader)
+    (:done "")
+    (:body
+     (setf (agent-repl-connect--reader-pending reader)
+           (concat (agent-repl-connect--reader-pending reader) chunk))
+     (agent-repl-connect--reader-decode reader))
+    (_
+     (let ((pending (concat (agent-repl-connect--reader-pending reader) chunk)))
+       (setf (agent-repl-connect--reader-pending reader) pending)
+       (let ((separator (cond ((string-match "\r\n\r\n" pending) (match-end 0))
+                              ((string-match "\n\n" pending) (match-end 0)))))
+         (if (not separator)
+             ""
+           (let ((block (substring pending 0 separator)))
+             (setf (agent-repl-connect--reader-pending reader)
+                   (substring pending separator)
+                   (agent-repl-connect--reader-phase reader) :body)
+             (agent-repl-connect--reader-read-head reader block)
+             (if (eq (agent-repl-connect--reader-phase reader) :done)
+                 ""
+               (agent-repl-connect--reader-decode reader)))))))))
 
-;;;; ---- argv (pure) and the ONE spawn boundary ----
+;;;; ---- The request (pure) and the ONE socket boundary ----
 
-(defun agent-repl-connect--method-url (address method)
-  "Return the Connect URL of METHOD on the daemon at ADDRESS."
-  (concat "http://" address agent-repl-connect--service-path method))
+(defun agent-repl-connect--method-path (method)
+  "Return the request-target path of METHOD on the daemon."
+  (concat agent-repl-connect--service-path method))
 
-(defun agent-repl-connect--curl-argv (address method content-type body-file)
-  "Return curl's argv for a Connect POST of BODY-FILE to METHOD at ADDRESS.
+(defun agent-repl-connect--split-address (address)
+  "Return the cons `(HOST . PORT)' of the `HOST:PORT' string ADDRESS.
+A bracketed IPv6 literal loses its brackets, which is the spelling
+`make-network-process' wants.  ADDRESS has already been validated by
+`agent-repl-connect-open'; an unsplittable one signals rather than
+dialing something else."
+  (cond
+   ((and (stringp address) (string-match "\\`\\[\\([^]]+\\)\\]:\\([0-9]+\\)\\'" address))
+    (cons (match-string 1 address) (string-to-number (match-string 2 address))))
+   ((and (stringp address) (string-match "\\`\\(.+\\):\\([0-9]+\\)\\'" address))
+    (cons (match-string 1 address) (string-to-number (match-string 2 address))))
+   (t
+    (agent-repl--error nil "elisp.connect.unsplittable-address address=%S" address)
+    (signal 'agent-repl-connect-error
+            (list (agent-repl-connect--failure
+                   :malformed-addr
+                   (format "unsplittable daemon address: %S" address)))))))
+
+(defun agent-repl-connect--request-bytes (address method content-type body)
+  "Return the whole HTTP/1.1 POST of BODY to METHOD at ADDRESS as unibyte bytes.
 CONTENT-TYPE selects unary protojson or the streaming envelope framing.
-Pure: it composes strings and touches nothing.  `--http1.1' pins the
-transport the daemon's listener shares with the webapp assets, `-sS'
-silences progress while keeping errors on stderr, `--no-buffer' is what
-makes a server stream arrive frame by frame instead of at exit, and
-`-D -' puts the response header block on stdout so the status is readable
-before any body byte."
-  (list "--http1.1" "-sS" "--no-buffer" "-D" "-"
-        "-X" "POST"
-        "-H" (concat "Content-Type: " content-type)
-        "-H" "Connect-Protocol-Version: 1"
-        "-H" "Expect:"
-        "--data-binary" (concat "@" body-file)
-        (agent-repl-connect--method-url address method)))
+BODY is ALREADY ENCODED — UTF-8 for a unary protojson body, the framed
+envelope for a stream — and its byte length is what `Content-Length'
+carries, so no request size or byte value can be mangled.  Pure: it
+composes bytes and touches nothing.
 
-(defun agent-repl-connect--spawn-curl (name args filter sentinel stderr-buffer)
-  "Start `agent-repl-connect-curl-program' with ARGS as process NAME.
-FILTER receives raw stdout bytes, SENTINEL the exit event, STDERR-BUFFER
-curl's diagnostics.
+`Connection: close' is asked for on every exchange so an answer always
+ends in an end-of-file the sentinel sees, whichever body framing the
+server picks."
+  (concat
+   (encode-coding-string
+    (concat "POST " (agent-repl-connect--method-path method) " HTTP/1.1\r\n"
+            "Host: " address "\r\n"
+            "Content-Type: " content-type "\r\n"
+            "Connect-Protocol-Version: 1\r\n"
+            "Content-Length: " (number-to-string (length body)) "\r\n"
+            "Connection: close\r\n"
+            "\r\n")
+    'utf-8 t)
+   body))
+
+(defun agent-repl-connect--transport-message (method address event)
+  "Return the text of a socket that ended METHOD without an HTTP answer.
+EVENT is the process sentinel's own event string — `failed with code 61
+\(Connection refused)' for a connection that never landed, `connection
+broken by remote peer' for a peer that hung up before answering.  It is
+the socket's counterpart of curl's stderr and rides along verbatim, so a
+refused daemon still names its own reason rather than being flattened
+into a generic silence."
+  (let ((detail (string-trim (or event ""))))
+    (if (string-empty-p detail)
+        (format "%s: no HTTP response from %s" method address)
+      (format "%s: no HTTP response from %s (%s)" method address detail))))
+
+(defun agent-repl-connect--close-socket (process)
+  "Delete PROCESS when it is still live, tolerating one already gone."
+  (when (process-live-p process)
+    (delete-process process)))
+
+(defun agent-repl-connect--open-socket (name host port request filter sentinel)
+  "Open a socket to HOST:PORT as process NAME and send REQUEST on it.
+FILTER receives raw response bytes and SENTINEL every status change.
+Returns the process, or nil when the connect never happened at all.
 
 This IS the one external-boundary wrapper of connect.el: every Connect
-exchange, unary or streaming, is spawned here and nowhere else.
-Registered in `agent-repl--external-boundary-functions' (core.el) so the
-batch harness's guard fails any test that reaches a real `curl'."
-  (make-process :name name
-                :command (cons agent-repl-connect-curl-program args) ;; ALLOW-EXTERNAL-BOUNDARY
-                :connection-type 'pipe
-                :coding 'no-conversion
-                :noquery t
-                :filter filter
-                :sentinel sentinel
-                :stderr stderr-buffer))
+exchange, unary or streaming, dials here and nowhere else.  Registered in
+`agent-repl--external-boundary-functions' (core.el) so the batch
+harness's guard fails any test that reaches a real listener.
 
-(defun agent-repl-connect--write-body-file (bytes)
-  "Write unibyte BYTES to a fresh temp file and return its path.
-The request body is handed to curl as `--data-binary @FILE' rather than on
-the command line so no request size or byte value can be mangled by argv
-quoting.  BYTES must already be encoded (UTF-8 for a unary protojson body,
-the framed envelope for a stream); the file is written verbatim.  The
-caller deletes the file when its process exits."
-  (let ((file (make-temp-file "agent-repl-connect-"))
-        (coding-system-for-write 'no-conversion))
-    (with-temp-file file
-      (set-buffer-multibyte nil)
-      (insert bytes))
-    file))
+THE CONNECT IS BLOCKING, AND THAT IS THE POINT.  The peer is the daemon's
+own loopback listener: connecting to it costs a fraction of a
+millisecond, and it either lands or is refused on the spot -- there is no
+network in between to stall on.  What a non-blocking connect costs
+instead is not latency but RE-ENTRANCY, and that is a correctness
+problem, not a tuning one.  A `:nowait' dial has to wait for the
+connection somewhere before it can write, and every way of waiting --
+`accept-process-output', or the 20ms retry Emacs itself does when the
+write gets EAGAIN -- runs the event loop.  These dials happen INSIDE
+PROCESS FILTERS: daemon-link attaches a successor from the `WatchDaemon'
+filter.  Running the event loop from inside a filter cost the handover
+its `transferred' pushes outright -- the outgoing daemon pushed them, the
+sockets were open, and Emacs never delivered a byte of them, so no
+workspace was ever adopted and the successor was never promoted.
+
+THE REQUEST IS WRITTEN IN CALLER ORDER, before this returns, so two
+exchanges started one after the other reach the daemon in that order --
+which is what a prompt queue replaying its held prompts oldest first
+depends on.
+
+A connect the kernel refuses, and a write that cannot be issued, are NOT
+swallowed: each is logged at ERROR here and handed to SENTINEL as the
+death it is.
+
+THEY ARE HANDED OVER ASYNCHRONOUSLY, THOUGH, and deliberately.  A caller
+told its exchange had already failed before this function returned would
+be answered before the stream it is opening exists to be closed, and out
+of the middle of its own constructor.  A death is delivered on the next
+turn of the event loop instead, exactly where every other death arrives
+from."
+  (let ((process nil)
+        (refusal nil))
+    (condition-case err
+        (setq process
+              (make-network-process ;; ALLOW-EXTERNAL-BOUNDARY
+               :name name
+               :host host
+               :service port
+               :coding 'binary
+               :noquery t
+               :filter filter
+               :sentinel #'ignore))
+      (error
+       (setq refusal (error-message-string err))
+       (agent-repl--error nil "elisp.connect.dial-failed name=%S host=%S port=%S error=%S"
+                          name host port err)))
+    (when process
+      (condition-case err
+          (process-send-string process request)
+        (error
+         (setq refusal (error-message-string err))
+         (agent-repl--error nil "elisp.connect.request-send-failed name=%S error=%S"
+                            name err)
+         (agent-repl-connect--close-socket process))))
+    (if (process-live-p process)
+        (set-process-sentinel process sentinel)
+      (let ((event (or refusal (format "%s" (and process (process-status process))))))
+        (run-at-time 0 nil (lambda () (funcall sentinel process event)))))
+    process))
 
 (defun agent-repl-connect--detach-sentinel (process)
   "Detach PROCESS's sentinel so a teardown cannot re-deliver into it.
 
 CALLED FIRST BY EVERY TERMINAL SENTINEL BRANCH HERE, and that ordering is
-the whole point.  A curl exchange's teardown kills STDERR-BUFFER, and
-`kill-buffer' runs `kill_buffer_processes': it deletes the stderr pipe
-process, closing curl's stderr, which makes `status_notify' run the
-sentinels of every process whose status just moved — including the curl
-process whose sentinel is running RIGHT NOW.  That sentinel then sees a
-dead process again, tears down again against a buffer that is still live
-mid-kill, and recurses: an unbounded
-Fkill_buffer -> Fdelete_process -> exec_sentinel -> Fkill_buffer stack
-with no Lisp error and no log record, because the recursion happens
-before the branch reaches any logging.  That is the `SPC .' hang.
+the whole point.  A terminal branch that tears its exchange down can move
+the very process whose sentinel is running RIGHT NOW, and `status_notify'
+then runs that sentinel again: the branch sees a dead process a second
+time, tears down a second time, and recurses — an unbounded stack with no
+Lisp error and no log record, because the recursion happens before the
+branch reaches any logging.  That is the `SPC .' hang.
 
 Detaching before the teardown makes the re-entry UNREPRESENTABLE rather
 than merely unlikely: the re-delivered status reaches `ignore'.  It is
@@ -377,28 +565,6 @@ nothing left to hear from its process."
   (when (processp process)
     (set-process-sentinel process #'ignore)))
 
-(defun agent-repl-connect--cleanup (body-file stderr-buffer)
-  "Delete BODY-FILE and kill STDERR-BUFFER, tolerating either being gone."
-  (when (and body-file (file-exists-p body-file))
-    (condition-case err
-        (delete-file body-file)
-      (error (agent-repl--warn nil "elisp.connect.body-file-cleanup-failed file=%S error=%S"
-                               body-file err))))
-  (when (buffer-live-p stderr-buffer)
-    ;; The stderr PIPE process owns this buffer; detach it too, so the
-    ;; deletion `kill-buffer' performs has no sentinel of its own to run.
-    (when-let ((pipe (get-buffer-process stderr-buffer)))
-      (set-process-query-on-exit-flag pipe nil)
-      (set-process-sentinel pipe #'ignore)
-      (set-process-filter pipe #'ignore))
-    (let ((kill-buffer-query-functions nil))
-      (kill-buffer stderr-buffer))))
-
-(defun agent-repl-connect--stderr-text (stderr-buffer)
-  "Return the trimmed contents of STDERR-BUFFER, or the empty string."
-  (if (buffer-live-p stderr-buffer)
-      (string-trim (with-current-buffer stderr-buffer (buffer-string)))
-    ""))
 
 ;;;; ---- Connection ----
 
@@ -463,13 +629,13 @@ transport failure, a timeout, or a 200 whose body will not parse.  Exactly
 one of the two runs, exactly once.  TIMEOUT defaults to
 `agent-repl-connect-unary-timeout-seconds'.  Nothing is ever retried here;
 retry policy belongs to the caller that knows whether the call is
-idempotent.  Returns the curl process."
+idempotent.  Returns the socket process."
   (agent-repl-connect--check-alive conn method)
   (let* ((address (agent-repl-connect-connection-address conn))
-         (body-file (agent-repl-connect--write-body-file
-                     (encode-coding-string json-string 'utf-8 t)))
-         (stderr-buffer (generate-new-buffer
-                         (format " *agent-repl-connect-stderr %s*" method)))
+         (host-port (agent-repl-connect--split-address address))
+         (request (agent-repl-connect--request-bytes
+                   address method agent-repl-connect--unary-content-type
+                   (encode-coding-string json-string 'utf-8 t)))
          (reader (agent-repl-connect--reader-create))
          (body "")
          (settled nil)
@@ -493,18 +659,23 @@ idempotent.  Returns the curl process."
       (agent-repl--log nil "elisp.connect.unary-send method=%S address=%S bytes=%d"
                        method address (string-bytes json-string))
       (setq process
-            (agent-repl-connect--spawn-curl
+            (agent-repl-connect--open-socket
              (format "agent-repl-connect-%s" method)
-             (agent-repl-connect--curl-argv
-              address method agent-repl-connect--unary-content-type body-file)
-             (lambda (_proc chunk)
-               (setq body (concat body (agent-repl-connect--reader-feed reader chunk))))
-             (lambda (proc _event)
+             (car host-port) (cdr host-port) request
+             (lambda (proc chunk)
+               (setq body (concat body (agent-repl-connect--reader-feed reader chunk)))
+               ;; A WHOLE BODY IS THE ANSWER.  The framing said how long the
+               ;; body is, so the exchange need not wait on the peer's close
+               ;; to hand it over; a framing breach ends it here just as
+               ;; promptly, and the sentinel below names it.
+               (when (or (agent-repl-connect--reader-breach reader)
+                         (agent-repl-connect--reader-complete-p reader))
+                 (agent-repl-connect--close-socket proc)))
+             (lambda (proc event)
                (unless (process-live-p proc)
                  (agent-repl-connect--detach-sentinel proc)
                  (let ((status (agent-repl-connect--reader-status reader))
-                       (stderr (agent-repl-connect--stderr-text stderr-buffer)))
-                   (agent-repl-connect--cleanup body-file stderr-buffer)
+                       (breach (agent-repl-connect--reader-breach reader)))
                    (cond
                     (timed-out
                      (settle :failure
@@ -512,13 +683,28 @@ idempotent.  Returns the curl process."
                               :timeout
                               (format "%s timed out after %ss" method
                                       (or timeout agent-repl-connect-unary-timeout-seconds)))))
+                    (breach
+                     (settle :failure
+                             (agent-repl-connect--failure
+                              :transport (format "%s: %s" method breach)
+                              :status status)))
                     ((null status)
                      (settle :failure
                              (agent-repl-connect--failure
                               :transport
-                              (if (string-empty-p stderr)
-                                  (format "%s: no HTTP response from %s" method address)
-                                stderr))))
+                              (agent-repl-connect--transport-message method address event))))
+                    ;; A DECLARED LENGTH THE PEER DID NOT DELIVER IS A DROP,
+                    ;; not a body.  Parsing what arrived would turn a severed
+                    ;; connection into an unrelated `malformed' complaint
+                    ;; about JSON, and a truncation that happened to parse
+                    ;; into a silent partial answer.
+                    ((agent-repl-connect--reader-truncated-p reader)
+                     (settle :failure
+                             (agent-repl-connect--failure
+                              :transport
+                              (format "%s: connection dropped before the body completed (%s)"
+                                      method (string-trim (or event "")))
+                              :status status)))
                     ((= status 200)
                      (let ((parsed (condition-case err
                                        (list :ok (agent-repl-connect--parse-json body))
@@ -532,23 +718,32 @@ idempotent.  Returns the curl process."
                                   :status status)))))
                     (t
                      (settle :failure
-                             (agent-repl-connect--connect-error-detail status body)))))))
-             stderr-buffer))
-      (setq timer
-            (run-at-time (or timeout agent-repl-connect-unary-timeout-seconds) nil
-                         (lambda ()
-                           (when (process-live-p process)
-                             (setq timed-out t)
-                             (agent-repl--warn nil "elisp.connect.unary-timeout method=%S address=%S"
-                                               method address)
-                             (delete-process process)))))
+                             (agent-repl-connect--connect-error-detail status body)))))))))
+      ;; A REFUSED CONNECT CAN ANSWER BEFORE THE DIAL RETURNS -- the kernel
+      ;; refuses on the spot and the sentinel runs from inside the write.  An
+      ;; exchange already settled must not arm a timer nothing will cancel.
+      (unless settled
+        (setq timer
+              (run-at-time (or timeout agent-repl-connect-unary-timeout-seconds) nil
+                           (lambda ()
+                             (when (process-live-p process)
+                               (setq timed-out t)
+                               (agent-repl--warn nil "elisp.connect.unary-timeout method=%S address=%S"
+                                                 method address)
+                               (delete-process process))))))
       process)))
 
 (defun agent-repl-connect-unary-sync (conn method json-string &optional timeout)
   "Call METHOD on CONN with JSON-STRING and block for the answer.
 Returns the parsed response alist, or signals `agent-repl-connect-error'
 with the failure plist as its data.  Waits on process output rather than
-sleeping, so timers (including the call's own timeout) keep running."
+sleeping, so timers (including the call's own timeout) keep running.
+
+The wait samples at 2ms.  `accept-process-output' returns the instant any
+process delivers, so the interval is only the floor under an answer that
+arrives while nothing else is talking; at the 50ms it used to be, a
+loopback round trip that takes about a millisecond still cost a whole
+slot, and every synchronous call in the editor paid it."
   (let ((outcome nil))
     (agent-repl-connect-unary
      conn method json-string
@@ -559,7 +754,7 @@ sleeping, so timers (including the call's own timeout) keep running."
                        (* 2 (or timeout agent-repl-connect-unary-timeout-seconds))
                        1)))
       (while (and (null outcome) (< (float-time) deadline))
-        (accept-process-output nil 0.05)))
+        (accept-process-output nil 0.002)))
     (cond
      ((null outcome)
       (agent-repl--error nil "elisp.connect.unary-sync-abandoned method=%S" method)
@@ -575,7 +770,7 @@ sleeping, so timers (including the call's own timeout) keep running."
                (:constructor agent-repl-connect-stream-create)
                (:copier nil))
   "One standing server-streaming Connect call.
-PROCESS is the curl child, METHOD the bare rpc name, CONN the connection
+PROCESS is the socket, METHOD the bare rpc name, CONN the connection
 it stands on.  CANCELLED-P records a client-side cancel so the exit is
 reported as `(:cancelled)' and not as a failure.  CLOSE-REASON holds the
 outcome decided by a terminal envelope, so the sentinel reports what the
@@ -694,10 +889,10 @@ failure to ITS caller; the transport reports what happened and judges
 nothing.  Returns the stream object."
   (agent-repl-connect--check-alive conn method)
   (let* ((address (agent-repl-connect-connection-address conn))
-         (body-file (agent-repl-connect--write-body-file
-                     (agent-repl-connect-envelope-encode 0 json-string)))
-         (stderr-buffer (generate-new-buffer
-                         (format " *agent-repl-connect-stderr %s*" method)))
+         (host-port (agent-repl-connect--split-address address))
+         (request (agent-repl-connect--request-bytes
+                   address method agent-repl-connect--stream-content-type
+                   (agent-repl-connect-envelope-encode 0 json-string)))
          (reader (agent-repl-connect--reader-create))
          (parser (agent-repl-connect-envelope-parser-create))
          (error-body "")
@@ -705,18 +900,28 @@ nothing.  Returns the stream object."
                   :method method :conn conn :on-push on-push :on-close on-close
                   :on-open on-open)))
     (agent-repl--info nil "elisp.connect.stream-open method=%S address=%S" method address)
+    ;; REGISTERED BEFORE IT IS DIALED.  A refused connect answers from inside
+    ;; the dial, so a stream registered afterwards would be pushed onto the
+    ;; connection by a call whose own close had already taken it off.
+    (push stream (agent-repl-connect-connection-streams conn))
     (setf (agent-repl-connect-stream-process stream)
-          (agent-repl-connect--spawn-curl
+          (agent-repl-connect--open-socket
            (format "agent-repl-connect-stream-%s" method)
-           (agent-repl-connect--curl-argv
-            address method agent-repl-connect--stream-content-type body-file)
-           (lambda (_proc chunk)
+           (car host-port) (cdr host-port) request
+           (lambda (proc chunk)
              (let ((bytes (agent-repl-connect--reader-feed reader chunk))
                    (status (agent-repl-connect--reader-status reader)))
                (cond
+                ;; A FRAMING BREACH IS NOT A STREAM.  Decoding past an
+                ;; unreadable chunk header would invent frames; the socket
+                ;; goes and the sentinel names the breach.
+                ((agent-repl-connect--reader-breach reader)
+                 (agent-repl-connect--close-socket proc))
                 ((null status) nil)
                 ((/= status 200)
-                 (setq error-body (concat error-body bytes)))
+                 (setq error-body (concat error-body bytes))
+                 (when (agent-repl-connect--reader-complete-p reader)
+                   (agent-repl-connect--close-socket proc)))
                 (t
                  (agent-repl-connect--dispatch-open stream)
                  (dolist (frame (agent-repl-connect-envelope-feed parser bytes))
@@ -730,36 +935,43 @@ nothing.  Returns the stream object."
                      ;; ON-CLOSE runs HERE, from the frame that ended the
                      ;; stream, and not from the sentinel: the producer has
                      ;; already said what happened, so a consumer must not
-                     ;; wait on a process exit to be told.  The process is
-                     ;; killed straight after; the sentinel then finds the
-                     ;; stream closed and only frees the temporaries.
+                     ;; wait on a socket teardown to be told.  The socket is
+                     ;; closed straight after; the sentinel then finds the
+                     ;; stream closed and reports nothing again.
                      (let ((reason (agent-repl-connect--end-frame-reason
                                     method (cdr frame))))
                        (setf (agent-repl-connect-stream-close-reason stream) reason)
                        (agent-repl-connect--close-stream stream reason)
-                       (let ((proc (agent-repl-connect-stream-process stream)))
-                         (when (process-live-p proc) (delete-process proc)))))
+                       (agent-repl-connect--close-socket
+                        (agent-repl-connect-stream-process stream))))
                     (t
-                     (agent-repl-connect--dispatch-push stream (cdr frame)))))))))
-           (lambda (proc _event)
+                     (agent-repl-connect--dispatch-push stream (cdr frame)))))
+                 ;; A body the framing declared WHOLE ends the response even
+                 ;; when no end frame came with it; the sentinel below calls
+                 ;; that what it is.
+                 (when (agent-repl-connect--reader-complete-p reader)
+                   (agent-repl-connect--close-socket proc))))))
+           (lambda (proc event)
              (unless (process-live-p proc)
                (agent-repl-connect--detach-sentinel proc)
                (let ((status (agent-repl-connect--reader-status reader))
-                     (stderr (agent-repl-connect--stderr-text stderr-buffer))
+                     (breach (agent-repl-connect--reader-breach reader))
                      (reason (agent-repl-connect-stream-close-reason stream)))
-                 (agent-repl-connect--cleanup body-file stderr-buffer)
                  (agent-repl-connect--close-stream
                   stream
                   (cond
                    (reason reason)
                    ((agent-repl-connect-stream-cancelled-p stream) (list :cancelled))
+                   (breach
+                    (list :error
+                          (agent-repl-connect--failure
+                           :transport (format "%s: %s" method breach)
+                           :status status)))
                    ((null status)
                     (list :error
                           (agent-repl-connect--failure
                            :transport
-                           (if (string-empty-p stderr)
-                               (format "%s: no HTTP response from %s" method address)
-                             stderr))))
+                           (agent-repl-connect--transport-message method address event))))
                    ((/= status 200)
                     (list :error
                           (agent-repl-connect--connect-error-detail status error-body)))
@@ -767,14 +979,12 @@ nothing.  Returns the stream object."
                     (list :error
                           (agent-repl-connect--failure
                            :no-end-frame
-                           (format "%s: producer closed without an end frame" method)))))))))
-           stderr-buffer))
-    (push stream (agent-repl-connect-connection-streams conn))
+                           (format "%s: producer closed without an end frame" method)))))))))))
     stream))
 
 (defun agent-repl-connect-stream-cancel (stream)
   "Cancel STREAM.  Cancelling IS the graceful close of a Connect stream.
-Kills the curl child; the sentinel then runs ON-CLOSE with `(:cancelled)'.
+Closes the socket; the sentinel then runs ON-CLOSE with `(:cancelled)'.
 Never an error, and idempotent — a stream already closed is left alone."
   (unless (agent-repl-connect-stream-closed-p stream)
     (setf (agent-repl-connect-stream-cancelled-p stream) t)

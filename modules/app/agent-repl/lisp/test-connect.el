@@ -6,18 +6,18 @@
 ;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
 ;;     -l lisp/test-connect.el -f ert-run-tests-batch-and-exit
 ;;
-;; NO EXTERNAL PROCESS IS EVER SPAWNED HERE.  `agent-repl-connect--spawn-curl'
-;; is connect.el's ONE external boundary and is registered in
+;; NO SOCKET IS EVER OPENED HERE.  `agent-repl-connect--open-socket' is
+;; connect.el's ONE external boundary and is registered in
 ;; `agent-repl--external-boundary-functions', so the harness's guard already
 ;; fails any test that reaches it unstubbed.  Every test below stubs it with
-;; `agent-repl-test-connect--spawn-stub', which hands back a real but
-;; PROCESS-LESS `make-pipe-process' object — process-live-p, delete-process
-;; and the sentinel all behave as production expects, while nothing is
-;; executed — and records the filter and sentinel so a test can drive the
-;; exchange byte by byte and deterministically, with no sleeps and no
-;; scheduler dependence.
+;; `agent-repl-test-connect--dial-stub', which hands back a real but
+;; CONNECTION-LESS `make-pipe-process' object — process-live-p,
+;; delete-process and the sentinel all behave as production expects, while
+;; nothing is dialed — and records the request bytes, the filter and the
+;; sentinel so a test can drive the exchange byte by byte and
+;; deterministically, with no sleeps and no scheduler dependence.
 ;;
-;; The real curl round trip belongs to the integration suite, not here.
+;; The real loopback round trip belongs to the integration suite, not here.
 
 ;;; Code:
 
@@ -28,14 +28,14 @@
 ;;;; ---- Harness ----
 
 (defvar agent-repl-test-connect--spawned nil
-  "List of spawn records, newest first, captured by the spawn stub.
-Each is a plist `(:name :args :filter :sentinel :stderr :process)'.")
+  "List of dial records, newest first, captured by the dial stub.
+Each is a plist `(:name :host :port :request :filter :sentinel :process)'.")
 
 (defvar agent-repl-test-connect--logs nil
   "List of `(LEVEL . TEXT)' entries, newest first, captured from the ladder.")
 
 (defvar agent-repl-test-connect--script nil
-  "Canned stdout the spawn stub replays inline, or nil to stay silent.
+  "Canned response bytes the dial stub replays inline, or nil to stay silent.
 When non-nil the stub feeds this string to the filter and then runs the
 sentinel BEFORE returning, which is what makes the synchronous entry
 points testable without waiting on anything.")
@@ -53,11 +53,11 @@ points testable without waiting on anything.")
                      (string-match-p regexp (cdr entry))))
               agent-repl-test-connect--logs))
 
-(defun agent-repl-test-connect--spawn-stub (name args filter sentinel stderr-buffer)
-  "Stand in for `agent-repl-connect--spawn-curl' without running anything.
-Creates a pipe process (a real process object bound to no program), records
-the exchange, and — when `agent-repl-test-connect--script' is set — replays
-that stdout and exits inline."
+(defun agent-repl-test-connect--dial-stub (name host port request filter sentinel)
+  "Stand in for `agent-repl-connect--open-socket' without dialing anything.
+Creates a pipe process (a real process object bound to no connection),
+records the exchange, and — when `agent-repl-test-connect--script' is set
+— replays those response bytes and closes inline."
   ;; The pipe process carries INERT callbacks: the production filter and
   ;; sentinel are kept in the record and driven by the test directly, so the
   ;; whole exchange is synchronous.  Attaching the real ones would let Emacs
@@ -68,32 +68,36 @@ that stdout and exits inline."
                                      :coding 'no-conversion
                                      :filter #'ignore
                                      :sentinel #'ignore))
-         (record (list :name name :args args :filter filter :sentinel sentinel
-                       :stderr stderr-buffer :process process)))
+         (record (list :name name :host host :port port :request request
+                       :filter filter :sentinel sentinel :process process)))
     (push record agent-repl-test-connect--spawned)
     (when agent-repl-test-connect--script
       (funcall filter process agent-repl-test-connect--script)
       (delete-process process)
-      (funcall sentinel process "finished\n"))
+      (funcall sentinel process "connection broken by remote peer\n"))
     process))
 
 (defun agent-repl-test-connect--last-spawn ()
-  "Return the most recent spawn record."
+  "Return the most recent dial record."
   (car agent-repl-test-connect--spawned))
 
 (defun agent-repl-test-connect--feed (record chunk)
-  "Hand CHUNK to RECORD's process filter, as curl's stdout would."
+  "Hand CHUNK to RECORD's process filter, as the socket's bytes would."
   (funcall (plist-get record :filter) (plist-get record :process) chunk))
 
-(defun agent-repl-test-connect--exit (record)
-  "End RECORD's process and run its sentinel, as an exiting curl would."
+(defun agent-repl-test-connect--exit (record &optional event)
+  "End RECORD's process and run its sentinel with EVENT.
+EVENT defaults to the peer hanging up, which is what a `Connection: close'
+answer ends with; a test that means a connect refusal or a mid-body drop
+passes the event string the real socket would carry."
   (let ((process (plist-get record :process)))
     (when (process-live-p process)
       (delete-process process))
-    (funcall (plist-get record :sentinel) process "finished\n")))
+    (funcall (plist-get record :sentinel)
+             process (or event "connection broken by remote peer\n"))))
 
 (defun agent-repl-test-connect--cleanup ()
-  "Delete every process the stub created during a test."
+  "Delete every process the dial stub created during a test."
   (dolist (record agent-repl-test-connect--spawned)
     (let ((process (plist-get record :process)))
       (when (process-live-p process)
@@ -111,8 +115,8 @@ abort before its own assertions ran."
          (agent-repl-test-connect--logs nil)
          (agent-repl-test-connect--script nil))
      (unwind-protect
-         (cl-letf (((symbol-function 'agent-repl-connect--spawn-curl)
-                    #'agent-repl-test-connect--spawn-stub)
+         (cl-letf (((symbol-function 'agent-repl-connect--open-socket)
+                    #'agent-repl-test-connect--dial-stub)
                    ((symbol-function 'agent-repl--log)
                     (lambda (_ws fmt &rest args)
                       (agent-repl-test-connect--record-log 'debug fmt args)))
@@ -129,7 +133,10 @@ abort before its own assertions ran."
        (agent-repl-test-connect--cleanup))))
 
 (defun agent-repl-test-connect--http (status body &optional extra-headers)
-  "Return a curl `-D -' stdout blob: STATUS line, EXTRA-HEADERS, then BODY."
+  "Return response bytes: STATUS line, EXTRA-HEADERS, then BODY.
+No `Content-Length' and no `Transfer-Encoding', so the body is delimited
+by the close — the framing a Connect stream's flushed answer uses, and
+the one that lets a test hand over bytes chunk by chunk."
   (concat (format "HTTP/1.1 %d %s\r\n" status (if (= status 200) "OK" "Error"))
           "Content-Type: application/json\r\n"
           (or extra-headers "")
@@ -308,9 +315,121 @@ abort before its own assertions ran."
   ;; Arrange
   (let ((reader (agent-repl-connect--reader-create)))
     ;; Act
-    (agent-repl-connect--reader-feed reader "curl: (7) Failed to connect\r\n\r\n")
+    (agent-repl-connect--reader-feed reader "not an http answer at all\r\n\r\n")
     ;; Assert
     (should (null (agent-repl-connect--reader-status reader)))))
+
+(ert-deftest agent-repl-test-connect-reader-completes-a-content-length-body ()
+  "A `Content-Length\' body is whole the moment that many bytes have arrived."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (let ((body (agent-repl-connect--reader-feed
+                 reader "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")))
+      ;; Assert
+      (should (equal body "{}"))
+      (should (agent-repl-connect--reader-complete-p reader)))))
+
+(ert-deftest agent-repl-test-connect-reader-holds-a-short-content-length-body-open ()
+  "A `Content-Length\' body that is still arriving is not yet complete."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (agent-repl-connect--reader-feed
+     reader "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n{}")
+    ;; Assert
+    (should-not (agent-repl-connect--reader-complete-p reader))
+    (should (agent-repl-connect--reader-truncated-p reader))))
+
+(ert-deftest agent-repl-test-connect-reader-stops-at-the-declared-length ()
+  "Bytes past a `Content-Length\' belong to no body and are not returned."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (let ((body (agent-repl-connect--reader-feed
+                 reader "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}trailing")))
+      ;; Assert
+      (should (equal body "{}")))))
+
+(ert-deftest agent-repl-test-connect-reader-completes-an-empty-content-length-body ()
+  "A `Content-Length: 0\' answer is whole with no body bytes at all."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (let ((body (agent-repl-connect--reader-feed
+                 reader "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")))
+      ;; Assert
+      (should (equal body ""))
+      (should (agent-repl-connect--reader-complete-p reader)))))
+
+(ert-deftest agent-repl-test-connect-reader-dechunks-a-chunked-body ()
+  "A `Transfer-Encoding: chunked\' body comes back with its framing removed."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (let ((body (agent-repl-connect--reader-feed
+                 reader (concat "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                                "4\r\n{\"ok\r\n" "4\r\n\":1}\r\n" "0\r\n\r\n"))))
+      ;; Assert
+      (should (equal body "{\"ok\":1}"))
+      (should (agent-repl-connect--reader-complete-p reader)))))
+
+(ert-deftest agent-repl-test-connect-reader-holds-a-partial-chunk ()
+  "A chunk still arriving is held back until all of it has landed."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    (agent-repl-connect--reader-feed
+     reader "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+    ;; Act
+    (let ((first (agent-repl-connect--reader-feed reader "8\r\n{\"ok"))
+          (second (agent-repl-connect--reader-feed reader "\":1}\r\n")))
+      ;; Assert
+      (should (equal first ""))
+      (should (equal second "{\"ok\":1}")))))
+
+(ert-deftest agent-repl-test-connect-reader-ignores-a-chunk-extension ()
+  "A chunk header\'s extension after `;\' is not part of its length."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    (agent-repl-connect--reader-feed
+     reader "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+    ;; Act
+    (let ((body (agent-repl-connect--reader-feed reader "2;x=y\r\n{}\r\n")))
+      ;; Assert
+      (should (equal body "{}")))))
+
+(ert-deftest agent-repl-test-connect-reader-records-an-unreadable-chunk-header ()
+  "A chunk header that is not a hexadecimal length is a breach, never a guess."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    (agent-repl-connect--reader-feed
+     reader "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+    ;; Act
+    (agent-repl-connect--reader-feed reader "zz\r\nnope\r\n")
+    ;; Assert
+    (should (string-match-p "unreadable chunk header"
+                            (agent-repl-connect--reader-breach reader)))))
+
+(ert-deftest agent-repl-test-connect-reader-chunked-outranks-a-content-length ()
+  "A server sending both headers is chunking, per RFC 9112."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (agent-repl-connect--reader-feed
+     reader (concat "HTTP/1.1 200 OK\r\nContent-Length: 99\r\n"
+                    "Transfer-Encoding: chunked\r\n\r\n"))
+    ;; Assert
+    (should (eq (agent-repl-connect--reader-framing reader) :chunked))))
+
+(ert-deftest agent-repl-test-connect-reader-close-delimited-body-is-never-truncated ()
+  "A body the close delimits ends when the close does, so it is never short."
+  ;; Arrange
+  (let ((reader (agent-repl-connect--reader-create)))
+    ;; Act
+    (agent-repl-connect--reader-feed reader (agent-repl-test-connect--http 200 "BODY"))
+    ;; Assert
+    (should (eq (agent-repl-connect--reader-framing reader) :until-close))
+    (should-not (agent-repl-connect--reader-truncated-p reader))))
 
 ;;;; ---- Tests: daemon.addr discovery ----
 
@@ -381,55 +500,94 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (agent-repl-test-connect--logs-matching
                'error "elisp\\.connect\\.daemon-addr-malformed")))))
 
-;;;; ---- Tests: argv composition ----
+;;;; ---- Tests: address splitting ----
 
-(ert-deftest agent-repl-test-connect-curl-argv-targets-the-connect-method-url ()
-  "The request URL is the service path plus the bare method name."
+(ert-deftest agent-repl-test-connect-split-address-separates-host-and-port ()
+  "A `HOST:PORT' string splits into the host and the port integer."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl-connect--split-address "127.0.0.1:41234")
+                 (cons "127.0.0.1" 41234))))
+
+(ert-deftest agent-repl-test-connect-split-address-unwraps-an-ipv6-literal ()
+  "A bracketed IPv6 literal loses its brackets, which is what the socket wants."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl-connect--split-address "[::1]:9")
+                 (cons "::1" 9))))
+
+(ert-deftest agent-repl-test-connect-split-address-signals-on-a-portless-address ()
+  "An address with no port signals rather than dialing something else."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    ;; Act / Assert
+    (should-error (agent-repl-connect--split-address "127.0.0.1")
+                  :type 'agent-repl-connect-error)))
+
+;;;; ---- Tests: request composition ----
+
+(ert-deftest agent-repl-test-connect-request-targets-the-connect-method-path ()
+  "The request line targets the service path plus the bare method name."
   ;; Arrange / Act
-  (let ((argv (agent-repl-connect--curl-argv
-               "127.0.0.1:41234" "RegisterWorkspace" "application/json" "/tmp/body")))
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:41234" "RegisterWorkspace" "application/json" "{}")))
     ;; Assert
-    (should (equal (car (last argv))
-                   "http://127.0.0.1:41234/agentrepl.v1.AgentRepl/RegisterWorkspace"))))
+    (should (string-prefix-p
+             "POST /agentrepl.v1.AgentRepl/RegisterWorkspace HTTP/1.1\r\n" request))))
 
-(ert-deftest agent-repl-test-connect-curl-argv-sends-the-connect-protocol-version ()
+(ert-deftest agent-repl-test-connect-request-names-the-daemon-as-its-host ()
+  "The `Host' header is the address dialed, as HTTP/1.1 requires."
+  ;; Arrange / Act
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:41234" "DaemonHealth" "application/json" "{}")))
+    ;; Assert
+    (should (string-match-p "\r\nHost: 127\\.0\\.0\\.1:41234\r\n" request))))
+
+(ert-deftest agent-repl-test-connect-request-sends-the-connect-protocol-version ()
   "Every Connect request carries `Connect-Protocol-Version: 1'."
   ;; Arrange / Act
-  (let ((argv (agent-repl-connect--curl-argv
-               "127.0.0.1:1" "DaemonHealth" "application/json" "/tmp/body")))
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:1" "DaemonHealth" "application/json" "{}")))
     ;; Assert
-    (should (member "Connect-Protocol-Version: 1" argv))))
+    (should (string-match-p "\r\nConnect-Protocol-Version: 1\r\n" request))))
 
-(ert-deftest agent-repl-test-connect-curl-argv-carries-the-requested-content-type ()
+(ert-deftest agent-repl-test-connect-request-carries-the-requested-content-type ()
   "The content type is the caller's, so unary and streaming differ only there."
   ;; Arrange / Act
-  (let ((unary (agent-repl-connect--curl-argv
-                "127.0.0.1:1" "DaemonHealth" "application/json" "/tmp/b"))
-        (stream (agent-repl-connect--curl-argv
-                 "127.0.0.1:1" "WatchDaemon" "application/connect+json" "/tmp/b")))
+  (let ((unary (agent-repl-connect--request-bytes
+                "127.0.0.1:1" "DaemonHealth" "application/json" "{}"))
+        (stream (agent-repl-connect--request-bytes
+                 "127.0.0.1:1" "WatchDaemon" "application/connect+json" "{}")))
     ;; Assert
-    (should (member "Content-Type: application/json" unary))
-    (should (member "Content-Type: application/connect+json" stream))))
+    (should (string-match-p "\r\nContent-Type: application/json\r\n" unary))
+    (should (string-match-p "\r\nContent-Type: application/connect\\+json\r\n" stream))))
 
-(ert-deftest agent-repl-test-connect-curl-argv-reads-the-body-from-a-file ()
-  "The request body rides `--data-binary @FILE', never argv."
+(ert-deftest agent-repl-test-connect-request-asks-the-daemon-to-close ()
+  "`Connection: close' is asked for, so every answer ends in an end-of-file."
   ;; Arrange / Act
-  (let ((argv (agent-repl-connect--curl-argv
-               "127.0.0.1:1" "SubmitPrompt" "application/json" "/tmp/body-file")))
+  (let ((request (agent-repl-connect--request-bytes
+                  "127.0.0.1:1" "DaemonHealth" "application/json" "{}")))
     ;; Assert
-    (should (member "--data-binary" argv))
-    (should (member "@/tmp/body-file" argv))))
+    (should (string-match-p "\r\nConnection: close\r\n" request))))
 
-(ert-deftest agent-repl-test-connect-curl-argv-pins-http-1-1-and-dumps-headers ()
-  "The argv pins HTTP/1.1, disables buffering, and dumps headers onto stdout."
+(ert-deftest agent-repl-test-connect-request-body-follows-the-blank-line ()
+  "The body rides the request verbatim, after the header block\'s blank line."
   ;; Arrange / Act
-  (let ((argv (agent-repl-connect--curl-argv
-               "127.0.0.1:1" "WatchDaemon" "application/connect+json" "/tmp/b")))
+  (let* ((request (agent-repl-connect--request-bytes
+                   "127.0.0.1:1" "SubmitPrompt" "application/json" "{\"a\":1}"))
+         (split (string-search "\r\n\r\n" request)))
     ;; Assert
-    (should (member "--http1.1" argv))
-    (should (member "--no-buffer" argv))
-    (should (equal (member "-D" argv) (append '("-D" "-") (cdr (member "-" (member "-D" argv))))))
-    (should (member "Expect:" argv))))
+    (should (equal (substring request (+ split 4)) "{\"a\":1}"))))
+
+(ert-deftest agent-repl-test-connect-request-content-length-counts-bytes ()
+  "`Content-Length' counts the body\'s BYTES, never its characters."
+  ;; Arrange
+  (let ((body (encode-coding-string "{\"n\":\"é\"}" 'utf-8 t)))
+    ;; Act
+    (let ((request (agent-repl-connect--request-bytes
+                    "127.0.0.1:1" "SubmitPrompt" "application/json" body)))
+      ;; Assert
+      (should (string-match "\r\nContent-Length: \\([0-9]+\\)\r\n" request))
+      (should (= (string-to-number (match-string 1 request)) (length body))))))
+
 
 ;;;; ---- Tests: connection lifecycle ----
 
@@ -535,7 +693,7 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (should (eq (plist-get failure :kind) :malformed)))))
 
 (ert-deftest agent-repl-test-connect-unary-reports-a-transport-failure ()
-  "An exit with no HTTP status at all is a transport failure carrying stderr."
+  "A close with no HTTP status at all is a transport failure."
   ;; Arrange
   (agent-repl-test-connect--with-transport
     (let ((conn (agent-repl-test-connect--conn))
@@ -543,13 +701,107 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       (agent-repl-connect-unary conn "DaemonHealth" "{}"
                                 :on-failure (lambda (d) (setq failure d)))
       ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (eq (plist-get failure :kind) :transport))
+      (should (string-match-p "no HTTP response" (plist-get failure :message))))))
+
+(ert-deftest agent-repl-test-connect-unary-names-a-refused-connection ()
+  "A connection that never landed fails naming the socket\'s own reason.
+`curl' put `Failed to connect\' on its stderr; the sentinel event carries
+the same fact now, and it must reach the caller rather than being
+flattened into a generic silence."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (failure nil))
+      (agent-repl-connect-unary conn "DaemonHealth" "{}"
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act — no bytes ever arrive; the connect itself failed
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn)
+                                     "failed with code 61\n")
+      ;; Assert
+      (should (eq (plist-get failure :kind) :transport))
+      (should (string-match-p "failed with code 61" (plist-get failure :message))))))
+
+(ert-deftest agent-repl-test-connect-unary-reports-a-drop-mid-body ()
+  "A peer that hangs up inside a declared body fails as a DROP, not as JSON.
+Parsing what arrived would turn a severed connection into an unrelated
+complaint about the payload, and a truncation that happened to parse into
+a silent partial answer."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (failure nil))
+      (agent-repl-connect-unary conn "DaemonHealth" "{}"
+                                :on-response (lambda (_a) (setq failure :unexpected-success))
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
       (let ((record (agent-repl-test-connect--last-spawn)))
-        (with-current-buffer (plist-get record :stderr)
-          (insert "curl: (7) Failed to connect to 127.0.0.1 port 41234"))
+        (agent-repl-test-connect--feed
+         record (concat "HTTP/1.1 200 OK\r\nContent-Length: 40\r\n\r\n{\"success\":"))
         (agent-repl-test-connect--exit record))
       ;; Assert
       (should (eq (plist-get failure :kind) :transport))
-      (should (string-match-p "Failed to connect" (plist-get failure :message))))))
+      (should (string-match-p "dropped before the body completed"
+                              (plist-get failure :message))))))
+
+(ert-deftest agent-repl-test-connect-unary-parses-a-body-arriving-in-chunks ()
+  "A 200 whose body is spread over several reads is reassembled before parsing."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (answer :none))
+      (agent-repl-connect-unary conn "DaemonHealth" "{}"
+                                :on-response (lambda (alist) (setq answer alist))
+                                :on-failure (lambda (d) (setq answer (list :failed d))))
+      ;; Act
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed record "HTTP/1.1 200 OK\r\nContent-Length: 19\r\n\r\n")
+        (agent-repl-test-connect--feed record "{\"success\":")
+        (agent-repl-test-connect--feed record "{\"n\":1}}")
+        (agent-repl-test-connect--exit record))
+      ;; Assert
+      (should (equal answer '((success . ((n . 1)))))))))
+
+(ert-deftest agent-repl-test-connect-unary-answers-a-whole-framed-body-without-a-close ()
+  "A `Content-Length\' body is answered the moment it is whole.
+Waiting on the peer\'s close for a body the framing already declared
+complete would put a round trip of latency on every editor command."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (answer :none))
+      (agent-repl-connect-unary conn "DaemonHealth" "{}"
+                                :on-response (lambda (alist) (setq answer alist)))
+      ;; Act — no `--exit'; only the bytes
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed
+         record "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+        ;; Assert — the socket is gone, and only the sentinel is still owed
+        (should-not (process-live-p (plist-get record :process)))
+        (agent-repl-test-connect--exit record)
+        (should (equal answer nil))))))
+
+(ert-deftest agent-repl-test-connect-unary-reports-an-unreadable-chunk-header ()
+  "A chunked answer whose framing will not parse fails loudly as transport.
+Decoding past it would invent a body out of the framing bytes."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn))
+          (failure nil))
+      (agent-repl-connect-unary conn "DaemonHealth" "{}"
+                                :on-response (lambda (_a) (setq failure :unexpected-success))
+                                :on-failure (lambda (d) (setq failure d)))
+      ;; Act
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed
+         record (concat "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                        "zz\r\nnope\r\n"))
+        (agent-repl-test-connect--exit record))
+      ;; Assert
+      (should (eq (plist-get failure :kind) :transport))
+      (should (string-match-p "unreadable chunk header" (plist-get failure :message))))))
 
 (ert-deftest agent-repl-test-connect-unary-answers-exactly-once ()
   "A second sentinel run after settling does not re-answer the caller."
@@ -568,26 +820,32 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
       ;; Assert
       (should (= answers 1)))))
 
-(ert-deftest agent-repl-test-connect-unary-writes-then-deletes-the-body-file ()
-  "The request body is staged in a temp file that the exit removes."
+(ert-deftest agent-repl-test-connect-unary-sends-the-json-as-its-request-body ()
+  "The caller\'s JSON is what goes on the wire, byte for byte."
   ;; Arrange
   (agent-repl-test-connect--with-transport
-    (let* ((conn (agent-repl-test-connect--conn)))
+    (let ((conn (agent-repl-test-connect--conn)))
+      ;; Act
       (agent-repl-connect-unary conn "RegisterWorkspace" "{\"dir\":\"/w\"}")
-      (let* ((record (agent-repl-test-connect--last-spawn))
-             (arg (car (seq-filter (lambda (a) (string-prefix-p "@" a))
-                                   (plist-get record :args))))
-             (file (substring arg 1)))
-        ;; Act
-        (let ((staged (with-temp-buffer (insert-file-contents file) (buffer-string))))
-          (agent-repl-test-connect--feed record (agent-repl-test-connect--http 200 "{}"))
-          (agent-repl-test-connect--exit record)
-          ;; Assert
-          (should (equal staged "{\"dir\":\"/w\"}"))
-          (should-not (file-exists-p file)))))))
+      ;; Assert
+      (let* ((request (plist-get (agent-repl-test-connect--last-spawn) :request))
+             (split (string-search "\r\n\r\n" request)))
+        (should (equal (substring request (+ split 4)) "{\"dir\":\"/w\"}"))))))
 
-(ert-deftest agent-repl-test-connect-unary-kills-its-stderr-buffer-on-exit ()
-  "The per-call stderr buffer does not outlive the call that created it."
+(ert-deftest agent-repl-test-connect-unary-dials-the-connection-address ()
+  "The socket is opened on the host and port the connection was opened with."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn)))
+      ;; Act
+      (agent-repl-connect-unary conn "DaemonHealth" "{}")
+      ;; Assert
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (should (equal (plist-get record :host) "127.0.0.1"))
+        (should (equal (plist-get record :port) 41234))))))
+
+(ert-deftest agent-repl-test-connect-unary-leaves-no-socket-behind ()
+  "The exchange\'s socket does not outlive the call that opened it."
   ;; Arrange
   (agent-repl-test-connect--with-transport
     (let ((conn (agent-repl-test-connect--conn)))
@@ -597,7 +855,7 @@ A CONTENTS of nil means the file is absent — the legal no-daemon state."
         (agent-repl-test-connect--feed record (agent-repl-test-connect--http 200 "{}"))
         (agent-repl-test-connect--exit record)
         ;; Assert
-        (should-not (buffer-live-p (plist-get record :stderr)))))))
+        (should-not (process-live-p (plist-get record :process)))))))
 
 (ert-deftest agent-repl-test-connect-unary-sync-returns-the-parsed-response ()
   "The blocking form answers the parsed alist of a 200."
@@ -660,14 +918,8 @@ frames begin."
     (let ((conn (agent-repl-test-connect--conn)))
       (agent-repl-connect-stream conn "WatchDaemon" "{}" #'ignore #'ignore)
       ;; Act
-      (let* ((record (agent-repl-test-connect--last-spawn))
-             (arg (car (seq-filter (lambda (a) (string-prefix-p "@" a))
-                                   (plist-get record :args))))
-             (staged (let ((coding-system-for-read 'no-conversion))
-                       (with-temp-buffer
-                         (set-buffer-multibyte nil)
-                         (insert-file-contents (substring arg 1))
-                         (buffer-string)))))
+      (let* ((request (plist-get (agent-repl-test-connect--last-spawn) :request))
+             (staged (substring request (+ (string-search "\r\n\r\n" request) 4))))
         ;; Assert
         (should (equal (append (substring staged 0 5) nil) '(0 0 0 0 2)))
         (should (equal (substring staged 5) "{}"))))))
@@ -756,7 +1008,7 @@ frames begin."
 (ert-deftest agent-repl-test-connect-stream-end-frame-closes-before-the-exit ()
   "ON-CLOSE runs from the END FRAME, not from the process exit.
 The producer has already said how the stream ended; making a consumer
-wait on a curl exit for that fact is what left a real stream hanging."
+wait on a socket teardown for that fact is what left a real stream hanging."
   ;; Arrange / Act
   (agent-repl-test-connect--with-stream
     (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
@@ -764,7 +1016,7 @@ wait on a curl exit for that fact is what left a real stream hanging."
     (should (equal agent-repl-test-connect--closes '((:ended))))))
 
 (ert-deftest agent-repl-test-connect-stream-end-frame-kills-the-process ()
-  "The end frame is followed by killing curl: nothing is left running."
+  "The end frame is followed by closing the socket: nothing is left open."
   ;; Arrange / Act
   (agent-repl-test-connect--with-stream
     (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
@@ -814,15 +1066,58 @@ wait on a curl exit for that fact is what left a real stream hanging."
     ;; Assert
     (should (= (length agent-repl-test-connect--closes) 1))))
 
-(ert-deftest agent-repl-test-connect-stream-end-frame-still-frees-the-temporaries ()
-  "Closing on the frame must not leak the body file or the stderr buffer."
+(ert-deftest agent-repl-test-connect-stream-drop-mid-stream-is-an-error ()
+  "A peer that hangs up mid-stream closes as an error, never as a clean end.
+A standing subscription that vanished has not ENDED; the consumer must be
+told the difference so it can reconnect."
   ;; Arrange
   (agent-repl-test-connect--with-stream
-    ;; Act
-    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode #x02 "{}"))
-    (agent-repl-test-connect--exit record)
+    ;; Act — one whole push, then the connection goes
+    (agent-repl-test-connect--feed record (agent-repl-connect-envelope-encode 0 "{\"n\":1}"))
+    (agent-repl-test-connect--exit record "connection broken by remote peer\n")
     ;; Assert
-    (should-not (buffer-live-p (plist-get record :stderr)))))
+    (let ((outcome (car agent-repl-test-connect--closes)))
+      (should (eq (car outcome) :error))
+      (should (eq (plist-get (cadr outcome) :kind) :no-end-frame)))))
+
+(ert-deftest agent-repl-test-connect-stream-refused-connection-closes-as-error ()
+  "A stream whose connection never landed closes naming the socket\'s reason."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let* ((agent-repl-test-connect--closes nil)
+           (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-stream
+       conn 'agent-repl-test-connect--pushes 'agent-repl-test-connect--closes)
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn)
+                                     "failed with code 61\n")
+      ;; Assert
+      (let ((outcome (car agent-repl-test-connect--closes)))
+        (should (eq (car outcome) :error))
+        (should (eq (plist-get (cadr outcome) :kind) :transport))
+        (should (string-match-p "failed with code 61"
+                                (plist-get (cadr outcome) :message)))))))
+
+(ert-deftest agent-repl-test-connect-stream-reassembles-a-chunked-frame ()
+  "A frame split across HTTP chunk boundaries is delivered once, whole."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let* ((agent-repl-test-connect--pushes nil)
+           (agent-repl-test-connect--closes nil)
+           (conn (agent-repl-test-connect--conn))
+           (envelope (agent-repl-connect-envelope-encode 0 "{\"n\":1}")))
+      (agent-repl-test-connect--open-stream
+       conn 'agent-repl-test-connect--pushes 'agent-repl-test-connect--closes)
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed
+         record "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+        ;; Act — the envelope arrives as two HTTP chunks
+        (agent-repl-test-connect--feed
+         record (format "%x\r\n%s\r\n" 6 (substring envelope 0 6)))
+        (agent-repl-test-connect--feed
+         record (format "%x\r\n%s\r\n" (- (length envelope) 6) (substring envelope 6))))
+      ;; Assert
+      (should (equal agent-repl-test-connect--pushes '(((n . 1))))))))
 
 (ert-deftest agent-repl-test-connect-stream-contains-an-on-push-exception ()
   "An ON-PUSH that signals is contained: the stream stays open for the next push."
@@ -1001,7 +1296,7 @@ wait on a curl exit for that fact is what left a real stream hanging."
       (should (= agent-repl-test-connect--opens 0)))))
 
 (ert-deftest agent-repl-test-connect-stream-on-open-does-not-fire-on-death-before-headers ()
-  "A curl that dies before any header block never accepted anything."
+  "A socket that dies before any header block never accepted anything."
   ;; Arrange
   (agent-repl-test-connect--with-transport
     (let ((agent-repl-test-connect--opens 0)
@@ -1082,27 +1377,6 @@ wait on a curl exit for that fact is what left a real stream hanging."
   "A nil or non-process argument is not an error."
   ;; Arrange / Act / Assert
   (should-not (agent-repl-connect--detach-sentinel nil)))
-
-(ert-deftest agent-repl-test-connect-cleanup-detaches-the-stderr-pipe-process ()
-  "The stderr buffer's pipe process is detached BEFORE its buffer is killed.
-Killing the buffer deletes that process, and a live sentinel on it would
-be run from inside the kill."
-  ;; Arrange
-  (let ((buf (generate-new-buffer " *agent-repl-test-connect-stderr*"))
-        (order nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'pipe-proc))
-                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
-                  ((symbol-function 'set-process-filter) #'ignore)
-                  ((symbol-function 'set-process-sentinel)
-                   (lambda (_p s) (push (cons 'sentinel s) order)))
-                  ((symbol-function 'kill-buffer)
-                   (lambda (b) (when (eq b buf) (push 'kill order)))))
-          ;; Act
-          (agent-repl-connect--cleanup nil buf)
-          ;; Assert
-          (should (equal (nreverse order) '((sentinel . ignore) kill))))
-      (kill-buffer buf))))
 
 (ert-deftest agent-repl-test-connect-terminal-sentinel-runs-once-under-re-delivery ()
   "A terminal branch that tears down runs ONCE even when the teardown
