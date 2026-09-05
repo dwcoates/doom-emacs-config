@@ -324,6 +324,31 @@ export async function serve(
   h2.on("sessionError", (err) => {
     LOGGER.log({ level: "warn", cause: err }, "an h2c session failed");
   });
+  // EVERY STREAM THIS SERVER RESETS SAYS SO. Without this the shim was silent
+  // about its own h2 layer cutting a stream: the daemon recorded "a standing
+  // stream ended without the session ending" and opened a `link_severed`
+  // fault, and the shim's log — the only place that could say whether the
+  // reset came from here — held nothing at all. `rstCode` names the code the
+  // stream ended with; `NGHTTP2_NO_ERROR` is an ordinary end and is not
+  // recorded.
+  h2.on("session", (session) => {
+    session.on("frameError", (type, code, id) => {
+      LOGGER.log(
+        { level: "error", frame_type: type, error_code: code, stream_id: id },
+        "an h2c frame could not be sent",
+      );
+    });
+    session.on("stream", (stream, headers) => {
+      const path = headers[":path"];
+      stream.once("close", () => {
+        if (stream.rstCode === undefined || stream.rstCode === 0) return;
+        LOGGER.log(
+          { level: "error", stream_id: stream.id, rst_code: stream.rstCode, path },
+          "an h2c stream ended with a reset code; whatever it was serving did not finish",
+        );
+      });
+    });
+  });
 
   const open = new Set<Socket>();
   const listener = createNetServer((socket) => {
