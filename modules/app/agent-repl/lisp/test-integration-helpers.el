@@ -125,8 +125,19 @@ almost useless."
           (error "agent-repl-itest: timed out after %ss waiting for %s"
                  limit (or description (prin1-to-string pred))))
         ;; A nil PROCESS argument serves every process's output and runs any
-        ;; pending sentinel, then returns after the interval at the latest.
-        (accept-process-output nil 0.02)))))
+        ;; pending sentinel, and RETURNS THE MOMENT ANY ARRIVES -- so for a
+        ;; predicate over Emacs's own state this loop is already woken by the
+        ;; event, and the interval is only the floor under a predicate whose
+        ;; fact lives on the DAEMON (a subscriber count, a recorded call) and
+        ;; so cannot announce itself.
+        ;;
+        ;; 2ms, not the 20ms it was: at 20ms nearly every wait in the suite
+        ;; slept a whole slot, which was the single largest cost in the
+        ;; integration run (454 waits, 10.0s of an 11.5s host run).  A
+        ;; daemon-state predicate now costs one loopback round trip (~0.3ms
+        ;; since the control plane stopped spawning curl), so 2ms samples an
+        ;; order of magnitude finer at a duty cycle the predicate can carry.
+        (accept-process-output nil 0.002)))))
 
 (defconst agent-repl-itest--fixture-root
   (expand-file-name (format "agent-repl-itest-fixtures-%d" (emacs-pid))
@@ -270,13 +281,87 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
     (ignore-errors (delete-directory (agent-repl-itest-daemon-state-dir daemon) t))))
 
 ;;;; ---- The control plane ----
+;;
+;; The control plane rides a NATIVE loopback socket rather than a `curl'
+;; child.  It is called several times by every scenario -- twice by the reset
+;; alone, then once per turn of every `--await-*' poll -- and a process spawn
+;; per call was measurably the largest single cost in the integration run
+;; (471 calls, 3.3s of a 9.4s roster run).  A `make-network-process' to
+;; 127.0.0.1 costs microseconds and pulls one more external binary out of the
+;; harness besides; production's own transport still spawns `curl', through
+;; `agent-repl-connect--spawn-curl', and that is the boundary the suite
+;; deliberately runs for real.
 
-(defun agent-repl-itest--curl-program ()
-  "Return `curl', which the control plane rides.
-This is the TEST's own use of curl, not production's: production reaches
-curl only through `agent-repl-connect--spawn-curl'."
-  (or (executable-find "curl")
-      (error "agent-repl-itest: no `curl' on PATH — the control plane needs it")))
+(defun agent-repl-itest--http-read-body (raw path)
+  "Return the status and payload of RAW, one whole HTTP/1.1 response.
+PATH names the request in any failure message.  Handles both a
+`Content-Length' body and a `Transfer-Encoding: chunked' one, because the
+Go server picks between them by how the handler wrote its answer."
+  (let ((split (string-search "\r\n\r\n" raw)))
+    (unless split
+      (error "agent-repl-itest: %s answered with no complete header block: %S" path raw))
+    (let* ((head (substring raw 0 split))
+           (payload (substring raw (+ split 4)))
+           (status (if (string-match "\\`HTTP/1\\.[01] \\([0-9]+\\)" head)
+                       (string-to-number (match-string 1 head))
+                     (error "agent-repl-itest: %s answered with no status line: %S" path head))))
+      (when (string-match-p "^[Tt]ransfer-[Ee]ncoding:[ \t]*chunked" head)
+        (setq payload (agent-repl-itest--http-dechunk payload path)))
+      (cons status payload))))
+
+(defun agent-repl-itest--http-dechunk (payload path)
+  "Return PAYLOAD with its HTTP chunked framing removed.
+PATH names the request in any failure message."
+  (let ((out "")
+        (pos 0))
+    (catch 'agent-repl-itest--dechunked
+      (while t
+        (let ((eol (string-search "\r\n" payload pos)))
+          (unless eol
+            (error "agent-repl-itest: %s answered with a truncated chunk header" path))
+          (let ((size (string-to-number (substring payload pos eol) 16)))
+            (when (zerop size)
+              (throw 'agent-repl-itest--dechunked out))
+            (setq out (concat out (substring payload (+ eol 2) (+ eol 2 size)))
+                  ;; past the chunk and its trailing CRLF
+                  pos (+ eol 2 size 2))))))))
+
+(defun agent-repl-itest--http-request (address path body)
+  "Send one HTTP/1.1 request for PATH at ADDRESS and return (STATUS . PAYLOAD).
+With BODY (a string) the request is a POST, otherwise a GET.  The request
+asks for `Connection: close', so the whole answer is exactly what arrives
+before end-of-file and no response framing has to be guessed at."
+  (let* ((host-port (split-string address ":"))
+         (host (car host-port))
+         (port (string-to-number (cadr host-port)))
+         (chunks nil)
+         (proc (make-network-process
+                :name "agent-repl-itest-control"
+                :host host :service port
+                :coding 'binary :noquery t
+                :filter (lambda (_p text) (push text chunks)))))
+    (unwind-protect
+        (progn
+          (process-send-string
+           proc
+           (concat (if body "POST " "GET ") path " HTTP/1.1\r\n"
+                   "Host: " address "\r\n"
+                   "Connection: close\r\n"
+                   (if body
+                       (concat "Content-Type: application/json\r\n"
+                               "Content-Length: "
+                               (number-to-string (string-bytes body)) "\r\n")
+                     "")
+                   "\r\n"
+                   (or body "")))
+          ;; The server closes once it has answered, so the sentinel-free wait
+          ;; is simply "until the process is no longer open".
+          (while (process-live-p proc)
+            (accept-process-output proc 1))
+          (agent-repl-itest--http-read-body
+           (decode-coding-string (apply #'concat (nreverse chunks)) 'utf-8)
+           path))
+      (when (process-live-p proc) (delete-process proc)))))
 
 (defun agent-repl-itest--control (daemon path &optional body)
   "Call DAEMON's control-plane PATH and return (STATUS . PARSED).
@@ -285,28 +370,16 @@ is the HTTP status as an integer and PARSED the decoded JSON body (an
 alist with symbol keys, `list' arrays), or the raw string when the body
 is not JSON.  A non-2xx status is returned rather than signalled: several
 scenarios assert on a deliberate 400."
-  (let* ((curl (agent-repl-itest--curl-program))
-         (url (format "http://%s%s" (agent-repl-itest-daemon-address daemon) path))
-         (args (append (list "-sS" "--http1.1" "-w" "\n%{http_code}")
-                       (when body (list "-X" "POST" "--data-binary" body))
-                       (list url))))
-    (with-temp-buffer
-      (let ((status (apply #'call-process curl nil t nil args)))
-        (unless (eq status 0)
-          (error "agent-repl-itest: curl failed (exit %s) for %s: %s"
-                 status path (buffer-string))))
-      (goto-char (point-max))
-      (forward-line -1)
-      (let* ((http-status (string-to-number (string-trim
-                                             (buffer-substring (point) (point-max)))))
-             (payload (string-trim (buffer-substring (point-min) (point)))))
-        (cons http-status
-              (if (string-empty-p payload)
-                  nil
-                (condition-case nil
-                    (json-parse-string payload :object-type 'alist :array-type 'list
-                                       :null-object :null :false-object :false)
-                  (error payload))))))))
+  (let* ((answer (agent-repl-itest--http-request
+                  (agent-repl-itest-daemon-address daemon) path body))
+         (payload (string-trim (cdr answer))))
+    (cons (car answer)
+          (if (string-empty-p payload)
+              nil
+            (condition-case nil
+                (json-parse-string payload :object-type 'alist :array-type 'list
+                                   :null-object :null :false-object :false)
+              (error payload))))))
 
 (defun agent-repl-itest--control-ok (daemon path &optional body)
   "Call DAEMON's control-plane PATH and return the parsed body, or signal.
@@ -600,14 +673,49 @@ suite asserting on a log line waits for it rather than racing it."
 
 ;;;; ---- Link teardown ----
 
+(defconst agent-repl-itest--transport-process-prefix "agent-repl-connect-"
+  "Name prefix every child `agent-repl-connect--spawn-curl' starts carries.
+`connect.el' names a unary exchange `agent-repl-connect-<method>' and a
+stream `agent-repl-connect-stream-<method>'; both are matched by this.")
+
+(defun agent-repl-itest--reap-transport-children ()
+  "Reap every transport child still running, sentinel dropped first.
+
+A SCENARIO OWNS EVERY PROCESS IT STARTED, AND AN EXCHANGE'S ANSWER IS A
+CONTINUATION.  connect.el delivers a Connect answer -- including a
+transport FAILURE, which is what an unanswered probe eventually is --
+from its curl child's sentinel, and Emacs runs a sentinel from the event
+loop rather than at the moment the process dies.  An exchange still in
+flight when the scenario returns therefore resumes AFTER `cl-letf' has
+put the external-boundary guards back and after the scenario's own
+scratch bindings have unwound: cold start's probe answers `nothing is
+listening', builds with the DEFAULT build script, spawns the DEFAULT
+binary, and errors out of a sentinel -- which aborts the whole batch run
+and names whichever test happened to be running.
+
+Dropping the sentinel before the reap is what makes the resumption
+impossible rather than unlikely; killing without it would simply deliver
+the same answer one line earlier."
+  (dolist (process (process-list))
+    (when (string-prefix-p agent-repl-itest--transport-process-prefix
+                           (process-name process))
+      (set-process-sentinel process #'ignore)
+      (set-process-filter process #'ignore)
+      (when (process-live-p process)
+        (delete-process process)))))
+
 (defun agent-repl-itest--teardown-link ()
-  "Close any standing daemon link and cancel its reconnect timer.
+  "Close any standing daemon link, cancel its reconnect, reap its children.
 `agent-repl-link-teardown\=' closes the connections and forgets the link
 state; the reconnect timer is armed separately by the close handler, so
 it is cancelled here too -- a timer that survives the scenario reconnects
-into the NEXT one\='s daemon."
+into the NEXT one\='s daemon.  The transport children are reaped last,
+because a close is not a reap: an exchange the teardown did not know
+about is still holding a curl child whose sentinel would answer into the
+next scenario."
   (ignore-errors (agent-repl-link-teardown))
-  (ignore-errors (agent-repl-link--cancel-reconnect)))
+  (ignore-errors (agent-repl-link--cancel-reconnect))
+  (agent-repl-itest--reap-transport-children))
 
 ;;;; ---- The ONE fake daemon a suite run shares ----
 ;;
@@ -894,19 +1002,43 @@ address is already published and recorded before it is replaced."
 (defconst agent-repl-itest--cold-start-boundaries
   '(agent-repl--frontend-run-build-script
     agent-repl--frontend-spawn-daemon
-    agent-repl--frontend-artifact-exists-p)
+    agent-repl--frontend-artifact-exists-p
+    agent-repl--frontend-run-log-tail)
   "The external boundaries a cold-start scenario exercises for real.
 Their targets are all test-owned: a stub script and a stub argv written
-into the scenario's own temp dir, and `file-exists-p' on those paths.")
+into the scenario's own temp dir, `file-exists-p' on those paths, and the
+run log under the scenario's own private `AGENT_REPL_STATE_DIR'.
+
+`--run-log-tail' is on the list because THE STUB DAEMON EXITS.  Every
+cold-start stub here is a shell script that does its one job and returns,
+and `agent-repl-daemon--await-address' polls once INLINE before arming
+its timer -- so whenever the stub has already exited by that first tick,
+production takes its `boot-exited' branch and reads the run log to say
+WHY, which is the whole point of that branch.  Which side of the tick the
+exit lands on is a race with the scheduler, so leaving this boundary
+guarded made the guard fire on a slow host and not on a fast one: a flake
+whose cause is the harness's own list, not the scenario.")
 
 (defvar agent-repl-daemon--ensure-in-flight)
+(defvar agent-repl-daemon--build-in-flight)
+(defvar agent-repl-daemon--build-process)
+(defvar agent-repl-daemon--build-continuations)
+(defvar agent-repl-daemon--build-started)
+(defvar agent-repl-daemon--build-labels)
+(defvar agent-repl-daemon--build-target-names)
+(defvar agent-repl-daemon--build-status-timer)
 (defvar agent-repl-daemon--boot-timer)
+(defvar agent-repl-daemon--boot-process)
 (defvar agent-repl-daemon--boot-deadline)
+(defvar agent-repl-daemon--departure-timer)
+(defvar agent-repl-daemon--departure-deadline)
+(defvar agent-repl-daemon--departure-continuation)
 (defvar agent-repl-daemon--boot-continuation)
 (defvar agent-repl-daemon-build-failure)
 (defvar agent-repl-daemon-mode-line-segment)
 (defvar agent-repl--frontend-daemon-process)
 (declare-function agent-repl-daemon--cancel-boot-wait "daemon")
+(declare-function agent-repl-daemon--cancel-departure-wait "daemon")
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-link--cancel-reconnect "daemon-link")
 
@@ -920,9 +1052,46 @@ and no-op — which is how one broken scenario silently disables the rest of
 the suite.  Cancelling and reaping is the only thing that actually ends
 them."
   (agent-repl-daemon--cancel-boot-wait)
-  (when (process-live-p agent-repl--frontend-daemon-process)
-    (delete-process agent-repl--frontend-daemon-process))
-  (agent-repl-link-teardown)
+  ;; The departure wait is armed by a restart and is NOT reached by
+  ;; `--cancel-boot-wait'; its continuation runs the ensure behind it, so a
+  ;; tick that survives the scenario reaches the guarded boundaries too.
+  (agent-repl-daemon--cancel-departure-wait)
+  ;; A BUILD SCRIPT'S SENTINEL OUTLIVES THE COLD-START WINDOW.  The build
+  ;; boundary is asynchronous, so a scenario that asserts as soon as its stub
+  ;; script has DONE ITS WORK returns before the exit behind it is delivered
+  ;; -- and Emacs runs a sentinel from the event loop, never at the moment
+  ;; the process dies, so it fires after `cl-letf' has put the
+  ;; external-boundary guards back.  `agent-repl-daemon--build-finished' then
+  ;; runs the continuation, which starts the daemon and polls once inline
+  ;; (`agent-repl-daemon--await-address' ends with a `--boot-tick'), reaching
+  ;; `agent-repl--frontend-run-log-tail' and `--artifact-exists-p' with the
+  ;; guards armed.  That is a hard error out of a sentinel, which aborts the
+  ;; whole batch run and names whichever test happened to be running.
+  ;;
+  ;; The sentinel is therefore dropped whenever the process OBJECT exists --
+  ;; not only while it is live, because a queued-but-unrun sentinel belongs to
+  ;; a process that is already dead, which is exactly the case that escaped.
+  (when (processp agent-repl-daemon--build-process)
+    (set-process-sentinel agent-repl-daemon--build-process #'ignore)
+    (when (process-live-p agent-repl-daemon--build-process)
+      (delete-process agent-repl-daemon--build-process)))
+  (when (timerp agent-repl-daemon--build-status-timer)
+    (cancel-timer agent-repl-daemon--build-status-timer))
+  (when (processp agent-repl--frontend-daemon-process)
+    (set-process-sentinel agent-repl--frontend-daemon-process #'ignore)
+    (when (process-live-p agent-repl--frontend-daemon-process)
+      (delete-process agent-repl--frontend-daemon-process)))
+  ;; THE RECONNECT TIMER IS A COLD-START TRIGGER, not just a link detail.
+  ;; `agent-repl-daemon-ensure' is registered on
+  ;; `agent-repl-link-no-daemon-functions' at load time, so a reconnect that
+  ;; fires after this window and finds no `daemon.addr' starts a WHOLE cold
+  ;; start -- default build script, default binary, a fresh boot poll -- with
+  ;; the external-boundary guards armed again, and the boot tick then errors
+  ;; out of a timer and aborts the batch run.  A bare
+  ;; `agent-repl-link-teardown' does not cancel that timer; the harness's own
+  ;; teardown does, and reaps the transport children the same way (the
+  ;; cold-start probe is asynchronous, so its answer can still be in flight).
+  (agent-repl-itest--teardown-link)
   (dolist (name '("*agent-repl-health*" "*agent-repl-build-frontend*"))
     (when (get-buffer name) (kill-buffer name))))
 
@@ -935,8 +1104,26 @@ daemon is reaped and the link is torn down, so nothing leaks into the next
 scenario."
   (declare (indent 0) (debug body))
   `(let ((agent-repl-daemon--ensure-in-flight nil)
+         ;; The build's own state, scratch-bound for the same reason the boot
+         ;; state is: a scenario that leaves a build in flight would otherwise
+         ;; make the NEXT scenario's ensure coalesce onto it and spawn nothing.
+         (agent-repl-daemon--build-in-flight nil)
+         (agent-repl-daemon--build-process nil)
+         (agent-repl-daemon--build-continuations nil)
+         (agent-repl-daemon--build-started nil)
+         (agent-repl-daemon--build-labels nil)
+         (agent-repl-daemon--build-target-names nil)
+         (agent-repl-daemon--build-status-timer nil)
          (agent-repl-daemon--boot-timer nil)
+         (agent-repl-daemon--boot-process nil)
          (agent-repl-daemon--boot-deadline nil)
+         ;; The DEPARTURE wait is the boot wait's mirror image and leaks the
+         ;; same way: `agent-repl-frontend-daemon-restart' arms it, its
+         ;; continuation runs the ensure behind it, and an ensure reached
+         ;; from a tick after the scenario returned finds the guards armed.
+         (agent-repl-daemon--departure-timer nil)
+         (agent-repl-daemon--departure-deadline nil)
+         (agent-repl-daemon--departure-continuation nil)
          (agent-repl-daemon--boot-continuation nil)
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
