@@ -37,7 +37,7 @@ export interface FoldContext {
   /** True while the open turn is the shim's own keep-alive. */
   readonly keepalive: boolean;
   /** The clock, injected so conversions are testable without one. */
-  nowMs(): number;
+  readonly nowMs: () => number;
   /**
    * The pending ask for a gated call, if the shim is blocking on one.
    *
