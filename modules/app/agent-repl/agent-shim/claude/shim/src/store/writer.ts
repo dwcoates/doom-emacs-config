@@ -180,6 +180,20 @@ export function toWriteBatchRequest(
 // The buffered writer
 // ---------------------------------------------------------------------------
 
+/**
+ * One failed attempt at a batch, and what KIND of failure it was.
+ *
+ * `terminal` says the failure is about the BATCH rather than about the store,
+ * so replaying it just re-sends the same bytes. `converterDefect` says WHOSE
+ * defect it is: the producer handed this writer a row that cannot be carried,
+ * which is not a store outage and must never be reported as one.
+ */
+interface BatchFailure {
+  readonly detail: string;
+  readonly terminal: boolean;
+  readonly converterDefect: boolean;
+}
+
 /** One batch waiting to be acked, and how many attempts it has had. */
 interface PendingBatch {
   readonly entries: readonly PersistEntry[];
@@ -345,29 +359,70 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    * the same malformed row while every later batch waits behind it in the one
    * ordered drain. It is surfaced ONCE and dropped, so the queue keeps moving.
    */
-  const attempt = async (
-    entries: readonly PersistEntry[],
-  ): Promise<{ readonly detail: string; readonly terminal: boolean } | null> => {
+  const attempt = async (entries: readonly PersistEntry[]): Promise<BatchFailure | null> => {
+    // THE ENVELOPE IS BUILT OUTSIDE THE TRANSPORT'S TRY, so a row this writer
+    // cannot envelope at all is never mistaken for the store being down.
+    // `toStoreEntry` refuses an entry with no servable item and one with an
+    // empty upsert key, and `requireProducer` refuses a row produced before the
+    // conversation was named -- every one of those is the PRODUCER's defect,
+    // reported for years as `store_unreachable` and retried on a schedule that
+    // could never make the same bytes acceptable.
+    let request: storev1.WriteBatchRequest;
+    try {
+      request = toWriteBatchRequest(requireProducer(), entries);
+    } catch (error) {
+      return {
+        detail: error instanceof Error ? error.message : String(error),
+        terminal: true,
+        converterDefect: true,
+      };
+    }
     let response: storev1.WriteBatchResponse;
     try {
-      response = await options.client.writeBatch(toWriteBatchRequest(requireProducer(), entries));
+      response = await options.client.writeBatch(request);
     } catch (error) {
       return {
         detail: error instanceof Error ? error.message : String(error),
         terminal: false,
+        converterDefect: false,
       };
     }
     const result = response.result;
     if (result.case === "success") return null;
     if (result.case === "failure") {
-      return {
-        detail: result.value.detail,
-        terminal: result.value.kind.case === "invalidRequest",
-      };
+      // AN `invalid_request` IS THE STORE ANSWERING, not the store failing: it
+      // read the batch and named a malformed row. The store is reachable, so
+      // the honest fault is the converter's.
+      const invalid = result.value.kind.case === "invalidRequest";
+      return { detail: result.value.detail, terminal: invalid, converterDefect: invalid };
     }
     // AN UNSET ONEOF IS ILLEGAL, immediately and loudly: a response that says
     // neither durable nor failed cannot be acted on either way.
-    return { detail: "store answered a WriteBatch with no result arm set", terminal: false };
+    return {
+      detail: "store answered a WriteBatch with no result arm set",
+      terminal: false,
+      converterDefect: false,
+    };
+  };
+
+  /**
+   * Report one failed attempt on the channel that names its real cause.
+   *
+   * A converter defect and a store outage are DIFFERENT DIAGNOSES and neither
+   * may be reported as the other: the store is reachable when it refuses a
+   * malformed row, and buffering does not exist for bytes that can never become
+   * valid, so a converter defect opens no degraded window.
+   */
+  const reportFailure = (failure: BatchFailure): void => {
+    if (failure.converterDefect) {
+      LOGGER.log(
+        { level: "error", detail: failure.detail },
+        "the converter produced a row the store plane cannot carry; the store is not at fault",
+      );
+      emitFault("converter_defect", failure.detail);
+      return;
+    }
+    openDegraded(failure.detail);
   };
 
   /** Announce a batch that will never be written, naming every row it lost. */
@@ -404,7 +459,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         );
         return true;
       }
-      openDegraded(failure.detail);
+      reportFailure(failure);
       // A REFUSED BATCH IS NOT A DEGRADED STORE: the store read this batch and
       // said it is malformed, so no schedule can make it acceptable. Surface it
       // once and drop it rather than blocking every later batch behind it.
@@ -447,7 +502,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       LOGGER.logVerbose({ entries: batch.entries.length, attempts: batch.attempts }, "batch is durable");
       return true;
     }
-    openDegraded(failure.detail);
+    reportFailure(failure);
     if (failure.terminal) dropLoudly(batch, failure.detail);
     return false;
   };

@@ -2905,16 +2905,23 @@ describe("a foreground unit whose item has no lifecycle", () => {
 
 
 /**
- * The IDE-diagnostics adjacency join (engine/session.ts's `lastWriteOrEdit`).
+ * The IDE-diagnostics adjacency join (engine/session.ts's `lastChange`).
  *
  * The vendor's `diagnostics` attachment carries no tool id, so
  * convert/attachments.ts joins it to the change it concerns by the one
  * remembered write-or-edit unit -- and nothing assigned it, so every
  * diagnostics record fell to "IDE diagnostics arrived with no preceding write
  * or edit" and landed as residue.
+ *
+ * The remembered value carries the KIND as well as the id, because the report
+ * lands on that unit's own arm and nothing else states which arm that is.
  */
-describe("the last write or edit unit the fold context carries", () => {
-  it("names the edit once one has been folded", async () => {
+describe("the last change the fold context carries", () => {
+  /** Fold one activity of the given kind, then a later message that reads the context. */
+  async function foldOneChange(
+    kind: "write" | "edit",
+    activityId: string,
+  ): Promise<ReturnType<typeof harness>> {
     const h = harness();
     await started(h);
     h.fold.entriesFor = (message) =>
@@ -2923,7 +2930,7 @@ describe("the last write or edit unit the fold context carries", () => {
             {
               agentId: mainAgentId("vendor-session"),
               upsertKey: "k",
-              source: { producer: "p", vendorUuid: "u", arm: "edit" } as never,
+              source: { producer: "p", vendorUuid: "u", arm: kind } as never,
               keepalive: false,
               item: {
                 kind: "frame",
@@ -2935,12 +2942,12 @@ describe("the last write or edit unit the fold context carries", () => {
                         case: "activity",
                         value: create(conversationv1.AgentActivitySchema, {
                           activityId: create(conversationv1.AgentActivityIdSchema, {
-                            value: "toolu_edit",
+                            value: activityId,
                           }),
-                          item: {
-                            case: "edit",
-                            value: create(conversationv1.AgentEditSchema, {}),
-                          },
+                          item:
+                            kind === "edit"
+                              ? { case: "edit", value: create(conversationv1.AgentEditSchema, {}) }
+                              : { case: "write", value: create(conversationv1.AgentWriteSchema, {}) },
                         }),
                       },
                     }),
@@ -2964,8 +2971,31 @@ describe("the last write or edit unit the fold context carries", () => {
       session_id: "s",
       message: { role: "user", content: [] },
     } as never);
+    return h;
+  }
 
-    expect(h.fold.contexts.at(-1)?.lastWriteOrEditUnit?.value).toBe("toolu_edit");
+  it("names the edit once one has been folded", async () => {
+    const h = await foldOneChange("edit", "toolu_edit");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.unit.value).toBe("toolu_edit");
+  });
+
+  it("states that an edit was an edit, so the report rides the edit arm", async () => {
+    const h = await foldOneChange("edit", "toolu_edit");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.kind).toBe("edit");
+  });
+
+  it("names the write once one has been folded", async () => {
+    const h = await foldOneChange("write", "toolu_write");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.unit.value).toBe("toolu_write");
+  });
+
+  it("states that a write was a write, so the report rides the write arm", async () => {
+    const h = await foldOneChange("write", "toolu_write");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.kind).toBe("write");
   });
 });
 

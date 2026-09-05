@@ -28,6 +28,17 @@ import { conversationv1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import type { SdkMessage } from "../sdk/types.js";
 
+/**
+ * A change to a file the agent made, as the diagnostics join remembers it.
+ *
+ * BOTH HALVES ARE LOAD-BEARING: the unit is what the report is attached to, and
+ * the kind is which arm it rides on that unit.
+ */
+export interface LastChange {
+  readonly unit: conversationv1.AgentActivityId;
+  readonly kind: "write" | "edit";
+}
+
 /** What the shim is already holding when a message arrives. */
 export interface FoldContext {
   /** The conversation's book: the ORIGINAL vendor session id (R9). */
@@ -100,12 +111,17 @@ export interface FoldContext {
   reportFault?(kind: "converter_defect", detail: string): void;
 
   /**
-   * The last write or edit unit seen.
+   * The last write or edit seen, and WHICH of the two it was.
    *
    * The vendor's IDE-diagnostics record carries no tool id, so the join is by
-   * ADJACENCY — one remembered value, which is exactly this.
+   * ADJACENCY — one remembered value, which is exactly this. The kind rides
+   * along because the report lands on the remembered unit's OWN arm: a report
+   * following a `Write` is `AgentWrite.diagnostics`, and one following an
+   * `Edit` is `AgentEdit.diagnostics`. Nothing else can tell them apart — the
+   * id alone states no kind, and a call site that guesses attributes a write's
+   * findings to an edit that never happened.
    */
-  readonly lastWriteOrEditUnit?: conversationv1.AgentActivityId;
+  readonly lastChange?: LastChange;
 }
 
 /** Everything one SDK message produced, as the engine consumes it. */
