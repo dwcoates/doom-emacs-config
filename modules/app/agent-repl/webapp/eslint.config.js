@@ -36,17 +36,38 @@ export default tseslint.config(
       },
     },
     rules: {
-      // THE HOUSE RULE, MECHANIZED: "every oneof is switched exhaustively; an
-      // unset oneof or an unknown arm is a MalformedView, never a default."
-      // `considerDefaultExhaustiveForUnions` stays at its default of false, so
-      // a `default:` clause does NOT excuse an unnamed arm — which is the
-      // whole point. When the proto grows an arm, the switch that has to draw
-      // it fails this lint instead of quietly routing the new arm into a
-      // catch-all. `case undefined:` is named alongside the rest, because an
-      // unset oneof is a real wire state and deserves a real arm.
+      // THE HOUSE RULE, MECHANIZED: an arm nobody drew must not fall through
+      // in silence. What that means here was MEASURED, not assumed, because
+      // this rule's `considerDefaultExhaustiveForUnions` option decides which
+      // of two very different rules you get, and the wrong one is worthless.
+      //
+      // At `false` — a `default:` clause does not excuse an unnamed arm — the
+      // rule reports 48 sites across this package and the shim, and not one of
+      // them is a defect: EVERY partial switch in both packages already ends
+      // in a default that throws, logs at warn, or makes a documented
+      // forward-compatible choice (`drawFooterSubStatus`: "an arm this build
+      // has never heard of still draws correctly"; `armBreathes`: "everything
+      // else is still"). Satisfying it would mean naming four cross-cutting
+      // refusal arms at thirteen call sites that deliberately delegate them,
+      // and spelling out thirty-seven `case` labels that all return the same
+      // cell — plus roughly nineteen inline disables where neither is
+      // defensible. A rule paid for in scattered disables is not enforcing
+      // anything.
+      //
+      // At `true` — the setting used here — a switch that ends in a default
+      // has made a decision, and a switch that does NOT and misses an arm is
+      // an error. That is precisely the silent fall-through: the arm that
+      // returns `undefined` because nobody wrote its case and nobody wrote a
+      // default. Zero sites violate it today, which is the discipline this
+      // package already keeps; the rule is the ratchet that keeps it.
+      //
+      // If a future arm needs catching AT the loud default rather than in it,
+      // the stronger tool is a `const _exhaustive: never = arm` in that
+      // default — a compile error, not a lint one — and it costs nothing to
+      // add at a switch that really is total.
       "@typescript-eslint/switch-exhaustiveness-check": [
         "error",
-        { requireDefaultForNonUnion: true },
+        { requireDefaultForNonUnion: true, considerDefaultExhaustiveForUnions: true },
       ],
 
       // `a || b` substitutes b for "" and 0, which for this renderer means a
