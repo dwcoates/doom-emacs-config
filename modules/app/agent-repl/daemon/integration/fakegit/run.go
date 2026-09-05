@@ -27,8 +27,39 @@ const fakeGitVersion = "git version 2.39.5"
 // filesystem effects a worktree command has, so it is unit-testable without a
 // process.
 func Run(s *State, cwd string, args []string) Result {
+	// THE ANSWER IS RECORDED, NOT ONLY THE QUESTION. A recorded conversation
+	// that says `rev-parse --show-toplevel` ran but not what it answered
+	// cannot tell a repository the fixture knows from one it does not -- and
+	// that difference is the whole diagnosis when a caller reacts to the
+	// answer by asking the user a question nobody can answer. The row is
+	// reserved before the command runs and completed after, so a command that
+	// records further calls of its own still leaves them in issue order.
+	at := len(s.Calls)
 	s.Calls = append(s.Calls, Call{Args: append([]string(nil), args...), Cwd: cwd, At: time.Now().UTC()})
+	res := answer(s, cwd, args)
+	s.Calls[at].Exit = res.Exit
+	s.Calls[at].Stdout = clipRecorded(res.Stdout)
+	s.Calls[at].Stderr = clipRecorded(res.Stderr)
+	return res
+}
 
+// recordedOutputLimit bounds how much of one answer the fixture keeps. A `log`
+// or a `status` can print a lot, and the fixture file is read and rewritten by
+// every subsequent invocation; what a diagnosis needs is the first line or two,
+// not the whole payload.
+const recordedOutputLimit = 512
+
+// clipRecorded bounds one recorded stream, saying so when it clips.
+func clipRecorded(out string) string {
+	if len(out) <= recordedOutputLimit {
+		return out
+	}
+	return out[:recordedOutputLimit] + "...(clipped)"
+}
+
+// answer is Run's body: the pure question-to-answer mapping, with the
+// recording left to Run.
+func answer(s *State, cwd string, args []string) Result {
 	dir, subject := splitGlobalOptions(cwd, args)
 	if len(subject) == 0 {
 		return Result{Stderr: "usage: git <command>\n", Exit: 129}

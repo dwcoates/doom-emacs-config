@@ -101,6 +101,13 @@ type Call struct {
 	// somebody else's git. A bound derived from a run without it would be a
 	// guess about which of the two was paying.
 	At time.Time `json:"at"`
+	// Exit, Stdout and Stderr are what the fake ANSWERED. Recorded because a
+	// caller's next move is a reaction to the answer, and a conversation that
+	// omits it cannot explain the reaction. Both streams are clipped; see
+	// `recordedOutputLimit`.
+	Exit   int    `json:"exit"`
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
 }
 
 // State is the whole fake world.
