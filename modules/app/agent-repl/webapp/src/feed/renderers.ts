@@ -65,7 +65,7 @@ export interface RowContext {
   /** The whole row, so a renderer can reach its id, turn and placement arm. */
   row: FeedRow;
   /** Bring another row into view, opening bubbles along the way if needed. */
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
   /**
    * The element this row's PREVIOUS draw produced, when it had one.
    *

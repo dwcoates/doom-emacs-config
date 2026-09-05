@@ -33,7 +33,7 @@ export interface RowContext {
    * whether the row could be reached (a collapsed shell bubble degrades to
    * scroll-if-rendered, so `false` is a real answer, not an error).
    */
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
   /**
    * The body element the PREVIOUS draw of this same row returned, when there
    * was one. Absent on a row's first draw.

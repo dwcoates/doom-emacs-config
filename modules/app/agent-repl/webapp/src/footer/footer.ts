@@ -47,7 +47,7 @@ export function panelStorageKey(workspaceId: string): string {
 
 export interface FooterDeps {
   /** Bring a feed row into view; the panels' jump rows call it. */
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
 }
 
 export interface FooterHandle extends Handle {

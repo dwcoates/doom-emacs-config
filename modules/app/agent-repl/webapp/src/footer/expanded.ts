@@ -79,7 +79,7 @@ export const EXPANDED_FOOTER_MAX_ROWS = 8;
 /** What the panels need: the context to call and click through, and the jump. */
 export interface ExpandedDeps {
   ctx: AppContext;
-  revealRow(id: FeedId): Promise<boolean>;
+  readonly revealRow: (id: FeedId) => Promise<boolean>;
 }
 
 /**
