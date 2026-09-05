@@ -584,6 +584,29 @@ func (e *Emacs) writeSettings(opts EmacsOpts) {
 ;; before modules/app/agent-repl/config.el loads, which is why it is here.
 (setq agent-repl-frontend-auto-start nil)
 
+;; NOTHING IN THIS LAYER CAN ANSWER A QUESTION.
+;;
+;; A y-or-n-p nobody answers does not fail, it HANGS: the reader enters a
+;; recursive edit, the command loop stops running the scenario's forms, and
+;; the process stops answering emacsclient -- so the layer reports "emacs did
+;; not answer a heartbeat probe", which names neither the prompt nor the call
+;; that raised it.  Measured: a native backtrace of that stall showed
+;; magit-status calling y-or-n-p directly, and nothing above it in the elisp
+;; log said so.
+;;
+;; Every scenario that drives a prompting command stubs the reader for the
+;; duration (cl-letf on the symbol-function, which wins over this advice), so
+;; a prompt that reaches here is by definition one nobody will ever answer.
+;; Refusing it loudly turns a permanent stall into a named failure.
+(defun agent-repl-e2e--refuse-prompt (prompt &rest _)
+  (let ((text (format "%%s" prompt)))
+    (message "agent-repl-e2e: UNANSWERABLE PROMPT: %%s" text)
+    (when (fboundp 'agent-repl--warn)
+      (agent-repl--warn nil "elisp.e2e.unanswerable-prompt prompt=%%s" text))
+    (error "agent-repl-e2e: no scenario can answer this prompt: %%s" text)))
+(advice-add 'y-or-n-p :override #'agent-repl-e2e--refuse-prompt)
+(advice-add 'yes-or-no-p :override #'agent-repl-e2e--refuse-prompt)
+
 ;; THE MODULE'S OWN LOG GETS A PER-SCENARIO ROOT.
 ;; The agent-repl-log-file-name default is
 ;; <temporary-file-directory>/doom-agent-repl-<uid>/doom-agent-repl.log --
