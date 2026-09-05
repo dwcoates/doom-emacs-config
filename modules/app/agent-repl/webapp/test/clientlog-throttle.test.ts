@@ -175,3 +175,40 @@ describe("ClientLogThrottle", () => {
     expect(sent.map((r) => r.message)).toEqual(["one", "two"]);
   });
 });
+
+describe("ClientLogThrottle: a refused drop summary", () => {
+  it("keeps owing the count when the summary itself is refused", () => {
+    // Arrange: one record fits, the second is dropped and counted.
+    const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
+    throttle.write("info", "kept");
+    throttle.write("info", "lost");
+    setAccept(false);
+
+    // Act: the refused flush must not forget the drop.
+    throttle.flush();
+    setAccept(true);
+    throttle.flush();
+
+    // Assert.
+    expect(sent[0].message).toBe(
+      "client log forwarding dropped 1 record(s) over its 1-record buffer bound",
+    );
+  });
+
+  it("reports the drop exactly once across the two flushes", () => {
+    // Arrange.
+    const { throttle, setAccept, sent } = harness({ maxBuffer: 1 });
+    throttle.write("info", "kept");
+    throttle.write("info", "lost");
+    setAccept(false);
+
+    // Act.
+    throttle.flush();
+    setAccept(true);
+    throttle.flush();
+    throttle.flush();
+
+    // Assert.
+    expect(sent.filter((r) => r.message.startsWith("client log forwarding dropped"))).toHaveLength(1);
+  });
+});

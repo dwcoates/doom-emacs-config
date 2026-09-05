@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CAPPED_CLASSES,
   CAPPED_SELECTOR,
@@ -10,6 +11,7 @@ import {
   expandAction,
   expandedKeys,
   isCappedSection,
+  installClickExpand,
   isExpanded,
   ownsSection,
   toggleExpanded,
@@ -295,5 +297,125 @@ describe("ownsSection", () => {
     const out = node("out", childCard, "tool-output");
     // Act + Assert
     expect(ownsSection(out, card)).toBe(false);
+  });
+});
+
+describe("primaryClass fallback", () => {
+  it("keys a section carrying no capped class under the empty class name", () => {
+    // Arrange — an expanded element that is not a capped section at all, the
+    // only input for which `primaryClass` has no CAPPED_CLASSES entry to find.
+    const sections = [section(EXPANDED_CLASS)];
+    // Act
+    const keys = expandedKeys(sections);
+    // Assert — the empty class name, still numbered by occurrence.
+    expect(keys).toEqual([":0"]);
+  });
+});
+
+describe("installClickExpand", () => {
+  let feed: HTMLElement | null = null;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    feed?.remove();
+    feed = null;
+  });
+
+  /** A feed holding one capped section, mounted for real click dispatch. */
+  function mountFeed(inner = ""): { feed: HTMLElement; box: HTMLElement } {
+    const el = document.createElement("div");
+    el.innerHTML = `<div class="tool-output">${inner}</div>`;
+    document.body.appendChild(el);
+    feed = el;
+    return { feed: el, box: el.querySelector(".tool-output") as HTMLElement };
+  }
+
+  it("expands the capped section a click lands on", () => {
+    // Arrange
+    const { feed: el, box } = mountFeed("body text");
+    installClickExpand(el, () => "");
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(true);
+  });
+
+  it("restores the capped preview on the second click", () => {
+    // Arrange — an already-expanded section, the state a first click leaves.
+    const { feed: el, box } = mountFeed("body text");
+    installClickExpand(el, () => "");
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("leaves a click on a control inside the section to that control", () => {
+    // Arrange — a button, one of CLICK_THROUGH_SELECTOR's own.
+    const { feed: el, box } = mountFeed(`<button id="b">run</button>`);
+    installClickExpand(el, () => "");
+    // Act
+    (el.querySelector("#b") as HTMLElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true }),
+    );
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("leaves a click that ends a text selection alone", () => {
+    // Arrange — the selection probe reports live selected text.
+    const { feed: el, box } = mountFeed("body text");
+    installClickExpand(el, () => "body");
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("ignores a click on no capped section at all", () => {
+    // Arrange — the click lands on the feed itself, above every section.
+    const { feed: el, box } = mountFeed("body text");
+    installClickExpand(el, () => "");
+    // Act
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("ignores a click whose target is not an HTML element", () => {
+    // Arrange — an SVG child: an Element, but never an HTMLElement.
+    const { feed: el, box } = mountFeed("");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    box.appendChild(svg);
+    installClickExpand(el, () => "");
+    // Act
+    svg.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("reads the live window selection when no probe is supplied", () => {
+    // Arrange — the default probe, with the page reporting selected text.
+    const { feed: el, box } = mountFeed("body text");
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      toString: () => "body",
+    } as unknown as globalThis.Selection);
+    installClickExpand(el);
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert — the selection gesture wins over the toggle.
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(false);
+  });
+
+  it("treats an absent window selection as no selected text", () => {
+    // Arrange — the default probe, with getSelection answering null.
+    const { feed: el, box } = mountFeed("body text");
+    vi.spyOn(window, "getSelection").mockReturnValue(null);
+    installClickExpand(el);
+    // Act
+    box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Assert
+    expect(box.classList.contains(EXPANDED_CLASS)).toBe(true);
   });
 });
