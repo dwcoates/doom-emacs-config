@@ -150,3 +150,42 @@ describe("drawFeedMergeGlyph: an unknown name is decoration, never an error", ()
     expect(el.getAttribute("data-glyph")).toBe("rebase");
   });
 });
+
+describe("an arm this build cannot draw is a refusal, never a default", () => {
+  it("refuses a merge whose result is an arm a newer daemon set", () => {
+    const newer = mergeHead({ case: "update" });
+    (newer as { result: unknown }).result = { case: "rewound", value: {} };
+
+    let thrown: unknown;
+    try {
+      draw(newer);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedMerge.result");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'rewound' is not one this build can draw",
+    );
+  });
+
+  it("refuses a merge error whose reason is an arm a newer daemon set", () => {
+    const newer = mergeHead({ case: "failed", endedAtMs: 9_000n, summary: "nope" });
+    const error = (newer as { result: { value: { reason: unknown } } }).result.value;
+    error.reason = { case: "superseded", value: {} };
+
+    let thrown: unknown;
+    try {
+      draw(newer);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedMerge.error.reason");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'superseded' is not one this build can draw",
+    );
+  });
+});

@@ -17,7 +17,7 @@ import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createAppContext } from "../../src/rpc/context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
-import { drawHeldOffer } from "../../src/tray/held-offer.js";
+import { answerHeldOfferRefusal, drawHeldOffer } from "../../src/tray/held-offer.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
@@ -191,5 +191,72 @@ describe("answering an offer", () => {
     card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
     const disabled = [...card.querySelectorAll("button")].every((b) => b.disabled);
     expect(disabled).toBe(true);
+  });
+});
+
+describe("the daemon could not be reached", () => {
+  it("states the unreachable daemon at the card rather than as a refusal arm", async () => {
+    // ARRANGE: the verb never answers at all — a transport failure, which is
+    // not one of the endpoint's own arms.
+    const { tc } = trayContext(() => {
+      throw new Error("the socket went away");
+    });
+    const card = drawHeldOffer(offer(), tc);
+    // ACT
+    card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]')?.click();
+    await settle();
+    // ASSERT
+    expect(card.querySelector(".offer-refusal")?.getAttribute("data-arm")).toBe("error");
+  });
+
+  it("words an unreachable daemon without inventing one of the endpoint's arms", async () => {
+    // ARRANGE
+    const { tc } = trayContext(() => {
+      throw new Error("the socket went away");
+    });
+    const card = drawHeldOffer(offer(), tc);
+    // ACT
+    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    await settle();
+    // ASSERT
+    expect(card.querySelector(".offer-refusal")?.textContent).toBe(
+      "the daemon could not be reached",
+    );
+  });
+
+  it("re-enables the answers once the unreachable daemon is stated", async () => {
+    // ARRANGE
+    const { tc } = trayContext(() => {
+      throw new Error("the socket went away");
+    });
+    const card = drawHeldOffer(offer(), tc);
+    const keep = card.querySelector<HTMLButtonElement>('[data-offer-decision="keep"]');
+    // ACT
+    keep?.click();
+    await settle();
+    // ASSERT
+    expect(keep?.disabled).toBe(false);
+  });
+});
+
+describe("answerHeldOfferRefusal", () => {
+  it("refuses an arm a newer daemon added rather than wording it as a shrug", () => {
+    // ARRANGE / ACT / ASSERT
+    expect(() =>
+      answerHeldOfferRefusal({ case: "offerExpired", value: {} } as never),
+    ).toThrow(MalformedView);
+  });
+
+  it("quotes the cause's own path in the refusal it raises", () => {
+    // ARRANGE
+    let raised: unknown;
+    // ACT
+    try {
+      answerHeldOfferRefusal({ case: "offerExpired", value: {} } as never);
+    } catch (err) {
+      raised = err;
+    }
+    // ASSERT
+    expect((raised as MalformedView).path).toBe("AnswerHeldOfferError.cause");
   });
 });

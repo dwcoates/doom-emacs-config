@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   SelectWorkspaceErrorSchema,
@@ -242,5 +242,90 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
     line?.click();
     await settle();
     expect(el.querySelectorAll('[data-queue-place="ahead"] .refusal').length).toBe(1);
+  });
+});
+
+describe("an arm this build cannot draw is a refusal, never a default", () => {
+  it("refuses an entry whose status is an arm a newer daemon set", () => {
+    const s = scripted(SELECTED);
+    const newer = create(FeedMergeQueueEntrySchema, {
+      workspace: { ref: create(WorkspaceRefSchema, { id: "x", dir: "/x" }) },
+      label: { text: "x" },
+    });
+    (newer as { status: unknown }).status = { case: "rebasing", value: {} };
+
+    let thrown: unknown;
+    try {
+      drawFeedMergeQueueEntry(newer, rowContext(s.ctx, mergeRow("m1")), "behind");
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeInstanceOf(MalformedView);
+    expect((thrown as MalformedView).path).toBe("FeedMergeQueueEntry.status");
+    expect((thrown as MalformedView).detail).toBe(
+      "arm 'rebasing' is not one this build can draw",
+    );
+  });
+
+  it("refuses a SelectWorkspace answer whose result is an arm a newer daemon set", async () => {
+    // The router transport re-encodes through the frozen schema, which would
+    // drop an arm the descriptor has no field for; a fake client hands the
+    // renderer the newer daemon's answer unaltered, which is the case under
+    // test.
+    const answer = create(SelectWorkspaceResponseSchema, {
+      result: { case: "success", value: {} },
+    });
+    (answer as { result: unknown }).result = { case: "deferred", value: {} };
+    const ctx = createAppContext({
+      client: {
+        selectWorkspace: () => Promise.resolve(answer),
+      } as unknown as ReturnType<typeof createAgentReplClient>,
+      workspace: WORKSPACE,
+      ticker: createTicker(1000),
+      failures: new RecordingSink(),
+      composerEnabled: false,
+    });
+    const row = document.createElement("div");
+    const ref = create(WorkspaceRefSchema, { id: "front", dir: "/w/front" });
+
+    const call = selectQueueEntryWorkspace(row, rowContext(ctx, mergeRow("m1")), ref);
+    const landed = vi.advanceTimersByTimeAsync(0);
+    await expect(call).rejects.toThrow(
+      "malformed view at SelectWorkspaceResponse.result: arm 'deferred' is not one this build can draw",
+    );
+    await landed;
+
+    expect(row.querySelector(".refusal")).toBeNull();
+  });
+});
+
+describe("a daemon that cannot be reached answers at the clicked row", () => {
+  it("draws the transport refusal in the row, and does not raise a malformed view", async () => {
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        selectWorkspace: () => {
+          throw new ConnectError("socket is gone", Code.Unavailable);
+        },
+      });
+    });
+    const ctx = createAppContext({
+      client: createAgentReplClient(transport),
+      workspace: WORKSPACE,
+      ticker: createTicker(1000),
+      failures: new RecordingSink(),
+      composerEnabled: false,
+    });
+    const row = document.createElement("div");
+    const ref = create(WorkspaceRefSchema, { id: "front", dir: "/w/front" });
+
+    const call = selectQueueEntryWorkspace(row, rowContext(ctx, mergeRow("m1")), ref);
+    const landed = vi.advanceTimersByTimeAsync(0);
+    await call;
+    await landed;
+
+    const refusal = row.querySelector(".merge-queue-refusal");
+    expect(refusal?.getAttribute("data-arm")).toBe("transport");
+    expect(refusal?.textContent).toBe("the daemon could not be reached");
   });
 });

@@ -18,7 +18,7 @@ import {
   type LoginTerminalOutput,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
 import type { LoginLink } from "../../src/login/link.js";
-import { mountLoginOverlay } from "../../src/login/login.js";
+import { mountLoginOverlay, report } from "../../src/login/login.js";
 import type { LoginTerminalView } from "../../src/login/terminal.js";
 import { oneofArms } from "../arms.js";
 import { RecordingSink, appContext } from "../topbar/fixtures.js";
@@ -474,4 +474,69 @@ describe("the refusals", () => {
       overlay.dispose();
     });
   }
+});
+
+describe("report: one SendLoginInput, awaited", () => {
+  /** A header standing on its own — `report` only ever draws into one. */
+  function header(): HTMLElement {
+    const el = document.createElement("div");
+    host.replaceChildren(el);
+    return el;
+  }
+
+  it("states a transport failure at the header when the send never answered", async () => {
+    // ARRANGE
+    const el = header();
+    // ACT
+    await report(appContext(), el, Promise.reject(new Error("socket closed")));
+    // ASSERT
+    expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
+  });
+
+  it("files a result arm this build cannot read through the failure sink", async () => {
+    // ARRANGE: a newer daemon's third arm is a frame this build cannot read,
+    // not a refusal — the overlay says so through the sink.
+    const sink = new RecordingSink();
+    const el = header();
+    // ACT
+    await report(appContext({}, sink), el, Promise.resolve({ result: { case: "deferred" } }));
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toEqual(["frameUndecodable"]);
+  });
+
+  it("draws no refusal at the header for a result arm it cannot read", async () => {
+    // ARRANGE
+    const el = header();
+    // ACT
+    await report(appContext({}, new RecordingSink()), el, Promise.resolve({
+      result: { case: "deferred" },
+    }));
+    // ASSERT
+    expect(el.querySelector(".refusal")).toBeNull();
+  });
+
+  it("files a response naming no result arm through the failure sink", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const el = header();
+    // ACT
+    await report(appContext({}, sink), el, Promise.resolve({ result: {} }));
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toEqual(["frameUndecodable"]);
+  });
+
+  it("rethrows an error that is not a view this build could not read", async () => {
+    // ARRANGE: only a MalformedView is the refusal path's to interpret;
+    // anything else must travel up rather than being swallowed at the header.
+    const el = header();
+    const answered = {
+      get result(): never {
+        throw new Error("reading the answer threw");
+      },
+    };
+    // ACT / ASSERT
+    await expect(report(appContext(), el, Promise.resolve(answered))).rejects.toThrow(
+      "reading the answer threw",
+    );
+  });
 });
