@@ -320,25 +320,25 @@ describe("shim runtime logging", () => {
   it("carries a non-finite number as its stringified form rather than dropping the field", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).log({ ratio: Number.POSITIVE_INFINITY }, "budget");
-    expect(persisted()[0]!.context).toEqual({ ratio: "Infinity" });
+    expect(persisted()[0].context).toEqual({ ratio: "Infinity" });
   });
 
   it("carries a bigint as a decimal string, which JSON has no other way to hold", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).log({ offset: 9007199254740993n }, "offset");
-    expect(persisted()[0]!.context).toEqual({ offset: "9007199254740993" });
+    expect(persisted()[0].context).toEqual({ offset: "9007199254740993" });
   });
 
   it("carries a function-valued field as its stringified form", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).log({ hook: function named() {} }, "hook");
-    expect(String((persisted()[0]!.context as Record<string, unknown>).hook)).toContain("named");
+    expect(String((persisted()[0].context as Record<string, unknown>).hook)).toContain("named");
   });
 
   it("carries a symbol-valued field as its stringified form", async () => {
     const log = await configured();
     log.bindLog({ operation: "shim.test.jsonsafe" }).log({ tag: Symbol("marker") }, "tag");
-    expect(persisted()[0]!.context).toEqual({ tag: "Symbol(marker)" });
+    expect(persisted()[0].context).toEqual({ tag: "Symbol(marker)" });
   });
 
   it("poisons the sink when the durable write fails WHILE recording the mirror's retirement", async () => {
@@ -358,7 +358,7 @@ describe("shim runtime logging", () => {
       durableWrites += 1;
       if (durableWrites > 1) throw new Error("bad fd");
       return args[3] as number;
-    }) as typeof writeSync);
+    }));
 
     log.bindLog({ operation: "shim.test.retire-poison" }).log({}, "the record that retires the mirror");
 
@@ -370,7 +370,7 @@ describe("shim runtime logging", () => {
     stderr();
     const causes: string[] = [];
     log.onLogSinkPoisoned((cause) => causes.push(cause.message));
-    mockedWriteSync.mockImplementation((() => { throw "EBADF"; }) as unknown as typeof writeSync);
+    mockedWriteSync.mockImplementation(() => { throw "EBADF"; });
 
     log.bindLog({ operation: "shim.test.nonerror" }).log({}, "durable failure");
 
@@ -379,7 +379,7 @@ describe("shim runtime logging", () => {
 
   it("retires the mirror when the stderr write throws a non-Error", async () => {
     const log = await configured();
-    vi.spyOn(process.stderr, "write").mockImplementation((() => { throw "EPIPE"; }) as unknown as typeof process.stderr.write);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw "EPIPE"; });
     log.bindLog({ operation: "shim.test.nonerror-mirror" }).log({}, "retire me");
     expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
   });
@@ -389,7 +389,7 @@ describe("shim runtime logging", () => {
     log.setClaudeSessionId("claude-77");
     const terminal = stderr();
     log.emergencyStderr("the sink is gone");
-    expect(JSON.parse(terminal[0]!)).toMatchObject({
+    expect(JSON.parse(terminal[0])).toMatchObject({
       operation: "shim.logging.emergency",
       claude_session_id: "claude-77",
     });
@@ -403,8 +403,8 @@ describe("shim runtime logging", () => {
     log.onLogSinkPoisoned((cause) => causes.push(cause.message));
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
     mockedWriteSync
-      .mockImplementationOnce(((...args: unknown[]) => args[3] as number) as typeof writeSync)
-      .mockImplementation((() => { throw "the inherited fd is gone"; }) as unknown as typeof writeSync);
+      .mockImplementationOnce(((...args: unknown[]) => args[3] as number))
+      .mockImplementation(() => { throw "the inherited fd is gone"; });
 
     // Act.
     log.bindLog({ operation: "shim.test.retire-nonerror" }).log({}, "a record");
@@ -416,7 +416,7 @@ describe("shim runtime logging", () => {
   it("retires the mirror when the emergency channel itself throws a non-Error", async () => {
     // Arrange.
     const log = await configured();
-    vi.spyOn(process.stderr, "write").mockImplementation((() => { throw "the terminal is gone"; }) as unknown as typeof process.stderr.write);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw "the terminal is gone"; });
 
     // Act.
     log.emergencyStderr("the sink is gone");

@@ -270,8 +270,8 @@ describe("createRealQuery", () => {
 
     // Assert.
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.prompt).toBe(prompt);
-    expect(calls[0]!.options).toMatchObject({ sessionId: "vendor-9", includePartialMessages: true });
+    expect(calls[0].prompt).toBe(prompt);
+    expect(calls[0].options).toMatchObject({ sessionId: "vendor-9", includePartialMessages: true });
   });
 
   it("names the RESUMED vendor session in the construction record", async () => {
