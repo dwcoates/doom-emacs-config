@@ -2,10 +2,12 @@ package shimclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,12 +35,102 @@ const (
 // already-open sink the daemon's log surfaces own.
 const shimLogFD = 3
 
+// ActorStandDown is the kill attribution the supervisor's own sweep records.
+// It is how the exit of an in-flight spawn is told from a crash: nothing else
+// in the daemon knew that process existed, so nothing else could have named
+// the actor.
+const ActorStandDown = "shimclient.standdown"
+
 // supervisor is the daemon's one shim supervisor.
 type supervisor struct {
 	surfaces  dlog.Surfaces
 	back      backoff
 	grace     time.Duration
 	lockProbe func(workspaceDir string) (free bool, err error)
+
+	// mu guards held.
+	mu sync.Mutex
+	// held is EVERY process this supervisor started and still owns, entered
+	// the instant cmd.Start returns and left only when the process is gone or
+	// has been handed to a successor.
+	//
+	// IT EXISTS BECAUSE NOTHING ELSE KNOWS. A spawn reaches the workspace
+	// fleet's session map only after bring-up returns healthy AND the shim has
+	// answered StartSession; for the whole window before that the process is
+	// running, holding the workspace's kernel lock and ~95 MiB, and the
+	// supervisor is its ONLY witness. An immediate shutdown that walked the
+	// registered sessions alone therefore left it standing forever -- measured
+	// over a 10s grace as "10.0xx s, 1 left" -- which is what
+	// StandDownEverySpawn sweeps.
+	held map[*client]struct{}
+}
+
+// hold enters a freshly started process in the supervisor's own registry and
+// arms its release, so the registry empties itself on the process's death or
+// its handover without anyone having to remember to.
+func (s *supervisor) hold(c *client) {
+	s.mu.Lock()
+	if s.held == nil {
+		s.held = make(map[*client]struct{})
+	}
+	s.held[c] = struct{}{}
+	s.mu.Unlock()
+	c.release = func() {
+		s.mu.Lock()
+		delete(s.held, c)
+		s.mu.Unlock()
+	}
+}
+
+// heldNow is a snapshot of the registry, taken so the sweep below never holds
+// the supervisor's lock while it signals and waits.
+func (s *supervisor) heldNow() []*client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*client, 0, len(s.held))
+	for c := range s.held {
+		out = append(out, c)
+	}
+	return out
+}
+
+// StandDownEverySpawn force-kills every process this supervisor started and
+// still owns, and reports every kill that failed.
+//
+// IT IS THE `now` SHUTDOWN'S SWEEP, AND ONLY THAT. A BOUNCE hands its shims to
+// a successor that adopts them, and the handover's per-workspace transfer says
+// so by calling Client.Detach -- which leaves the process running and takes it
+// OUT of the registry above. So a transferred shim is not in this set, and the
+// bounce does not call this at all: `rollout.controller.Handover` exits through
+// its own path and never reaches drain.ShutdownNow. The two cases are
+// therefore distinguished twice over, by the caller and by the registry.
+//
+// EVERY WAIT IS BOUNDED TWICE. ctx bounds the whole sweep -- the drain gives it
+// StandBound -- and each process additionally gets the supervisor's own kill
+// grace, so one process whose reap never lands cannot starve its siblings of
+// the remaining budget. The kill is FORCED: a graceful stand-down of a process
+// that has not even finished coming up has nothing to be graceful about, and
+// this daemon is already exiting.
+//
+// A failed kill is RETURNED, never swallowed: a leaked shim holds the
+// workspace lock that refuses the next session, and the caller's record is the
+// only thing that will ever say so.
+func (s *supervisor) StandDownEverySpawn(ctx context.Context, reason string) error {
+	held := s.heldNow()
+	if len(held) == 0 {
+		return nil
+	}
+	attr := KillAttribution{Actor: ActorStandDown, Reason: reason, Force: true}
+	var errs []error
+	for _, c := range held {
+		c.log.Warn("daemon.shimclient.standdown", "a spawn this daemon never registered is being stood down", dlog.Context{
+			"workspace_id": string(c.ws), "pid": c.PID(), "reason": reason,
+		})
+		if err := c.killWithin(ctx, s.grace, attr); err != nil {
+			errs = append(errs, fmt.Errorf("shimclient: stand down the spawn for %q (pid %d): %w", c.ws, c.PID(), err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Spawn starts a shim, dials it, and returns once WatchSession is connected
@@ -89,6 +181,13 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	c.pid = cmd.Process.Pid
 	c.pgid = cmd.Process.Pid
 	c.mu.Unlock()
+
+	// THE REGISTRY IS ENTERED BEFORE THE REAPER IS STARTED, and before
+	// bring-up, because from cmd.Start onward this process exists and the
+	// supervisor is the only thing that knows it. Held first, released by the
+	// reaper: the other order is a window in which a death deregisters
+	// nothing.
+	s.hold(c)
 
 	log.Info("daemon.shimclient.spawn", "shim spawned", dlog.Context{
 		"pid": cmd.Process.Pid, "uds": spec.UDSPath,

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -446,4 +447,149 @@ func waitForExit(t *testing.T, pid int) {
 		}
 	}
 	t.Fatalf("pid %d is still alive; the abandoned shim was not stopped", pid)
+}
+
+// TestStandDownEverySpawnKillsASpawnStillBringingUp is the leak's own case: a
+// process that has been started and has NOT finished bring-up is known to
+// nobody but the supervisor, and the sweep is what stops it.
+func TestStandDownEverySpawnKillsASpawnStillBringingUp(t *testing.T) {
+	// Arrange: the fake never pushes the healthy diagnostics, so bring-up is
+	// still waiting and the client has reached no caller.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	sup := newSupervisor(t, WithKillGrace(50*time.Millisecond))
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := sup.Spawn(context.Background(), spec)
+		done <- err
+	}()
+	record := sink.record(t)
+	waitForSessionOpen(t, f)
+
+	// Act.
+	if err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested"); err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v", err)
+	}
+
+	// Assert.
+	waitForExit(t, record.PID)
+	if err := <-done; err == nil {
+		t.Fatalf("Spawn() succeeded after its process was stood down")
+	}
+}
+
+// TestStandDownEverySpawnLeavesADetachedShimRunning is the BOUNCE's case: a
+// shim handed to a successor is detached from, and the sweep must not be able
+// to find it.
+func TestStandDownEverySpawnLeavesADetachedShimRunning(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	sup := newSupervisor(t, WithKillGrace(50*time.Millisecond))
+	c := spawnReadyOn(t, sup, f, spec)
+	record := sink.record(t)
+	c.Detach()
+
+	// Act.
+	if err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested"); err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v", err)
+	}
+
+	// Assert: the handover's process is still there for the successor.
+	if !alive(record.PID) {
+		t.Fatalf("pid %d was killed; a detached shim is the successor's to adopt", record.PID)
+	}
+	_ = syscall.Kill(-record.PID, syscall.SIGKILL)
+}
+
+// TestStandDownEverySpawnReportsAKillThatFailed pins that a kill which cannot
+// be performed is RETURNED, never swallowed: a leaked shim holds the workspace
+// lock, and this error is the only thing that will ever say so.
+func TestStandDownEverySpawnReportsAKillThatFailed(t *testing.T) {
+	// Arrange: a held client with no process handle, which Kill refuses.
+	sup := newSupervisor(t).(*supervisor)
+	c := newClient(newTestSurfaces().Global(), ids.WorkspaceID("ws-1"), "/tmp/absent.sock", defaultBackoff, nil)
+	sup.hold(c)
+
+	// Act.
+	err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested")
+
+	// Assert.
+	if !errors.Is(err, ErrNoProcess) {
+		t.Fatalf("StandDownEverySpawn() error = %v, want ErrNoProcess", err)
+	}
+}
+
+// TestStandDownEverySpawnSweepsNothingWhenNoSpawnIsHeld pins the ordinary
+// shutdown: every shim reached the fleet and went down through it, so the
+// sweep has nothing left to do and says so without error.
+func TestStandDownEverySpawnSweepsNothingWhenNoSpawnIsHeld(t *testing.T) {
+	// Arrange.
+	sup := newSupervisor(t)
+
+	// Act.
+	err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v, want nil", err)
+	}
+}
+
+// TestStandDownEverySpawnForgetsAShimThatAlreadyExited pins that the registry
+// empties itself on death: a process that is already gone is not swept, and
+// the sweep does not report the absence as a failure.
+func TestStandDownEverySpawnForgetsAShimThatAlreadyExited(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	sup := newSupervisor(t, WithKillGrace(50*time.Millisecond))
+	c := spawnReadyOn(t, sup, f, spec)
+	record := sink.record(t)
+	if err := c.Kill(KillAttribution{Actor: "test", Reason: "already stopped", Force: true}); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+	waitForExit(t, record.PID)
+	<-c.Exited()
+
+	// Act.
+	err := sup.StandDownEverySpawn(context.Background(), "an immediate shutdown was requested")
+
+	// Assert: the registry emptied itself on the death, so the sweep finds
+	// nothing at all rather than merely finding a corpse it may not signal.
+	if err != nil {
+		t.Fatalf("StandDownEverySpawn() error = %v, want nil", err)
+	}
+	if held := sup.(*supervisor).heldNow(); len(held) != 0 {
+		t.Fatalf("the supervisor still holds %d spawn(s) after one exited", len(held))
+	}
+}
+
+// spawnReadyOn is spawnReady against a supervisor the caller keeps, which is
+// what a sweep test needs: the sweep is asked of the very supervisor that
+// started the process.
+func spawnReadyOn(t *testing.T, sup Supervisor, f *fakeShim, spec Spec) Client {
+	t.Helper()
+
+	type result struct {
+		c   Client
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := sup.Spawn(context.Background(), spec)
+		done <- result{c: c, err: err}
+	}()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("Spawn() error = %v", r.err)
+	}
+	return r.c
 }

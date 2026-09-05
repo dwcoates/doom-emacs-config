@@ -3,11 +3,13 @@ package drain
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -694,5 +696,148 @@ func TestRepublishRefusesAPersistedScheduleWhoseReasonWillNotDecode(t *testing.T
 	}
 	if pushed := h.announcer.Scheduled(); len(pushed) != 0 {
 		t.Fatalf("drain_scheduled pushes = %d, want none from a corrupt row", len(pushed))
+	}
+}
+
+// TestShutdownNowStandsDownASpawnStillInFlight is the leak's own case: a shim
+// that has been spawned and has not finished coming up is in NO workspace's
+// session map, so the walk over the registered sessions steps past it and it
+// outlives the daemon holding the workspace lock. The supervisor's sweep is
+// what reaches it.
+func TestShutdownNowStandsDownASpawnStillInFlight(t *testing.T) {
+	// Arrange: no workspace has a registered session at all, which is exactly
+	// the state a spawn in flight leaves behind.
+	h := newHarness(t)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if reasons := h.spawns.Reasons(); len(reasons) != 1 {
+		t.Fatalf("spawn sweeps = %d, want exactly 1; a spawn in flight is nothing else's to stand down", len(reasons))
+	}
+}
+
+// TestShutdownNowSweepsTheSpawnsOnlyAfterTheRegisteredSessions pins the order:
+// a registered session still goes down the ORDINARY way, through the fleet,
+// and the sweep catches only what that walk could not reach.
+func TestShutdownNowSweepsTheSpawnsOnlyAfterTheRegisteredSessions(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	h.workspace(t, instant)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	seen := h.spawns.Seen()
+	if len(seen) != 1 {
+		t.Fatalf("spawn sweeps = %d, want exactly 1", len(seen))
+	}
+	if seen[0] != 2 {
+		t.Fatalf("the sweep ran after %d of 2 registered stand-downs; it must follow the ordinary path, never replace it", seen[0])
+	}
+}
+
+// TestShutdownNowReportsASpawnThatWouldNotStandDown pins the failure policy
+// for the sweep, which is the same as for the ordinary walk: the leak is
+// RECORDED at ERROR and the exit happens anyway, because an exit skipped over
+// one stubborn shim leaks the daemon too.
+func TestShutdownNowReportsASpawnThatWouldNotStandDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.spawns.fail(errFake)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	var reported bool
+	for _, rec := range records(h.log, opNow) {
+		if rec.Level == "error" && strings.Contains(rec.Context["cause"].(string), errFake.Error()) {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("a spawn that would not stand down was swallowed; records = %v", records(h.log, opNow))
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started after a spawn refused to stand down")
+	}
+}
+
+// TestShutdownNowBoundsTheSpawnSweep pins the bound. The sweep runs on the
+// request's own goroutine ahead of the exit, so an unbounded one is a daemon
+// that never goes; it gets StandBound, the same budget one registered
+// session's stand-down gets.
+func TestShutdownNowBoundsTheSpawnSweep(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	bounds := h.spawns.Bounds()
+	if len(bounds) != 1 {
+		t.Fatalf("bounded sweeps = %d, want exactly 1; an unbounded sweep is a daemon that does not exit", len(bounds))
+	}
+	if bounds[0] <= 0 || bounds[0] > DefaultStandBound {
+		t.Fatalf("sweep budget = %v, want a positive bound no larger than StandBound (%v)", bounds[0], DefaultStandBound)
+	}
+}
+
+// TestTheScheduledDrainNeverSweepsTheSpawns is the BOUNCE-shaped contract at
+// this seam: forcing is `now`'s alone. Everything graceful — the scheduled
+// drain here, and the handover that hands its shims to an adopting successor —
+// must leave a running process alone, and the sweep is never reached from
+// them.
+func TestTheScheduledDrainNeverSweepsTheSpawns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	if err := h.c.fire(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant, SetAt: instant,
+	}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	if reasons := h.spawns.Reasons(); len(reasons) != 0 {
+		t.Fatalf("the scheduled drain swept the spawns %v; only an immediate shutdown forces", reasons)
+	}
+}
+
+// TestNewRefusesWithoutASpawnSweep pins that the sweep is REQUIRED wiring: a
+// controller built without it cannot stand an in-flight spawn down, and that
+// is the leak this seam exists to close.
+func TestNewRefusesWithoutASpawnSweep(t *testing.T) {
+	// Arrange & Act
+	_, err := New(Deps{
+		DB:        newHarness(t).db,
+		Stand:     newFakeStand(),
+		Freeness:  newFakeFreeness(),
+		Announcer: &fakeAnnouncer{},
+		Exit:      func(context.Context) error { return nil },
+		Log:       dlog.NewTestSurfaces(),
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("New accepted a controller with no spawn sweep")
 	}
 }
