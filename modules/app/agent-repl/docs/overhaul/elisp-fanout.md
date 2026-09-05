@@ -583,9 +583,11 @@ are deleted by the verbs agent once verbs.el replaces them.
   `:http`, `:transport`, `:timeout`, `:malformed`, `:malformed-addr`,
   `:no-end-frame`. `(agent-repl-connect-close CONN)` marks the connection
   dead and cancels every standing stream as `(:cancelled)` — daemon-link's
-  teardown primitive. `agent-repl-connect--spawn-curl` is the single spawn
+  teardown primitive. `agent-repl-connect--open-socket` is the single dial
   point, registered in `agent-repl--external-boundary-functions`. The HTTP
-  status is read from `curl -D -` header blocks for unary and streams alike.
+  status is read off the response header block by `agent-repl-connect--reader`
+  for unary and streams alike; the same reader decodes the body under
+  whichever framing the daemon chose.
 - LANDED SHAPES (rpc.el as merged): request encoders are called for EMPTY
   request messages too (`agent-repl-wire-encode-watch-daemon-request`,
   `-watch-workspace-roster-request`, `-daemon-health-request` receive nil);

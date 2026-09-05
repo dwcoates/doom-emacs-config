@@ -27,7 +27,7 @@ import (
 // ACCEPTED an immediate shutdown. It is a different phase from every bound
 // in `emacs_test.go`: nothing about Emacs is being waited on, the wait is
 // the daemon flushing its writes and exiting, the kernel closing the socket,
-// curl seeing EOF and Emacs's process sentinel running.
+// Emacs's own socket seeing EOF and its sentinel running.
 //
 // MEASURED: 2.021s and 2.023s across the two scenarios that make this wait,
 // remarkably stable. 3x that. The bound it replaced named an emacsclient
@@ -56,8 +56,8 @@ const handoverAnnounceBound = 2 * time.Second
 // (`lisp/daemon-link.el') promotes when the PRIMARY stream closes while a
 // successor is held. So this phase is the rollout plus exactly the phase
 // `daemonStopBound' above measures -- the daemon flushing its writes and
-// exiting, the kernel closing the socket, curl seeing EOF and Emacs's
-// sentinel running -- which is why the two numbers agree to a millisecond.
+// exiting, the kernel closing the socket, Emacs's own socket seeing EOF and
+// its sentinel running -- which is why the two numbers agree to a millisecond.
 //
 // MEASURED, and it replaces a bound that was deliberately left unmeasured
 // because no healthy promotion had ever been seen. Six samples on a quiet
