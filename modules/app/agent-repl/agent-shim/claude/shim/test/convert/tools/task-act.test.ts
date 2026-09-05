@@ -123,6 +123,37 @@ describe("taskActConverter.settle — TaskCreate", () => {
     expect(act.state?.status.case).toBe("pending");
   });
 
+  it("is the `rejected` arm when the tracker refused a create", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+    );
+
+    // Assert.
+    expect([act.task?.value, act.act.case]).toEqual(["9", "rejected"]);
+  });
+
+  it("carries what the tracker said was wrong with a refused create", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskCreate", { subject: "s" }), outcome({ task: { id: "9" } }, true))!,
+    );
+
+    // Assert.
+    const rejected = act.act.value as conversationv1.AgentTaskRejected;
+    expect(rejected.error?.settledAt?.atMs).toBe(6_000n);
+  });
+
+  it("falls back to the INPUT subject when the tracker echoed none", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.settle(call("TaskCreate", { subject: "from input" }), outcome({ task: { id: "9" } }))!,
+    );
+
+    // Assert.
+    expect(act.state?.subject).toBe("from input");
+  });
+
   it("produces NO frame when the tracker returned no identity", () => {
     // Arrange, Act, Assert.
     expect(taskActConverter.settle(call("TaskCreate", {}), outcome({ task: {} }))).toBeUndefined();
@@ -332,6 +363,14 @@ describe("taskActConverter.settle — TaskUpdate", () => {
 
     // Assert.
     expect(act.task?.value).toBe("7");
+  });
+
+  it("leaves the status UNSET when the tracker named a status this contract has no arm for", () => {
+    // Arrange, Act.
+    const act = actOf(taskActConverter.start(call("TaskUpdate", { taskId: "1", status: "wedged" })));
+
+    // Assert.
+    expect(act.state?.status.case).toBeUndefined();
   });
 
   it("produces NO frame when neither the call nor the tracker names a task", () => {

@@ -112,6 +112,25 @@ describe("worktreeConverter.start", () => {
     expect((act.value as conversationv1.AgentWorktreeExit).action.case).toBeUndefined();
   });
 
+  it("says a removal discards NOTHING when the caller set no discard flag", () => {
+    // Arrange, Act.
+    const act = startOf(callNamed("ExitWorktree", { action: "remove" })).act;
+
+    // Assert.
+    expect((act.value as conversationv1.AgentWorktreeExit).action).toEqual({
+      case: "remove",
+      value: create(conversationv1.AgentWorktreeExitRemoveSchema, { discardChanges: false }),
+    });
+  });
+
+  it("leaves the act UNSET when the tool name is neither the enter nor the exit call", () => {
+    // Arrange, Act.
+    const act = startOf(callNamed("Worktree")).act;
+
+    // Assert.
+    expect(act.case).toBeUndefined();
+  });
+
   it("stamps the instant the call was issued", () => {
     // Arrange, Act, Assert.
     expect(startOf(callNamed("EnterWorktree")).startedAt?.atMs).toBe(1_700_000_000_000n);
