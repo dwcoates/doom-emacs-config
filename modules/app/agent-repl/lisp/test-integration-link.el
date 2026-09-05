@@ -112,13 +112,21 @@ the seam, never the test driving it by hand."
 (defun agent-repl-itest-link--announce (daemon &optional address cause)
   "Push `shutdown_announced' on DAEMON, optionally naming ADDRESS.
 CAUSE defaults to the self-merge rollout arm.  Without an address this is
-a plain bounce: the same daemon is coming back, so nothing dual-attaches."
+a plain bounce: the same daemon is coming back, so nothing dual-attaches.
+
+THE OUTAGE IS THE SCENARIO'S OWN WALL-CLOCK COST: every bounce scenario
+that reconnects has to let the announced window elapse first, and the
+window's LENGTH is a parameter of the fixture, never of the contract.
+500ms is an order of magnitude above the 50ms poll tolerance the one
+scenario that asserts against the deadline allows itself, so a client
+that ignored the window entirely still cannot pass -- and three
+scenarios stop spending 1.5s each waiting to prove it."
   (agent-repl-itest--push
    daemon "daemon"
    `((shutdownAnnounced
       . ,(append (when address `((address . ,address)))
                  `((cause . ,(or cause '((selfMergeRollout . ()))))
-                   (expectedOutageMs . "1500")
+                   (expectedOutageMs . "500")
                    (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time)))))))))))
 
 (defun agent-repl-itest-link--boom-up-hook (&rest _)
@@ -551,14 +559,17 @@ sleep."
     (agent-repl-itest-link--with-link primary
       (let* ((state-dir (agent-repl-itest-daemon-state-dir primary))
              (minted-at-ms (truncate (* 1000 (float-time))))
-             (deadline-ms (+ minted-at-ms 1500)))
+             ;; 500ms, not 1500: the assertion's 50ms tolerance still has an
+             ;; order of magnitude of room, and a client that did not wait at
+             ;; all would accept ~450ms early -- nine times the tolerance.
+             (deadline-ms (+ minted-at-ms 500)))
         ;; Act: an ordinary bounce; the successor is started immediately,
         ;; racing the quiet window rather than waiting it out first.
         (agent-repl-itest--push
          primary "daemon"
          `((shutdownAnnounced
             . ((cause . ((selfMergeRollout . ())))
-               (expectedOutageMs . "1500")
+               (expectedOutageMs . "500")
                (mintedAtMs . ,(format "%d" minted-at-ms))))))
         (agent-repl-itest--stop-daemon primary t)
         (let ((successor (agent-repl-itest--start-daemon state-dir)))

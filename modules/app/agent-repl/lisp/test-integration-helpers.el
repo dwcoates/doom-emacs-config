@@ -983,11 +983,15 @@ into the scenario's own temp dir, and `file-exists-p' on those paths.")
 (defvar agent-repl-daemon--boot-timer)
 (defvar agent-repl-daemon--boot-process)
 (defvar agent-repl-daemon--boot-deadline)
+(defvar agent-repl-daemon--departure-timer)
+(defvar agent-repl-daemon--departure-deadline)
+(defvar agent-repl-daemon--departure-continuation)
 (defvar agent-repl-daemon--boot-continuation)
 (defvar agent-repl-daemon-build-failure)
 (defvar agent-repl-daemon-mode-line-segment)
 (defvar agent-repl--frontend-daemon-process)
 (declare-function agent-repl-daemon--cancel-boot-wait "daemon")
+(declare-function agent-repl-daemon--cancel-departure-wait "daemon")
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-link--cancel-reconnect "daemon-link")
 
@@ -1001,6 +1005,10 @@ and no-op — which is how one broken scenario silently disables the rest of
 the suite.  Cancelling and reaping is the only thing that actually ends
 them."
   (agent-repl-daemon--cancel-boot-wait)
+  ;; The departure wait is armed by a restart and is NOT reached by
+  ;; `--cancel-boot-wait'; its continuation runs the ensure behind it, so a
+  ;; tick that survives the scenario reaches the guarded boundaries too.
+  (agent-repl-daemon--cancel-departure-wait)
   ;; A BUILD SCRIPT'S SENTINEL OUTLIVES THE COLD-START WINDOW.  The build
   ;; boundary is asynchronous, so a scenario that asserts as soon as its stub
   ;; script has DONE ITS WORK returns before the exit behind it is delivered
@@ -1052,6 +1060,13 @@ scenario."
          (agent-repl-daemon--boot-timer nil)
          (agent-repl-daemon--boot-process nil)
          (agent-repl-daemon--boot-deadline nil)
+         ;; The DEPARTURE wait is the boot wait's mirror image and leaks the
+         ;; same way: `agent-repl-frontend-daemon-restart' arms it, its
+         ;; continuation runs the ensure behind it, and an ensure reached
+         ;; from a tick after the scenario returned finds the guards armed.
+         (agent-repl-daemon--departure-timer nil)
+         (agent-repl-daemon--departure-deadline nil)
+         (agent-repl-daemon--departure-continuation nil)
          (agent-repl-daemon--boot-continuation nil)
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
