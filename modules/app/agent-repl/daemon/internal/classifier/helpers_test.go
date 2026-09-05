@@ -3,6 +3,8 @@ package classifier
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"claude-repld/internal/envc"
@@ -52,3 +54,16 @@ func answering(t *testing.T, guard envc.VendorGuard, out string, runErr error) (
 
 // errLoad is the loader failure a brief-absent subject injects.
 var errLoad = errors.New("the brief is absent")
+
+// fakeVendor writes an executable stand-in for the vendor binary and answers
+// its path. NOTHING here ever runs the real `claude`: the exec site's own
+// tests drive a scripted executable, the same way the git client's tests drive
+// a scripted `git`.
+func fakeVendor(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fake-claude")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+		t.Fatalf("write the fake vendor %q: %v", path, err)
+	}
+	return path
+}
