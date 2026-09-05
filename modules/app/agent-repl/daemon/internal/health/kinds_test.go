@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"claude-repld/internal/wsm"
 )
 
@@ -245,5 +247,55 @@ func TestFaultDetailOmitsAnEmptyProseDetail(t *testing.T) {
 	// Assert.
 	if got != KindLinkSevered {
 		t.Fatalf("faultDetail() = %q, want the bare kind", got)
+	}
+}
+
+// The `detail` arms take the RECORDED evidence when there is one, exactly as
+// the `cause` arms do — the fault's prose detail is the fallback, never the
+// preference.
+func TestDetailArmPrefersTheRecordedEvidenceOverTheProse(t *testing.T) {
+	tests := []struct {
+		name   string
+		fault  wsm.Fault
+		detail func(*agentreplv1.DaemonFault) string
+		want   string
+	}{
+		{
+			name: "deploy script, evidence recorded",
+			fault: wsm.Fault{
+				Kind:     KindDeployScriptFailed,
+				Detail:   "the prose",
+				Evidence: map[string]string{"detail": "exit 2 running deploy.sh"},
+			},
+			detail: func(f *agentreplv1.DaemonFault) string { return f.GetDeployScriptFailed().GetDetail() },
+			want:   "exit 2 running deploy.sh",
+		},
+		{
+			name:   "deploy script, nothing recorded",
+			fault:  wsm.Fault{Kind: KindDeployScriptFailed, Detail: "the prose"},
+			detail: func(f *agentreplv1.DaemonFault) string { return f.GetDeployScriptFailed().GetDetail() },
+			want:   "the prose",
+		},
+		{
+			name: "successor spawn, evidence recorded",
+			fault: wsm.Fault{
+				Kind:     KindSuccessorSpawnFailed,
+				Detail:   "the prose",
+				Evidence: map[string]string{"detail": "fork failed"},
+			},
+			detail: func(f *agentreplv1.DaemonFault) string { return f.GetSuccessorSpawnFailed().GetDetail() },
+			want:   "fork failed",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := daemonFault(tc.fault)
+
+			// Assert.
+			if tc.detail(got) != tc.want {
+				t.Fatalf("detail = %q, want %q", tc.detail(got), tc.want)
+			}
+		})
 	}
 }

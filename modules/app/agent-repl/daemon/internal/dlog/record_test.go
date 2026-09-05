@@ -187,3 +187,33 @@ func TestRecordOmitsPidForAForwardedRecord(t *testing.T) {
 		t.Fatalf("a forwarded record carries pid %v; it must carry the sender's identity instead", got["pid"])
 	}
 }
+
+// A promoted identifier is a STRING FIELD, so a caller that passed a non-string
+// has it rendered rather than dropped — a request id logged as a number is
+// still the id a reader has to join on.
+func TestRecordPromotesANonStringIdentifierByRenderingIt(t *testing.T) {
+	// Arrange, Act.
+	rec := newRecord(time.Now(), RuntimeDaemon, LevelInfo, "daemon.dlog.test", "m",
+		Context{KeyRequestID: 42}, 1)
+
+	// Assert.
+	if rec.RequestID != "42" {
+		t.Fatalf("request_id = %q, want %q", rec.RequestID, "42")
+	}
+}
+
+// A nil identifier is ABSENT, never the string "<nil>": an empty field says the
+// caller had no id, which is a fact a reader can act on.
+func TestRecordLeavesANilIdentifierEmptyRatherThanRenderingIt(t *testing.T) {
+	// Arrange, Act.
+	rec := newRecord(time.Now(), RuntimeDaemon, LevelInfo, "daemon.dlog.test", "m",
+		Context{KeyRequestID: nil}, 1)
+
+	// Assert.
+	if rec.RequestID != "" {
+		t.Fatalf("request_id = %q, want an empty field for an absent id", rec.RequestID)
+	}
+	if _, still := rec.Context[KeyRequestID]; still {
+		t.Fatal("a reserved key stayed inside context")
+	}
+}
