@@ -1261,6 +1261,66 @@ func (e *Emacs) stop() {
 	// AND THEN WAIT FOR IT. Asking is not stopping.
 	e.awaitEmacsExit(asked)
 	e.proc.Kill()
+	e.awaitDaemonExit(asked)
+}
+
+// daemonExitBound is how long the daemon this scenario asked Emacs to stop
+// gets to actually be gone.
+//
+// IT IS PRODUCTION'S OWN BUDGET, ADDED UP, not a number chosen here. The stop
+// is acked the moment the exit is STARTED -- `drain.ShutdownNow` announces,
+// stands every session down, calls Exit and answers -- and everything after
+// that ack is the daemon's orderly exit, whose every step is separately
+// bounded: `shutdownGrace` (2s) for the in-flight requests, then
+// `merge.TerminalDrainBound` (2s) for a merge terminal's durable stamps, then
+// `loopJoinBound` (2s) for the background loops. Six seconds is the sum, so a
+// daemon still here afterwards has missed a bound it states itself, which is a
+// failure rather than a slow machine.
+//
+// MEASURED, and the healthy case never comes near it: `go test -v` prints
+// `emacs phase daemon-exit` for every scenario, and on a quiet box it is a
+// single poll interval -- the daemon is gone before the reaper's first /proc
+// read. The observation that made this wait exist is the other end: with
+// Emacs's own exit escalating (1.06s of a 500ms bound on a loaded host), the
+// daemon's shutdown grace was still running when the reaper looked, because
+// the grace does not end until the standing streams' client -- that Emacs --
+// is gone. The reaper then reported a daemon that was exiting exactly as
+// designed.
+const daemonExitBound = 6 * time.Second
+
+// awaitDaemonExit does not return until the daemon and the shims this scenario
+// asked Emacs to stop are actually gone, or until their own bound expires.
+//
+// IT IS THE SECOND HALF OF "ASKING IS NOT STOPPING". The teardown asks Emacs
+// to stop its daemon and WAITS for the ack, and it asks Emacs to exit and
+// WAITS for the process -- and then it went straight to the reaper, which
+// reads /proc once. But the ack says the exit was STARTED, not that it
+// finished, so between the two there was a race the scenario could only lose:
+// the daemon's shutdown grace is held open by the standing streams of the very
+// Emacs teardown has just killed, so the slower Emacs is to go, the more of
+// that grace is still running when the reaper looks.
+//
+// Nothing is loosened by waiting here. What is left when the bound expires is
+// still the reaper's to report and still fails the scenario; the wait only
+// stops the reaper from calling a bounded exit a leak.
+func (e *Emacs) awaitDaemonExit(asked bool) {
+	if !asked {
+		// A wedged Emacs was never asked to stop its daemon, so nothing is on
+		// its way out and there is nothing to wait for. The reaper below still
+		// finds every one of them.
+		return
+	}
+	started := time.Now()
+	left := e.awaitStraysGone(daemonExitBound)
+	e.t.Logf("emacs phase daemon-exit took %s (bound %s)",
+		time.Since(started).Round(time.Millisecond), daemonExitBound)
+	if len(left) == 0 {
+		e.noteTeardownStep(fmt.Sprintf("the daemon and its shims exited on the stop within %s",
+			time.Since(started).Round(time.Millisecond)))
+		return
+	}
+	e.noteTeardownStep(fmt.Sprintf("waited %s for the stopped daemon to exit, still holding %s",
+		daemonExitBound, pidList(left)))
 }
 
 // awaitEmacsExit does not return until this scenario's Emacs process is
