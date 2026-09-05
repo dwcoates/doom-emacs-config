@@ -973,7 +973,15 @@ Their targets are all test-owned: a stub script and a stub argv written
 into the scenario's own temp dir, and `file-exists-p' on those paths.")
 
 (defvar agent-repl-daemon--ensure-in-flight)
+(defvar agent-repl-daemon--build-in-flight)
+(defvar agent-repl-daemon--build-process)
+(defvar agent-repl-daemon--build-continuations)
+(defvar agent-repl-daemon--build-started)
+(defvar agent-repl-daemon--build-labels)
+(defvar agent-repl-daemon--build-target-names)
+(defvar agent-repl-daemon--build-status-timer)
 (defvar agent-repl-daemon--boot-timer)
+(defvar agent-repl-daemon--boot-process)
 (defvar agent-repl-daemon--boot-deadline)
 (defvar agent-repl-daemon--boot-continuation)
 (defvar agent-repl-daemon-build-failure)
@@ -993,8 +1001,31 @@ and no-op — which is how one broken scenario silently disables the rest of
 the suite.  Cancelling and reaping is the only thing that actually ends
 them."
   (agent-repl-daemon--cancel-boot-wait)
-  (when (process-live-p agent-repl--frontend-daemon-process)
-    (delete-process agent-repl--frontend-daemon-process))
+  ;; A BUILD SCRIPT'S SENTINEL OUTLIVES THE COLD-START WINDOW.  The build
+  ;; boundary is asynchronous, so a scenario that asserts as soon as its stub
+  ;; script has DONE ITS WORK returns before the exit behind it is delivered
+  ;; -- and Emacs runs a sentinel from the event loop, never at the moment
+  ;; the process dies, so it fires after `cl-letf' has put the
+  ;; external-boundary guards back.  `agent-repl-daemon--build-finished' then
+  ;; runs the continuation, which starts the daemon and polls once inline
+  ;; (`agent-repl-daemon--await-address' ends with a `--boot-tick'), reaching
+  ;; `agent-repl--frontend-run-log-tail' and `--artifact-exists-p' with the
+  ;; guards armed.  That is a hard error out of a sentinel, which aborts the
+  ;; whole batch run and names whichever test happened to be running.
+  ;;
+  ;; The sentinel is therefore dropped whenever the process OBJECT exists --
+  ;; not only while it is live, because a queued-but-unrun sentinel belongs to
+  ;; a process that is already dead, which is exactly the case that escaped.
+  (when (processp agent-repl-daemon--build-process)
+    (set-process-sentinel agent-repl-daemon--build-process #'ignore)
+    (when (process-live-p agent-repl-daemon--build-process)
+      (delete-process agent-repl-daemon--build-process)))
+  (when (timerp agent-repl-daemon--build-status-timer)
+    (cancel-timer agent-repl-daemon--build-status-timer))
+  (when (processp agent-repl--frontend-daemon-process)
+    (set-process-sentinel agent-repl--frontend-daemon-process #'ignore)
+    (when (process-live-p agent-repl--frontend-daemon-process)
+      (delete-process agent-repl--frontend-daemon-process)))
   (agent-repl-link-teardown)
   (dolist (name '("*agent-repl-health*" "*agent-repl-build-frontend*"))
     (when (get-buffer name) (kill-buffer name))))
@@ -1008,7 +1039,18 @@ daemon is reaped and the link is torn down, so nothing leaks into the next
 scenario."
   (declare (indent 0) (debug body))
   `(let ((agent-repl-daemon--ensure-in-flight nil)
+         ;; The build's own state, scratch-bound for the same reason the boot
+         ;; state is: a scenario that leaves a build in flight would otherwise
+         ;; make the NEXT scenario's ensure coalesce onto it and spawn nothing.
+         (agent-repl-daemon--build-in-flight nil)
+         (agent-repl-daemon--build-process nil)
+         (agent-repl-daemon--build-continuations nil)
+         (agent-repl-daemon--build-started nil)
+         (agent-repl-daemon--build-labels nil)
+         (agent-repl-daemon--build-target-names nil)
+         (agent-repl-daemon--build-status-timer nil)
          (agent-repl-daemon--boot-timer nil)
+         (agent-repl-daemon--boot-process nil)
          (agent-repl-daemon--boot-deadline nil)
          (agent-repl-daemon--boot-continuation nil)
          (agent-repl-daemon-build-failure nil)
