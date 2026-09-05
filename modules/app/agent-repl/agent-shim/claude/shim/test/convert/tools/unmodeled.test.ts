@@ -92,6 +92,19 @@ describe("unmodeledConverter.start", () => {
     expect(startOf(item).mcpServer).toBeUndefined();
   });
 
+  it("leaves mcp_server UNSET when the whole remainder IS a known server and no tool follows it", () => {
+    // Arrange: `mcp__gmail` names the server with no separator or tool after it,
+    // so the exact-match arm refuses it rather than naming a server for a call
+    // that addresses no tool.
+    const environment = { mcpServerNames: ["gmail"] };
+
+    // Act.
+    const item = unmodeledConverter.start(call("mcp__gmail"), environment);
+
+    // Assert.
+    expect(startOf(item).mcpServer).toBeUndefined();
+  });
+
   it("leaves the arguments UNSET when they cannot be represented as JSON", () => {
     // Arrange.
     const cyclic: Record<string, unknown> = {};

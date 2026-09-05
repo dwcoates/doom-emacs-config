@@ -4,7 +4,7 @@
  * throws). Every option asserted here is load-bearing per
  * docs/overhaul/shim.md.
  */
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -272,6 +272,30 @@ describe("createRealQuery", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.prompt).toBe(prompt);
     expect(calls[0]!.options).toMatchObject({ sessionId: "vendor-9", includePartialMessages: true });
+  });
+
+  it("names the RESUMED vendor session in the construction record", async () => {
+    // Arrange: a resume binding carries its id under a different field than a
+    // fresh one, and the record has to name whichever one applies.
+    const { createRealQuery } = await withMockedSdk();
+    vi.mocked(writeSync).mockClear();
+
+    // Act.
+    await createRealQuery(
+      spec({ binding: { kind: "resume", resumeSessionId: "vendor-resumed-7" } }),
+      (async function* () {})(),
+    );
+
+    // Assert.
+    const records = (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>)
+      .map(([, bytes, offset, length]) =>
+        JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+          message: string;
+          context: Record<string, unknown>;
+        },
+      )
+      .filter((record) => record.message === "constructing the real vendor query");
+    expect(records.map((record) => record.context.vendor_session_id)).toEqual(["vendor-resumed-7"]);
   });
 
   it("returns the SDK's own query object rather than a wrapper", async () => {

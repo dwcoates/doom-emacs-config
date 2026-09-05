@@ -216,6 +216,17 @@ describe("conversation_reset", () => {
     expect(rotated.vendorSessionId).toBe("");
   });
 
+  it("states an empty previous id when the vendor named no session it rotated away from", () => {
+    const entries = convert({
+      type: "conversation_reset",
+      session_id: undefined,
+      new_conversation_id: "new",
+    });
+
+    const rotated = updateOf(entries[0])?.update.value as conversationv1.SessionIdentityRotated;
+    expect(rotated.previousVendorSessionId).toBe("");
+  });
+
   it("cuts the conversation so the reader sees WHERE it was cleared", () => {
     const entries = convert({ type: "conversation_reset", new_conversation_id: "new" });
 

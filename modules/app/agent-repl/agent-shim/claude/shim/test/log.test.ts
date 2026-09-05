@@ -379,6 +379,38 @@ describe("shim runtime logging", () => {
     });
   });
 
+  it("POISONS the sink when the retirement record's own write throws a non-Error", async () => {
+    // Arrange: the mirror dies, and the durable write that records its death
+    // fails with a bare string rather than an Error.
+    const log = await configured();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    mockedWriteSync
+      .mockImplementationOnce(((...args: unknown[]) => args[3] as number) as typeof writeSync)
+      .mockImplementation((() => { throw "the inherited fd is gone"; }) as unknown as typeof writeSync);
+
+    // Act.
+    log.bindLog({ operation: "shim.test.retire-nonerror" }).log({}, "a record");
+
+    // Assert. The bare string is surfaced as the poisoning's cause, not lost.
+    expect(causes).toEqual(["the inherited fd is gone"]);
+  });
+
+  it("retires the mirror when the emergency channel itself throws a non-Error", async () => {
+    // Arrange.
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation((() => { throw "the terminal is gone"; }) as unknown as typeof process.stderr.write);
+
+    // Act.
+    log.emergencyStderr("the sink is gone");
+
+    // Assert. The mirror is retired, so ordinary records no longer echo there.
+    const terminal = stderr();
+    log.bindLog({ operation: "shim.test.after-emergency" }).log({}, "after");
+    expect(terminal).toEqual([]);
+  });
+
   it("does not let the emergency channel's own failure escape the caller", async () => {
     // This is the escape hatch used while the real error is on its way out;
     // letting a dead pipe throw over it would replace a surfaced error with a

@@ -1419,6 +1419,43 @@ describe("a compaction summary the vendor stated as a bare string", () => {
   });
 });
 
+describe("a compaction boundary whose next assistant message carries no prose at all", () => {
+  it("HOLDS the cut, so the prose that follows still records it", () => {
+    // Arrange: the boundary is held, and the first assistant message after it
+    // states a content the vendor contract does not model as prose.
+    const fold = createFold();
+    fold.onSdkMessage(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "auto", pre_tokens: 10, post_tokens: 1, duration_ms: 2 },
+        uuid: "uuid-boundary-held",
+        session_id: "session-1",
+      } as unknown as SdkMessage,
+      foldContext(),
+    );
+    const barren = fold.onSdkMessage(
+      assistant("msg-no-prose", [], { message: { content: 42 } }),
+      foldContext(),
+    );
+    expect(barren.entries).toHaveLength(0);
+
+    // Act: the real summary arrives on the next assistant message.
+    const output = fold.onSdkMessage(
+      assistant("msg-prose", [], { message: { content: "the summary, at last" } }),
+      foldContext(),
+    );
+
+    // Assert
+    const frame = output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const cut = update.value as conversationv1.ContextCut;
+    expect((cut.cut.value as conversationv1.ContextCompacted).summary?.markdown).toBe(
+      "the summary, at last",
+    );
+  });
+});
+
 /**
  * The class and the wait are remembered SEPARATELY: a retry that restates only
  * one of them must not erase the other, because the terminal reads both.
