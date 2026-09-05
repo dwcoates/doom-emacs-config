@@ -25,27 +25,34 @@
 // cannot collide with another area file's helper of the same shape (all 20
 // area files compile into one package).
 //
-// TWO PRODUCT WARNINGS SEEN ONCE UNDER UNCAPPED `-parallel`, MEASURED AND NOT
+// TWO RECORDS SEEN ONCE UNDER UNCAPPED `-parallel`, MEASURED AND NOT
 // REPRODUCED (2026-09-04):
 //   - `daemon.feed.response_fragment_after_settle`, from
-//     TestMergeParkedRecognizedFromLeaseState.
+//     TestMergeParkedRecognizedFromLeaseState. SETTLED SINCE, AND NOT A
+//     FAULT: one block's frames reach the fold from two store planes that
+//     share an upsert key and are not ordered against one another, so the
+//     sidecar's settled `success` routinely lands between the shim's `start`
+//     and its own trailing deltas. A settled frame restates the WHOLE, so the
+//     dropped delta was already on screen. The daemon records it at DEBUG now
+//     (daemon/internal/resolve/feed/response.go), and nothing here should
+//     chase it.
 //   - an OpenFeed resolve-workspace "no such file or directory", from
-//     TestMergeBubbleCoalescesIntoOneFeedRow/self-repo.
+//     TestMergeBubbleCoalescesIntoOneFeedRow/self-repo. STILL A FAULT: a feed
+//     opened against a workspace path already gone is a daemon fault whenever
+//     it happens.
 //
 // Both were observed in a single whole-suite run left uncapped on `-parallel`
 // (one world per test, far more concurrent daemons than cores). The
 // measurement: these two were re-run at `-count=10` under `-parallel 32` and
-// `-parallel 64`, nine times over, and NEITHER warning appeared in any of the
-// 180 executions. One run of TestMergeParkedRecognizedFromLeaseState DID fail
-// in that campaign, on a host carrying an unrelated load average near ten, and
+// `-parallel 64`, nine times over, and NEITHER appeared in any of the 180
+// executions. One run of TestMergeParkedRecognizedFromLeaseState DID fail in
+// that campaign, on a host carrying an unrelated load average near ten, and
 // did not recur in the 80 executions that followed.
 //
-// So the fault is real but LOAD-DEPENDENT, not deterministic in these two
-// tests, and the source is the daemon rather than the arrangement here: a
-// response fragment resolved after its turn settled, and a feed opened against
-// a workspace path already gone, are both daemon faults whenever they happen.
-// This note is the evidence for whoever sees either again — it is a warning to
-// root-cause in the daemon, never a flake to re-run past.
+// So the SECOND is real but LOAD-DEPENDENT, and its source is the daemon
+// rather than the arrangement here. This note is the evidence for whoever
+// sees it again — a warning to root-cause in the daemon, never a flake to
+// re-run past.
 package e2e
 
 import (
