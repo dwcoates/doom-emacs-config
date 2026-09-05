@@ -25,6 +25,13 @@ func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) 
 	// liveness, which the shim knows without asking; listing it would hand the
 	// shim an obligation to resolve against itself. The filter is the spawn
 	// columns: a main agent is the one row with neither.
+	//
+	// THE ORDER IS THE STORE'S OWN. `started_at_ms` is written from the store's
+	// clock and from nowhere else (internal/db/lifecycle.go), so this compares
+	// two instants taken by ONE process at ONE point — its own write
+	// transaction. It once also held a producer's instant, which made the
+	// ordering a comparison across the store's, the shim's and the vendor's
+	// clocks; the agent id breaks a tie so the listing is fixed either way.
 	const agentsSQL = `SELECT agent_id FROM agent
 	  WHERE ended_at_ms IS NULL
 	    AND (spawned_by_agent IS NOT NULL OR spawned_by_workflow IS NOT NULL)

@@ -280,3 +280,78 @@ func TestCursorsPreservesTheCarry(t *testing.T) {
 		t.Fatalf("carry = %q", got)
 	}
 }
+
+func TestLiveWorkOrdersSpawnedAgentsByTheStoresOwnArrivalNotTheProducersInstant(t *testing.T) {
+	// Arrange: two spawns whose PRODUCER instants disagree with the order the
+	// store actually heard them in. agent-late is announced second but carries
+	// the earlier producer instant, which is routine: the shim stamps with its
+	// own Date.now() on the stream plane and the sidecar stamps with the
+	// vendor's transcript timestamp on the file plane, and both planes mint the
+	// same key for the same unit on purpose.
+	clock := int64(1_000)
+	d := newStoreWithClock(t, func() int64 { return clock })
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "act-1", subagentStartAt("agent-early", 9_000)))))
+
+	// Act
+	clock = 2_000
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(activityFrame("agent-main", "act-2", subagentStartAt("agent-late", 5_000)))))
+	live, err := d.LiveWork(ctx())
+
+	// Assert: the store's own write order, not the producers' stamps.
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	got := []string{}
+	for _, a := range live.GetLiveAgents() {
+		got = append(got, a.GetValue())
+	}
+	if len(got) != 2 || got[0] != "agent-early" || got[1] != "agent-late" {
+		t.Fatalf("live_agents = %v, want [agent-early agent-late]", got)
+	}
+}
+
+func TestLiveWorkDoesNotSortAnAgentFirstBecauseItsProducerStatedNoInstant(t *testing.T) {
+	// Arrange: the sidecar's parseInstant answers 0 for a vendor transcript
+	// record whose `timestamp` is missing or unparseable. started_at_ms is NOT
+	// NULL, so a 0 was indistinguishable from an instant and sorted ahead of
+	// every real one.
+	clock := int64(1_000)
+	d := newStoreWithClock(t, func() int64 { return clock })
+	writeOK(t, d, pageEntry("w1", "u1", "agent-main", frameItem(activityFrame("agent-main", "act-1", subagentStartAt("agent-first", 9_000)))))
+
+	// Act
+	clock = 2_000
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(activityFrame("agent-main", "act-2", subagentStartAt("agent-unstamped", 0)))))
+	live, err := d.LiveWork(ctx())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LiveWork: %v", err)
+	}
+	if got := live.GetLiveAgents()[0].GetValue(); got != "agent-first" {
+		t.Fatalf("first live agent = %q, want agent-first", got)
+	}
+}
+
+func TestASpawnFrameDoesNotMoveTheStartOfAnAgentTheStoreAlreadyHeardFrom(t *testing.T) {
+	// Arrange: the created agent speaks BEFORE the spawn that announced it is
+	// applied, which the two planes' arrival race makes routine. First sight
+	// stamps the row with the store's clock.
+	clock := int64(1_000)
+	d := newStoreWithClock(t, func() int64 { return clock })
+	writeOK(t, d, pageEntry("w1", "u1", "agent-2", frameItem(activityFrame("agent-2", "act-1", prose()))))
+
+	// Act
+	clock = 2_000
+	writeOK(t, d, pageEntry("w2", "u2", "agent-main", frameItem(activityFrame("agent-main", "act-2", subagentStartAt("agent-2", 9_000)))))
+
+	// Assert: first sight stands. The spawn supplies the metadata and not the
+	// instant, so an agent's start never moves forward or backward as later
+	// frames about it arrive.
+	if got := scalar[int64](t, d, `SELECT started_at_ms FROM agent WHERE agent_id = 'agent-2'`); got != 1_000 {
+		t.Fatalf("started_at_ms = %d, want first sight 1000", got)
+	}
+	if got := scalar[string](t, d, `SELECT spawned_by_agent FROM agent WHERE agent_id = 'agent-2'`); got != "agent-main" {
+		t.Fatalf("spawned_by_agent = %q, want agent-main", got)
+	}
+}
