@@ -319,7 +319,7 @@ func TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows(t *testing.T) {
 // SessionRateLimitStatus by daemon/internal/resolve/footer/activity.go's
 // `allowance`, which never defaults an arm), and the daemon's own
 // percent→fraction and seconds conversions
-// (state.go observeFigures: "the contract carries a 0..1 fraction and epoch
+// (state.go fileFigures: "the contract carries a 0..1 fraction and epoch
 // seconds, so the conversion is the daemon's and never the client's").
 //
 // The footer watch is opened BEFORE the prompt on purpose. The shim reprobes
