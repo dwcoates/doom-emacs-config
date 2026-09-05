@@ -525,8 +525,8 @@ export function convertSessionMessage(
         residueEntry(
           context,
           message,
-          vendorSpecificResidue(residueKind(record as { type?: string; subtype?: string }), message),
-          `residue.vendor_specific.${residueKind(record as { type?: string; subtype?: string })}`,
+          vendorSpecificResidue(residueKind(record), message),
+          `residue.vendor_specific.${residueKind(record)}`,
         ),
       ];
   }
