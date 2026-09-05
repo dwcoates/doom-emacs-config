@@ -32,7 +32,7 @@ import { conversationv1 } from "../proto.js";
 import { activityUpsertKey, contextBudgetWarningUpsertKey } from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { agentActivity, pageLineEntry, updateFrame } from "./entries.js";
-import type { FoldContext } from "./fold-context.js";
+import type { FoldContext, LastChange } from "./fold-context.js";
 import { residueEntry, residueForMessage, vendorSpecificResidue } from "./residue.js";
 
 const LOGGER = bindLog({ component: "shim-convert-attach", operation: "shim.convert.attachments" });
@@ -115,16 +115,16 @@ function diagnosticsFile(entry: unknown): conversationv1.AgentDiagnosticsFile | 
 function convertDiagnostics(
   record: AttachmentRecord,
   context: FoldContext,
-  unit: conversationv1.AgentActivityId,
-  isEdit: boolean,
+  change: LastChange,
 ): readonly PersistEntry[] {
+  const { unit, kind } = change;
   const files = Array.isArray(record.attachment?.files) ? record.attachment.files : [];
   const report = create(conversationv1.AgentDiagnosticsReportSchema, {
     files: files
       .map(diagnosticsFile)
       .filter((file): file is conversationv1.AgentDiagnosticsFile => file !== undefined),
   });
-  const item: conversationv1.AgentActivity["item"] = isEdit
+  const item: conversationv1.AgentActivity["item"] = kind === "edit"
     ? {
         case: "edit",
         value: create(conversationv1.AgentEditSchema, {
@@ -138,7 +138,7 @@ function convertDiagnostics(
         }),
       };
   LOGGER.log(
-    { unit: unit.value, files: report.files.length, arm: isEdit ? "edit" : "write" },
+    { unit: unit.value, files: report.files.length, arm: kind },
     "attaching IDE diagnostics to the last change unit by adjacency",
   );
   const activity = agentActivity(unit, item);
@@ -148,7 +148,7 @@ function convertDiagnostics(
       upsertKey: activityUpsertKey(unit),
       source: {
         vendorUuid: record.uuid ?? `diagnostics:${unit.value}`,
-        discriminator: `activity.${isEdit ? "edit" : "write"}.diagnostics`,
+        discriminator: `activity.${kind}.diagnostics`,
       },
       keepalive: context.keepalive,
       item: { kind: "frame", frame: updateFrame(context.mainAgentId, {
@@ -345,8 +345,8 @@ export function convertAttachment(
     ];
   }
   if (type === "diagnostics") {
-    const unit = context.lastWriteOrEditUnit;
-    if (unit === undefined) {
+    const change = context.lastChange;
+    if (change === undefined) {
       LOGGER.log(
         { level: "warn" },
         "IDE diagnostics arrived with no preceding write or edit; nothing to attach them to",
@@ -362,7 +362,7 @@ export function convertAttachment(
     }
     // WHICH ARM the report rides is the unit's own kind, and the fold knows the
     // last change was an edit or a write from the same remembered value.
-    return convertDiagnostics(record, context, unit, true);
+    return convertDiagnostics(record, context, change);
   }
   // `context_tip` IS NOT THE BUDGET WARNING (ruling, landing 5). The one real
   // `context_tip` capture is a generic `/goal` tip, so mapping it to the
