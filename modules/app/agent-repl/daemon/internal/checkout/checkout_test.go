@@ -1,11 +1,10 @@
-package checkout_test
+package checkout
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"claude-repld/internal/checkout"
 )
 
 // TestRootEnvironmentOverrideWins verifies that a set AGENT_REPL_CHECKOUT
@@ -20,10 +19,10 @@ func TestRootEnvironmentOverrideWins(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	exePath := filepath.Join(moduleRoot, "daemon", "claude-repld")
-	t.Setenv(checkout.Env, filepath.Join(tmp, "elsewhere", "..", "elsewhere-override"))
+	t.Setenv(Env, filepath.Join(tmp, "elsewhere", "..", "elsewhere-override"))
 
 	// Act.
-	got, err := checkout.Root(exePath)
+	got, err := Root(exePath)
 
 	// Assert.
 	if err != nil {
@@ -48,7 +47,7 @@ func TestRootModuleRootAncestor(t *testing.T) {
 	exePath := filepath.Join(daemonDir, "claude-repld")
 
 	// Act.
-	got, err := checkout.Root(exePath)
+	got, err := Root(exePath)
 
 	// Assert.
 	if err != nil {
@@ -78,7 +77,7 @@ func TestRootRepositoryRootAncestor(t *testing.T) {
 	exePath := filepath.Join(deployDir, "claude-repld")
 
 	// Act.
-	got, err := checkout.Root(exePath)
+	got, err := Root(exePath)
 
 	// Assert.
 	if err != nil {
@@ -102,7 +101,7 @@ func TestRootWithNoMarkerNearTheExecutableFallsBack(t *testing.T) {
 	}
 
 	// Act.
-	got, err := checkout.Root(exePath)
+	got, err := Root(exePath)
 
 	// Assert.
 	if err != nil {
@@ -122,9 +121,9 @@ func TestDerivedPaths(t *testing.T) {
 		got  string
 		want string
 	}{
-		{name: "shim main", got: checkout.ShimMain(root), want: filepath.Join(root, "agent-shim", "claude", "shim", "dist", "main.js")},
-		{name: "webapp dist", got: checkout.WebappDist(root), want: filepath.Join(root, "webapp", "dist")},
-		{name: "prompts dir", got: checkout.PromptsDir(root), want: filepath.Join(root, "prompts")},
+		{name: "shim main", got: ShimMain(root), want: filepath.Join(root, "agent-shim", "claude", "shim", "dist", "main.js")},
+		{name: "webapp dist", got: WebappDist(root), want: filepath.Join(root, "webapp", "dist")},
+		{name: "prompts dir", got: PromptsDir(root), want: filepath.Join(root, "prompts")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -144,10 +143,135 @@ func TestVocabDirIsBeneathTheProtoTree(t *testing.T) {
 	root := filepath.Join("/checkout", "modules", "app", "agent-repl")
 
 	// Act
-	got := checkout.VocabDir(root)
+	got := VocabDir(root)
 
 	// Assert
 	if want := filepath.Join(root, "proto", "vocab"); got != want {
 		t.Fatalf("VocabDir = %q, want %q", got, want)
+	}
+}
+
+// TestShimBuildStampIsBesideTheCompiledEntryPoint covers the production source
+// of SHIM_BUILD_SHA: the stamp the shim's build chain writes next to its
+// bundle, which the daemon refuses to boot without.
+func TestShimBuildStampIsBesideTheCompiledEntryPoint(t *testing.T) {
+	// Arrange.
+	root := filepath.FromSlash("/checkout/modules/app/agent-repl")
+
+	// Act.
+	got := ShimBuildStamp(root)
+
+	// Assert.
+	if want := filepath.Join(filepath.Dir(ShimMain(root)), ".built-sha"); got != want {
+		t.Fatalf("ShimBuildStamp() = %q, want %q", got, want)
+	}
+}
+
+// TestResolveRootRefusesWhenNothingNamesACheckout covers the loud refusal: no
+// environment override, no marker above the executable, and a compiled-in
+// path that names none either — which is what a binary copied off a machine
+// whose checkout is gone looks like.
+func TestResolveRootRefusesWhenNothingNamesACheckout(t *testing.T) {
+	// Arrange.
+	unsetEnv(t)
+	exePath := filepath.Join(t.TempDir(), "bin", "claude-repld")
+
+	// Act.
+	got, err := resolveRoot(exePath, func() (string, bool) { return "", false })
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("resolveRoot() = %q, want a refusal rather than a guessed root", got)
+	}
+	for _, want := range []string{exePath, marker, Env} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want it to name %q", err, want)
+		}
+	}
+}
+
+// TestResolveRootTakesTheCompiledFallbackOverTheRefusal pins that the last
+// resort is consulted before the refusal, which is what makes a binary built
+// with `go build -o <tmp>` resolvable at all.
+func TestResolveRootTakesTheCompiledFallbackOverTheRefusal(t *testing.T) {
+	// Arrange.
+	unsetEnv(t)
+	exePath := filepath.Join(t.TempDir(), "bin", "claude-repld")
+
+	// Act.
+	got, err := resolveRoot(exePath, func() (string, bool) { return "/built/from/here", true })
+
+	// Assert.
+	if err != nil || got != "/built/from/here" {
+		t.Fatalf("resolveRoot() = (%q, %v), want the compiled-in root", got, err)
+	}
+}
+
+// TestCompiledRootFromRefusesAnUnknownFrame covers the case runtime.Caller
+// could not answer: no root, never a walk from an empty path.
+func TestCompiledRootFromRefusesAnUnknownFrame(t *testing.T) {
+	// Arrange, Act.
+	got, ok := compiledRootFrom("", false)
+
+	// Assert.
+	if ok {
+		t.Fatalf("compiledRootFrom() = (%q, true), want no root for an unknown frame", got)
+	}
+}
+
+// TestCompiledRootFromRefusesACheckoutThatMoved covers the reason the walk
+// stats at all: a checkout that moved after the binary was built leaves a
+// compiled-in path that no longer exists.
+func TestCompiledRootFromRefusesACheckoutThatMoved(t *testing.T) {
+	// Arrange: a marked path under a directory nothing was ever created in.
+	sourceFile := filepath.Join(t.TempDir(), "gone", "modules", "app", "agent-repl",
+		"daemon", "internal", "checkout", "checkout.go")
+
+	// Act.
+	got, ok := compiledRootFrom(sourceFile, true)
+
+	// Assert.
+	if ok {
+		t.Fatalf("compiledRootFrom() = (%q, true), want no root for a checkout that moved", got)
+	}
+}
+
+// TestCompiledRootFromRefusesASourceInNoCheckout covers the walk running out
+// of ancestors: a source path with no marker anywhere above it.
+func TestCompiledRootFromRefusesASourceInNoCheckout(t *testing.T) {
+	// Arrange.
+	sourceFile := filepath.Join(t.TempDir(), "elsewhere", "checkout.go")
+
+	// Act.
+	got, ok := compiledRootFrom(sourceFile, true)
+
+	// Assert.
+	if ok {
+		t.Fatalf("compiledRootFrom() = (%q, true), want no root outside any checkout", got)
+	}
+}
+
+// TestCompiledRootAnswersThisPackagesOwnCheckout pins the production last
+// resort against the tree the tests themselves were compiled from.
+func TestCompiledRootAnswersThisPackagesOwnCheckout(t *testing.T) {
+	// Arrange, Act.
+	got, ok := compiledRoot()
+
+	// Assert.
+	if !ok {
+		t.Fatal("compiledRoot() = (_, false), want this package's own checkout")
+	}
+	if filepath.Base(got) != "agent-repl" {
+		t.Fatalf("compiledRoot() = %q, want the agent-repl module root", got)
+	}
+}
+
+// unsetEnv removes AGENT_REPL_CHECKOUT for one test, restoring whatever the
+// process had (set or unset) afterwards.
+func unsetEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(Env, "restored-by-cleanup")
+	if err := os.Unsetenv(Env); err != nil {
+		t.Fatalf("Unsetenv(%s) = %v", Env, err)
 	}
 }
