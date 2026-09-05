@@ -23,8 +23,15 @@ import { textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
-import type { AccountUsageLike, McpServerStatusLike } from "../../src/sdk/types.js";
+import type {
+  AccountUsageLike,
+  ContextUsageLike,
+  McpServerStatusLike,
+  ModelInfoLike,
+} from "../../src/sdk/types.js";
 import { mainAgentId } from "../../src/convert/ids.js";
+import type { PersistEntry } from "../../src/store/persistence.js";
+import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -98,6 +105,21 @@ function harness(
     watcherConclusionBudgetMs?: number;
     /** Leave every scripted query's stream standing after `close()`. */
     closeLeavesStreamOpen?: boolean;
+    /** How long StartSession waits for the vendor's own `system:init`. */
+    initTimeoutMs?: number;
+    /** Refuse to create any query after this many have been created. */
+    createQueryFailsFrom?: number;
+    /** Build the engine with NO `endProcess`, the way an in-process build does. */
+    withoutEndProcess?: boolean;
+    /**
+     * Pull the prompt stream the engine hands the vendor, as the real SDK does.
+     *
+     * `ScriptedQuery` never touches `spec.prompt`, so nothing normally exercises
+     * the push-to-pull bridge the engine submits every prompt through.
+     */
+    drainPrompts?: string[];
+    /** Reach each scripted query the moment it is created, before it is returned. */
+    onQueryCreated?: (query: ScriptedQuery, spec: QuerySpec, index: number) => void;
   } = {},
 ): Harness {
   const stateDir = scratch();
@@ -112,10 +134,13 @@ function harness(
   const workspaceLocks: string[] = [];
   const exits: number[] = [];
   const engine = createEngine({
-    endProcess: (code) => exits.push(code),
+    ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
     persistence,
     fold,
     createQuery: (spec) => {
+      if (options.createQueryFailsFrom !== undefined && queries.length >= options.createQueryFailsFrom) {
+        return Promise.reject(new Error("the vendor refused another query"));
+      }
       const query = new ScriptedQuery();
       if (options.backgroundTasks === true) query.backgroundTaskAnswer = true;
       if (options.backgroundTasksThrows === true) {
@@ -124,13 +149,25 @@ function harness(
       if (options.mcp !== undefined) query.mcp = options.mcp;
       if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
       if (options.closeLeavesStreamOpen === true) query.closeLeavesStreamOpen = true;
+      const index = queries.length;
       queries.push({ spec, query });
+      options.onQueryCreated?.(query, spec, index);
+      const drained = options.drainPrompts;
+      if (drained !== undefined) {
+        void (async (): Promise<void> => {
+          for await (const message of spec.prompt) {
+            drained.push(typeof message.message.content === "string" ? message.message.content : "");
+          }
+          drained.push("<end>");
+        })();
+      }
       return Promise.resolve(query);
     },
     runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
     env: { stateDir, configDir, cwd },
     nowMs: () => options.nowMs ?? 1_000_100,
     scheduler,
+    ...(options.initTimeoutMs === undefined ? {} : { initTimeoutMs: options.initTimeoutMs }),
     ...(options.keepaliveIntervalMs === undefined
       ? {}
       : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
@@ -2958,5 +2995,1628 @@ describe("the vendor request the turn runs under", () => {
     await h.engine.onSdkMessage(resultMessage());
 
     expect(stampedRequestId()).toBeUndefined();
+  });
+});
+
+/**
+ * Every push the engine produced while `act` ran, narrowed by `pick`.
+ *
+ * The same shape the model and fast-mode suites above use: subscribe first, do
+ * the thing, then stand the session down so the stream ends and the reader can
+ * be awaited rather than raced.
+ */
+async function pushedUpdates<T>(
+  h: Harness,
+  pick: (update: conversationv1.SessionUpdate["update"]) => T | undefined,
+  act: () => Promise<void>,
+): Promise<T[]> {
+  const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+  const seen: T[] = [];
+  const reading = (async () => {
+    for (;;) {
+      const step = await stream.next();
+      if (step.done === true) return;
+      const got = pick(step.value.update);
+      if (got !== undefined) seen.push(got);
+    }
+  })();
+  await act();
+  await h.engine.standDown("collected");
+  await reading;
+  return seen;
+}
+
+describe("the context usage the vendor states, mapped field by field", () => {
+  /** Every field of the vendor's answer populated, so each mapping is testable. */
+  function fullUsage(overrides: Partial<ContextUsageLike> = {}): ContextUsageLike {
+    return {
+      categories: [
+        { name: "messages", tokens: 10, color: "#111", isDeferred: true },
+        { name: "tools", tokens: 20, color: "#222" },
+      ],
+      totalTokens: 100,
+      maxTokens: 200,
+      rawMaxTokens: 300,
+      percentage: 50,
+      gridRows: [],
+      model: "claude-opus-5",
+      memoryFiles: [{ path: "/ws/CLAUDE.md", type: "project", tokens: 7 }],
+      mcpTools: [{ name: "search", serverName: "docs", tokens: 9, isLoaded: true }],
+      deferredBuiltinTools: [{ name: "WebFetch", tokens: 3, isLoaded: false }],
+      systemTools: [{ name: "Bash", tokens: 4 }],
+      systemPromptSections: [{ name: "identity", tokens: 5 }],
+      agents: [{ agentType: "Explore", source: "builtin", tokens: 6 }],
+      slashCommands: { totalCommands: 12, includedCommands: 8, tokens: 40 },
+      skills: {
+        totalSkills: 3,
+        includedSkills: 2,
+        tokens: 30,
+        skillFrontmatter: [{ name: "graphify", source: "user", tokens: 11 }],
+      },
+      autoCompactThreshold: 190,
+      isAutoCompactEnabled: true,
+      messageBreakdown: {
+        toolCallTokens: 1,
+        toolResultTokens: 2,
+        attachmentTokens: 3,
+        assistantMessageTokens: 4,
+        userMessageTokens: 5,
+        redirectedContextTokens: 6,
+        unattributedTokens: 7,
+        toolCallsByType: [{ name: "Bash", callTokens: 8, resultTokens: 9 }],
+        attachmentsByType: [{ name: "image", tokens: 10 }],
+      },
+      apiUsage: {
+        input_tokens: 21,
+        output_tokens: 22,
+        cache_creation_input_tokens: 23,
+        cache_read_input_tokens: 24,
+      },
+      ...overrides,
+    } as ContextUsageLike;
+  }
+
+  /** Start a session whose vendor answers `getContextUsage` with `usage`. */
+  async function usagePushedFor(usage: ContextUsageLike): Promise<conversationv1.SessionContextUsage> {
+    const h = harness({ onQueryCreated: (query) => (query.contextUsage = usage) });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "contextUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const first = seen[0];
+    if (first === undefined) throw new Error("the engine pushed no context usage");
+    return first;
+  }
+
+  it("carries each category the vendor named", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories.map((category) => category.label)).toEqual(["messages", "tools"]);
+  });
+
+  it("states a category the vendor marked deferred", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories[0]?.isDeferred).toBe(true);
+  });
+
+  it("leaves a category the vendor said nothing about UNSTATED, not false", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories[1]?.isDeferred).toBeUndefined();
+  });
+
+  it("ROUNDS a fractional figure rather than losing the whole push", async () => {
+    // `BigInt()` throws outright on a non-integer, which would turn one
+    // fractional vendor field into a lost context-usage push and a fault.
+    const usage = await usagePushedFor(fullUsage({ percentage: 84.6 }));
+
+    expect(usage.percentage).toBe(85n);
+  });
+
+  it("carries the memory files the context holds", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.memoryFiles.map((file) => [file.path, file.tokens])).toEqual([["/ws/CLAUDE.md", 7n]]);
+  });
+
+  it("carries the mcp tools and whether each is loaded", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.mcpTools.map((tool) => [tool.name, tool.serverName, tool.isLoaded])).toEqual([
+      ["search", "docs", true],
+    ]);
+  });
+
+  it("carries the deferred builtin tools", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.deferredBuiltinTools.map((tool) => [tool.name, tool.isLoaded])).toEqual([
+      ["WebFetch", false],
+    ]);
+  });
+
+  it("carries the system tools", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.systemTools.map((tool) => [tool.name, tool.tokens])).toEqual([["Bash", 4n]]);
+  });
+
+  it("carries the system prompt sections", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.systemPromptSections.map((section) => section.name)).toEqual(["identity"]);
+  });
+
+  it("carries the agent definitions in context", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.agents.map((agent) => [agent.agentType, agent.source])).toEqual([
+      ["Explore", "builtin"],
+    ]);
+  });
+
+  it("states the slash-command block when the vendor declared one", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.slashCommands?.includedCommands).toBe(8n);
+  });
+
+  it("states the skills block, frontmatter included", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.skills?.skillFrontmatter.map((skill) => skill.name)).toEqual(["graphify"]);
+  });
+
+  it("states the auto-compact threshold the vendor declared", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.autoCompactThreshold).toBe(190n);
+  });
+
+  it("states the per-message breakdown the vendor declared", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.messageBreakdown?.unattributedTokens).toBe(7n);
+  });
+
+  it("carries the breakdown's per-tool call and result figures", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(
+      usage.messageBreakdown?.toolCallsByType.map((entry) => [entry.name, entry.callTokens, entry.resultTokens]),
+    ).toEqual([["Bash", 8n, 9n]]);
+  });
+
+  it("carries the breakdown's per-attachment-type figures", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.messageBreakdown?.attachmentsByType.map((entry) => entry.name)).toEqual(["image"]);
+  });
+
+  it("states the API usage the vendor reported for the last request", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.apiUsage?.cacheReadInputTokens).toBe(24n);
+  });
+
+  it("states NO api usage when the vendor reported none", async () => {
+    const usage = await usagePushedFor(fullUsage({ apiUsage: null }));
+
+    expect(usage.apiUsage).toBeUndefined();
+  });
+
+  it("reports a getContextUsage failure as a vendor_query_failed fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = () => Promise.reject(new Error("the vendor will not answer"));
+      },
+    });
+    const faults = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "diagnostics" ? update.value.health.case : undefined,
+      async () => {
+        await started(h);
+      },
+    );
+
+    expect(faults).toContain("unhealthy");
+  });
+});
+
+describe("the account's rate-limit windows", () => {
+  /** The vendor's usage answer, with only the rate-limit half varied. */
+  function usage(overrides: Partial<AccountUsageLike>): AccountUsageLike {
+    return {
+      session: {
+        total_cost_usd: 0,
+        total_api_duration_ms: 0,
+        total_duration_ms: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+        model_usage: {},
+      },
+      subscription_type: "max",
+      rate_limits_available: true,
+      rate_limits: null,
+      behaviors: null,
+      ...overrides,
+    } as AccountUsageLike;
+  }
+
+  /** The account-usage push a session with this vendor answer produces. */
+  async function accountUsagePushed(answer: AccountUsageLike): Promise<conversationv1.SessionAccountUsage> {
+    const h = harness({ accountUsage: answer });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const first = seen[0];
+    if (first === undefined) throw new Error("the engine pushed no account usage");
+    return first;
+  }
+
+  /** The unavailable reason on a push that carries one. */
+  function unavailableReason(pushed: conversationv1.SessionAccountUsage): string | undefined {
+    return pushed.outcome.case === "unavailable" ? (pushed.outcome.value.reason.case ?? "") : undefined;
+  }
+
+  it("reports service_unavailable when limits are claimed and none are given", async () => {
+    // The service said it had limits and produced none: still the service
+    // failing to answer, not a shape with a window missing from it.
+    const pushed = await accountUsagePushed(usage({ rate_limits: null }));
+
+    expect(unavailableReason(pushed)).toBe("serviceUnavailable");
+  });
+
+  it("reports window_unavailable when the answer carries no five-hour window", async () => {
+    const pushed = await accountUsagePushed(
+      usage({ rate_limits: { five_hour: null } } as Partial<AccountUsageLike>),
+    );
+
+    expect(unavailableReason(pushed)).toBe("windowUnavailable");
+  });
+
+  it("reports utilization_unavailable when the five-hour window states no utilization", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: { five_hour: { utilization: null, resets_at: "2026-01-01T00:00:00.000Z" } },
+      } as Partial<AccountUsageLike>),
+    );
+
+    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
+  });
+
+  it("reports utilization_unavailable when the window's reset time cannot be read", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: { five_hour: { utilization: 10, resets_at: "not a timestamp" } },
+      } as Partial<AccountUsageLike>),
+    );
+
+    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
+  });
+
+  it("echoes each per-model window the vendor offered", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          model_scoped: [
+            { display_name: "Fable", utilization: 30, resets_at: "2026-01-03T00:00:00.000Z" },
+          ],
+        },
+      } as Partial<AccountUsageLike>),
+    );
+    const available =
+      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
+
+    expect(available?.modelScoped.map((scoped) => [scoped.model?.name, scoped.window?.utilizationPercent])).toEqual(
+      [["Fable", 30]],
+    );
+  });
+
+  it("DROPS a per-model window the vendor could not state", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          model_scoped: [{ display_name: "Fable", utilization: null, resets_at: null }],
+        },
+      } as Partial<AccountUsageLike>),
+    );
+    const available =
+      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
+
+    expect(available?.modelScoped).toEqual([]);
+  });
+
+  it("reports a sampling failure when the vendor's usage verb throws", async () => {
+    // "We could not ask" is a different fact to a consumer than "the service is
+    // down", so it gets its own reason rather than an absent field.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () =>
+          Promise.reject(new Error("the usage endpoint is down"));
+      },
+    });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const outcome = seen[0]?.outcome;
+
+    expect(
+      outcome?.case === "unavailable" && outcome.value.reason.case === "samplingFailure"
+        ? outcome.value.reason.value.cause
+        : undefined,
+    ).toBe("the usage endpoint is down");
+  });
+});
+
+describe("mcp server health, arm by arm", () => {
+  /** The health arm the engine pushed for one declared server. */
+  async function healthFor(status: McpServerStatusLike["status"]): Promise<string | undefined> {
+    const h = harness({ mcp: [{ name: "docs", status }] as McpServerStatusLike[] });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "mcpServer" ? (update.value.health.case ?? "") : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    return seen[0];
+  }
+
+  it("states a server awaiting authorization as needs_auth", async () => {
+    expect(await healthFor("needs-auth")).toBe("needsAuth");
+  });
+
+  it("states a server still connecting as pending", async () => {
+    expect(await healthFor("pending")).toBe("pending");
+  });
+
+  it("states a server the user turned off as disabled", async () => {
+    expect(await healthFor("disabled")).toBe("disabled");
+  });
+
+  it("reports an mcpServerStatus failure as a session fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.mcpServerStatus = () => Promise.reject(new Error("the vendor cannot probe its servers"));
+      },
+    });
+    const before = h.engine.pushes.faultCount;
+    await started(h);
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+  });
+});
+
+describe("the model catalog's capabilities", () => {
+  /** The catalog a session reports when the vendor declares `models`. */
+  async function catalogFor(models: ModelInfoLike[]): Promise<conversationv1.ModelOption[]> {
+    const h = harness({ onQueryCreated: (query) => (query.models = models) });
+    const response = await started(h);
+    return response.result.case === "success" ? (response.result.value.session?.modelCatalog ?? []) : [];
+  }
+
+  it("states the wire model an alias row resolves to", async () => {
+    const catalog = await catalogFor([
+      { value: "sonnet", displayName: "Sonnet", description: "alias", resolvedModel: "claude-sonnet-5" },
+    ]);
+
+    expect(catalog[0]?.capabilities?.resolvedModel?.name).toBe("claude-sonnet-5");
+  });
+
+  it("states effort UNSUPPORTED for a model that declares other capabilities but no effort", async () => {
+    const catalog = await catalogFor([
+      { value: "m", displayName: "M", description: "d", supportsAdaptiveThinking: true },
+    ]);
+
+    expect(catalog[0]?.capabilities?.effortSupport.case).toBe("effortUnsupported");
+  });
+
+  it("maps an effort level the shim does not know to UNSPECIFIED", async () => {
+    const catalog = await catalogFor([
+      {
+        value: "m",
+        displayName: "M",
+        description: "d",
+        supportsEffort: true,
+        supportedEffortLevels: ["ludicrous"] as unknown as ModelInfoLike["supportedEffortLevels"],
+      },
+    ]);
+    const support = catalog[0]?.capabilities?.effortSupport;
+
+    expect(support?.case === "effortSupported" ? support.value.levels : undefined).toEqual([
+      conversationv1.AgentEffortLevel.UNSPECIFIED,
+    ]);
+  });
+});
+
+/**
+ * The fold's own rows, and what the engine does with them.
+ *
+ * A `PersistEntry` the fold produced, wrapped so each test states only the row
+ * it cares about.
+ */
+function foldEntry(item: PersistEntry["item"], arm: string): PersistEntry {
+  return {
+    agentId: mainAgentId("vendor-session"),
+    upsertKey: `k-${arm}`,
+    source: { vendorUuid: `u-${arm}`, discriminator: arm } as never,
+    keepalive: false,
+    item,
+  };
+}
+
+/** One assistant message, so a fold has something to answer. */
+function assistantMessage(uuid: string): SdkMessage {
+  return {
+    type: "assistant",
+    uuid,
+    session_id: "s",
+    parent_tool_use_id: null,
+    message: { id: "msg_1", role: "assistant", content: [] },
+  } as never;
+}
+
+/** One activity frame row, as the fold produces them. */
+function activityEntry(
+  activityId: string,
+  item: conversationv1.AgentActivity["item"],
+  arm: string,
+): PersistEntry {
+  return foldEntry(
+    {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: {
+              case: "activity",
+              value: create(conversationv1.AgentActivitySchema, {
+                activityId: create(conversationv1.AgentActivityIdSchema, { value: activityId }),
+                item,
+              }),
+            },
+          }),
+        },
+      }),
+    },
+    arm,
+  );
+}
+
+describe("the session updates the fold itself produced", () => {
+  it("fans out an arm the engine does not state itself", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "session_update",
+                update: create(conversationv1.SessionUpdateSchema, {
+                  update: {
+                    case: "rateLimitStatus",
+                    value: create(conversationv1.SessionRateLimitStatusSchema, {}),
+                  },
+                }),
+              },
+              "rate_limit_status",
+            ),
+          ]
+        : [];
+
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === "rateLimitStatus" ? "rateLimitStatus" : undefined),
+      async () => {
+        await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+      },
+    );
+
+    expect(arms).toEqual(["rateLimitStatus"]);
+  });
+
+  it("DROPS a fold duplicate of an arm the engine owns", async () => {
+    // One producer per arm, or a consumer sees the same flip twice.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "session_update",
+                update: create(conversationv1.SessionUpdateSchema, {
+                  update: {
+                    case: "modelChanged",
+                    value: create(conversationv1.SessionModelChangedSchema, {
+                      effectiveModel: create(conversationv1.AgentModelSchema, {
+                        name: "the-fold-said-this",
+                      }),
+                    }),
+                  },
+                }),
+              },
+              "model_changed",
+            ),
+          ]
+        : [];
+
+    const names = await pushedUpdates(
+      h,
+      (update) => (update.case === "modelChanged" ? update.value.effectiveModel?.name : undefined),
+      async () => {
+        await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a2"));
+      },
+    );
+
+    expect(names).not.toContain("the-fold-said-this");
+  });
+});
+
+describe("the vendor's init when it names no real model", () => {
+  it("keeps the model already in effect rather than adopting the synthetic marker", async () => {
+    // `<synthetic>` is the CLI's stand-in for "no nameable model"; adopting it
+    // would put an unspawnable id in the picker and every later field.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: SYNTHETIC_MODEL,
+      }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success" ? response.result.value.session?.effectiveModel?.name : undefined,
+    ).toBe("claude-opus-5");
+  });
+});
+
+describe("the vendor's own compaction, announced through system:status", () => {
+  /** Every context cut this session wrote, newest last. */
+  function contextCuts(h: Harness): conversationv1.ContextCut[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "frame") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "update") return [];
+      const update = result.value.update;
+      return update.case === "contextCut" ? [update.value] : [];
+    });
+  }
+
+  it("pushes `compacting` when the vendor says it started", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === "compacting" ? "compacting" : undefined),
+      async () => {
+        await h.engine.onSdkMessage({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "00000000-0000-4000-8000-0000000000b1",
+          session_id: "s",
+        } as never);
+      },
+    );
+
+    expect(arms).toEqual(["compacting"]);
+  });
+
+  it("writes a compaction_failed page line carrying the vendor's own wording", async () => {
+    // A failure has no `compact_boundary` record at all, so this is its ONLY
+    // producer.
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      compact_error: "the model refused to summarize",
+      uuid: "00000000-0000-4000-8000-0000000000b2",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.error : undefined).toBe(
+      "the model refused to summarize",
+    );
+  });
+
+  it("states its own wording when the vendor named no error", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      uuid: "00000000-0000-4000-8000-0000000000b3",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.error : undefined).toBe(
+      "the vendor's compaction failed",
+    );
+  });
+});
+
+describe("what the engine remembers from the fold's own frames", () => {
+  it("RELAYS a denial the fold produced into the one memory of denied calls", async () => {
+    // The policy and undecidable arms never reach the gate's ask, so the
+    // `tool_result` that follows them must still be recognised as a relayed
+    // deny rather than a call that ran.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "permission",
+                        value: create(conversationv1.AgentPermissionSchema, {
+                          gatedCall: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_denied",
+                          }),
+                          result: {
+                            case: "success",
+                            value: create(conversationv1.AgentPermissionSuccessSchema, {
+                              decision: {
+                                case: "denied",
+                                value: create(conversationv1.AgentPermissionDeniedSchema, {
+                                  by: {
+                                    case: "policy",
+                                    value: create(
+                                      conversationv1.AgentPermissionDeniedByPolicySchema,
+                                      {},
+                                    ),
+                                  },
+                                }),
+                              },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "permission_denied",
+            ),
+          ]
+        : [];
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c1"));
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c2"));
+
+    expect(h.fold.contexts.at(-1)?.deniedCall("toolu_denied")).toBe(true);
+  });
+
+  it("ANNOUNCES the agent a spawn created, so a watch on it can be answered", async () => {
+    // The daemon opens its WatchAgent the instant it sees the spawn — before a
+    // single row of the child's exists.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            activityEntry(
+              "toolu_spawn",
+              {
+                case: "subagent",
+                value: create(conversationv1.AgentSubagentSchema, {
+                  result: {
+                    case: "start",
+                    value: create(conversationv1.AgentSubagentStartSchema, {
+                      createdAgentId: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+                    }),
+                  },
+                }),
+              },
+              "subagent_start",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c3"));
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+          pageSize: 5,
+        }),
+      )
+      [Symbol.asyncIterator]();
+    const first = await iterator.next();
+    await iterator.return?.();
+
+    expect(first.value?.frame.case).toBe("page");
+  });
+
+  it("REFUSES a watch on an agent this session never announced", async () => {
+    const h = harness();
+    await started(h);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "agent-nobody-minted" }),
+          pageSize: 5,
+        }),
+      )
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(/never been announced|no agent by that id/);
+  });
+});
+
+describe("the live detached table, driven by the vendor's own messages", () => {
+  /** `task_started` for one shell run. */
+  const taskStarted = (overrides: Record<string, unknown> = {}): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t01",
+      tool_use_id: "toolu_run",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000d0",
+      session_id: "s",
+      ...overrides,
+    }) as never;
+
+  /** The command lines of every interrupted shell terminal this session wrote. */
+  function interruptedCommands(h: Harness): string[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "bash_run") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "success" || result.value.outcome.case !== "interrupted") return [];
+      return [result.value.command?.line ?? ""];
+    });
+  }
+
+  it("PATCHES a live item from the vendor's task_updated", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "t01",
+      patch: { description: "sleep 900" },
+      uuid: "00000000-0000-4000-8000-0000000000d1",
+      session_id: "s",
+    } as never);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual(["sleep 900"]);
+  });
+
+  it("applies the vendor's LEVEL by replacement, retiring what it omits", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "background_tasks_changed",
+      tasks: [],
+      uuid: "00000000-0000-4000-8000-0000000000d2",
+      session_id: "s",
+    } as never);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("tells the fold which call a live task belongs to", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+
+    expect(h.fold.contexts.at(-1)?.liveTask("t01")).toEqual({ toolUseId: "toolu_run" });
+  });
+
+  it("tells the fold nothing for a task id it never saw start", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+
+    expect(h.fold.contexts.at(-1)?.liveTask("t99")).toBeUndefined();
+  });
+
+  it("writes NO shell terminal for a stopped item that names no originating call", async () => {
+    // Tracked for liveness, addressable by nobody: there is no unit to settle,
+    // and inventing one would put work on a stream that never announced it.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted({ tool_use_id: undefined }));
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual([]);
+  });
+
+  it("writes NO shell terminal for a stopped SUBAGENT: its terminal is the spawn unit's", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted({ task_type: "local_agent" }));
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual([]);
+  });
+});
+
+describe("a model name the vendor could not really state", () => {
+  it("adopts nothing from a reported model that is only whitespace", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const names: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "modelChanged") names.push(update.value.effectiveModel?.name ?? "");
+      }
+    })();
+
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-0000000000e1",
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "   ", content: [] },
+    } as never);
+    await h.engine.standDown("done");
+    await reading;
+
+    expect(names.filter((name) => name.trim() === "")).toEqual([]);
+  });
+});
+
+describe("folding before the session has an identity", () => {
+  it("REFUSES to fold a vendor message, rather than keying rows to nothing", async () => {
+    const h = harness();
+
+    await expect(
+      h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000e2")),
+    ).rejects.toThrow(/identity is not established/);
+  });
+});
+
+describe("the vendor query dying under the loop", () => {
+  it("reports an iterator failure as query_died.iterator_failure", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const causes: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "queryDied") causes.push(update.value.cause.case ?? "");
+      }
+    })();
+
+    // The loop is PARKED in the iterator; a stream that merely ends under a
+    // parked reader is an EOF. A message first unparks it, so the failure is
+    // raised on the next pull, which is how a real iterator throws.
+    h.queries[0]?.query.emit(assistantMessage("00000000-0000-4000-8000-0000000000e3"));
+    h.queries[0]?.query.fail(new Error("the vendor stream broke"));
+    for (let attempt = 0; attempt < 50 && causes.length === 0; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await h.engine.standDown("done");
+    await reading;
+
+    expect(causes).toContain("iteratorFailure");
+  });
+});
+
+describe("StartSession's remaining refusals", () => {
+  it("refuses vendor_start_failed when the vendor never sends its init", async () => {
+    // The init is the only thing StartSession waits for; without a bound a
+    // silent vendor would hold the verb open forever.
+    const h = harness({ initTimeoutMs: 5 });
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+  });
+
+  it("throws when StartSession reaches the engine with no source at all", async () => {
+    const h = harness();
+
+    await expect(
+      h.engine.startSession(create(shimv1.StartSessionRequestSchema, {})),
+    ).rejects.toThrow(/no source/);
+  });
+
+  it("proceeds without remediation when the caller named an arm the shim does not know", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const unset = create(conversationv1.SessionColdRemediationSchema, {});
+    const pending = h.engine.startSession(resumeRequest("resume-1", unset));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("reports a supportedModels failure as a session fault rather than failing the start", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
+      },
+    });
+    const before = h.engine.pushes.faultCount;
+
+    await started(h);
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+  });
+});
+
+describe("the cold gate's COMPACT remediation", () => {
+  /** A `compact` remediation over the whole conversation. */
+  const compactRemediation = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, {
+          scope: conversationv1.SessionCompactScope.ALL,
+        }),
+      },
+    });
+
+  /** Every context cut this session wrote, in the order it wrote them. */
+  function contextCuts(h: Harness): conversationv1.ContextCut[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "frame") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "update") return [];
+      const update = result.value.update;
+      return update.case === "contextCut" ? [update.value] : [];
+    });
+  }
+
+  it("WRITES the cut it held until the session had an identity", async () => {
+    // The remediation runs before the identity is settled, so its page line
+    // cannot be keyed yet — it waits rather than vanishing.
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
+  });
+
+  it("refuses vendor_start_failed when the summarizing session ends in a failure subtype", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) {
+          query.emit({
+            ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
+            subtype: "error_max_turns",
+          } as never);
+        }
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the summarizing session ended as error_max_turns");
+  });
+
+  it("refuses when the summarizing session produced no summary", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) {
+          query.emit({
+            ...(resultMessage("99999999-9999-4999-8999-999999999999") as unknown as Record<string, unknown>),
+            result: "",
+          } as never);
+        }
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the summarizing session produced no summary");
+  });
+
+  it("refuses with the vendor's own words when the throwaway query cannot be created", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, createQueryFailsFrom: 0 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor refused another query");
+  });
+});
+
+describe("Hibernate's compaction failing", () => {
+  it("carries the summarizing session's own failure into the refusal", async () => {
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 1) {
+          query.emit({
+            ...(resultMessage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") as unknown as Record<string, unknown>),
+            subtype: "error_during_execution",
+          } as never);
+        }
+      },
+    });
+    await started(h);
+    const first = h.queries[0];
+    const sessionId = first?.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+    writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const error = response.result.case === "error" ? response.result.value : undefined;
+
+    expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
+      "the summarizing session ended as error_during_execution",
+    );
+  });
+});
+
+describe("reconciliation when the record cannot describe the work", () => {
+  it("closes a live run as swept up with no command when the book cannot be read", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.openError = new (await import("../../src/store/persistence.js")).PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+
+    await started(h);
+
+    const terminal = h.persistence.buffered.find((entry) => entry.upsertKey === "bash:b01:terminal");
+    expect(
+      terminal?.item.kind === "bash_run" && terminal.item.frame.result.case === "success"
+        ? terminal.item.frame.result.value.command?.line
+        : undefined,
+    ).toBe("");
+  });
+
+  it("closes a SPAWN the book describes as a subagent, not as a shell run", async () => {
+    // The kind comes from what the book says the unit was; closing a spawn as a
+    // shell would put a bash terminal on a subagent's own unit.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+          entry: create(conversationv1.HistoryEntrySchema, {
+            entry: {
+              case: "agentFrame",
+              value: create(conversationv1.AgentFrameSchema, {
+                result: {
+                  case: "update",
+                  value: create(conversationv1.AgentUpdateSchema, {
+                    update: {
+                      case: "activity",
+                      value: create(conversationv1.AgentActivitySchema, {
+                        activityId: create(conversationv1.AgentActivityIdSchema, {
+                          value: "toolu_spawn",
+                        }),
+                        item: {
+                          case: "subagent",
+                          value: create(conversationv1.AgentSubagentSchema, {
+                            result: {
+                              case: "start",
+                              value: create(conversationv1.AgentSubagentStartSchema, {}),
+                            },
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    expect(
+      h.persistence.buffered.some(
+        (entry) => entry.source.discriminator === "activity.subagent.failure.lost.swept_up",
+      ),
+    ).toBe(true);
+  });
+
+  it("neither re-adopts nor closes a live WORKFLOW run", async () => {
+    // WORKFLOW IS KICKED this wave: a terminal written for one would close an
+    // obligation nothing in this build owns.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveWorkflows: [create(conversationv1.DetachedWorkIdSchema, { value: "w01" })],
+    });
+
+    const response = await started(h);
+
+    expect(h.persistence.buffered).toEqual([]);
+    expect(
+      response.result.case === "success" ? response.result.value.session?.liveWork : undefined,
+    ).toEqual([]);
+  });
+});
+
+describe("the keep-alive beat that could not be recorded", () => {
+  it("reports the failure as a keepalive_failed fault rather than losing the beat", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.write = (): void => {
+      throw new Error("the record plane refused the keep-alive prompt row");
+    };
+    const before = h.engine.pushes.faultCount;
+
+    h.scheduler.fire(0);
+    for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === before; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+});
+
+describe("what this session will answer a watch about", () => {
+  it("refuses a watch on the empty agent id", async () => {
+    const h = harness();
+    await started(h);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "" }),
+          pageSize: 5,
+        }),
+      )
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
+  });
+
+  it("answers a watch on a subagent the live table still holds", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_live_agent",
+      task_type: "local_agent",
+      description: "explore",
+      uuid: "00000000-0000-4000-8000-0000000000f1",
+      session_id: "s",
+    } as never);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "toolu_live_agent" }),
+          pageSize: 5,
+        }),
+      )
+      [Symbol.asyncIterator]();
+    const first = await iterator.next();
+    await iterator.return?.();
+
+    expect(first.value?.frame.case).toBe("page");
+  });
+
+  it("answers a watch on a subagent that has since RETIRED", async () => {
+    // A retired handle was still announced; refusing it would deny a consumer
+    // the book of work that plainly happened.
+    const h = harness();
+    await started(h);
+    const spawn = {
+      type: "system",
+      subtype: "task_started",
+      task_id: "a02",
+      tool_use_id: "toolu_retired_agent",
+      task_type: "local_agent",
+      description: "explore",
+      uuid: "00000000-0000-4000-8000-0000000000f2",
+      session_id: "s",
+    } as never;
+    await h.engine.onSdkMessage(spawn);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a02",
+      status: "completed",
+      uuid: "00000000-0000-4000-8000-0000000000f3",
+      session_id: "s",
+    } as never);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "toolu_retired_agent" }),
+          pageSize: 5,
+        }),
+      )
+      [Symbol.asyncIterator]();
+    const first = await iterator.next();
+    await iterator.return?.();
+
+    expect(first.value?.frame.case).toBe("page");
+  });
+});
+
+describe("the teardown's tails", () => {
+  /** A one-entry page whose head pointer a conclusion can name. */
+  function pageWithHead(pointer: string): conversationv1.HistoryPage {
+    return create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: pointer }),
+          entry: create(conversationv1.HistoryEntrySchema, {}),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+  }
+
+  it("CONCLUDES an open tail through the book's head before the process ends", async () => {
+    // The terminals are already durable, so the head names the last row the
+    // consumer is owed; cutting the tail instead reads as a transport failure.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))
+      [Symbol.asyncIterator]();
+    await watching.next();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.persistence.concludedThrough).toContain("p-9");
+  });
+
+  it("concludes NOTHING for a tail that already ended on its own", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    const watching = h.engine.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+    );
+    for await (const _frame of watching) {
+      // drained to completion, which is what disposes the watcher
+    }
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.persistence.concludedThrough).toEqual([]);
+  });
+
+  it("finishes KillSession when a WatchBash stream never ends", async () => {
+    // A LAST RESORT bound: a consumer that stopped pulling must not keep a
+    // killed shim alive forever.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.openBashRun = () =>
+      Promise.resolve({
+        async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {
+          await new Promise<void>(() => undefined);
+        },
+      });
+    const watching = h.engine
+      .watchBash(
+        create(shimv1.WatchBashRequestSchema, {
+          work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_never_ends" }),
+        }),
+      )
+      [Symbol.asyncIterator]();
+    void watching.next().catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("continues the teardown when the vendor refuses the interrupt", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.interrupt = () => Promise.reject(new Error("the vendor will not be interrupted"));
+      },
+    });
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.queries[0]?.query.calls).toContain("close");
+  });
+
+  it("continues the teardown when a detached item cannot be stopped", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.stopTask = () => Promise.reject(new Error("the vendor cannot stop this task"));
+      },
+    });
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t02",
+      tool_use_id: "toolu_unstoppable",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000f4",
+      session_id: "s",
+    } as never);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_unstoppable:terminal"),
+    ).toBe(true);
+  });
+});
+
+describe("ending the process the session was serving", () => {
+  it("says so rather than exiting when this build has no process to end", async () => {
+    const h = harness({ withoutEndProcess: true });
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case).toBe("success");
+    expect(h.exits).toEqual([]);
+  });
+
+  it("stands down NONZERO when the store never acked some rows", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.lostRows = 3;
+
+    expect(await h.engine.standDown("SIGTERM")).toBe(1);
+  });
+});
+
+describe("SetSessionModel and SetSessionPermissionMode, refused by the vendor", () => {
+  it("answers a deferred model change with the vendor's refusal at the turn boundary", async () => {
+    // The caller has been waiting for exactly this moment; swallowing the
+    // refusal would leave the daemon believing a change landed that never did.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModelRejects = new Error("the vendor refuses that model");
+    const deferred = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    query?.emit(resultMessage("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+    const response = await deferred;
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor refuses that model");
+  });
+
+  it("surfaces an immediate vendor refusal rather than reporting a model that is not in force", async () => {
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModelRejects = new Error("the vendor refuses that model");
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.cause.case : undefined,
+    ).toBe("vendorRefused");
+  });
+
+  it("throws when SetSessionPermissionMode reaches the engine with no mode", async () => {
+    const h = harness();
+    await started(h);
+
+    await expect(
+      h.engine.setSessionPermissionMode(create(shimv1.SetSessionPermissionModeRequestSchema, {})),
+    ).rejects.toThrow(/no mode/);
+  });
+});
+
+describe("the prompt stream the engine hands the vendor", () => {
+  it("DELIVERS a submitted prompt through the push-to-pull bridge", async () => {
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    for (let attempt = 0; attempt < 50 && delivered.length === 0; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(delivered).toEqual(["go"]);
+  });
+
+  it("ENDS the vendor's prompt stream when the session stands down", async () => {
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+
+    await h.engine.standDown("SIGTERM");
+    for (let attempt = 0; attempt < 50 && !delivered.includes("<end>"); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(delivered).toEqual(["<end>"]);
+  });
+});
+
+describe("compaction when no model is in effect", () => {
+  it("passes NO model to the throwaway query, leaving the SDK's own default", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
+      },
+    });
+    // A transcript whose records never named a model: nothing to recover, so
+    // nothing to ask the summarizing query for either.
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      assistantLine({
+        message: {
+          usage: {
+            input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 500,
+            cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
+          },
+        },
+      }),
+    ]);
+    const remediation = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, {
+          scope: conversationv1.SessionCompactScope.ALL,
+        }),
+      },
+    });
+    const pending = h.engine.startSession(resumeRequest("resume-1", remediation));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+});
+
+describe("reconciliation against work the shim has already SEEN start", () => {
+  it("re-adopts it without asking the vendor at all", async () => {
+    // The live table already holds it, and a vendor round trip for something
+    // this process watched begin would be asking about its own knowledge.
+    const h = harness({
+      onQueryCreated: (query, spec) => {
+        query.emit(initMessage({ sessionId: spec.binding.kind === "fresh" ? spec.binding.sessionId : "" }));
+        query.emit({
+          type: "system",
+          subtype: "task_started",
+          task_id: "t10",
+          tool_use_id: "toolu_seen",
+          task_type: "local_bash",
+          description: "sleep 600",
+          uuid: "00000000-0000-4000-8000-000000000101",
+          session_id: "s",
+        } as never);
+      },
+    });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_seen" })],
+    });
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries[0]?.query.calls).not.toContain("backgroundTasks:toolu_seen");
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_seen:terminal"),
+    ).toBe(false);
+  });
+});
+
+/**
+ * The shim's own durable log dying.
+ *
+ * LAST IN THIS FILE ON PURPOSE. The logger is ONE process-wide singleton and a
+ * poisoning is one-way, so this must not run before anything that logs.
+ */
+describe("the durable log sink being poisoned", () => {
+  it("states the loss on WatchSession, the only channel left once fd 3 is gone", async () => {
+    vi.mocked(writeSync).mockImplementationOnce(() => {
+      throw new Error("fd 3 is gone");
+    });
+    bindLog({ operation: "shim.test.poison" }).log({}, "the record this sink cannot take");
+
+    const h = harness();
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
   });
 });
