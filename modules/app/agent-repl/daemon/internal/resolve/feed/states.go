@@ -196,6 +196,17 @@ type subagentState struct {
 	detached bool
 	// feed is where the bubble landed.
 	feed placement
+	// held is the spawn's frames that arrived BEFORE its start, in arrival
+	// order.
+	//
+	// ONLY THE START NAMES THE CREATED AGENT, and the bubble's own row id IS
+	// that agent's sub-feed address, so a frame folded before the start lands
+	// would publish a row nothing can open — and the start would then mint a
+	// SECOND row beside it. The two planes carrying one run under one upsert
+	// key (the shim's stream, the sidecar's file tail) make that order real
+	// rather than hypothetical, so a pre-start frame waits here and is folded
+	// the moment the start supplies the identity.
+	held []*conversationv1.AgentSubagent
 }
 
 // markDetached remembers that a unit this resolver has not drawn yet has

@@ -548,3 +548,51 @@ func TestSubagentFailed(t *testing.T) {
 			"out of sight (feed.proto: lost is \"not known to have failed\")")
 	}
 }
+
+// TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed pins the CROSS-PLANE
+// consequence of the bubble's row identity carrying the created agent.
+//
+// One run's frames reach the daemon from TWO producers under one upsert key —
+// the shim's live stream and the sidecar's tail of the vendor transcript
+// (docs/overhaul/shim-fanout.md, "the CROSS-PLANE rule"). Only
+// `AgentSubagentStart` states `created_agent_id`
+// (conversation/v1/agent_activity.proto: "the join key the whole flat model
+// rests on"), and the bubble's own FeedId IS that agent's sub-feed address —
+// so a settled frame folded before the start landed drew a row whose `Sub` was
+// empty, `OpenFeed` refused it as `feed_undecodable`, and the start that
+// followed minted a SECOND bubble beside it. The plane order is not steerable
+// from this suite, so the assertion is on the INVARIANT that order cannot be
+// allowed to break: exactly one bubble on the root feed, and it opens.
+func TestSubagentBubbleIsDrawnOnceAndAddressesItsSubFeed(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	w := NewWorld(t, WorldOpts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+
+	// Act.
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
+	rootPage, _ := openFeed(t, w, ws, nil)
+
+	// Assert: ONE bubble, however the two planes interleaved.
+	var bubbles []*frontendv1.FeedRow
+	for _, row := range rootPage.GetSuccess().GetRows() {
+		if subagentBubble(row) != nil {
+			bubbles = append(bubbles, row)
+		}
+	}
+	if len(bubbles) != 1 {
+		t.Fatalf("root feed carries %d subagent bubbles, want exactly 1 (a bubble drawn before its start names no agent and the start then mints a second)", len(bubbles))
+	}
+
+	// Assert: that one bubble is addressable — its id names the created agent.
+	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{
+		Workspace: ws, Feed: bubbles[0].GetId(),
+	}))
+	if err != nil {
+		t.Fatalf("OpenFeed(bubble): %v", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("OpenFeed(bubble) = %v, want a success rather than a refusal", resp.Msg)
+	}
+}
