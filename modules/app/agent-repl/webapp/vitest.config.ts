@@ -12,12 +12,12 @@ export default defineConfig({
   resolve: { alias: protobufRuntimeAliases },
   test: {
     css: true,
-    setupFiles: ["./test/setup.ts"],
+    setupFiles: ["./test/setup.ts", "./test/setup-shared-worker.ts"],
     // The unit suite spent far more wall time standing a fresh jsdom up for
     // each of its 97 files than running the 3369 tests inside them: ~13.5s
     // isolated against ~5.5s here, with the tests themselves unchanged.
     // Reusing one environment per worker is only safe because no file leaves
-    // global state behind for the next one — test/setup.ts hands back the real
+    // global state behind for the next one — test/setup-shared-worker.ts hands back the real
     // clock and empties the page before every test, and each file uninstalls
     // what it installs. `npx vitest run --no-isolate --sequence.shuffle
     // --sequence.seed=<n>` is how that is checked; it must stay green for any
