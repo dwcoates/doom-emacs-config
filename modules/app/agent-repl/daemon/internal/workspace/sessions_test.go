@@ -32,6 +32,9 @@ type fakeClient struct {
 	pid      int
 	kills    []shimclient.KillAttribution
 	killErr  error
+	// standDown is the fixture's shared step order, appended to on the shim's
+	// own KillSession.
+	standDown *[]string
 	// reaped makes the supervised process ALREADY GONE, which is how a test
 	// reaches the split between a session row and a live shim.
 	reaped bool
@@ -50,6 +53,15 @@ func (c *fakeClient) StartSession(_ context.Context, req *shimv1.StartSessionReq
 		return nil, c.startErr
 	}
 	return c.response, nil
+}
+
+func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+	if c.standDown != nil {
+		*c.standDown = append(*c.standDown, "shim.KillSession")
+	}
+	return &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}},
+	}, nil
 }
 
 func (c *fakeClient) PID() int { return c.pid }
@@ -91,6 +103,15 @@ func (s *fakeSupervisor) Adopt(_ context.Context, _ ids.WorkspaceID, _ string, u
 type fakeWatcher struct {
 	sessionwatcher.Watcher
 	closed bool
+	// standDown is the fixture's shared step order, appended to when the
+	// daemon declares the session ending.
+	standDown *[]string
+}
+
+func (w *fakeWatcher) SessionEnding(string) {
+	if w.standDown != nil {
+		*w.standDown = append(*w.standDown, "watcher.SessionEnding")
+	}
 }
 
 func (w *fakeWatcher) Close() error { w.closed = true; return nil }
@@ -147,6 +168,9 @@ type fleetFixture struct {
 	// decides adopt-versus-spawn beside the lock.
 	socketState shimsocket.State
 	socketErr   error
+	// standDown is the ORDER the stand-down's steps happened in, shared by the
+	// fake watcher and the fake client, because the ordering is the guarantee.
+	standDown *[]string
 }
 
 // recordingLinkSink answers the three view sinks' OnLink and nothing else: the
@@ -187,14 +211,16 @@ func (s sidebarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState
 // bring-up succeeds.
 func newFleetFixture(t *testing.T) *fleetFixture {
 	t.Helper()
+	order := &[]string{}
 	f := &fleetFixture{
+		standDown:  order,
 		db:         newFakeDB(),
 		accounts:   &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
-		client:     &fakeClient{response: startedResponse("vendor-1"), pid: 4242},
+		client:     &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
 		feed:       &fakeFeed{},
 		footer:     newFakeFooter(),
 		log:        newFakeSurfaces(),
-		watcher:    &fakeWatcher{},
+		watcher:    &fakeWatcher{standDown: order},
 		links:      &recordingLinkSink{},
 		probeState: sessionlock.StateFree,
 

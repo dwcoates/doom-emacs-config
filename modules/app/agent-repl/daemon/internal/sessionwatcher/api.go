@@ -367,6 +367,15 @@ type Watcher interface {
 	// row itself, and the prompt also arrives as a history entry on the main
 	// watch. Two feed rows for one prompt is what routing it here would cost.
 	OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage)
+	// SessionEnding records that THIS DAEMON is ending the session, before the
+	// verb that ends it is dispatched.
+	//
+	// The shim closes its standing streams as the session goes, and a watcher
+	// that has not been told reads the daemon's own act as a transport fault:
+	// it records a severing at ERROR, marks the link degraded, and redials
+	// watches at a shim the same call is about to stop. Only the caller knows
+	// the difference, so only the caller can say.
+	SessionEnding(reason string)
 	// Close tears down every watch this workspace owns.
 	Close() error
 }

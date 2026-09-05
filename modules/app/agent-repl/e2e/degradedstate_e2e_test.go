@@ -123,8 +123,15 @@ func TestDegradedDuringRealStoreOutage(t *testing.T) {
 	// healthy at session start (GetLiveWork, shim.md, succeeds before the
 	// outage begins).
 	w := NewWorld(t, WorldOpts{})
-	// The store outage this test provokes is exactly a health fault.
-	w.ExpectWarnings("daemon.health.open_fault")
+	// The store outage this test provokes is exactly a health fault. It also
+	// reaches the daemon's own standing streams: the shim serves WatchAgent
+	// out of the store, so a store the test killed severs that stream and
+	// the link with it. Whether the break lands inside the outage window is
+	// a race, and an undeclared record whose observation is a race is a
+	// flake rather than a finding.
+	w.ExpectWarnings("daemon.health.open_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.link_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
@@ -173,8 +180,15 @@ func TestRecoveryAfterStoreRestart(t *testing.T) {
 	// Arrange: same setup as TestDegradedDuringRealStoreOutage, through the
 	// open window.
 	w := NewWorld(t, WorldOpts{})
-	// The store outage this test provokes is exactly a health fault.
-	w.ExpectWarnings("daemon.health.open_fault")
+	// The store outage this test provokes is exactly a health fault. It also
+	// reaches the daemon's own standing streams: the shim serves WatchAgent
+	// out of the store, so a store the test killed severs that stream and
+	// the link with it. Whether the break lands inside the outage window is
+	// a race, and an undeclared record whose observation is a race is a
+	// flake rather than a finding.
+	w.ExpectWarnings("daemon.health.open_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.link_fault")
 	ws := openWorkspace(t, w)
 	topbar := w.WatchTopbar(ws)
 	t.Cleanup(topbar.Close)
