@@ -132,7 +132,14 @@ So the error names nothing, and the one fact that would explain it -- what
 is actually sitting there -- is discarded.  This reads it BEFORE the bind,
 while it is still there to read.  The scratch root is unique per scenario,
 so anything at all at this path is a defect in this harness and the
-description is the whole of the evidence for it."
+description is the whole of the evidence for it.
+
+AND WHEN IT ANSWERS NIL AND THE BIND STILL FAILS, THAT IS ALSO EVIDENCE:
+the socket that failed to bind was not PATH.  That is what happened before
+init.el pinned `server-name' -- Doom bound /tmp/emacs<uid>/server under the
+default name from inside `(require 'server)', and this function, reading
+the right path, correctly saw nothing.  Which is why the bind's guard now
+encloses the require as well, so an error from either names PATH."
   (let ((attrs (file-attributes path 'string)))
     (when attrs
       (format "type=%s mode=%s owner=%s size=%s modified=%s"
@@ -196,6 +203,14 @@ effect."
         (socket (getenv "AGENT_REPL_E2E_SERVER")))
     ;; THE HANDLER IS `t', NOT `error', AND `(require 'server)' IS INSIDE IT.
     ;;
+    ;; `(require 'server)' IS ALSO INSIDE THE BIND'S OWN GUARD, further down,
+    ;; and that placement is the second half of the fix documented at the top
+    ;; of init.el. Doom registers `(unless (server-running-p) (server-start))'
+    ;; as a `with-eval-after-load' on `server', so THE REQUIRE ITSELF CAN
+    ;; BIND, and a bind error raised there used to escape this hook's
+    ;; annotation entirely: the failure reached the Go side as a bare "Cannot
+    ;; bind server socket: Address already in use" naming no path at all.
+    ;;
     ;; A boot that leaves this hook by ANY non-local exit publishes no stamp
     ;; and writes no further breadcrumb, and the Go side then reports only
     ;; "no readiness stamp" for a socket that is never coming -- the exact
@@ -206,11 +221,19 @@ effect."
     ;; that names what happened.
     (condition-case err
         (progn
-          (require 'server)
-          (agent-repl-e2e--breadcrumb "server feature loaded")
-          (agent-repl-e2e--unblind-server-errors)
           (unless (and socket (not (string-empty-p socket)))
             (error "AGENT_REPL_E2E_SERVER is unset"))
+          ;; THE NAME WAS PINNED IN init.el, AND THAT IS ASSERTED HERE RATHER
+          ;; THAN REDONE. Setting it in this hook is too late: Doom's
+          ;; `use-package! server' can have loaded and bound the feature
+          ;; already, under the DEFAULT name, at a path every scenario in the
+          ;; container shares. init.el sets it before anything can load
+          ;; `server'; if that ever stops being true this is the one place
+          ;; that can still say so, and a boot that binds the wrong socket
+          ;; must fail here rather than pass and collide later.
+          (unless (equal (and (boundp 'server-name) server-name) socket)
+            (error "server-name is %S, not this scenario's socket %S: something loaded `server' before init.el pinned the name"
+                   (and (boundp 'server-name) server-name) socket))
           ;; A real frame with a tab-bar: the layer asserts window and tab
           ;; state, and both need the modes actually on.
           ;;
@@ -230,7 +253,6 @@ effect."
           (require 'persp-mode)
           (agent-repl-e2e--breadcrumb "persp-mode loaded")
           (tab-bar-mode 1)
-          (setq server-name socket)
           ;; THE OCCUPANT IS READ BEFORE THE BIND, AND THE BIND STILL RUNS.
           ;; `server-start' RECOVERS from a stale socket by deleting it, so an
           ;; occupant is not by itself a failure and this must not turn one
@@ -241,12 +263,31 @@ effect."
           ;; fails -- at which point it is the whole of the evidence, because
           ;; the scratch root is unique per scenario and nothing outside this
           ;; run can have written to it.
+          ;;
+          ;; It is read before the REQUIRE and not merely before the
+          ;; `server-start' below, because Doom's `with-eval-after-load' on
+          ;; `server' binds the socket from inside that require.
           (let ((occupant (agent-repl-e2e--socket-occupant socket)))
-            (when occupant
-              (agent-repl-e2e--breadcrumb
-               (format "server socket path is already occupied: %s -- %s" socket occupant)))
             (condition-case bind-err
-                (server-start)
+                (progn
+                  (require 'server)
+                  (agent-repl-e2e--breadcrumb "server feature loaded")
+                  (agent-repl-e2e--unblind-server-errors)
+                  ;; DOOM'S OWN `use-package! server' MAY HAVE BOUND IT
+                  ;; ALREADY, from inside the require above or from its
+                  ;; `:defer 1' timer, and either way it bound THIS
+                  ;; scenario's socket because init.el pinned the name. One
+                  ;; server is the whole requirement, so the second
+                  ;; `server-start' is not issued: it would `server-stop' a
+                  ;; working server and rebind it for nothing.
+                  (if (process-live-p server-process)
+                      (agent-repl-e2e--breadcrumb
+                       "server already bound by Doom's own `use-package! server'")
+                    (when occupant
+                      (agent-repl-e2e--breadcrumb
+                       (format "server socket path is already occupied: %s -- %s"
+                               socket occupant)))
+                    (server-start)))
               (error
                (signal (car bind-err)
                        (list (format "%s [socket %s; occupant before the bind: %s]"
