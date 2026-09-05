@@ -58,6 +58,19 @@ func (f *Fleet) Watcher(ws ids.WorkspaceID) (promptqueue.Watcher, bool) {
 	return session.watcher, true
 }
 
+// sessionWatcher answers the workspace's watcher on its FULL surface, for the
+// callers that drive its lifecycle rather than a turn's. Watcher above narrows
+// it to the prompt queue's contract, which carries none of that.
+func (f *Fleet) sessionWatcher(ws ids.WorkspaceID) (sessionwatcher.Watcher, bool) {
+	f.mu.RLock()
+	session, ok := f.sessions[ws]
+	f.mu.RUnlock()
+	if !ok || session.watcher == nil {
+		return nil, false
+	}
+	return session.watcher, true
+}
+
 // sender narrows a shim client to the queue's delivery surface.
 type sender struct{ client shimclientSender }
 

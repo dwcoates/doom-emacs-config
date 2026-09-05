@@ -504,6 +504,26 @@ func TestStreamEndAfterTheSessionDiedIsNotAFailure(t *testing.T) {
 	}
 }
 
+// TestStreamEndAfterTheDaemonEndedTheSessionIsNotAFailure covers the OTHER
+// legal end: the daemon itself is standing the session down, so the streams
+// the shim closes on its way out are that stand-down, never a severing to
+// redial.
+func TestStreamEndAfterTheDaemonEndedTheSessionIsNotAFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.w.SessionEnding("the daemon is ending the session")
+
+	// Act.
+	h.main.Close()
+
+	// Assert.
+	h.awaitRecord(t, "debug", "daemon.sessionwatcher.stream_closed")
+	if !h.w.Connected() {
+		t.Fatal("a stream ending with the daemon's own stand-down severed the link")
+	}
+}
+
 // TestCloseClosesEveryStream covers the teardown: it ends every watch and
 // KILLS NOTHING, because attaching created nothing.
 func TestCloseClosesEveryStream(t *testing.T) {
