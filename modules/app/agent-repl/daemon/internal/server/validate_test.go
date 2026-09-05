@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -245,5 +246,153 @@ func TestOperatorDrainNoteIsAccepted(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("UpdateShutdownSchedule with a real operator note = %v, want a success", err)
+	}
+}
+
+// Five request validators had no caller of their own. Each one names the FIELD
+// a producer has to fix, so the table pins the field name and not just the code.
+func TestEachRequestValidatorNamesTheFieldItRefuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func() *connect.Error
+		field string
+	}{
+		{
+			name: "command support with no workspace",
+			check: func() *connect.Error {
+				return validateRequestCommandSupportRequest(&agentreplv1.RequestCommandSupportRequest{})
+			},
+			field: "workspace",
+		},
+		{
+			name: "command support with no command",
+			check: func() *connect.Error {
+				return validateRequestCommandSupportRequest(&agentreplv1.RequestCommandSupportRequest{Workspace: ref()})
+			},
+			field: "command",
+		},
+		{
+			name: "register with no dir",
+			check: func() *connect.Error {
+				return validateRegisterWorkspaceRequest(&agentreplv1.RegisterWorkspaceRequest{})
+			},
+			field: "dir",
+		},
+		{
+			name: "set priority with no workspace",
+			check: func() *connect.Error {
+				return validateSetWorkspacePriorityRequest(&agentreplv1.SetWorkspacePriorityRequest{})
+			},
+			field: "workspace",
+		},
+		{
+			name: "set priority with a priority that sets no level arm",
+			check: func() *connect.Error {
+				return validateSetWorkspacePriorityRequest(&agentreplv1.SetWorkspacePriorityRequest{
+					Workspace: ref(),
+					Priority:  &agentreplv1.WorkspacePriority{},
+				})
+			},
+			field: "priority.level",
+		},
+		{
+			name:  "open external with no workspace",
+			check: func() *connect.Error { return validateOpenExternalRequest(&agentreplv1.OpenExternalRequest{}) },
+			field: "workspace",
+		},
+		{
+			name: "open external with no url",
+			check: func() *connect.Error {
+				return validateOpenExternalRequest(&agentreplv1.OpenExternalRequest{Workspace: ref()})
+			},
+			field: "url",
+		},
+		{
+			name:  "open in editor with no workspace",
+			check: func() *connect.Error { return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{}) },
+			field: "workspace",
+		},
+		{
+			name: "open in editor with no path",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref()})
+			},
+			field: "path",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			err := tc.check()
+
+			// Assert.
+			if err == nil {
+				t.Fatal("the validator accepted a request missing a required field")
+			}
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", connect.CodeOf(err))
+			}
+			if !strings.HasPrefix(err.Message(), tc.field+":") {
+				t.Fatalf("message = %q, want it to name the field %q", err.Message(), tc.field)
+			}
+		})
+	}
+}
+
+// A well-formed request of each shape is ACCEPTED, so the table above is
+// proving a refusal rather than a validator that refuses everything.
+func TestEachRequestValidatorAcceptsAWellFormedRequest(t *testing.T) {
+	tests := []struct {
+		name  string
+		check func() *connect.Error
+	}{
+		{
+			name: "command support",
+			check: func() *connect.Error {
+				return validateRequestCommandSupportRequest(&agentreplv1.RequestCommandSupportRequest{
+					Workspace: ref(), Command: "/merge",
+				})
+			},
+		},
+		{
+			name: "register",
+			check: func() *connect.Error {
+				return validateRegisterWorkspaceRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: testWorkspaceDir})
+			},
+		},
+		{
+			// An UNSET priority is the CLEAR spelling, which is legal.
+			name: "set priority clearing the priority",
+			check: func() *connect.Error {
+				return validateSetWorkspacePriorityRequest(&agentreplv1.SetWorkspacePriorityRequest{Workspace: ref()})
+			},
+		},
+		{
+			name: "open external",
+			check: func() *connect.Error {
+				return validateOpenExternalRequest(&agentreplv1.OpenExternalRequest{
+					Workspace: ref(), Url: "https://example.invalid",
+				})
+			},
+		},
+		{
+			name: "open in editor",
+			check: func() *connect.Error {
+				return validateOpenInEditorRequest(&agentreplv1.OpenInEditorRequest{
+					Workspace: ref(), Path: "/tmp/a.go",
+				})
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			err := tc.check()
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("a well-formed request was refused: %v", err)
+			}
+		})
 	}
 }
