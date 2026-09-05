@@ -105,7 +105,7 @@ export class PerfRecorder {
     if (this.samples.length === 0) return 0;
     const sorted = [...this.samples].sort((a, b) => a - b);
     const rank = Math.min(Math.max(Math.ceil(q * sorted.length), 1), sorted.length);
-    return sorted[rank - 1] as number;
+    return sorted[rank - 1];
   }
 
   p50(): number {

@@ -263,7 +263,7 @@ export function drawFeedColdGateResolved(
       );
       break;
     default:
-      return unreachableArm(`${path}.choice`, armName(choice as { case: string }));
+      return unreachableArm(`${path}.choice`, armName(choice));
   }
 
   const when = document.createElement("span");

@@ -119,7 +119,7 @@ function read(storage: Storage | null): StoredPrefs {
     if (raw === null) return {};
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return {};
-    return parsed as StoredPrefs;
+    return parsed;
   } catch (err) {
     log("warn", `the sidebar could not read its preferences: ${String(err)}`, {
       operation: "sidebar.prefs.read-failed",

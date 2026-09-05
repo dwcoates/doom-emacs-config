@@ -845,7 +845,7 @@ describe("a malformed card", () => {
   });
 
   it("refuses an arm this build has no case for", () => {
-    const u = card({}) as FeedSimpleToolCall;
+    const u = card({});
     // Arrange: the shape a NEWER daemon's arm arrives in.
     (u as { outcome: unknown }).outcome = { case: "teleported", value: {} };
     expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);

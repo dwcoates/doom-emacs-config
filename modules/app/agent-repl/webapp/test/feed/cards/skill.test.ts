@@ -20,7 +20,7 @@ type InitOfFeedSkill = MessageInitShape<typeof FeedSkillSchema>["outcome"];
 
 /** A row context for a card drawn on its own, optionally over a previous draw. */
 function rc(previous?: HTMLElement): RowContext {
-  return rowContext(harness().ctx, create(FeedRowSchema, {}), { previous }) as RowContext;
+  return rowContext(harness().ctx, create(FeedRowSchema, {}), { previous });
 }
 
 const INVOCATION = "/graphify";
@@ -72,12 +72,12 @@ describe("drawFeedSkill", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the card's state`, () => {
-      const el = drawFeedSkill(skill(c.outcome as InitOfFeedSkill), rc());
+      const el = drawFeedSkill(skill(c.outcome), rc());
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedSkill(skill(c.outcome as InitOfFeedSkill), rc());
+      const el = drawFeedSkill(skill(c.outcome), rc());
       expect(el.querySelector(".tool-head .badge")?.textContent).toBe(c.badge);
     });
   }

@@ -37,7 +37,7 @@ function memoryStorage(seed: Record<string, string> = {}): Storage {
     key: (index) => [...map.keys()][index] ?? null,
     removeItem: (key) => void map.delete(key),
     setItem: (key, value) => void map.set(key, value),
-  } as Storage;
+  };
 }
 
 function throwingStorage(): Storage {
@@ -60,7 +60,7 @@ function throwingStorage(): Storage {
     setItem: () => {
       throw new Error("site data is disabled");
     },
-  } as unknown as Storage;
+  };
 }
 
 function ctxFor(rosters = [roster()]): AppContext {

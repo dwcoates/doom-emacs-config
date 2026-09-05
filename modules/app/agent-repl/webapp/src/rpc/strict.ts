@@ -57,7 +57,7 @@ function walk(node: ReflectMessage, path: string): void {
 function walkField(node: ReflectMessage, field: DescField, path: string): void {
   switch (field.fieldKind) {
     case "message":
-      walk(node.get(field) as ReflectMessage, path);
+      walk(node.get(field), path);
       return;
     case "list": {
       if (field.listKind !== "message") return;

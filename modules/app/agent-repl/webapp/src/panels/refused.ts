@@ -166,7 +166,7 @@ async function requestSupport(
       return;
     }
     const cause = requireCase(
-      (result.value as RequestCommandSupportError).cause,
+      (result.value).cause,
       "RequestCommandSupportError.cause",
     );
     const say = crossCuttingSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);

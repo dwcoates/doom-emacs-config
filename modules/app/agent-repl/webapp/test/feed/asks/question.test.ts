@@ -372,7 +372,7 @@ describe("a refused batch", () => {
 
   for (const c of causes) {
     it(`says what ${c.arm} means, at the submit`, async () => {
-      const h = askHarness({ question: refused(c.cause as never) });
+      const h = askHarness({ question: refused(c.cause) });
       const el = drawFeedQuestion(question({ case: "open", value: {} }), h.rc);
       pick(el, "OAuth 2.0");
       el.querySelector<HTMLButtonElement>("[data-question-submit]")?.click();

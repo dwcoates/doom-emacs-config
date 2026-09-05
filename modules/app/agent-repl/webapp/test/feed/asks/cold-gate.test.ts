@@ -361,7 +361,7 @@ describe("a refused gate answer", () => {
 
   for (const c of causes) {
     it(`says what ${c.arm} means, at the buttons`, async () => {
-      const h = askHarness({ coldGate: refused(c.cause as never) });
+      const h = askHarness({ coldGate: refused(c.cause) });
       const el = drawFeedColdGate(gate(standing()), h.rc);
       el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
       await settle();

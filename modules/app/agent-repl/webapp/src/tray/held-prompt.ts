@@ -541,7 +541,7 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     const result = requireCase(response.result, "UpdateHeldPromptResponse.result");
     if (result.case !== "success") {
       const cause = requireCase(
-        (result.value as UpdateHeldPromptError).cause,
+        (result.value).cause,
         "UpdateHeldPromptError.cause",
       );
       const say =
