@@ -71,6 +71,18 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// counted holds one call open for as long as its answer is still owed.
+//
+// THE COUNT COMES DOWN WHEN THE STREAM CLOSES, NOT WHEN THE HANDLER RETURNS,
+// and the difference is the whole defect. A returning handler has produced its
+// answer; net/http/http2 writes it from the CONNECTION's own goroutine
+// afterwards, so an exit that waited only for the return still cut the answer
+// off the wire — measured after the first attempt at this gate, with
+// "applied the shutdown schedule" and "every open stream was ended" 369
+// microseconds apart and the caller still reading `unexpected EOF`. net/http
+// cancels a request's context once its stream is closed, which is after the
+// last frame of the answer was written, so that cancellation is the answer
+// having left rather than a guess about it.
 func (s *Serving) counted(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if standingStreamPaths[r.URL.Path] {
@@ -78,7 +90,17 @@ func (s *Serving) counted(inner http.Handler) http.Handler {
 			return
 		}
 		s.enter()
-		defer s.leave()
+		answered := r.Context()
+		defer func() {
+			if answered.Done() == nil {
+				s.leave()
+				return
+			}
+			go func() {
+				<-answered.Done()
+				s.leave()
+			}()
+		}()
 		inner.ServeHTTP(w, r)
 	})
 }
