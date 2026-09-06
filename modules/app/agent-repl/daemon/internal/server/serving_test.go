@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -125,5 +126,37 @@ func TestStandingStreamPathsComeFromTheDescriptor(t *testing.T) {
 	}
 	if paths["/agentrepl.v1.AgentRepl/SelectWorkspace"] {
 		t.Fatal("SelectWorkspace, a unary verb, is in the standing-stream set")
+	}
+}
+
+// TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn is the
+// difference the first version of this gate got wrong: the handler had
+// returned, the exit proceeded, and the caller still read a cut connection
+// because the response had not been written yet.
+func TestAwaitQuietWaitsForTheAnswerToLeaveNotForTheHandlerToReturn(t *testing.T) {
+	// Arrange: a handler that has returned, on a request whose context — the
+	// stream's own lifetime — has not ended.
+	returned := make(chan struct{})
+	streamOpen, endStream := context.WithCancel(context.Background())
+	defer endStream()
+	serving := H2C(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		close(returned)
+	}), nil)
+	request := httptest.NewRequest(http.MethodPost, "/agentrepl.v1.AgentRepl/SelectWorkspace", nil).WithContext(streamOpen)
+	go serving.ServeHTTP(httptest.NewRecorder(), request)
+	<-returned
+
+	// Act, Assert: the gate is still holding, and lets go when the stream does.
+	quiet := make(chan int, 1)
+	go func() { quiet <- serving.AwaitQuiet(time.Minute) }()
+	select {
+	case left := <-quiet:
+		t.Fatalf("AwaitQuiet returned %d with the answer's stream still open", left)
+	case <-time.After(50 * time.Millisecond):
+	}
+	endStream()
+	if left := <-quiet; left != 0 {
+		t.Fatalf("AwaitQuiet = %d once the stream closed, want 0", left)
 	}
 }
