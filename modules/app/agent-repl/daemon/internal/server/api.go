@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
@@ -612,11 +610,3 @@ func TransportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool) 
 // opTransportClosed is the operation every refused stream open is recorded
 // under. ERROR-ARMS.md's transport-closed section reconciles against it.
 const opTransportClosed = "daemon.refusal.transport_closed"
-
-// H2C wraps the Connect handler so ONE loopback listener serves both HTTP/1.1
-// and cleartext HTTP/2. The daemon binds one listener and serves the rpcs and
-// the webapp assets on one origin, which is what makes the webview URL and the
-// Connect endpoint the same host.
-func H2C(h http.Handler) http.Handler {
-	return h2c.NewHandler(h, &http2.Server{})
-}
