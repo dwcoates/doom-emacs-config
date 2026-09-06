@@ -328,7 +328,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"address": claim.Address(),
 		"joining": joining,
 	})
-	return h.Serve(serving, claim.Listener(), server.H2C(srv))
+	return h.Serve(serving, claim.Listener(), server.H2C(srv, log))
 }
 
 // openState opens the state client. A JOINING daemon opens it READ-ONLY: until
@@ -355,6 +355,16 @@ func openState(ctx context.Context, layout stateroot.Layout, log dlog.Logger, jo
 // serve runs the http server on the claimed listener until ctx ends, then shuts
 // it down gracefully.
 func serve(ctx context.Context, l net.Listener, h http.Handler) error {
+	// THE GRACE HAS TO BE OURS, so the handler must carry the gate that counts
+	// the calls being answered. `Server.Shutdown` cannot do it: every client
+	// dials h2c, `h2c.NewHandler` serves such a connection by HIJACKING it,
+	// and net/http neither closes nor waits for a hijacked connection — so
+	// Shutdown returns at once and the exit runs over the calls in flight.
+	// See server.Serving.
+	gate, ok := h.(server.RequestGate)
+	if !ok {
+		return fmt.Errorf("claude-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
+	}
 	srv := &http.Server{Handler: h}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(l) }()
@@ -365,6 +375,16 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 		}
 		return err
 	case <-ctx.Done():
+		// THE CALLS BEING ANSWERED GO FIRST, and this is the wait that
+		// actually happens. `UpdateShutdownSchedule{now}` ends the serving
+		// lifetime from inside its own handler, so the exit races its own
+		// answer unless something holds the exit until that answer is written.
+		// Measured in the e2e sandbox: the handler recorded "applied the
+		// shutdown schedule" and every open stream had been ended 211
+		// microseconds later, so the caller read `unexpected EOF` from a stop
+		// the daemon had performed. AwaitQuiet says so loudly when its own
+		// bound expires; nothing is swallowed.
+		gate.AwaitQuiet(shutdownGrace)
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
 		// request, and this daemon's Watch* handlers are STANDING STREAMS that
 		// end only when their client goes away — so an unbounded wait is a

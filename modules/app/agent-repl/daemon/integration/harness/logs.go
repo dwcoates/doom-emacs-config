@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -182,7 +183,7 @@ func (d *Daemon) assertNoUnexpectedWarnings() {
 	}
 	var b strings.Builder
 	for _, r := range unexpected {
-		b.WriteString("\n  " + r.Level + " " + r.Operation + ": " + r.Message)
+		b.WriteString("\n  " + r.Level + " " + r.Operation + ": " + r.Message + contextSuffix(r))
 	}
 	d.t.Errorf("the daemon produced %d unexpected warning records; declare them with ExpectWarnings if they are intended:%s", len(unexpected), b.String())
 }
@@ -528,6 +529,30 @@ func containsAll(order []string, verbs []string) bool {
 		}
 	}
 	return true
+}
+
+// contextSuffix renders a record's own structured context onto the sweep's
+// failure line, keys sorted so two runs of the same fault read the same.
+//
+// The message alone is not enough to act on. "shim call failed" and "the
+// session kill did not answer" both carry their CAUSE in the context and
+// nowhere else, and a sweep failure that names neither the workspace nor the
+// cause sends the next reader back to a log directory the test already
+// deleted.
+func contextSuffix(r LogRecord) string {
+	if len(r.Context) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(r.Context))
+	for k := range r.Context {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, r.Context[k]))
+	}
+	return " {" + strings.Join(parts, " ") + "}"
 }
 
 // unexpectedWarnings answers the records at a warning level whose operation the

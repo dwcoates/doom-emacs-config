@@ -109,6 +109,75 @@ export function isStreamingPath(url: string): boolean {
   return STREAMING_RPCS.includes(rpc);
 }
 
+/**
+ * How long ONE connection has to stop producing bytes before the exit cuts it
+ * anyway.
+ *
+ * A LAST RESORT, never the mechanism, exactly like the quiet-drain budget: the
+ * ordinary case settles in two event-loop turns and spends none of this. It
+ * exists so a connection that never stops writing cannot keep a killed shim
+ * alive. One second is three orders of magnitude over the work it covers —
+ * pushing one unary Connect response, tens of bytes, down a unix socket.
+ */
+export const SOCKET_QUIET_BUDGET_MS = 1_000;
+
+/**
+ * Cut a connection once it has stopped producing bytes.
+ *
+ * WHY THIS IS NOT A BARE `socket.destroy()`, WHICH IS WHAT IT USED TO BE.
+ * {@link ShimServer.quiet} waits for each response's own `close` event, and
+ * that event is NOT "the answer is on the wire". Over h2c — the only dialect
+ * the daemon dials — a response's close means its frames were handed to the
+ * http2 session; the session serializes and writes them on a LATER turn of the
+ * event loop. Destroying the socket in the same breath threw them away, and
+ * neither `session.state.outboundQueueSize` nor `socket.writableLength`
+ * reported anything pending at that moment (both measured at 0 while 9 bytes
+ * of the answer had yet to be written), so there is nothing to ask: the only
+ * honest question is whether the connection has gone quiet.
+ *
+ * What it cost: the daemon read `unexpected EOF` off a `KillSession` the shim
+ * had in fact performed, recorded "the session kill did not answer" against an
+ * orderly stand-down, and failed the e2e suite's warning sweep with it —
+ * 6 of 36 full runs, always on the handover that stands a merged workspace's
+ * shim down.
+ *
+ * THE WAIT IS QUIESCENCE, NOT A DELAY. Each pass yields the event loop and
+ * then asks the socket whether anything new left it and whether anything is
+ * still queued. It ends the moment a whole turn passes with neither — two
+ * turns in the ordinary case, measured — and the budget bounds only a
+ * connection that never stops.
+ */
+async function cutWhenQuiet(socket: Socket, budgetMs: number): Promise<void> {
+  if (socket.destroyed) return;
+  let spent = false;
+  const budget = setTimeout(() => {
+    spent = true;
+  }, budgetMs);
+  // The budget must not itself hold the process open: it is a backstop on work
+  // the event loop is already doing.
+  budget.unref();
+  let written = -1;
+  while (!spent && !socket.destroyed && (socket.bytesWritten !== written || socket.writableLength > 0)) {
+    written = socket.bytesWritten;
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  clearTimeout(budget);
+  if (spent) {
+    LOGGER.log(
+      {
+        level: "error",
+        budget_ms: budgetMs,
+        pending_bytes: socket.writableLength,
+        bytes_written: socket.bytesWritten,
+      },
+      "a connection never went quiet before the exit cut it; an answer may not have reached the daemon",
+    );
+  }
+  socket.destroy();
+}
+
 /** A bound listener, and the way to stop it. */
 export interface ShimServer {
   /** The path the listener is bound to. */
@@ -255,6 +324,31 @@ export async function serve(
   h2.on("sessionError", (err) => {
     LOGGER.log({ level: "warn", cause: err }, "an h2c session failed");
   });
+  // EVERY STREAM THIS SERVER RESETS SAYS SO. Without this the shim was silent
+  // about its own h2 layer cutting a stream: the daemon recorded "a standing
+  // stream ended without the session ending" and opened a `link_severed`
+  // fault, and the shim's log — the only place that could say whether the
+  // reset came from here — held nothing at all. `rstCode` names the code the
+  // stream ended with; `NGHTTP2_NO_ERROR` is an ordinary end and is not
+  // recorded.
+  h2.on("session", (session) => {
+    session.on("frameError", (type, code, id) => {
+      LOGGER.log(
+        { level: "error", frame_type: type, error_code: code, stream_id: id },
+        "an h2c frame could not be sent",
+      );
+    });
+    session.on("stream", (stream, headers) => {
+      const path = headers[":path"];
+      stream.once("close", () => {
+        if (stream.rstCode === undefined || stream.rstCode === 0) return;
+        LOGGER.log(
+          { level: "error", stream_id: stream.id, rst_code: stream.rstCode, path },
+          "an h2c stream ended with a reset code; whatever it was serving did not finish",
+        );
+      });
+    });
+  });
 
   const open = new Set<Socket>();
   const listener = createNetServer((socket) => {
@@ -308,12 +402,14 @@ export async function serve(
       // open connection to end, and this shim's connections do not end on their
       // own: a standing WatchSession never concludes, and an h2c session is held
       // open by its client. Waiting first would hang the stand-down forever, so
-      // the open sockets are cut inside the same tick that closes the listener.
-      await new Promise<void>((resolve) => {
-        listener.close(() => resolve());
-        for (const socket of open) socket.destroy();
-        open.clear();
-      });
+      // the open sockets are cut without waiting for the peer.
+      //
+      // CUT, BUT ONLY ONCE WHAT IS ALREADY OWED HAS LEFT: see {@link cutWhenQuiet}.
+      const stopped = new Promise<void>((resolve) => listener.close(() => resolve()));
+      const cutting = [...open].map((socket) => cutWhenQuiet(socket, SOCKET_QUIET_BUDGET_MS));
+      open.clear();
+      await Promise.all(cutting);
+      await stopped;
       h2.close();
       h1.close();
       unlinkSocketFile(socketPath, "listener closed");

@@ -820,6 +820,39 @@ describe("waiting for the wire to go quiet", () => {
     expect([settledAfterFirst, quietSettled]).toEqual([false, true]);
   });
 
+  // THE REGRESSION THIS FILE EXISTS FOR, over h2c: `quiet` resolving is not
+  // the same as the answer being on the wire. A response's `close` means its
+  // frames reached the http2 session; the session writes them on a LATER turn,
+  // and the exit's `close()` used to destroy the socket before that turn came
+  // — 30 of 30 answers lost in this shape, and in the e2e suite a `KillSession`
+  // the shim had performed reaching the daemon as `unexpected EOF`.
+  it("delivers the answer of a call that ends the process, though the exit closes in the same breath", async () => {
+    // Arrange — main.ts's endProcess exactly: the exit is requested from
+    // inside the handler, BEFORE the response is returned.
+    const sock = socketPath();
+    const engine = new NotImplementedEngine();
+    // The server is reachable from the handler through a holder, because the
+    // handler is built before the listener it ends.
+    const exiting: { server?: ShimServer } = {};
+    engine.killSession = async (): Promise<shimv1.KillSessionResponse> => {
+      void (async (): Promise<void> => {
+        await exiting.server?.quiet(30_000);
+        await exiting.server?.close();
+      })();
+      return create(shimv1.KillSessionResponseSchema, {});
+    };
+    exiting.server = await serve(sock, shimRoutes(engine));
+    started.push(exiting.server);
+
+    // Act.
+    const answer = client(sock, "2").killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+
+    // Assert — the answer arrives whole rather than as a cut connection.
+    await expect(answer).resolves.toBeDefined();
+  });
+
   it("REPORTS giving up and returns once the budget is spent on a response that never closes", async () => {
     // A stream that never ends must not keep a killed shim alive forever.
     // Arrange.
@@ -1005,5 +1038,44 @@ describe("a connection that closes without ever speaking", () => {
       .hibernate(create(shimv1.HibernateRequestSchema, {}))
       .then(() => null, (err: unknown) => ConnectError.from(err));
     expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+});
+
+describe("an h2c stream this server resets", () => {
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  // THE SHIM WAS SILENT ABOUT ITS OWN RESETS, and that silence cost a whole
+  // investigation: the daemon recorded "a standing stream ended without the
+  // session ending" and opened a link_severed fault, while the shim's log —
+  // the only place that could say whether the reset came from here — held
+  // nothing at all.
+  it("records the reset code and the path it was serving", async () => {
+    // Arrange: a standing stream the client then cancels.
+    const sock = socketPath();
+    const { engine, entered } = heldHibernateEngine();
+    const server = await serve(sock, shimRoutes(engine));
+    started.push(server);
+    const pending = client(sock, "2")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}), { signal: AbortSignal.timeout(1) })
+      .catch(() => undefined);
+    await entered;
+
+    // Act
+    await pending;
+
+    // Assert
+    await vi.waitFor(() => {
+      const reset = mirroredRecords(written).find(
+        (record) => record.level === "error" && record.context.rst_code !== undefined,
+      );
+      expect(reset?.context.path).toBe("/shim.v1.Shim/Hibernate");
+    });
   });
 });

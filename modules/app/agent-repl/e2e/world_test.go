@@ -254,12 +254,18 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		// kernel claim; without it no session starts at all.
 		"AGENT_REPL_SHIM_LOCK_BIN="+lockBin)
 
-	d := harness.StartDaemon(t, daemonOpts)
-	// Registered immediately after the daemon starts, so t.Cleanup's LIFO
-	// unwind runs it AFTER harness.StartDaemon's own stop cleanup (registered
-	// later, therefore run earlier): the daemon and its shims have already
-	// exited and flushed their final records by the time the logs are read.
-	preserveLogsOnFailure(t, d)
+	// REGISTERED BEFORE THE DAEMON EXISTS, SO IT RUNS LAST OF ALL. t.Cleanup
+	// unwinds last-registered-first, and the daemon registers its own
+	// cleanups from inside StartDaemon: the stop (which flushes the last
+	// records) and, ahead of it, the WARNING SWEEP. Registered after
+	// StartDaemon, this ran FIRST — before the sweep had failed the test —
+	// so every sweep failure preserved nothing at all, which is exactly the
+	// class of failure whose logs are hardest to get a second time. Closing
+	// over the variable rather than the value is what lets it be armed before
+	// there is a daemon to name.
+	var d *harness.Daemon
+	preserveLogsOnFailure(t, &d)
+	d = harness.StartDaemon(t, daemonOpts)
 	resolveConfigRoots(t, d)
 
 	sidecar := startSidecar(t, sidecarBin, sidecarOpts{
@@ -375,10 +381,15 @@ const artifactTailBytes = 64 << 10
 // directory (they otherwise landed in anonymous t.TempDir()s that vanished
 // with the test, leaving a failed run with no store or sidecar log at all),
 // so the one sweep below collects them alongside the daemon's sinks.
-func preserveLogsOnFailure(t *testing.T, d *harness.Daemon) {
+func preserveLogsOnFailure(t *testing.T, daemon **harness.Daemon) {
 	t.Helper()
 	t.Cleanup(func() {
 		if !t.Failed() {
+			return
+		}
+		d := *daemon
+		if d == nil {
+			t.Log("e2e artifacts: the daemon never started, so this world produced no logs to preserve")
 			return
 		}
 		logsDir := filepath.Join(d.StateDir, "logs")

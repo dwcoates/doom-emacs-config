@@ -166,27 +166,42 @@ export async function driveTurn(
   kind: string,
   unit?: string,
 ): Promise<HTMLElement> {
-  // BOTH COUNTS ARE SNAPSHOTTED FIRST. The page accumulates rows across a
-  // file's tests, so "a row of this family exists" is already true from an
-  // earlier turn: only a row MORE than were standing is this turn's, and
-  // waiting on the count is what stops a test asserting on its predecessor's
-  // row when its own scenario drew none.
-  const beforeFamily = rows(app, kind, unit).length;
+  // THE ROWS ARE IDENTIFIED, NOT COUNTED, AND NOT POSITIONED. The page
+  // accumulates rows across a file's tests, so "a row of this family exists"
+  // is already true from an earlier turn; and the feed UPSERTS and reorders,
+  // so "the last row of this family" is not reliably the one this turn drew
+  // either. Counting alone was enough to see a row appear, and then the last
+  // row read back as a PREDECESSOR'S: `!rotate` asserted its `cleared`
+  // separation and read the previous test's `compacted` one, on the e2e host
+  // run. Every drawn row carries the daemon's own FeedRow id on
+  // `data-feed-row` and an upsert keeps it, so the ids that were not standing
+  // before are exactly this turn's rows.
+  const standing = new Set(rows(app, kind, unit).map(rowID));
   const beforeTurns = rows(app, "turnEnded").length;
   const what = `${kind}${unit === undefined ? "" : "." + unit}`;
   await submit(app, `!${scenario}`);
   await awaitDrawn(
     app,
-    `a NEW ${what} row for !${scenario} (${beforeFamily} stood before it)`,
-    () => rows(app, kind, unit).length > beforeFamily,
+    `a NEW ${what} row for !${scenario} (${standing.size} stood before it)`,
+    () => rows(app, kind, unit).some((row) => !standing.has(rowID(row))),
   );
   await awaitDrawn(app, `the turn for !${scenario} to end`, () =>
     rows(app, "turnEnded").length > beforeTurns,
   );
-  const drawn = rows(app, kind, unit);
+  const drawn = rows(app, kind, unit).filter((row) => !standing.has(rowID(row)));
   const last = drawn[drawn.length - 1];
   expect(last, `!${scenario} drew no ${what} row`).toBeDefined();
   return last;
+}
+
+/**
+ * A drawn row's own identity: the FeedRow id the daemon minted for it, which
+ * `rowSelector` already requires every matched element to carry.
+ */
+function rowID(row: HTMLElement): string {
+  const id = row.dataset.feedRow;
+  expect(id, "a drawn feed row carries no FeedRow id").toBeTruthy();
+  return id as string;
 }
 
 /**
