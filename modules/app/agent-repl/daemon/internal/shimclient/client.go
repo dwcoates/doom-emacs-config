@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -59,6 +60,18 @@ type client struct {
 	link *linkFeed
 	exit chan ExitInfo
 	dead chan struct{}
+
+	// standDown latches the moment a KillSession is asked of this shim.
+	//
+	// A SHIM ENDS ITS PROCESS ON KillSession -- the real one and the fake one
+	// both do -- so the supervised liveness stream breaking afterwards is this
+	// daemon's own act arriving back at it. Untold, the monitor read that
+	// break as a transport fault: WARN "shim link broke; redialing", a redial
+	// into a dying process, and a `link_severed` health fault raised against
+	// an orderly stand-down. The session watcher is already told through
+	// SessionEnding (internal/workspace/fleet_rollout.go); this is the same
+	// courtesy for the SUPERVISOR's own stream, which nothing was telling.
+	standDown atomic.Bool
 
 	monitorCtx    context.Context
 	cancelMonitor context.CancelFunc
@@ -208,6 +221,15 @@ func (c *client) Kill(attr KillAttribution) error {
 			return fmt.Errorf("shimclient: SIGTERM %d: %w", pgid, err)
 		}
 		if gone {
+			// GONE IS NOT REAPED. A group that has already left still owes this
+			// daemon its exit decode, and until the reaper delivers it the
+			// supervisor still holds the client -- so an immediate shutdown's
+			// spawn sweep, which runs the instant the stand-down walk returns,
+			// found a session it had just stood down and recorded "a spawn
+			// this daemon never registered is being stood down" against it.
+			// The wait is the same one the ordinary path takes below, and it
+			// is already over whenever the reaper got there first.
+			<-c.dead
 			return nil
 		}
 		timer := time.NewTimer(grace)
@@ -222,15 +244,15 @@ func (c *client) Kill(attr KillAttribution) error {
 		}
 	}
 
-	gone, err := c.signalGroup(syscall.SIGKILL, pgid)
-	if err != nil {
+	// THE REAP IS WHAT ENDS THIS CALL, whether or not the group had already
+	// left: see the SIGTERM branch above. Kill's contract is that the process
+	// is gone AND this daemon no longer owns one when it returns, and the
+	// deregistration rides the exit decode.
+	if _, err := c.signalGroup(syscall.SIGKILL, pgid); err != nil {
 		c.log.Error("daemon.shimclient.kill", "SIGKILL failed", dlog.Context{
 			"workspace_id": string(c.ws), "pgid": pgid, "error": err.Error(),
 		})
 		return fmt.Errorf("shimclient: SIGKILL %d: %w", pgid, err)
-	}
-	if gone {
-		return nil
 	}
 	<-c.dead
 	return nil
@@ -544,14 +566,22 @@ func (c *client) publishExit(info ExitInfo) {
 		c.log.Error("daemon.shimclient.exit", "shim died", ctx)
 	}
 
+	// THE SUPERVISOR LETS GO BEFORE ANY WAITER IS WOKEN. `Kill` returns on
+	// `dead`, and its contract is that the process is gone AND this daemon no
+	// longer owns one; released afterwards, the registry still held this
+	// client for as long as the reaper goroutine took to reach the next line,
+	// and an immediate shutdown's spawn sweep -- which runs the instant the
+	// stand-down walk returns -- swept a session it had just stood down and
+	// recorded "a spawn this daemon never registered is being stood down"
+	// against it (4 of 6 runs of
+	// TestUpdateShutdownScheduleNowLeavesNoShimBehindEvenAtAPermissionGate).
+	c.releaseHold()
 	close(c.dead)
 	c.link.publish(LinkDead)
 	c.link.close()
 	c.exit <- info
 	close(c.exit)
 	c.cancelMonitor()
-	// The process is gone, so the supervisor no longer owns one.
-	c.releaseHold()
 }
 
 // releaseHold fires the supervisor's deregistration exactly once. A client
@@ -728,6 +758,17 @@ func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-c
 		if c.exitedAlready() || ctx.Err() != nil {
 			return
 		}
+		if c.standDown.Load() {
+			// THE DAEMON ASKED FOR THIS. A stand-down was requested of this
+			// shim, so the liveness stream ending is the answer to it and not
+			// a fault: redialing here reaches a process that is on its way
+			// out, and publishing `redialing` raises a `link_severed` health
+			// fault against a teardown the daemon itself ordered.
+			c.log.Debug("daemon.shimclient.redial", "the liveness stream ended after a stand-down was asked of this shim; not redialing", dlog.Context{
+				"uds": c.udsPath, "error": errText(broke),
+			})
+			return
+		}
 		c.log.Warn("daemon.shimclient.redial", "shim link broke; redialing", dlog.Context{
 			"uds": c.udsPath, "error": errText(broke),
 		})
@@ -892,7 +933,12 @@ func (c *client) Hibernate(ctx context.Context, req *shimv1.HibernateRequest) (*
 }
 
 // KillSession ends the session, gracefully unless forced.
+//
+// The stand-down is latched BEFORE the verb goes, not after it answers: the
+// shim ends its process as it answers, so a monitor told only afterwards has
+// already read the break as a fault.
 func (c *client) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+	c.standDown.Store(true)
 	return unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
 }
 
