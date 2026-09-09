@@ -308,6 +308,27 @@ func (c *controller) ShutdownNow(ctx context.Context, reason *agentreplv1.DrainR
 // single-digit milliseconds; a concurrent fan-out would buy nothing and would
 // put N goroutines into the fleet's lock at the exact moment the process is
 // tearing down.
+//
+// THE BOUND IS THE DAEMON'S OWN DECISION, NOT A SLICE OF THE CALLER'S BUDGET.
+// Each stand-down runs on a context DETACHED from the caller's deadline
+// (`context.WithoutCancel`), and the reason is that ShutdownNow's doc comment
+// above is otherwise a promise this code cannot keep. Derived as a CHILD of
+// ctx, the per-workspace bound is `min(StandBound, whatever the caller has
+// left)` — so for any caller whose own budget is no larger than StandBound the
+// caller's deadline always fires first, every workspace after the one that
+// consumed the remainder is given up on with a context error before its shim
+// was even asked, and "reported and stepped over" degrades into "skipped". The
+// daemon's own e2e harness is exactly that caller: ONE 5s context, created at
+// the daemon's process start and shared by every call the test makes, with
+// `UpdateShutdownSchedule{now}` the last of them.
+//
+// DROPPING THE CALLER'S CANCELLATION TOO IS DELIBERATE, not an oversight. By
+// the time this runs the immediate shutdown has already been ANNOUNCED to every
+// WatchDaemon subscriber and the exit below is committed; a client that hangs
+// up mid-stop must not be able to leave the shims standing, because a shim that
+// outlives its daemon holds the workspace lock that refuses the next session
+// and keeps ~95 MiB resident — the very leak this whole path exists to close.
+// The caller's context bounds the ANSWER it is waiting for, never the act.
 func (c *controller) standEverySessionDown(ctx context.Context) {
 	workspaces, err := c.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
@@ -317,7 +338,7 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 	}
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID)}
-		standDown, cancel := context.WithTimeout(ctx, c.deps.StandBound)
+		standDown, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.StandBound)
 		err := c.deps.Stand.KillSession(standDown, ws.ID, true)
 		cancel()
 		if err != nil {
@@ -347,8 +368,15 @@ func (c *controller) standEverySessionDown(ctx context.Context) {
 // for the few hundred milliseconds of one bring-up — and a forced kill of one
 // that is there is a SIGKILL plus a reap, single-digit milliseconds, so 5s is
 // three orders of magnitude of headroom over the work it actually does.
+//
+// IT IS DETACHED FROM THE CALLER'S DEADLINE for the same reason
+// standEverySessionDown is, and the leak it guards is the worse of the two: an
+// in-flight spawn has no workspace row, so nothing else in the daemon knows the
+// process exists. A caller whose budget expired during the walk above would
+// otherwise take this sweep's whole bound down with it, and the shim would be
+// left running with nothing left that can name it.
 func (c *controller) sweepInFlightSpawns(ctx context.Context) {
-	sweep, cancel := context.WithTimeout(ctx, c.deps.StandBound)
+	sweep, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.deps.StandBound)
 	defer cancel()
 	if err := c.deps.Spawns.StandDownEverySpawn(sweep, "an immediate shutdown was requested"); err != nil {
 		c.log.Error(opNow, "a spawn in flight would not stand down before the immediate exit; its shim will outlive this daemon and hold the workspace lock",
