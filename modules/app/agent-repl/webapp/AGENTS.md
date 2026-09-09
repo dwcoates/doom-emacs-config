@@ -78,7 +78,8 @@ and are contract on the same terms:
 
 | attribute | on | values | landing |
 |---|---|---|---|
-| `data-delivery` | the marker on the SENDER's agent-prompt row | `queuedToLive` \| `resumedRecipient` (absent when `FeedAgentPrompt.delivery` is unset — every recipient copy) | 10 |
+| `data-delivery` | the marker on the SENDER's agent-prompt row | `queuedToLive` \| `resumedRecipient` \| `refused` (absent when `FeedAgentPrompt.delivery` is unset — every recipient copy) | 10, `refused` 14 |
+| `.refused` class + `.prompt-refusal-reason` | the same delivery marker, when the send was REFUSED; the reason element is absent when the producer gave no account | — | 14 |
 | `data-permission-verdict` | the answered permission card's `.perm-verdict` | the `FeedPermissionAnswered.answer` case, `deniedUndecidable` included | 10 |
 | `data-query-cause` | the line under a `queryDied` turn error | `unexpectedEof` \| `iteratorFailure` (absent when the cause is unset) | 10 |
 | `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
