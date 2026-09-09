@@ -526,6 +526,15 @@ func newPlaybook(t *testing.T, e *Emacs, name, purpose string) *playbook {
 			"Run it through modules/app/agent-repl/bin/playtest.sh, which sets it.", ArtifactsEnv)
 	}
 	dir := filepath.Join(root, playtestArtifactsSubdir, name)
+	// THE PLAYBOOK OWNS ITS DIRECTORY AND SWEEPS ITS OWN, which is why the
+	// runner does not sweep the tree. A picture left by an earlier run is
+	// indistinguishable from one this run took, and that is the one way a
+	// visual review reaches a confident wrong answer -- but a runner that
+	// swept everything would also delete the twelve playbooks a `-run` of one
+	// playbook does not re-take.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("sweep the previous run's %s: %v", dir, err)
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("prepare the playbook directory %s: %v", dir, err)
 	}

@@ -710,7 +710,9 @@ func TestPlaytestScheduledDrainBanner(t *testing.T) {
          document.querySelector('[data-component="drain-banner"]').textContent.trim() !== ""`)
 	p.capture("drain-scheduled", "`agent-repl-daemon-shutdown-schedule` five minutes out, reason \"maintenance\"",
 		fmt.Sprintf("`agent-repl-link-drain` carries the reason arm `:%s`, `agent-repl-link-drain-segment` renders %q, and the webapp's own drain banner is non-empty", drainReason, segment),
-		"A STANDING DRAIN BANNER is up in TWO places at once: Emacs's mode line reads "+
-			"`drain HH:MM · maintenance`, and the webapp draws its own drain banner across the top of "+
-			"the panel. The tab bar is otherwise unchanged.")
+		"The WEBAPP draws a STANDING DRAIN BANNER across the top of the panel, naming the reason "+
+			"(\"maintenance\") and how long is left. Emacs's own `drain HH:MM · maintenance` segment is "+
+			"asserted as a string rather than read off this picture: it lives in `global-mode-string`, "+
+			"which Doom's mode line renders on the right of whatever line has room, so which line "+
+			"carries it is not this playbook's claim.")
 }
