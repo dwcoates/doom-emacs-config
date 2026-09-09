@@ -521,6 +521,17 @@ spawn plus a turn through a real store, "roughly an 8x margin"). Two
 independently measured real-process baselines agreeing on 5s is strong
 grounding for reusing it as-is rather than inventing a third number.
 
+**That bound is ONE WAIT'S, never the whole run's.** `World.Ctx()` is the
+`harness.Daemon`'s context, which is the run budget (`DefaultTimeout *
+runBudgetWaits`, 30s). Handing it straight to a single rpc gives that call
+whatever the run happened to have left — every test here boots a real daemon,
+a store, a sidecar and a real Node shim before it asserts anything, so the
+LAST call in a test would answer `deadline_exceeded` for time the earlier ones
+spent. That is exactly how `TestHostRequestedStopLeavesNoProcessBehind` failed
+~1 in 20 at ~5.09s on a stop measured at 9ms p50 / 15ms max over 104 runs. A
+one-shot rpc whose latency is the subject takes a `DefaultTimeout` child of
+`w.Ctx()`.
+
 Per-site overrides get the SAME discipline `HandoverChainTimeout` uses in
 `daemon/integration/harness`: a NAMED constant with a one-line reason,
 never an ad hoc duration at the call site. This suite needs at minimum:
