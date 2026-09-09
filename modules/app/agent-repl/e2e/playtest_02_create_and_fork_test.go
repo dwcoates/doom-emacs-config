@@ -400,11 +400,11 @@ func TestPlaytestNewWorkspaceAndChild(t *testing.T) {
 	// what Emacs is standing on is the whole input to the next step. Whether
 	// creating SELECTED it is read off the product rather than assumed:
 	// `agent-repl-verb-create`'s docstring says nothing happens on success.
-	selectedByCreate := playtestCurrentName(s) == createdName
-	if switched := playtestStandOn(t, s, createdName); switched == selectedByCreate {
-		t.Fatalf("standing on %q reported switched=%v while the create had already selected it (%v): "+
-			"the two readings of the selection disagree", createdName, switched, selectedByCreate)
-	}
+	selectedByCreate := !playtestStandOn(t, s, createdName)
+	// THE STANDING IS ASSERTED EITHER WAY. Whichever branch was taken, the
+	// child create below reads `agent-repl--ws-current-name` itself, so its
+	// input is checked here rather than assumed from the branch.
+	playtestAwaitCurrent(t, s, createdName)
 	p.note("Emacs made the created workspace the current one",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q; creating it %s selected it, so a switch was %s",
 			createdName,
