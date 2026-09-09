@@ -991,71 +991,85 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		}
 	})
 
-	t.Run("after-action failure rides the terminal", func(t *testing.T) {
-		t.Parallel()
-		// Arrange: the SAME marked text, moved to the after-merge arm.
-		//
-		// PRODUCTION DEFECT, reported and not worked around: this arm is
-		// pinned on the SELF-REPO method because the other method contradicts
-		// the proto. internal/merge/run.go:333-337 (method's non-emacsRepo
-		// branch) returns postPrompt's error straight up, which execute()
-		// turns into an abort — so for EVERY repository that is not the
-		// daemon's own, an after-action failure DOES fail the run, against
-		// endpoint_create_workspace.proto:124-126 ("can never fail the run"),
-		// feed.proto:1990-1991 and postPrompt's own doc comment ("THEIR
-		// FAILURE NEVER FAILS THE RUN"). Only the emacsRepo branch
-		// (run.go:344-348) swallows it into the WARN the contract describes.
-		// This test asserts the contract where production honors it rather
-		// than lowering the assertion to what the other branch does.
-		// harness.NewRepo directly, not mqCleanRepo: mqSelfRepoWorld writes
-		// the passing gate script itself, and writing bin/test-all.sh twice
-		// into one repo would leave two authors for one file.
-		repo := harness.NewRepo(t)
-		w := mqSelfRepoWorld(t, repo)
-		repoRef := mqRepositoryRef(t, w, repo)
-		child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-after", &agentreplv1.CreateWorkspaceMergeActions{
-			PostprocessingPrompt: mqSaid(mqMarkedAction),
+	for _, tc := range []struct {
+		name     string
+		selfRepo bool
+	}{
+		{name: "after-action failure rides the terminal", selfRepo: true},
+		{name: "after-action failure rides the terminal outside the daemon's own repo", selfRepo: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// Arrange: the SAME marked text, moved to the after-merge arm, run
+			// under BOTH methods.
+			//
+			// The non-self arm was once the reverse: method's non-emacsRepo
+			// branch returned postPrompt's error straight up, which execute()
+			// turned into an abort, so for every repository that is not the
+			// daemon's own an after-action failure DID fail the run — against
+			// endpoint_create_workspace.proto's "can never fail the run",
+			// feed.proto's "failure never fails the run (it rides the
+			// terminal)" and postPrompt's own doc comment. FIXED: both methods
+			// now run the after-action through run.go's single afterAction
+			// helper, which warns and lets the run conclude, so the two cannot
+			// drift apart again. This arm is what holds that.
+			// harness.NewRepo directly, not mqCleanRepo: the self-repo world
+			// writes the passing gate script itself, and writing
+			// bin/test-all.sh twice into one repo would leave two authors for
+			// one file.
+			repo := harness.NewRepo(t)
+			var w *World
+			if tc.selfRepo {
+				w = mqSelfRepoWorld(t, repo)
+			} else {
+				// The other method never runs the gate, so it needs no script.
+				w = NewWorld(t, WorldOpts{})
+			}
+			repoRef := mqRepositoryRef(t, w, repo)
+			child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-after", &agentreplv1.CreateWorkspaceMergeActions{
+				PostprocessingPrompt: mqSaid(mqMarkedAction),
+			})
+			root := mqOpenFeedWatch(t, w, child, nil)
+			defer root.Close()
+			// Warning discipline: exactly one daemon record, and it is the
+			// contract's own — "the post-merge prompt failed; the merge still
+			// landed" (daemon.merge.post_prompt, internal/merge/run.go's
+			// afterAction). Its presence is half the fact this arm asserts:
+			// the failure was RECORDED, not swallowed.
+			w.ExpectWarnings("daemon.merge.post_prompt")
+
+			// Act
+			if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
+				t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+			}
+			head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
+				return row.GetActivity().GetMerge() != nil
+			})
+			tabs := mqOpenFeedWatch(t, w, child, head.GetId())
+			defer tabs.Close()
+
+			// Assert: the post_prompt tab settles FAILED — the failure is
+			// drawn, not swallowed.
+			postTab := tabs.AwaitRow("the post_prompt tab, settled", func(row *frontendv1.FeedRow) bool {
+				return row.GetMergeTab().GetPostPrompt().GetSettled() != nil
+			}).GetMergeTab().GetPostPrompt().GetSettled()
+			if postTab.GetFailed() == nil {
+				t.Fatalf("post_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", postTab)
+			}
+			wantSummary := fmt.Sprintf("the after-merge prompt %q did not complete", mqMarkedAction)
+			if got := postTab.GetFailed().GetSummary(); got != wantSummary {
+				t.Errorf("post_prompt tab failure summary = %q, want %q", got, wantSummary)
+			}
+
+			// Assert: THE RUN STILL LANDED — the opposite direction, from the
+			// same failing turn. This is the whole point of the pair.
+			terminal := root.AwaitRow("the merge bubble's terminal", func(row *frontendv1.FeedRow) bool {
+				merge := row.GetActivity().GetMerge()
+				return merge.GetError() != nil || merge.GetSuccess() != nil
+			}).GetActivity().GetMerge()
+			if terminal.GetSuccess() == nil {
+				t.Fatalf("merge terminal = %v, want FeedMergeSuccess (an after-action failure rides the terminal)", terminal)
+			}
 		})
-		root := mqOpenFeedWatch(t, w, child, nil)
-		defer root.Close()
-		// Warning discipline: exactly one daemon record, and it is the
-		// contract's own — "the post-merge prompt failed; the merge still
-		// landed" (daemon.merge.post_prompt, internal/merge/run.go's method).
-		// Its presence is half the fact this arm asserts: the failure was
-		// RECORDED, not swallowed.
-		w.ExpectWarnings("daemon.merge.post_prompt")
-
-		// Act
-		if _, err := w.Client().MergeWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
-			t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
-		}
-		head := root.AwaitRow("the merge bubble's head", func(row *frontendv1.FeedRow) bool {
-			return row.GetActivity().GetMerge() != nil
-		})
-		tabs := mqOpenFeedWatch(t, w, child, head.GetId())
-		defer tabs.Close()
-
-		// Assert: the post_prompt tab settles FAILED — the failure is drawn,
-		// not swallowed.
-		postTab := tabs.AwaitRow("the post_prompt tab, settled", func(row *frontendv1.FeedRow) bool {
-			return row.GetMergeTab().GetPostPrompt().GetSettled() != nil
-		}).GetMergeTab().GetPostPrompt().GetSettled()
-		if postTab.GetFailed() == nil {
-			t.Fatalf("post_prompt tab settled = %v, want the failed arm (the marked action's turn failed)", postTab)
-		}
-		wantSummary := fmt.Sprintf("the after-merge prompt %q did not complete", mqMarkedAction)
-		if got := postTab.GetFailed().GetSummary(); got != wantSummary {
-			t.Errorf("post_prompt tab failure summary = %q, want %q", got, wantSummary)
-		}
-
-		// Assert: THE RUN STILL LANDED — the opposite direction, from the same
-		// failing turn. This is the whole point of the pair.
-		terminal := root.AwaitRow("the merge bubble's terminal", func(row *frontendv1.FeedRow) bool {
-			merge := row.GetActivity().GetMerge()
-			return merge.GetError() != nil || merge.GetSuccess() != nil
-		}).GetActivity().GetMerge()
-		if terminal.GetSuccess() == nil {
-			t.Fatalf("merge terminal = %v, want FeedMergeSuccess (an after-action failure rides the terminal)", terminal)
-		}
-	})
+	}
 }
