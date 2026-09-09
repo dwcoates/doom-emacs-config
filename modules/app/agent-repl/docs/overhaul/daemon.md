@@ -1415,6 +1415,9 @@ Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
 
 - FeedAgentPrompt.delivery: resolve/feed/sendmessage.go sets queued_to_live /
   resumed_recipient on the sender's row from AgentSendMessageSuccess's arm.
+  (Landing 14 adds the third arm: the same composer's failure case sets
+  `refused`, ALWAYS — a contentless refusal is still a refusal — with the
+  producer's own words read by failureText as its reason.)
 - FeedPermissionAnswered.denied_undecidable{text}: resolve/feed/permission.go
   `decisionArm` draws the shim's AgentPermissionDenied.undecidable as its own
   arm (today folded onto denied_by_policy).
