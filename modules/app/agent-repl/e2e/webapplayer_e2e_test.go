@@ -838,9 +838,17 @@ func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) 
 // act WHILE the page is mounted (§F9 #39, the restart handover). Every other
 // area starts the child and immediately waits, which is wlRunVitest.
 type wlChild struct {
-	t        *testing.T
-	cmd      *exec.Cmd
-	done     chan error
+	t    *testing.T
+	cmd  *exec.Cmd
+	done chan error
+	// file names the area file this child runs, and started is when it was
+	// spawned, so WaitFor can report the CHILD'S OWN WALL. Reported on every
+	// run, green or red, because that wall is the only measurement
+	// WebappLayerTimeout is derivable from and it was previously being
+	// confused with the vitest-internal `Duration` line, which excludes the
+	// npm wrapper, node's own boot and the pool's teardown.
+	file     string
+	started  time.Time
 	tailOnly struct {
 		sync.Mutex
 		lines []string
@@ -918,7 +926,7 @@ func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string
 		return nil, fmt.Errorf("starting `npm run test:webapp-layer` in %s: %w", webappDir, err)
 	}
 
-	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
+	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1), file: vitestFile, started: time.Now()}
 	// UNCONDITIONAL, so no path out of this test leaves a worker pool behind:
 	// the Go side failing its own assertion, a t.Fatal on the way to Wait, a
 	// panic, or the bound firing. Killing an already-exited group is a no-op
@@ -973,6 +981,8 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 	tail := &c.tailOnly
 	select {
 	case waitErr := <-c.done:
+		wall := time.Since(c.started)
+		c.t.Logf("e2e/webapp-layer: %s child wall %s (bound %s)", c.file, wall.Round(time.Millisecond), bound)
 		if waitErr == nil {
 			return nil
 		}
@@ -987,6 +997,7 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 		c.killTree()
 		tail.Lock()
 		defer tail.Unlock()
+		c.t.Logf("e2e/webapp-layer: %s child wall EXCEEDED the %s bound", c.file, bound)
 		return fmt.Errorf("vitest did not exit within %s; last output:\n%s",
 			bound, strings.Join(tail.lines, "\n"))
 	}
