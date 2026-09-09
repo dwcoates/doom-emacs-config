@@ -77,8 +77,13 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 // during ordinary catch-up.
 func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	// Arrange: the store's own default buffer, not a test-shrunk one.
+	//
+	// THE BOUNDS HERE ARE THIS SITE'S OWN. A 4096-entry WriteBatch and a
+	// 4096-frame delivery are the heaviest calls in the package, and the
+	// package-wide 2s bound they used to share is sized off single-item rpcs,
+	// so it said nothing about this site's real cost. See burstCallTimeout.
 	store := startStore(t, storeOptions{})
-	ctx, cancel := callContext(t)
+	ctx, cancel := callContextWithin(t, burstCallTimeout)
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
@@ -88,7 +93,8 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	defer stream.Close()
 	mark := store.logMark()
 
-	// Act
+	// Act. The burst is half DefaultWatchBuffer, so absorbing it is the
+	// buffer's contract and not a race the test hopes to win.
 	const burst = 4096
 	entries := make([]*storev1.StoreEntry, 0, burst)
 	for i := 0; i < burst; i++ {
@@ -99,7 +105,7 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	shim.write(ctx, t, entries...)
 
 	// Assert: every frame arrives, and the store never gave up on the watcher.
-	got := receiveLines(t, stream, burst)
+	got := receiveLinesWithin(t, stream, burst, burstStreamTimeout)
 	if len(got) != burst {
 		t.Fatalf("the watcher received %d frames, want %d", len(got), burst)
 	}
