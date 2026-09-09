@@ -36,10 +36,30 @@ function panels(): HTMLElement[] {
   return app.$$('[data-component="composer"] [data-panel]');
 }
 
-/** Submit a recognized slash command and wait for its panel to be drawn. */
+/**
+ * Submit a recognized slash command and wait for ITS OWN panel to be drawn.
+ *
+ * THE WAIT IS ON A NEW NODE, NOT ON A NON-EMPTY HOST, and the difference is a
+ * whole test's verdict. Every command in this file leaves its panel standing,
+ * so from the second one onward `panels().length > 0` is ALREADY TRUE when the
+ * submission is made: `command` returned before this answer had been applied
+ * at all, and "clears the composer's text when the command is answered" then
+ * read the box while the daemon was still answering and found the literal it
+ * had just typed. Once in eight in-container runs.
+ *
+ * `main.ts`'s `showPanel` removes the stale panels and APPENDS a fresh
+ * element, so a node that is not the one standing before the submit is this
+ * submission's answer and nothing else. Order-independent: the first command
+ * in a file has no standing panel, and `undefined !== node` holds for it too.
+ */
 async function command(literal: string): Promise<HTMLElement> {
+  const standing = panels().at(-1);
   await submit(app, literal);
-  await awaitDrawn(app, `the panel answering ${literal}`, () => panels().length > 0);
+  await awaitDrawn(
+    app,
+    `the panel answering ${literal}`,
+    () => panels().length > 0 && panels().at(-1) !== standing,
+  );
   const drawn = panels();
   return drawn[drawn.length - 1];
 }
