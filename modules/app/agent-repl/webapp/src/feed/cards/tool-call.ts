@@ -28,6 +28,8 @@
 import {
   type FeedCodeSpan,
   type FeedDiffLine,
+  type FeedImageBlock,
+  type FeedShellExit,
   type FeedSimpleToolCall,
   type FeedToolCallCodeOutput,
   type FeedToolCallDenied,
@@ -52,6 +54,8 @@ import {
   type FeedToolCallTextOutput,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { formatTickedAge } from "../../duration.js";
+import { drawFeedImageBlock } from "../rows/blocks.js";
+import { drawFeedShellExit } from "./shell.js";
 import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -426,6 +430,13 @@ export function drawFeedToolCallReturned(
   if (u.runtime !== undefined && head !== null) {
     head.appendChild(drawFeedToolCallRuntime(u.runtime, `${path}.runtime`));
   }
+  // THE EXIT CHIP IS THE DETACHED SHELL'S CHIP, drawn by the detached shell's
+  // own function on the same element. The two cards are the same command told
+  // twice, so a second chip renderer here could only drift from that one.
+  // Absence draws no chip at all — never a zero.
+  if (u.exit !== undefined && head !== null) {
+    head.appendChild(drawFeedToolCallExit(u.exit, `${path}.exit`));
+  }
 
   // The output FORM is a fact about the card, and the `none` arm draws nothing
   // at all — so the arm is stated on the card rather than inferred from whether
@@ -457,6 +468,8 @@ function drawForm(
       return drawFeedToolCallLinesOutput(form.value, `${path}.lines`);
     case "links":
       return drawFeedToolCallLinksOutput(form.value, rc, `${path}.links`);
+    case "image":
+      return [drawFeedToolCallImage(form.value, `${path}.image`)];
     case "none":
       return drawFeedToolCallNoOutput(form.value, `${path}.none`);
     default: {
@@ -467,6 +480,34 @@ function drawForm(
       return unreachableArm(`${path}.form`, other.case);
     }
   }
+}
+
+/**
+ * The image form: the feed's SHARED image block, drawn by the shared drawing.
+ *
+ * A tool's image and a prompt body's image are the same message and the same
+ * picture-shaped problem, so this arm delegates rather than building a second
+ * `<img>`: the daemon resolved the src on the one end that can, and this end
+ * loads it. The wrapper carries the output-section class so a tool image sits
+ * in the card where every other output form sits.
+ */
+export function drawFeedToolCallImage(u: FeedImageBlock, path: string): HTMLElement {
+  log("debug", "drawing an image output", {
+    operation: "feed.cards.tool-call.image-output",
+    context: { path, has_alt: u.alt !== "" },
+  });
+  const box = document.createElement("div");
+  box.className = "tool-output tool-image-output";
+  box.appendChild(drawFeedImageBlock(u));
+  return box;
+}
+
+/**
+ * The exit chip on a returned card — the SAME chip the detached shell's settled
+ * head wears, by the same function.
+ */
+export function drawFeedToolCallExit(u: FeedShellExit, path: string): HTMLElement {
+  return drawFeedShellExit(u, path);
 }
 
 /**
@@ -805,6 +846,7 @@ export const TOOL_CALL_FORM_ARMS: readonly string[] = [
   "diff",
   "lines",
   "links",
+  "image",
   "none",
 ];
 export const TOOL_CALL_INPUT_FORM_ARMS: readonly string[] = ["command", "path", "query"];
