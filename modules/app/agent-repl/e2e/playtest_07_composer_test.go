@@ -44,8 +44,33 @@ func heldCardWith(text string) string {
                 function (card) { return card.textContent.indexOf(` + jsString(text) + `) !== -1; })`
 }
 
-// settledResponseRows counts the root feed's settled response bubbles.
-const settledResponseRows = `document.querySelectorAll('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]').length`
+// settledResponseWith answers whether the root feed carries a SETTLED
+// response bubble whose prose includes TEXT.
+//
+// A TURN DRAWS SEVERAL RESPONSE ROWS, NOT ONE, so a count of
+// `[data-unit="response"]` rows counts the vendor's block structure rather
+// than the turns that settled: the fake SDK's default prose turn
+// (`fake/scenarios/prose.ts`) emits TWO text blocks -- "Here is what I
+// found." and the turn's conclusion -- and the daemon folds each block into
+// its own activity row, so one finished turn leaves TWO settled response
+// bubbles behind. Naming the TEXT is what makes the check a claim about one
+// turn: `feed-view.ts` mirrors the bubble's own `data-state` onto the row
+// chrome, so `success` on the row carrying that text is the drawn bubble
+// saying it settled.
+func settledResponseWith(text string) string {
+	return `Array.prototype.some.call(
+                document.querySelectorAll('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]'),
+                function (row) { return row.textContent.indexOf(` + jsString(text) + `) !== -1; })`
+}
+
+// settledEchoFor is the settled response bubble THIS prompt's turn concluded
+// with. The fake's prose scenario ends every turn with `echo: <the prompt
+// verbatim>` and the daemon's success frame restates it whole, so the
+// conclusion identifies the turn the way `userPromptRowWith` identifies the
+// prompt -- a bubble left over from any other turn could not satisfy it.
+func settledEchoFor(prompt string) string {
+	return settledResponseWith("echo: " + prompt)
+}
 
 // awaitComposerCleared waits for the daemon's acceptance to clear the
 // composer, which is the acceptance's own visible act in Emacs.
@@ -80,14 +105,16 @@ func TestPlaytestComposerSubmitFocusDiscard(t *testing.T) {
 	s.awaitInPage(t, "the user's prompt bubble carrying the typed text to arrive on the standing tail",
 		userPromptRowWith(prompt))
 	s.awaitComposerCleared(t)
-	s.awaitInPage(t, "the assistant's response bubble to settle beneath it", settledResponseRows+` === 1`)
+	s.awaitInPage(t, "the assistant's response bubble for this prompt to settle beneath it",
+		settledEchoFor(prompt))
 	s.awaitArm(t, s.Name, "the turn to settle", emGHISettledArms...)
 	p.capture("prompt-bubble", fmt.Sprintf("%q typed into the composer and submitted with composer RET", prompt),
 		"a `[data-row-kind=\"userPrompt\"]` row carrying that exact text is in the root feed, the composer "+
-			"emptied on the daemon's acceptance, one `[data-unit=\"response\"]` row settled, and the roster arm settled",
+			"emptied on the daemon's acceptance, a settled `[data-unit=\"response\"]` row carries this turn's "+
+			"conclusion, and the roster arm settled",
 		fmt.Sprintf("The feed carries the user's own prompt bubble reading %q, and beneath it the assistant's "+
-			"response bubble with prose in it. The composer window beside the webview is EMPTY: the typed "+
-			"text moved from the composer into the bubble.", prompt))
+			"response bubbles with prose in them -- the turn's opening line and its conclusion. The composer "+
+			"window beside the webview is EMPTY: the typed text moved from the composer into the bubble.", prompt))
 
 	// SPC o v FROM SOMEWHERE ELSE. Focus is moved OUT of the composer first
 	// -- into the webview's window -- because `agent-repl-focus-input` from
@@ -261,14 +288,16 @@ func TestPlaytestDeferredPromptDrains(t *testing.T) {
 		`(length (agent-repl-prompt-queue-pending `+elispString(s.Name)+` :deferred))`,
 		func(raw json.RawMessage) bool { return string(raw) == "0" })
 	s.awaitInPage(t, "the drained prompt to arrive as its own user bubble", userPromptRowWith(deferred))
-	s.awaitInPage(t, "both turns' response bubbles to settle", settledResponseRows+` === 2`)
+	s.awaitInPage(t, "the first turn's response bubble to have settled", settledEchoFor(first))
+	s.awaitInPage(t, "the drained turn's own response bubble to settle", settledEchoFor(deferred))
 	s.awaitArm(t, s.Name, "the drained turn to settle", emGHISettledArms...)
 	s.awaitInPage(t, "the feed to carry exactly two user prompts",
 		`document.querySelectorAll('[data-feed-row][data-row-kind="userPrompt"]').length === 2`)
 	p.capture("feed-after-drain", "the first turn finished, which is the edge the queue drains on",
 		"`agent-repl--prompt-queue` is empty, a `[data-row-kind=\"userPrompt\"]` row carries the deferred text, "+
-			"the feed holds exactly two user prompts and two settled `[data-unit=\"response\"]` rows, and the arm settled",
-		fmt.Sprintf("The feed carries FOUR bubbles in order: the user's prompt %q, the assistant's response, "+
-			"the user's deferred prompt %q, and the assistant's second response. The hold tray beneath "+
-			"them reads \"nothing held\", and the composer is empty.", first, deferred))
+			"the feed holds exactly two user prompts, and EACH turn's conclusion is carried by a settled "+
+			"`[data-unit=\"response\"]` row, and the arm settled",
+		fmt.Sprintf("The feed carries both exchanges in order: the user's prompt %q with the assistant's "+
+			"response beneath it, then the user's deferred prompt %q with its own response beneath that. "+
+			"The hold tray beneath them reads \"nothing held\", and the composer is empty.", first, deferred))
 }
