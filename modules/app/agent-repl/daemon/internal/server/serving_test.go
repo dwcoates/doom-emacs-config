@@ -281,3 +281,46 @@ func TestWriteBarrierSettlesOnceTheConnectionHasSpokenAndStopped(t *testing.T) {
 		t.Fatal("AwaitWrittenSince = false after the connection wrote and went quiet")
 	}
 }
+
+// TestWriteBarrierDoesNotCallABusyConnectionALostAnswer pins the second way the
+// barrier settles true: a connection that never falls silent within the bound
+// has still written past the mark, and reporting that as a lost answer would
+// put an ERROR record against a healthy run.
+func TestWriteBarrierDoesNotCallABusyConnectionALostAnswer(t *testing.T) {
+	// Arrange: a connection that writes without pause for the whole bound.
+	barrier := &WriteBarrier{}
+	inner, outer := net.Pipe()
+	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
+	stop := make(chan struct{})
+	go func() {
+		buf := make([]byte, 1)
+		for {
+			if _, err := outer.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	counted := (&barrierListener{barrier: barrier}).count(inner)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if _, err := counted.Write([]byte("x")); err != nil {
+				return
+			}
+		}
+	}()
+	mark := barrier.Mark()
+
+	// Act.
+	settled := barrier.AwaitWrittenSince(mark, 20*time.Millisecond)
+	close(stop)
+
+	// Assert.
+	if !settled {
+		t.Fatal("AwaitWrittenSince = false on a connection that wrote past the mark throughout; a busy link is not a lost answer")
+	}
+}

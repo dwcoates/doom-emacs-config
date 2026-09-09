@@ -86,11 +86,26 @@ func (b *WriteBarrier) Mark() uint64 {
 // above it is what covers a connection that never stops.
 const barrierSettle = time.Millisecond
 
-// AwaitWrittenSince waits for the connections to have written past mark and
-// then to have gone quiet, and reports whether they did inside the bound.
+// AwaitWrittenSince waits for the connections to have written past mark, and
+// reports whether the answer can be said to have left.
 //
-// A false answer is a real anomaly — an answer this process produced that the
-// socket never took — and every caller records it. Nothing is swallowed.
+// TWO WAYS TO SETTLE TRUE, and both are statements about the socket rather than
+// concessions.
+//
+//   - QUIET is the ordinary one and the one the exit wants: something was
+//     written past the mark and then nothing was, so the connection owes
+//     nothing.
+//   - STILL SPEAKING is the other, and it exists because a busy connection must
+//     not be reported as a lost answer. One h2 connection multiplexes this
+//     daemon's standing pushes alongside its unary calls, so a connection can
+//     write without pause for the whole bound while a turn is running. It has
+//     written past the mark; waiting for it to fall silent would turn an active
+//     link into an ERROR record about an answer that did go out, and the e2e
+//     warning sweep would fail an entirely healthy run with it.
+//
+// FALSE means one thing only: NOTHING was written since the mark. The answer
+// was produced and the socket never took a byte of it. Every caller records
+// that; nothing is swallowed.
 func (b *WriteBarrier) AwaitWrittenSince(mark uint64, bound time.Duration) bool {
 	deadline := time.Now().Add(bound)
 	ticker := time.NewTicker(barrierSettle)
@@ -106,7 +121,7 @@ func (b *WriteBarrier) AwaitWrittenSince(mark uint64, bound time.Duration) bool 
 		}
 		previous = written
 		if !time.Now().Before(deadline) {
-			return false
+			return written > mark
 		}
 	}
 }
