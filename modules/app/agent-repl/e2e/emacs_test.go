@@ -1126,7 +1126,7 @@ func (e *Emacs) dumpArtifacts() {
 			e.t.Logf("preserve %s: %v", extra, err)
 		}
 	}
-	e.preserveWorkspaceElispLogs(out)
+	e.preserveWorkspaceElispLogs(out, e.box.Scratch())
 }
 
 // preserveWorkspaceElispLogs copies every workspace-scoped ELISP sink this
@@ -1150,16 +1150,24 @@ func (e *Emacs) dumpArtifacts() {
 // workspace-scoped and had gone with the temp file. The one question the
 // artifacts existed to answer was the one they could not.
 //
-// The sweep is over `e.Root`, the scratch subtree this Emacs owns, so it
-// catches workspaces this scenario registered AND worktrees the daemon minted
-// under it, with no per-site bookkeeping. `copyTree` resolves symlinks, so
-// what lands in the artifacts is the durable target's own bytes.
-func (e *Emacs) preserveWorkspaceElispLogs(out string) {
-	if e.Root == "" {
+// THE SWEEP IS OVER THE WHOLE SCRATCH SUBTREE, not over `e.Root`. `e.Root` is
+// `<scratch>/emacs`, the Emacs HOME; the workspaces this layer registers and
+// the worktrees the daemon mints for it are `e.Root`'s SIBLINGS under the same
+// scratch directory, so a sweep rooted at `e.Root` finds nothing at all — which
+// is what the first version of this did, silently, on a red run that needed it.
+// Sweeping by SHAPE from the scratch root catches both, with no per-site
+// bookkeeping. `copyTree` resolves symlinks, so what lands in the artifacts is
+// the durable target's own bytes.
+//
+// The count is reported whether or not anything was found: "no workspace elisp
+// sinks" is itself a diagnosis, and reporting only the non-empty case is how
+// an empty sweep went unnoticed.
+func (e *Emacs) preserveWorkspaceElispLogs(out string, root string) {
+	if root == "" {
 		return
 	}
 	copied := 0
-	err := filepath.WalkDir(e.Root, func(path string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			// An unreadable subtree is reported and stepped over: one
 			// unreachable directory must not cost the sweep every sink
@@ -1167,10 +1175,19 @@ func (e *Emacs) preserveWorkspaceElispLogs(out string) {
 			e.t.Logf("preserve workspace elisp logs: walk %s: %v", path, err)
 			return nil
 		}
-		if !entry.IsDir() || entry.Name() != "emacs" || filepath.Base(filepath.Dir(path)) != ".claude" {
+		if !entry.IsDir() {
 			return nil
 		}
-		rel, relErr := filepath.Rel(e.Root, path)
+		// The staged Doom tree and any node_modules under the scratch root
+		// hold tens of thousands of files and no workspace sink; walking them
+		// costs the whole sweep and finds nothing.
+		if entry.Name() == ".emacs.d" || entry.Name() == "node_modules" {
+			return fs.SkipDir
+		}
+		if entry.Name() != "emacs" || filepath.Base(filepath.Dir(path)) != ".claude" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			e.t.Logf("preserve workspace elisp logs: relate %s: %v", path, relErr)
 			return fs.SkipDir
@@ -1183,11 +1200,9 @@ func (e *Emacs) preserveWorkspaceElispLogs(out string) {
 		return fs.SkipDir
 	})
 	if err != nil {
-		e.t.Logf("preserve workspace elisp logs under %s: %v", e.Root, err)
+		e.t.Logf("preserve workspace elisp logs under %s: %v", root, err)
 	}
-	if copied > 0 {
-		e.t.Logf("preserved %d workspace elisp sink(s) under %s", copied, filepath.Join(out, "workspace-elisp-logs"))
-	}
+	e.t.Logf("preserved %d workspace elisp sink(s) from %s under %s", copied, root, filepath.Join(out, "workspace-elisp-logs"))
 }
 
 // messagesTailLines is how much of `*Messages*` a failure carries.
