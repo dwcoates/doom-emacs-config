@@ -171,8 +171,44 @@ func TestALinkThatAppearsMidTailMovesTheWatchedFilesBook(t *testing.T) {
 	}
 }
 
-// TestAnUnchangedBookIsNotReKeyed: the re-key pass runs on every rescan, so a
-// steady book must produce neither a move nor a record.
+// TestALinkThatAppearsBetweenTwoRescansMovesTheBookOnTheVeryNextPoll is the
+// window a rescan-only re-key leaves open, and it is not a latency window: the
+// reader polls several times per rescan, and records read in between are booked
+// under the id the FILE is named by, committed, and never read again. So the
+// link must be honored by the next READ, not by the next discovery pass.
+func TestALinkThatAppearsBetweenTwoRescansMovesTheBookOnTheVeryNextPoll(t *testing.T) {
+	// Arrange: the transcript is watched and read once before any link exists,
+	// exactly as it is when a `/clear` outruns the shim's link file.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, bookRotated, promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	if got := bookOfLastWrite(t, store); got != bookRotated {
+		t.Fatalf("precondition: with no link on disk the first records booked to %q, want %q", got, bookRotated)
+	}
+
+	// Act: the link appears and the transcript grows, with NO rescan between
+	// the two — the poll tick is four times the rescan tick, so this is the
+	// ordinary case rather than an exotic one.
+	h.mintIdentity(t, bookWorkspace, bookOriginal)
+	h.linkVendorSession(t, bookWorkspace, bookRotated, bookOriginal)
+	h.write(t, path, promptLine+"\n"+assistantLine+"\n")
+	h.sc.pollAll()
+
+	// Assert: the records this poll read landed in the original's book.
+	if got := bookOfLastWrite(t, store); got != bookOriginal {
+		t.Errorf("the records read after the link appeared landed in book %q, want %q", got, bookOriginal)
+	}
+	if got := h.sc.watchers[path].ctx.MainAgentID; got != bookOriginal {
+		t.Errorf("the watched file still books to %q, want %q", got, bookOriginal)
+	}
+}
+
+// TestAnUnchangedBookIsNotReKeyed: the re-key pass runs on every poll and every
+// rescan, so a steady book must produce neither a move nor a record.
 func TestAnUnchangedBookIsNotReKeyed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
