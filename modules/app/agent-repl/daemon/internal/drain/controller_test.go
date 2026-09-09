@@ -936,3 +936,33 @@ func TestNewRefusesWithoutASpawnSweep(t *testing.T) {
 		t.Fatalf("New accepted a controller with no spawn sweep")
 	}
 }
+
+// TestCancellingAScheduleRepublishesEveryHostView is the composer's other way
+// back open. The host view's composer arm is composed from the occupancy
+// lease, so every push taken while the schedule's drain hold stood said
+// `draining`, and the server cannot see the cancellation release it — without
+// this republish a cancelled shutdown leaves every host client's composer shut
+// for a drain that is not coming.
+func TestCancellingAScheduleRepublishesEveryHostView(t *testing.T) {
+	// Arrange
+	var published []ids.WorkspaceID
+	h := newHarness(t, func(d *Deps) {
+		d.PublishHost = func(ws ids.WorkspaceID) { published = append(published, ws) }
+	})
+	ws := h.workspace(t, instant)
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act
+	if err := h.c.Cancel(context.Background()); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	// Assert
+	if len(published) != 1 || published[0] != ws {
+		t.Fatalf("PublishHost calls = %v, want the released workspace %q republished", published, ws)
+	}
+}

@@ -454,6 +454,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Freeness:     fleet.Freeness(),
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
+		PublishHost:  relay.PublishHostWorkspace,
 		Exit:         orderlyExit(p.Exit),
 		Log:          p.Surfaces,
 	})

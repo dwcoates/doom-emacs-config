@@ -102,6 +102,15 @@ type Deps struct {
 	// it a prompt held during a hibernation stays held forever: the release
 	// changes a row the queue is not watching. Nil means nothing is told.
 	LeaseChanged func(ws ids.WorkspaceID)
+	// PublishHost recomposes and republishes one workspace's HOST view. The
+	// composer gate on that view is a function of the OCCUPANCY LEASE -- a
+	// held drain or hibernation lease composes the draining arm -- and the
+	// server cannot see a lease released, so the last push a host client got
+	// during a stand-down was taken while the lease was still held. Without
+	// this the composer stays shut after the hibernation ends, and Emacs
+	// refuses the very prompt that is meant to revive the session. Nil means
+	// no host surface is wired.
+	PublishHost func(ws ids.WorkspaceID)
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
