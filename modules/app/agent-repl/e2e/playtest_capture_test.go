@@ -655,7 +655,7 @@ func (p *playbook) capture(step, act, asserted, expected string) {
              (redisplay t)
              t)`)
 
-	body, settled, took := p.settleFrame()
+	body, settled, took, rounds := p.settleFrame()
 	img, err := decodeXWD(body)
 	if err != nil {
 		p.t.Fatalf("capture %s: decode the framebuffer at %s: %v", name, p.e.Display.FramebufferPath, err)
@@ -693,25 +693,40 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 		note = fmt.Sprintf(" _(the screen was still changing after %s, so this frame may be torn)_", playtestSettleBound)
 	}
 	p.write("| %02d | %s | %s | `%s` | %s%s |\n", p.step, act, asserted, name, expected, note)
-	p.t.Logf("playtest phase capture-%02d-%s settled=%v took %s (%d distinct colors)",
-		p.step, step, settled, took.Round(time.Millisecond), colors)
+	p.t.Logf("playtest phase capture-%02d-%s settled=%v took %s over %d redisplay rounds (%d distinct colors)",
+		p.step, step, settled, took.Round(time.Millisecond), rounds, colors)
 }
 
-// settleFrame reads the framebuffer until two consecutive reads agree, and
-// answers the last read either way.
-func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration) {
+// settleFrame drives full redisplays until two CONSECUTIVE ones leave the
+// framebuffer identical, and answers the last read either way, with the
+// number of redisplay rounds it took.
+//
+// WHY A REDISPLAY SITS BETWEEN THE TWO READS. Two reads a few milliseconds
+// apart with nothing driven between them agree trivially on a screen Emacs
+// has simply not repainted yet, and that is a picture of the PREVIOUS
+// state passed off as settled. MEASURED, on the tab bar after a roster push
+// opened a new tab: with the two garbaged redisplays above already done,
+// the bar still showed the tab set from before the push in three of four
+// registrations, and one more `(redraw-frame) (redisplay t)` showed the new
+// one every time. So the quiescence this waits for is "a further full
+// redisplay changed nothing", which is a property of the screen rather than
+// of the poll interval, and the round count is logged so a capture that
+// needed more than one is on the record.
+func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration, rounds int) {
 	p.t.Helper()
 	started := time.Now()
 	deadline := started.Add(playtestSettleBound)
 	previous := p.readFramebuffer()
 	for {
+		rounds++
+		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
 		current := p.readFramebuffer()
 		if string(current) == string(previous) {
-			return current, true, time.Since(started)
+			return current, true, time.Since(started), rounds
 		}
 		previous = current
 		if time.Now().After(deadline) {
-			return current, false, time.Since(started)
+			return current, false, time.Since(started), rounds
 		}
 		time.Sleep(playtestSettleInterval)
 	}
