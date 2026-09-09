@@ -113,16 +113,30 @@ func TestPlaytestContextPrompts(t *testing.T) {
 
 	// --- a line, through the CANNED verb ---------------------------------
 	//
-	// The file is visited the ordinary way; the routing advice on the
-	// display primitives runs for real. Point goes to line 3 and the verb is
-	// invoked as a command, which is where a user invoking it stands.
+	// THE FILE IS VISITED THROUGH THE MODULE'S OWN EDITOR POPUP, not through
+	// a raw `find-file`. `find-file` from the panel's selected window (the
+	// composer, a dedicated input window) REPLACED THE WEBVIEW with the
+	// visited file, so every capture below it showed the file alone and no
+	// panel at all. `agent-repl-popup-open` is the one shared open-a-file
+	// subroutine (lisp/popup.el): a right side window at half the frame,
+	// which leaves the webview and the composer where they are. Point goes
+	// to line 3 and the verb is invoked as a command, which is where a user
+	// invoking it stands.
 	e.Eval(`(progn
-             (find-file ` + elispString(contextPath) + `)
-             (with-current-buffer (get-file-buffer ` + elispString(contextPath) + `)
-               (goto-char (point-min))
-               (forward-line 2)
-               (call-interactively #'agent-repl-explain))
+             (defvar agent-repl-playtest08--context nil)
+             (setq agent-repl-playtest08--context
+                   (agent-repl-popup-open ` + elispString(contextPath) + ` 3))
              t)`)
+	if !e.EvalBool(`(and (window-live-p (get-buffer-window agent-repl-playtest08--context)) t)`) {
+		t.Fatalf("the editor popup showing %s has no live window", playtestContextFileName)
+	}
+	p.note("the context file opened in the module's editor popup",
+		"`agent-repl-popup-open` put "+playtestContextFileName+" in a live right-side window, and the panel's webview and composer are untouched")
+	e.Eval(`(with-current-buffer agent-repl-playtest08--context
+              (goto-char (point-min))
+              (forward-line 2)
+              (call-interactively #'agent-repl-explain)
+              t)`)
 	lineRef := playtestContextFileName + ":3"
 	sent := awaitSubmissions(t, e, 1, "the line prompt to reach the RPC boundary")[0]
 	if sent.Origin != playtestExplainOriginContext {
@@ -136,9 +150,11 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	p.capture("line-canned", "`agent-repl-explain` (`SPC j e E`) with point on line 3 of "+playtestContextFileName+", no region",
 		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
 			playtestExplainOriginContext, sent.Text, lineRef),
-		fmt.Sprintf("The feed's user prompt bubble reads %q -- the canned template around the "+
-			"file:line reference -- and a prose response bubble sits beneath it. The editor's left "+
-			"window shows %s.", fmt.Sprintf(template, lineRef), playtestContextFileName))
+		fmt.Sprintf("The webview fills the left of the frame and its feed's user prompt bubble reads "+
+			"%q -- the canned template around the file:line reference -- with a prose response bubble "+
+			"beneath it; the composer sits under the webview. The right half of the frame is the "+
+			"editor popup showing %s, whose point is on line 3 (`line three`).",
+			fmt.Sprintf(template, lineRef), playtestContextFileName))
 
 	// --- a region, through the PROMPTING verb ----------------------------
 	//
@@ -148,7 +164,7 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	// prompting verb, and the stub EDITS the initial text rather than
 	// replacing it, so the assertion proves the reference was the pre-fill.
 	const suffix = " -- what does this block do?"
-	e.Eval(`(with-current-buffer (get-file-buffer ` + elispString(contextPath) + `)
+	e.Eval(`(with-current-buffer agent-repl-playtest08--context
               (let ((transient-mark-mode t))
                 (goto-char (point-min))
                 (forward-line 1)
@@ -172,28 +188,54 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	p.capture("region-prompt", "`agent-repl-explain-prompt` (`SPC j e e`) with lines 2-4 of "+playtestContextFileName+" as the active region, the minibuffer answered with the pre-filled reference plus the user's own words",
 		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
 			playtestExplainOriginPrompt, sent.Text, regionRef),
-		fmt.Sprintf("The newest user prompt bubble reads %q: the file:startline-endline reference "+
-			"FIRST, then the words the user added. Two earlier bubbles (the line prompt and its "+
-			"answer) sit above it.", regionRef+suffix))
+		fmt.Sprintf("The webview still fills the left of the frame, with the composer beneath it and "+
+			"the editor popup showing %s on the right half. The webview's newest user prompt bubble "+
+			"reads %q: the file:startline-endline reference FIRST, then the words the user added. Two "+
+			"earlier bubbles (the line prompt and its answer) sit above it.",
+			playtestContextFileName, regionRef+suffix))
 
 	// --- a magit hunk, through the CANNED verb ---------------------------
 	//
-	// `magit-status-setup-buffer` is magit's own Lisp entry point and the
-	// one the module opens every status buffer through (lisp/magit.el says
-	// why the prompting `magit-status` is never called). Point goes to the
-	// hunk's `@@` line, the module's own hunk predicate is asserted, and
-	// the verb is invoked in that buffer.
+	// THE STATUS BUFFER IS OPENED THROUGH THE MODULE'S OWN DOOR,
+	// `agent-repl--magit-status-same-window`, with the popup's window
+	// SELECTED: the door forces same-window display, so magit replaces the
+	// popup's buffer on the right half and the panel survives. A raw
+	// `magit-status-setup-buffer` instead went through Doom's own magit
+	// display function and filled the WHOLE FRAME, leaving no webview in the
+	// picture at all. The door returns magit's log line and not the buffer,
+	// so the buffer is asked for by mode.
+	//
+	// The popup's window is a SOFTLY DEDICATED side window, and
+	// `display-buffer-same-window` refuses a dedicated window; the
+	// dedication is lifted first so the same-window display can land there
+	// rather than falling through to the fallback action (which would take
+	// the webview's window).
 	e.Eval(`(progn
              (require 'magit)
              (defvar agent-repl-playtest08--magit nil)
-             (setq agent-repl-playtest08--magit
-                   (magit-status-setup-buffer (file-name-as-directory ` + elispString(repository.Dir) + `)))
-             t)`)
+             (select-window (get-buffer-window agent-repl-playtest08--context))
+             (set-window-dedicated-p (selected-window) nil)
+             (agent-repl--magit-status-same-window ` + elispString(repository.Dir) + `)
+             (setq agent-repl-playtest08--magit (magit-get-mode-buffer 'magit-status-mode))
+             (and agent-repl-playtest08--magit t))`)
 	e.AwaitTrue("the magit status buffer to draw the scripted dirty hunk",
 		`(with-current-buffer agent-repl-playtest08--magit
            (save-excursion
              (goto-char (point-min))
              (and (re-search-forward "^@@ " nil t) t)))`)
+	// THE FILE SECTION IS EXPANDED THE WAY A USER EXPANDS IT. magit's status
+	// buffer opens dirty.txt's file section COLLAPSED: the hunk's text is in
+	// the buffer (so the search above finds it) but invisible, so the
+	// capture showed a `modified dirty.txt` line and no hunk under it. Point
+	// goes to that line and the section is shown, exactly as `TAB` there
+	// would. `magit-section-show` is unconditional, so it is also correct
+	// for a section that some future magit opens already visible.
+	e.Eval(`(with-current-buffer agent-repl-playtest08--magit
+              (goto-char (point-min))
+              (re-search-forward "^modified +dirty\\.txt")
+              (beginning-of-line)
+              (magit-section-show (magit-current-section))
+              t)`)
 	if !e.EvalBool(`(with-current-buffer agent-repl-playtest08--magit
                        (goto-char (point-min))
                        (re-search-forward "^@@ ")
@@ -219,10 +261,12 @@ func TestPlaytestContextPrompts(t *testing.T) {
 	p.capture("hunk-canned", "`agent-repl-explain` (`SPC j e E`) with point on the `@@ -1 +1,2 @@` hunk of dirty.txt in the workspace's magit status buffer",
 		fmt.Sprintf("the RPC boundary saw origin %s with text %q, and a user prompt bubble carrying %q is drawn",
 			playtestExplainOriginContext, sent.Text, hunkRef),
-		fmt.Sprintf("The newest user prompt bubble reads %q: the hunk's own file and to-range, taken "+
-			"from the magit section rather than from point's line. The editor's left window shows "+
-			"the magit status buffer with an `Unstaged changes` section holding dirty.txt's hunk.",
-			fmt.Sprintf(template, hunkRef)))
+		fmt.Sprintf("The webview fills the left of the frame with the composer beneath it, and its "+
+			"newest user prompt bubble reads %q: the hunk's own file and to-range, taken from the "+
+			"magit section rather than from point's line. The right half of the frame is the magit "+
+			"status buffer (it replaced the editor popup's file), showing an `Unstaged changes` "+
+			"section whose `modified   dirty.txt` entry is EXPANDED, so the `@@ -1 +1,2 @@` hunk and "+
+			"its lines are visible under it.", fmt.Sprintf(template, hunkRef)))
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +377,22 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
                                       (overlays-in (point-min) (point-max)))
                             t))`) {
 		t.Fatalf("no thumbnail overlay is on the composer's marker line")
+	}
+	// THE COMPOSER IS ON SCREEN BEFORE THE PICTURE IS TAKEN. This capture
+	// came out with the webview white and the composer black and wordless
+	// while the same run's other captures were painted, so the arrangement
+	// itself is asserted here: the composer has a live window and that
+	// window starts at the buffer's first character, which is where the
+	// typed words and the marker line are. The `redisplay' is forced in the
+	// same eval so a redisplay failure, if there is one, surfaces as an
+	// elisp error attributed to THIS step rather than as a blank picture.
+	if !e.EvalBool(`(let ((w (get-buffer-window ` + elispString(s.Input) + `)))
+                       (prog1 (and w (window-live-p w)
+                                   (with-current-buffer ` + elispString(s.Input) + `
+                                     (= (window-start w) (point-min)))
+                                   t)
+                         (redisplay t)))`) {
+		t.Fatalf("the composer has no live window showing its buffer from the top before the thumbnail capture")
 	}
 	p.capture("composer-thumbnail", "the words typed, then the image attached through `agent-repl-input-attach-image` and its marker inserted",
 		fmt.Sprintf("`agent-repl-input-attachments` holds exactly {%s, %s}; the composer text carries the marker %q and not the path; an overlay with `agent-repl-image` and a `display` image is on the marker",
