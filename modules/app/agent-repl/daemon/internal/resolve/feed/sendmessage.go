@@ -57,7 +57,10 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		delivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		// A send that could not be delivered still HAPPENED, and its row is
-		// what explains the attempt. It is drawn against what the start said.
+		// what explains the attempt. It is drawn against what the start said,
+		// and its delivery arm states the REFUSAL — never left unset, which a
+		// reader cannot tell apart from a producer that stated nothing.
+		delivery = refusedOf(state.Failure)
 	default:
 		return nil, errNotARow
 	}
@@ -143,4 +146,25 @@ func deliveryOf(success *conversationv1.AgentSendMessageSuccess) deliveryArm {
 		}
 	}
 	return nil
+}
+
+// refusedOf relays AgentSendMessageFailure onto the SENDER's row as the
+// `refused` delivery arm (feed.proto, landing 14: "a refusal is not an
+// absence"). ALWAYS AN ARM, even when the failure carried no account at all —
+// the arm is the refusal, and the reason is only its detail, so a contentless
+// refusal is still drawn as one rather than falling back to the unset oneof
+// that means "the producer stated nothing".
+//
+// The reason is the producer's own words, taken by the same reading every
+// failed tool call's account is taken by (failureText): the text blocks the
+// tool answered with, joined in order. No refusal KIND is derived from them —
+// the vendor declares none, and it lives only inside prose.
+func refusedOf(failure *conversationv1.AgentSendMessageFailure) deliveryArm {
+	refused := &frontendv1.FeedAgentPromptRefused{}
+	if text := failureText(failure.GetError()); text != "" {
+		refused.Reason = &frontendv1.FeedAgentPromptRefusalReason{Text: text}
+	}
+	return func(p *frontendv1.FeedAgentPrompt) {
+		p.Delivery = &frontendv1.FeedAgentPrompt_Refused{Refused: refused}
+	}
 }
