@@ -727,6 +727,51 @@ message FooterStatusActivityRateLimited {
   FooterAllowance session = 1;
   // The seven-day weekly allowance.
   FooterAllowance weekly = 2;
+  // What the newest account-usage SAMPLE managed to read. UNSET means no
+  // sample has been observed and the figures above came from a rate-limit
+  // event alone.
+  //
+  // WHY THIS EXISTS. The figures above are the last ones READ; this states
+  // whether the last ATTEMPT read anything. Without it a sample that failed
+  // is indistinguishable from one that never happened, and the strip draws
+  // yesterday's percentage as though it were today's. It is carried
+  // ALONGSIDE the figures and never instead of them: an unreadable sample
+  // leaves the figures on hand standing (the daemon's own sourcing rule),
+  // and this cell is what lets the client say the figures are stale rather
+  // than silently implying they are fresh.
+  FooterAllowanceSample sample = 3;
+}
+
+// The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A
+// FIGURE WAS READ, mirroring conversation.v1 SessionAccountUsage's own
+// outcome oneof arm for arm, so no consumer has to reconstruct the reason
+// from an absence.
+message FooterAllowanceSample {
+  oneof outcome {
+    // A figure was read; the allowances above are as fresh as this sample.
+    FooterAllowanceSampleAvailable available = 1;
+    // The usage service did not answer.
+    FooterAllowanceSampleServiceUnavailable service_unavailable = 2;
+    // The service answered without a five-hour window.
+    FooterAllowanceSampleWindowUnavailable window_unavailable = 3;
+    // The window carried no utilization figure.
+    FooterAllowanceSampleUtilizationUnavailable utilization_unavailable = 4;
+    // The shim's own sampling failed; it states the cause.
+    FooterAllowanceSampleSamplingFailure sampling_failure = 5;
+  }
+}
+// A figure was read.
+message FooterAllowanceSampleAvailable {}
+// The usage service did not answer.
+message FooterAllowanceSampleServiceUnavailable {}
+// The service answered without a five-hour window.
+message FooterAllowanceSampleWindowUnavailable {}
+// The window carried no utilization figure.
+message FooterAllowanceSampleUtilizationUnavailable {}
+// The shim's own sampling failed.
+message FooterAllowanceSampleSamplingFailure {
+  // The cause, verbatim from the shim. Empty when it stated none.
+  string cause = 1;
 }
 
 // The close-blocked reasons line.
