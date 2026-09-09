@@ -35,9 +35,24 @@
 (defvar agent-repl-test-verbs--handover nil
   "Refusal arms handed to host.el's handover path, as (WS ARM).")
 
+(defvar agent-repl-test-verbs--selected nil
+  "Project roots handed to `agent-repl-switch-to-project', oldest first.
+The selection is commands.el's persp/projectile boundary, so it is
+RECORDED here rather than run -- exactly as the tab teardown is.")
+
 (defun agent-repl-test-verbs--ref (&optional id dir)
   "Return a decoded `WorkspaceRef' plist, echoed verbatim by production."
   (list :id (or id "ws-id-1") :dir (or dir "/tmp/agent-repl-test/ws-1")))
+
+(defun agent-repl-test-verbs--created (&optional ref)
+  "Return the answers alist for a create that SUCCEEDED, minting REF.
+`CreateWorkspaceSuccess' is one of the few answers that is not empty --
+\"Callers learn the identity from the response\" -- so a create test that
+cares what the verb does with the minted identity has to script it."
+  (list (cons :create
+              (list :response
+                    (list :arm :success
+                          :value (list :workspace (or ref (agent-repl-test-verbs--ref))))))))
 
 (defun agent-repl-test-verbs--repo-ref (&optional id dir)
   "Return a decoded `RepositoryRef' plist."
@@ -83,6 +98,7 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--torn-down nil)
          (agent-repl-test-verbs--messages nil)
          (agent-repl-test-verbs--handover nil)
+         (agent-repl-test-verbs--selected nil)
          (agent-repl-test-verbs--answers ,answers))
      (cl-letf* (((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
@@ -103,6 +119,9 @@ answers a bare success, which is what almost every verb's success is."
                  (lambda (ws) (member ws '("main" "none"))))
                 ((symbol-function 'agent-repl--kill-one-workspace)
                  (lambda (ws &optional _p) (push ws agent-repl-test-verbs--torn-down)))
+                ((symbol-function 'agent-repl-switch-to-project)
+                 (lambda (&optional project)
+                   (push project agent-repl-test-verbs--selected)))
                 ((symbol-function 'message)
                  (lambda (fmt &rest args)
                    (push (if args (apply #'format fmt args) fmt)
@@ -535,7 +554,7 @@ daemon starts sending it, with no table to update here."
 
 (ert-deftest agent-repl-verbs-create-command-blank-name-is-absence ()
   "A blank name is ABSENCE -- the daemon mints one -- never an empty string."
-  (agent-repl-test-verbs--with nil
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
@@ -548,7 +567,7 @@ daemon starts sending it, with no table to update here."
 
 (ert-deftest agent-repl-verbs-create-command-prefix-arg-sets-the-parent ()
   "A prefix argument makes the new workspace a CHILD of the current one."
-  (agent-repl-test-verbs--with nil
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
@@ -559,7 +578,7 @@ daemon starts sending it, with no table to update here."
 
 (ert-deftest agent-repl-verbs-fork-command-sets-fork-inside-the-parent ()
   "A fork lives INSIDE the parent: a fork without a parent is unrepresentable."
-  (agent-repl-test-verbs--with nil
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
     (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
                (lambda () (agent-repl-test-verbs--repo-ref)))
               ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
@@ -567,6 +586,62 @@ daemon starts sending it, with no table to update here."
       (should (eq (plist-get (plist-get (agent-repl-test-verbs--request :create) :parent)
                              :fork)
                   t)))))
+
+;;;; ---- Create: standing on what was just created ----
+
+(ert-deftest agent-repl-verbs-create-command-selects-the-created-workspace ()
+  "`SPC TAB n' stands on the workspace it just made.
+Creating one is a statement about where the user intends to work next, so
+the create selects it the same way registering a directory does."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "new-id" "/tmp/agent-repl-test/new"))
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "do a thing"))
+              ((symbol-function 'read-string) (lambda (&rest _) "")))
+      ;; Act.
+      (agent-repl-create-workspace nil)
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected
+                     '("/tmp/agent-repl-test/new"))))))
+
+(ert-deftest agent-repl-verbs-fork-command-selects-the-created-workspace ()
+  "`SPC TAB f' stands on the fork: you forked in order to work in the fork."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created
+                                (agent-repl-test-verbs--ref "fork-id" "/tmp/agent-repl-test/fork"))
+    (cl-letf (((symbol-function 'agent-repl-verbs--read-repository)
+               (lambda () (agent-repl-test-verbs--repo-ref)))
+              ((symbol-function 'agent-repl-verbs--read-prompt) (lambda (_p) "fork it")))
+      ;; Act.
+      (agent-repl-fork-workspace)
+      ;; Assert.
+      (should (equal agent-repl-test-verbs--selected
+                     '("/tmp/agent-repl-test/fork"))))))
+
+(ert-deftest agent-repl-verbs-create-without-select-stands-still ()
+  "A create that did not ask to be selected moves the user NOWHERE.
+`select' is off by default because a one-shot is fire-and-forget and must
+not steal the user's place."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created)
+    ;; Act.
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    ;; Assert.
+    (should-not agent-repl-test-verbs--selected)))
+
+(ert-deftest agent-repl-verbs-create-select-without-a-dir-is-reported ()
+  "A success whose ref carries no dir is REPORTED, never silently skipped.
+The decoder already refuses a success without the ref, so a missing dir is
+a contract breach and the user is owed the reason nothing came up."
+  ;; Arrange.
+  (agent-repl-test-verbs--with (agent-repl-test-verbs--created (list :id "no-dir" :dir ""))
+    ;; Act.
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :select t)
+    ;; Assert.
+    (should-not agent-repl-test-verbs--selected)
+    (should (agent-repl-test-verbs--messaged-p "no directory to switch to"))))
 
 ;;;; ---- Create: the one-shot form and both finish arms ----
 
