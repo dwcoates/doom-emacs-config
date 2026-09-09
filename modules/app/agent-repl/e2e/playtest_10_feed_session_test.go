@@ -90,12 +90,17 @@ const (
 // session's own default model is the catalog's `Fake Opus` row, so "Fake
 // Sonnet" on that button is reachable only through the fallback.
 //
-// The MISSING HOOK is reported rather than worked around: the drawn selector
-// carries no attribute naming the model actually in force -- the button has
-// only its display text and `data-unselected`, and `data-model-option` exists
-// only on the reveal's rows, none of which is marked as the selected one. See
-// the owner's report.
+// THE MISSING HOOK THIS ROW ORIGINALLY REPORTED IS NOW LANDED, and the row
+// asserts it too: `webapp/src/topbar/model.ts` SELECTED_MODEL_ATTRIBUTE puts
+// `data-model` on the `.topbar-model` CONTROL (the wrap, not the button)
+// carrying `AgentModel.name` -- the same echo token `[data-model-option]`
+// carries on the offered rows. So the strip now names the model in force in a
+// vocabulary a reader can check, and D31 pins BOTH: the display name a human
+// sees and the model name underneath it.
 const pt10FallbackModelDisplayName = "Fake Sonnet"
+
+// pt10FallbackModelName is the model on the WIRE, which `data-model` carries.
+const pt10FallbackModelName = "fake-sonnet-5"
 
 // pt10DefaultModelDisplayName is the display name the SAME button carries
 // before the fallback -- the catalog row for `FAKE_DEFAULT_MODEL`. It is named
@@ -412,20 +417,34 @@ func TestPlaytestFeedSession(t *testing.T) {
 					"the topbar's model selector to name the fallback model the vendor swapped to",
 					pt10ModelButtonReads(pt10FallbackModelDisplayName),
 				},
+				{
+					// THE NAME, NOT THE LABEL. The button's text is a display
+					// name and two catalog rows may share one, so this is the
+					// assertion that actually identifies the model in force.
+					"the model control to carry the fallback model's own NAME, not only its display label",
+					`(function () {
+                       var control = document.querySelector(".topbar-model");
+                       return control !== null &&
+                              control.getAttribute("data-model") === ` + jsString(pt10FallbackModelName) + `;
+                     })()`,
+				},
 			},
 			asserted: "`.topbar-model-button` reads exactly `" + pt10FallbackModelDisplayName + "` and carries " +
-				"no `data-unselected` -- the catalog display name for `fake-sonnet-5`, which is the " +
-				"model `TestModelChanged` pins for this scenario, and which is reachable from this " +
-				"session's own default (`" + pt10DefaultModelDisplayName + "`) only through the fallback",
+				"no `data-unselected`, AND `.topbar-model` carries `data-model=\"" + pt10FallbackModelName +
+				"\"` -- the model `TestModelChanged` pins for this scenario, named on the strip in the " +
+				"same vocabulary the offered rows use, and reachable from this session's own default " +
+				"(`" + pt10DefaultModelDisplayName + "`) only through the fallback",
 			expected: "THE TOPBAR'S MODEL SELECTOR NOW NAMES THE FALLBACK MODEL: its button reads " +
 				"\"" + pt10FallbackModelDisplayName + "\" and must NOT still read " +
 				"\"" + pt10DefaultModelDisplayName + "\", which is what the session started on. " +
 				"The feed carries the `!model-fallback` prompt and the answer stating the swap. " +
 				"WHAT THE BUTTON DRAWS IS THE CATALOG'S DISPLAY NAME AND NOT THE MODEL NAME: the wire " +
-				"carries `fake-sonnet-5`, the catalog gives that model the display name " +
-				"\"" + pt10FallbackModelDisplayName + "\", and the button draws the display name. A " +
-				"reviewer looking for the literal `fake-sonnet-5` on the strip will not find it, and " +
-				"that is the product's own choice rather than a defect in this picture.",
+				"carries `" + pt10FallbackModelName + "`, the catalog gives that model the display " +
+				"name \"" + pt10FallbackModelDisplayName + "\", and the button draws the display name. " +
+				"So a reviewer will NOT see the literal `" + pt10FallbackModelName + "` anywhere on " +
+				"the strip, and must not treat its absence as a defect -- the name is carried as the " +
+				"control's own `data-model` attribute, which this row asserts and which no picture can " +
+				"show.",
 		},
 
 		// -------------------------------------------------------------------
@@ -509,15 +528,27 @@ func TestPlaytestFeedSession(t *testing.T) {
 			s.awaitInPage(t, "the "+row.name+" prompt bubble to arrive on the standing tail",
 				pt10UserPromptWithText(row.prompt))
 
-			// THE RUNNING ARM IS AWAITED FIRST, AND THAT IS NOT DECORATION.
-			// Every row shares one session, so the workspace is ALREADY on a
-			// settled arm when a row starts -- a wait for a settled arm would
-			// be satisfied instantly by the PREVIOUS row's finish edge and
-			// would photograph a turn still in flight. Waiting for the turn to
-			// be genuinely running first makes the settle edge this row's own.
-			s.awaitArm(t, s.Name, "the "+row.name+" turn to be genuinely in flight", emGHIRunningArms...)
-			s.awaitArm(t, s.Name, "the "+row.name+" turn to settle", emGHISettledArms...)
-
+			// THIS ROW'S OWN DRAWN EVIDENCE IS WHAT SCOPES THE ROW, and the
+			// ARM IS NOT, which was MEASURED rather than reasoned about.
+			//
+			// Every row shares one session, so the workspace is already on a
+			// settled arm when a row starts and a bare settled-arm wait could
+			// be answered by the PREVIOUS row's finish edge. The obvious
+			// guard -- wait for a running arm first -- does not work here and
+			// must not be reinstated: the fake answers faster than the roster
+			// can be observed running, so it failed with "await the
+			// slash-vendor-answered turn to be genuinely in flight: never
+			// satisfied within 5s; last value was `:done`". The turn had
+			// already finished. That is the product being fast, not wrong.
+			//
+			// So the row is scoped by evidence only IT can produce: every
+			// row's answering prose is distinct, and every row's remaining
+			// hooks (the Nth compacted divider, the compactionFailed arm, the
+			// model button's new name, the fast cell's own state) are
+			// reachable only once that row's turn has landed. Those waits run
+			// FIRST, and the settled-arm wait then follows them -- by which
+			// point this row's answer is already on the page, so a settled arm
+			// is unambiguously this row's.
 			if row.settled != "" {
 				s.awaitInPage(t, "the answering response bubble for "+row.name+" to settle with its own prose",
 					pt10SettledResponseWithProse(row.settled))
@@ -525,6 +556,7 @@ func TestPlaytestFeedSession(t *testing.T) {
 			for _, wait := range row.waits {
 				s.awaitInPage(t, wait.what, wait.expression)
 			}
+			s.awaitArm(t, s.Name, "the "+row.name+" turn to settle", emGHISettledArms...)
 
 			p.capture(row.name,
 				fmt.Sprintf("%s: `%s` typed into the composer and submitted with RET", row.plan, row.prompt),
