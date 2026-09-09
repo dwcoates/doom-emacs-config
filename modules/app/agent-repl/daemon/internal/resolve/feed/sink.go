@@ -190,11 +190,11 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 }
 
 // OnContextCut draws the separation divider a context cut leaves.
-func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, addr sessionwatcher.OutputAddress) {
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, addr sessionwatcher.OutputAddress) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.state(ws)
-	r.drawContextCut(s, agent, cut)
+	r.drawContextCut(s, agent, cut, at)
 }
 
 // OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is

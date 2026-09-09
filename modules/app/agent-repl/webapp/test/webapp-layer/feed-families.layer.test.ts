@@ -34,6 +34,7 @@ import {
   awaitDrawn,
   bootLayer,
   driveTurn,
+  rowID,
   rows,
   submit,
   textOf,
@@ -456,16 +457,27 @@ it(
   TURN_TEST_MS,
 );
 
-/** Drive a scenario whose turn dies, and read the terminal row it added. */
+/**
+ * Drive a scenario whose turn dies, and read the terminal row IT added.
+ *
+ * THE ROW IS IDENTIFIED, NOT COUNTED AND NOT POSITIONED — the same rule
+ * `driveTurn` already carries, and this helper was breaking it. It counted the
+ * terminals and then read `drawn[drawn.length - 1]`, but the feed upserts and
+ * REORDERS, so the last terminal in the DOM is not reliably the one this turn
+ * drew: the assertion read a predecessor's row and found `executionError`
+ * where `!query-eof` wanted `queryDied`. The ids that were not standing before
+ * the submit are exactly this turn's rows.
+ */
 async function died(scenario: string): Promise<HTMLElement> {
-  const before = rows(app, "turnEnded").length;
+  const standing = new Set(rows(app, "turnEnded").map(rowID));
   await submit(app, `!${scenario}`);
   await awaitDrawn(
     app,
-    `the terminal row for !${scenario}`,
-    () => rows(app, "turnEnded").length > before,
+    `the terminal row for !${scenario} (${standing.size} stood before it)`,
+    () => rows(app, "turnEnded").some((row) => !standing.has(rowID(row))),
   );
-  const drawn = rows(app, "turnEnded");
+  const drawn = rows(app, "turnEnded").filter((row) => !standing.has(rowID(row)));
+  expect(drawn.length, `!${scenario} drew no terminal row`).toBeGreaterThan(0);
   return drawn[drawn.length - 1];
 }
 

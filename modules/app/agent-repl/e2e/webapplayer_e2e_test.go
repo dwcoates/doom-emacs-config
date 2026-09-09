@@ -51,39 +51,55 @@ import (
 	"claude-repld/integration/harness"
 )
 
-// WebappLayerTimeout bounds the vitest child process end to end.
+// WebappLayerTimeout bounds the vitest CHILD PROCESS end to end.
 //
-// MEASURED, then set at ~3x the observed max, the same way every other bound
-// in this suite was derived.
+// MEASURED UNDER THE LOAD THE PACKAGE ACTUALLY RUNS AT, then set at ~3x the
+// observed max, the same way every other bound in this suite is derived.
 //
-// Two full runs of all the areas (2026-09-03), per-area vitest child
-// durations: 1.21s, 1.30s, 1.38s, 1.44s, 1.48s, 1.50s, 1.74s, 3.16s — the
-// slowest is the feed-families area (22 real turns in one child). The Go
-// tests wrapping them ran 1.58-3.77s including a full world bring-up each.
-// 3x the 3.16s max is ~9.5s, so 10s.
+// ITS EARLIER DERIVATION WAS TAKEN FROM THE WRONG NUMBER AND THE WRONG
+// CONDITIONS, and that is why it kept failing green areas. It read "per-area
+// vitest child durations: 1.21s ... 3.16s; 3x the 3.16s max is ~9.5s, so 10s",
+// but those are vitest's own `Duration` summary — which begins after npm's
+// wrapper and node's boot and ends before the worker pool's teardown — taken
+// with the layer alone on the box. Nothing ever reported the child's own wall,
+// which is what this constant bounds; it does now, on every run, green or red.
 //
-// AN EARLIER DRAFT CARRIED 60s, THEN 20s, on the theory that a cold Vite
-// transform dominated and could not be measured. That theory was wrong: the
-// transform is ~400ms on every run, cache or no cache (clearing
-// the vite cache changes nothing — vitest transforms sources per run),
-// so there is no hidden cold-start term to leave headroom for.
+// The wall, per area, over fourteen full-package runs at `-parallel 8`
+// (sorted; the last figure in each row is that area's observed maximum):
 //
-// It bounds a HANG, not a synchronization wait: nothing here sleeps, the
+//	cards            3.22 3.47 3.51 3.51 3.55 3.64 3.71 3.92 3.99 4.07 4.13 4.17 5.07 9.23
+//	merge-tabs       1.82 2.07 2.08 2.09 2.32 2.42 2.45 2.58 2.71 2.77 2.93 3.15 4.59 9.11
+//	subfeeds         3.27 3.43 3.44 3.45 3.52 3.61 3.62 3.86 4.06 4.13 4.21 4.62 4.69 8.80
+//	panels           2.22 2.28 2.29 2.35 2.38 2.41 2.49 2.61 2.63 2.79 3.08 4.17 4.48 8.21
+//	refusals         2.30 2.35 2.40 2.45 2.48 2.55 2.66 2.67 2.73 2.90 3.15 3.90 4.55 7.99
+//	roster           2.44 2.44 2.46 2.55 2.67 2.77 2.96 3.07 3.18 3.29 3.31 5.27      7.91
+//	feed-families    6.21 6.83 7.00 7.11 7.49 7.49 7.74 7.78 7.78 7.79 7.98 8.01 8.42
+//	surfaces         2.54 2.57 2.61 2.61 2.65 2.66 2.71 2.75 2.75 2.80 2.85 4.17 4.53 7.69
+//	query-death      2.81 2.85 2.87 2.96 3.04 3.09 3.09 3.13 3.22 3.30 3.34 3.50 3.73 7.05
+//	client-log       3.76 3.83 3.96 3.98 4.07 4.13 4.31 4.34 4.35 4.45 4.62 4.63 4.65 4.84
+//	proof-of-life    3.67 3.67 3.82 3.89 3.92 3.93 4.08 4.10 4.13 4.30 4.41 4.61 4.63 4.72
+//
+// So the median area runs in about three seconds and every one of them has a
+// tail into the eights on a busy run — 10s was ~1.1x the observed max for
+// half the roster, not the ~3x this suite sets its bounds at, and areas kept
+// dying on it while doing nothing wrong. 30s is ~3.2x the 9.23s maximum.
+//
+// FEED-FAMILIES NO LONGER NEEDS A BOUND OF ITS OWN, and the loaded figures are
+// why: it is the area with the longest MEDIAN (24 real turns in one child) but
+// not the longest maximum — cards and merge-tabs both spike higher. One
+// measured default covers them all, and a per-area constant that the data does
+// not support is a number nobody can check.
+//
+// It still bounds a HANG, not a synchronization wait: nothing here sleeps, the
 // child's exit is awaited on its own channel, and the child's own per-site
 // budgets (BOOT_BUDGET_MS and TURN_BUDGET_MS in test/webapp-layer/drive.ts)
 // fail a stuck assertion long before this fires.
 //
-// THE CONSTANT SAID 300s UNTIL 2026-09-04, WHICH THE COMMENT ABOVE AND
-// WEBAPP-LAYER-SPEC.md §E BOTH CONTRADICTED — reported as PERF-SPEC.md §H
-// finding 2 and fixed here to the value both of them state and the
-// measurement above supports. 300s is not a hang bound: it is thirty times
-// the slowest observed child, so a genuinely wedged area would have held its
-// world, its slot and its four processes for five minutes before saying so.
-//
-// AN AREA WHOSE CHILD IS STRUCTURALLY LONGER THAN A FUNCTIONAL ONE DOES NOT
-// RELAX THIS CONSTANT; it passes its own bound to wlChild.WaitFor. The perf
-// area is the first such caller (WebappLayerPerfTimeout).
-const WebappLayerTimeout = 10 * time.Second
+// AN AREA WHOSE CHILD IS STRUCTURALLY LONGER THAN A FUNCTIONAL ONE STILL DOES
+// NOT RELAX THIS CONSTANT; it passes its own bound to wlChild.WaitFor. The
+// restart-handover area is the one such caller (WebappLayerHandoverTimeout),
+// and its child is two whole process lifecycles rather than a slow area.
+const WebappLayerTimeout = 30 * time.Second
 
 // WebappLayerHandoverTimeout bounds the RESTART-HANDOVER area's child, which
 // is structurally longer than a functional area's by two whole process
@@ -838,9 +854,17 @@ func wlRunVitest(t *testing.T, npm, webappDir, vitestFile string, env []string) 
 // act WHILE the page is mounted (§F9 #39, the restart handover). Every other
 // area starts the child and immediately waits, which is wlRunVitest.
 type wlChild struct {
-	t        *testing.T
-	cmd      *exec.Cmd
-	done     chan error
+	t    *testing.T
+	cmd  *exec.Cmd
+	done chan error
+	// file names the area file this child runs, and started is when it was
+	// spawned, so WaitFor can report the CHILD'S OWN WALL. Reported on every
+	// run, green or red, because that wall is the only measurement
+	// WebappLayerTimeout is derivable from and it was previously being
+	// confused with the vitest-internal `Duration` line, which excludes the
+	// npm wrapper, node's own boot and the pool's teardown.
+	file     string
+	started  time.Time
 	tailOnly struct {
 		sync.Mutex
 		lines []string
@@ -870,10 +894,15 @@ type wlChild struct {
 // The slot therefore covers the whole area, and is released at test cleanup,
 // after the world's own teardown has run.
 //
-// Sized at 2 from measurement on a 16-core host: one area alone runs in
-// 2.9-7.4s (its vitest child is 1.2-3.2s of that — WebappLayerTimeout's own
-// note), two together stay inside that spread, and the Go areas' own
-// DefaultTimeout waits keep their measured headroom.
+// SIZED AT THREE, and the figure below is the measurement it is sized on.
+// Against its neighbours at `-parallel 8` on a 16-core host: cap 2 took 31.2s,
+// cap 3 took 20.7s, and cap 4 at `-parallel 12` lost a test. Three is the
+// fastest setting measured green.
+//
+// (This comment read "Sized at 2 …" until 2026-09-09, describing a value the
+// constant has not held since the cap landed — the same kind of stale
+// derivation that made WebappLayerTimeout fail green areas for a year of runs.
+// A number whose stated basis contradicts it cannot be checked by anyone.)
 const wlMaxConcurrentAreas = 3
 
 var wlAreaSlots = make(chan struct{}, wlMaxConcurrentAreas)
@@ -918,7 +947,7 @@ func wlStartVitest(t *testing.T, npm, webappDir, vitestFile string, env []string
 		return nil, fmt.Errorf("starting `npm run test:webapp-layer` in %s: %w", webappDir, err)
 	}
 
-	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1)}
+	child := &wlChild{t: t, cmd: cmd, done: make(chan error, 1), file: vitestFile, started: time.Now()}
 	// UNCONDITIONAL, so no path out of this test leaves a worker pool behind:
 	// the Go side failing its own assertion, a t.Fatal on the way to Wait, a
 	// panic, or the bound firing. Killing an already-exited group is a no-op
@@ -973,6 +1002,8 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 	tail := &c.tailOnly
 	select {
 	case waitErr := <-c.done:
+		wall := time.Since(c.started)
+		c.t.Logf("e2e/webapp-layer: %s child wall %s (bound %s)", c.file, wall.Round(time.Millisecond), bound)
 		if waitErr == nil {
 			return nil
 		}
@@ -987,6 +1018,7 @@ func (c *wlChild) WaitFor(bound time.Duration) error {
 		c.killTree()
 		tail.Lock()
 		defer tail.Unlock()
+		c.t.Logf("e2e/webapp-layer: %s child wall EXCEEDED the %s bound", c.file, bound)
 		return fmt.Errorf("vitest did not exit within %s; last output:\n%s",
 			bound, strings.Join(tail.lines, "\n"))
 	}

@@ -36,10 +36,30 @@ function panels(): HTMLElement[] {
   return app.$$('[data-component="composer"] [data-panel]');
 }
 
-/** Submit a recognized slash command and wait for its panel to be drawn. */
+/**
+ * Submit a recognized slash command and wait for ITS OWN panel to be drawn.
+ *
+ * THE WAIT IS ON A NEW NODE, NOT ON A NON-EMPTY HOST, and the difference is a
+ * whole test's verdict. Every command in this file leaves its panel standing,
+ * so from the second one onward `panels().length > 0` is ALREADY TRUE when the
+ * submission is made: `command` returned before this answer had been applied
+ * at all, and "clears the composer's text when the command is answered" then
+ * read the box while the daemon was still answering and found the literal it
+ * had just typed. Once in eight in-container runs.
+ *
+ * `main.ts`'s `showPanel` removes the stale panels and APPENDS a fresh
+ * element, so a node that is not the one standing before the submit is this
+ * submission's answer and nothing else. Order-independent: the first command
+ * in a file has no standing panel, and `undefined !== node` holds for it too.
+ */
 async function command(literal: string): Promise<HTMLElement> {
+  const standing = panels().at(-1);
   await submit(app, literal);
-  await awaitDrawn(app, `the panel answering ${literal}`, () => panels().length > 0);
+  await awaitDrawn(
+    app,
+    `the panel answering ${literal}`,
+    () => panels().length > 0 && panels().at(-1) !== standing,
+  );
   const drawn = panels();
   return drawn[drawn.length - 1];
 }
@@ -125,15 +145,41 @@ it(
   TURN_TEST_MS,
 );
 
+// §F6 #30 — A RECOGNIZED COMMAND WITH NO PRODUCER DRAWS THE DAEMON'S REFUSAL,
+// and the client invents nothing in its place.
+//
+// `/help` is ruled UNPRODUCED (daemon/ERROR-ARMS.md, "Panel commands with no
+// producer"): `server.Panels` produces `/status`, `/context` and `/mcp`, and
+// every other recognized panel command "answers as `command_refused` before
+// recognition ever reaches a panel". The daemon mirrors that refusal into the
+// root feed as a non-durable card.
+//
+// THIS SCENARIO USED TO ASSERT A HELP PANEL, and it passed for a reason that
+// was not its own: `command()` waited only for `panels().length > 0`, which the
+// PREVIOUS test's `/context` panel already satisfied, so the assertion read
+// that stale panel's text and never looked at what `/help` did. With the wait
+// on this submission's own answer, the truth showed: `/help` draws a
+// `commandRefused` row and no panel, exactly as the contract says.
 it(
-  "draws the help panel's own commands",
+  "draws the daemon's own refusal for a recognized command with no producer, and no panel",
   async () => {
-    // Arrange / Act
-    const panel = await command("/help");
+    // Arrange — a panel from an earlier command is standing, so "no panel was
+    // drawn" is a statement about THIS command rather than about an empty host.
+    const standing = await command("/status");
+    const refusedBefore = rows(app, "commandRefused").length;
 
-    // Assert — the panel carries rows resolved by the daemon; the client only
-    // renders them.
-    expect(panel.textContent?.trim()).not.toBe("");
+    // Act — a command the daemon recognizes and has no producer for.
+    await submit(app, "/help");
+    await awaitDrawn(
+      app,
+      "the daemon's refusal card for /help",
+      () => rows(app, "commandRefused").length > refusedBefore,
+    );
+
+    // Assert — the refusal is the DAEMON's, drawn as its own feed card, and
+    // the standing panel is untouched: nothing invented a help panel here.
+    expect(panels()).toHaveLength(1);
+    expect(panels()[0]).toBe(standing);
   },
   TURN_TEST_MS,
 );

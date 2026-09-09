@@ -624,21 +624,12 @@ func TestSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Act: crash the daemon and cold-boot a successor, which knows the spawn
 	// only from the store's durable rows.
 	successor := adColdBoot(t, w)
-	opened, err := successor.Client().OpenFeed(successor.Ctx(),
-		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed on the cold-booted successor = error %v, want a success", err)
-	}
-	page := opened.Msg.GetSuccess().GetPage().GetSuccess()
-	if page == nil {
-		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a served page", opened.Msg)
-	}
-	bubble := findRow(page.GetRows(), func(row *frontendv1.FeedRow) bool {
-		return subagentBubble(row) != nil
-	})
-	if bubble == nil {
-		t.Fatalf("replayed feed page = %v, want the spawn's bubble drawn from the store's durable rows", page)
-	}
+	// THE REPLAY IS NOT FINISHED WHEN THE BOOT ANSWERS: see
+	// adAwaitReplayedFeedRow (adoption_e2e_test.go) for the sequence that made
+	// this the once-in-nine red it was.
+	bubble := adAwaitReplayedFeedRow(t, successor, ws,
+		"the spawn's bubble drawn from the store's durable rows",
+		func(row *frontendv1.FeedRow) bool { return subagentBubble(row) != nil })
 
 	// Assert: the replayed row addresses the created agent's own feed, so an
 	// expand resolves rather than refusing as feed_undecodable.

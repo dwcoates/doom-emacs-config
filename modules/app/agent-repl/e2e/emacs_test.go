@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1125,6 +1126,83 @@ func (e *Emacs) dumpArtifacts() {
 			e.t.Logf("preserve %s: %v", extra, err)
 		}
 	}
+	e.preserveWorkspaceElispLogs(out, e.box.Scratch())
+}
+
+// preserveWorkspaceElispLogs copies every workspace-scoped ELISP sink this
+// scenario wrote into the artifacts, and it closes a gap that cost a whole
+// diagnosis.
+//
+// The daemon's workspace-bound records are minted under the state root and
+// only SYMLINKED into the workspace (daemon/AGENTS.md "Logging"), so copying
+// the state root collects them. The Emacs side is the other way round: the
+// canonical `<workspace>/.claude/emacs/emacs.log` is the symlink and its
+// durable target is minted in `temporary-file-directory`
+// (`agent-repl--workspace-emacs-log-target`, lisp/core.el), which is outside
+// the state root and is swept with the container.
+//
+// The consequence, observed on a red `TestEmacsHandoverTransfersAtFreeness`:
+// the preserved artifacts held the module's GLOBAL elisp log and nothing else,
+// so the run could be seen to decode two `WatchHostWorkspaceResponse` pushes
+// and then fall silent -- while every record that says what host.el DID with
+// them (`elisp.host.transferred`, `elisp.host.transferred-awaiting-successor`,
+// `elisp.host.transferred-without-successor`, `elisp.host.adopt-*`) is
+// workspace-scoped and had gone with the temp file. The one question the
+// artifacts existed to answer was the one they could not.
+//
+// THE SWEEP IS OVER THE WHOLE SCRATCH SUBTREE, not over `e.Root`. `e.Root` is
+// `<scratch>/emacs`, the Emacs HOME; the workspaces this layer registers and
+// the worktrees the daemon mints for it are `e.Root`'s SIBLINGS under the same
+// scratch directory, so a sweep rooted at `e.Root` finds nothing at all — which
+// is what the first version of this did, silently, on a red run that needed it.
+// Sweeping by SHAPE from the scratch root catches both, with no per-site
+// bookkeeping. `copyTree` resolves symlinks, so what lands in the artifacts is
+// the durable target's own bytes.
+//
+// The count is reported whether or not anything was found: "no workspace elisp
+// sinks" is itself a diagnosis, and reporting only the non-empty case is how
+// an empty sweep went unnoticed.
+func (e *Emacs) preserveWorkspaceElispLogs(out string, root string) {
+	if root == "" {
+		return
+	}
+	copied := 0
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			// An unreadable subtree is reported and stepped over: one
+			// unreachable directory must not cost the sweep every sink
+			// after it.
+			e.t.Logf("preserve workspace elisp logs: walk %s: %v", path, err)
+			return nil
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		// The staged Doom tree and any node_modules under the scratch root
+		// hold tens of thousands of files and no workspace sink; walking them
+		// costs the whole sweep and finds nothing.
+		if entry.Name() == ".emacs.d" || entry.Name() == "node_modules" {
+			return fs.SkipDir
+		}
+		if entry.Name() != "emacs" || filepath.Base(filepath.Dir(path)) != ".claude" {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			e.t.Logf("preserve workspace elisp logs: relate %s: %v", path, relErr)
+			return fs.SkipDir
+		}
+		if copyErr := copyTree(path, filepath.Join(out, "workspace-elisp-logs", rel)); copyErr != nil {
+			e.t.Logf("preserve %s: %v", path, copyErr)
+		} else {
+			copied++
+		}
+		return fs.SkipDir
+	})
+	if err != nil {
+		e.t.Logf("preserve workspace elisp logs under %s: %v", root, err)
+	}
+	e.t.Logf("preserved %d workspace elisp sink(s) from %s under %s", copied, root, filepath.Join(out, "workspace-elisp-logs"))
 }
 
 // messagesTailLines is how much of `*Messages*` a failure carries.

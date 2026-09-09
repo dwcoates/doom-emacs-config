@@ -23,6 +23,10 @@ type RequestGate interface {
 	// Listener wraps the listener this handler serves, so a call counts as
 	// answered only once its bytes have left the socket.
 	Listener(inner net.Listener) net.Listener
+	// AwaitWritesQuiet waits, bounded, for the connections to stop writing,
+	// and reports whether they did. It covers what AwaitQuiet cannot: the
+	// pushes on the STANDING streams, which are not counted calls.
+	AwaitWritesQuiet(bound time.Duration) bool
 }
 
 // Serving is the daemon's one serving handler: h2c over the loopback listener,
@@ -190,6 +194,25 @@ func (s *Serving) AwaitQuiet(bound time.Duration) int {
 		}
 		return left
 	}
+}
+
+// AwaitWritesQuiet waits for the connections to fall silent, so the exit does
+// not close the standing streams over the daemon's own last push.
+//
+// THE COUNTED CALLS ARE NOT THE WHOLE OF WHAT IS OWED. `counted` skips
+// standingStreamPaths deliberately, so `AwaitQuiet` reports zero in flight
+// while a `DaemonShutdownAnnounced` the drain pushed a moment earlier is still
+// on its way onto every WatchDaemon stream. See WriteBarrier.AwaitQuiescent.
+func (s *Serving) AwaitWritesQuiet(bound time.Duration) bool {
+	if s.barrier.AwaitQuiescent(bound) {
+		return true
+	}
+	if s.log != nil {
+		s.log.Warn("daemon.server.await_writes_quiet",
+			"the connections were still writing when the exit's write-quiet bound expired; the standing streams are closed over whatever was still going out",
+			dlog.Context{"bound_ms": bound.Milliseconds()})
+	}
+	return false
 }
 
 // standingStreamPaths are the procedure paths whose handler does not return

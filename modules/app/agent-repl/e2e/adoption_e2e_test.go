@@ -111,23 +111,10 @@ func TestColdBootReadsReplayFromStore(t *testing.T) {
 	// REAL session's turn purely from the store's durable rows (store.md
 	// cursor/replay semantics) — this daemon never started that session
 	// itself.
-	opened, err := successor.Client().OpenFeed(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed on the cold-booted successor = error %v, want a success", err)
-	}
-	page := opened.Msg.GetSuccess().GetPage().GetSuccess()
-	if page == nil {
-		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a served page", opened.Msg)
-	}
-	found := false
-	for _, row := range page.GetRows() {
-		if row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("cold boot's replayed feed page = %v, want the prior REAL session's turn %s replayed from the store", page, turn.GetValue())
-	}
+	adAwaitReplayedFeedRow(t, successor, ws, "the prior REAL session's turn replayed from the store",
+		func(row *frontendv1.FeedRow) bool {
+			return row.GetTurn().GetValue() == turn.GetValue() && row.GetTurnEnded() != nil
+		})
 }
 
 // ===========================================================================
@@ -230,6 +217,51 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 1 {
 		t.Fatalf("the cumulative watch_session log holds %d ignored re-announcements, want exactly 1 (the incumbent's own session watch; the successor's fresh watcher took the facts instead)", got)
 	}
+}
+
+// adAwaitReplayedFeedRow answers DAEMON's first feed row for WS matching PRED,
+// waiting on the feed's OWN PINNED TAIL when the newest page does not carry it
+// yet.
+//
+// A COLD BOOT'S REPLAY IS NOT FINISHED WHEN THE DAEMON ANSWERS, and reading
+// only the opening page assumed it was. `harness.StartDaemon` returns once
+// `daemon.addr` is written and the server is serving; the workspace's surviving
+// shim is adopted, its watches are opened, and the store's durable rows are
+// replayed into the feed AFTER that, on the watcher's own goroutines. So an
+// `OpenFeed` issued on the first line after the boot legitimately serves an
+// empty page, and every assertion about a replayed row read a page the replay
+// had not reached. That is `TestSubagentBubbleFromAReplayIsStillAddressable`
+// failing once in nine in-container runs, and it is latent in every other
+// cold-boot page read.
+//
+// The wait is on the DAEMON'S OWN PUSH rather than on a clock: the replay
+// upserts each row and publishes it, and the tail this page pinned delivers
+// exactly those. Its bound is a `DefaultTimeout` child of the run's budget,
+// never the run's budget itself.
+func adAwaitReplayedFeedRow(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+	t.Helper()
+	opened, err := d.Client().OpenFeed(d.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = error %v, want a success", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a success", opened.Msg)
+	}
+	page := success.GetPage().GetSuccess()
+	if page == nil {
+		t.Fatalf("OpenFeed on the cold-booted successor = %v, want a served page", opened.Msg)
+	}
+	for _, row := range page.GetRows() {
+		if pred(row) {
+			return row
+		}
+	}
+	stream := d.WatchFeedOn(d.Client(), success.GetWatch())
+	defer stream.Close()
+	ctx, cancel := context.WithTimeout(d.Ctx(), DefaultTimeout)
+	defer cancel()
+	return harness.AwaitView(t, ctx, stream, what, pred)
 }
 
 // adColdBoot SIGKILLs w's daemon and boots a fresh one against the SAME
