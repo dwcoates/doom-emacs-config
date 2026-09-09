@@ -1070,7 +1070,12 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 			return fmt.Errorf("stop session for %q: close the watcher: %w", ws, err)
 		}
 	}
-	if err := session.client.Kill(shimclient.KillAttribution{
+	// THE CALLER'S BOUND REACHES THE KILL. It did not: this handed Kill no
+	// context at all, so the drain's stand-down sat through the whole SIGTERM
+	// grace and the escalation after it whatever its own budget said. The
+	// bound is real now, and shimclient.GracefulKillBound is what a caller
+	// must leave for a graceful stop to fit inside it.
+	if err := session.client.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "workspace.stop",
 		Reason: "the workspace's session was stopped",
 		Force:  force,
