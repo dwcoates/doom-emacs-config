@@ -343,7 +343,7 @@ func (s *playtestScenario) awaitArm(t *testing.T, ws, what string, arms ...strin
 // every caller of `captureArm` depends on. What is photographed is the TAB
 // BAR, and the tab bar declares its own overrides: the three IN-FLIGHT merge
 // arms and `:vendor-blocked` are painted differently there. Reading the
-// shared table wrote "carries NO status disc at all" into the manifest for a
+// shared table wrote "carries NO arm color at all" into the manifest for a
 // merging tab the product paints PURPLE -- a sentence that sends a reviewer
 // to file the harness's own mistake as a defect in the paint. The tab-bar
 // table is DERIVED from the shared one, so it can never disagree about which
@@ -395,18 +395,35 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
 
 // armSentence is the manifest sentence for a tab painted from one arm.
 //
+// WHAT THE PRODUCT ACTUALLY PAINTS, WHICH IS NOT A DISC. `agent-repl--render-tab`
+// draws each tab as a bracketed index -- `agent-repl-tab-bracket-format`, "[N]" --
+// followed by the workspace name, and it is the BRACKETED INDEX that carries the
+// arm's color, as the bracket run's BACKGROUND. The name beside it carries the
+// tab's own name face, which is Doom's selected-tab face on the selected tab, so
+// the name's color says which tab is selected and never which arm it is on. A
+// sentence promising a "status disc beside the name" sends a reviewer hunting a
+// glyph the module never draws, and every owner's manifest inherits this sentence.
+//
 // "none" is a real answer and not a missing one: the color table maps
-// `:none` and the whole merge family to it, and the tab then carries NO disc
-// at all. Saying "a none-colored disc" would send a reviewer looking for
-// something that is not there.
+// `:none` and the whole merge family to it, and the index badge then carries
+// NO arm color at all -- it is drawn in the tab's ordinary background.
+// Saying "a none-colored badge" would send a reviewer looking for something
+// that is not there.
 func armSentence(ws, arm, color string) string {
 	if color == "none" {
-		return fmt.Sprintf("The tab for %q carries NO status disc at all: its arm is %s, which the "+
-			"module's own color table maps to no color.", ws, arm)
+		return fmt.Sprintf("The tab for %q carries NO arm color at all on its %s index badge: its arm "+
+			"is %s, which the module's own color table maps to no color, so the badge is drawn in the "+
+			"tab's ordinary background and only the name beside it is faced.", ws, tabBadgeShape, arm)
 	}
-	return fmt.Sprintf("The tab for %q carries a %s status disc beside its name: its arm is %s, and "+
-		"%s is the color the module's own table gives that arm.", ws, strings.ToUpper(color), arm, color)
+	return fmt.Sprintf("The tab for %q is painted %s on its %s index badge, the bracketed number drawn "+
+		"BEFORE the workspace name: its arm is %s, and %s is the color the module's own table gives that "+
+		"arm, carried as the badge's background. The name beside the badge carries the tab's selection "+
+		"face, not the arm color.", ws, strings.ToUpper(color), tabBadgeShape, arm, color)
 }
+
+// tabBadgeShape is the shape of the run the arm color lands on, spelled the
+// way `agent-repl-tab-bracket-format` draws it.
+const tabBadgeShape = "`[N]`"
 
 // captureArm takes one tab-bar picture whose subject is the arm a workspace
 // is painted with, re-reading the arm at the moment of the capture and
