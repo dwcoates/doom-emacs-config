@@ -19,6 +19,10 @@ import { conclude, scenario } from "./support.js";
 
 const FILE = "/w/s/example.ts";
 
+/** The path and body a Write CREATES, so its result is `type: "create"`. */
+const NEW_FILE = "/w/s/created.ts";
+const NEW_FILE_BODY = "export const created = missing;\n";
+
 const FILE_BODY = [
   "export const one = 1;",
   "export const two = 2;",
@@ -313,6 +317,58 @@ const IDE_DIAGNOSTICS = scenario({
   },
 });
 
+const IDE_DIAGNOSTICS_WRITE = scenario({
+  name: "ide-diagnostics-write",
+  prompt: "!ide-diagnostics-write",
+  emits: "a `Write` that CREATES a file, then the vendor's `diagnostics` attachment reporting a typescript error in the written file",
+  writes: "the tool_use line, the tool_result line, a `diagnostics` attachment line, the closing text line",
+  arms: "AgentWrite.diagnostics (AgentDiagnosticsReport joined to the last WRITE by adjacency)",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "ide-diagnostics-write" }, "fake write-then-diagnostics turn");
+    const call = ctx.toolUse("Write", { file_path: NEW_FILE, content: NEW_FILE_BODY });
+    // GROUNDED IN TWO REAL ARTIFACTS, exactly as IDE_DIAGNOSTICS above is:
+    // the `Write` result shape is the capture's, field for field —
+    // `testdata/captures/write-created-and-updated/files/projects/<slug>/<session>.jsonl`
+    // records `{type:"create", filePath, content, structuredPatch: [],
+    // originalFile: null, userModified: false}` for a file the vendor created,
+    // and an empty patch is what the vendor really sends for a creation (unlike
+    // an EDIT, where an empty patch is a shape the vendor never sends).
+    ctx.toolResult(call, "File created successfully.", {
+      type: "create",
+      filePath: NEW_FILE,
+      content: NEW_FILE_BODY,
+      structuredPatch: [],
+      originalFile: null,
+      userModified: false,
+    });
+    // The attachment is the harvested one, field for field:
+    // `modules/app/agent-repl/testdata/corpus/attachments/diagnostics.jsonl`.
+    // No capture can ground this arm on ANY host — the diagnostics record only
+    // exists when an editor integration is connected, which is why
+    // `ide-diagnostics-after-edit` holds no attachment at all — so the corpus
+    // fixture is the evidence for the attachment on both siblings alike.
+    ctx.attachment({
+      type: "diagnostics",
+      files: [
+        {
+          uri: NEW_FILE,
+          diagnostics: [
+            {
+              message: "Cannot find name 'missing'.",
+              severity: "Error",
+              range: { start: { line: 0, character: 23 }, end: { line: 0, character: 30 } },
+              source: "typescript",
+              code: "2304",
+            },
+          ],
+        },
+      ],
+      isNew: true,
+    });
+    conclude(ctx, "The new file introduced a type error.");
+  },
+});
+
 const GREP_CONTENT = scenario({
   name: "grep-content",
   prompt: "!grep-content",
@@ -414,6 +470,7 @@ export const FILE_SCENARIOS = [
   WRITE_UPDATE,
   EDIT,
   IDE_DIAGNOSTICS,
+  IDE_DIAGNOSTICS_WRITE,
   GREP_CONTENT,
   GREP_FILES,
   GREP_COUNT,

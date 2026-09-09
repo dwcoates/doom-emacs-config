@@ -46,6 +46,18 @@ the row below) by lengthening the shared world's own prompt list until
 `compaction-directed` row is now a real `compact_boundary` capture, not a
 `Not enough messages` non-event.
 
+NO CAPTURE CAN GROUND THE `diagnostics` ATTACHMENT, on this or any host. The
+record only exists when an editor integration is connected to the scratch cwd,
+which is why `ide-diagnostics-after-edit` — the capture named for it — holds no
+attachment at all: the run shelled out to `tsc` instead. The attachment's shape
+is grounded in `testdata/corpus/attachments/diagnostics.jsonl` (a real harvested
+attachment) on both of the mock's diagnostics scenarios alike. `!ide-diagnostics`
+composes it with that capture's real `Edit` result; `!ide-diagnostics-write`
+composes it with the real `Write` `type: "create"` result recorded in
+`write-created-and-updated`, so the fold's write arm has the same grade of
+evidence its edit arm has. `!ide-diagnostics-write` therefore has NO capture
+directory and no row in the table below, and must not be given one.
+
 Three TURN-STOP FAILURE terminals are DECLARED-ONLY — the mock keeps them
 because `sdk.d.ts` declares them, but no capture reaches them, so nothing here
 grounds the pairing and none may be asserted from a golden:
