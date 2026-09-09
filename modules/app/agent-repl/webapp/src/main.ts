@@ -6,21 +6,28 @@
  * failure overlay, which is the only surface that can report the boot itself
  * going wrong.
  *
- * THE ORDER IS FORCED, not chosen:
- *   1. the shell, so a broken `index.html` fails by name here rather than
- *      inside a component's first draw;
- *   2. the page address, because everything below is addressed to a workspace
- *      and a page without one has nothing to show;
- *   3. the transport and client, because the LOGGER's sink is an rpc;
- *   4. the failure overlay, so there is somewhere to put a boot failure before
- *      anything that can fail is started;
- *   5. the logger, bound to this page's identity;
+ * THE ORDER IS FORCED, not chosen, and the forcing constraint is that
+ * `log()` REFUSES to emit without an installed sink:
+ *   1. the page address, because everything below is addressed to a workspace
+ *      and a page without one has nothing to show — and it logs nothing;
+ *   2. the transport and client, because the LOGGER's sink is an rpc on that
+ *      client — and neither logs;
+ *   3. the logger, bound to this page's identity, BEFORE the first thing that
+ *      logs;
+ *   4. the shell, which logs, so a broken `index.html` fails by name here
+ *      rather than inside a component's first draw;
+ *   5. the failure overlay, which also logs, so there is somewhere to put a
+ *      boot failure before anything that can fail is started;
  *   6. everything else.
+ *
+ * Steps 4 and 5 used to come before step 3, which meant `boot` threw on its
+ * own first log line every single time and the page came up empty. See the
+ * comment inside `boot`.
  *
  * A THROW ANYWHERE IN HERE IS `boot_failed` — the one failure that cannot be
  * carried the way the others are, since the machinery that would carry it is
  * the machinery that failed to build. It is drawn from whatever exists at the
- * time: the overlay if step 4 got that far, and the emergency console path if
+ * time: the overlay if step 5 got that far, and the emergency console path if
  * it did not, which is the documented exception to "no direct console".
  */
 import "./styles.css";
@@ -78,16 +85,36 @@ function clientLogSink(getClient: () => AgentReplClient, workspace: WorkspaceRef
 }
 
 export async function boot(): Promise<void> {
-  const shell = shellElements(document);
   let overlay: FailureOverlayHandle | null = null;
   try {
+    // THE LOGGER GOES IN BEFORE THE FIRST THING THAT LOGS, AND THAT ORDER IS
+    // THE WHOLE OF THIS BLOCK'S SHAPE.
+    //
+    // `log()` REFUSES to emit without an installed sink -- `emit` throws "the
+    // webapp logger is not installed" rather than discarding the record --
+    // and TWO of the boot's own steps log as their first statement:
+    // `shellElements` announces the shell it is resolving, and
+    // `mountFailureOverlay` announces its mount. Both used to run before
+    // `setLogger`, so `boot` threw at the one moment `overlay` was still
+    // null: the catch below had nothing to draw on, the failure went to
+    // `console.error`, and THE PAGE CAME UP EMPTY -- no stream opened, no
+    // card shown, nothing said. It could never have booted at all.
+    //
+    // Found by the playtest (e2e/PLAYTEST-SPEC.md), which is the first thing
+    // in this repo to look at the RUNNING webapp: `boot` has no test of its
+    // own, and `test/setup.ts` installs a logger for every suite, so the one
+    // condition this failed under is the only one no suite creates.
+    //
+    // Everything above `setLogger` is silent by construction, and must stay
+    // so: `pageAddress`, `workspaceRef`, the transport, the client,
+    // `mintConnectionId` and `bindLogContext` do not log, which is what
+    // makes them safe to run before the sink exists. Anything added here
+    // that logs reintroduces exactly this defect.
     const address = pageAddress(window.location.search);
     const workspace = workspaceRef(address.workspaceId, address.workspaceDir);
 
     const transport = createDaemonTransport(window.location.origin);
     const client = createAgentReplClient(transport);
-
-    overlay = mountFailureOverlay(shell.failureOverlay);
 
     const connectionId = mintConnectionId();
     bindLogContext({
@@ -96,6 +123,16 @@ export async function boot(): Promise<void> {
       workspace_dir: workspace.dir,
     });
     setLogger(new ForwardingLogger(clientLogSink(() => client, workspace)));
+
+    // AND THE SHELL IS RESOLVED INSIDE THE TRY, not above it, because it
+    // logs and therefore has to come after the sink. Its failure now goes
+    // through `reportBootFailure` like every other one, which for a page
+    // missing its own `#failure-overlay` is still the console path -- there
+    // is nothing to draw a card on -- but it is at least LOGGED now rather
+    // than thrown past the reporter.
+    const shell = shellElements(document);
+
+    overlay = mountFailureOverlay(shell.failureOverlay);
 
     const ticker = createTicker();
     const ctx = createAppContext({
