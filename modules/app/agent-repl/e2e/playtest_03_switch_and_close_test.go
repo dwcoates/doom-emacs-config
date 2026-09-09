@@ -47,16 +47,25 @@ func awaitPanelFollows(t *testing.T, s *playtestScenario, ws, gone string) {
 }
 
 // panelWindowsForm answers non-nil when WS's OWN panel pair -- its webview
-// buffer and its composer -- are both in windows of the frame.
+// buffer and its composer -- are BOTH in windows of the frame, and
+// panelGoneForm answers non-nil when NEITHER of them is.
 //
-// It is ONE form used in both directions: `awaitPanelShown` waits for it to
-// answer non-nil and `awaitPanelHidden` waits for it to answer nil, so "the
-// panel is up" and "the panel is down" cannot drift into two different
-// notions of what the panel IS.
+// TWO FORMS, NOT ONE NEGATED. "Both shown" and "neither shown" are not each
+// other's complement: a frame carrying the webview but not the composer
+// satisfies the negation of the first while the panel is plainly still
+// half on the glass, and waiting on that negation would accept it. The
+// hidden claim has to be made in its own right or it is the weaker one.
 func panelWindowsForm(ws string) string {
 	return `(let ((shown (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
              (and (member (agent-repl--frontend-webview-buffer-name ` + elispString(ws) + `) shown)
                   (member (buffer-name (agent-repl--input-buffer ` + elispString(ws) + `)) shown)
+                  t))`
+}
+
+func panelGoneForm(ws string) string {
+	return `(let ((shown (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
+             (and (not (member (agent-repl--frontend-webview-buffer-name ` + elispString(ws) + `) shown))
+                  (not (member (buffer-name (agent-repl--input-buffer ` + elispString(ws) + `)) shown))
                   t))`
 }
 
@@ -84,13 +93,13 @@ func awaitPanelShown(t *testing.T, s *playtestScenario, ws string) {
 		panelWindowsForm(ws), func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 }
 
-// awaitPanelHidden is the same claim negated: the frame is no longer showing
-// WS's panel pair.
+// awaitPanelHidden asserts the frame is showing NEITHER of WS's panel
+// buffers -- not merely that it has stopped showing both of them.
 func awaitPanelHidden(t *testing.T, s *playtestScenario, ws string) {
 	t.Helper()
 	s.E.AwaitEvalFor(emacsVerbBound,
-		fmt.Sprintf("the frame to stop showing %q's webview and composer", ws),
-		panelWindowsForm(ws), func(raw json.RawMessage) bool { return isJSONNull(raw) })
+		fmt.Sprintf("no window of the frame to be showing %q's webview or its composer", ws),
+		panelGoneForm(ws), func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 }
 
 // tablineDrawn answers the tab bar's rendered line as PLAIN TEXT.
