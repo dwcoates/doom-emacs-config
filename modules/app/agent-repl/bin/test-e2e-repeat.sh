@@ -99,6 +99,78 @@ else
 fi
 rm -rf "$root" "$out_root"
 
+# --- the load gate waits for a quiet box, and records what it started at ----
+root=$(make_root 'exit 0')
+out_root=$(mktemp -d)
+# A stub `uptime` first on PATH: two loaded readings, then a quiet one, so the
+# gate has to actually WAIT rather than take the first value it sees.
+stub_dir=$(mktemp -d)
+cat > "$stub_dir/uptime" <<'STUB'
+#!/usr/bin/env bash
+n=$(cat "$AGENT_REPL_TEST_UPTIME_COUNT" 2>/dev/null || echo 0)
+n=$((n + 1)); echo "$n" > "$AGENT_REPL_TEST_UPTIME_COUNT"
+if (( n < 3 )); then
+    echo "12:00  up 1:00, 1 user, load averages: 42.00 40.00 39.00"
+else
+    echo "12:00  up 1:00, 1 user, load averages: 1.50 2.00 3.00"
+fi
+STUB
+chmod +x "$stub_dir/uptime"
+export AGENT_REPL_TEST_UPTIME_COUNT="$stub_dir/count"
+PATH="$stub_dir:$PATH" "$root/bin/e2e-repeat.sh" --runs 1 --root "$out_root" >/dev/null 2>&1
+if [[ $(cat "$out_root/run-001/start-load" 2>/dev/null) == "1.50" ]]; then
+    pass "a run waits for a quiet box and records the load it started at"
+else
+    fail "a run waits for a quiet box and records the load it started at"          "start-load was '$(cat "$out_root/run-001/start-load" 2>/dev/null)', wanted 1.50"
+fi
+rm -rf "$root" "$out_root" "$stub_dir"
+
+# --- --no-load-gate starts under load, and still records it -----------------
+root=$(make_root 'exit 0')
+out_root=$(mktemp -d)
+stub_dir=$(mktemp -d)
+cat > "$stub_dir/uptime" <<'STUB'
+#!/usr/bin/env bash
+echo "12:00  up 1:00, 1 user, load averages: 42.00 40.00 39.00"
+STUB
+chmod +x "$stub_dir/uptime"
+PATH="$stub_dir:$PATH" "$root/bin/e2e-repeat.sh" --runs 1 --no-load-gate --root "$out_root" >/dev/null 2>&1
+if [[ $(cat "$out_root/run-001/start-load" 2>/dev/null) == "42.00" ]]; then
+    pass "--no-load-gate runs under load and still records it"
+else
+    fail "--no-load-gate runs under load and still records it"          "start-load was '$(cat "$out_root/run-001/start-load" 2>/dev/null)'"
+fi
+rm -rf "$root" "$out_root" "$stub_dir"
+
+# --- a host with no load average is said, never assumed quiet ---------------
+root=$(make_root 'exit 0')
+out_root=$(mktemp -d)
+stub_dir=$(mktemp -d)
+printf '#!/usr/bin/env bash
+echo "no load line here"
+' > "$stub_dir/uptime"
+chmod +x "$stub_dir/uptime"
+PATH="$stub_dir:$PATH" "$root/bin/e2e-repeat.sh" --runs 1 --root "$out_root" >"$out_root/driver.log" 2>&1
+if [[ $(cat "$out_root/run-001/start-load" 2>/dev/null) == "unavailable" ]] &&
+   grep -q "reports no load average" "$out_root/driver.log"; then
+    pass "a host with no load average is said out loud, not assumed quiet"
+else
+    fail "a host with no load average is said out loud, not assumed quiet"          "start-load '$(cat "$out_root/run-001/start-load" 2>/dev/null)'"
+fi
+rm -rf "$root" "$out_root" "$stub_dir"
+
+# --- a malformed load bound is refused, never defaulted ---------------------
+root=$(make_root 'exit 0')
+out_root=$(mktemp -d)
+"$root/bin/e2e-repeat.sh" --runs 1 --load-max zero --root "$out_root" >/dev/null 2>&1
+status=$?
+if (( status == 2 )); then
+    pass "a non-numeric --load-max is refused"
+else
+    fail "a non-numeric --load-max is refused" "exit status was $status"
+fi
+rm -rf "$root" "$out_root"
+
 # --- a malformed run count is refused, never defaulted ----------------------
 root=$(make_root 'exit 0')
 out_root=$(mktemp -d)
