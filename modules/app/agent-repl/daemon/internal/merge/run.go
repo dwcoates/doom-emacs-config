@@ -332,21 +332,30 @@ func (r *run) method(ctx context.Context) (outcome, error) {
 	if !r.emacsRepo {
 		// EVERY OTHER REPO: nothing between the two prompts. Landing, tests and
 		// PR work belong to the prompts there.
-		if parked, err := r.postPrompt(ctx); err != nil || parked {
-			return outcome{parked: parked}, err
-		}
-		return outcome{}, nil
+		return outcome{parked: r.afterAction(ctx)}, nil
 	}
 	out, err := r.emacsMethod(ctx)
 	if err != nil || out.parked || out.failed != "" {
 		return out, err
 	}
-	if _, err := r.postPrompt(ctx); err != nil {
-		// A post-prompt failure NEVER fails the run: it rides the terminal.
+	out.parked = r.afterAction(ctx)
+	return out, nil
+}
+
+// afterAction runs the post-merge prompts for EITHER method. It is one helper
+// on purpose: the two methods once carried their own spelling of this and drifted,
+// and every other repository's merge failed on an after-action the contract says
+// can never fail a run. A FAILURE never fails the run — it is surfaced as this
+// WARN, with the failure's own text, and the post-prompt tab has already settled
+// failed with its composed summary. A PARK is not a failure: it stops the run
+// short of concluding and holds its lease, so it is reported to the caller.
+func (r *run) afterAction(ctx context.Context) bool {
+	parked, err := r.postPrompt(ctx)
+	if err != nil {
 		r.o.log(ctx, r.ws).Warn("daemon.merge.post_prompt", "the post-merge prompt failed; the merge still landed",
 			dlog.Context{"workspace": string(r.ws), "error": err.Error()})
 	}
-	return out, nil
+	return parked
 }
 
 // emacsMethod is the no-ff merge, its conflicts, the gate and its fixes.
