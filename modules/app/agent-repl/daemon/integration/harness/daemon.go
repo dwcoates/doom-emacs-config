@@ -42,7 +42,32 @@ import (
 // getting its own fresh one — gets its own longer, justified override
 // through Opts.Timeout (see HandoverChainTimeout) instead of a bigger
 // default for everyone.
+//
+// IT BOUNDS ONE WAIT, NOT A RUN. The Daemon's own context gets
+// runBudgetWaits times this, because a run is a SEQUENCE of waits and a
+// budget that only fits one of them makes the last call in a test answer for
+// the time every earlier call spent. Every wait the harness makes takes a
+// fresh child of this size off that budget (Daemon.waitCtx), so a wait
+// bounded by it never means the whole test.
 const DefaultTimeout = 5 * time.Second
+
+// runBudgetWaits is how many DefaultTimeout-sized waits a Daemon's own context
+// is sized to hold.
+//
+// DefaultTimeout BOUNDS ONE WAIT; THE DAEMON'S CONTEXT IS A WHOLE-RUN BUDGET,
+// and the two were the same number, which made every test's whole run as short
+// as its single longest permitted wait. A test that boots a daemon, opens a
+// workspace, drives a turn and then asks the daemon to stop makes FOUR waits on
+// one context, and the last of them was answering `deadline_exceeded` for
+// budget the first three had spent — reporting the stop as the slow step when
+// the stop measured 9ms p50 and 15ms max across 104 e2e runs.
+//
+// Sized off what a whole run actually contains: five DefaultTimeout waits plus
+// one drain.DefaultStandBound stand-down is 30s, and a run that exceeds that is
+// wedged rather than slow. It is a MULTIPLE rather than its own constant so an
+// Opts.Timeout override, which widens the per-wait bound for a structurally
+// longer run, widens that run's budget in the same proportion.
+const runBudgetWaits = 6
 
 // HandoverChainTimeout bounds the few tests whose single Daemon context must
 // span an entire self-reload handover: a merge landing, the rollout trigger,
@@ -204,8 +229,10 @@ type Daemon struct {
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
-	t          *testing.T
-	ctx        context.Context
+	t   *testing.T
+	ctx context.Context
+	// waitBound is ONE wait's failure bound; ctx above is the whole run's.
+	waitBound  time.Duration
 	cmd        *exec.Cmd
 	stderrPath string
 	client     agentreplv1connect.AgentReplClient
@@ -386,7 +413,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	d.waitBound = timeout
+	// THE RUN BUDGET, NOT ONE WAIT'S BOUND. See runBudgetWaits: every wait the
+	// harness makes carves its own `timeout`-sized child off this, so the two
+	// promises stay separate.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout*runBudgetWaits)
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
@@ -622,9 +653,11 @@ func (d *Daemon) AwaitAddrFile() string {
 	return addr
 }
 
-// awaitFile polls for a file, bounded by the daemon's context.
+// awaitFile polls for a file, bounded by ONE wait's bound off the run budget.
 func (d *Daemon) awaitFile(path string) string {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -636,8 +669,8 @@ func (d *Daemon) awaitFile(path string) string {
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s: %v\nstderr:\n%s", path, d.ctx.Err(), d.Stderr())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s: %v\nstderr:\n%s", path, wait.Err(), d.Stderr())
 		}
 	}
 }
@@ -645,6 +678,8 @@ func (d *Daemon) awaitFile(path string) string {
 // AwaitFileGone waits for a path to disappear.
 func (d *Daemon) AwaitFileGone(path string) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -653,15 +688,17 @@ func (d *Daemon) AwaitFileGone(path string) {
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s to be removed: %v", path, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s to be removed: %v", path, wait.Err())
 		}
 	}
 }
 
-// AwaitFileExists waits for a path to appear, bounded by the daemon's context.
+// AwaitFileExists waits for a path to appear, bounded by ONE wait's bound.
 func (d *Daemon) AwaitFileExists(path string) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -670,8 +707,8 @@ func (d *Daemon) AwaitFileExists(path string) {
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s to appear: %v", path, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s to appear: %v", path, wait.Err())
 		}
 	}
 }
@@ -732,6 +769,17 @@ func (d *Daemon) HTTP() *http.Client { return &http.Client{} }
 
 // Ctx is the context every call in the test is bounded by.
 func (d *Daemon) Ctx() context.Context { return d.ctx }
+
+// waitCtx bounds ONE wait, off the daemon's whole-run budget.
+//
+// A wait is the harness's own failure detector, and its bound is
+// Opts.Timeout (DefaultTimeout by default). Reading d.ctx directly instead
+// would hand a wait whatever the run had left — everything from the full
+// budget down to nothing, depending only on what ran before it — so a slow
+// early step would surface as a timeout on a later, blameless one.
+func (d *Daemon) waitCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(d.ctx, d.waitBound)
+}
 
 // PID is the daemon process's id.
 func (d *Daemon) PID() int { return d.cmd.Process.Pid }
@@ -927,16 +975,18 @@ func isZombie(pid int) bool {
 }
 
 // AwaitExit waits for the process to leave and answers its exit status,
-// failing the test if it outlives the context.
+// failing the test if it outlives ONE wait's bound.
 func (d *Daemon) AwaitExit() int {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	done := make(chan int, 1)
 	go func() { done <- d.Wait() }()
 	select {
 	case code := <-done:
 		return code
-	case <-d.ctx.Done():
-		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", d.ctx.Err(), d.Stderr())
+	case <-wait.Done():
+		d.t.Fatalf("daemon did not exit: %v\nstderr:\n%s", wait.Err(), d.Stderr())
 		return -1
 	}
 }
