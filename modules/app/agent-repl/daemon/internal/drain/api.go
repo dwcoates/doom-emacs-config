@@ -175,6 +175,23 @@ type Announcer interface {
 // been told to stand down and does not answer is exactly the wedged shim that
 // grace exists for -- and a healthy round trip here is single-digit
 // milliseconds, so five seconds is three orders of magnitude of headroom.
+//
+// IT MUST STRICTLY EXCEED THE SHIM'S OWN LAST RESORT, and that is the reason it
+// is not shrunk to the measured headroom. The whole of the shim's teardown runs
+// inside the `KillSession` this bounds, and the teardown's own bounded stages
+// (`WATCHER_CONCLUSION_BUDGET_MS`, agent-shim/claude/shim/src/engine/session.ts)
+// can be spent four times back to back: 4 x 1s = 4s. A stand bound at or below
+// that would give up on a shim that was still legitimately working and report
+// it as leaked -- and the shim's own last resort could never be reached at all.
+// The two were both 5s, set independently, which is exactly that case. One
+// second of margin is what separates them now; MEASURED, the whole stop takes
+// 9ms p50 and 15ms max across 104 e2e runs, so no healthy shim is anywhere
+// near either number.
+//
+// `now` FORCES, so the supervisor's kill grace is NOT inside this budget: a
+// forced Kill skips the SIGTERM wait and goes straight to SIGKILL and the reap.
+// The graceful path (the idle sweep's `KillSession(..., false)`) is the one
+// that pays the grace.
 const DefaultStandBound = 5 * time.Second
 
 // ExitFunc performs the daemon's orderly exit: flush the in-flight writes and

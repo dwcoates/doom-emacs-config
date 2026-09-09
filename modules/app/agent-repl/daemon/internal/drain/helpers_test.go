@@ -200,6 +200,8 @@ type fakeStand struct {
 	wedge bool
 	// wedgeKill wedges only the stand-down.
 	wedgeKill bool
+	// wedgeKillOnWS wedges the stand-down of NAMED workspaces only.
+	wedgeKillOnWS map[ids.WorkspaceID]bool
 
 	hibernated []ids.WorkspaceID
 	killed     []killCall
@@ -215,10 +217,11 @@ type killCall struct {
 
 func newFakeStand() *fakeStand {
 	return &fakeStand{
-		answer:       make(map[ids.WorkspaceID]*shimv1.HibernateResponse),
-		hibernateErr: make(map[ids.WorkspaceID]error),
-		killErr:      make(map[ids.WorkspaceID]error),
-		kills:        make(chan killCall, 16),
+		answer:        make(map[ids.WorkspaceID]*shimv1.HibernateResponse),
+		hibernateErr:  make(map[ids.WorkspaceID]error),
+		killErr:       make(map[ids.WorkspaceID]error),
+		wedgeKillOnWS: make(map[ids.WorkspaceID]bool),
+		kills:         make(chan killCall, 16),
 	}
 }
 
@@ -248,11 +251,27 @@ func (s *fakeStand) KillSession(ctx context.Context, ws ids.WorkspaceID, force b
 	s.killed = append(s.killed, call)
 	err := s.killErr[ws]
 	s.kills <- call
-	if s.wedge || s.wedgeKill {
+	// A DEAD CONTEXT IS ANSWERED, NOT IGNORED. The real stand is a Connect
+	// round trip: handed a context that is already done it never reaches the
+	// shim. A fake that stood a session down on an expired budget anyway would
+	// hide exactly the defect the bound-derivation tests are about.
+	if cerr := ctx.Err(); cerr != nil {
+		return cerr
+	}
+	if s.wedge || s.wedgeKill || s.wedgeKillOnWS[ws] {
 		<-ctx.Done()
 		return ctx.Err()
 	}
 	return err
+}
+
+// wedgeKillOn wedges ONE workspace's stand-down, leaving its siblings
+// answering. It is how a test states "this shim will not go" without also
+// saying it of the workspaces the pass must still reach.
+func (s *fakeStand) wedgeKillOn(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wedgeKillOnWS[ws] = true
 }
 
 // wedgeKillOnly leaves the directive answering and wedges only the

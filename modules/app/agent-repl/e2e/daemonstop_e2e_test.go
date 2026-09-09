@@ -22,6 +22,7 @@
 package e2e
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -77,7 +78,18 @@ func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 
 	// Act: exactly what Emacs sends (lisp/daemon.el's
 	// `agent-repl-frontend-daemon-stop`).
-	resp, err := w.Client().UpdateShutdownSchedule(w.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+	//
+	// ON ITS OWN BOUND, NOT ON WHAT THE RUN HAS LEFT. w.Ctx() is the WHOLE
+	// RUN's budget, and everything above has already spent out of it: a real
+	// daemon boot, a store, a sidecar, a real Node shim spawn and a turn driven
+	// to an open permission ask. Handing that remainder to the stop makes this
+	// call answer for time it did not spend -- the stop itself measures 9ms p50
+	// and 15ms max across 104 runs of this shape, so a `deadline_exceeded` here
+	// on a shared budget names the wrong step. DefaultTimeout is ~330x the
+	// measured max, which is a failure bound for the stop and nothing else.
+	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancelStop()
+	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
 			Reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
 				Operator: &agentreplv1.DrainReasonOperator{Note: "emacs"},

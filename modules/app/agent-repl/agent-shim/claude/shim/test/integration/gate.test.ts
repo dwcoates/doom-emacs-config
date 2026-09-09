@@ -1013,6 +1013,39 @@ describe("pending-callback liveness", () => {
     stream.close();
   });
 
+  test("a forced KillSession during an open ask concludes it PROMPTLY, not on a budget", async () => {
+    // THE ASK IS BEING ABANDONED, NOT ANSWERED, so nothing in the teardown has
+    // anything to wait for: the gate resolves every pending callback as denied
+    // before the vendor is touched, and each tail ends as soon as it has served
+    // the book's head. Every wait the teardown makes is a LAST RESORT with a
+    // budget behind it, and a regression that makes one of them the mechanism
+    // would still pass the liveness test above — it would just cost a budget.
+    // So this one pins the TIME, not merely the outcome.
+    //
+    // `!perm-hold` PARKS after the ask however it resolves, so the turn is
+    // genuinely in flight and the interrupt is the only terminal it can reach —
+    // the shape the daemon's immediate stop meets in the field.
+    //
+    // MEASURED: 9ms, with the `WatchAgent` tail standing. The bound is 250ms —
+    // ~28x that, and deliberately BELOW the 500ms conclusion budget this
+    // harness spawns its shims with, so a single stage falling back on its
+    // budget fails here instead of passing slowly.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-hold" }));
+    await awaitPermissionStart(stream);
+
+    const started = Date.now();
+    await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+    const elapsedMs = Date.now() - started;
+
+    expect(elapsedMs).toBeLessThan(250);
+    stream.close();
+  });
+
   test("UpdateAgent.stop during an open ask denies it and interrupts the turn", async () => {
     // A STOP IS A TEARDOWN PATH LIKE ANY OTHER. The stop resolves every pending
     // callback as denied BEFORE it interrupts, because an unresolved
