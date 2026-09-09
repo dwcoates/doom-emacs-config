@@ -123,6 +123,123 @@ const playtestSettleBound = 2 * time.Second
 // copy out of tmpfs, so a shorter one would buy nothing but copies.
 const playtestSettleInterval = pollInterval
 
+// playtestPaintFrames is how many ANIMATION FRAMES the page must deliver,
+// after the capture forced its redraw, before the picture is taken.
+//
+// WHAT THIS CURES, and it is the same one defect wearing two faces.
+//
+// An `xwidget-webkit` webview on X is OFFSCREEN-RENDERED: WebKit paints into
+// a GTK offscreen surface, and those pixels reach the glass ONLY when
+// Emacs's own redisplay copies that surface into the frame while drawing the
+// xwidget's glyph. So a capture's redraw copies WHATEVER THE SURFACE HELD AT
+// THAT INSTANT. If WebKit has taken the DOM change but not yet produced a
+// frame for it, the copy is of the previous page state -- and the picture is
+// a stale webview under a DOM assertion that legitimately passed. Worse, the
+// frame WebKit then produces raises a damage signal, and the redisplay that
+// signal schedules is INCREMENTAL: it draws the xwidget glyph into the back
+// buffer and swaps, so the glass gets a current webview inside a buffer that
+// carries none of the chrome the capture's full redraw had put in the OTHER
+// buffer. Both were observed, in three runs of one owner's section: a picture
+// of an empty feed whose DOM held two settled bubbles, and a picture of a
+// current webview with no tab bar and no mode lines at all.
+//
+// Neither is a torn frame, which is why `settleFrame` never caught them: the
+// stale screen is perfectly still, so two consecutive reads agree and the
+// capture reports settled=true on a lie.
+//
+// So the capture WAITS FOR THE PAGE'S OWN FRAMES before its final redraw.
+// TWO is the smallest count that proves anything: the first
+// `requestAnimationFrame` callback runs BEFORE that frame is painted, and the
+// second runs only once the first frame has been produced -- so two
+// callbacks mean a frame carrying the current DOM exists to be copied. One
+// would only mean the page was asked.
+const playtestPaintFrames = 2
+
+// playtestPaintStateGlobal is where the page keeps one paint request's
+// progress between the probe's issue and the probe's readback.
+//
+// It is per-request rather than a single slot: `xwidget-webkit-execute-script`
+// is asynchronous and the probe issues its script again on every poll, so a
+// script that started a fresh frame chain each time would never finish one.
+// Keying by the capture's own token makes the second and later issues pure
+// READS of the chain the first issue started.
+const playtestPaintStateGlobal = "__agentReplPlaytestPaint"
+
+// playtestPaintGateScript builds the page-side script for one paint request.
+//
+// It answers "yes" once the page has delivered playtestPaintFrames frames
+// for THIS token, and otherwise a "no:" carrying the count it is at -- the
+// same shape `pageYes` uses, and for the same reason: a wait that fails
+// prints its last value, so the value has to say what the page was doing.
+func playtestPaintGateScript(token string) string {
+	frames := strconv.Itoa(playtestPaintFrames)
+	key := jsString(token)
+	store := "window." + playtestPaintStateGlobal
+	return `(function () {
+                   ` + store + ` = ` + store + ` || {};
+                   var state = ` + store + `[` + key + `];
+                   if (!state) {
+                     state = ` + store + `[` + key + `] = { frames: 0 };
+                     var tick = function () {
+                       state.frames += 1;
+                       if (state.frames < ` + frames + `) { requestAnimationFrame(tick); }
+                     };
+                     requestAnimationFrame(tick);
+                   }
+                   if (state.frames >= ` + frames + `) { return "yes"; }
+                   return "no: the page has delivered " + state.frames + " of ` + frames + `" +
+                          " animation frames since the capture forced its redraw";
+                 })()`
+}
+
+// jsString renders a Go string as a JavaScript string literal.
+//
+// It lives HERE, in the untagged half of the mechanism, rather than beside
+// the playbooks that mostly call it: the paint gate below is compiled by the
+// ordinary `go test` so its unit tests need no sandbox, and one escaping
+// shared by the selectors and the gate is the only way the two cannot drift.
+// The selectors here carry double quotes, so single quotes are the delimiter
+// and the two characters that could still end the literal are escaped.
+func jsString(s string) string {
+	out := make([]rune, 0, len(s)+2)
+	out = append(out, '\'')
+	for _, r := range s {
+		if r == '\'' || r == '\\' {
+			out = append(out, '\\')
+		}
+		out = append(out, r)
+	}
+	return string(append(out, '\''))
+}
+
+// countColorWithin counts how many pixels of IMG are within TOLERANCE of
+// WANT on every channel.
+//
+// It is what turns "the glass carries this change" into a number. A capture
+// asserting a solid region it just painted into the page cannot ask for an
+// EXACT color -- the region's edges are antialiased and a scrollbar or a
+// selection may sit over part of it -- so the measure is a count of pixels
+// near the color, held to a floor, rather than an equality anywhere.
+func countColorWithin(img *image.RGBA, want color.RGBA, tolerance uint8) int {
+	near := func(a, b uint8) bool {
+		if a > b {
+			a, b = b, a
+		}
+		return b-a <= tolerance
+	}
+	n := 0
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if near(c.R, want.R) && near(c.G, want.G) && near(c.B, want.B) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // ---------------------------------------------------------------------------
 // XWD
 // ---------------------------------------------------------------------------
@@ -473,6 +590,111 @@ func TestPlaytestABlankFrameIsUnderTheFloorAndADrawnOneIsOver(t *testing.T) {
 	}
 }
 
+// The paint gate is the piece of the capture a human looking at a picture
+// cannot check either, and for the same reason as the decoder: a gate that
+// silently waits for the WRONG thing produces a picture that still looks
+// like a picture. So its script is built by a pure function and pinned here.
+
+func TestPlaytestPaintGateScriptIsAboutItsOwnToken(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		token string
+		want  string
+	}{
+		{"an ordinary capture token", "capture-1", `['capture-1']`},
+		{"a second capture, whose slot must not be the first's", "capture-2", `['capture-2']`},
+		{"a token carrying the quote that delimits it", "cap'ture", `['cap\'ture']`},
+		{"a token carrying the escape character", `cap\ture`, `['cap\\ture']`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			script := playtestPaintGateScript(tc.token)
+			if !strings.Contains(script, playtestPaintStateGlobal+tc.want) {
+				t.Errorf("the gate for %q reads %s%s nowhere in:\n%s",
+					tc.token, playtestPaintStateGlobal, tc.want, script)
+			}
+		})
+	}
+}
+
+func TestPlaytestPaintGateWaitsForTheMeasuredFrameCount(t *testing.T) {
+	t.Parallel()
+	// The count is the whole claim: one frame proves only that the page was
+	// ASKED, because the first requestAnimationFrame callback runs before
+	// that frame is painted. A gate that stopped naming the constant would
+	// wait for a number nobody measured.
+	script := playtestPaintGateScript("capture-1")
+	want := "state.frames >= " + strconv.Itoa(playtestPaintFrames)
+	if !strings.Contains(script, want) {
+		t.Errorf("the gate does not answer on %q, so it is not waiting for the measured %d frames:\n%s",
+			want, playtestPaintFrames, script)
+	}
+}
+
+func TestPlaytestPaintGateDiagnosesItsOwnNo(t *testing.T) {
+	t.Parallel()
+	// A wait that fails prints its last value, and the value has to say what
+	// the page was doing -- the same rule pageYes follows.
+	script := playtestPaintGateScript("capture-1")
+	if !strings.Contains(script, `return "yes"`) {
+		t.Error("the gate never answers \"yes\", so no wait on it could be satisfied")
+	}
+	if !strings.Contains(script, `"no: the page has delivered " + state.frames`) {
+		t.Errorf("the gate's \"no\" does not carry the frame count it is at:\n%s", script)
+	}
+}
+
+func TestPlaytestCountsThePixelsNearAColor(t *testing.T) {
+	t.Parallel()
+	// A 4x4 image: the top half is the wanted color exactly, the third row is
+	// two channels off it, and the bottom row is nothing like it.
+	want := color.RGBA{R: 0xff, G: 0x00, B: 0xff, A: 0xff}
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for x := 0; x < 4; x++ {
+		img.SetRGBA(x, 0, want)
+		img.SetRGBA(x, 1, want)
+		img.SetRGBA(x, 2, color.RGBA{R: 0xfd, G: 0x02, B: 0xff, A: 0xff})
+		img.SetRGBA(x, 3, color.RGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})
+	}
+
+	tests := []struct {
+		name      string
+		tolerance uint8
+		want      int
+	}{
+		{"exactly the color, and nothing else counted", 0, 8},
+		{"a tolerance too small to reach the near row", 1, 8},
+		{"a tolerance that reaches the near row", 2, 12},
+		{"a tolerance that still cannot reach an unrelated color", 8, 12},
+		{"a tolerance wide enough to swallow the whole image", 0xff, 16},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := countColorWithin(img, want, tc.tolerance); got != tc.want {
+				t.Errorf("counting within %d of %v answered %d, want %d", tc.tolerance, want, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlaytestCountsNoPixelsOfAColorThatIsNotThere(t *testing.T) {
+	t.Parallel()
+	// The zero the defect produced: the proof region was in the DOM and not
+	// on the glass, so the capture carried none of its color at all.
+	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			img.SetRGBA(x, y, color.RGBA{R: 0x20, G: 0x20, B: 0x20, A: 0xff})
+		}
+	}
+	if got := countColorWithin(img, color.RGBA{R: 0xff, B: 0xff, A: 0xff}, 8); got != 0 {
+		t.Errorf("a frame with none of the color counted %d pixels of it, want 0", got)
+	}
+}
+
 func TestPlaytestGeometryIsTheDisplaysOwn(t *testing.T) {
 	t.Parallel()
 	// The manifest declares a geometry and the assertions hold every capture
@@ -505,6 +727,19 @@ type playbook struct {
 	Name string
 	// Dir is that directory, made once.
 	Dir string
+
+	// awaitPaint blocks until the webview has delivered
+	// playtestPaintFrames animation frames raised AFTER it was called, and
+	// answers how long that took. See playtestPaintFrames: without it a
+	// capture photographs whatever the webview's offscreen surface happened
+	// to hold, which is not necessarily the DOM the step just asserted.
+	//
+	// IT IS NIL UNTIL A PANEL IS OPEN, and that is a real state rather than
+	// an unset option: several playbooks photograph an editor with no
+	// workspace registered in it at all, and there is no page in those
+	// frames to have painted anything. `playtestScenario.openPanel` installs
+	// it the moment one exists.
+	awaitPaint func() time.Duration
 
 	step     int
 	manifest *os.File
@@ -617,12 +852,17 @@ func (p *playbook) note(act, asserted string) {
 // picture against. The last of those is never asserted, because what the
 // picture SHOWS is the reviewer's judgment and the whole reason this suite
 // exists.
-func (p *playbook) capture(step, act, asserted, expected string) {
+// It answers the decoded capture, so a caller that has a MECHANICAL claim
+// about the pixels -- the substrate's own proof that the glass carries the
+// DOM change, in playtest_00_feed_tail_test.go -- can make it on the very
+// image that was written. Every other caller ignores it: what a picture
+// SHOWS is the reviewer's judgment.
+func (p *playbook) capture(step, act, asserted, expected string) *image.RGBA {
 	p.t.Helper()
 	p.step++
 	name := fmt.Sprintf("%02d-%s.png", p.step, step)
 
-	// THE WHOLE FRAME IS REDRAWN, TWICE, AND THAT IS A MEASUREMENT.
+	// THE WHOLE FRAME IS REDRAWN, AND THAT IS A MEASUREMENT.
 	//
 	// The tab bar is repainted by Emacs's C redisplay, which keeps the last
 	// items vector it built and compares the next one with `equal` -- a
@@ -634,26 +874,20 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 	// capture never busts anything: `force-mode-line-update` makes redisplay
 	// rebuild the items, and `redisplay` runs it now. A tab bar wrong after
 	// that is wrong in the product.
-	//
-	// WHY `redraw-frame`, AND WHY TWICE. Emacs draws this frame double
-	// buffered and swaps with XdbeCopied, which promises the back buffer a
-	// copy of the front after each swap. This X server does not keep that
-	// promise: measured, a tab bar drawn in one redisplay was on the glass,
-	// gone after the next redisplay that changed anything at all, and back
-	// after the one after that -- the two buffers alternate, and Emacs,
-	// trusting the copy, redraws only the glyphs it believes changed. An
-	// incremental redisplay therefore lands the new tab bar in ONE buffer,
-	// and which buffer is on the glass at the read is parity. Garbaging the
-	// frame makes the next redisplay draw EVERY glyph; doing it twice puts
-	// the complete current frame in both buffers, so the read is right
-	// whichever one is in front.
-	p.e.Eval(`(progn
-             (force-mode-line-update t)
-             (redraw-frame)
-             (redisplay t)
-             (redraw-frame)
-             (redisplay t)
-             t)`)
+	p.redrawFrame()
+
+	// AND THE PAGE'S OWN FRAMES, BETWEEN THE TWO REDRAWS. The redraw above
+	// is the kick -- it is what an idle Emacs on an Xvfb nobody types into
+	// needs before it draws what it has already decided. The redraw below is
+	// what COPIES the webview's offscreen surface onto the glass, and it has
+	// to happen after the page has produced a frame for the DOM this step
+	// asserted, or the copy is of the previous page state and the damage
+	// signal for the real frame lands mid-capture. See playtestPaintFrames.
+	paint := time.Duration(0)
+	if p.awaitPaint != nil {
+		paint = p.awaitPaint()
+	}
+	p.redrawFrame()
 
 	body, settled, took := p.settleFrame()
 	img, err := decodeXWD(body)
@@ -693,8 +927,34 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 		note = fmt.Sprintf(" _(the screen was still changing after %s, so this frame may be torn)_", playtestSettleBound)
 	}
 	p.write("| %02d | %s | %s | `%s` | %s%s |\n", p.step, act, asserted, name, expected, note)
-	p.t.Logf("playtest phase capture-%02d-%s settled=%v took %s (%d distinct colors)",
-		p.step, step, settled, took.Round(time.Millisecond), colors)
+	p.t.Logf("playtest phase capture-%02d-%s settled=%v paint %s settle %s (%d distinct colors)",
+		p.step, step, settled, paint.Round(time.Millisecond), took.Round(time.Millisecond), colors)
+	return img
+}
+
+// redrawFrame makes the next redisplay draw EVERY glyph of the frame, twice,
+// and runs it now.
+//
+// WHY `redraw-frame`, AND WHY TWICE. Emacs draws this frame double buffered
+// and swaps with XdbeCopied, which promises the back buffer a copy of the
+// front after each swap. This X server does not keep that promise: measured,
+// a tab bar drawn in one redisplay was on the glass, gone after the next
+// redisplay that changed anything at all, and back after the one after that
+// -- the two buffers alternate, and Emacs, trusting the copy, redraws only
+// the glyphs it believes changed. An incremental redisplay therefore lands
+// the new tab bar in ONE buffer, and which buffer is on the glass at the
+// read is parity. Garbaging the frame makes the next redisplay draw EVERY
+// glyph; doing it twice puts the complete current frame in both buffers, so
+// the read is right whichever one is in front.
+func (p *playbook) redrawFrame() {
+	p.t.Helper()
+	p.e.Eval(`(progn
+             (force-mode-line-update t)
+             (redraw-frame)
+             (redisplay t)
+             (redraw-frame)
+             (redisplay t)
+             t)`)
 }
 
 // settleFrame reads the framebuffer until two consecutive reads agree, and
