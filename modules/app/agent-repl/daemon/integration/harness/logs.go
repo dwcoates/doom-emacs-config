@@ -478,6 +478,13 @@ func (d *Daemon) CumulativeWorkspaceLogOperationCount(workspaceDir, operation st
 // wrote it — the cross-restart counterpart of
 // AwaitWorkspaceLogOperationCount, for a test that crashes a daemon and cold
 // boots its successor.
+//
+// USE AwaitCumulativeWorkspaceLogMessageCount INSTEAD whenever the assertion
+// that follows is about a PARTICULAR record. Most operations are written by
+// several different messages, so this returns on whichever lands first and the
+// assertion then reads a log its own record has not reached — a race that read
+// as a real cardinality failure twice in eight runs. This one is right only
+// when the count of the operation IS the subject.
 func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
@@ -493,6 +500,49 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operati
 		case <-ticker.C:
 		case <-wait.Done():
 			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, wait.Err())
+		}
+	}
+}
+
+// CumulativeWorkspaceLogMessageCount answers how many records a workspace's
+// daemon sink holds under an operation whose message contains substr, across
+// every runtime that wrote it.
+func (d *Daemon) CumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr string) int {
+	d.t.Helper()
+	seen := 0
+	for _, r := range ReadCumulativeWorkspaceLog(d.t, workspaceDir, "daemon") {
+		if r.Operation == operation && strings.Contains(r.Message, substr) {
+			seen++
+		}
+	}
+	return seen
+}
+
+// AwaitCumulativeWorkspaceLogMessageCount waits for `n` records under
+// `operation` whose message contains substr.
+//
+// WAIT FOR THE RECORD YOU ARE ABOUT TO ASSERT ON, not for a count its
+// NEIGHBOURS also satisfy. An operation is written by several distinct
+// messages — `daemon.sessionwatcher.watch_session` carries "session watch
+// opened", "took the session facts..." and "ignored a re-announced..." alike —
+// so a wait on the operation's count returns as soon as the FIRST of them
+// lands and the assertion then reads a log the record it wants has not reached.
+// That is what failed TestSessionStartedReAnnouncedOnEveryNewWatch twice in
+// eight in-container runs: the successor's "session watch opened" satisfied the
+// count, and "took the session facts" was still on its way.
+func (d *Daemon) AwaitCumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr string, n int) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		seen := d.CumulativeWorkspaceLogMessageCount(workspaceDir, operation, substr)
+		if seen >= n {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %d cumulative %q records under %s for workspace %s (saw %d): %v", n, substr, operation, workspaceDir, seen, d.ctx.Err())
 		}
 	}
 }
