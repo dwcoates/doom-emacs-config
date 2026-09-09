@@ -805,6 +805,141 @@ A zero-length second line would not occupy the pixel row the pinned
         (should (string-blank-p (nth 1 lines)))
         (should (= 80 (length (nth 1 lines))))))))
 
+;;;; ---- Tests: the render key (structural repaint identity) ----
+
+(ert-deftest agent-repl-test-tabline-render-key-advances-when-only-a-face-changes ()
+  "Two renders equal in content but different in face get DIFFERENT keys.
+This is the whole point: the tab bar's C-side items cache compares with
+`equal', which ignores faces, so a face-only arm change must be made a
+content change or it is never repainted."
+  ;; Arrange
+  (let ((agent-repl--tabline-render-identities (make-hash-table :test 'eq))
+        (red (propertize "[1] ws " 'face '(:background "#cc3333")))
+        (green (propertize "[1] ws " 'face '(:background "#1a7a1a"))))
+    ;; Act
+    (let ((first (agent-repl--tabline-render-key red 'frame-a))
+          (second (agent-repl--tabline-render-key green 'frame-a)))
+      ;; Assert
+      (should (equal red green))
+      (should-not (equal first second))
+      (should (get-text-property 0 'invisible first))
+      (should (get-text-property 0 'invisible second)))))
+
+(ert-deftest agent-repl-test-tabline-render-key-holds-when-the-render-is-identical ()
+  "An identical render keeps its key, so an unchanged bar is not repainted."
+  ;; Arrange
+  (let ((agent-repl--tabline-render-identities (make-hash-table :test 'eq))
+        (render (propertize "[1] ws " 'face '(:background "#cc3333"))))
+    ;; Act
+    (let ((first (agent-repl--tabline-render-key render 'frame-a))
+          (second (agent-repl--tabline-render-key
+                   (propertize "[1] ws " 'face '(:background "#cc3333"))
+                   'frame-a)))
+      ;; Assert
+      (should (equal first second)))))
+
+(ert-deftest agent-repl-test-tabline-render-key-is-per-frame ()
+  "Each frame keeps its own generation, so two frames rendering
+differently do not thrash each other's identity."
+  ;; Arrange
+  (let ((agent-repl--tabline-render-identities (make-hash-table :test 'eq))
+        (a (propertize "a" 'face 'bold))
+        (b (propertize "b" 'face 'bold)))
+    ;; Act
+    (agent-repl--tabline-render-key a 'frame-a)
+    (agent-repl--tabline-render-key b 'frame-b)
+    (let ((a-again (agent-repl--tabline-render-key a 'frame-a)))
+      ;; Assert
+      (should (equal a-again (propertize "1" 'invisible t))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-changes-content-when-the-arm-changes ()
+  "The drawn string differs by CONTENT, not only by face, across an arm change.
+Same workspaces, same toggle, same selection; only the roster arm moved.
+If the two strings were `equal' the tab bar would keep painting the old
+arm until the dwell heartbeat's next tick."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((persp-names-cache '("ws1"))
+          (agent-repl--tabline-space-toggle nil)
+          (arm :thinking))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-display-state)
+                 (lambda (_ws) arm)))
+        ;; Act
+        (cl-flet ((visible (line)
+                    (apply #'string
+                           (cl-loop for i below (length line)
+                                    unless (get-text-property i 'invisible line)
+                                    collect (aref line i)))))
+          (let ((thinking (agent-repl-workspace-tabline-formatted)))
+            (setq arm :done)
+            (let ((done (agent-repl-workspace-tabline-formatted)))
+              ;; Assert: the visible characters are identical, the string is not.
+              (should (equal (visible thinking) (visible done)))
+              (should-not (equal thinking done)))))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-keeps-content-when-nothing-changed ()
+  "Two renders of an unchanged world are `equal', so no repaint is forced."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (let ((persp-names-cache '("ws1"))
+          (agent-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-display-state)
+                 (lambda (_ws) :thinking)))
+        (should (equal (agent-repl-workspace-tabline-formatted)
+                       (agent-repl-workspace-tabline-formatted)))))))
+
+(ert-deftest agent-repl-test-roster-push-repaints-the-tab-bar ()
+  "A roster push drives the tab-bar repaint itself, not the heartbeat."
+  ;; Arrange
+  (let ((redraws 0))
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
+               (lambda () (cl-incf redraws))))
+      ;; Act
+      (run-hook-with-args 'agent-repl-roster-update-functions 'roster)
+      ;; Assert
+      (should (memq #'agent-repl-status-repaint-on-roster-push
+                    agent-repl-roster-update-functions))
+      (should (= 1 redraws)))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-one-workspace-one-tab ()
+  "One registered workspace is drawn as exactly one tab."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "solo" :project-dir "/tmp/solo")
+    (let ((persp-names-cache '("solo"))
+          (agent-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "solo"))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+        (let ((visible (substring-no-properties
+                        (agent-repl-workspace-tabline-formatted))))
+          (should (= 1 (cl-count ?\[ visible)))
+          (should (string-match-p "\\[1\\] solo" visible)))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-two-workspaces-two-tabs ()
+  "Two registered workspaces are drawn as exactly two tabs, in order."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "first" :project-dir "/tmp/first")
+    (agent-repl--ws-put "second" :project-dir "/tmp/second")
+    (let ((persp-names-cache '("first" "second"))
+          (agent-repl--tabline-space-toggle nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "second"))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
+        (let ((visible (substring-no-properties
+                        (agent-repl-workspace-tabline-formatted))))
+          (should (= 2 (cl-count ?\[ visible)))
+          (should (string-match-p "\\[1\\] first .*\\[2\\] second" visible)))))))
+
 ;;;; ---- Tests: current-workspace-name-segment (extracted from +dwc/) ----
 
 (ert-deftest agent-repl-test-current-workspace-name-segment-is-invisible ()

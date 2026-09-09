@@ -28,6 +28,8 @@ import {
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { Code, ConnectError } from "@connectrpc/connect";
+// Connect's own spelling of a code, the one `PageSubscriptionFailed` carries.
+import { codeToString } from "@connectrpc/connect/protocol-connect";
 
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
@@ -37,13 +39,41 @@ import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { DaemonHoldTray } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
-import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
-import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
-import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
-import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
-import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
-import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
-import { WatchWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import {
+  WatchDaemonResponseSchema,
+  type WatchDaemonRequest,
+  type WatchDaemonResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import {
+  WatchFeedResponseSchema,
+  type WatchFeedRequest,
+  type WatchFeedResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
+import {
+  WatchFooterResponseSchema,
+  type WatchFooterRequest,
+  type WatchFooterResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import {
+  WatchTopbarResponseSchema,
+  type WatchTopbarRequest,
+  type WatchTopbarResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
+import {
+  WatchWorkspaceRosterResponseSchema,
+  type WatchWorkspaceRosterRequest,
+  type WatchWorkspaceRosterResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import {
+  WatchDaemonHoldsResponseSchema,
+  type WatchDaemonHoldsRequest,
+  type WatchDaemonHoldsResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
+import {
+  WatchWebWorkspaceResponseSchema,
+  type WatchWebWorkspaceRequest,
+  type WatchWebWorkspaceResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -84,9 +114,19 @@ import { SendLoginInputResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import {
   LoginTerminalOutputSchema,
   type LoginTerminalOutput,
+  type WatchLoginTerminalRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
 import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 import type { WatchHostWorkspaceResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
+import {
+  PageAttachedSchema,
+  PageFrameSchema,
+  PageSubscriptionEndedSchema,
+  WatchPageResponseSchema,
+  type PageFrame,
+  type SubscribePageRequest,
+  type WatchPageResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb";
 import {
   emptyFeedPage,
   emptyFooterView,
@@ -290,6 +330,31 @@ export interface FakeDaemon {
    * abort) rather than poll `liveStreams` on a timer.
    */
   awaitStreamClosed(rpc: RpcName, workspace?: string, feed?: FeedKey): Promise<void>;
+
+  // --- the page's one stream ----------------------------------------------
+  /**
+   * Every page id holding a `WatchPage` stream right now.
+   *
+   * A page holds ONE connection, so this is the count a leak shows up in: two
+   * entries for one document means the mux opened a second stream.
+   */
+  attachedPages(): string[];
+  /**
+   * The live subscription ids on PAGE, in the order they were subscribed.
+   *
+   * THIS IS WHERE A LEAK IS VISIBLE. A collapsed bubble, a switched workspace
+   * or a cancelled view that stopped drawing but never unsubscribed still
+   * appears here, costing the daemon work for a reader that is gone.
+   * Defaults to the only attached page when there is exactly one.
+   */
+  pageSubscriptions(page?: string): string[];
+  /**
+   * Kill the page's own stream WITHOUT a terminal frame — a dropped link.
+   *
+   * Every subscription riding it dies with it, which is what the client's
+   * degraded state and its re-subscribe are the answer to.
+   */
+  endPageStream(page?: string): void;
 }
 
 const key = (workspace: string, feed: FeedKey): string => `${workspace} ${feed}`;
@@ -718,6 +783,292 @@ export function createFakeDaemon(): FakeDaemon {
     for (const reg of targets) reg.channel.push(message);
   };
 
+  // -------------------------------------------------------------------------
+  // ONE SOURCE PER STANDING VIEW, SERVED TWO WAYS
+  //
+  // A browser page multiplexes every standing watch onto `WatchPage`, because
+  // it holds about six connections per host over HTTP/1.1 and a
+  // server-streaming call pins one for its whole life
+  // (endpoint_watch_page.proto). The contract there is that A SUBSCRIPTION IS
+  // EXACTLY THE STREAM IT REPLACES: the same request, the same replay, the same
+  // pushes, the same refusal.
+  //
+  // So the fake keeps ONE generator per view and serves it from BOTH the
+  // dedicated rpc and `SubscribePage`. A second implementation behind the mux
+  // could answer a suite differently from the rpc it stands for, and the
+  // suite would be proving the stand-in rather than the app.
+  // -------------------------------------------------------------------------
+
+  const rosterSource = (
+    request: WatchWorkspaceRosterRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchWorkspaceRoster", request);
+    consumeFailure("watchWorkspaceRoster");
+    const { channel, iterate } = openStream("watchWorkspaceRoster", "", signal);
+    channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { roster })));
+    return iterate();
+  };
+
+  const webWorkspaceSource = (
+    request: WatchWebWorkspaceRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchWebWorkspace", request);
+    consumeFailure("watchWebWorkspace");
+    const workspace = request.workspace?.id ?? "";
+    const { iterate } = openStream("watchWebWorkspace", workspace, signal);
+    return iterate();
+  };
+
+  const daemonSource = (
+    request: WatchDaemonRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchDaemon", request);
+    consumeFailure("watchDaemon");
+    const { iterate } = openStream("watchDaemon", "", signal);
+    return iterate();
+  };
+
+  const topbarSource = (
+    request: WatchTopbarRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchTopbar", request);
+    consumeFailure("watchTopbar");
+    const workspace = request.workspace?.id ?? "";
+    const { channel, iterate } = openStream("watchTopbar", workspace, signal);
+    channel.push(
+      taint(
+        "watchTopbar",
+        create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
+      ),
+    );
+    return iterate();
+  };
+
+  const footerSource = (
+    request: WatchFooterRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchFooter", request);
+    consumeFailure("watchFooter");
+    const workspace = request.workspace?.id ?? "";
+    const { channel, iterate } = openStream("watchFooter", workspace, signal);
+    channel.push(
+      taint(
+        "watchFooter",
+        create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
+      ),
+    );
+    return iterate();
+  };
+
+  const holdsSource = (
+    request: WatchDaemonHoldsRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchDaemonHolds", request);
+    consumeFailure("watchDaemonHolds");
+    const workspace = request.workspace?.id ?? "";
+    const { channel, iterate } = openStream("watchDaemonHolds", workspace, signal);
+    channel.push(
+      taint(
+        "watchDaemonHolds",
+        create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }),
+      ),
+    );
+    return iterate();
+  };
+
+  const feedSource = (
+    request: WatchFeedRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchFeed", request);
+    consumeFailure("watchFeed");
+    const token = request.watch?.value ?? "";
+    const target = tokenFeeds.get(token);
+    if (!target) {
+      throw new ConnectError(`unknown feed watch token: ${JSON.stringify(token)}`, Code.NotFound);
+    }
+    const { iterate } = openStream("watchFeed", target.workspace, signal, target.feed);
+    return iterate();
+  };
+
+  const loginTerminalSource = (
+    request: WatchLoginTerminalRequest,
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    record("watchLoginTerminal", request);
+    consumeFailure("watchLoginTerminal");
+    const workspace = request.workspace?.id ?? "";
+    const { channel, iterate } = openStream("watchLoginTerminal", workspace, signal);
+    // The scrollback replays FIRST, exactly as the daemon replays the pty's
+    // buffer to a newly attached viewer, before any live byte arrives.
+    for (const chunk of loginScrollback.get(workspace) ?? []) {
+      channel.push(
+        taint(
+          "watchLoginTerminal",
+          create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
+        ),
+      );
+    }
+    return iterate();
+  };
+
+  /**
+   * Open the source one `SubscribePage` arm stands for.
+   *
+   * The switch is exhaustive over the request oneof: a NEW arm in the proto
+   * fails to compile here rather than becoming a silently unserved
+   * subscription, which is the same rule the client's own mux follows.
+   */
+  const openSubscriptionSource = (
+    request: SubscribePageRequest["request"],
+    signal: AbortSignal,
+  ): AsyncGenerator<object> => {
+    switch (request.case) {
+      case "roster":
+        return rosterSource(request.value, signal);
+      case "webWorkspace":
+        return webWorkspaceSource(request.value, signal);
+      case "daemon":
+        return daemonSource(request.value, signal);
+      case "topbar":
+        return topbarSource(request.value, signal);
+      case "footer":
+        return footerSource(request.value, signal);
+      case "holds":
+        return holdsSource(request.value, signal);
+      case "feed":
+        return feedSource(request.value, signal);
+      case "loginTerminal":
+        return loginTerminalSource(request.value, signal);
+      case undefined:
+        throw new ConnectError(
+          "SubscribePageRequest.request is required and no arm was set",
+          Code.InvalidArgument,
+        );
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // THE PAGE'S ONE STREAM
+  // -------------------------------------------------------------------------
+
+  /** One attached page: its outbound frames and the subscriptions riding them. */
+  interface PageState {
+    readonly outbound: Channel<WatchPageResponse>;
+    /** Every live subscription, by its client-minted id, with its own abort. */
+    readonly subscriptions: Map<string, AbortController>;
+  }
+
+  const pageStates = new Map<string, PageState>();
+
+  /**
+   * The page a control is about.
+   *
+   * NAMING NOTHING IS ONLY LEGAL WITH ONE PAGE ATTACHED. A harness mounts one
+   * document, so the common case needs no id; two attached pages make the
+   * default ambiguous and this THROWS rather than picking one, which would
+   * make an assertion about a leak depend on map order.
+   */
+  const requirePage = (page: string | undefined, control: string): PageState => {
+    if (page === undefined) {
+      const attached = [...pageStates.keys()];
+      if (attached.length !== 1) {
+        throw new Error(
+          `${control} was given no page and ${attached.length} are attached [${attached.join(", ")}]`,
+        );
+      }
+      page = attached[0];
+    }
+    const state = pageStates.get(page);
+    if (state === undefined) {
+      throw new Error(`${control}: no stream is attached for page ${JSON.stringify(page)}`);
+    }
+    return state;
+  };
+
+  /** Wrap one source push as the frame addressing SUBSCRIPTION. */
+  const pushFrame = (
+    state: PageState,
+    subscription: string,
+    kind: NonNullable<SubscribePageRequest["request"]["case"]>,
+    value: object,
+  ): void => {
+    state.outbound.push(
+      create(WatchPageResponseSchema, {
+        frame: {
+          case: "push",
+          value: create(PageFrameSchema, {
+            subscription,
+            // The arm and the value are correlated by the source that produced
+            // them; the compiler cannot carry that through a generic build of
+            // the oneof, and the switch above is what establishes it.
+            payload: { case: kind, value } as PageFrame["payload"],
+          }),
+        },
+      }),
+    );
+  };
+
+  /**
+   * Carry one subscription's remaining pushes onto the page's stream, then
+   * announce its end.
+   *
+   * THE CLIENT'S OWN UNSUBSCRIBE ANNOUNCES NOTHING. `unsubscribePage` drops the
+   * id from the map BEFORE aborting, so the check here sees a subscription the
+   * client already retired and stays quiet — a client that asked for the end
+   * does not need to be told, which is the proto's own rule.
+   */
+  const pumpSubscription = async (
+    state: PageState,
+    subscription: string,
+    kind: NonNullable<SubscribePageRequest["request"]["case"]>,
+    source: AsyncGenerator<object>,
+    controller: AbortController,
+  ): Promise<void> => {
+    let ending: MessageInitShape<typeof PageSubscriptionEndedSchema>["how"];
+    try {
+      for (;;) {
+        const step = await source.next();
+        if (step.done === true) break;
+        pushFrame(state, subscription, kind, step.value);
+      }
+      ending = { case: "sourceEnded", value: {} };
+    } catch (err) {
+      // THE DEDICATED RPC'S OWN ERROR, CARRIED AS DATA. A multiplexed
+      // subscription has no status of its own to fail with, so the Connect
+      // error its stream would have ended with rides an `ended` frame instead
+      // and the page's stream stays open for its other subscriptions.
+      const connectError = ConnectError.from(err);
+      ending = {
+        case: "failed",
+        value: { code: codeToString(connectError.code), message: connectError.rawMessage },
+      };
+    } finally {
+      if (state.subscriptions.get(subscription) === controller) {
+        state.subscriptions.delete(subscription);
+        state.outbound.push(endedFrame(subscription, ending));
+      }
+    }
+  };
+
+  /** One `ended` frame, saying HOW the subscription ended. */
+  const endedFrame = (
+    subscription: string,
+    how: MessageInitShape<typeof PageSubscriptionEndedSchema>["how"],
+  ): WatchPageResponse =>
+    create(WatchPageResponseSchema, {
+      frame: {
+        case: "ended",
+        value: create(PageSubscriptionEndedSchema, { subscription, how }),
+      },
+    });
+
   const routes = (router: ConnectRouter): void => {
     router.service(AgentRepl, {
       // ---- the feed -------------------------------------------------------
@@ -790,15 +1141,7 @@ export function createFakeDaemon(): FakeDaemon {
         return message;
       },
       async *watchFeed(request, context) {
-        record("watchFeed", request);
-        consumeFailure("watchFeed");
-        const token = request.watch?.value ?? "";
-        const target = tokenFeeds.get(token);
-        if (!target) {
-          throw new ConnectError(`unknown feed watch token: ${JSON.stringify(token)}`, Code.NotFound);
-        }
-        const { iterate } = openStream("watchFeed", target.workspace, context.signal, target.feed);
-        yield* iterate();
+        yield* feedSource(request, context.signal) as AsyncGenerator<WatchFeedResponse>;
       },
       getFeedPage(request) {
         record("getFeedPage", request);
@@ -844,11 +1187,7 @@ export function createFakeDaemon(): FakeDaemon {
 
       // ---- the sidebar ----------------------------------------------------
       async *watchWorkspaceRoster(request, context) {
-        record("watchWorkspaceRoster", request);
-        consumeFailure("watchWorkspaceRoster");
-        const { channel, iterate } = openStream("watchWorkspaceRoster", "", context.signal);
-        channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { roster })));
-        yield* iterate();
+        yield* rosterSource(request, context.signal) as AsyncGenerator<WatchWorkspaceRosterResponse>;
       },
       createWorkspace(request) {
         record("createWorkspace", request);
@@ -922,17 +1261,7 @@ export function createFakeDaemon(): FakeDaemon {
 
       // ---- topbar / footer / tray -----------------------------------------
       async *watchTopbar(request, context) {
-        record("watchTopbar", request);
-        consumeFailure("watchTopbar");
-        const workspace = request.workspace?.id ?? "";
-        const { channel, iterate } = openStream("watchTopbar", workspace, context.signal);
-        channel.push(
-          taint(
-            "watchTopbar",
-            create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
-          ),
-        );
-        yield* iterate();
+        yield* topbarSource(request, context.signal) as AsyncGenerator<WatchTopbarResponse>;
       },
       setModel(request) {
         record("setModel", request);
@@ -947,30 +1276,10 @@ export function createFakeDaemon(): FakeDaemon {
         });
       },
       async *watchFooter(request, context) {
-        record("watchFooter", request);
-        consumeFailure("watchFooter");
-        const workspace = request.workspace?.id ?? "";
-        const { channel, iterate } = openStream("watchFooter", workspace, context.signal);
-        channel.push(
-          taint(
-            "watchFooter",
-            create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
-          ),
-        );
-        yield* iterate();
+        yield* footerSource(request, context.signal) as AsyncGenerator<WatchFooterResponse>;
       },
       async *watchDaemonHolds(request, context) {
-        record("watchDaemonHolds", request);
-        consumeFailure("watchDaemonHolds");
-        const workspace = request.workspace?.id ?? "";
-        const { channel, iterate } = openStream("watchDaemonHolds", workspace, context.signal);
-        channel.push(
-          taint(
-            "watchDaemonHolds",
-            create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }),
-          ),
-        );
-        yield* iterate();
+        yield* holdsSource(request, context.signal) as AsyncGenerator<WatchDaemonHoldsResponse>;
       },
       updateHeldPrompt(request) {
         record("updateHeldPrompt", request);
@@ -1042,10 +1351,7 @@ export function createFakeDaemon(): FakeDaemon {
         yield* iterate();
       },
       async *watchDaemon(request, context) {
-        record("watchDaemon", request);
-        consumeFailure("watchDaemon");
-        const { iterate } = openStream("watchDaemon", "", context.signal);
-        yield* iterate();
+        yield* daemonSource(request, context.signal) as AsyncGenerator<WatchDaemonResponse>;
       },
       adoptHostWorkspace(request) {
         record("adoptHostWorkspace", request);
@@ -1054,13 +1360,110 @@ export function createFakeDaemon(): FakeDaemon {
         });
       },
 
+      // ---- the page's one stream ------------------------------------------
+      //
+      // A page holds ONE connection and multiplexes every standing watch onto
+      // it. These three verbs are what make that possible, and the fake serves
+      // them from the same per-view sources the dedicated rpcs use, so a
+      // subscription replays exactly what its own rpc replays.
+      async *watchPage(request, context) {
+        record("watchPage", request);
+        consumeFailure("watchPage");
+        const page = request.page;
+        // TWO STREAMS FOR ONE PAGE ID IS A REFUSAL, not a replacement: the
+        // second would leave the first's subscriptions addressable by a client
+        // that no longer owns them.
+        if (pageStates.has(page)) {
+          throw new ConnectError(
+            `page ${JSON.stringify(page)} already holds a stream`,
+            Code.AlreadyExists,
+          );
+        }
+        const state: PageState = {
+          outbound: new Channel<WatchPageResponse>(),
+          subscriptions: new Map(),
+        };
+        pageStates.set(page, state);
+        // THE LATCH GOES FIRST AND EXACTLY ONCE. `SubscribePage` names a page
+        // that must already be attached, so the client may not subscribe until
+        // it has read this frame.
+        state.outbound.push(
+          create(WatchPageResponseSchema, {
+            frame: { case: "attached", value: create(PageAttachedSchema, {}) },
+          }),
+        );
+        try {
+          yield* state.outbound.iterate(context.signal);
+        } finally {
+          // EVERY SUBSCRIPTION DIES WITH THE STREAM THAT CARRIED IT. Nothing
+          // can address them any more, so leaving them running would be work
+          // for a reader that no longer exists.
+          for (const [, controller] of state.subscriptions) controller.abort();
+          state.subscriptions.clear();
+          if (pageStates.get(page) === state) pageStates.delete(page);
+        }
+      },
+      subscribePage(request) {
+        record("subscribePage", request);
+        consumeFailure("subscribePage");
+        const state = pageStates.get(request.page);
+        if (state === undefined) {
+          throw new ConnectError(
+            `no stream is attached for page ${JSON.stringify(request.page)}`,
+            Code.FailedPrecondition,
+          );
+        }
+        if (state.subscriptions.has(request.subscription)) {
+          throw new ConnectError(
+            `subscription ${JSON.stringify(request.subscription)} is already live on this page`,
+            Code.AlreadyExists,
+          );
+        }
+        const kind = request.request.case;
+        if (kind === undefined) {
+          throw new ConnectError(
+            "SubscribePageRequest.request is required and no arm was set",
+            Code.InvalidArgument,
+          );
+        }
+        const controller = new AbortController();
+        // THE SUBSCRIPTION EXISTS BEFORE THE ANSWER DOES, and that is why this
+        // call is not an `await`. Each source registers with its publisher and
+        // queues its replay SYNCHRONOUSLY — the same shape `openStream` has —
+        // so a view published after this reply cannot be missed, and a view
+        // that replays NOTHING (`daemon`, `webWorkspace`) still answers rather
+        // than parking this unary on a first frame that may never come.
+        //
+        // A source that REFUSES (a scripted failure, an unknown feed token)
+        // throws from here and refuses THIS call, exactly as the dedicated
+        // rpc's own open would have.
+        const source = openSubscriptionSource(request.request, controller.signal);
+        state.subscriptions.set(request.subscription, controller);
+        void pumpSubscription(state, request.subscription, kind, source, controller);
+        return {};
+      },
+      unsubscribePage(request) {
+        record("unsubscribePage", request);
+        const state = pageStates.get(request.page);
+        const controller = state?.subscriptions.get(request.subscription);
+        // ENDING ONE THAT DOES NOT EXIST IS NOT A REFUSAL: the end is the state
+        // the caller asked for, and a subscription already gone is that state.
+        if (state !== undefined && controller !== undefined) {
+          // Dropped BEFORE the abort, so the pump does not also announce this
+          // ending as the source's own. THE END IS ONE FACT ON ONE WIRE
+          // whoever asked for it, so the `unsubscribed` arm is announced here
+          // rather than suppressed — the client's own bookkeeping is what
+          // makes it harmless, not the daemon's silence.
+          state.subscriptions.delete(request.subscription);
+          controller.abort();
+          state.outbound.push(endedFrame(request.subscription, { case: "unsubscribed", value: {} }));
+        }
+        return {};
+      },
+
       // ---- the web link ---------------------------------------------------
       async *watchWebWorkspace(request, context) {
-        record("watchWebWorkspace", request);
-        consumeFailure("watchWebWorkspace");
-        const workspace = request.workspace?.id ?? "";
-        const { iterate } = openStream("watchWebWorkspace", workspace, context.signal);
-        yield* iterate();
+        yield* webWorkspaceSource(request, context.signal) as AsyncGenerator<WatchWebWorkspaceResponse>;
       },
       adoptWebWorkspace(request) {
         record("adoptWebWorkspace", request);
@@ -1077,21 +1480,7 @@ export function createFakeDaemon(): FakeDaemon {
         });
       },
       async *watchLoginTerminal(request, context) {
-        record("watchLoginTerminal", request);
-        consumeFailure("watchLoginTerminal");
-        const workspace = request.workspace?.id ?? "";
-        const { channel, iterate } = openStream("watchLoginTerminal", workspace, context.signal);
-        // The scrollback replays FIRST, exactly as the daemon replays the pty's
-        // buffer to a newly attached viewer, before any live byte arrives.
-        for (const chunk of loginScrollback.get(workspace) ?? []) {
-          channel.push(
-            taint(
-              "watchLoginTerminal",
-              create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
-            ),
-          );
-        }
-        yield* iterate() as AsyncGenerator<LoginTerminalOutput>;
+        yield* loginTerminalSource(request, context.signal) as AsyncGenerator<LoginTerminalOutput>;
       },
       sendLoginInput(request) {
         record("sendLoginInput", request);
@@ -1354,6 +1743,15 @@ export function createFakeDaemon(): FakeDaemon {
     awaitStreamClosed(rpc, workspace, feed) {
       if (countStreams(rpc, workspace, feed) === 0) return Promise.resolve();
       return new Promise<void>((resolve) => streamClosedWaiters.push({ rpc, workspace, feed, resolve }));
+    },
+    attachedPages() {
+      return [...pageStates.keys()];
+    },
+    pageSubscriptions(page) {
+      return [...requirePage(page, "pageSubscriptions").subscriptions.keys()];
+    },
+    endPageStream(page) {
+      requirePage(page, "endPageStream").outbound.end();
     },
   };
 }

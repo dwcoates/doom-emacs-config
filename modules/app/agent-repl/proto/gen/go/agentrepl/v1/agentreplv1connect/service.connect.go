@@ -159,6 +159,13 @@ const (
 	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptWebWorkspace RPC.
 	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
+	// AgentReplWatchPageProcedure is the fully-qualified name of the AgentRepl's WatchPage RPC.
+	AgentReplWatchPageProcedure = "/agentrepl.v1.AgentRepl/WatchPage"
+	// AgentReplSubscribePageProcedure is the fully-qualified name of the AgentRepl's SubscribePage RPC.
+	AgentReplSubscribePageProcedure = "/agentrepl.v1.AgentRepl/SubscribePage"
+	// AgentReplUnsubscribePageProcedure is the fully-qualified name of the AgentRepl's UnsubscribePage
+	// RPC.
+	AgentReplUnsubscribePageProcedure = "/agentrepl.v1.AgentRepl/UnsubscribePage"
 )
 
 // These variables are the protoreflect.Descriptor objects for the RPCs defined in this package.
@@ -210,6 +217,9 @@ var (
 	agentReplOpenExternalMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("OpenExternal")
 	agentReplOpenInEditorMethodDescriptor           = agentReplServiceDescriptor.Methods().ByName("OpenInEditor")
 	agentReplAdoptWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
+	agentReplWatchPageMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("WatchPage")
+	agentReplSubscribePageMethodDescriptor          = agentReplServiceDescriptor.Methods().ByName("SubscribePage")
+	agentReplUnsubscribePageMethodDescriptor        = agentReplServiceDescriptor.Methods().ByName("UnsubscribePage")
 )
 
 // AgentReplClient is a client for the agentrepl.v1.AgentRepl service.
@@ -343,6 +353,14 @@ type AgentReplClient interface {
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
+	// The page's one standing stream. Its first frame is the attachment latch;
+	// every frame after it is one subscription's push.
+	WatchPage(context.Context, *connect.Request[v1.WatchPageRequest]) (*connect.ServerStreamForClient[v1.WatchPageResponse], error)
+	// Start one subscription on an attached page. The acceptance IS the answer,
+	// and a refused open is a Connect error exactly as a refused Watch* is.
+	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
+	// End one subscription, leaving the page's others alone.
+	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
 }
 
 // NewAgentReplClient constructs a client for the agentrepl.v1.AgentRepl service. By default, it
@@ -631,6 +649,24 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplAdoptWebWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		watchPage: connect.NewClient[v1.WatchPageRequest, v1.WatchPageResponse](
+			httpClient,
+			baseURL+AgentReplWatchPageProcedure,
+			connect.WithSchema(agentReplWatchPageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		subscribePage: connect.NewClient[v1.SubscribePageRequest, v1.SubscribePageResponse](
+			httpClient,
+			baseURL+AgentReplSubscribePageProcedure,
+			connect.WithSchema(agentReplSubscribePageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		unsubscribePage: connect.NewClient[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse](
+			httpClient,
+			baseURL+AgentReplUnsubscribePageProcedure,
+			connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -682,6 +718,9 @@ type agentReplClient struct {
 	openExternal           *connect.Client[v1.OpenExternalRequest, v1.OpenExternalResponse]
 	openInEditor           *connect.Client[v1.OpenInEditorRequest, v1.OpenInEditorResponse]
 	adoptWebWorkspace      *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
+	watchPage              *connect.Client[v1.WatchPageRequest, v1.WatchPageResponse]
+	subscribePage          *connect.Client[v1.SubscribePageRequest, v1.SubscribePageResponse]
+	unsubscribePage        *connect.Client[v1.UnsubscribePageRequest, v1.UnsubscribePageResponse]
 }
 
 // SubmitPrompt calls agentrepl.v1.AgentRepl.SubmitPrompt.
@@ -914,6 +953,21 @@ func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Re
 	return c.adoptWebWorkspace.CallUnary(ctx, req)
 }
 
+// WatchPage calls agentrepl.v1.AgentRepl.WatchPage.
+func (c *agentReplClient) WatchPage(ctx context.Context, req *connect.Request[v1.WatchPageRequest]) (*connect.ServerStreamForClient[v1.WatchPageResponse], error) {
+	return c.watchPage.CallServerStream(ctx, req)
+}
+
+// SubscribePage calls agentrepl.v1.AgentRepl.SubscribePage.
+func (c *agentReplClient) SubscribePage(ctx context.Context, req *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error) {
+	return c.subscribePage.CallUnary(ctx, req)
+}
+
+// UnsubscribePage calls agentrepl.v1.AgentRepl.UnsubscribePage.
+func (c *agentReplClient) UnsubscribePage(ctx context.Context, req *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
+	return c.unsubscribePage.CallUnary(ctx, req)
+}
+
 // AgentReplHandler is an implementation of the agentrepl.v1.AgentRepl service.
 type AgentReplHandler interface {
 	// The composer's submission, whole; the daemon recognizes programmatically
@@ -1045,6 +1099,14 @@ type AgentReplHandler interface {
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
+	// The page's one standing stream. Its first frame is the attachment latch;
+	// every frame after it is one subscription's push.
+	WatchPage(context.Context, *connect.Request[v1.WatchPageRequest], *connect.ServerStream[v1.WatchPageResponse]) error
+	// Start one subscription on an attached page. The acceptance IS the answer,
+	// and a refused open is a Connect error exactly as a refused Watch* is.
+	SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error)
+	// End one subscription, leaving the page's others alone.
+	UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error)
 }
 
 // NewAgentReplHandler builds an HTTP handler from the service implementation. It returns the path
@@ -1329,6 +1391,24 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplAdoptWebWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplWatchPageHandler := connect.NewServerStreamHandler(
+		AgentReplWatchPageProcedure,
+		svc.WatchPage,
+		connect.WithSchema(agentReplWatchPageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplSubscribePageHandler := connect.NewUnaryHandler(
+		AgentReplSubscribePageProcedure,
+		svc.SubscribePage,
+		connect.WithSchema(agentReplSubscribePageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplUnsubscribePageHandler := connect.NewUnaryHandler(
+		AgentReplUnsubscribePageProcedure,
+		svc.UnsubscribePage,
+		connect.WithSchema(agentReplUnsubscribePageMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/agentrepl.v1.AgentRepl/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentReplSubmitPromptProcedure:
@@ -1423,6 +1503,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplOpenInEditorHandler.ServeHTTP(w, r)
 		case AgentReplAdoptWebWorkspaceProcedure:
 			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplWatchPageProcedure:
+			agentReplWatchPageHandler.ServeHTTP(w, r)
+		case AgentReplSubscribePageProcedure:
+			agentReplSubscribePageHandler.ServeHTTP(w, r)
+		case AgentReplUnsubscribePageProcedure:
+			agentReplUnsubscribePageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1614,4 +1700,16 @@ func (UnimplementedAgentReplHandler) OpenInEditor(context.Context, *connect.Requ
 
 func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptWebWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchPage(context.Context, *connect.Request[v1.WatchPageRequest], *connect.ServerStream[v1.WatchPageResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchPage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) SubscribePage(context.Context, *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.SubscribePage is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) UnsubscribePage(context.Context, *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.UnsubscribePage is not implemented"))
 }

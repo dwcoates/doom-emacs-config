@@ -14,7 +14,8 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import {
@@ -56,7 +57,7 @@ function streamingContext(
       },
     });
   });
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker,
@@ -66,7 +67,7 @@ function streamingContext(
 }
 
 function trayContext(ticker: Ticker = fakeTicker()): TrayContext {
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(createRouterTransport(({ service }) => service(AgentRepl, {}))),
     workspace: WORKSPACE,
     ticker,

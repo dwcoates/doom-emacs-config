@@ -27,7 +27,8 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { AttentionRegistry, type BlinkTimers } from "../../src/sidebar/attention.js";
 import type { SidebarContext, SidebarPrefs } from "../../src/sidebar/context.js";
 
@@ -113,7 +114,7 @@ export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ti
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, impl);
   });
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: ticker ?? fakeTicker(),

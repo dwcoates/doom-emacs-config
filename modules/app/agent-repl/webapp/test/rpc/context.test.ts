@@ -5,13 +5,13 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "./app-context.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 const client = () => createAgentReplClient(createRouterTransport(() => {}));
 
 function ctx(composerEnabled = false) {
-  return createAppContext({
+  return testAppContext({
     client: client(),
     workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
     ticker: createTicker(1000),

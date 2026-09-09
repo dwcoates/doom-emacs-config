@@ -131,6 +131,29 @@ a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
   ending on its own is a transport failure: report it and reopen. Stopping
   anything is an `Interrupt` rpc, never a stream close. The webapp never
   redials a successor daemon.
+- **THE PAGE HOLDS ONE CONNECTION, AND NOTHING BUT THE MUX MAY OPEN ONE.**
+  Every standing watch goes through `ctx.streams.watch(kind, request, signal)`
+  (`src/rpc/page-streams.ts`), which multiplexes it onto the page's single
+  `WatchPage` stream. NEVER call `client.watch*` for a server-streaming rpc from
+  anywhere else; `test/rpc/page-streams.test.ts` reads the whole `src` tree and
+  fails on any module that does.
+
+  This is not tidiness. A webview negotiates **http/1.1** — the daemon serves
+  h2c, but no browser negotiates cleartext HTTP/2 — and HTTP/1.1 caps a page at
+  **six** connections per host, measured exactly on this daemon in the e2e
+  sandbox: standing streams 1-6 reached it within 9ms and were logged as
+  accepted; streams 7, 8 and 9 produced NO daemon record at all, and a plain
+  same-origin `GET` taken while six were held timed out in the browser after 5s
+  while the same `GET` with five held returned 200 in under a millisecond.
+
+  The page used to open six dedicated watches — `WatchWorkspaceRoster`,
+  `WatchWebWorkspace`, `WatchDaemon`, `WatchTopbar`, `WatchFooter`,
+  `WatchDaemonHolds` — before its feed tail. `WatchFeed` was the seventh, and it
+  did not fail: it QUEUED, forever, with no request on the wire and therefore no
+  `daemon_unreachable` card, so the root feed never drew a row produced after
+  the page loaded. Every expanded subagent bubble opens another feed tail, so no
+  fixed budget could have contained the count — which is why the guarantee is
+  "one stream exists" rather than "few enough streams exist".
 - **EVERY CLICK IS AN RPC**, and its refusal renders AT the clicked control,
   never as pushed state. Domain outcomes (deny, nothing-running, empty) are
   SUCCESS arms.

@@ -167,7 +167,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
-    open: (client, signal) => client.watchWorkspaceRoster({}, { signal }),
+    open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
     onPush: (response) => {
       const roster = requireMessage(response.roster, "WatchWorkspaceRosterResponse.roster");
       // The teardowns come down BEFORE the draw, so a ticking age about to be

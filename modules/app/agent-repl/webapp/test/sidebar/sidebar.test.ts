@@ -5,7 +5,8 @@ import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentr
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { createRouterTransport } from "@connectrpc/connect";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import {
   PREFS_KEY,
   createSidebarPrefs,
@@ -78,7 +79,7 @@ function ctxFor(rosters = [roster()]): AppContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, rosterStream(rosters));
   });
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: fakeTicker(NOW),
@@ -290,7 +291,7 @@ describe("mounting the rail", () => {
         ]),
       );
     });
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker,
@@ -315,7 +316,7 @@ describe("mounting the rail", () => {
         },
       });
     });
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: fakeTicker(NOW),

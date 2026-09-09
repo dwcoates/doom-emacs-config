@@ -27,10 +27,21 @@ import type { Ticker } from "../clock.js";
 import type { FailureSink } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
+import { startPageStreams, type PageStreams, type PageStreamContext } from "./page-streams.js";
 
 export interface AppContext {
   /** The daemon client as of NOW; re-read it per call, never cache it. */
   readonly client: AgentReplClient;
+  /**
+   * The page's ONE standing stream, which every watch on this page rides.
+   *
+   * A browser holds about six connections per host over HTTP/1.1 and a
+   * server-streaming call pins one for its whole life, so a page that opened a
+   * stream per view ran out — silently, with the calls past the cap queued
+   * forever rather than refused. Nothing here opens a stream of its own any
+   * more; see page-streams.ts for what that cost when it did.
+   */
+  readonly streams: PageStreams;
   /** The workspace every request on this page is addressed to. */
   readonly workspace: WorkspaceRef;
   /** The shared one-second clock; components subscribe, never setInterval. */
@@ -80,14 +91,37 @@ export interface AppContextInit {
   ticker: Ticker;
   failures: FailureSink;
   composerEnabled: boolean;
+  /**
+   * This page's own id, which its one standing stream is registered under.
+   *
+   * It is the connection id the logs already correlate by: a page and its
+   * stream are the same thing to the daemon, and two identities for one page
+   * would be two things to line up in a log that already lines one up.
+   */
+  page: string;
+  /**
+   * The page's stream, for a test that drives ONE component's watch against a
+   * scripted client. Production leaves it unset and gets the real one, opened
+   * here; a substitute cannot reach production because nothing but a test
+   * passes it.
+   */
+  streams?: PageStreams;
 }
 
-/** Build the context main.ts hands to every mount. */
+/**
+ * Build the context main.ts hands to every mount, and OPEN THE PAGE'S ONE
+ * STANDING STREAM as part of building it.
+ *
+ * The stream is opened HERE rather than by the caller because a context without
+ * one cannot serve a single view: every watch on this page rides it. Building
+ * them together means there is no window in which a mount could find a context
+ * whose stream has not been asked for.
+ */
 export function createAppContext(init: AppContextInit): AppContext {
   let quiesced = false;
   const quietListeners = new Set<() => void>();
   const pushListeners = new Set<() => void>();
-  return {
+  const base = {
     client: init.client,
     workspace: init.workspace,
     ticker: init.ticker,
@@ -132,4 +166,10 @@ export function createAppContext(init: AppContextInit): AppContext {
       };
     },
   };
+  // The stream subscribes to `onQuiesced` and reports through `failures` off
+  // this same object, so it is opened once the rest of the context exists and
+  // handed back on the finished one.
+  const streams: PageStreams =
+    init.streams ?? startPageStreams(base satisfies PageStreamContext, init.page);
+  return { ...base, streams };
 }

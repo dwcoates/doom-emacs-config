@@ -13,7 +13,7 @@ import {
   type FeedShell,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { createTicker } from "../../../src/clock.js";
-import { createAppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   drawFeedShell,
@@ -574,10 +574,10 @@ function ctxAnswering(answer: InterruptResponse): {
   reported: { cause: string; frameHead: string }[];
 } {
   const reported: { cause: string; frameHead: string }[] = [];
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: {
       interrupt: () => Promise.resolve(answer),
-    } as unknown as Parameters<typeof createAppContext>[0]["client"],
+    } as unknown as Parameters<typeof testAppContext>[0]["client"],
     workspace: WORKSPACE,
     ticker: createTicker(1000),
     failures: {

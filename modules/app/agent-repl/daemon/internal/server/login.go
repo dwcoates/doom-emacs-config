@@ -53,11 +53,20 @@ func (s *server) WatchLoginTerminal(
 	req *connect.Request[agentreplv1.WatchLoginTerminalRequest],
 	out *connect.ServerStream[agentreplv1.LoginTerminalOutput],
 ) error {
+	return s.watchLoginTerminal(ctx, req.Msg, out)
+}
+
+// watchLoginTerminal is the body, written to whatever sink carries it.
+func (s *server) watchLoginTerminal(
+	ctx context.Context,
+	msg *agentreplv1.WatchLoginTerminalRequest,
+	out streamSink[agentreplv1.LoginTerminalOutput],
+) error {
 	const rpc = "WatchLoginTerminal"
-	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
