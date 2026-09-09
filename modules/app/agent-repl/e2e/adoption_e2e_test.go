@@ -202,13 +202,17 @@ func TestSessionStartedReAnnouncedOnEveryNewWatch(t *testing.T) {
 	if got := adCountLogMessage(t, repo.Dir, adWatchSessionOp, adIgnoredReannouncementMessage); got != 1 {
 		t.Fatalf("the original daemon's watch_session log holds %d ignored re-announcements before any restart, want exactly 1 (its session watch, opened after StartSession, draws one)", got)
 	}
-	baseline := w.CumulativeWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp)
-
 	// Act: crash-adopt onto the SAME still-running real shim — PROTO-CHANGES.md
 	// Landing 7: the shim re-announces SessionStarted once per watch "so an
 	// adopting daemon (crash boot, handover) attaches purely."
 	successor := adColdBoot(t, w)
-	successor.AwaitCumulativeWorkspaceLogOperationCount(repo.Dir, adWatchSessionOp, baseline+1)
+	// WAIT FOR THE RECORD THIS TEST IS ABOUT. Waiting for one more record under
+	// the OPERATION was satisfied by the successor's own "session watch
+	// opened", which is written when the stream opens and before any
+	// re-announcement has been read off it — so the assertions below ran
+	// against a log the "took" record had not reached, and read 0 where they
+	// want 1. Twice in eight in-container runs.
+	successor.AwaitCumulativeWorkspaceLogMessageCount(repo.Dir, adWatchSessionOp, adTookSessionFactsMessage, 1)
 
 	// Assert: the exact cardinality (SPEC.md #48), not merely presence. The
 	// successor's fresh watcher — the first watch this session has seen
