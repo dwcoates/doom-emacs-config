@@ -601,7 +601,23 @@ func (p *playbook) prepareFrame() {
 func (p *playbook) note(act, asserted string) {
 	p.t.Helper()
 	p.step++
-	p.write("| %02d | %s | %s | — | — |\n", p.step, act, asserted)
+	p.write("| %02d | %s | %s | — | — |\n", p.step, mdCell(act), mdCell(asserted))
+}
+
+// mdCell makes one string safe to place in a markdown table cell.
+//
+// A manifest row is written with `|` as the column separator, so a `|` in
+// any cell -- and the substrate produces them, `tabFaceFor` joins the faces
+// it found with " | " -- silently splits that row into extra columns. The
+// manifest then still LOOKS like a table and is wrong, which is worse than
+// a manifest that fails to render: a reviewer reads the shifted columns as
+// the harness's answer.
+//
+// Every cell this file writes goes through here, not only the ones known to
+// carry a pipe today, because the cells are built from product strings and
+// which of them can carry one is not this file's to know.
+func mdCell(s string) string {
+	return strings.ReplaceAll(s, "|", "\\|")
 }
 
 // capture takes one picture, holds it to the mechanical assertions, and
@@ -692,7 +708,7 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 		// reading a torn picture is owed the reason.
 		note = fmt.Sprintf(" _(the screen was still changing after %s, so this frame may be torn)_", playtestSettleBound)
 	}
-	p.write("| %02d | %s | %s | `%s` | %s%s |\n", p.step, act, asserted, name, expected, note)
+	p.write("| %02d | %s | %s | `%s` | %s%s |\n", p.step, mdCell(act), mdCell(asserted), mdCell(name), mdCell(expected), note)
 	p.t.Logf("playtest phase capture-%02d-%s settled=%v took %s (%d distinct colors)",
 		p.step, step, settled, took.Round(time.Millisecond), colors)
 }
