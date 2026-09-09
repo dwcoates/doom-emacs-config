@@ -501,3 +501,75 @@ NO OTHER RUNTIME CHANGES. The daemon already promotes `agent_repl_session_id`
 and `claude_session_id` out of a forwarded ClientLog record's context into the
 persisted record's own fields (dlog.promote), so the field names the page
 stamps are the ones the other four runtimes are already grepped by.
+
+## Landing 16 (2026-09-09): a tool call can return a picture, and a shell says how it exited
+
+OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
+behalf). Two plain-data fields, both found by playtest owner 13 in the real
+webview, both on the ONE message the whole grey tool card settles into.
+
+- frontend.v1 FeedToolCallReturned.form gains `image` (tag 11), carrying the
+  EXISTING FeedImageBlock. FeedToolCallReturned also gains
+  `optional FeedShellExit exit` (tag 12), the EXISTING chip element the detached
+  shell's settled shape already carries.
+
+WHY THE IMAGE ARM. The form oneof offered succeeded / failed / text / code /
+diff / lines / links / none and no image, so `!bash-image` — a shell whose
+stdout IS a screenshot — settled to `none` and the card drew NOTHING: a picture
+and a command that printed nothing were the same drawing. The conversation tier
+has carried the fact from the start (AgentBashOutput.form = image); this is
+where it reaches a surface, which is the same story landing 14 tells about a
+refused send.
+
+REUSED, NOT REINVENTED. FeedImageBlock is the block a prompt body draws an image
+with, and its documented contract — "an image the webview can fetch; the daemon
+RESOLVES the record's reference into a src a browser can load" — is exactly what
+a tool's image needs. A second image message would have given the same picture
+two resolutions that could disagree, so the arm carries that one.
+
+WHY THE EXIT FIELD, AND WHY THE SAME ELEMENT. A failing foreground `Bash` drew
+`failed` and no number: the reader was told the command went wrong and never
+told how. A foreground shell and a detached one are the SAME COMMAND TOLD TWICE,
+so the field sits where a reader of FeedShellSettled would look for it and
+carries FeedShellExit itself. The site states the parallel as a rule: a field
+added to, retyped on, or reworded for one of the two belongs on the other in the
+same edit. Unset is the honest state (a foreground call ordinarily states no
+status, and a KILLED command never has a number) and, as FeedShellSettled.exit
+already says for itself, absence draws no chip, NEVER a zero.
+
+TWO PRODUCERS WERE STARVING THE TIER, AND BOTH ARE FIXED. `isImage` on the
+vendor's Output object states only THAT the output was an image; the bytes and
+the media type arrive on the answering `tool_result`'s own image content block,
+which is the only place either is stated.
+
+- shim convert/tools/bash.ts refused EVERY image output and produced no terminal
+  frame at all, so an image-producing shell's unit stayed open forever. It now
+  reads the image block back out of the data url the shim carries an inlined
+  image by. The loud refusal is unchanged for a result carrying no loadable
+  bytes: a fetchable url names no bytes, and a payload that does not decode is
+  half an image.
+- shim-sidecar internal/convert/results.go read `mediaType` off the Output
+  object — a field that is not there — and set no bytes, so its image arm
+  carried neither half. It now reads the result block and decodes the payload.
+
+NO CONVERSATION-TIER CHANGE. AgentBashOutputImage{data, media_type} and
+AgentBashCompleted.termination.exited.code both predate this landing; the
+foreground exit code has been filled by both producers since the two `!bash-fail`
+fixes (shim 14df2e44a, sidecar's statedExitCode), which is what makes
+`termination` legitimately SET for a foreground command that exited non-zero
+even though the field's own comment describes it as a detached-shell fact.
+
+CONSUMERS. daemon resolve/feed/toolcall.go composes the src as
+`data:<media_type>;base64,<bytes>` and captions it with the command line — the
+only caption the record affords — and refuses loudly under
+`daemon.feed.bash_image_unresolved` when either half is missing, falling back to
+`none` rather than serving a src that renders as a broken image on every client.
+bashExit relays the stated termination onto the new field. webapp
+feed/cards/tool-call.ts delegates BOTH drawings rather than writing new ones:
+the image goes through drawFeedImageBlock (the prompt body's own drawing) and
+the chip through drawFeedShellExit (the detached shell's own chip), so neither
+pair can drift.
+
+EMACS IS UNTOUCHED, deliberately: `lisp/` draws no feed.
+
+Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ

@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -98,6 +99,32 @@ func textForm(text string) returnedForm {
 	}
 	return func(returned *frontendv1.FeedToolCallReturned) {
 		returned.Form = &frontendv1.FeedToolCallReturned_Text{Text: &frontendv1.FeedToolCallTextOutput{Text: text}}
+	}
+}
+
+// imageForm is the IMAGE output form — the feed's shared FeedImageBlock, the
+// same block a prompt body draws an image with. Reused rather than restated so
+// a tool's image and a prompt's image reach the webview by one code path, and
+// so the reference is resolved on the one end that can resolve it.
+func imageForm(block *frontendv1.FeedImageBlock) returnedForm {
+	return func(returned *frontendv1.FeedToolCallReturned) {
+		returned.Form = &frontendv1.FeedToolCallReturned_Image{Image: block}
+	}
+}
+
+// withExit folds a shell's exit chip onto a returned card. It is applied AFTER
+// the outcome so a card that did not reach the returned arm — a denied one,
+// say — silently carries no chip rather than growing a field on an arm that
+// has none. A nil exit changes nothing: absence draws no chip, NEVER a zero.
+func withExit(outcome toolOutcome, exit *frontendv1.FeedShellExit) toolOutcome {
+	if exit == nil {
+		return outcome
+	}
+	return func(card *frontendv1.FeedSimpleToolCall) {
+		outcome(card)
+		if returned := card.GetReturned(); returned != nil {
+			returned.Exit = exit
+		}
 	}
 }
 
@@ -575,9 +602,15 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	case *conversationv1.AgentBash_Success:
 		u.input = state.Success.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
-		ok, text := bashOutcomeText(state.Success)
+		ok, form := r.bashOutcomeForm(s, u.input, state.Success)
+		// THE EXIT CODE IS THE COMMAND'S OWN VERDICT ON ITSELF, and the
+		// foreground card states it exactly as the detached shell's settled
+		// shape does. Without it a shell that failed drew `failed` and no
+		// number, so the reader was told the command went wrong and never told
+		// how. The two sites must stay parallel; see FeedToolCallReturned.exit.
 		return r.toolRow(s, at, unitID, "Bash",
-			returnedOutcome(u, ok, textForm(text), state.Success.GetSettledAt().GetAtMs())), nil
+			withExit(returnedOutcome(u, ok, form, state.Success.GetSettledAt().GetAtMs()),
+				bashExit(state.Success))), nil
 	case *conversationv1.AgentBash_Failure:
 		return r.toolRow(s, at, unitID, "Bash",
 			returnedOutcome(u, false, textForm(failureText(state.Failure.GetError())),
@@ -586,17 +619,78 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	return nil, errNotARow
 }
 
-// bashOutcomeText renders a settled shell's output and says whether the badge
-// reads ok. A COMPLETED command succeeded as a CALL whatever its exit code —
-// the code is the command's verdict on itself. So did an INTERRUPTED one: THE
-// PROTO ALWAYS WINS, and conversation.v1 nests AgentBashInterrupted inside
-// AgentBashSuccess, so an interrupt is a SUCCESS arm carrying the interrupted
-// marker. The badge reads succeeded and the text says how it was cut; only
-// AgentBash_Failure — the call itself breaking — draws `failed`.
-func bashOutcomeText(success *conversationv1.AgentBashSuccess) (bool, string) {
+// bashExit is the exit status a settled foreground shell REPORTED, when it
+// reported one, drawn through the SAME element the detached shell's settled
+// shape carries (FeedShellSettled.exit).
+//
+// UNSET when the producer stated no termination — a foreground call ordinarily
+// states one only when the command exited non-zero — and unset for a KILLED
+// command too: an exit code and a kill are different endings, and only one of
+// them has a number. Absence draws no chip, never a zero.
+func bashExit(success *conversationv1.AgentBashSuccess) *frontendv1.FeedShellExit {
+	completed, ok := success.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	if !ok {
+		return nil
+	}
+	exited, ok := completed.Completed.GetTermination().GetHow().(*conversationv1.AgentBashTermination_Exited)
+	if !ok {
+		return nil
+	}
+	return &frontendv1.FeedShellExit{Code: exited.Exited.GetCode()}
+}
+
+// bashImageForm draws a command whose output was IMAGE DATA rather than
+// characters — a screenshot, a rendered chart — through the feed's shared
+// image block.
+//
+// THE DAEMON RESOLVES THE REFERENCE, as FeedImageBlock says it must: the
+// record carries the bytes and their media type, and the src a browser can
+// load is composed from the two here rather than at either end that cannot.
+// A record that states one without the other resolves to NOTHING drawable, so
+// the gap is recorded loudly and the card falls back to the `none` arm rather
+// than carrying a src that renders as a broken image on every client.
+func (r *resolver) bashImageForm(s *wsState, command string, image *conversationv1.AgentBashOutputImage) returnedForm {
+	mediaType := image.GetMediaType()
+	data := image.GetData()
+	if mediaType == "" || len(data) == 0 {
+		r.logger(s.id).Warn("daemon.feed.bash_image_unresolved",
+			"a command's image output states no source the webview can load; the card draws no output body",
+			dlog.Context{
+				"media_type": mediaType,
+				"bytes":      len(data),
+				"command":    command,
+			})
+		return nil
+	}
+	return imageForm(&frontendv1.FeedImageBlock{
+		Src: "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(data),
+		// The command line is the caption a reader has: nothing else in the
+		// record names what the picture is of.
+		Alt: command,
+	})
+}
+
+// bashOutcomeForm renders a settled shell's output as a drawn form and says
+// whether the badge reads ok. A COMPLETED command succeeded as a CALL whatever
+// its exit code — the code is the command's verdict on itself. So did an
+// INTERRUPTED one: THE PROTO ALWAYS WINS, and conversation.v1 nests
+// AgentBashInterrupted inside AgentBashSuccess, so an interrupt is a SUCCESS
+// arm carrying the interrupted marker. The badge reads succeeded and the body
+// says how it was cut; only AgentBash_Failure — the call itself breaking —
+// draws `failed`.
+//
+// AN INTERRUPTED COMMAND IS DRAWN AS TEXT EVEN WHEN ITS OUTPUT IS IMAGE DATA.
+// The form is a oneof, the lead line ("timed out after 2 m") is the fact the
+// reader came for, and no producer emits an image on that arm; carrying the
+// picture there would drop the sentence that explains it.
+func (r *resolver) bashOutcomeForm(s *wsState, command string, success *conversationv1.AgentBashSuccess) (bool, returnedForm) {
 	switch outcome := success.GetOutcome().(type) {
 	case *conversationv1.AgentBashSuccess_Completed:
-		return true, bashOutputText(outcome.Completed.GetOutput())
+		output := outcome.Completed.GetOutput()
+		if image, ok := output.GetForm().(*conversationv1.AgentBashOutput_Image); ok {
+			return true, r.bashImageForm(s, command, image.Image)
+		}
+		return true, textForm(bashOutputText(output))
 	case *conversationv1.AgentBashSuccess_Interrupted:
 		lead := "interrupted"
 		switch cause := outcome.Interrupted.GetCause().(type) {
@@ -607,16 +701,19 @@ func bashOutcomeText(success *conversationv1.AgentBashSuccess) (bool, string) {
 		}
 		body := bashOutputText(outcome.Interrupted.GetOutput())
 		if body == "" {
-			return true, lead
+			return true, textForm(lead)
 		}
-		return true, lead + "\n" + body
+		return true, textForm(lead + "\n" + body)
 	}
-	return true, ""
+	return true, nil
 }
 
 // bashOutputText renders a command's output. The two streams are carried apart
 // and joined here, in that order, because nothing states an interleaving.
 func bashOutputText(output *conversationv1.AgentBashOutput) string {
+	// The IMAGE form never reaches here on the completed arm — bashOutcomeForm
+	// routes it to the image block — and the `not_observed` form has no text
+	// by construction: the producer states that it does not know.
 	text, ok := output.GetForm().(*conversationv1.AgentBashOutput_Text)
 	if !ok {
 		return ""

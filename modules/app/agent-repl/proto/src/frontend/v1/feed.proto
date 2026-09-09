@@ -605,6 +605,23 @@ message FeedToolCallReturned {
     FeedToolCallSucceeded succeeded = 1;
     FeedToolCallFailed failed = 2;
   }
+  // THE EXIT CODE A FOREGROUND SHELL REPORTED, when it reported one — the
+  // SAME element the detached shell's settled shape carries
+  // (FeedShellSettled.exit), and deliberately the same message rather than a
+  // second one, so a chip drawn on one card cannot drift from the chip drawn
+  // on the other.
+  //
+  // THE TWO MUST STAY PARALLEL. A foreground `Bash` and a detached one are the
+  // same command told twice, and the exit status is the command's own verdict
+  // on itself either way; a field added to, retyped on, or reworded for one of
+  // these two sites belongs on the other in the same edit. Without it a failing
+  // foreground shell drew `failed` and NO CODE, so the reader was told the
+  // command went wrong and never told how.
+  //
+  // UNSET when the producer stated no status — absence draws no chip, NEVER a
+  // zero, the rule FeedShellSettled.exit states for itself. Meaningful for a
+  // shell card; every other tool leaves it unset.
+  optional FeedShellExit exit = 12;
   // WHAT THE OUTPUT IS, by drawn form — the only axis the tools genuinely
   // differ on.
   oneof form {
@@ -619,6 +636,17 @@ message FeedToolCallReturned {
     FeedToolCallLinesOutput lines = 6;
     // A link list: web search results, each row a clickable title.
     FeedToolCallLinksOutput links = 8;
+    // AN IMAGE the call produced instead of characters — a screenshot, a
+    // rendered chart. THE SHARED BLOCK, reused rather than restated: this is
+    // the very message a prompt body draws an image with, so the webview
+    // fetches a tool's image through the code path it already has and the
+    // daemon resolves the reference on the one end that can.
+    //
+    // WITHOUT THIS ARM an image-producing shell settled to `none` and the card
+    // drew nothing at all, which reads exactly like a command that printed
+    // nothing — the conversation tier has carried the fact from the start
+    // (AgentBashOutput.form = image); this is where it reaches a surface.
+    FeedImageBlock image = 11;
     // The call returned NOTHING to draw (a write, an empty search): the
     // output section is omitted. An arm, never an empty text — presence,
     // not a sentinel.

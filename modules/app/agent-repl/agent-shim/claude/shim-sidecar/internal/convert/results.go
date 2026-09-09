@@ -8,6 +8,7 @@ package convert
 // as a fact.
 
 import (
+	"encoding/base64"
 	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -343,12 +344,12 @@ func stringList(raw any) []string {
 // bashSuccess: a NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call
 // that could not be performed; a command that ran and failed ran, and what it
 // printed is the answer the caller wanted.
-func bashSuccess(call openCall, result map[string]any, exit *int32, ts int64) *conversationv1.AgentBashSuccess {
+func bashSuccess(call openCall, result map[string]any, block map[string]any, exit *int32, ts int64) *conversationv1.AgentBashSuccess {
 	success := &conversationv1.AgentBashSuccess{
 		Command:   bashCommand(call.input),
 		SettledAt: settledAt(ts),
 	}
-	output := bashOutput(result)
+	output := bashOutput(result, block)
 	if boolean(result["interrupted"]) {
 		interrupted := &conversationv1.AgentBashInterrupted{Output: output}
 		if timeout := optionalInt64(result, "timedOutAfterMs"); timeout != nil {
@@ -468,11 +469,21 @@ func firstSignedInt(text string) *int32 {
 // bashOutput keeps stdout and stderr APART rather than interleaving them: a
 // consumer that wants them woven can concatenate, while one handed a single blob
 // can never pull them apart again.
-func bashOutput(result map[string]any) *conversationv1.AgentBashOutput {
+func bashOutput(result map[string]any, block map[string]any) *conversationv1.AgentBashOutput {
 	if boolean(result["isImage"]) {
+		// THE PICTURE IS IN THE RESULT BLOCK, NOT IN `toolUseResult`. The
+		// vendor's Output object states only that the output WAS an image
+		// (`isImage`); the bytes and their media type arrive as the answering
+		// `tool_result`'s own image content block, which is the only place
+		// either is stated. Reading `mediaType` off the Output object alone
+		// produced an image arm carrying neither, which no consumer can draw.
+		data, mediaType := bashResultImage(block)
 		return &conversationv1.AgentBashOutput{
 			Form: &conversationv1.AgentBashOutput_Image{Image: &conversationv1.AgentBashOutputImage{
-				MediaType: str(result["mediaType"]),
+				Data: data,
+				// The Output object's own spelling is preferred where it
+				// exists; the content block is what actually carries one.
+				MediaType: firstNonEmpty(str(result["mediaType"]), mediaType),
 			}},
 		}
 	}
@@ -797,4 +808,39 @@ func sentAtMs(result map[string]any) *int64 {
 		return nil
 	}
 	return &iso
+}
+
+// bashResultImage reads the image an answering `tool_result` carried: the bytes
+// as the vendor base64'd them, and their media type.
+//
+// A BLOCK WHOSE PAYLOAD DOES NOT DECODE YIELDS NOTHING RATHER THAN HALF AN
+// IMAGE. The media type is still returned when it was stated, so a consumer's
+// own refusal can name what it was handed; the daemon draws nothing for an
+// image missing either half, which is the honest end of a payload we cannot
+// reconstruct.
+func bashResultImage(block map[string]any) ([]byte, string) {
+	blocks, ok := block["content"].([]any)
+	if !ok {
+		return nil, ""
+	}
+	for _, el := range blocks {
+		content := obj(el)
+		if content == nil || str(content["type"]) != "image" {
+			continue
+		}
+		source := obj(content["source"])
+		if source == nil {
+			continue
+		}
+		mediaType := str(source["media_type"])
+		if str(source["type"]) != "base64" {
+			return nil, mediaType
+		}
+		data, err := base64.StdEncoding.DecodeString(str(source["data"]))
+		if err != nil {
+			return nil, mediaType
+		}
+		return data, mediaType
+	}
+	return nil, ""
 }
