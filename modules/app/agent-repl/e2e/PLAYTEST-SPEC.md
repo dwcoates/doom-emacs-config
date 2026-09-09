@@ -12,6 +12,12 @@ modules/app/agent-repl/bin/playtest.sh                 # every playbook
 modules/app/agent-repl/bin/playtest.sh -run TestPlaytestTabArm   # one, by name
 ```
 
+The playbooks live one file per `PLAYTEST-PLAN.md` owner —
+`e2e/playtest_NN_<subject>_test.go`, writing under `playtest/NN-<subject>/` —
+and everything they share is in `e2e/playtest_scenario_test.go` (the world,
+the page probe, the arm helpers) and `e2e/playtest_capture_test.go` (the
+capture mechanism). An owner adds a file and shares nothing else.
+
 The playbooks are behind the `playtest` build tag, so the ordinary
 `go test ./e2e` never starts one: a playbook holds an Emacs slot for its
 whole length and writes files a human then has to read, which is not work a
