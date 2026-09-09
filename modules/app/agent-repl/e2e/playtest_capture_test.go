@@ -622,7 +622,7 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 	p.step++
 	name := fmt.Sprintf("%02d-%s.png", p.step, step)
 
-	// ONE REDISPLAY, ASKED FOR THE ORDINARY WAY, AND NOTHING MORE.
+	// THE WHOLE FRAME IS REDRAWN, TWICE, AND THAT IS A MEASUREMENT.
 	//
 	// The tab bar is repainted by Emacs's C redisplay, which keeps the last
 	// items vector it built and compares the next one with `equal` -- a
@@ -631,29 +631,29 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 	// render with `agent-repl--tabline-render-key`, an invisible generation
 	// that advances exactly when the rendered rows change in any way, faces
 	// included, and a roster push schedules the redisplay itself. So a
-	// capture only has to ask for the redisplay that draws what the module
-	// already decided: `force-mode-line-update` makes redisplay rebuild the
-	// items, and `redisplay` runs it now. A tab bar still wrong after that
-	// is wrong in the product.
+	// capture never busts anything: `force-mode-line-update` makes redisplay
+	// rebuild the items, and `redisplay` runs it now. A tab bar wrong after
+	// that is wrong in the product.
 	//
-	// IT IS DELIBERATELY NOT DRIVEN TWICE. An earlier capture ran two
-	// rounds of the module's clock-driven cache-buster and a redisplay each,
-	// in one eval, and MEASURED the previous frame on the glass every time:
-	// a tab that had just been registered was absent, an arm that read
-	// `:thinking` painted the color before it -- and the very next eval,
-	// with no further change, showed the right frame. Two content-changing
-	// redisplays inside one eval leave this X server one frame behind; one
-	// does not. The pictures those runs produced were the harness's doing.
-	//
-	// AND THE FRAME IS REVEALED BY A SECOND, SEPARATE EVAL. Also measured:
-	// what a redisplay draws inside one emacsclient eval reaches this X
-	// server's screen memory only once Emacs handles its next input, so a
-	// framebuffer read straight after the drawing eval sees the frame
-	// before it. The second eval is that input; the redisplay it carries
-	// has nothing new to draw and is there so the two evals are the same
-	// act, not a bare no-op.
-	p.e.Eval(`(progn (force-mode-line-update t) (redisplay t) t)`)
-	p.e.Eval(`(progn (redisplay t) t)`)
+	// WHY `redraw-frame`, AND WHY TWICE. Emacs draws this frame double
+	// buffered and swaps with XdbeCopied, which promises the back buffer a
+	// copy of the front after each swap. This X server does not keep that
+	// promise: measured, a tab bar drawn in one redisplay was on the glass,
+	// gone after the next redisplay that changed anything at all, and back
+	// after the one after that -- the two buffers alternate, and Emacs,
+	// trusting the copy, redraws only the glyphs it believes changed. An
+	// incremental redisplay therefore lands the new tab bar in ONE buffer,
+	// and which buffer is on the glass at the read is parity. Garbaging the
+	// frame makes the next redisplay draw EVERY glyph; doing it twice puts
+	// the complete current frame in both buffers, so the read is right
+	// whichever one is in front.
+	p.e.Eval(`(progn
+             (force-mode-line-update t)
+             (redraw-frame)
+             (redisplay t)
+             (redraw-frame)
+             (redisplay t)
+             t)`)
 
 	body, settled, took := p.settleFrame()
 	img, err := decodeXWD(body)
