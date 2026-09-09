@@ -3,6 +3,8 @@
 package e2e
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -63,4 +65,62 @@ func TestPlaytestAColoredArmSentenceSaysTheNameCarriesSelectionNotTheArm(t *test
 		t.Errorf("the colored-arm sentence says %q, and never tells the reviewer the name beside the "+
 			"badge carries the SELECTION face rather than the arm color", got)
 	}
+}
+
+// TestPlaytestAManifestCellCarryingAPipeIsEscapedAndTheTableKeepsItsColumns
+// is the second defect: `tabFaceFor` joins faces with " | ", the joined
+// string is written into a table cell, and an unescaped pipe silently splits
+// that row into extra columns.
+func TestPlaytestAManifestCellCarryingAPipeIsEscapedAndTheTableKeepsItsColumns(t *testing.T) {
+	// Arrange: a playbook whose manifest is a plain file -- no Emacs is
+	// involved in writing a row, so none is started.
+	dir := t.TempDir()
+	path := filepath.Join(dir, playtestManifestFile)
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create the manifest under test: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close the manifest under test: %v", err)
+		}
+	})
+	p := &playbook{t: t, Name: "unit", Dir: dir, manifest: file}
+	p.write("| # | the act | asserted | image | what the image must show |\n|---|---|---|---|---|\n")
+
+	// Act: a row whose "asserted" cell carries the exact join tabFaceFor
+	// produces.
+	face := `(:background "#98be65") | doom-modeline-panel`
+	p.note("switch to ws-a", "the drawn tabline carries "+face)
+
+	// Assert.
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the manifest under test: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+	row := lines[len(lines)-1]
+
+	if !strings.Contains(row, `\|`) {
+		t.Errorf("the row is %q; the pipe in the face join was not escaped", row)
+	}
+	if want, got := columnCount(lines[0]), columnCount(row); got != want {
+		t.Errorf("the row splits into %d columns, want the header's %d: %q", got, want, row)
+	}
+}
+
+// columnCount counts a markdown row's cells the way a renderer does: on
+// UNESCAPED pipes only.
+func columnCount(row string) int {
+	n := 0
+	for i := 0; i < len(row); i++ {
+		if row[i] == '\\' {
+			i++
+			continue
+		}
+		if row[i] == '|' {
+			n++
+		}
+	}
+	return n
 }
