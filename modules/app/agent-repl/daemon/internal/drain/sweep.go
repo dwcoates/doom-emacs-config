@@ -152,6 +152,25 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		log.Error(opSweep, "could not clear the hibernated session's shim pid", withCause(fields, err))
 		return false
 	}
+	// THE ROSTER'S ARM FOR THIS ROW IS A FUNCTION OF THE RECORD ABOVE. The
+	// roster resolver reads the session terminal to know a park from a fault,
+	// and it publishes on the events it is handed -- the last of which, the
+	// shim link going dead, arrived during the KillSession above, before this
+	// terminal existed. The row resolved on that event says `dead`, which
+	// Emacs paints as "something on this machine broke" for a session the
+	// daemon stood down on purpose. Nothing else republishes the roster after
+	// a hibernation, so this is the republish that makes the park READ as one.
+	//
+	// A failure here is recorded and nothing more: the hibernation HAPPENED,
+	// and reporting it as refused would leave the sweep retrying a session
+	// that is already stood down. The stale view is the defect, and the
+	// record is what names it.
+	if c.deps.PublishRegistry != nil {
+		if err := c.deps.PublishRegistry(ctx); err != nil {
+			log.Error(opSweep, "could not republish the roster after the hibernation",
+				withCause(fields, err))
+		}
+	}
 	log.Info(opSweep, "hibernated an idle session", fields)
 	return true
 }
