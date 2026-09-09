@@ -328,5 +328,40 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 		// of a world that was already broken.
 		s.Book.capture(row.capture, "`"+row.prompt+"` submitted with composer RET into a workspace of its own",
 			row.asserted, row.expected)
+
+		// AND THEN THE ROW'S WORKSPACE IS CLOSED, which is a user act this
+		// playbook performs deliberately and not a cleanup.
+		//
+		// WHY, measured in the sandbox run of this playbook: rows 25-27 --
+		// five workspaces with five LIVE webviews -- passed and captured,
+		// and the SIXTH row's page stalled at boot. Its `AdoptWebWorkspace`
+		// reached the daemon roughly a second late, its page stream
+		// (`WatchPage`) never reached the daemon at all -- no
+		// `daemon.feed.open_page` in that workspace's daemon log and no
+		// forwarded webapp log -- and the probe read `rows=0 text=""`.
+		// Every page pins exactly one HTTP/1.1 connection for its whole life
+		// (the WatchPage mux), all xwidget webviews of one Emacs share ONE
+		// WebKit network process, and WebKit caps a host at six connections,
+		// so the sixth live page's connections queue forever.
+		//
+		// That is a PRODUCT DEFECT, and it is FILED for the lead rather than
+		// worked around silently: it is a cross-system transport/frontend
+		// matter and not this section's. What this playbook owes is not to
+		// DEPEND on it. Closing the row's workspace through the ordinary
+		// verb is the user act that releases its webview, so at most one
+		// page is live when the next row boots.
+		if want, got := "agent-repl-close-workspace", s.E.LeaderBinding("j d"); got != want {
+			t.Fatalf("SPC j d resolves to %q, want %q", got, want)
+		}
+		s.E.Eval(`(agent-repl-close-workspace ` + elispString(ws) + `)`)
+		s.E.AwaitEvalFor(emacsVerbBound, "the closed workspace's webview buffer to be gone",
+			`(null (get-buffer (agent-repl--frontend-webview-buffer-name `+elispString(ws)+`)))`,
+			func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+		s.E.AwaitEvalFor(emacsVerbBound, "the closed workspace's tab to go away",
+			emacsWSTablineNamesForm,
+			func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), ws) })
+		s.Book.note("`SPC j d` pressed to close the row's workspace once its picture was taken",
+			"the webview buffer is gone and the name left `agent-repl--ws-tabline-names`, so the "+
+				"next row's page boots with at most one other live webview")
 	}
 }
