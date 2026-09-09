@@ -39,6 +39,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetLoggingForTests } from "../src/log.js";
 import { shellHTML } from "./shell-html.js";
 
+/**
+ * THIS FILE'S OWN TEST BOUND, because one test here pays for the whole graph.
+ *
+ * The 850ms unit global is sized for tests that import nothing at run time.
+ * Every test here does `await import("../src/main.js")` INSIDE its body — that
+ * top-level `void boot()` is the production entry point, so importing it is
+ * how a page is booted — and whichever test runs first compiles the entire
+ * module graph on that import. Measured over three runs: the first test 661,
+ * 678 and 692ms; the second and third 68-87ms each, doing identical work. So
+ * the cost is the first import, not the boot, and it lands on whichever test
+ * the runner happens to order first — which the shuffled run reorders.
+ *
+ * 3x the 692ms healthy maximum. This is a per-site bound, deliberately not a
+ * raised global: nothing else in the unit suite imports its subject at run
+ * time, and the global stays sized for what it covers.
+ */
+const BOOT_IMPORT_TIMEOUT_MS = 2100;
+
 /** The page address a workspace-addressed page is loaded with. */
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";
 
@@ -137,7 +155,7 @@ describe("the webapp's boot against a real page", () => {
     const card = await awaitBootFailureCard();
     expect(card.textContent).toContain("AdoptWebWorkspace");
     expect(document.querySelector("#failure-overlay")?.hasAttribute("data-empty")).toBe(false);
-  });
+  }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("never fails on the logger's own guard", async () => {
     // The specific regression, named. A boot that fails for ANY reason
@@ -148,7 +166,7 @@ describe("the webapp's boot against a real page", () => {
     await awaitBootFailureCard();
     const said = consoleError.mock.calls.flat().join(" ");
     expect(said).not.toContain("the webapp logger is not installed");
-  });
+  }, BOOT_IMPORT_TIMEOUT_MS);
 
   it("re-raises the failure it drew, rather than ending quietly", async () => {
     // The other half of "drew its failure": the card is what the READER sees,
@@ -162,5 +180,5 @@ describe("the webapp's boot against a real page", () => {
     expect(reRaised.map((err) => String(err))).toEqual([
       expect.stringContaining("AdoptWebWorkspace") as unknown as string,
     ]);
-  });
+  }, BOOT_IMPORT_TIMEOUT_MS);
 });
