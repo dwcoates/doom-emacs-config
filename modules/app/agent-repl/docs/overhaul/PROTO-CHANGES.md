@@ -397,3 +397,44 @@ the SAME delivery marker the two landings wear, with a `refused` class in the
 feed's error color and the producer's words in an element of their own, so
 this client's wording and the vendor's stay tellable apart. Emacs draws no
 feed (no change).
+
+## Landing 15 (2026-09-09): the page learns which session its logs belong to
+
+OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
+behalf).
+
+- agentrepl.v1 WatchWebWorkspaceResponse.push gains `session_identity` (tag 2,
+  WebWorkspaceSessionIdentity), a new message carrying
+  `agent_repl_session_id` (tag 1) and `claude_session_id` (tag 2). Both may be
+  empty: a workspace with no session yet, and a session with no vendor
+  conversation yet, are legitimate states.
+
+WHY. Four of the five runtimes stamp a correlation identity on their records —
+the daemon `agent_repl_session_id`, the shim the SDK `request_id`, Emacs
+`claude_session_id` off HostSessionLive, the sidecar its own. The webapp was
+the exception: `bindLogContext` knew only `connection_id`, so a browser-side
+ClientLog record could not be joined to the daemon session it was logged
+against and a user-visible fault in the page could not be traced to the vendor
+session behind it. The webapp logger was already built for this — its
+RuntimeLogContext has both identity fields and `restampRecordIdentity` restamps
+both — and nothing ever bound them.
+
+WHY THIS FRAME. failure.proto states the rule that "an agent-repl session
+identity is a vocabulary a rendering frontend does not have", which bars
+frontend/v1 (the topbar's session line included). WatchWebWorkspace is the
+page's standing, per-workspace, explicitly NOT DRAWN link stream — the
+webview's analog of the host stream Emacs binds its own identity from.
+
+STATE, NOT AN EVENT. `session_identity` is published on its own topic and
+merged onto the wire beside the `transferred` event, exactly as the host
+stream carries `host` beside its four event arms and for the same reason: a
+Topic replays only its latest value, so one topic carrying both would hand a
+late subscriber whichever came last. The daemon composes it before subscribing
+(so every fresh stream opens with one) and republishes it on every edge that
+republishes the host view, so a restart or a handover that mints a new identity
+is followed rather than remembered from boot.
+
+NO OTHER RUNTIME CHANGES. The daemon already promotes `agent_repl_session_id`
+and `claude_session_id` out of a forwarded ClientLog record's context into the
+persisted record's own fields (dlog.promote), so the field names the page
+stamps are the ones the other four runtimes are already grepped by.
