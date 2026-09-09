@@ -299,7 +299,7 @@ func (c *fakeClient) ReadHistory(context.Context, *shimv1.ReadHistoryRequest) (*
 }
 
 func (c *fakeClient) Occupy(string) (func(), error) { panic("sessionwatcher must not take the lease") }
-func (c *fakeClient) Kill(shimclient.KillAttribution) error {
+func (c *fakeClient) Kill(context.Context, shimclient.KillAttribution) error {
 	panic("sessionwatcher must never kill: attach ends nothing")
 }
 func (c *fakeClient) Detach()                            { panic("sessionwatcher must not detach the client") }

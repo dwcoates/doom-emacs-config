@@ -122,7 +122,7 @@ func TestKillReapsAndAttributes(t *testing.T) {
 
 	// Act.
 	attr := KillAttribution{Actor: "workspace.kill", Reason: "user closed the workspace"}
-	if err := client.Kill(attr); err != nil {
+	if err := client.Kill(context.Background(), attr); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestKillEscalatesToSigkill(t *testing.T) {
 	_ = sink.record(t)
 
 	// Act.
-	if err := client.Kill(KillAttribution{Actor: "drain", Reason: "shutdown"}); err != nil {
+	if err := client.Kill(context.Background(), KillAttribution{Actor: "drain", Reason: "shutdown"}); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
 
@@ -169,7 +169,7 @@ func TestKillFinalCloseOfExited(t *testing.T) {
 	f, uds := startFakeShim(t, dir)
 	spec, _ := newTestSpec(t, dir, uds, helperIdle)
 	client := spawnReady(t, f, spec)
-	if err := client.Kill(KillAttribution{Actor: "test", Reason: "one record"}); err != nil {
+	if err := client.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "one record"}); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
 	<-client.Exited()
@@ -278,7 +278,7 @@ func TestDetachLeavesTheProcessRunning(t *testing.T) {
 	if !alive(record.PID) {
 		t.Fatalf("pid %d is gone; Detach must leave the process running", record.PID)
 	}
-	if err := client.Kill(KillAttribution{Actor: "test", Reason: "after detach"}); !errors.Is(err, ErrDetached) {
+	if err := client.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "after detach"}); !errors.Is(err, ErrDetached) {
 		t.Fatalf("Kill() after Detach error = %v, want ErrDetached", err)
 	}
 	_ = syscall.Kill(record.PID, syscall.SIGKILL)
@@ -573,7 +573,7 @@ func TestKillOnlyEverSignalsOurOwnChild(t *testing.T) {
 				c := spawnReady(t, f, spec)
 				record := sink.record(t)
 				kill := func() error {
-					return c.Kill(KillAttribution{Actor: "test", Reason: "live child"})
+					return c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "live child"})
 				}
 				return kill, func(t *testing.T) {
 					info := <-c.Exited()
@@ -596,7 +596,7 @@ func TestKillOnlyEverSignalsOurOwnChild(t *testing.T) {
 				}
 				<-c.Exited()
 				kill := func() error {
-					return c.Kill(KillAttribution{Actor: "test", Reason: "already gone"})
+					return c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "already gone"})
 				}
 				return kill, nil
 			},
@@ -632,7 +632,7 @@ func TestKillOnlyEverSignalsOurOwnChild(t *testing.T) {
 				c.pgid = stranger.Process.Pid
 
 				kill := func() error {
-					return c.Kill(KillAttribution{Actor: "test", Reason: "not ours", Force: true})
+					return c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "not ours", Force: true})
 				}
 				return kill, func(t *testing.T) {
 					if err := syscall.Kill(stranger.Process.Pid, 0); err != nil {
@@ -660,5 +660,101 @@ func TestKillOnlyEverSignalsOurOwnChild(t *testing.T) {
 				witness(t)
 			}
 		})
+	}
+}
+
+// TestGracefulKillLeavesAHealthyShimUnescalated asserts the ordinary case the
+// grace exists for: a shim that answers SIGTERM inside the grace is never
+// SIGKILLed, even when the caller holds only the bound a graceful stop is
+// promised — GracefulKillBound itself.
+func TestGracefulKillLeavesAHealthyShimUnescalated(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	ctx, cancel := context.WithTimeout(context.Background(), GracefulKillBound)
+	defer cancel()
+
+	// Act.
+	if err := client.Kill(ctx, KillAttribution{Actor: "drain", Reason: "idle sweep"}); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	// Assert.
+	info := <-client.Exited()
+	if info.Signal != syscall.SIGTERM.String() {
+		t.Fatalf("signal = %q, want %q: a shim that left on SIGTERM must never be escalated", info.Signal, syscall.SIGTERM.String())
+	}
+}
+
+// TestGracefulKillEscalatesInsideTheCallersStandBound asserts the nesting the
+// stand bound promises: a shim that ignores SIGTERM is SIGKILLed and REPORTED
+// as stopped, on a caller holding drain.DefaultStandBound's own budget for the
+// process stop — GracefulKillBound. The two used to be the same 5s, so the
+// caller gave up at the exact instant the escalation fired and read a shim it
+// was still stopping as leaked.
+func TestGracefulKillEscalatesInsideTheCallersStandBound(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIgnoreTerm)
+	client := spawnReady(t, f, spec)
+	// THE RECORD IS THE DISPOSITION'S RECEIPT: the helper installs its SIGTERM
+	// ignore before it writes, so a parent that has read it knows the ignore is
+	// already in place and the SIGTERM below cannot win a race against it.
+	_ = sink.record(t)
+	ctx, cancel := context.WithTimeout(context.Background(), GracefulKillBound)
+	defer cancel()
+
+	// Act.
+	err := client.Kill(ctx, KillAttribution{Actor: "drain", Reason: "idle sweep"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Kill() error = %v, want nil: the escalation must land inside the caller's bound", err)
+	}
+	info := <-client.Exited()
+	if info.Signal != syscall.SIGKILL.String() {
+		t.Fatalf("signal = %q, want %q", info.Signal, syscall.SIGKILL.String())
+	}
+}
+
+// TestKillAnswersItsCallerWhenTheContextEndsInsideTheGrace asserts the one
+// thing that is cancellable and the one thing that is not: a caller whose bound
+// expires mid-grace is answered at once, with the expiry named, AND the process
+// is still SIGKILLed and still reaped. Kill took no context at all before this,
+// so the caller sat through the whole grace whatever its budget said.
+func TestKillAnswersItsCallerWhenTheContextEndsInsideTheGrace(t *testing.T) {
+	// Arrange. The grace is far longer than the caller's bound, so an answer
+	// that arrives promptly can only have come from the context.
+	const grace = 30 * time.Second
+	const callerBound = 50 * time.Millisecond
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIgnoreTerm)
+	client := spawnReady(t, f, spec, WithKillGrace(grace))
+	// See the receipt note above: the ignore is in place once the record is.
+	_ = sink.record(t)
+	ctx, cancel := context.WithTimeout(context.Background(), callerBound)
+	defer cancel()
+
+	// Act.
+	started := time.Now()
+	err := client.Kill(ctx, KillAttribution{Actor: "drain", Reason: "idle sweep"})
+	answered := time.Since(started)
+
+	// Assert.
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Kill() error = %v, want a context.DeadlineExceeded", err)
+	}
+	if answered >= grace {
+		t.Fatalf("Kill() answered after %v; it must answer on the caller's %v bound, not the grace", answered, callerBound)
+	}
+	// THE REAP IS NOT CANCELLABLE. The wait ended; the wait status is still
+	// collected, or the daemon accumulates a zombie per abandoned kill.
+	info := <-client.Exited()
+	if info.Signal != syscall.SIGKILL.String() {
+		t.Fatalf("signal = %q, want %q: the escalation must go out even when the caller has stopped waiting", info.Signal, syscall.SIGKILL.String())
 	}
 }
