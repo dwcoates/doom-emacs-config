@@ -18,7 +18,8 @@ import { createTicker } from "../../src/clock.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import {
   createComposerGate,
   mountComposer,
@@ -139,7 +140,7 @@ function mount(
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),

@@ -44,7 +44,8 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker } from "../../src/clock.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 
@@ -144,7 +145,7 @@ export function harness(script: FooterScript = {}): Harness {
     calls,
     sink,
     tail,
-    ctx: createAppContext({
+    ctx: testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: createTicker(1000),

@@ -77,7 +77,7 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
   const watch: StreamHandle = watchStream<WatchFooterResponse>(ctx, {
     name: "WatchFooter",
     schema: WatchFooterResponseSchema,
-    open: (client, signal) => client.watchFooter(buildWatchFooterRequest(ctx), { signal }),
+    open: (_client, signal) => ctx.streams.watch("footer", buildWatchFooterRequest(ctx), signal),
     onPush: (response) => {
       view = requireMessage(response.footer, "WatchFooterResponse.footer");
       draw();

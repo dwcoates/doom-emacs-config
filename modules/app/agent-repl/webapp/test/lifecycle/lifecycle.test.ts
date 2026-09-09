@@ -22,7 +22,8 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { Ticker } from "../../src/clock.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   AdoptionFailed,
@@ -285,7 +286,7 @@ describe("drawRestartingNotice", () => {
 // ---------------------------------------------------------------------------
 
 function bannerContext(ticker: Ticker, failures: FailureSink = new RecordingSink()): AppContext {
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(createRouterTransport(({ service }) => service(AgentRepl, {}))),
     workspace: WORKSPACE,
     ticker,
@@ -419,7 +420,7 @@ function lifecycleContext(
   failures: FailureSink,
   ticker: Ticker,
 ): AppContext {
-  return createAppContext({ client, workspace: WORKSPACE, ticker, failures, composerEnabled: false });
+  return testAppContext({ client, workspace: WORKSPACE, ticker, failures, composerEnabled: false });
 }
 
 /** Let the transport's zero-delay frames land without moving the clock. */
@@ -847,7 +848,7 @@ describe("adoptAtBoot", () => {
         },
       });
     });
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: fakeTicker(),

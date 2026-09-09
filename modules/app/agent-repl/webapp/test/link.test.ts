@@ -26,7 +26,8 @@ import {
 } from "../src/link.js";
 import { createAgentReplClient } from "../src/rpc/client.js";
 import { MalformedView } from "../src/rpc/malformed.js";
-import { createAppContext, type AppContext } from "../src/rpc/context.js";
+import { type AppContext } from "../src/rpc/context.js";
+import { testAppContext } from "./rpc/app-context.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/home/u/w" });
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
@@ -98,7 +99,7 @@ function harness(
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(1000),

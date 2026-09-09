@@ -180,7 +180,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       case "success": {
         root.applyPage(requireMessage(result.value.page, "OpenFeedSuccess.page"), "replace");
         const token = requireMessage(result.value.watch, "OpenFeedSuccess.watch");
-        yield* client.watchFeed(buildWatchFeedRequest(token), { signal });
+        yield* ctx.streams.watch("feed", buildWatchFeedRequest(token), signal);
         return;
       }
       case "error":

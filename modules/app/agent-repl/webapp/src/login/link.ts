@@ -43,7 +43,7 @@ export function connectLoginLink(ctx: AppContext): LoginLink {
     attach(signal: AbortSignal): AsyncIterable<LoginTerminalOutput> {
       log("debug", "attaching to the login terminal", { operation: "login.attach" });
       return strictFrames(
-        ctx.client.watchLoginTerminal({ workspace: ctx.workspace }, { signal }),
+        ctx.streams.watch("loginTerminal", { workspace: ctx.workspace }, signal),
       );
     },
 

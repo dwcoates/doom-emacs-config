@@ -17,7 +17,8 @@ import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/worksp
 import { createTicker } from "../../../src/clock.js";
 import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../../src/rpc/context.js";
+import { type AppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { ARTIFACT_STATE_ARMS, drawFeedArtifact } from "../../../src/feed/cards/artifact.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
@@ -52,7 +53,7 @@ function harness(answer?: OpenExternalResponse): Harness {
       },
     });
   });
-  const ctx: AppContext = createAppContext({
+  const ctx: AppContext = testAppContext({
     client: createAgentReplClient(transport),
     workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
     ticker: createTicker(1000),
