@@ -217,10 +217,52 @@ func (s *playtestScenario) submit(t *testing.T, text string) {
 // awaitInPage waits until a JavaScript predicate holds inside the webview.
 func (s *playtestScenario) awaitInPage(t *testing.T, what, expression string) {
 	t.Helper()
+	s.awaitInPageFor(t, playtestPageBound, what, expression)
+}
+
+// awaitInPageFor is awaitInPage with an explicit bound, for a page act that
+// is not a redraw. Per SPEC.md section B and the module AGENTS.md, a per-site
+// bound is a NAMED constant with a stated reason, never a duration written
+// at the call site -- so this takes one rather than a number.
+func (s *playtestScenario) awaitInPageFor(t *testing.T, bound time.Duration, what, expression string) {
+	t.Helper()
 	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
-	s.E.AwaitEvalFor(playtestPageBound, what,
+	s.E.AwaitEvalFor(bound, what,
 		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+elispString(pageYes(expression))+`)`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+}
+
+// clickInPage clicks one element inside the webview, the way a user does.
+//
+// The element is WAITED FOR first and the click's own answer is waited on,
+// so a selector that names nothing fails as "nothing to click" rather than
+// as whatever assertion came next.
+func (s *playtestScenario) clickInPage(t *testing.T, what, selector string) {
+	t.Helper()
+	s.awaitInPage(t, what+" to be there to click", `document.querySelector(`+jsString(selector)+`)`)
+	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
+	s.E.AwaitEvalFor(playtestPageBound, "the click on "+what,
+		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
+			elispString(pageYes(`(function () { var el = document.querySelector(`+jsString(selector)+`);
+                                                if (!el) { return false; }
+                                                el.click();
+                                                return true; })()`))+`)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+}
+
+// jsString renders a Go string as a JavaScript string literal. The selectors
+// here carry double quotes, so single quotes are the delimiter and the two
+// characters that could still end the literal are escaped.
+func jsString(s string) string {
+	out := make([]rune, 0, len(s)+2)
+	out = append(out, '\'')
+	for _, r := range s {
+		if r == '\'' || r == '\\' {
+			out = append(out, '\\')
+		}
+		out = append(out, r)
+	}
+	return string(append(out, '\''))
 }
 
 // tabNames reads the names the tab bar DRAWS, in roster order.
