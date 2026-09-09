@@ -1,0 +1,542 @@
+//go:build playtest
+
+package e2e
+
+import (
+	"fmt"
+	"testing"
+)
+
+// OWNER 10 of PLAYTEST-PLAN.md's partition: D29-D32 -- the slash-command
+// family, the compaction family, the vendor's unsolicited model fallback, and
+// the three fast-mode states.
+//
+// ONE WORLD, ONE TABLE, ONE LOOP, which is the plan's own rule for sections
+// D-H ("must be ONE loop each, not hand-written per scenario"). Every row
+// below is one scripted user act -- a prompt typed into the composer and
+// submitted with RET -- against the SAME Emacs, the same daemon and the same
+// session, so the picture a row produces also carries every row before it and
+// a reviewer reads the session's whole history in the last frame.
+//
+// WHY ONE SESSION AND NOT ONE PER ROW. Three of these families are STANDING
+// SESSION FACTS rather than turn events: fast mode sticks, the model fallback
+// sticks, and a context cut is a divider in the history it cut. A world per
+// row would photograph each of them on a session that had never done anything
+// else, which is the one arrangement that cannot show a fact STICKING.
+//
+// THE ROWS ARE ORDERED, and the order is the plan's: 29 slash, 30 compaction,
+// 31 model fallback, 32 fast mode. Nothing in a later row disturbs an earlier
+// row's evidence -- the compaction dividers stay in the feed, the fallback
+// model stays selected, and the fast-mode cell is the only thing the last
+// three rows move.
+
+// ---------------------------------------------------------------------------
+// THE EXACT STRINGS, taken from the suites that own them
+// ---------------------------------------------------------------------------
+
+// The answering prose each slash scenario concludes with, copied from the Go
+// e2e suite that owns those assertions (`slashcommands_e2e_test.go`
+// TestVendorAnsweredSlashCommand, TestSlashShapeANamed, TestSlashShapeAUnnamed)
+// rather than restated from the fake's source, so the two cannot drift into
+// disagreeing about the same turn.
+const (
+	pt10SlashProse         = "Answered the slash command locally."
+	pt10SlashShapeANamed   = "Recorded the Shape-A bookkeeping for /merge."
+	pt10SlashShapeAUnnamed = "Recorded the withheld-unnamed bookkeeping."
+)
+
+// The compaction family's own strings, from `compaction_e2e_test.go`
+// (TestCompactionDirected, TestCompactionAuto, TestCompactionFailed).
+const (
+	pt10CompactSummary     = "Compacted the conversation."
+	pt10CompactAutoSummary = "The conversation was compacted automatically."
+	pt10CompactFailedError = "the summarizing request was rejected"
+)
+
+// The fast-mode family's own conclusion prose, composed by the fake verbatim
+// into both the assistant block and `result.result`
+// (`agent-shim/claude/shim/src/fake/scenarios/session.ts` fastModeScenario),
+// and asserted by `turnlifecycle_e2e_test.go` TestFastMode for the `on` arm.
+const (
+	pt10FastOnProse       = "Fast mode is on."
+	pt10FastOffProse      = "Fast mode is off."
+	pt10FastCooldownProse = "Fast mode is cooldown."
+)
+
+// The labels the fast-mode cell draws, from `webapp/src/topbar/fast-mode.ts`
+// FAST_MODE_LABELS. They are the whole subject of D32: `cooldown` is
+// deliberately NOT folded into `off`, because off is a setting somebody chose
+// and cooldown is the vendor saying "not right now".
+const (
+	pt10FastLabelOn       = "fast"
+	pt10FastLabelOff      = "fast off"
+	pt10FastLabelCooldown = "fast cooling"
+)
+
+// pt10FallbackModelDisplayName is what the model selector's button DRAWS once
+// the vendor has swapped the session onto its fallback model.
+//
+// THE DRAWN TEXT IS A DISPLAY NAME, NOT THE MODEL NAME, and this constant is
+// deliberately the former. `!model-fallback` swaps a default-model session
+// (`fake-opus-4-8`) onto `fake-sonnet-5`
+// (`fake/scenarios/session.ts` MODEL_FALLBACK), and that model IS in the
+// fake's catalog (`fake/catalogs.ts`) carrying `displayName: "Fake Sonnet"` --
+// so `drawTopbarModelSelector` draws `u.selected.displayName`
+// (`webapp/src/topbar/model.ts`) and the string on the glass is "Fake Sonnet".
+// Asserting `fake-sonnet-5` on the button would assert something the product
+// does not draw and never has.
+//
+// It is still an EXACT assertion of the swap rather than a weakened one: the
+// session's own default model is the catalog's `Fake Opus` row, so "Fake
+// Sonnet" on that button is reachable only through the fallback.
+//
+// The MISSING HOOK is reported rather than worked around: the drawn selector
+// carries no attribute naming the model actually in force -- the button has
+// only its display text and `data-unselected`, and `data-model-option` exists
+// only on the reveal's rows, none of which is marked as the selected one. See
+// the owner's report.
+const pt10FallbackModelDisplayName = "Fake Sonnet"
+
+// pt10DefaultModelDisplayName is the display name the SAME button carries
+// before the fallback -- the catalog row for `FAKE_DEFAULT_MODEL`. It is named
+// so the fallback row's manifest sentence can say what the picture must NOT
+// still read.
+const pt10DefaultModelDisplayName = "Fake Opus"
+
+// pt10FallbackConclusion is the prose the fallback turn concludes with, from
+// `fake/scenarios/session.ts` MODEL_FALLBACK's own `conclude` call. It names
+// the model on the WIRE -- `fake-sonnet-5` -- which is the one place in this
+// row's evidence that literal appears at all, the strip drawing the catalog's
+// display name for it instead.
+const pt10FallbackConclusion = "Answered on fake-sonnet-5 after the fallback."
+
+// ---------------------------------------------------------------------------
+// THE PAGE PREDICATES
+// ---------------------------------------------------------------------------
+
+// pt10SettledResponseWithProse is the predicate for "the answering response
+// bubble settled, carrying exactly this prose".
+//
+// It is scoped to a bubble in the SUCCESS state, which is `data-state` mirrored
+// off `FeedTurnActivityResponse`'s own result arm
+// (`webapp/src/feed/cards/response.ts`), so a response still streaming cannot
+// satisfy it. The prose is matched against the bubble's rendered text because
+// the daemon ships markdown and the bubble renders it -- every string here is
+// plain prose, so the rendered text carries it verbatim.
+//
+// EVERY ROW'S PROSE IS DISTINCT, which is what makes a shared session safe:
+// the predicate cannot be satisfied by a bubble an earlier row left behind.
+func pt10SettledResponseWithProse(prose string) string {
+	return `Array.prototype.some.call(
+                  document.querySelectorAll('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]'),
+                  function (bubble) { return bubble.textContent.indexOf(` + jsString(prose) + `) !== -1; })`
+}
+
+// pt10UserPromptWithText is the predicate for "the user's own prompt bubble
+// for THIS row arrived on the standing tail".
+//
+// It is the first thing every row asserts, and it is the assertion that
+// separates "the prompt never reached the daemon" from "the turn produced the
+// wrong thing" -- two failures a wait on the response alone would report
+// identically.
+func pt10UserPromptWithText(text string) string {
+	return `Array.prototype.some.call(
+                  document.querySelectorAll('[data-feed-row][data-row-kind="userPrompt"]'),
+                  function (bubble) { return bubble.textContent.indexOf(` + jsString(text) + `) !== -1; })`
+}
+
+// pt10CompactedSeparations is the predicate for "the feed carries at least N
+// compacted context-cut dividers".
+//
+// COUNTED, NOT POSITIONED. Two rows of this table compact, and the second
+// cannot be told from the first by any attribute the divider carries -- both
+// are `[data-row-kind="separation"][data-state="compacted"]`, and their
+// summaries are folded away by default (`separation.ts` initialFold, off the
+// wire's own `folded`). So the second compaction's own evidence is that the
+// feed now holds TWO of them, which is a fact about the feed rather than about
+// where a row landed in it.
+func pt10CompactedSeparations(least int) string {
+	return fmt.Sprintf(
+		`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compacted"] .sep-compacted').length >= %d`,
+		least)
+}
+
+// pt10ContextFigureDrawn is the predicate for "the topbar's context budget
+// figure is drawn and says something".
+//
+// `.topbar-context-figure` is the hook the webapp's own DOM contract names for
+// it (`webapp/src/topbar/context-chip.ts`), and the daemon fills it for every
+// ready workspace (`daemon/internal/resolve/topbar/resolver.go` contextChip
+// -> `TopbarContextChip.text`), so a compaction that moved the context is
+// drawn HERE and nowhere else on the strip. The figure is the daemon's own
+// formatted text; this asserts it is present rather than what number it is,
+// because the number is the vendor's and the playtest scripts no context size.
+const pt10ContextFigureDrawn = `document.querySelector(".topbar-context-figure") &&
+         document.querySelector(".topbar-context-figure").textContent.trim() !== ""`
+
+// pt10FastCell is the predicate for the fast-mode cell in one named state,
+// carrying that state's own label.
+//
+// BOTH HALVES, AND THE LABEL IS THE POINT. The arm alone would pass on a cell
+// that drew cooldown with off's words, which is the exact confusion
+// `fast-mode.ts` says it exists to avoid ("Drawing them the same would invite
+// a reader to go looking for a switch that cannot take effect").
+func pt10FastCell(state, label string) string {
+	return `(function () {
+                  var cell = document.querySelector('.topbar-fast[data-fast-mode=` + jsString(state) + `]');
+                  return cell !== null && cell.textContent.trim() === ` + jsString(label) + `;
+                })()`
+}
+
+// pt10ModelButtonReads is the predicate for the model selector's button
+// carrying exactly one display name, on a button that has a selection at all.
+//
+// `data-unselected` is checked too rather than left implied: an unselected
+// button draws the `MODEL_PLACEHOLDER` word, and a page that lost its
+// selection entirely would otherwise be diagnosed as a wrong model rather than
+// as no model.
+func pt10ModelButtonReads(displayName string) string {
+	return `(function () {
+                  var button = document.querySelector(".topbar-model-button");
+                  return button !== null &&
+                         !button.hasAttribute("data-unselected") &&
+                         button.textContent.trim() === ` + jsString(displayName) + `;
+                })()`
+}
+
+// ---------------------------------------------------------------------------
+// THE TABLE
+// ---------------------------------------------------------------------------
+
+// pt10Wait is one programmatic in-page assertion a row makes: what is being
+// waited for, in words a failure prints, and the predicate that decides it.
+type pt10Wait struct {
+	what       string
+	expression string
+}
+
+// pt10Row is one act in the playbook: a prompt, the assertions the act must
+// satisfy before any picture is taken, and the sentence a reviewer holds the
+// picture to.
+type pt10Row struct {
+	// name is the capture's own name under the playbook's artifact directory.
+	name string
+	// plan is the PLAYTEST-PLAN.md playbook this row belongs to, recorded in
+	// the manifest so a reviewer reads the plan's own numbering.
+	plan string
+	// prompt is what the user types into the composer.
+	prompt string
+	// settled is the answering prose the turn must conclude with, asserted on
+	// the DRAWN bubble. Empty means this row's subject is not the prose.
+	settled string
+	// waits are the row's remaining in-page assertions, made after the turn
+	// has settled.
+	waits []pt10Wait
+	// asserted is the manifest's account of what the row PROVED
+	// programmatically, and expected is the sentence the picture must match.
+	asserted string
+	expected string
+}
+
+// TestPlaytestFeedSession is D29-D32.
+func TestPlaytestFeedSession(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "10-feed-session",
+		"Plan D29-D32. The slash-command family, the compaction family, the vendor's unsolicited model "+
+			"fallback and the three fast-mode states -- every one of them driven through the composer "+
+			"against ONE session, so a standing session fact is photographed on a session that has a "+
+			"history rather than on a fresh one.")
+	p := s.Book
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	p.note("one repository registered with its panel opened",
+		"the webapp mounted its feed host, drew its footer status word off the daemon's own push, and "+
+			"filed nothing on the failure overlay")
+
+	rows := []pt10Row{
+		// -------------------------------------------------------------------
+		// D29 -- the slash-command family.
+		//
+		// THERE IS NO SLASH FEED ROW, and that is the contract rather than a
+		// gap in this table. `slashcommands_e2e_test.go`'s own header settles
+		// it off frontend/v1/failure.proto and docs/overhaul/daemon.md: a
+		// slash command the vendor answers itself is entry-less
+		// vendor-specific residue, which "has no feed-row arm of its own -- so
+		// a slash command the vendor answers itself surfaces on the wire only
+		// as an ORDINARY concluded turn, never as a distinct unit". The two
+		// Shape-A scenarios are FILE-PLANE ONLY for their bookkeeping write
+		// and produce no SessionUpdate at all. So the row the webapp draws for
+		// a slash record is the answering RESPONSE bubble, and that is what
+		// these three rows assert -- each on its own exact prose, which is the
+		// only thing that distinguishes the three turns on the glass.
+		// -------------------------------------------------------------------
+		{
+			name:    "slash-vendor-answered",
+			plan:    "D29",
+			prompt:  "!slash",
+			settled: pt10SlashProse,
+			asserted: "the user's own prompt bubble arrived on the standing tail, the roster arm ran and " +
+				"settled, and a `[data-unit=\"response\"][data-state=\"success\"]` bubble carries exactly " +
+				"the prose `" + pt10SlashProse + "`",
+			expected: "The feed carries the `!slash` PROMPT BUBBLE and, beneath it, an assistant bubble reading " +
+				"\"" + pt10SlashProse + "\". THERE IS NO SEPARATE SLASH ROW and there must not be: the " +
+				"vendor answered the command itself, which the contract draws as an ordinary concluded " +
+				"turn. The answering prose IS the whole surface of the slash record.",
+		},
+		{
+			// `merge` rather than the scenario's own `compact` default,
+			// following TestSlashShapeANamed: a command name chosen to prove
+			// the name is genuinely a parameter.
+			name:    "slash-shape-a-named",
+			plan:    "D29",
+			prompt:  "!slash-shape-a merge",
+			settled: pt10SlashShapeANamed,
+			asserted: "the prompt bubble arrived, the turn settled, and the answering bubble carries exactly " +
+				"`" + pt10SlashShapeANamed + "` -- the conclusion `slashcommands_e2e_test.go` " +
+				"TestSlashShapeANamed pins for the same scenario",
+			expected: "A THIRD pair of bubbles: the `!slash-shape-a merge` prompt and an assistant bubble " +
+				"reading \"" + pt10SlashShapeANamed + "\", naming the command that was passed. " +
+				"The CLI's own bookkeeping record is a file-plane write with no wire signal, so again " +
+				"NOTHING but the prose is drawn for it. The `!slash` pair is still above.",
+		},
+		{
+			name:    "slash-shape-a-unnamed",
+			plan:    "D29",
+			prompt:  "!slash-shape-a-unnamed",
+			settled: pt10SlashShapeAUnnamed,
+			asserted: "the prompt bubble arrived, the turn settled, and the answering bubble carries exactly " +
+				"`" + pt10SlashShapeAUnnamed + "`",
+			expected: "The unnamed counterpart: a prompt bubble and an assistant bubble reading " +
+				"\"" + pt10SlashShapeAUnnamed + "\", NAMING NO COMMAND -- the negative the named row " +
+				"exists beside. Three slash pairs are now in the feed, in order.",
+		},
+
+		// -------------------------------------------------------------------
+		// D30 -- the compaction family.
+		//
+		// The divider is the subject, and the context budget beside it. The
+		// summary is folded on a first draw (the wire's own `folded`), so the
+		// picture shows a rule, a label with the size change on it, and a
+		// closed "summary" toggle -- which is what a reader gets, and
+		// therefore what the manifest asks for.
+		// -------------------------------------------------------------------
+		{
+			name:    "compact-directed",
+			plan:    "D30",
+			prompt:  "!compact",
+			settled: pt10CompactSummary,
+			waits: []pt10Wait{
+				{"the compacted context-cut divider to be drawn in the feed", pt10CompactedSeparations(1)},
+				{"the topbar's context budget figure to be drawn", pt10ContextFigureDrawn},
+			},
+			asserted: "a `[data-row-kind=\"separation\"][data-state=\"compacted\"]` row holding " +
+				"`.sep-compacted` is in the feed, `.topbar-context-figure` carries a figure, and the " +
+				"turn concluded with `" + pt10CompactSummary + "`",
+			expected: "A CONTEXT-CUT DIVIDER is drawn across the feed beneath the slash pairs: a coloured rule " +
+				"with a centred muted label under it, the label carrying the size change as " +
+				"`before → after`, and a closed `▸ summary` toggle beside it (the summary is folded on " +
+				"a first draw). THE TOPBAR CARRIES A CONTEXT FIGURE at its right -- a yellow number " +
+				"such as `12.3k`. The divider must be VISIBLE, not merely present.",
+		},
+		{
+			name:    "compact-auto",
+			plan:    "D30",
+			prompt:  "!compact-auto",
+			settled: pt10CompactAutoSummary,
+			waits: []pt10Wait{
+				{"a SECOND compacted divider to be drawn, the first one still standing", pt10CompactedSeparations(2)},
+				{"the topbar's context budget figure to still be drawn", pt10ContextFigureDrawn},
+			},
+			asserted: "the feed now holds TWO compacted separation rows rather than one, the topbar still " +
+				"draws its context figure, and the turn concluded with `" + pt10CompactAutoSummary + "`",
+			expected: "TWO context-cut dividers are now visible, one under the other with the auto-compaction's " +
+				"turn between them, each with its own rule, label and folded summary toggle. The topbar " +
+				"still carries its context figure. Nothing about the drawn divider says which compaction " +
+				"was asked for and which happened on its own -- the vendor's trigger is not on the glass, " +
+				"which is a fact about the product and not a fault in the picture.",
+		},
+		{
+			name:   "compact-failed",
+			plan:   "D30",
+			prompt: "!compact-failed",
+			waits: []pt10Wait{
+				{
+					"the compaction-failed divider to be drawn carrying the vendor's own rejection wording",
+					`(function () {
+                       var failed = document.querySelector('[data-feed-row][data-row-kind="separation"][data-state="compactionFailed"] [data-compaction-failed="true"]');
+                       return failed !== null && failed.textContent.trim() === ` + jsString(pt10CompactFailedError) + `;
+                     })()`,
+				},
+				{
+					// NOTHING WAS CUT, so there is no size change to draw
+					// beside this label -- the wire leaves `tokens` unset and
+					// `separation.ts` draws no figure for an absent one. The
+					// negative is asserted because the whole difference
+					// between this divider and the two above it is that this
+					// one reports a compaction that DID NOT HAPPEN.
+					"the failed divider to carry NO size change, nothing having been cut",
+					`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compactionFailed"] .sep-tokens').length === 0`,
+				},
+				{"the two successful dividers to still be standing", pt10CompactedSeparations(2)},
+			},
+			asserted: "a `[data-state=\"compactionFailed\"]` separation row carries exactly " +
+				"`" + pt10CompactFailedError + "`, carries NO `.sep-tokens` figure, and the two " +
+				"compacted dividers above it are untouched",
+			expected: "A THIRD DIVIDER, and it is drawn in the slot a compacted one would have taken -- the same " +
+				"rule geometry -- but it reports a compaction that DID NOT HAPPEN: it states " +
+				"\"" + pt10CompactFailedError + "\" and its label carries NO `before → after` size " +
+				"change, because nothing was cut. Its rule takes the failed accent rather than the " +
+				"compacted one, so it must not be mistakable for the two above it. There is no folded " +
+				"summary on it: there is no summary.",
+		},
+
+		// -------------------------------------------------------------------
+		// D31 -- the vendor's unsolicited model fallback.
+		//
+		// Nothing called SetSessionModel; the vendor swapped the model on its
+		// own and said so in a `system:model_refusal_fallback` record, which
+		// the shim folds into the ONE authoritative fact
+		// (`engine/session.ts`: "SessionUpdate.model_changed is stated by
+		// SetSessionModel, or by the vendor ... so one place is
+		// authoritative"). The topbar's own button is where that lands.
+		// -------------------------------------------------------------------
+		{
+			name:    "model-fallback",
+			plan:    "D31",
+			prompt:  "!model-fallback",
+			settled: pt10FallbackConclusion,
+			waits: []pt10Wait{
+				{
+					"the topbar's model selector to name the fallback model the vendor swapped to",
+					pt10ModelButtonReads(pt10FallbackModelDisplayName),
+				},
+			},
+			asserted: "`.topbar-model-button` reads exactly `" + pt10FallbackModelDisplayName + "` and carries " +
+				"no `data-unselected` -- the catalog display name for `fake-sonnet-5`, which is the " +
+				"model `TestModelChanged` pins for this scenario, and which is reachable from this " +
+				"session's own default (`" + pt10DefaultModelDisplayName + "`) only through the fallback",
+			expected: "THE TOPBAR'S MODEL SELECTOR NOW NAMES THE FALLBACK MODEL: its button reads " +
+				"\"" + pt10FallbackModelDisplayName + "\" and must NOT still read " +
+				"\"" + pt10DefaultModelDisplayName + "\", which is what the session started on. " +
+				"The feed carries the `!model-fallback` prompt and the answer stating the swap. " +
+				"WHAT THE BUTTON DRAWS IS THE CATALOG'S DISPLAY NAME AND NOT THE MODEL NAME: the wire " +
+				"carries `fake-sonnet-5`, the catalog gives that model the display name " +
+				"\"" + pt10FallbackModelDisplayName + "\", and the button draws the display name. A " +
+				"reviewer looking for the literal `fake-sonnet-5` on the strip will not find it, and " +
+				"that is the product's own choice rather than a defect in this picture.",
+		},
+
+		// -------------------------------------------------------------------
+		// D32 -- the three fast-mode states, one capture each.
+		//
+		// The cell is a LABEL and never a control: nothing on the contract sets
+		// fast mode. So each row's evidence is the arm the vendor stated and
+		// the words the cell chose for it, and the whole subject is that
+		// COOLDOWN IS NOT DRAWN AS OFF.
+		// -------------------------------------------------------------------
+		{
+			name:    "fast-on",
+			plan:    "D32",
+			prompt:  "!fast-on",
+			settled: pt10FastOnProse,
+			waits: []pt10Wait{
+				{"the topbar's fast-mode cell to read the ON state", pt10FastCell("on", pt10FastLabelOn)},
+			},
+			asserted: "`.topbar-fast[data-fast-mode=\"on\"]` is drawn and its label is exactly " +
+				"`" + pt10FastLabelOn + "`, beside the conclusion `" + pt10FastOnProse + "` that says " +
+				"which state the vendor reported",
+			expected: "THE TOPBAR CARRIES A FAST-MODE CELL READING \"fast\", in the strip's ordinary " +
+				"foreground rather than the muted grey of the cells around it -- on is the one state " +
+				"that changes what sending a prompt does, and it is the only one given any emphasis.",
+		},
+		{
+			name:    "fast-off",
+			plan:    "D32",
+			prompt:  "!fast-off",
+			settled: pt10FastOffProse,
+			waits: []pt10Wait{
+				{"the topbar's fast-mode cell to read the OFF state", pt10FastCell("off", pt10FastLabelOff)},
+			},
+			asserted: "`.topbar-fast[data-fast-mode=\"off\"]` is drawn and its label is exactly " +
+				"`" + pt10FastLabelOff + "`, beside the conclusion `" + pt10FastOffProse + "`",
+			expected: "THE SAME CELL NOW READS \"fast off\", in MUTED UPRIGHT text -- a setting somebody chose. " +
+				"It must no longer read \"fast\". The vendor's reason for it (`preference`) is the " +
+				"cell's tooltip and is deliberately NOT in the label, so nothing but the two words is " +
+				"drawn.",
+		},
+		{
+			name:    "fast-cooldown",
+			plan:    "D32",
+			prompt:  "!fast-cooldown",
+			settled: pt10FastCooldownProse,
+			waits: []pt10Wait{
+				{"the topbar's fast-mode cell to read the COOLDOWN state", pt10FastCell("cooldown", pt10FastLabelCooldown)},
+				{
+					// THE SPECIFIC NEGATIVE the contract exists for. The
+					// matrix names it outright for `!fast-cooldown`: the strip
+					// does NOT draw cooldown as `off`, which would offer a
+					// switch that cannot take effect.
+					"the cell to be drawing cooldown as ITS OWN state and not as off",
+					`document.querySelector('.topbar-fast[data-fast-mode="off"]') === null`,
+				},
+			},
+			asserted: "`.topbar-fast[data-fast-mode=\"cooldown\"]` is drawn with the label " +
+				"`" + pt10FastLabelCooldown + "`, and NO `[data-fast-mode=\"off\"]` cell is on the page " +
+				"-- the specific negative the fast-mode contract exists for",
+			expected: "THE CELL NOW READS \"fast cooling\", DIMMED AND ITALIC -- and that treatment is the whole " +
+				"subject of this picture. It must be VISIBLY DISTINCT from the previous capture's " +
+				"plain upright \"fast off\": cooldown is the vendor saying \"not right now, and it " +
+				"will come back on its own\", where off is a setting somebody chose, and drawing them " +
+				"the same would send a reader looking for a switch that cannot take effect. " +
+				"`styles.css` gives `[data-fast-mode=\"cooldown\"]` `font-style: italic` and " +
+				"`opacity: 0.7`; the picture is what says the reader gets it.",
+		},
+	}
+
+	for _, row := range rows {
+		row := row
+		// ONE WORLD AND ONE LOOP, per PLAYTEST-PLAN.md's rule for sections
+		// D-H. `t.Run` here is SUBSTEP SCOPING ONLY -- it is sequential, it
+		// takes no world of its own, and it exists so a failing row names
+		// itself in the test output instead of being one of eleven
+		// indistinguishable failures against the same test name.
+		t.Run(row.plan+"/"+row.name, func(t *testing.T) {
+			// THE PROMPT IS TYPED AND SUBMITTED WITH RET, and `submit` asserts
+			// the composer's own RET binding before pressing it.
+			s.submit(t, row.prompt)
+			s.awaitInPage(t, "the "+row.name+" prompt bubble to arrive on the standing tail",
+				pt10UserPromptWithText(row.prompt))
+
+			// THE RUNNING ARM IS AWAITED FIRST, AND THAT IS NOT DECORATION.
+			// Every row shares one session, so the workspace is ALREADY on a
+			// settled arm when a row starts -- a wait for a settled arm would
+			// be satisfied instantly by the PREVIOUS row's finish edge and
+			// would photograph a turn still in flight. Waiting for the turn to
+			// be genuinely running first makes the settle edge this row's own.
+			s.awaitArm(t, s.Name, "the "+row.name+" turn to be genuinely in flight", emGHIRunningArms...)
+			s.awaitArm(t, s.Name, "the "+row.name+" turn to settle", emGHISettledArms...)
+
+			if row.settled != "" {
+				s.awaitInPage(t, "the answering response bubble for "+row.name+" to settle with its own prose",
+					pt10SettledResponseWithProse(row.settled))
+			}
+			for _, wait := range row.waits {
+				s.awaitInPage(t, wait.what, wait.expression)
+			}
+
+			p.capture(row.name,
+				fmt.Sprintf("%s: `%s` typed into the composer and submitted with RET", row.plan, row.prompt),
+				row.asserted, row.expected)
+		})
+	}
+
+	// THE SESSION'S ARM AT THE END, recorded rather than photographed: the
+	// last row's capture already carries the screen, and this says the world
+	// the pictures were taken in was never left mid-turn.
+	final := s.awaitArm(t, name, "the session to be left on a settled arm", emGHISettledArms...)
+	p.note("every row in the table run against the one session",
+		fmt.Sprintf("the workspace is left on %s, and every one of the %d rows above asserted its own "+
+			"drawn evidence before its picture was taken", final, len(rows)))
+}
