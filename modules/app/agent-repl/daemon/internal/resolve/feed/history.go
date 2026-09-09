@@ -26,7 +26,7 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 	// the replay walks it backwards.
 	entries := page.GetEntries()
 	for i := len(entries) - 1; i >= 0; i-- {
-		r.replayEntry(s, agent, entries[i].GetEntry())
+		r.replayEntry(s, agent, entries[i].GetEntry(), entries[i].GetAt())
 	}
 
 	// A REPLAY CARRIES NO START — "what history replays is SETTLED frames" —
@@ -64,12 +64,12 @@ func (r *resolver) OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.Agent
 }
 
 // replayEntry routes one replayed entry to the family that draws it.
-func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry *conversationv1.HistoryEntry) {
+func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry *conversationv1.HistoryEntry, at *conversationv1.HistoryPointer) {
 	switch arm := entry.GetEntry().(type) {
 	case *conversationv1.HistoryEntry_UserPrompt:
 		r.drawAgentPrompt(s, agent, arm.UserPrompt)
 	case *conversationv1.HistoryEntry_AgentFrame:
-		r.replayFrame(s, arm.AgentFrame)
+		r.replayFrame(s, arm.AgentFrame, at)
 	default:
 		r.logger(s.id).Warn("daemon.feed.history_entry_unset",
 			"a replayed history entry carried no arm",
@@ -80,7 +80,7 @@ func (r *resolver) replayEntry(s *wsState, agent *conversationv1.AgentId, entry 
 // replayFrame routes one replayed agent frame. FRAMES ARE FLAT and the frame's
 // own agent_id is the whole of their attribution, so the replay reads it here
 // rather than inheriting the page's agent.
-func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame) {
+func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
 	agent := frame.GetAgentId()
 	switch arm := frame.GetResult().(type) {
 	case *conversationv1.AgentFrame_Update:
@@ -92,7 +92,7 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame) {
 		case *conversationv1.AgentUpdate_Permission:
 			r.drawPermission(s, agent, update.Permission)
 		case *conversationv1.AgentUpdate_ContextCut:
-			r.drawContextCut(s, agent, update.ContextCut)
+			r.drawContextCut(s, agent, update.ContextCut, at)
 		case *conversationv1.AgentUpdate_ContextBudgetWarning:
 			// The vendor's own context-budget warning is a PAGE LINE with
 			// nothing to draw in the feed: the footer's activity line is its
