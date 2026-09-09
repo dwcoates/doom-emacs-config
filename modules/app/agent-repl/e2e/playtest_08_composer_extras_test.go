@@ -353,6 +353,16 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
               (erase-buffer)
               (insert ` + elispString(words) + `)
+              t)`)
+	if got := composerText(e, s.Input); got != words {
+		t.Fatalf("the composer text is %q, want %q", got, words)
+	}
+	p.capture("composer-words", "the words typed into the composer, nothing attached yet",
+		"the composer text is exactly the typed words",
+		"The composer window (beneath the webview) shows the typed words on its first line; the "+
+			"webview above it shows the idle page: sidebar with the workspace, empty feed, footer status idle.")
+
+	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
               (agent-repl-input-attach-image ` + elispString(imagePath) + ` ` + elispString(mediaType) + `)
               (agent-repl--image-insert-marker ` + elispString(imagePath) + ` ` + elispString(name) + `)
               t)`)
