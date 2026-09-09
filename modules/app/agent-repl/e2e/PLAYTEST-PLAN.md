@@ -59,7 +59,7 @@ A. Boot and roster (tab bar)
  2. adopt an already-answering daemon → ready with no rebuild
  3. build failure → modeline, tab `failed`, no wedge
  4. add project from directory (SPC TAB C-n) → second tab, roster order
- 5. new workspace (SPC TAB n) and child-of-current (C-u) → nesting in tab names
+ 5. new workspace (SPC TAB n) and child-of-current (C-u) → the child follows its parent in depth-first tab order (the product expresses nesting as order, not as a name marker), and the created workspace is selected
  6. fork workspace + conversation (SPC TAB f) → forked tab, parent history in feed
  7. switch (SPC p p / SPC TAB R) → selected tab highlights, webview swaps, composer follows
  8. priority set/clear (SPC TAB p); deprio close shuffles tab to the end
