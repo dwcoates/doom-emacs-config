@@ -788,3 +788,100 @@ func TestAHibernationWithNoRosterSurfaceWiredIsTolerated(t *testing.T) {
 		t.Fatalf("hibernated = %v, want the idle session hibernated with no roster surface wired", hibernated)
 	}
 }
+
+// TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord is the
+// footer's and the indicator's half of the park, and it is one assertion
+// because the ordering IS the defect: both are in-memory accumulations fed by
+// events, so a park announced before the terminal record exists would be a
+// surface asserting something the durable state does not yet say.
+//
+// The reason they must be told at all is that the last event either one is
+// handed during a stand-down is the shim link going dead, and the footer's
+// disconnected step reads that as `disconnected · dead` — the word the
+// webapp's composer gate closes on (webapp/src/main.ts).
+func TestTheHibernationTellsTheSessionScopedViewsAfterTheTerminalRecord(t *testing.T) {
+	// Arrange
+	var terminalsAtPark []string
+	var parked []bool
+	h := newHarness(t)
+	var ws ids.WorkspaceID
+	h.c.deps.SetParked = func(told ids.WorkspaceID, park bool) {
+		parked = append(parked, park)
+		session, found, err := h.db.Session(context.Background(), told)
+		if err != nil || !found || session.Terminal == nil {
+			terminalsAtPark = append(terminalsAtPark, "")
+			return
+		}
+		terminalsAtPark = append(terminalsAtPark, session.Terminal.Kind)
+	}
+	ws = h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want the one idle session %q", hibernated, ws)
+	}
+	if len(parked) != 1 || !parked[0] {
+		t.Fatalf("SetParked calls = %v, want exactly one park for the one hibernation", parked)
+	}
+	if terminalsAtPark[0] != TerminalHibernated {
+		t.Fatalf("session terminal seen at the park = %q, want %q: the views must be told after the record",
+			terminalsAtPark[0], TerminalHibernated)
+	}
+}
+
+// TestARefusedHibernationDoesNotParkTheSessionScopedViews is the negative
+// half: the shim is still serving, so a park told here would make the footer
+// treat the NEXT real link death as a deliberate stand-down.
+func TestARefusedHibernationDoesNotParkTheSessionScopedViews(t *testing.T) {
+	// Arrange
+	var parked []bool
+	h := newHarness(t, func(d *Deps) {
+		d.SetParked = func(_ ids.WorkspaceID, park bool) { parked = append(parked, park) }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = &shimv1.HibernateResponse{
+		Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+			Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+		}},
+	}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the refusal to defer", hibernated)
+	}
+	if len(parked) != 0 {
+		t.Fatalf("SetParked calls = %v, want none: the shim the sweep deferred is still serving", parked)
+	}
+}
+
+// TestAHibernationWithNoSessionScopedViewsWiredIsTolerated pins the nil dep:
+// the controller is built in tests without any view surface, and a sweep must
+// not take the daemon down for it.
+func TestAHibernationWithNoSessionScopedViewsWiredIsTolerated(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.SetParked = nil })
+	h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 {
+		t.Fatalf("hibernated = %v, want the idle session hibernated with no view surface wired", hibernated)
+	}
+}
