@@ -34,6 +34,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -258,6 +259,106 @@ func wlWebappWritable(webappDir string) error {
 func TestWebappLayer(t *testing.T) {
 	t.Parallel()
 	wlDriveArea(t, "proof-of-life.layer.test.ts")
+}
+
+// wlClientLogOperation is the operation the client-log area's page plants.
+//
+// SHARED WITH THE PAGE BY VALUE: `OPERATION` in
+// `webapp/test/webapp-layer/client-log.layer.test.ts` is this same string. It
+// is how this driver finds the ONE record the page emitted on purpose among
+// the boot's own fifty-odd.
+const wlClientLogOperation = "webapp-layer.client-log-round-trip"
+
+// TestWebappLayerClientLog is the five-runtime JOIN the logging contract
+// promises, asserted where it is real: a record emitted in the browser lands
+// in the daemon's own `webapp.log` carrying the identity that ties it to the
+// daemon's records and the shim's for the same session.
+//
+// WHY THIS AREA EXISTS AT ALL. `ClientLog` is the console-less client's only
+// evidence path — a page inside an xwidget has no console anybody reads — and
+// until this area the round trip was proven only against the FAKE daemon. The
+// layer's own page forwarded nothing, because the layer installed a no-op
+// sink; so the one place that runs the real page against the real daemon could
+// not prove the thing the whole contract exists for. The page now mounts with
+// production's own sink (its cost per file is measured in
+// `webapp/test/webapp-layer/setup.ts`), plants one record, and this side reads
+// the files back.
+//
+// THE ASSERTION IS A JOIN, NOT AN ECHO. The page's own file-level assertions
+// (that its record arrived, in the webapp runtime, with both identities
+// promoted) are the half a browser can see. What only this side can see is
+// that those identities are the SAME strings the other runtimes wrote for the
+// same session — which is what makes one incident readable across five logs.
+func TestWebappLayerClientLog(t *testing.T) {
+	t.Parallel()
+	w, ws := wlDriveAreaWorld(t, "client-log.layer.test.ts")
+
+	// The record the page planted, in the workspace's own webapp sink. The
+	// page already waited for it, so this reads rather than races; awaiting it
+	// keeps the failure legible if the sink ever moved.
+	planted := w.Daemon.AwaitLogRecord(harness.ClientLogPath(ws), "the page's planted client-log record",
+		func(r harness.LogRecord) bool { return r.Operation == wlClientLogOperation })
+
+	if planted.Runtime != "webapp" {
+		t.Errorf("the forwarded record's runtime = %q, want webapp: a forwarded record keeps the SENDING runtime's name", planted.Runtime)
+	}
+	// A FORWARDED RECORD CARRIES NO PID, deliberately: stamping the daemon's
+	// would attribute a browser's record to the daemon process.
+	if planted.PID != 0 {
+		t.Errorf("the forwarded record carries pid %d, want none: the daemon's pid would misattribute a browser's record", planted.PID)
+	}
+	if planted.AgentReplSessionID == "" || planted.ClaudeSessionID == "" {
+		t.Fatalf("the forwarded record carries agent_repl_session_id=%q claude_session_id=%q, want both: without them the record joins to the workspace and no further",
+			planted.AgentReplSessionID, planted.ClaudeSessionID)
+	}
+	// THE WORKSPACE ID IS THE DAEMON'S OWN, NOT THE REF'S. ClientLog stamps
+	// the routing identity the daemon resolved the record's workspace to
+	// (internal/dlog/surfaces.go merges its own dir and id over whatever the
+	// client sent), which is a different string from the ref's id — so the
+	// assertion that means something is that it joins to the daemon's records
+	// for this workspace, not that it echoes the ref.
+	wlRequireJoin(t, "the daemon's own records", w.Daemon.WorkspaceLog(ws.GetDir(), "daemon"),
+		"workspace_id", planted.WorkspaceID,
+		func(r harness.LogRecord) string { return r.WorkspaceID })
+
+	// THE JOIN, ARM ONE: the daemon's OWN records for this session. The
+	// workspace's session-scoped logger binds agent_repl_session_id
+	// (internal/workspace/sessions.go), so the page's id must be a string the
+	// daemon itself wrote.
+	wlRequireJoin(t, "the daemon's own records", w.Daemon.WorkspaceLog(ws.GetDir(), "daemon"),
+		"agent_repl_session_id", planted.AgentReplSessionID,
+		func(r harness.LogRecord) string { return r.AgentReplSessionID })
+
+	// THE JOIN, ARM TWO: the shim's records for the same vendor conversation.
+	// The shim binds claude_session_id once the vendor names the session, so
+	// the page's id must be a string the shim itself wrote — the browser and
+	// the process talking to the vendor agreeing on one conversation.
+	wlRequireJoin(t, "the shim's records", w.Daemon.WorkspaceLog(ws.GetDir(), "shim"),
+		"claude_session_id", planted.ClaudeSessionID,
+		func(r harness.LogRecord) string { return r.ClaudeSessionID })
+}
+
+// wlRequireJoin fails unless some record in `records` carries `want` in the
+// field `field` reads, naming what it did see so a mismatch is read here
+// rather than diffed by hand out of two log files.
+func wlRequireJoin(t *testing.T, whose string, records []harness.LogRecord, field, want string, idOf func(harness.LogRecord) string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, r := range records {
+		if got := idOf(r); got != "" {
+			if got == want {
+				return
+			}
+			seen[got] = true
+		}
+	}
+	values := make([]string, 0, len(seen))
+	for v := range seen {
+		values = append(values, v)
+	}
+	sort.Strings(values)
+	t.Errorf("the page's %s=%q appears in no record of %s (%d records, ids seen: %v); the webapp record does not join to them",
+		field, want, whose, len(records), values)
 }
 
 // TestWebappLayerFeedFamilies is section F2: one drawn row family per test.
@@ -628,6 +729,15 @@ func wlCreateChild(t *testing.T, w *World, repoRef *workspacev1.RepositoryRef, n
 // against its real daemon.
 func wlDriveArea(t *testing.T, vitestFile string, expectWarnings ...string) {
 	t.Helper()
+	wlDriveAreaWorld(t, vitestFile, expectWarnings...)
+}
+
+// wlDriveAreaWorld is wlDriveArea, answering the world and the workspace it
+// drove so an area whose subject is the daemon's OWN artifacts (the client-log
+// area reads the workspace's log sinks) can assert against them after the
+// child has exited. Every other area wants neither and calls wlDriveArea.
+func wlDriveAreaWorld(t *testing.T, vitestFile string, expectWarnings ...string) (*World, *workspacev1.WorkspaceRef) {
+	t.Helper()
 	wlHoldAreaSlot(t)
 	npm := wlRequireNPM(t)
 	webappDir := wlRequireWebappDeps(t)
@@ -684,6 +794,7 @@ func wlDriveArea(t *testing.T, vitestFile string, expectWarnings ...string) {
 	}
 
 	w.RequireNoUnexpectedExit(t)
+	return w, ws
 }
 
 // wlChildEnv is the environment one vitest child is handed: the gate, the
