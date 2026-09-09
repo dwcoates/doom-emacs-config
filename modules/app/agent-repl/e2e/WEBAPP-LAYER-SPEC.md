@@ -362,9 +362,17 @@ and NOT as a feed row.
 
 A recognized slash command answered programmatically draws its panel and mints
 no feed row and no turn; the composer clears; no refusal; a second command
-REPLACES the standing panel; the help panel carries the daemon's rows.
+REPLACES the standing panel; and a recognized command with NO PRODUCER draws
+the daemon's own refusal card and no panel at all.
 (No fake-SDK scenario is involved — the daemon's recognition table intercepts
 these, so no scenario was invented.)
+
+The last scenario read "the help panel carries the daemon's rows" until
+2026-09-09, which the daemon has never done: `/help` is ruled UNPRODUCED
+(daemon/ERROR-ARMS.md) and answers `command_refused`. It passed because the
+file's own `command()` helper waited for `panels().length > 0`, which the
+previous scenario's panel already satisfied, so the assertion read a stale
+panel. Both the helper and the scenario now name what actually happens.
 
 ### F7. Merge bubble tabs (5 tests) — `merge-tabs.layer.test.ts`
 
