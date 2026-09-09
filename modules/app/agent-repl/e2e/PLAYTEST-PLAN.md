@@ -39,6 +39,19 @@ exists, is a valid PNG of the declared geometry, and is not blank. The visual
 gate is a vision-capable review of the PNGs against the manifest by the lead;
 a capture whose picture does not match its sentence is a defect.
 
+## Who runs a playbook
+
+A section group is owned END TO END by one fable agent: it authors the
+playbooks (delegating rote table-driven writes if it chooses), runs them in
+its own worlds, remediates whatever blocks a step from producing its
+evidence — production fixes included, under the standing rules — reruns,
+then inspects its own captures against the manifest and files every
+mismatch. Run, remediate and inspect are never split across agents; the
+agent that hit the blocker fixes it and the one that fixed it judges the
+picture. The lead merges the sections, triages what they file, and keeps the
+sandbox gate honest. Concurrency is bounded by the sandbox (about two
+containers of two Emacsen), not by agent count.
+
 ## Playbooks
 
 A. Boot and roster (tab bar)
