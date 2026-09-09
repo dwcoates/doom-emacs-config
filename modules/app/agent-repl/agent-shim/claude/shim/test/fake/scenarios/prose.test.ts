@@ -108,6 +108,28 @@ describe("the markdown showcase", () => {
     expect(widest).toBeGreaterThan(DAEMON_TREE_WRAP_COLUMNS);
   });
 
+  it("gives the tree the metaprompt's own DOTLESS labels, root line included", () => {
+    // WHY: the webapp's root detector (`dottedLabelEnd` in
+    // webapp/src/metaprompt-tree.ts) ends a label at a dot no digit follows, so
+    // a dotted root `1. 🌳` is not an emoji root at all and the whole tree
+    // falls back to a markdown ordered list. The showcase exists to be drawn AS
+    // A TREE, so its labels carry the metaprompt's own dotless shape.
+    // Arrange
+    const lines = MARKDOWN_SHOWCASE.split("\n");
+
+    // Act — the tree's root is the first line under its own heading; the
+    // showcase's ordinary ordered list ("1. first") sits above it.
+    const root = lines[lines.indexOf("## A numbered tree") + 2] ?? "";
+    const branches = lines.filter((line) => /^[│ ]*[├└]── /u.test(line));
+
+    // Assert
+    expect(root).toMatch(/^\d+ \p{Extended_Pictographic}/u);
+    expect(branches.length).toBeGreaterThan(0);
+    for (const branch of branches) {
+      expect(branch).toMatch(/[├└]── \d+(\.\d+)* /u);
+    }
+  });
+
   it("emits one PROSE block, behind the reasoning every turn opens with", async () => {
     // The vendor's closing API response is `[thinking, text]` in every capture,
     // so the showcase is one TEXT block rather than one block full stop.
