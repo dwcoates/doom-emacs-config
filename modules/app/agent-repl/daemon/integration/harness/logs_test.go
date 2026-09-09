@@ -224,3 +224,49 @@ func TestReadLogOfTheLinkAloneMissesThePriorRuntime(t *testing.T) {
 		t.Fatalf("ReadLog of the canonical link = %d records, want 1 (the current runtime's only)", len(got))
 	}
 }
+
+// TestReadLogSkipsARecordStillBeingWritten is the read race every caller here
+// runs into: they poll a LIVE daemon's own sink, so a read can land inside one
+// `write(2)` and see the record so far. `TestMcpServerHealths` died 50ms into
+// its run on `"message":"no intent manif`.
+func TestReadLogSkipsARecordStillBeingWritten(t *testing.T) {
+	// Arrange: one whole record, then the beginning of the next.
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	body := adRecordLine("daemon.boot.run") + "\n" + `{"timestamp":"2026-08-29T14:44:00Z","operation":"daemon.rollout.reconcile","message":"no intent manif`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if len(got) != 1 || got[0].Operation != "daemon.boot.run" {
+		t.Fatalf("ReadLog = %v, want only the record whose newline had arrived", got)
+	}
+}
+
+// The tolerance is for the UNTERMINATED tail alone: a line that has its
+// newline and does not parse is still a defect in the log, and must still fail.
+func TestReadLogStillFailsOnATerminatedLineThatDoesNotParse(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	if err := os.WriteFile(path, []byte("not json at all\n"), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+
+	// Act
+	fake := &testing.T{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }()
+		ReadLog(fake, path)
+	}()
+	<-done
+
+	// Assert
+	if !fake.Failed() {
+		t.Fatal("ReadLog accepted a newline-terminated line that is not JSON; a malformed record must still fail the test")
+	}
+}
