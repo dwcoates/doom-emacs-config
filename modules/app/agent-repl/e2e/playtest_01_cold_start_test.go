@@ -251,16 +251,21 @@ func TestPlaytestColdStartAndFirstTab(t *testing.T) {
 			"footer is idle again, and the hold tray still holds nothing.")
 }
 
-// elispLogRecords counts the records in the module's own log that carry
-// MARKER. The log is under this world's own state root (`e.LogFile`), and
-// the layer runs inside the container, so it is read directly.
+// elispLogRecords counts the RECORDS in the module's own log whose message
+// begins with MARKER. The log is under this world's own state root
+// (`e.LogFile`), one JSON record per line, and the layer runs inside the
+// container, so it is read directly.
+//
+// Records, not substrings: each record carries its message twice -- once
+// rendered and once as the `format` in its context -- so a substring count
+// reads two for one. MEASURED: one `elisp.daemon.adopted` record counted 2.
 func elispLogRecords(t *testing.T, e *Emacs, marker string) int {
 	t.Helper()
 	body, err := os.ReadFile(e.LogFile)
 	if err != nil {
 		t.Fatalf("read the module's own log at %s: %v", e.LogFile, err)
 	}
-	return strings.Count(string(body), marker)
+	return strings.Count(string(body), `"message":"`+marker)
 }
 
 // TestPlaytestAdoptsAnAnsweringDaemon is plan A.2: a daemon that is already
