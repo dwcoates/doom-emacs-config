@@ -36,9 +36,13 @@ import {
   mountBanner,
   quietWindowMs,
   shutdownCauseText,
+  bindSessionIdentity,
   startLifecycle,
   workspaceMoved,
 } from "../../src/lifecycle/lifecycle.js";
+import type { ClientLogRecord } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import { WebWorkspaceSessionIdentitySchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import { ForwardingLogger, bindLogContext, log, resetLoggingForTests, setLogger } from "../../src/log.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const NOW = 1_700_000_000_000;
@@ -401,7 +405,14 @@ function lifecycleClient(script: {
   return { client: createAgentReplClient(transport), state };
 }
 
-type WatchWebWorkspaceResponseInit = { push: { case: "transferred"; value: { address: string } } };
+type WatchWebWorkspaceResponseInit =
+  | { push: { case: "transferred"; value: { address: string } } }
+  | {
+      push: {
+        case: "sessionIdentity";
+        value: { agentReplSessionId: string; claudeSessionId: string };
+      };
+    };
 
 function lifecycleContext(
   client: ReturnType<typeof lifecycleClient>["client"],
@@ -1011,6 +1022,153 @@ describe("startLifecycle: the daemon answering again", () => {
     await settle();
     // ASSERT
     expect(host.children.length).toBe(0);
+    handle.dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE PAGE'S LOG IDENTITY (landing 15). A browser has no durable sink, so the
+// daemon writes this page's records — and a record that names no session can be
+// joined to a workspace and no further.
+// ---------------------------------------------------------------------------
+
+interface LogHarness {
+  logger: ForwardingLogger;
+  sent: ClientLogRecord[];
+}
+
+/** A logger whose forwarded records the test reads, replacing setup.ts's. */
+function captureLogger(): LogHarness {
+  const sent: ClientLogRecord[] = [];
+  const logger = new ForwardingLogger(
+    async (record) => {
+      sent.push(record);
+    },
+    () => undefined,
+  );
+  resetLoggingForTests();
+  setLogger(logger);
+  bindLogContext({ connection_id: "test-connection" });
+  return { logger, sent };
+}
+
+/** Release the throttle's window and let the sink's promises settle. */
+async function forwarded(h: LogHarness): Promise<ClientLogRecord[]> {
+  h.logger.flush();
+  await Promise.resolve();
+  return h.sent;
+}
+
+/**
+ * The one forwarded record for OPERATION. Absence throws rather than reading
+ * as an absent field: "the record never went" and "the record went without the
+ * identity" are different facts and only one of them is under test.
+ */
+function forwardedRecord(records: ClientLogRecord[], operation: string): ClientLogRecord {
+  const found = records.find((r) => r.operation === operation);
+  if (found === undefined) throw new Error(`no forwarded record for ${operation}`);
+  return found;
+}
+
+function identityPush(agentReplSessionId: string, claudeSessionId = "") {
+  return create(WebWorkspaceSessionIdentitySchema, { agentReplSessionId, claudeSessionId });
+}
+
+describe("bindSessionIdentity", () => {
+  it("stamps the session on a record logged after the frame", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    // ACT
+    bindSessionIdentity(identityPush("sess-1"));
+    log("info", "after", { operation: "test.after" });
+    // ASSERT
+    const records = await forwarded(h);
+    const after = forwardedRecord(records, "test.after");
+    expect(after.context).toMatchObject({ agent_repl_session_id: "sess-1" });
+  });
+
+  it("stamps the vendor conversation the same frame named", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    // ACT
+    bindSessionIdentity(identityPush("sess-1", "claude-1"));
+    log("info", "after", { operation: "test.after" });
+    // ASSERT
+    const records = await forwarded(h);
+    const after = forwardedRecord(records, "test.after");
+    expect(after.context).toMatchObject({ claude_session_id: "claude-1" });
+  });
+
+  it("leaves a record forwarded before the frame unattributed", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    // ACT: the record is forwarded while nothing is bound.
+    log("info", "before", { operation: "test.before" });
+    const records = await forwarded(h);
+    // ASSERT
+    const before = forwardedRecord(records, "test.before");
+    expect(before.context).not.toHaveProperty("agent_repl_session_id");
+  });
+
+  it("rebinds when a rotation mints a new session", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    bindSessionIdentity(identityPush("sess-1"));
+    // ACT
+    bindSessionIdentity(identityPush("sess-2"));
+    log("info", "after the rotation", { operation: "test.rotated" });
+    // ASSERT
+    const records = await forwarded(h);
+    const rotated = forwardedRecord(records, "test.rotated");
+    expect(rotated.context).toMatchObject({ agent_repl_session_id: "sess-2" });
+  });
+
+  it("drops the identity when the frame names none, rather than keeping the retired one", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    bindSessionIdentity(identityPush("sess-1"));
+    // ACT: the workspace's session went away.
+    bindSessionIdentity(identityPush(""));
+    log("info", "after the session went away", { operation: "test.sessionless" });
+    // ASSERT
+    const records = await forwarded(h);
+    const sessionless = forwardedRecord(records, "test.sessionless");
+    expect(sessionless.context).not.toHaveProperty("agent_repl_session_id");
+  });
+});
+
+describe("startLifecycle: the session identity", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("binds the identity the link stream's opening push named", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    const host = document.createElement("div");
+    const { client } = lifecycleClient({
+      web: async function* () {
+        yield {
+          push: {
+            case: "sessionIdentity",
+            value: { agentReplSessionId: "sess-1", claudeSessionId: "claude-1" },
+          },
+        };
+      },
+    });
+    const ctx = lifecycleContext(client, new RecordingSink(), fakeTicker());
+    // ACT
+    const handle = startLifecycle(ctx, { drainBannerHost: host });
+    await settle();
+    log("info", "after the push", { operation: "test.after-push" });
+    // ASSERT
+    h.logger.flush();
+    await settle();
+    const after = forwardedRecord(h.sent, "test.after-push");
+    expect(after.context).toMatchObject({ agent_repl_session_id: "sess-1" });
     handle.dispose();
   });
 });
