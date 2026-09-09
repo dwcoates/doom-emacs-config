@@ -406,9 +406,9 @@ func TestPlaytestNewWorkspaceAndChild(t *testing.T) {
 	// input is checked here rather than assumed from the branch.
 	playtestAwaitCurrent(t, s, createdName)
 	p.note("Emacs made the created workspace the current one",
-		fmt.Sprintf("`agent-repl--ws-current-name` is %q; creating it %s selected it, so a switch was %s",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q; creating it %s, so a switch was %s",
 			createdName,
-			map[bool]string{true: "DID", false: "did NOT"}[selectedByCreate],
+			map[bool]string{true: "DID select it", false: "did NOT select it"}[selectedByCreate],
 			map[bool]string{true: "not needed", false: "performed"}[selectedByCreate]))
 
 	// ---- the child create ------------------------------------------------
