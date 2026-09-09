@@ -114,7 +114,15 @@
 ;; !!                                                                  !!
 ;; !! This has been accidentally removed multiple times.  DO NOT       !!
 ;; !! remove it again.  It is NOT dead code.  It is NOT cosmetic.     !!
-;; !! It is the mechanism that makes tab-bar updates work.             !!
+;; !!                                                                  !!
+;; !! It is, however, no longer the mechanism that makes an ARM        !!
+;; !! CHANGE reach the pixels.  The toggle changes the string on a     !!
+;; !! clock; `agent-repl--tabline-render-key' (below) changes it the   !!
+;; !! moment the rendered rows differ in ANY way, faces included, and  !!
+;; !! `agent-repl-status-repaint-on-roster-push' schedules the         !!
+;; !! redisplay that draws it.  Measured before the key existed: with  !!
+;; !! one gated turn in flight the bar painted the PREVIOUS arm until  !!
+;; !! the next tick, because the two strings compared `equal'.         !!
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 (defvar agent-repl--tabline-space-toggle nil
   "Non-nil means append the zero-width cache-buster to the tabline string.
