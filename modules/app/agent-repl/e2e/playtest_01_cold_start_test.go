@@ -330,10 +330,17 @@ func TestPlaytestAdoptsAnAnsweringDaemon(t *testing.T) {
 	// nothing recorded as started, no failure), and the module's own log is
 	// what says the ensure took the adopt branch: one more `adopted` record
 	// and not one more `build` record.
-	if e.EvalBool(`(and (or agent-repl-daemon--build-in-flight agent-repl-daemon--build-state agent-repl-daemon-build-failure) t)`) {
-		t.Fatalf("the adopting ensure touched the build: in-flight=%s state=%s failure=%s",
+	//
+	// `agent-repl-daemon--build-state` is deliberately NOT read: it holds
+	// `built` for `agent-repl-daemon-build-status-display-seconds` after the
+	// cold start's own build as the mode line's "just built" note, so it
+	// outlives the build it reports and says nothing about THIS ensure.
+	// MEASURED: it read `built` here on a run whose log carried no new
+	// build record.
+	if e.EvalBool(`(and (or agent-repl-daemon--build-in-flight agent-repl-daemon--build-started agent-repl-daemon-build-failure) t)`) {
+		t.Fatalf("the adopting ensure touched the build: in-flight=%s started=%s failure=%s",
 			e.EvalString(`(format "%s" agent-repl-daemon--build-in-flight)`),
-			e.EvalString(`(format "%s" agent-repl-daemon--build-state)`),
+			e.EvalString(`(format "%s" agent-repl-daemon--build-started)`),
 			e.EvalString(`(format "%s" agent-repl-daemon-build-failure)`))
 	}
 	if got := elispLogRecords(t, e, "elisp.daemon.adopted"); got != adoptions+1 {
