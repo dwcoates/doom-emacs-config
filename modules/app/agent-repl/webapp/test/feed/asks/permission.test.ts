@@ -16,7 +16,7 @@ import {
 import type { FailureKind } from "../../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createTicker } from "../../../src/clock.js";
 import type { AgentReplClient } from "../../../src/rpc/client.js";
-import { createAppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
@@ -521,7 +521,7 @@ function unalteredPermission(answer: AnswerPermissionResponse): {
   return {
     filed,
     rc: {
-      ctx: createAppContext({
+      ctx: testAppContext({
         client: {
           answerPermission: () => Promise.resolve(answer),
         } as unknown as AgentReplClient,

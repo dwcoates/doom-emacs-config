@@ -19,7 +19,7 @@ import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/worksp
 import { createTicker } from "../../../src/clock.js";
 import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { createAppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
@@ -42,7 +42,7 @@ function rowContext(): RowContext {
     });
   });
   return {
-    ctx: createAppContext({
+    ctx: testAppContext({
       client: createAgentReplClient(transport),
       workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
       ticker: createTicker(1000),

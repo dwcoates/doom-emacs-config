@@ -32,7 +32,7 @@ import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/worksp
 import { createTicker } from "../../../src/clock.js";
 import type { FailureSink } from "../../../src/failure/sink.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { createAppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
@@ -94,7 +94,7 @@ export function askHarness(script: AskScript = {}, previous?: HTMLElement): AskH
   return {
     calls,
     rc: {
-      ctx: createAppContext({
+      ctx: testAppContext({
         client: createAgentReplClient(transport),
         workspace: WORKSPACE,
         ticker: createTicker(1000),

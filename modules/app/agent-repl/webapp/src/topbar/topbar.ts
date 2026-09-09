@@ -74,7 +74,7 @@ export function mountTopbar(host: HTMLElement, ctx: AppContext, deps: TopbarDeps
   const stream = watchStream(ctx, {
     name: "WatchTopbar",
     schema: WatchTopbarResponseSchema,
-    open: (client, signal) => client.watchTopbar({ workspace: ctx.workspace }, { signal }),
+    open: (_client, signal) => ctx.streams.watch("topbar", { workspace: ctx.workspace }, signal),
     onPush: (response) => {
       const view = requireMessage(response.topbar, "WatchTopbarResponse.topbar");
       // The old strip's clock subscriptions come down BEFORE the new one goes
