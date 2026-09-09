@@ -5,50 +5,513 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"claude-repld/integration/harness"
 )
 
 // OWNER 18 of PLAYTEST-PLAN.md's partition: I53-I56 -- panels, fullscreen,
 // webview reload/rescue, and visit-file routing.
 //
-// I.53 and I.54 are here. I.55 and I.56 are unwritten.
+// Four playbooks, one world each:
+//
+//   - I.53 TestPlaytestPanelsOpenAndClose: both panel kinds (the webview
+//     and the composer) opened into the main area, the composer focused,
+//     the plain close hiding both and leaving the tab order alone, and the
+//     toggle bringing them back.
+//   - I.54 TestPlaytestFullscreenToggleAndRestore: `SPC w f` from an
+//     ordinary work window maximizes it, and the same key restores the
+//     layout it replaced.
+//   - I.55 TestPlaytestReloadAndRescueWebview: `SPC o l` fetches the page
+//     again and the feed's rows come back; `SPC o L` leaves a page that is
+//     home alone and brings a page that navigated away back with its rows.
+//   - I.56 TestPlaytestVisitFileRouting: a file under a registered worktree
+//     lands in its owning workspace, an unroutable one records a refusal and
+//     still opens. Functional; one picture of the routed layout.
+//
+// Every assertion here is one the Emacs layer's own scenarios already make
+// (`emacs_panels_e2e_test.go`, `emacs_findfile_e2e_test.go`), and every
+// capture follows its assertion.
 
-// TestPlaytestPanelAndFullscreen is plan I.53 and I.54: the panel opened into
-// the main area, made fullscreen, and restored.
-func TestPlaytestPanelAndFullscreen(t *testing.T) {
+// panelWindowSides answers the `window-side` parameter of every window
+// showing one of the two panel buffer families, as DATA. A panel is "in the
+// main area" when its side is nil; the module's own rule is that a panel is
+// never a side window.
+func panelWindowSides(e *Emacs, frontendPrefix, panelPrefix string) map[string]string {
+	e.t.Helper()
+	pairs := e.EvalStrings(`(let (out)
+                              (dolist (w (window-list))
+                                (let ((name (buffer-name (window-buffer w))))
+                                  (push (format "%s\t%s" name (window-parameter w 'window-side)) out)))
+                              out)`)
+	sides := map[string]string{}
+	for _, pair := range pairs {
+		name, side, _ := strings.Cut(pair, "\t")
+		if strings.HasPrefix(name, frontendPrefix) || strings.HasPrefix(name, panelPrefix) {
+			sides[name] = side
+		}
+	}
+	return sides
+}
+
+// requirePanelsInMainArea asserts that BOTH panel kinds are shown, and that
+// each is a main-area window rather than a side window.
+func requirePanelsInMainArea(t *testing.T, e *Emacs, frontendPrefix, panelPrefix string) {
+	t.Helper()
+	sides := panelWindowSides(e, frontendPrefix, panelPrefix)
+	var sawFrontend, sawPanel bool
+	for name, side := range sides {
+		if side != "nil" {
+			t.Fatalf("the panel window %q has window-side %q, want none: a panel is never a side window", name, side)
+		}
+		if strings.HasPrefix(name, frontendPrefix) {
+			sawFrontend = true
+		}
+		if strings.HasPrefix(name, panelPrefix) {
+			sawPanel = true
+		}
+	}
+	if !sawFrontend {
+		t.Fatalf("no window shows a %q buffer; the panel windows are %v", frontendPrefix, sides)
+	}
+	if !sawPanel {
+		t.Fatalf("no window shows a %q buffer; the panel windows are %v", panelPrefix, sides)
+	}
+}
+
+// requireTabBarHeightContract asserts the frame carries the module's own
+// pinned tab-bar row count. `agent-repl--install-fixed-height-tab-bar` pins
+// `agent-repl--tabline-row-count` onto every graphical frame, and a frame
+// whose `tab-bar-lines` reads anything else draws the second row clipped --
+// which would make every layout capture here a picture of that defect.
+func requireTabBarHeightContract(t *testing.T, e *Emacs) (rows int) {
+	t.Helper()
+	rows = e.EvalInt(`agent-repl--tabline-row-count`)
+	if got := e.EvalInt(`(or (frame-parameter (selected-frame) 'tab-bar-lines) 0)`); got != rows {
+		t.Fatalf("the frame's tab-bar-lines is %d, want the module's pinned %d: the fixed-height tab bar contract is broken", got, rows)
+	}
+	return rows
+}
+
+// ---------------------------------------------------------------------------
+// I.53 -- PANELS OPEN AND CLOSE
+// ---------------------------------------------------------------------------
+
+// TestPlaytestPanelsOpenAndClose is plan I.53: each panel kind opened into
+// the main area, the composer focused, a plain close that hides both and
+// leaves the tab order alone, and the toggle bringing them back.
+//
+// Two workspaces, so "the tab order is untouched" is an observable claim
+// rather than a vacuous one.
+func TestPlaytestPanelsOpenAndClose(t *testing.T) {
 	t.Parallel()
-	s := newPlaytestScenario(t, "18-panel-and-fullscreen",
-		"Plan I.53 and I.54. The panel opened into the main area, then fullscreen and back.")
+	s := newPlaytestScenario(t, "18-panels-open-close",
+		"Plan I.53. The webview and the composer opened into the main area, the composer focused "+
+			"with `SPC o v`, both hidden by the plain close `SPC o c` with the tab order untouched, "+
+			"and both brought back by the same toggle.")
 	p, e := s.Book, s.E
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
 
-	repository := s.repoAt(t, "repo")
-	s.register(t, repository.Dir)
+	s.register(t, s.repoAt(t, "first").Dir)
+	// The panel verbs act on the CURRENT workspace, which is the one most
+	// recently added; point the scenario at it.
+	s.Name = s.register(t, s.repoAt(t, "second").Dir)
+	tabs := s.tabNames()
+	if len(tabs) != 2 {
+		t.Fatalf("the tab bar names %q after two registrations, want two tabs", tabs)
+	}
+	p.note("two worktrees registered through `SPC TAB C-n`",
+		fmt.Sprintf("the tab bar enumerates both: %q", tabs))
+
 	s.openPanel(t)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+	rows := requireTabBarHeightContract(t, e)
 	windows := e.EvalInt(`(length (window-list))`)
-	p.capture("panel-open", "`agent-repl-frontend-open-panel`",
-		fmt.Sprintf("the panel's webview is live, the composer buffer exists, and the frame holds %d windows", windows),
-		"The frame is SPLIT: the WEBAPP is drawn inside the panel window — workspace sidebar down "+
-			"one side, an empty feed, and the progress footer along the bottom with a status word in "+
-			"it — and a separate Emacs window holds the composer. THE WEBAPP MUST NOT BE A BLANK "+
-			"WHITE RECTANGLE.")
+	p.capture("panels-open", "`agent-repl-frontend-open-panel` for the second workspace",
+		fmt.Sprintf("a %q window and a %q window are both on the frame, neither is a side window, the "+
+			"webview is live and its page mounted, and the frame's tab-bar-lines is the pinned %d",
+			frontendPrefix, panelPrefix, rows),
+		"The frame is SPLIT between the two panel kinds, both in the main area: the WEBAPP inside "+
+			"the webview window -- workspace sidebar down one side, an empty feed, and the progress "+
+			"footer with a status word along its bottom -- and a separate composer window beneath or "+
+			"beside it. The tab bar across the top lists BOTH workspaces on two rows of the pinned "+
+			"height, the second one selected. THE WEBAPP MUST NOT BE A BLANK WHITE RECTANGLE.")
 
-	e.Eval(`(agent-repl-fullscreen-and-focus)`)
+	// THE COMPOSER, FOCUSED. Select the webview's window first so the
+	// command has somewhere to move point FROM.
+	e.Eval(`(progn (select-window (get-buffer-window (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer))) t)`)
+	if want, got := "agent-repl-focus-input", e.LeaderBinding("o v"); got != want {
+		t.Fatalf("SPC o v resolves to %q, want %q", got, want)
+	}
+	e.Leader("o v")
+	e.AwaitEvalFor(panelSettleBound, "the composer window to be selected",
+		`(buffer-name (window-buffer (selected-window)))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == s.Input })
+	p.capture("composer-focused", "`SPC o v` (`agent-repl-focus-input`) from the webview's window",
+		fmt.Sprintf("the selected window shows the composer buffer %q", s.Input),
+		"The same split as before, with the CURSOR now in the composer window: the composer is the "+
+			"selected window and the webapp is unchanged beside it.")
+
+	// THE PLAIN CLOSE hides both and touches no tab.
+	orderBefore := e.EvalStrings(`agent-repl-roster--tab-order`)
+	if want, got := "agent-repl-simple", e.LeaderBinding("o c"); got != want {
+		t.Fatalf("SPC o c resolves to %q, want %q", got, want)
+	}
+	e.Leader("o c")
+	e.AwaitEvalFor(panelSettleBound, "the panel windows to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	orderAfter := e.EvalStrings(`agent-repl-roster--tab-order`)
+	if strings.Join(orderBefore, "\x00") != strings.Join(orderAfter, "\x00") {
+		t.Fatalf("the plain close moved the tab order: %q -> %q; only the deprio close may touch it", orderBefore, orderAfter)
+	}
+	if got := s.tabNames(); strings.Join(got, "\x00") != strings.Join(tabs, "\x00") {
+		t.Fatalf("the plain close changed the tab bar's names: %q -> %q", tabs, got)
+	}
+	if !e.EvalBool(`(and (buffer-live-p (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer)) t)`) {
+		t.Fatal("the plain close killed the webview buffer; it only hides the panels")
+	}
+	p.capture("panels-hidden", "`SPC o c` (`agent-repl-simple`), the plain close",
+		fmt.Sprintf("no window shows a panel buffer, the webview buffer is still live, and the roster's "+
+			"tab order is unchanged: %q", orderAfter),
+		"NO webapp and NO composer are on the frame: the main area shows whatever ordinary buffer the "+
+			"layout held before the panels (the work layout was restored). The tab bar still lists BOTH "+
+			"workspaces in the SAME order as before, the second still selected -- the plain close "+
+			"leaves the tab alone.")
+
+	// THE TOGGLE BRINGS THEM BACK.
+	e.Leader("o c")
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+	s.awaitPageMounted(t)
+	if got := e.EvalInt(`(length (window-list))`); got != windows {
+		t.Fatalf("the frame holds %d windows after the toggle reopened the panels, want the %d it held on the first open", got, windows)
+	}
+	p.capture("panels-reopened", "`SPC o c` again, toggling the panels back",
+		fmt.Sprintf("both panel kinds are on the frame again in the main area, the page is mounted, and "+
+			"the frame holds its original %d windows", windows),
+		"The split of the first capture is back: the webapp in the webview window with its sidebar and "+
+			"footer, and the composer window beside it. The tab bar is unchanged.")
+}
+
+// ---------------------------------------------------------------------------
+// I.54 -- FULLSCREEN TOGGLE AND RESTORE
+// ---------------------------------------------------------------------------
+
+// TestPlaytestFullscreenToggleAndRestore is plan I.54.
+//
+// `agent-repl-fullscreen-and-focus` has two branches, and only the non-agent
+// one maximizes: from inside a panel buffer it moves point to the composer,
+// because the panels already fill the frame. So the press happens from an
+// ordinary work window split beside the panels, and what the first picture
+// shows is THAT window filling the frame with the panels gone; the second
+// shows the panels back.
+func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "18-fullscreen",
+		"Plan I.54. `SPC w f` from an ordinary work window beside the panels maximizes that window; "+
+			"the same key restores the layout it replaced, panels included.")
+	p, e := s.Book, s.E
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+
+	s.register(t, s.repoAt(t, "repo").Dir)
+	s.openPanel(t)
+	awaitPanelWindows(e, frontendPrefix, panelPrefix)
+	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+
+	// An ordinary, non-agent work window, selected, with something legible
+	// in it so the picture says which window survived.
+	const workBuffer = "*playtest-work*"
+	e.Eval(`(progn
+              (select-window (split-window (get-buffer-window (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer))))
+              (switch-to-buffer (get-buffer-create ` + elispString(workBuffer) + `))
+              (with-current-buffer ` + elispString(workBuffer) + `
+                (erase-buffer)
+                (insert "This is the ordinary work window the playtest maximizes with SPC w f.\n"))
+              t)`)
+	if got := e.EvalString(`(buffer-name (window-buffer (selected-window)))`); got != workBuffer {
+		t.Fatalf("the selected window shows %q, want the work buffer %q", got, workBuffer)
+	}
+	before := e.EvalInt(`(length (window-list))`)
+	p.capture("work-window-beside-panels", "an ordinary work window split beside the panels and selected",
+		fmt.Sprintf("the selected window shows %q and the frame holds %d windows, both panel kinds among them", workBuffer, before),
+		"THREE main-area windows: the webapp in the webview window, the composer, and a plain text "+
+			"window carrying one sentence about SPC w f, which is the selected window.")
+
+	if want, got := "agent-repl-fullscreen-and-focus", e.LeaderBinding("w f"); got != want {
+		t.Fatalf("SPC w f resolves to %q, want %q", got, want)
+	}
+	e.Leader("w f")
 	e.AwaitTrue("the fullscreen configuration to be recorded",
 		`(and agent-repl--window-fullscreen-config t)`)
-	p.capture("fullscreen", "`agent-repl-fullscreen-and-focus` (`SPC w f`)",
-		"`agent-repl--window-fullscreen-config` is non-nil, so the layout was saved to be restored",
-		"ONE window fills the whole frame. The webapp is drawn edge to edge and the composer window "+
-			"is gone.")
+	if got := e.EvalInt(`(length (window-list))`); got != 1 {
+		t.Fatalf("the frame holds %d windows after SPC w f, want exactly the maximized one", got)
+	}
+	if got := e.EvalString(`(buffer-name (window-buffer (selected-window)))`); got != workBuffer {
+		t.Fatalf("the surviving window shows %q, want the work buffer %q", got, workBuffer)
+	}
+	p.capture("work-window-fullscreen", "`SPC w f` (`agent-repl-fullscreen-and-focus`) from the work window",
+		fmt.Sprintf("`agent-repl--window-fullscreen-config` is non-nil and the frame holds ONE window, showing %q", workBuffer),
+		"ONE window fills the whole frame below the tab bar: the plain text window with its one "+
+			"sentence. The webapp and the composer are GONE from the frame.")
 
-	e.Eval(`(agent-repl-fullscreen-and-focus)`)
+	e.Leader("w f")
 	e.AwaitEval("the fullscreen configuration to be released",
 		`(and agent-repl--window-fullscreen-config t)`,
 		func(raw json.RawMessage) bool { return isJSONNull(raw) })
-	if got := e.EvalInt(`(length (window-list))`); got != windows {
-		t.Fatalf("the frame holds %d windows after restoring, want the %d it started with", got, windows)
+	if got := e.EvalInt(`(length (window-list))`); got != before {
+		t.Fatalf("the frame holds %d windows after restoring, want the %d it started with", got, before)
 	}
-	p.capture("fullscreen-restored", "the same command again, restoring the layout",
-		fmt.Sprintf("`agent-repl--window-fullscreen-config` is nil and the frame holds its original %d windows", windows),
-		"The split of the first capture is back, unchanged: the toggle RESTORED the layout rather "+
-			"than rebuilding some other one.")
+	requirePanelsInMainArea(t, e, frontendPrefix, panelPrefix)
+	s.awaitPageMounted(t)
+	p.capture("fullscreen-restored", "the same key again, restoring the layout",
+		fmt.Sprintf("`agent-repl--window-fullscreen-config` is nil, the frame holds its original %d windows, "+
+			"and both panel kinds are back in the main area with the page mounted", before),
+		"The three-window split of the first capture is back, unchanged: webapp, composer and the "+
+			"work window. The toggle RESTORED the layout rather than rebuilding some other one.")
+}
+
+// ---------------------------------------------------------------------------
+// I.55 -- RELOAD AND RESCUE
+// ---------------------------------------------------------------------------
+
+// playtestMarker is a global stamped onto the page's `window` before a
+// reload. It is how "the page was fetched again" is told apart from "the
+// page is still the old one": a navigation makes a new document, and a new
+// document does not carry the old one's globals.
+const playtestMarker = `window.__agentReplPlaytestMarker`
+
+// TestPlaytestReloadAndRescueWebview is plan I.55: `SPC o l` fetches the page
+// again and its rows come back; `SPC o L` leaves a page that is home alone,
+// and brings one that navigated away back with its rows.
+//
+// "State intact" is the feed's rows: a turn is run first so the page has
+// something to lose, and every step after a navigation waits for BOTH of its
+// bubbles to be drawn again before the picture.
+func TestPlaytestReloadAndRescueWebview(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "18-reload-rescue",
+		"Plan I.55. A turn is run so the feed holds rows, then `SPC o l` reloads the page and the rows "+
+			"come back; `SPC o L` on a page that is home does nothing, and on a page that navigated "+
+			"away brings it home with its rows.")
+	p, e := s.Book, s.E
+
+	s.register(t, s.repoAt(t, "repo").Dir)
+	s.openPanel(t)
+
+	const prompt = "draw one plain prose answer so the reload has rows to keep"
+	const promptRow = `document.querySelector('[data-feed-row][data-row-kind="userPrompt"]')`
+	const responseRow = `document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`
+	s.submit(t, prompt)
+	s.awaitInPage(t, "the user's prompt bubble to arrive", promptRow)
+	s.awaitInPage(t, "the assistant's response bubble to settle", responseRow)
+	s.awaitArm(t, s.Name, "the turn to settle", emGHISettledArms...)
+	p.note("one plain-prose prompt submitted with composer RET and settled",
+		"the feed holds the prompt bubble and a settled response bubble, which is the state the reload must keep")
+
+	homeURI := s.webviewURI()
+	if !e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(homeURI) + `) t)`) {
+		t.Fatalf("the webview's own URI %q is not at home before anything was done to it", homeURI)
+	}
+
+	// RELOAD. The marker proves a NEW document came back rather than the
+	// old one being looked at again.
+	s.stampMarker(t)
+	if want, got := "agent-repl-frontend-reload-webview", e.LeaderBinding("o l"); got != want {
+		t.Fatalf("SPC o l resolves to %q, want %q", got, want)
+	}
+	e.Leader("o l")
+	s.awaitInPage(t, "a new document to replace the stamped one after the reload", playtestMarker+` === undefined`)
+	s.awaitPageMounted(t)
+	s.awaitInPage(t, "the prompt bubble to be drawn again on the reloaded page", promptRow)
+	s.awaitInPage(t, "the response bubble to be drawn again on the reloaded page", responseRow)
+	s.requireHome(t, homeURI)
+	p.capture("reloaded", "`SPC o l` (`agent-repl-frontend-reload-webview`)",
+		"the page's marker global is gone (a new document was fetched), the page mounted again, both "+
+			"feed rows are drawn again, and the webview's URI is at the daemon's own origin",
+		"The webapp is drawn with its feed holding the SAME two bubbles as before the reload -- the "+
+			"user's prompt and the assistant's prose answer -- with the sidebar and the footer status "+
+			"word around it. Nothing is blank and no failure card is shown.")
+
+	// RESCUE, WHEN HOME: nothing happens. The marker survives because no
+	// navigation happened.
+	s.stampMarker(t)
+	if want, got := "agent-repl-frontend-rescue-webview", e.LeaderBinding("o L"); got != want {
+		t.Fatalf("SPC o L resolves to %q, want %q", got, want)
+	}
+	if !e.EvalBool(`(null (agent-repl-frontend-rescue-webview ` + elispString(s.Name) + `))`) {
+		t.Fatal("rescuing a webview that is home answered non-nil: it navigated a page that was already home")
+	}
+	s.awaitInPage(t, "the stamped document to still be the page after a rescue that had nothing to do", playtestMarker+` === true`)
+	s.requireHome(t, homeURI)
+	p.note("`SPC o L` (`agent-repl-frontend-rescue-webview`) while the page is home",
+		"the command answered nil, the stamped document is still the one on screen (no navigation), and the URI is unchanged")
+
+	// RESCUE, WHEN ASTRAY. The page is sent to an address that is not the
+	// daemon's, the way an external hyperlink would send it, then rescued.
+	e.Eval(`(let* ((buf (agent-repl--ws-get ` + elispString(s.Name) + ` :frontend-buffer))
+                   (xw (agent-repl--frontend-webview-live-widget buf)))
+              (agent-repl--frontend-webview-navigate-widget xw "about:blank")
+              t)`)
+	e.AwaitEvalFor(playtestPageBound, "the webview to report it has left the daemon",
+		`(agent-repl--frontend-webview-current-uri `+elispString(s.Name)+`)`,
+		func(raw json.RawMessage) bool {
+			uri := decodeString(raw)
+			return uri != "" && !strings.HasPrefix(uri, "http")
+		})
+	stray := s.webviewURI()
+	if e.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(stray) + `) t)`) {
+		t.Fatalf("the webview at %q still reads as home; the rescue would have nothing to do", stray)
+	}
+	p.note("the webview navigated to `about:blank`, the way an external hyperlink navigates it away",
+		fmt.Sprintf("the webview's URI is %q, which `agent-repl--frontend-webview-at-home-p` refuses", stray))
+
+	e.Leader("o L")
+	e.AwaitEvalFor(playtestPageBound, "the webview to be back at the daemon's origin",
+		`(and (agent-repl--frontend-webview-at-home-p (agent-repl--frontend-webview-current-uri `+elispString(s.Name)+`)) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	s.awaitPageMounted(t)
+	s.awaitInPage(t, "the prompt bubble to be drawn again on the rescued page", promptRow)
+	s.awaitInPage(t, "the response bubble to be drawn again on the rescued page", responseRow)
+	s.requireHome(t, homeURI)
+	p.capture("rescued", "`SPC o L` (`agent-repl-frontend-rescue-webview`) on the astray page",
+		"the webview's URI is back at the daemon's origin, the page mounted, and both feed rows are drawn again",
+		"The webapp is back where the reload left it: the feed holding the user's prompt bubble and "+
+			"the assistant's prose answer, with the sidebar and the footer status word. No trace of "+
+			"the blank page remains.")
+}
+
+// webviewURI reads the URI the workspace's webview currently shows.
+func (s *playtestScenario) webviewURI() string {
+	s.E.t.Helper()
+	return s.E.EvalString(`(or (agent-repl--frontend-webview-current-uri ` + elispString(s.Name) + `) "")`)
+}
+
+// stampMarker sets the page's marker global and waits until the page
+// answers that it holds it, so a later "the marker is gone" is a statement
+// about a new document and not about a stamp that never landed.
+func (s *playtestScenario) stampMarker(t *testing.T) {
+	t.Helper()
+	s.awaitInPage(t, "the page to hold the playtest marker", `(`+playtestMarker+` = true) === true`)
+	s.awaitInPage(t, "the marker to read back", playtestMarker+` === true`)
+}
+
+// requireHome asserts the webview's URI is at the daemon's own origin, and
+// that the origin is the one the page started at. The path and query are
+// deliberately NOT compared: the page rewrites its own query as the user
+// moves about the webapp, and a freshly built URL carries a different build
+// stamp than a still-correct page; what home means is the daemon's origin
+// (`agent-repl--frontend-webview-at-home-p`).
+func (s *playtestScenario) requireHome(t *testing.T, homeURI string) {
+	t.Helper()
+	uri := s.webviewURI()
+	if !s.E.EvalBool(`(and (agent-repl--frontend-webview-at-home-p ` + elispString(uri) + `) t)`) {
+		t.Fatalf("the webview's URI %q is not at the daemon's origin", uri)
+	}
+	if got, want := originOf(uri), originOf(homeURI); got != want {
+		t.Fatalf("the webview's origin is %q, want the one it started at, %q", got, want)
+	}
+}
+
+// originOf cuts a URL down to its scheme and authority.
+func originOf(uri string) string {
+	scheme, rest, ok := strings.Cut(uri, "://")
+	if !ok {
+		return uri
+	}
+	authority, _, _ := strings.Cut(rest, "/")
+	return scheme + "://" + authority
+}
+
+// ---------------------------------------------------------------------------
+// I.56 -- VISIT-FILE ROUTING
+// ---------------------------------------------------------------------------
+
+// TestPlaytestVisitFileRouting is plan I.56: a file under a registered
+// worktree routes into its owning workspace, and a file no workspace can own
+// records a refusal and still opens.
+//
+// Root detection goes through the module's own documented injection point
+// (`agent-repl-find-file-workspace-root-function`), exactly as
+// `emacs_findfile_e2e_test.go` does: the scripted fake git answers the
+// daemon's git surface, not `rev-parse --show-toplevel`, and no real git may
+// run anywhere. Both repositories live under HOME, which is this Emacs's
+// root, because the routing refuses roots outside it.
+func TestPlaytestVisitFileRouting(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "18-visit-file",
+		"Plan I.56. Visiting a file under a registered worktree routes into its owning workspace; "+
+			"visiting a file whose root no workspace can be created for records a refusal and still "+
+			"opens the file.")
+	p, e := s.Book, s.E
+
+	owned := harness.NewRepoAt(t, filepath.Join(e.Root, "owned"))
+	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(owned.Dir, ".claude"))
+	ws := s.register(t, owned.Dir)
+	ownedFile := writePlaytestFile(t, owned.Dir, "owned.txt", "one\ntwo\nthree\n")
+
+	// Leave the owning workspace first, so "switched to it" is a change the
+	// visit caused rather than where Emacs already was.
+	e.Eval(`(tab-bar-new-tab)`)
+	e.Eval(`(let ((agent-repl-find-file-workspace-root-function
+                    (lambda (_dir) ` + elispString(owned.Dir) + `)))
+              (find-file ` + elispString(ownedFile) + `)
+              t)`)
+	e.AwaitEvalFor(emacsFindFileBound, "the owning workspace to be selected",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == ws })
+	side := e.EvalString(`(let* ((buf (get-file-buffer ` + elispString(ownedFile) + `))
+                                 (win (and buf (get-buffer-window buf t))))
+                            (format "%s" (and win (window-parameter win 'window-side))))`)
+	if side != "nil" {
+		t.Fatalf("the routed file's window has window-side %q, want none: a file is not placed in a side window", side)
+	}
+	if !e.EvalBool(`(and (get-buffer-window (get-file-buffer ` + elispString(ownedFile) + `) t) t)`) {
+		t.Fatalf("the routed file %s is not displayed", ownedFile)
+	}
+	p.capture("file-routed", "`find-file` on a file under the registered worktree, from another tab",
+		fmt.Sprintf("the current workspace is %q (the owner), and the file's window is a main-area window, not a side window", ws),
+		"The file's three lines (one, two, three) are shown in an ordinary main-area window, and the "+
+			"tab bar marks the owning workspace as the selected one.")
+
+	// UNROUTABLE: the create verb refuses, the refusal is recorded, and the
+	// file is not lost.
+	orphan := harness.NewRepoAt(t, filepath.Join(e.Root, "unowned"))
+	orphanFile := writePlaytestFile(t, orphan.Dir, "orphan.txt", "no workspace owns me\n")
+	e.Eval(`(let ((agent-repl-find-file-workspace-root-function
+                    (lambda (_dir) ` + elispString(orphan.Dir) + `))
+                  (agent-repl-find-file-workspace-create-function
+                    (lambda (_root) (error "the workspace could not be created"))))
+              (find-file ` + elispString(orphanFile) + `)
+              t)`)
+	refused := hashKeys(e, "agent-repl--ffw-refused")
+	if len(refused) != 1 {
+		t.Fatalf("agent-repl--ffw-refused = %v, want exactly the one refused root", refused)
+	}
+	if !e.EvalBool(`(and (get-file-buffer ` + elispString(orphanFile) + `)
+                          (get-buffer-window (get-file-buffer ` + elispString(orphanFile) + `) t)
+                          t)`) {
+		t.Fatalf("the file %s is not displayed after the refusal: a refused routing falls through, it never loses the file", orphanFile)
+	}
+	if got := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`); got != ws {
+		t.Fatalf("the refused visit moved the current workspace to %q, want it left on %q", got, ws)
+	}
+	p.note("`find-file` on a file under a root no workspace can be created for",
+		fmt.Sprintf("`agent-repl--ffw-refused` records exactly that root (%q), the file is displayed in an ordinary window, and the current workspace is still %q", refused[0], ws))
+}
+
+// writePlaytestFile writes an ordinary text file, the thing a user visits.
+func writePlaytestFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
 }
