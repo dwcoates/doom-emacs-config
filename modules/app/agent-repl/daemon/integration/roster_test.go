@@ -913,3 +913,89 @@ func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
 		t.Fatalf("the workspace's assignment to %s did not survive the restart", task.GetId())
 	}
 }
+
+// rosterStatusName answers which arm of RosterRow.status a row carries, by the
+// proto's own field name, so a walk can be recorded and compared as data.
+func rosterStatusName(row *frontendv1.RosterRow) string {
+	m := row.ProtoReflect()
+	oneof := m.Descriptor().Oneofs().ByName("status")
+	if field := m.WhichOneof(oneof); field != nil {
+		return string(field.Name())
+	}
+	return "<unset>"
+}
+
+// TestRosterBringUpWalkIsMonotoneFromAColdSubmit pins the arm walk a workspace
+// is published through when its FIRST prompt brings its session up: none ->
+// init -> submitting -> thinking, each step no earlier than the one before,
+// and never `ready`.
+//
+// Two defects sat in that walk, both found by the playtest's cold start. The
+// rpc mints the turn and parks it under the revival hold, and the roster
+// learned of the turn only when the hold was released -- so between the shim's
+// SessionStarted and the release it read a live idle session with no turn and
+// published `ready` for a workspace whose prompt the daemon had already
+// accepted. And the session watcher, born on a connected link, applied the
+// client's replayed bring-up `dialing` as a live transition and walked the
+// row back to `init` right after `submitting`.
+func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
+	t.Parallel()
+	// Arrange: registered, never opened, the roster watched from before the
+	// prompt so every push of the walk is on the stream.
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, f.ws.GetId()) != nil
+	})
+
+	// Act: the first prompt revives the workspace, which spawns the fake shim
+	// and delivers the prompt once the session is up.
+	resp := f.submit("bring the session up", "k-cold-walk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("SubmitPrompt on a cold workspace = %v, want a minted TurnId", resp)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+
+	// Assert: every arm the row was published through, up to thinking, in
+	// the order it was published, with consecutive repeats collapsed.
+	var walk []string
+	for {
+		r := harness.AwaitNext(t, f.d.Ctx(), roster, "the next roster push of the bring-up walk")
+		row := rosterRow(r, f.ws.GetId())
+		if row == nil {
+			continue
+		}
+		name := rosterStatusName(row)
+		if len(walk) == 0 || walk[len(walk)-1] != name {
+			walk = append(walk, name)
+		}
+		if name == "thinking" {
+			break
+		}
+	}
+	rank := map[string]int{"none": 0, "init": 1, "submitting": 2, "thinking": 3}
+	last := -1
+	for _, arm := range walk {
+		r, known := rank[arm]
+		if !known {
+			t.Fatalf("the bring-up walk published %q; the walk is none -> init -> submitting -> thinking, and the whole walk was %v", arm, walk)
+		}
+		if r < last {
+			t.Fatalf("the bring-up walk stepped back to %q; the whole walk was %v", arm, walk)
+		}
+		last = r
+	}
+	for _, want := range []string{"init", "submitting"} {
+		seen := false
+		for _, arm := range walk {
+			if arm == want {
+				seen = true
+			}
+		}
+		if !seen {
+			t.Fatalf("the bring-up walk never published %q; the whole walk was %v", want, walk)
+		}
+	}
+}
