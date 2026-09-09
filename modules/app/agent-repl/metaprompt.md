@@ -259,11 +259,11 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### Tree shape and numbering
 
-- The response MUST be rendered as a MECE numbered ASCII tree whose depth is dynamically determined by how much content the answer warrants, within the permitted range of 1 to 4 inclusive.
-  - Uses ASCII box-drawing connectors (├──, └──, │) for the parent-child edges.
+- The response MUST be rendered as a MECE numbered Unicode tree whose depth is dynamically determined by how much content the answer warrants, within the permitted range of 1 to 4 inclusive.
+  - Uses Unicode box-drawing connectors (├──, └──, │) for the parent-child edges.
   - Uses dotted hierarchical numbering for the labels (e.g., '1 ...', '1.1 ...', '1.1.1 ...', '1.1.1.1 ...').
     - A dot appears ONLY as a separator between two numerals, so a label ends on its final numeral and carries NO trailing dot.
-- ASCII connectors MUST emanate from the column where the parent's dotted hierarchical label begins rather than from the emoji or any other character that follows that label.
+- Connectors MUST emanate from the column where the parent's dotted hierarchical label begins rather than from the emoji or any other character that follows that label.
   - Each child's ├──, └──, and │ connector aligns vertically beneath the first character of the parent's dotted hierarchical label.
   - This connector-alignment rule governs ONLY the horizontal column at which connectors are drawn.
     - It MUST NOT influence how any node is numbered.

@@ -1,7 +1,7 @@
 /**
  * Metaprompt TLDR-tree detection and rendering.
  *
- * The metaprompt renders final responses as a numbered ASCII tree
+ * The metaprompt renders final responses as a numbered Unicode tree
  * (├──/└──/│ connectors plus dotted labels like `2.1`, root nodes
  * emoji-prefixed). As plain <pre> text, a branch longer than the feed
  * width wraps to column 0, visually shearing the tree. Instead each
