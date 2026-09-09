@@ -389,6 +389,24 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 		// the daemon had performed. AwaitQuiet says so loudly when its own
 		// bound expires; nothing is swallowed.
 		gate.AwaitQuiet(shutdownGrace)
+		// AND THEN THE STANDING STREAMS' OWN LAST WORDS. The gate counts
+		// unary calls only — a Watch* handler does not return until its
+		// client goes away, so counting one would make every exit wait out
+		// its whole grace — but the daemon's last push goes out on exactly
+		// those streams. `drain.fire` pushes `DaemonShutdownAnnounced` onto
+		// every WatchDaemon stream and calls Exit on the next line, so
+		// AwaitQuiet sees nothing in flight, returns at once, and Shutdown
+		// closes the streams over an announcement that never reached the
+		// socket. The page then waits out its own budget for a banner the
+		// daemon did draw, which is `TestWebappLayerRoster`'s "the drain
+		// banner was never drawn within 5000ms".
+		//
+		// Bounded by writesQuietBound, and a link still speaking at the end
+		// of it says so through the gate's own logger rather than being
+		// treated as an error: one h2 connection multiplexes the pushes with
+		// everything else, so a genuinely busy link never falls silent and is
+		// not a lost announcement.
+		gate.AwaitWritesQuiet(writesQuietBound)
 		// THE GRACE IS BOUNDED. Graceful shutdown waits for every in-flight
 		// request, and this daemon's Watch* handlers are STANDING STREAMS that
 		// end only when their client goes away — so an unbounded wait is a
@@ -408,6 +426,18 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 // shutdownGrace is how long in-flight requests have to finish before the
 // standing streams are closed underneath them.
 const shutdownGrace = 2 * time.Second
+
+// writesQuietBound is how long the exit gives the connections to stop writing
+// after every counted call has been answered.
+//
+// IT IS `server.answerWriteBound`'s SIBLING and is sized the same way: what it
+// covers is one `write(2)` of a few dozen bytes of a push onto a loopback or
+// unix socket by a goroutine that is already runnable, and the barrier ends on
+// quiescence rather than on this clock, so the ordinary exit spends about two
+// `barrierSettle` ticks here rather than this bound. 250ms is a last resort,
+// deliberately well under `shutdownGrace` so a link that never falls silent
+// cannot spend the exit's own budget on top of it.
+const writesQuietBound = 250 * time.Millisecond
 
 // loopJoinBound is how long the exit waits for the background loops to leave
 // after their serving context ended. Every loop is a ticker whose iteration is
