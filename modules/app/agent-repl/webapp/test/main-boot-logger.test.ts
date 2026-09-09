@@ -68,11 +68,46 @@ async function awaitBootFailureCard(): Promise<Element> {
   }
 }
 
+/**
+ * THE RE-RAISE, CAUGHT INSTEAD OF LEAKED.
+ *
+ * `main.ts` ends in `void boot().catch(err => queueMicrotask(() => { throw err }))`,
+ * and that rethrow is deliberate: it re-raises a boot failure as the uncaught
+ * error a browser reports, which is the loudness the old synchronous throw
+ * had. Both tests here drive the boot to failure ON PURPOSE, so both provoke
+ * it — and under vitest an uncaught error is a FAILED RUN, however many
+ * assertions passed. `npm test` exited 1 with 3759 tests green.
+ *
+ * The answer is not to silence it. A test that provokes a re-raise owns it, so
+ * the microtask the re-raise is scheduled on is taken over here and the error
+ * it carries is captured and ASSERTED — strictly more coverage than the
+ * escape, and not one line of production changed. Every other caller's
+ * callback still runs on a real microtask.
+ */
+let reRaised: unknown[] = [];
+
+function captureTheReRaise(): void {
+  const realQueueMicrotask = globalThis.queueMicrotask.bind(globalThis);
+  reRaised = [];
+  globalThis.queueMicrotask = (callback: () => void): void => {
+    realQueueMicrotask(() => {
+      try {
+        callback();
+      } catch (err) {
+        reRaised.push(err);
+      }
+    });
+  };
+}
+
 describe("the webapp's boot against a real page", () => {
   let realFetch: typeof globalThis.fetch;
+  let realQueueMicrotask: typeof globalThis.queueMicrotask;
   let consoleError: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    realQueueMicrotask = globalThis.queueMicrotask;
+    captureTheReRaise();
     // OUT, not replaced. A page has no logger; installing one is `boot`'s job.
     resetLoggingForTests();
     document.body.innerHTML = shellHTML();
@@ -89,6 +124,7 @@ describe("the webapp's boot against a real page", () => {
   });
 
   afterEach(() => {
+    globalThis.queueMicrotask = realQueueMicrotask;
     globalThis.fetch = realFetch;
     consoleError.mockRestore();
     document.body.innerHTML = "";
@@ -112,5 +148,19 @@ describe("the webapp's boot against a real page", () => {
     await awaitBootFailureCard();
     const said = consoleError.mock.calls.flat().join(" ");
     expect(said).not.toContain("the webapp logger is not installed");
+  });
+
+  it("re-raises the failure it drew, rather than ending quietly", async () => {
+    // The other half of "drew its failure": the card is what the READER sees,
+    // and this is what the BROWSER sees. A boot that drew the card and then
+    // returned normally would leave a page that looks broken to a person and
+    // healthy to every error reporter pointed at it.
+    await import("../src/main.js");
+    await awaitBootFailureCard();
+    // The re-raise is scheduled on a microtask after the card is drawn.
+    await Promise.resolve();
+    expect(reRaised.map((err) => String(err))).toEqual([
+      expect.stringContaining("AdoptWebWorkspace") as unknown as string,
+    ]);
   });
 });
