@@ -441,21 +441,34 @@ func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testin
 // Flush-on-accept.
 // ---------------------------------------------------------------------------
 
-func TestWatchWebWorkspaceFlushesHeadersBeforeAnyFrameWhenNothingIsPublishedYet(t *testing.T) {
+func TestWatchWebWorkspaceOpensWithTheOpenedWorkspacesSessionIdentity(t *testing.T) {
 	t.Parallel()
-	// Arrange / Act: WatchWebWorkspace carries no state topic of its own --
-	// only the `transferred` event, which nothing in this test ever raises --
-	// so a fresh subscription has no published view to replay. Without
-	// flush-on-accept (a ResponseWriter wrapper that flushes headers the
-	// moment the subscription is registered) the daemon would never send
-	// anything and this open would hang until the daemon's context times out;
-	// WatchWeb already t.Fatalf's on an open error, so its returning at all
-	// is the first half of the assertion.
+	// Arrange / Act: this test used to assert the OPPOSITE -- that a fresh
+	// WatchWebWorkspace carries no frame at all, because the stream had only
+	// the `transferred` event and no state of its own. Landing 15 gave it
+	// one: the page binds its log context from `session_identity`, so the
+	// daemon composes the identity before every subscribe and the topic
+	// replays it to each new subscriber. The genuine no-view flush-on-accept
+	// case now lives on WatchDaemon
+	// (TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled),
+	// and this stream's header flush is covered per kind by
+	// TestFlushOnAcceptAcrossWatchKinds.
+	//
+	// What this asserts instead is the fact only an OPENED workspace can
+	// show, and the one the whole landing exists for: the identity the page
+	// stamps its forwarded log records with is the session the daemon is
+	// actually operating, not an empty placeholder.
 	f := newOpened(t, harness.Opts{})
 	web := f.d.WatchWeb(f.ws)
 
-	// Assert: headers arrived (the open returned) and no frame follows.
-	harness.ExpectNoPush(t, web, harness.ProbeWindow, "WatchWebWorkspace with nothing ever published carries no frame")
+	// Assert.
+	push := harness.AwaitView(t, f.d.Ctx(), web, "WatchWebWorkspace: the opened workspace's session identity",
+		func(r *agentreplv1.WatchWebWorkspaceResponse) bool {
+			return r.GetSessionIdentity().GetAgentReplSessionId() != ""
+		})
+	if got := push.GetSessionIdentity().GetAgentReplSessionId(); got == "" {
+		t.Fatalf("WatchWebWorkspace on an opened workspace = agent_repl_session_id %q, want the operated session's", got)
+	}
 }
 
 // ---------------------------------------------------------------------------
