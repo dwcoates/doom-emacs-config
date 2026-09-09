@@ -114,9 +114,19 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 	label := priorityLabelForm(thirdName)
 	set := e.AwaitEval(fmt.Sprintf("the roster to carry a priority badge for %q", thirdName),
 		label, func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+	// THE PANEL IS STILL ON THE FRAME, asserted BEFORE the page is asked
+	// anything. `xwidget-webkit-execute-script` answers through a callback the
+	// WebKit view raises, and a view whose buffer no window is displaying is
+	// not running one -- so a panel laid over between the verb and the probe
+	// makes the probe go SILENT (`last value was null`, no diagnosis string at
+	// all) rather than answer "no". That is what the first two rounds of this
+	// step timed out on, and reading it as "the badge is absent" would have
+	// sent the fix to the wrong system entirely.
+	awaitPanelShown(t, s, thirdName)
 	// AND THE PAGE DREW IT. The roster label is the daemon's answer; this is
 	// that answer rendered, on the one surface that renders it.
-	s.awaitInPage(t, "the sidebar's roster row to draw the priority badge",
+	s.awaitInPageFor(t, playtestPagePushBound,
+		"the sidebar's roster row to draw the priority badge",
 		`document.querySelector('[data-roster-row] [data-priority=`+jsString(decodeString(set))+`]')`)
 	// AND THE TAB BAR'S OWN STRING CARRIES IT, which is the claim the PICTURE
 	// is about and the one the roster accessor cannot make.
@@ -159,7 +169,9 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
                t)`)
 	e.AwaitEval(fmt.Sprintf("the roster's priority badge for %q to go away", thirdName),
 		label, func(raw json.RawMessage) bool { return decodeString(raw) == "" })
-	s.awaitInPage(t, "the sidebar's roster rows to draw NO priority badge at all",
+	awaitPanelShown(t, s, thirdName)
+	s.awaitInPageFor(t, playtestPagePushBound,
+		"the sidebar's roster rows to draw NO priority badge at all",
 		`document.querySelectorAll('[data-roster-row] [data-priority]').length === 0`)
 	// AND THE BAR'S OWN STRING HAS LOST IT. The set step asserted the label
 	// INTO the drawn tabline, so this is the same read negated -- and it is
@@ -233,8 +245,8 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 	// `captureArm` re-reads an arm there: the shuffle is a transient by the
 	// product's own design, so a sentence written from the atomic read alone
 	// would send a reviewer looking for an order the module had already,
-	// correctly, stopped holding.
-	// AND THE ORDER THE BAR'S OWN STRING SPELLS IS READ WITH IT, in one form,
+	// correctly, stopped holding. THE ORDER THE BAR'S OWN STRING SPELLS IS
+	// READ WITH IT, in one form,
 	// so the enumeration a reviewer is given and the line the bar is painted
 	// from cannot be two sides of a roster push. The enumeration is what the
 	// manifest sentence names; the rendered line is what says the paint had
@@ -259,13 +271,16 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 			"GONE — %q's webview and composer are off the frame, because `agent-repl` always hides — so "+
 			"what fills the main area is whatever the workspace behind them was showing, NOT a webapp. "+
 			"THE ORDER DRAWN HERE IS %v, and that is what the reviewer should see — NOT the shuffled %v. "+
-			"OBSERVED AND FILED, NOT ASSERTED: `agent-repl-workspace-push-to-back` moves the tab to the "+
-			"last slot, and the next accepted roster push then RE-DERIVES the order from the daemon's "+
-			"walk (`agent-repl-roster-move-tab-to-back`'s own docstring says so, and `workspace.el` "+
-			"declares client-authored ordering dead). So the shuffle is overwritten before a picture can "+
-			"be taken of it, and `SPC o C`'s reordering has no lasting visible effect at all. Whether "+
-			"that gesture should still reorder anything is a contract question about who owns tab order, "+
-			"so it is filed rather than changed here.",
+			"ESCALATED AS AN OPEN CONTRACT QUESTION, NOT ASSERTED: "+
+			"`agent-repl-workspace-push-to-back` moves the tab to the last slot, and the next accepted "+
+			"roster push then RE-DERIVES the order from the daemon's walk "+
+			"(`agent-repl-roster-move-tab-to-back`'s own docstring says so, and `workspace.el` declares "+
+			"client-authored ordering dead). So the shuffle is overwritten before a picture can be taken "+
+			"of it, and `SPC o C`'s reordering has NO LASTING VISIBLE EFFECT. Whether the gesture should "+
+			"reorder anything at all is a question about who owns tab order — the proto's answer is the "+
+			"daemon's walk — and the lead is carrying it. This step therefore asserts only what the "+
+			"product does keep: the tab count, the moved focus, the hidden panels, and the bar's own "+
+			"string agreeing with the roster enumeration.",
 			focus, firstName, firstName, atCapture, shuffled))
 }
 
