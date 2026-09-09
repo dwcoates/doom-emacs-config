@@ -1091,7 +1091,7 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 // stopped, answered `success: false` with the vendor's refusal prose. The
 // scenario's declared arm is conversation/v1's AgentSendMessageFailure.
 //
-// # WHAT THE FRONTEND CONTRACT SAYS ABOUT A REFUSED SEND — AND THE GAP
+// # WHAT THE FRONTEND CONTRACT SAYS ABOUT A REFUSED SEND
 //
 // A send is NOT drawn as a tool card. feed.proto's FeedTurnActivity oneof has
 // no send arm; a send is drawn with FeedAgentPrompt instead, "ONE component,
@@ -1102,21 +1102,24 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 // the START said, with this comment: "A send that could not be delivered
 // still HAPPENED, and its row is what explains the attempt."
 //
-// FeedAgentPrompt's ONLY outcome field is its `delivery` oneof, and that
-// oneof has exactly two arms — queued_to_live and resumed_recipient — both of
-// which state how a send LANDED. feed.proto declares no failure arm and no
-// refusal-reason field, and the field's own comment says the oneof is "UNSET
-// ... when the producer observed nothing; the row's presence already says the
-// attempt happened". So the refused send is drawn as an accepted one is,
-// except that its delivery stays unset.
+// THE GAP THIS TEST RECORDED IS CLOSED (landing 14). FeedAgentPrompt's
+// `delivery` oneof once carried only the two arms that say how a send LANDED,
+// so a refused send was drawn exactly as one whose producer merely stated
+// nothing — the refusal was indistinguishable from an absence. The oneof now
+// carries a third arm, `refused`, whose only field is the producer's own
+// refusal words: a reason and no kind, because a reason is all the vendor
+// gives.
 //
-// GAP RECORDED: the frontend surface therefore cannot distinguish a REFUSED
-// send from one whose producer simply stated no delivery. The strongest
-// available assertions are the three below — the attempt is drawn AND
+// So this asserts the whole path end to end — the attempt is drawn AND
 // SURVIVES the refusal (a resolver that dropped the row on the failure arm,
 // or that invented a recipient identity the refusal never resolved, would
-// fail here), the delivery oneof is unset (a resolver that reported a landing
-// the refusal never achieved would fail here), and the turn still concludes.
+// fail here), the delivery states the REFUSAL BY NAME rather than the silence
+// that reads as "not yet delivered" (a resolver that left it unset, or that
+// reported a landing the refusal never achieved, would fail here), the reason
+// is the vendor's own prose carried verbatim from the shim's converter
+// through the daemon (a producer that dropped the tool result's content, or a
+// resolver that synthesized wording of its own, would fail here), and the
+// turn still concludes.
 func TestSendMessageRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -1151,10 +1154,22 @@ func TestSendMessageRefused(t *testing.T) {
 		t.Errorf("refused send body blocks = %q, want exactly the caller's summary [%q]", bodies, "continue")
 	}
 
-	// Assert: NOTHING was delivered, so the delivery oneof stays unset — the
-	// arm states how a send landed, never that one was attempted.
-	if prompt.GetDelivery() != nil {
-		t.Errorf("refused send delivery = %T, want unset", prompt.GetDelivery())
+	// Assert: NOTHING was delivered, and the row SAYS SO BY NAME. An unset
+	// delivery is what a producer that stated nothing leaves behind, and a
+	// reader cannot tell that apart from a message still on its way.
+	refused := prompt.GetRefused()
+	if refused == nil {
+		t.Fatalf("refused send delivery = %T, want the refused arm — an unset delivery is "+
+			"indistinguishable from a send whose producer simply stated no delivery", prompt.GetDelivery())
+	}
+
+	// Assert: the refusal carries the VENDOR's own words, verbatim. The vendor
+	// declares no refusal code, so this prose is the only thing it ever says
+	// about why the send was refused.
+	const prose = "The agent was stopped by the user."
+	if got := refused.GetReason().GetText(); got != prose {
+		t.Errorf("refusal reason = %q, want the vendor's own prose %q — never wording the "+
+			"daemon or the client invented", got, prose)
 	}
 
 	// Assert: the refusal is the VENDOR's, not the turn's — a tool that
