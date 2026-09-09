@@ -1,0 +1,112 @@
+# Playtest plan — headless, screenshot-reviewed, mocked-SDK only
+
+Owner ruling (2026-09-09): playtests run before any merge to master. They are
+a scripted playbook of user actions against the REAL application — real Doom
+on Xvfb, real daemon/shim/store/sidecar — with the fake SDK as the sole vendor
+so no real agent response is ever generated, a frame capture after every step,
+and a manifest line per capture stating what the reviewer should see.
+
+## Parallelism
+
+Every playbook is its own world: its own Emacs on its own Xvfb, its own
+quartet, its own scratch root. Playbooks share nothing, so the only ordering
+constraint is the sandbox's container gate (memory-budgeted) and the layer's
+two Emacs slots per container. Throughput is 2 × containers. Sections D–H are
+table-driven over the fake's scenario registry and must be ONE loop each, not
+hand-written per scenario.
+
+## What counts as reviewed
+
+Each capture has a manifest sentence. The mechanical gate is: every capture
+exists, is a valid PNG of the declared geometry, and is not blank. The visual
+gate is a vision-capable review of the PNGs against the manifest by the lead;
+a capture whose picture does not match its sentence is a defect.
+
+## Playbooks
+
+A. Boot and roster (tab bar)
+ 1. cold start: no daemon → build+spawn; first tab init→booting→ready; tray empty
+ 2. adopt an already-answering daemon → ready with no rebuild
+ 3. build failure → modeline, tab `failed`, no wedge
+ 4. add project from directory (SPC TAB C-n) → second tab, roster order
+ 5. new workspace (SPC TAB n) and child-of-current (C-u) → nesting in tab names
+ 6. fork workspace + conversation (SPC TAB f) → forked tab, parent history in feed
+ 7. switch (SPC p p / SPC TAB R) → selected tab highlights, webview swaps, composer follows
+ 8. priority set/clear (SPC TAB p); deprio close shuffles tab to the end
+ 9. close, re-open (SPC TAB o), close with held prompt (tab stays), kill (never blocks)
+10. copy workspace name / copy reference → echo only, negative capture
+
+B. Tab-bar arms, one playbook per transition
+11. idle → thinking on submit → done on conclusion (prose)
+12. attention on permission ask; clears on answer
+13. attention on question (!ask-single); clears on answer
+14. failed on !fail-execution; persists until next submit
+15. hibernated after idle cutoff; ready again on revival
+16. merging → done through SPC TAB M (self-repo); parked on scripted conflict
+17. detached indicator while !bash-detach runs; clears on settle
+18. link severed → degraded → recovered (kill the shim under the daemon)
+
+C. Composer and delivery
+19. type/submit → prompt bubble; SPC o v focuses; discard clears
+20. held prompt during live turn → tray; discard from tray
+21. deferred prompt drains on finish edge
+22. line/region/hunk prompt (SPC TAB e) and canned (E) → reference in prompt
+23. attach clipboard image → attachment chip
+24. history search recall → last prompt restored
+
+D. Feed families (webapp visuals) — table over scenarios, settled feed per row
+25. !md markdown: headings, fence, list
+26. !interrupt then SPC o C-c → interrupted terminal
+27. !query-eof / !query-fail / !query-eof-mid-ask → failure overlay, ask denied
+28. !rotate → separator, new session line
+29. !slash, shape-a, shape-a-unnamed
+30. !compact / compact-auto / compact-failed → context-cut row, footer budget
+31. !model-fallback → topbar model `fake-sonnet-5`
+32. !fast-on/off/cooldown → topbar fast cell, three states
+33. !rate-limit, five-hour, seven-day → footer allowance line; overage
+34. five !usage-* → footer unread caveat beside standing figures
+35. !context-tip, !tokens-reminder, !context-budget-warning → footer status
+36. !mcp-healthy, !mcp-all → sidebar rows with health
+
+E. Permissions and questions
+37. !perm-allow-once / -standing / -standing-mode → card, answer, standing offered vs not
+38. !perm-deny-user / -deny-policy / -undecidable / -no-standing → each wording
+39. !perm-hold → ask survives a workspace switch and back
+40. !ask-single / -multi / -free / -unanswered → card shape, answered state
+41. topbar permission-mode picker → change, arm shown
+
+F. Tools — table over scenarios
+42. shell: !bash, -hold, -fail, -timeout, -spill, -image
+43. detached shell: !bash-detach, -poll, -fail, -live → row, sub-feed, settled
+44. files: read(-head/-range/-truncated/-image), write-create/-update, edit, both diagnostics, grep/glob
+45. web: fetch, redirect, search
+46. skills: !skill, -fail, memory, injected
+47. hooks: success, blocked, failed, cancelled
+48. automation: plan, findings, worktree keep/remove, cron, monitor deadline/persistent, wakeup schedule/stop (footer chip), artifact publish/list, unmodeled
+
+G. Subagents and tasks
+49. !subagent → bubble once, sub-feed opens
+50. subagent detached / live / utterance off top level / failed
+51. !cancel-all → fan-wide cancel with count
+52. tasks create/change/reject; send-message queued / resumed / refused (refused drawn apart)
+
+H. Failure arms — every !fail-* and every !api-*, one capture of the exact headline each
+
+I. Panels and layout
+53. open each panel kind into the main area; close; plain close leaves the tab alone
+54. fullscreen toggle and restore
+55. reload webview (SPC o l), rescue webview (SPC o L) → state intact
+56. visit a file → routes to its owning workspace; unroutable file records a refusal
+
+J. Daemon lifecycle
+57. scheduled shutdown → page-wide drain banner; cancel removes it
+58. shutdown now → every tab goes down; no wedge
+59. graceful restart holds prompts; forced restart interrupts the turn
+60. handover at freeness → tabs survive, adopted session continues; daemon down surfaces and reconnects
+
+K. Multi-workspace concurrency (one Emacs, several workspaces)
+61. two workspaces thinking at once; each arm its own
+62. attention in a background workspace while foreground idle → background tab paints attention; switching shows the ask
+63. merge one workspace while another runs a turn
+
+~63 playbooks, ~250 captures.
