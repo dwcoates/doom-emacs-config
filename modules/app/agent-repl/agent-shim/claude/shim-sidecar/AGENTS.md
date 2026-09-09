@@ -732,12 +732,19 @@ the suite rather than quietly shrinking what the feed can show.
   itself (R9's resume rule). THE WORKSPACE KEY IS ENUMERATED, NEVER DERIVED:
   the reader holds only the vendor's lossy, non-invertible cwd slug, so it
   globs `<state>/shim/*` and takes the key from the records.
-- THE BOOK IS RE-RESOLVED EVERY RESCAN (`cycle.go`'s `rekeyRotations`), because
-  discovery order is not causal order: a link that lands after the transcript
-  was first seen moves the watched file's book, and UN-PARKS it when the
-  refusal that parked it was that very book move — the one refusal that stops
-  being true. Nothing is duplicated, because `write_id` and `upsert_key` are
-  digested from a file position that did not move.
+- THE BOOK IS RE-RESOLVED BY EVERY POLL AND EVERY RESCAN (`cycle.go`'s
+  `rekeyRotations`, called from `pollAll` and `rescan`), because discovery order
+  is not causal order: a link that lands after the transcript was first seen
+  moves the watched file's book, and UN-PARKS it when the refusal that parked it
+  was that very book move — the one refusal that stops being true. Nothing is
+  duplicated, because `write_id` and `upsert_key` are digested from a file
+  position that did not move.
+- IT SHARES THE READ'S CLOCK, NOT DISCOVERY'S, and that is the whole point. A
+  record read under a book the link file has already superseded is committed,
+  advances the cursor, and — for a file the store never parked — is never read
+  again, so a resolution on the slower rescan tick would leave one conversation
+  split across two books for good. Tie it to the read and no byte is converted
+  under an identity the disk has already contradicted.
 - SUBAGENT: `AgentId.value` == the `toolUseId` of the companion
   `agent-<id>.meta.json` — the `tool_use_id` of the call that SPAWNED the agent
   (the cross-plane minting rule; see "Identity and keys"). The vendor `agentId`
