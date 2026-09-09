@@ -465,6 +465,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}
 			return verbs.PublishRegistry(ctx)
 		},
+		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
+		// and the topbar's indicator each draw the shim link, and the roster
+		// promises they agree with it about the same link
+		// (resolve/sidebar/status.go's linkArm); telling them from one closure
+		// is what makes a park they could disagree about unrepresentable.
+		SetParked: func(ws ids.WorkspaceID, parked bool) {
+			footerResolver.SetParked(ws, parked)
+			topbarResolver.SetParked(ws, parked)
+		},
 		Exit: orderlyExit(p.Exit),
 		Log:  p.Surfaces,
 	})

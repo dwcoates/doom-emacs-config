@@ -121,6 +121,19 @@ type Deps struct {
 	// so a workspace the daemon parked on purpose stays painted as a fault.
 	// Nil means no roster surface is wired.
 	PublishRegistry func(ctx context.Context) error
+	// SetParked hands the SESSION-SCOPED views -- the footer's strip and the
+	// topbar's connectivity indicator -- the same park the roster reads out of
+	// the terminal record. They are in-memory accumulations rather than DB
+	// readers, so unlike the roster they cannot look the record up: they are
+	// told, once, from the site that writes it, which is what keeps all three
+	// surfaces deriving one park from one fact.
+	//
+	// Without it the footer's `disconnected` step answered `dead` for the link
+	// the stand-down killed, and the webapp's composer gate IS that word
+	// (webapp/src/main.ts: a `disconnected` status closes the composer), so
+	// the parked workspace could not be handed the prompt that revives it.
+	// Nil means no session-scoped view is wired.
+	SetParked func(ws ids.WorkspaceID, parked bool)
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
