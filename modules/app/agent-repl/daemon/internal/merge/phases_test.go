@@ -11,6 +11,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/wsm"
 )
 
@@ -744,5 +745,108 @@ func TestShortRendersACommitTheWayNarrationNamesIt(t *testing.T) {
 	// Assert.
 	if got != "abcdef012345" {
 		t.Fatalf("short(%q) = %q, want the narration's own length", sha, got)
+	}
+}
+
+// TestPostPromptFailureRidesTheTerminalOutsideTheDaemonsRepo covers the same
+// ruling for EVERY OTHER repository, the case the two methods once spelled
+// differently: an after-action failure there aborted a merge the contract says
+// had already succeeded.
+func TestPostPromptFailureRidesTheTerminalOutsideTheDaemonsRepo(t *testing.T) {
+	// Arrange: a non-self repository whose after-action's turn fails.
+	h := newHarness(t)
+	h.configureActions(nil, []string{"after"})
+	h.briefs["after"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge reported a failure for a post-prompt: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
+		t.Fatalf("the merge is %q, want it to have succeeded anyway", facts.State)
+	}
+}
+
+// TestPostPromptFailureWarnsOutsideTheDaemonsRepo covers what the swallowed
+// failure becomes: the canonical WARN, carrying the failure's own text, so the
+// run's success is never silent about it.
+func TestPostPromptFailureWarnsOutsideTheDaemonsRepo(t *testing.T) {
+	// Arrange: a non-self repository whose after-action's turn fails.
+	h := newHarness(t)
+	h.configureActions(nil, []string{"after"})
+	h.briefs["after"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	var warned *dlog.Record
+	for i, rec := range h.logs.Records() {
+		if rec.Operation == "daemon.merge.post_prompt" && rec.Level == "warn" {
+			warned = &h.logs.Records()[i]
+		}
+	}
+	if warned == nil {
+		t.Fatal("no daemon.merge.post_prompt WARN records the after-action's failure")
+	}
+	if text, _ := warned.Context["error"].(string); !strings.Contains(text, "after-merge prompt") {
+		t.Fatalf("the WARN's error is %q, want the failure's own text", warned.Context["error"])
+	}
+}
+
+// TestPostPromptFailedTabSettlesOutsideTheDaemonsRepo covers the feed's half of
+// the same failure: the post_prompt tab still settles failed with its composed
+// summary even though the run succeeded.
+func TestPostPromptFailedTabSettlesOutsideTheDaemonsRepo(t *testing.T) {
+	// Arrange: a non-self repository whose after-action's turn fails.
+	h := newHarness(t)
+	h.configureActions(nil, []string{"after"})
+	h.briefs["after"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	want := []string{TabQueue, TabPostPrompt}
+	if got := h.feed.tabSequence(); !equal(got, want) {
+		t.Fatalf("the tab sequence is %v, want %v", got, want)
+	}
+	summary := h.feed.lastTabOfKind(TabPostPrompt).GetPostPrompt().GetSettled().GetFailed().GetSummary()
+	if got := summary; !strings.Contains(got, "after-merge prompt") {
+		t.Fatalf("the settled post-prompt tab reads %q, want the composed summary", got)
+	}
+}
+
+// TestPostPromptNeverParks covers the parked-versus-failed distinction the one
+// after-action helper turns on: a park stops the run and holds its lease, and
+// the after-action has no parking arm to reach for.
+func TestPostPromptNeverParks(t *testing.T) {
+	// Arrange: a non-self repository whose after-action's turn fails.
+	h := newHarness(t)
+	h.configureActions(nil, []string{"after"})
+	h.briefs["after"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State == StateParked {
+		t.Fatalf("the merge parked on a failed after-action, want %q", StateMerged)
 	}
 }
