@@ -163,8 +163,9 @@ interface EngineDeps {
    * module constant.
    *
    * `main.ts` fills this ONLY for a `--fake` process; a real session always
-   * bounds on {@link WATCHER_CONCLUSION_BUDGET_MS}. It is a LAST RESORT bound
-   * either way — the ordering it protects is unchanged by its size.
+   * bounds on {@link WATCHER_CONCLUSION_BUDGET_MS}, whose own doc states what
+   * its size is answerable to. It is a LAST RESORT bound either way — the
+   * ordering it protects is unchanged by its size.
    */
   readonly watcherConclusionBudgetMs?: number;
   /**
@@ -201,13 +202,30 @@ interface OpenBashWatcher {
 }
 
 /**
- * How long the teardown waits for one concluded tail to actually end.
+ * How long the teardown waits for ONE of its bounded stages to finish.
  *
- * A LAST RESORT: the tail ends on its own the moment it has served the book's
- * head. This only bounds a consumer that stopped pulling, so it cannot keep a
- * killed shim alive forever.
+ * A LAST RESORT: a tail ends on its own the moment it has served the book's
+ * head, and the vendor's message loop ends the moment its query is closed.
+ * This only bounds a party that stopped answering, so it cannot keep a killed
+ * shim alive forever.
+ *
+ * IT IS SIZED AGAINST THE DAEMON'S STAND BOUND, NOT AGAINST ITSELF. The whole
+ * teardown runs INSIDE the daemon's `KillSession` call, which
+ * `drain.DefaultStandBound` (5s) gives up on; a per-stage budget large enough
+ * that the daemon's bound fires first would mean the shim's own last resort
+ * can never be reached, and the daemon would report a shim as leaked while it
+ * was still legitimately working. The teardown spends at most FOUR of these
+ * back to back -- the message loop's end, then, per agent, the book-head read
+ * and the tail's own end, then the bash tails -- so the worst case must stay
+ * strictly under the daemon's bound: 4 x 1s = 4s, one second inside it.
+ *
+ * MEASURED: a forced `KillSession` on a session parked at an OPEN permission
+ * ask, with a `WatchAgent` tail standing, concluded in 9ms in the shim's own
+ * integration harness, and the whole daemon-side stop it sits inside measured
+ * 9ms p50 / 15ms max across 104 e2e runs at -parallel 8 and -parallel 32. One
+ * second is a hundred times that, so nothing healthy can reach this bound.
  */
-const WATCHER_CONCLUSION_BUDGET_MS = 5_000;
+const WATCHER_CONCLUSION_BUDGET_MS = 1_000;
 
 /** The component name the log sink's own fault and degraded window carry. */
 const LOG_SINK_COMPONENT = "log-sink";

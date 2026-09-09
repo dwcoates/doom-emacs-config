@@ -62,6 +62,8 @@ func (d *Daemon) WorkspaceLog(workspaceDir, sink string) []LogRecord {
 // AwaitLogRecord waits for a record satisfying the predicate in a log file.
 func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -72,8 +74,8 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s in %s: %v", what, path, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s in %s: %v", what, path, wait.Err())
 		}
 	}
 }
@@ -235,6 +237,8 @@ func (d *Daemon) WorkspaceLogRecords() []LogRecord {
 // workspace directory is GONE — a merged one — waits on.
 func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -245,8 +249,8 @@ func (d *Daemon) AwaitWorkspaceLogRecordInState(what string, pred func(LogRecord
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s in this daemon's workspace log targets: %v", what, wait.Err())
 		}
 	}
 }
@@ -291,6 +295,8 @@ func ShimLoggedRequest(t *testing.T, workspaceDir, rpc string, into proto.Messag
 // moment.
 func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, into proto.Message, pred func() bool) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -299,8 +305,8 @@ func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, 
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, wait.Err())
 		}
 	}
 }
@@ -309,6 +315,8 @@ func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, 
 // a verb, and decodes the last one.
 func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Message) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -317,8 +325,8 @@ func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Mes
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, wait.Err())
 		}
 	}
 }
@@ -346,6 +354,8 @@ func (d *Daemon) AwaitWorkspaceLogRecord(workspaceDir, what string, pred func(Lo
 // turn, for one, which loses the terminal and hangs whatever was waiting on it.
 func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	path := WorkspaceLogPath(workspaceDir, "daemon")
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -361,8 +371,8 @@ func (d *Daemon) AwaitWorkspaceLogOperationCount(workspaceDir, operation string,
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %d records under %s in %s (saw %d): %v", n, operation, path, seen, wait.Err())
 		}
 	}
 }
@@ -458,6 +468,8 @@ func (d *Daemon) CumulativeWorkspaceLogOperationCount(workspaceDir, operation st
 // boots its successor.
 func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operation string, n int) {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -467,8 +479,8 @@ func (d *Daemon) AwaitCumulativeWorkspaceLogOperationCount(workspaceDir, operati
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for %d cumulative records under %s for workspace %s (saw %d): %v", n, operation, workspaceDir, seen, wait.Err())
 		}
 	}
 }
@@ -499,6 +511,8 @@ func ShimVerbOrder(t *testing.T, workspaceDir string) []string {
 // answers their order, failing if the second never arrives.
 func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []string {
 	d.t.Helper()
+	wait, cancelWait := d.waitCtx()
+	defer cancelWait()
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -508,8 +522,8 @@ func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []stri
 		}
 		select {
 		case <-ticker.C:
-		case <-d.ctx.Done():
-			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, d.ctx.Err())
+		case <-wait.Done():
+			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, wait.Err())
 		}
 	}
 }
