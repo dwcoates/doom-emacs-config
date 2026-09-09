@@ -62,12 +62,16 @@ const DefaultTimeout = 5 * time.Second
 // budget the first three had spent — reporting the stop as the slow step when
 // the stop measured 9ms p50 and 15ms max across 104 e2e runs.
 //
-// Sized off what a whole run actually contains: five DefaultTimeout waits plus
-// one drain.DefaultStandBound stand-down is 30s, and a run that exceeds that is
-// wedged rather than slow. It is a MULTIPLE rather than its own constant so an
-// Opts.Timeout override, which widens the per-wait bound for a structurally
-// longer run, widens that run's budget in the same proportion.
-const runBudgetWaits = 6
+// Sized off what a whole run actually contains: five DefaultTimeout waits (25s)
+// plus one drain.DefaultStandBound stand-down (6s) is 31s, and a run that
+// exceeds that is wedged rather than slow. It is a MULTIPLE rather than its own
+// constant so an Opts.Timeout override, which widens the per-wait bound for a
+// structurally longer run, widens that run's budget in the same proportion —
+// which is why the multiple is 7 (35s) rather than 6.2: the stand-down grew
+// when it was re-derived as a sum of the shim teardown and the graceful kill it
+// contains, and a budget that no longer covers one whole stand-down would make
+// the LAST call of a run answer deadline_exceeded for budget the stop spent.
+const runBudgetWaits = 7
 
 // HandoverChainTimeout bounds the few tests whose single Daemon context must
 // span an entire self-reload handover: a merge landing, the rollout trigger,

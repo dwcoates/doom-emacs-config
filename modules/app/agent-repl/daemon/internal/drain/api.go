@@ -26,6 +26,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
 
@@ -164,35 +165,49 @@ type Announcer interface {
 	ShutdownAnnounced(push *agentreplv1.DaemonShutdownAnnounced)
 }
 
+// shimTeardownWorstCase is the whole of the shim's own graceful teardown, as
+// the shim states it: the teardown spends at most FOUR of its per-stage
+// `WATCHER_CONCLUSION_BUDGET_MS` budgets back to back (1s each,
+// agent-shim/claude/shim/src/engine/session.ts), and that teardown runs INSIDE
+// the `KillSession` rpc the stand bound below covers.
+const shimTeardownWorstCase = 4 * time.Second
+
+// standBoundMargin is what separates the stand bound from the sum of the two
+// promises nested inside it. MEASURED, the whole daemon-side stop takes 9ms p50
+// and 15ms max across 104 e2e runs, so this is not headroom anything healthy
+// consumes -- it exists so that a shim spending its own last resort in full,
+// and a kill spending its grace in full, still both land INSIDE this bound
+// rather than exactly on it.
+const standBoundMargin = 500 * time.Millisecond
+
 // DefaultStandBound is how long the idle sweep gives ONE shim round trip --
 // the Hibernate directive, or the graceful KillSession that follows its ack --
 // before it gives that workspace up for this pass.
 //
 // THE SWEEP RUNS ON THE DRAIN LOOP'S OWN GOROUTINE, so an unbounded call there
 // is not one wedged workspace, it is the whole controller: no later pass, no
-// other workspace, and no standing schedule ever fires again. It is the same
-// bound, for the same reason, as shimclient's kill grace -- a shim that has
-// been told to stand down and does not answer is exactly the wedged shim that
-// grace exists for -- and a healthy round trip here is single-digit
-// milliseconds, so five seconds is three orders of magnitude of headroom.
+// other workspace, and no standing schedule ever fires again.
 //
-// IT MUST STRICTLY EXCEED THE SHIM'S OWN LAST RESORT, and that is the reason it
-// is not shrunk to the measured headroom. The whole of the shim's teardown runs
-// inside the `KillSession` this bounds, and the teardown's own bounded stages
-// (`WATCHER_CONCLUSION_BUDGET_MS`, agent-shim/claude/shim/src/engine/session.ts)
-// can be spent four times back to back: 4 x 1s = 4s. A stand bound at or below
-// that would give up on a shim that was still legitimately working and report
-// it as leaked -- and the shim's own last resort could never be reached at all.
-// The two were both 5s, set independently, which is exactly that case. One
-// second of margin is what separates them now; MEASURED, the whole stop takes
-// 9ms p50 and 15ms max across 104 e2e runs, so no healthy shim is anywhere
-// near either number.
+// IT IS A SUM OF WHAT IT CONTAINS, not a round number chosen alongside them.
+// The graceful `KillSession(..., false)` this bounds is two stops in sequence,
+// and both are inside it:
 //
-// `now` FORCES, so the supervisor's kill grace is NOT inside this budget: a
-// forced Kill skips the SIGTERM wait and goes straight to SIGKILL and the reap.
-// The graceful path (the idle sweep's `KillSession(..., false)`) is the one
-// that pays the grace.
-const DefaultStandBound = 5 * time.Second
+//   - the shim's own teardown, inside the rpc: shimTeardownWorstCase, 4s;
+//   - the process stop that follows it: shimclient.GracefulKillBound, the
+//     SIGTERM grace (1.25s) plus the SIGKILL and the reap (250ms);
+//   - standBoundMargin, 500ms, so both land inside this rather than on it.
+//
+// IT USED TO BE 5s WHILE THE KILL GRACE WAS ALSO 5s, set independently, and
+// that is a bound that can never observe what it contains: the daemon gave up
+// on the workspace at the exact moment the shim would have been SIGKILLed and
+// reported a shim it was still stopping as leaked. Two equal numbers are two
+// different promises colliding, never a nesting.
+//
+// `now` FORCES, so a forced Kill skips the SIGTERM wait and pays only the
+// escalation half of GracefulKillBound. The graceful path (the idle sweep's
+// `KillSession(..., false)`) is the one that pays the grace, and it is the one
+// this is sized for.
+const DefaultStandBound = shimTeardownWorstCase + shimclient.GracefulKillBound + standBoundMargin
 
 // ExitFunc performs the daemon's orderly exit: flush the in-flight writes and
 // go. It returns only if the exit could not be started.

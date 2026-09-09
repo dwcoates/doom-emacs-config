@@ -225,7 +225,7 @@ func spawnReady(t *testing.T, f *fakeShim, spec Spec, opts ...Option) Client {
 	if r.err != nil {
 		t.Fatalf("Spawn() error = %v", r.err)
 	}
-	t.Cleanup(func() { _ = r.c.Kill(KillAttribution{Actor: "test", Reason: "cleanup"}) })
+	t.Cleanup(func() { _ = r.c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "cleanup"}) })
 	return r.c
 }
 

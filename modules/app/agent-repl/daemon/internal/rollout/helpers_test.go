@@ -345,7 +345,7 @@ func (s *fakeShim) KillRequests() []*shimv1.KillSessionRequest {
 	return append([]*shimv1.KillSessionRequest(nil), s.killReq...)
 }
 
-func (s *fakeShim) Kill(attr shimclient.KillAttribution) error {
+func (s *fakeShim) Kill(_ context.Context, attr shimclient.KillAttribution) error {
 	s.mu.Lock()
 	s.killed = append(s.killed, attr)
 	err := s.forceErr
@@ -495,7 +495,7 @@ func (f *fakeFleet) StandDown(ctx context.Context, ws ids.WorkspaceID) error {
 	if _, err := shim.KillSession(ctx, &shimv1.KillSessionRequest{Force: true}); err != nil {
 		return err
 	}
-	return shim.Kill(shimclient.KillAttribution{Actor: "test.standdown", Reason: "stand down", Force: true})
+	return shim.Kill(context.Background(), shimclient.KillAttribution{Actor: "test.standdown", Reason: "stand down", Force: true})
 }
 
 func (f *fakeFleet) Resume(_ context.Context, ws ids.WorkspaceID, _ shimclient.Client) (Resumed, error) {
