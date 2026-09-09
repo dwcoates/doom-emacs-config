@@ -2234,3 +2234,51 @@ func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testi
 		t.Fatalf("the parked roster row = %v, want an idle arm and never a fault arm", row)
 	}
 }
+
+// TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView is the host half of the
+// same park, and the assertion the sibling lease-republish fix
+// (drain.Deps.PublishHost) exists for: the host view's composer arm is
+// composed from the OCCUPANCY LEASE, so every push taken while the
+// hibernation lease stood said `draining`, and Emacs's input.el refuses a
+// submission on that gate ("composer closed: daemon draining").
+//
+// That closes the only revival path a hibernated workspace has, because
+// reviving it IS a prompt. TestHibernationParksAnIdleSessionAndRevivesOnPrompt
+// already asserts `existing.live` with shim_attached=false; the COMPOSER is
+// what a client reads to decide it may submit at all, and nothing asserted it.
+//
+// COST: the same 50ms cutoff and the same two shim round trips as the roster
+// test above, plus one host push; measured at 0.31s wall inside the parallel
+// suite.
+func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	// THE STREAM IS OPENED BEFORE THE PARK, which is what makes this a
+	// regression guard rather than a re-resolution. WatchHostWorkspace
+	// composes a fresh view for each new subscriber, so a client that
+	// subscribes AFTER the lease is gone reads an open composer whether or not
+	// anything republished; the client this defect was reported against had
+	// been streaming since the mount, and its last push was the stale one.
+	host := f.d.WatchHost(f.ws)
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+
+	// Act
+	f.shim.AwaitGone()
+
+	// Assert: live, unattached, and OPEN — the three facts a client needs to
+	// be allowed to type the prompt that revives the session.
+	settled := harness.AwaitView(t, f.d.Ctx(), host, "the parked workspace's composer reopening", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		live := r.GetHost().GetExisting().GetLive()
+		return live != nil && !live.GetShimAttached() && live.GetOpen() != nil
+	})
+	if live := settled.GetHost().GetExisting().GetLive(); live.GetDraining() != nil {
+		t.Fatalf("the parked workspace's composer = draining, want open: %v", live)
+	}
+}
