@@ -9,9 +9,13 @@
  * A detached test that only checked messages would pass against a mock that
  * wrote nothing at all.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { driveScenario, ofType, toolUseResults, toolUses } from "../harness.js";
+import { DETACH_GATE_PATH_ENV } from "../../../src/fake/index.js";
+import { driveScenario, ofType, readSpool, toolUseResults, toolUses } from "../harness.js";
 
 const result = async (prompt: string): Promise<Record<string, unknown>> => {
   const driven = await driveScenario([prompt]);
@@ -190,6 +194,127 @@ describe("detached shells", () => {
       body: driven.spool(taskId),
       notifications: ofType(driven, "system", "task_notification").length,
     }).toEqual({ body: "partial output with no terminator\n", notifications: 0 });
+  });
+});
+
+/**
+ * The detached-work gate: `!bash-detach` parked mid-spool so a test can catch
+ * detached work still running after its turn has already concluded.
+ *
+ * `writeSync` is the suite-wide durable-sink stub (test/log-setup.ts), reused
+ * here exactly as `test/fake/index.test.ts` reuses it, to wait for the mock's
+ * own park record rather than for wall-clock time.
+ */
+describe("the detached-work gate", () => {
+  const wroteLog = (needle: string): boolean =>
+    (vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>).some(
+      ([, bytes, offset, length]) => bytes.subarray(offset, offset + length).toString("utf8").includes(needle),
+    );
+
+  const untilLogged = async (needle: string): Promise<void> => {
+    for (let i = 0; i < 1_000; i++) {
+      if (wroteLog(needle)) return;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error(`never logged: ${needle}`);
+  };
+
+  it("parks after line-1, having already concluded the turn and announced the live set", async () => {
+    // Arrange
+    const dir = mkdtempSync(join(tmpdir(), "fake-detach-gate-"));
+    const gate = join(dir, "open");
+    process.env[DETACH_GATE_PATH_ENV] = gate;
+    let taskIdWhileParked: string | undefined;
+    let spoolWhileParked: string | null = null;
+    let notificationsWhileParked = 0;
+
+    try {
+      // Act. `during` releases the gate itself, once it has observed the
+      // parked state, so the drive can finish.
+      await driveScenario(["!bash-detach"], {
+        during: async (_query, _prompts, messages, roots) => {
+          await untilLogged("fake detached work PARKED on its gate");
+          const started = messages.find((m) => m.type === "system" && m.subtype === "task_started");
+          taskIdWhileParked = String(started?.task_id);
+          spoolWhileParked = readSpool(roots, roots.sessionId, taskIdWhileParked);
+          notificationsWhileParked = messages.filter(
+            (m) => m.type === "system" && m.subtype === "task_notification",
+          ).length;
+          writeFileSync(gate, "");
+        },
+      });
+
+      // Assert. The turn already concluded (a result exists), the live set was
+      // announced with the task, "line-1" is on disk, and nothing past it —
+      // the terminator most of all — has been written yet.
+      expect({
+        taskIdShape: taskIdWhileParked !== undefined && /^b[a-z0-9]{8}$/.test(taskIdWhileParked),
+        spool: spoolWhileParked,
+        notifications: notificationsWhileParked,
+      }).toEqual({ taskIdShape: true, spool: "line-1\n", notifications: 0 });
+    } finally {
+      delete process.env[DETACH_GATE_PATH_ENV];
+    }
+  });
+
+  it("finishes exactly as the ungated run once the gate is created", async () => {
+    // Arrange
+    const dir = mkdtempSync(join(tmpdir(), "fake-detach-gate-release-"));
+    const gate = join(dir, "open");
+    process.env[DETACH_GATE_PATH_ENV] = gate;
+
+    try {
+      // Act
+      const driven = await driveScenario(["!bash-detach"], {
+        during: async () => {
+          await untilLogged("fake detached work PARKED on its gate");
+          writeFileSync(gate, "");
+        },
+      });
+      const taskId = String(ofType(driven, "system", "task_started")[0]?.task_id);
+      const announcements = ofType(driven, "system", "background_tasks_changed");
+      const notification = ofType(driven, "system", "task_notification")[0];
+
+      // Assert. Byte-for-byte the same shape the ungated test above asserts.
+      expect({
+        spool: driven.spool(taskId),
+        liveSetCounts: { count: announcements.length, last: (announcements.at(-1)?.tasks as unknown[]).length },
+        notificationStatus: notification?.status,
+      }).toEqual({
+        spool: "line-1\nline-2\nline-3\nEXIT=0\n",
+        liveSetCounts: { count: 2, last: 0 },
+        notificationStatus: "completed",
+      });
+    } finally {
+      delete process.env[DETACH_GATE_PATH_ENV];
+    }
+  });
+
+  it("does not park at all when the gate path already exists", async () => {
+    // Arrange
+    const dir = mkdtempSync(join(tmpdir(), "fake-detach-gate-preexisting-"));
+    const gate = join(dir, "open");
+    writeFileSync(gate, "");
+    process.env[DETACH_GATE_PATH_ENV] = gate;
+    const before = vi.mocked(writeSync).mock.calls.length;
+
+    try {
+      // Act
+      const driven = await driveScenario(["!bash-detach"]);
+      const parkedAfter = (
+        vi.mocked(writeSync).mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>
+      ).some(([, bytes, offset, length]) =>
+        bytes.subarray(offset, offset + length).toString("utf8").includes("fake detached work PARKED on its gate"),
+      );
+
+      // Assert
+      expect({
+        parked: parkedAfter,
+        spool: driven.spool(String(ofType(driven, "system", "task_started")[0]?.task_id)),
+      }).toEqual({ parked: false, spool: "line-1\nline-2\nline-3\nEXIT=0\n" });
+    } finally {
+      delete process.env[DETACH_GATE_PATH_ENV];
+    }
   });
 });
 
