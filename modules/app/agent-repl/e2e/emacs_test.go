@@ -1109,6 +1109,7 @@ func (e *Emacs) dumpArtifacts() {
 		return
 	}
 	e.t.Logf("emacs pty output preserved at %s", path)
+	e.dumpMessages(out)
 	// The scripted git's fixture file carries every call made against it,
 	// and the state root carries the daemon's own logs: a prompt Emacs is
 	// stuck on is usually explained by one of the two.
@@ -1124,6 +1125,61 @@ func (e *Emacs) dumpArtifacts() {
 			e.t.Logf("preserve %s: %v", extra, err)
 		}
 	}
+}
+
+// messagesTailLines is how much of `*Messages*` a failure carries.
+//
+// The whole buffer is unbounded and mostly Doom's own boot chatter; what a
+// failure turns on is what Emacs said LAST, which is where a `user-error`, a
+// refused command and the module's own echo-area messages land.
+const messagesTailLines = 200
+
+// messagesFile is where that tail is filed with the other evidence.
+const messagesFile = "emacs.messages.log"
+
+// dumpMessages preserves the tail of Emacs's own `*Messages*` buffer.
+//
+// WHY IT IS PART OF EVERY FAILURE AND NOT A WEDGE-ONLY EXTRA. A GUI frame
+// writes its messages INTO THE FRAME, not to the pty, so the pty output a
+// failure already carries is routinely EMPTY -- measured. `*Messages*` is
+// then the only record of what Emacs said, and the elisp error text a
+// scenario needs is in it and nowhere else.
+//
+// It never fails the test: this is evidence about a failure that has already
+// been reported, so every way it can come up empty is said in place of the
+// tail rather than swallowed.
+func (e *Emacs) dumpMessages(out string) {
+	if e.isWedged() {
+		// A wedged Emacs answers nothing, and asking would only spend a
+		// bound. `nativeBacktrace` and the profiler are that case's witnesses.
+		return
+	}
+	form := fmt.Sprintf(`(with-current-buffer "*Messages*"
+             (let ((end (point-max)))
+               (save-excursion
+                 (goto-char end)
+                 (forward-line %d)
+                 (buffer-substring-no-properties (point) end))))`, -messagesTailLines)
+	res, err := e.eval(form)
+	if err != nil {
+		e.t.Logf("emacs could not be asked for its *Messages*: %v", err)
+		return
+	}
+	if !res.OK {
+		e.t.Logf("reading emacs's *Messages* signalled in emacs: %s", res.Error)
+		return
+	}
+	var text string
+	if unmarshalErr := json.Unmarshal(res.Value, &text); unmarshalErr != nil {
+		e.t.Logf("emacs's *Messages* did not come back as a string: %s", res.Value)
+		return
+	}
+	path := filepath.Join(out, messagesFile)
+	if writeErr := os.WriteFile(path, []byte(text), 0o644); writeErr != nil {
+		e.t.Logf("write %s: %v", path, writeErr)
+		return
+	}
+	e.t.Logf("emacs *Messages* tail preserved at %s", path)
 }
 
 // artifactDirName is not unique enough on its own, and this is what makes it

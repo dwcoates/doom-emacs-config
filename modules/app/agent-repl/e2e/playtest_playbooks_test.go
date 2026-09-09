@@ -5,44 +5,62 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
+
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
 )
 
 // THE PLAYBOOKS.
 //
-// PLAYTEST-SPEC.md is the design and playtest_capture_test.go is the
-// mechanism. Each test here is one SCRIPTED SEQUENCE OF USER ACTS against
-// the real application -- real Doom, a daemon Emacs spawned through its own
-// launcher, the real shim, store and sidecar, and the fake SDK as the only
-// vendor -- with a picture taken after every act and a manifest sentence
-// saying what that picture must show.
+// PLAYTEST-PLAN.md is the owner's plan, PLAYTEST-SPEC.md is how this layer
+// implements it, and playtest_capture_test.go is the capture mechanism. Each
+// test here is one SCRIPTED SEQUENCE OF USER ACTS against the real
+// application -- real Doom, a daemon Emacs spawned through its own launcher,
+// the real shim, store and sidecar, and the fake SDK as the only vendor.
 //
-// IT IS NOT A REPLACEMENT FOR THE E2E ASSERTIONS AND DOES NOT TRY TO BE.
-// Every wait here is on the same fact the Emacs layer's own scenarios wait
-// on, and the mechanical assertions are only that a capture exists, is the
-// declared geometry, and is not blank. WHAT the picture shows is read by a
-// human, which is the whole reason the pictures exist: the tab bar's paint
-// is an SVG and the webapp is inside a WebKit view, and neither is
-// something a Go assertion can look at.
+// FUNCTIONAL FIRST, PICTURES SECOND, which is the plan's own rule:
+//
+//   - EVERY step carries a programmatic assertion, and every one of them is
+//     an assertion the Emacs layer's own scenarios already make -- the roster
+//     arm awaits, the panel-window await, the composer binding check, the
+//     registry readback. Nothing new is invented to assert with, and a step
+//     that cannot even start fails RIGHT THERE with the elisp error text,
+//     the `*Messages*` tail and the world's logs attached, which is the
+//     harness's ordinary failure path.
+//   - A CAPTURE IS OPTIONAL, taken only where the step's subject is VISUAL
+//     -- the tab bar's painted state and the webapp's rendering -- and only
+//     AFTER that step's assertion passed. A reviewer is never handed a
+//     picture of a world that was already broken.
+//
+// So a playbook is a sequence of the same waits the e2e tests already use,
+// with a `capture` call on the visual ones and a `note` on the rest.
+//
+// EVERY PLAYBOOK IS ITS OWN WORLD and shares nothing: its own Emacs on its
+// own Xvfb, its own daemon/shim/store/sidecar, its own scratch root, its own
+// sockets, its own artifact directory. The only ordering constraint is the
+// layer's own Emacs slot gate, which `NewEmacsWorld` takes.
 //
 // THE TAG IS THE POINT. These run only under `-tags playtest`, so the
-// ordinary `go test ./e2e` never starts one: a playbook takes an Emacs slot
-// for its whole length and writes files a human then has to read, which is
-// not work a merge gate should be doing.
+// ordinary `go test ./e2e` never starts one.
 
 // playtestPageBound bounds one wait on something being DRAWN inside the
 // webview.
 //
-// It is `emacsTurnBound`, deliberately and not by accident of reuse: every
-// one of these waits is "a fake-SDK turn reached the daemon, the daemon
-// pushed a frame, and the webapp drew it", which is that bound's own subject
-// plus one render. The fake vendor answers without network or model
-// latency, so nothing here is waiting on a model.
-const playtestPageBound = emacsTurnBound
+// MEASURED, over the runs that produced the captures in `.playtest-out`: the
+// webapp's own first draw (the footer's status word appearing, which is the
+// daemon's first push rendered) took 242ms, 262ms, 423ms, 445ms and 487ms.
+// 2s is roughly four times the worst of those, and the extra margin over a
+// 3x rule is deliberate: this covers a WebKit view starting its own web and
+// network processes on a container's first scenario, which is the case a
+// bound exists to tolerate.
+const playtestPageBound = 2 * time.Second
 
 // playtestProbeSetup installs the page probe.
 //
@@ -50,7 +68,7 @@ const playtestPageBound = emacsTurnBound
 // WebKit and answers a callback later -- so a probe cannot be one eval. It
 // is two: each call issues the script again and answers what the PREVIOUS
 // issue's callback stored, and the Go side polls it through the layer's own
-// `AwaitEval`. That converges on the truth within one poll and never sleeps.
+// `AwaitEval`. That converges within one poll and never sleeps.
 //
 // The stored answer is reset before each new question, so a wait can never
 // be satisfied by the answer to the previous one.
@@ -67,11 +85,25 @@ const playtestProbeSetup = `(progn
              t)`
 
 // pageYes wraps a JavaScript expression so the probe's answer is one of two
-// words. A predicate that throws answers "no" rather than wedging the wait
-// on a callback WebKit will never make.
+// words, and so a "no" CARRIES ITS OWN DIAGNOSIS.
+//
+// A wait that fails prints its last value, so making that value say what the
+// page actually held is what turns "never satisfied" into a finding. It is
+// how the boot defect this playtest found was diagnosed: the page's url,
+// its row count and its failure cards, read off the last unsatisfied probe.
 func pageYes(expression string) string {
-	return `(function () { try { return (` + expression + `) ? "yes" : "no"; }
-                           catch (e) { return "no"; } })()`
+	return `(function () {
+                   try { if (` + expression + `) { return "yes"; } }
+                   catch (e) { return "no: the predicate threw " + e; }
+                   var overlay = document.querySelector('[data-component="failure-overlay"]');
+                   var arms = overlay ? Array.prototype.map.call(
+                     overlay.querySelectorAll(".failure-card"),
+                     function (c) { return c.getAttribute("data-arm"); }).join(",") : "<no overlay>";
+                   return "no: url=" + location.href +
+                          " rows=" + document.querySelectorAll("[data-feed-row]").length +
+                          " failureArms=[" + arms + "]" +
+                          " text=" + (document.body ? document.body.innerText.slice(0, 200) : "<no body>");
+                 })()`
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +118,8 @@ type playtestScenario struct {
 	E     *Emacs
 	Box   sandbox
 
-	// Name and Input are the first registered workspace and its composer,
-	// once `register` has run.
+	// Name and Input are the workspace the playbook is acting on and its
+	// composer buffer. A playbook with several workspaces re-points them.
 	Name  string
 	Input string
 }
@@ -106,18 +138,39 @@ func newPlaytestScenario(t *testing.T, name, purpose string, options ...EmacsWor
 	// THE FRAME IS SIZED BEFORE ANYTHING IS DRAWN IN IT. Emacs takes a
 	// default frame far smaller than the screen, and the panel's webview is
 	// laid out in real pixels -- so a frame resized after the webview
-	// existed would photograph a webapp that had been laid out for a
-	// different window.
+	// existed would photograph a webapp laid out for a different window.
 	book.prepareFrame()
-	e.EnsureDaemon()
 
-	return &playtestScenario{Book: book, World: w, E: e, Box: box}
+	s := &playtestScenario{Book: book, World: w, E: e, Box: box}
+	// THE COLD-START LAUNCH IS AN ASSERTION, not arrangement: `EnsureDaemon`
+	// waits for `agent-repl-link--primary`, so a launcher that composes a
+	// wrong argv fails here rather than somewhere downstream.
+	e.EnsureDaemon()
+	book.note("Emacs spawned the daemon through its own launcher (`agent-repl-frontend-daemon-ensure`)",
+		"Emacs holds a live link: `agent-repl-link--primary` is non-nil")
+	return s
 }
 
-// register registers one scripted fake-git worktree through the ordinary
-// command and records the composer it materializes.
+// repoAt mints one scripted fake-git worktree under this world's own
+// scratch. NO REAL GIT RUNS ANYWHERE: `harness.NewRepoAt` scripts the fake
+// git the world installed ahead of Emacs on PATH.
+func (s *playtestScenario) repoAt(t *testing.T, name string) *harness.Repo {
+	t.Helper()
+	repository := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), name))
+	s.E.ArtifactPaths = append(s.E.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
+	return repository
+}
+
+// register registers one worktree through the ordinary command, asserting
+// the binding the user reaches it by first.
 func (s *playtestScenario) register(t *testing.T, dir string) string {
 	t.Helper()
+	// `SPC TAB C-n` prompts for the directory, so the binding is a LOOKUP and
+	// the command is then invoked with its argument -- the standard way this
+	// layer drives a prompting verb.
+	if want, got := "agent-repl-add-project-workspace", s.E.LeaderBinding("TAB C-n"); got != want {
+		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
+	}
 	name := addProjectWorkspace(t, s.E, dir)
 	if s.Name == "" {
 		s.Name = name
@@ -125,8 +178,8 @@ func (s *playtestScenario) register(t *testing.T, dir string) string {
 	return name
 }
 
-// openPanel opens the panel and waits until the WEBAPP HAS DRAWN, not
-// merely until the buffers exist.
+// openPanel opens the panel and waits until the WEBAPP HAS DRAWN, not merely
+// until the buffers exist.
 //
 // The webapp exposes no readiness flag of its own -- there is no
 // `data-ready`, no global -- so the signal is the one the webapp layer's own
@@ -149,7 +202,9 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 }
 
 // submit types a prompt into the composer and PRESSES RET, which is how a
-// user submits.
+// user submits. The binding is asserted rather than assumed: a RET that
+// resolved to anything else would submit nothing and fail a wait five
+// seconds later with no cause attached.
 func (s *playtestScenario) submit(t *testing.T, text string) {
 	t.Helper()
 	typeIntoComposer(s.E, s.Input, text)
@@ -168,317 +223,471 @@ func (s *playtestScenario) awaitInPage(t *testing.T, what, expression string) {
 		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
 }
 
-// clickInPage clicks one element inside the webview, the way a user does,
-// and refuses loudly if the selector names nothing.
-func (s *playtestScenario) clickInPage(t *testing.T, what, selector string) {
-	t.Helper()
-	s.awaitInPage(t, what+" to be there to click", `document.querySelector(`+jsString(selector)+`)`)
-	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
-	s.E.AwaitEvalFor(playtestPageBound, "the click on "+what,
-		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
-			elispString(pageYes(`(function () { var el = document.querySelector(`+jsString(selector)+`);
-                                                if (!el) { return false; }
-                                                el.click();
-                                                return true; })()`))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+// tabNames reads the names the tab bar DRAWS, in roster order.
+//
+// NOT `tab-bar-tabs`: `status.el` paints the bar from `tab-bar-format`, so
+// Emacs's built-in tabs are window configurations named after whatever
+// buffer they hold. `agent-repl--ws-tabline-names` is the enumeration the
+// renderer itself walks, which is what "the tab bar's names" means here.
+func (s *playtestScenario) tabNames() []string {
+	s.E.t.Helper()
+	return s.E.EvalStrings(emacsWSTablineNamesForm)
 }
 
-// jsString renders a Go string as a JavaScript string literal. The selectors
-// here carry double quotes, so single quotes are the delimiter and the two
-// characters that could still end the literal are escaped.
-func jsString(s string) string {
-	out := make([]rune, 0, len(s)+2)
-	out = append(out, '\'')
-	for _, r := range s {
-		if r == '\'' || r == '\\' {
-			out = append(out, '\\')
-		}
-		out = append(out, r)
+// awaitArm waits for a workspace's roster arm to be one of ARMS and answers
+// the one it settled on. It is the Emacs layer's own helper, unchanged: the
+// roster's arm vocabulary is the ONE source for the tab's color, so this
+// reads the paint DECISION rather than the paint.
+func (s *playtestScenario) awaitArm(t *testing.T, ws, what string, arms ...string) string {
+	t.Helper()
+	return emGHIAwaitStatus(t, s.E, ws, what, arms...)
+}
+
+// armPaint answers a workspace's arm and the COLOR NAME the module decided
+// for it, read at the instant it is asked.
+//
+// IT IS RE-READ AT CAPTURE TIME, AND THAT IS THE WHOLE REASON IT EXISTS. An
+// arm is a transient: `awaitArm` is satisfied by the first push carrying the
+// arm it wanted, and the row may have moved on by the time the picture is
+// taken. A manifest sentence written from the AWAITED arm would then tell a
+// reviewer to expect a color the product had already correctly stopped
+// painting, and the reviewer would file the harness's own race as a defect.
+//
+// The color comes from `agent-repl-status-color-table` and
+// `agent-repl--color-by-name` -- the module's own two tables, which
+// `AGENTS.md` names as the one source for tab coloring -- so the sentence a
+// reviewer checks is the module's own decision rather than this file's guess
+// at it.
+func (s *playtestScenario) armPaint(t *testing.T, ws string) (arm, color string) {
+	t.Helper()
+	pair := s.E.EvalStrings(`(let* ((arm (agent-repl-roster-status-for-ws ` + elispString(ws) + `))
+                                     (color (cdr (assq arm agent-repl-status-color-table))))
+                                (list (format "%s" arm) (format "%s" (or color "<no color-table entry>"))))`)
+	if len(pair) != 2 {
+		t.Fatalf("reading the arm and color for %s answered %v, want an arm and a color", ws, pair)
 	}
-	return string(append(out, '\''))
+	return pair[0], pair[1]
 }
 
-// awaitSettled waits for this workspace's roster arm to reach a settled arm,
-// which is the finish edge every one of Emacs's reactions rides.
-func (s *playtestScenario) awaitSettled(t *testing.T, what string) {
+// armSentence is the manifest sentence for a tab painted from one arm.
+//
+// "none" is a real answer and not a missing one: the color table maps
+// `:none` and the whole merge family to it, and the tab then carries NO disc
+// at all. Saying "a none-colored disc" would send a reviewer looking for
+// something that is not there.
+func armSentence(ws, arm, color string) string {
+	if color == "none" {
+		return fmt.Sprintf("The tab for %q carries NO status disc at all: its arm is %s, which the "+
+			"module's own color table maps to no color.", ws, arm)
+	}
+	return fmt.Sprintf("The tab for %q carries a %s status disc beside its name: its arm is %s, and "+
+		"%s is the color the module's own table gives that arm.", ws, strings.ToUpper(color), arm, color)
+}
+
+// captureArm takes one tab-bar picture whose subject is the arm a workspace
+// is painted with, re-reading the arm at the moment of the capture and
+// REFUSING if it has moved off the one the step is about.
+func (s *playtestScenario) captureArm(t *testing.T, name, ws, act string, want string, extra string) {
 	t.Helper()
-	emGHIAwaitStatus(t, s.E, s.Name, what, emGHISettledArms...)
+	arm, color := s.armPaint(t, ws)
+	if arm != want {
+		t.Fatalf("the arm for %s is %s at capture time, want %s: the step's subject moved before its picture was taken",
+			ws, arm, want)
+	}
+	s.Book.capture(name, act,
+		fmt.Sprintf("`agent-repl-roster-status-for-ws` still reads %s at the instant of the capture, which the module's color table paints %s", arm, color),
+		armSentence(ws, arm, color)+" "+extra)
 }
 
 // ---------------------------------------------------------------------------
-// A. COLD START, THE FIRST TURN, AND THE WINDOW LAYOUT
+// SECTION A — BOOT AND ROSTER
 // ---------------------------------------------------------------------------
 
-// TestPlaytestColdStartAndFirstTurn walks the shortest path a new user
-// takes: an editor, a workspace, a panel, a prompt, an answer -- and then
-// the one window act that changes the whole frame.
-func TestPlaytestColdStartAndFirstTurn(t *testing.T) {
+// TestPlaytestColdStartAndFirstTab is plan A.1 and A.4: an editor with
+// nothing in it, a daemon Emacs spawned itself, and the first workspace tab.
+//
+// The two captures are the tab bar, which is the plan's own visual subject
+// for section A and a surface no Connect-dialing test can see at all.
+func TestPlaytestColdStartAndFirstTab(t *testing.T) {
 	t.Parallel()
-	s := newPlaytestScenario(t, "cold-start",
-		"The shortest path a user takes: boot, register a repository, open the panel, "+
-			"submit one plain-prose prompt, read the answer, and toggle fullscreen.")
+	s := newPlaytestScenario(t, "a-cold-start",
+		"Plan A.1 and A.4. A cold Emacs spawns its own daemon, then registers a repository "+
+			"from a directory and gains its first workspace tab.")
 	p, e := s.Book, s.E
 
-	p.capture("doom-booted", "Emacs booted the image's real Doom and spawned the daemon through its own launcher",
-		"An Emacs frame filling the whole screen. Doom is up, so the frame is themed rather than default-grey. "+
-			"NOTHING agent-repl is registered yet, so the tab bar carries no workspace tab.")
-
-	repository := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
-	s.register(t, repository.Dir)
-
-	p.capture("workspace-registered", "`agent-repl-add-project-workspace` on a scripted fake-git worktree",
-		"The tab bar now carries EXACTLY ONE workspace tab, named after the repository, "+
-			"with its roster arm painted beside the name as a small colored disc. "+
-			"The arm is a settled one, so the disc is green -- not the red band of a running turn.")
-
-	s.openPanel(t)
-	p.capture("panel-open", "`agent-repl-frontend-open-panel`",
-		"The frame is split: the WEBAPP is drawn inside the panel window -- workspace sidebar down "+
-			"one side, topbar across the top, an empty feed, and the progress footer along the bottom "+
-			"with a status word in it. A separate small Emacs window holds the composer. "+
-			"THE WEBAPP MUST NOT BE A BLANK WHITE RECTANGLE.")
-
-	const prompt = "draw one plain prose answer for the playtest"
-	typeIntoComposer(e, s.Input, prompt)
-	p.capture("prompt-typed", "the prompt typed into the composer buffer, not yet sent",
-		"The composer window carries the typed text verbatim. The feed is still empty: nothing was sent.")
-
-	if want, got := "agent-repl-send", e.BindingForIn(s.Input, "RET"); got != want {
-		t.Fatalf("composer RET resolves to %q, want %q", got, want)
+	if !decodeBool(e.Eval(`(and agent-repl--frontend-daemon-process
+                                (process-live-p agent-repl--frontend-daemon-process))`)) {
+		t.Fatal("the launcher reports no live daemon process after EnsureDaemon")
 	}
-	e.KeysIn(s.Input, "RET")
-	s.awaitInPage(t, "the user's own prompt bubble to be drawn",
-		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"]')`)
-	s.awaitInPage(t, "the assistant's response bubble to settle",
-		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
-	s.awaitSettled(t, "the turn to settle after the response")
+	if _, err := os.Stat(filepath.Join(e.StateDir, "daemon.addr")); err != nil {
+		t.Fatalf("the daemon published no address under the state root Emacs handed it: %v", err)
+	}
+	p.capture("cold-editor", "nothing registered yet",
+		"`agent-repl--frontend-daemon-process` is live and the daemon published `daemon.addr` under the state root",
+		"An Emacs frame filling the whole screen, booted through the image's real Doom. "+
+			"The tab bar carries NO workspace tab: nothing is registered yet.")
 
-	p.capture("turn-answered", "RET pressed in the composer, and the fake SDK's plain-prose answer drawn",
-		"The feed carries TWO bubbles in order: the user's own prompt bubble with the text typed at "+
-			"step 04, and beneath it the assistant's response bubble with prose in it. "+
-			"The tab bar's arm is settled again and the footer is no longer running a turn.")
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	if got := s.tabNames(); len(got) != 1 || got[0] != name {
+		t.Fatalf("the tab bar draws %v, want exactly [%s]", got, name)
+	}
+	// A WORKSPACE NOTHING HAS BEEN WIRED TO IS `:none`, AND THAT IS THE
+	// POINT OF THIS PICTURE. Registering mints an identity; it does not bring
+	// a session up, which the first submit does. Per the module's color rule
+	// `:none` is TEAL -- "nothing is wired, and nothing is wrong" -- and it
+	// is emphatically not the blue of a broken link.
+	s.awaitArm(t, name, "the new workspace's tab arm to be published", playtestUnwiredArm)
+	s.captureArm(t, "first-tab", name,
+		"`agent-repl-add-project-workspace` (`SPC TAB C-n`) on a scripted fake-git worktree",
+		playtestUnwiredArm,
+		fmt.Sprintf("The tab bar must carry EXACTLY ONE workspace tab and it must be named %q: "+
+			"`agent-repl--ws-tabline-names` says the module knows about exactly that one.", name))
+}
+
+// TestPlaytestSwitchBetweenWorkspaces is plan A.7: a second workspace, the
+// selection moving between the two, and the tab bar following it.
+func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "a-switch",
+		"Plan A.7. Two workspaces on the tab bar, and the selection moving between them.")
+	p, e := s.Book, s.E
+
+	first := s.repoAt(t, "repo-first")
+	firstName := s.register(t, first.Dir)
+	s.openPanel(t)
+	p.note("the first repository registered and its panel opened",
+		"the composer buffer exists and the webapp drew its footer against this daemon")
+
+	second := s.repoAt(t, "repo-second")
+	secondName := s.register(t, second.Dir)
+	// Registering SELECTS, which is one of Emacs's only two inputs to the
+	// roster, so the assertion is on the module's own current-workspace
+	// accessor rather than on anything drawn.
+	e.AwaitEval("the second workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
+	names := s.tabNames()
+	if len(names) != 2 {
+		t.Fatalf("the tab bar draws %v, want both workspaces", names)
+	}
+	p.capture("two-tabs", "a second repository registered through the same verb",
+		fmt.Sprintf("`agent-repl--ws-tabline-names` is %v and `agent-repl--ws-current-name` is %q", names, secondName),
+		fmt.Sprintf("The tab bar must carry TWO workspace tabs, %q and %q, in that order, and the "+
+			"SECOND must be the highlighted one — registering selects it.", names[0], names[1]))
+
+	// `agent-repl-switch-to-project` takes a PROJECT ROOT PATH, not a
+	// workspace name -- its own docstring says so -- and taking the target as
+	// an argument is why the picker is neither the subject nor stubbed.
+	e.Eval(`(agent-repl-switch-to-project ` + elispString(first.Dir) + `)`)
+	e.AwaitEval("the first workspace to become the selected one again",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == firstName })
+	p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q", firstName),
+		fmt.Sprintf("The SAME two tabs in the SAME order, with the highlight moved back to %q. "+
+			"The selection moved; the roster did not.", firstName))
+}
+
+// TestPlaytestCloseAndKillLeaveTheEditorAnswering is plan A.9's close and
+// kill, and it is deliberately FUNCTIONAL-ONLY: what it proves is that the
+// tab goes away, the daemon still holds the session after a close, and Emacs
+// is still answering afterwards. None of that is a picture.
+//
+// The heartbeat is the real assertion behind the last of those, and it is
+// armed for the whole life of the process: this is the sentinel/kill-buffer
+// recursion, which manifests only as an editor that stops answering.
+func TestPlaytestCloseAndKillLeaveTheEditorAnswering(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "a-close-and-kill",
+		"Plan A.9. Close is a view act and kill never blocks, and neither wedges the editor. "+
+			"FUNCTIONAL ONLY: nothing here has a visual subject, so nothing is captured.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	p.note("one repository registered with its panel open",
+		"the panel's webview is live and the webapp drew its footer")
+
+	// `SPC j d` takes the CURRENT workspace, so it is PRESSED: real keymap
+	// lookup, real command.
+	e.Leader("j d")
+	e.AwaitEval("the closed workspace's tab to be gone",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), name) })
+	p.note("`SPC j d` pressed to close the workspace",
+		"the name is gone from `agent-repl--ws-tabline-names`")
+
+	// CLOSE IS A VIEW ACT BY CONTRACT, so the only way to say the daemon still
+	// holds the workspace is to ask the daemon -- at the address Emacs's own
+	// launcher published.
+	awaitDaemonRoster(t, e.DaemonAddr(), emacsVerbBound,
+		"the daemon to still hold the closed workspace",
+		func(r *frontendv1.WorkspaceRoster) bool { return len(r.GetRepository().GetSections()) > 0 })
+	p.note("the daemon asked for its own roster at the address the launcher published",
+		"the daemon still carries the workspace: closing is a VIEW act and destroys nothing")
+
+	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after the close and kill",
+		`(and (emacs-pid) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("Emacs probed for liveness after the close",
+		"the command loop still answers, and the heartbeat has not missed for the whole run")
+}
+
+// ---------------------------------------------------------------------------
+// SECTION B — TAB-BAR ARMS, ONE PLAYBOOK PER TRANSITION
+// ---------------------------------------------------------------------------
+
+// playtestUnwiredArm is the arm a workspace carries before anything has been
+// wired to it, and playtestVendorBlockedArm is the arm a vendor failure
+// leaves it on.
+//
+// Neither is in `emGHISettledArms`, and that is correct rather than an
+// oversight: that list is the FINISH EDGE's settled set, while these two are
+// states a turn never produced. They are named here so a playbook asserts the
+// arm it means instead of "any of the settled ones", which would pass on the
+// wrong picture.
+const (
+	playtestUnwiredArm       = ":none"
+	playtestVendorBlockedArm = ":vendor-blocked"
+)
+
+// playtestGatedPrompt is the prompt a gated playbook submits.
+//
+// The fake SDK holds a turn whose FULL submitted text matches the gate text
+// until the gate file exists (`agent-shim/claude/shim/src/fake/index.ts`), so
+// a playbook that must photograph a RUNNING tab is synchronized on the work
+// rather than racing a turn that would otherwise finish first. It carries no
+// `!` prefix, so it falls through to the fake's default prose scenario and
+// concludes ordinarily once the gate opens.
+const playtestGatedPrompt = "hold this turn open for the playtest"
+
+// TestPlaytestTabArmIdleThinkingDone is plan B.11: the tab's arm through one
+// ordinary turn, photographed at each of the three states the owner named.
+//
+// The turn is GATED rather than raced. Waiting for a running arm and then
+// photographing would be a race against the fake answering, and a picture
+// taken on the wrong side of it is worse than no picture: it looks like a
+// product that never paints a running tab.
+func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
+	t.Parallel()
+	box := requireSandbox(t)
+	gatePath := filepath.Join(box.Scratch(), "b11-turn-gate")
+	s := newPlaytestScenario(t, "b-arm-idle-thinking-done",
+		"Plan B.11. One ordinary turn, and the workspace's tab through idle, thinking and done.",
+		WithEmacsEnv(turnGatePathEnv, gatePath),
+		WithEmacsEnv(turnGateTextEnv, playtestGatedPrompt))
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	s.awaitArm(t, name, "the tab's arm before anything is submitted", playtestUnwiredArm)
+	s.captureArm(t, "arm-idle", name, "one repository registered, its panel open, nothing submitted",
+		playtestUnwiredArm,
+		"The webapp's footer says the session is idle and the feed is empty: nothing has run.")
+
+	s.submit(t, playtestGatedPrompt)
+	// `:thinking` BY NAME, not "any running arm". The bring-up walks
+	// `:none` -> `:init` -> `:submitting` -> `:thinking`, and a wait
+	// satisfied by the first of those photographs a prompt still sitting in
+	// the hold tray while the session comes up -- which is a real state, and
+	// not the one this step is about.
+	s.awaitArm(t, name, "the tab's arm to reach thinking once the turn is in flight", ":thinking")
+	s.captureArm(t, "arm-thinking", name,
+		"the prompt submitted with composer RET, and held in flight by the fake's turn gate",
+		":thinking",
+		"The webapp's footer says a turn is RUNNING, and the feed carries the user's own prompt "+
+			"bubble. The turn cannot conclude: the fake's gate is still shut.")
+
+	// The gate opens only now, so the turn concludes on this playbook's own
+	// schedule rather than whenever the fake got there.
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("open the fake's turn gate at %s: %v", gatePath, err)
+	}
+	done := s.awaitArm(t, name, "the tab's arm to settle when the turn concludes", emGHISettledArms...)
+	s.captureArm(t, "arm-done", name, "the gate opened, and the fake's prose answer concluded the turn",
+		done,
+		"The turn is over: the webapp's footer is idle again and the feed carries the answer.")
+}
+
+// TestPlaytestTabArmFailed is plan B.14: a turn that fails, and the tab that
+// says so.
+//
+// `!fail-execution` ends the turn on the vendor's own execution error, which
+// is a PURPLE fault by the module's color rule — the vendor's work — and not
+// the blue of a broken local environment. That distinction is the picture's
+// whole subject.
+func TestPlaytestTabArmFailed(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "b-arm-failed",
+		"Plan B.14. A turn that fails at the vendor, and the arm the tab paints for it.")
+	p := s.Book
+
+	repository := s.repoAt(t, "repo")
+	name := s.register(t, repository.Dir)
+	s.openPanel(t)
+	p.note("one repository registered with its panel open",
+		"the panel's webview is live and the webapp drew its footer")
+
+	s.submit(t, "!fail-execution")
+	// `:vendor-blocked` IS THE ANSWER, and it is asserted by name rather than
+	// as "any settled arm". The module's color rule puts it in PURPLE -- the
+	// vendor's own work went wrong -- and the whole value of this picture is
+	// that the tab does NOT paint the blue of a broken local environment for
+	// a failure that is not the local environment's.
+	s.awaitArm(t, name, "the tab's arm to reach the vendor-blocked arm", playtestVendorBlockedArm)
+	s.captureArm(t, "arm-after-failure", name,
+		"the fake SDK's `!fail-execution` scenario ended the turn on an execution error",
+		playtestVendorBlockedArm,
+		"PURPLE is the whole subject: the vendor's own work went wrong, so the tab must NOT paint "+
+			"the BLUE that means something on this machine broke, and must not still paint the RED "+
+			"of a turn that is running.")
+}
+
+// TestPlaytestTabArmAttentionOnPermission is plan B.12's first half: a
+// permission ask raised against a workspace the user is NOT looking at, and
+// the attention marker the tab then paints.
+//
+// EMACS ANSWERS NOTHING. There is no permission-answering command in
+// `lisp/`; the notification policy is Emacs's whole reaction to an ask, and
+// the card in the webapp is the answering surface. B.12's second half —
+// the marker CLEARING when the ask is answered from that card — is not here,
+// because answering means clicking a feed row and the root feed's live tail
+// is broken (see PLAYTEST-SPEC.md, "What is blocked").
+//
+// Two arrangements are forced, and both are the Emacs layer's own:
+//   - `agent-repl--emacs-focused-p` is overridden, because it is an
+//     environment probe and a container has no desktop to answer it
+//     truthfully.
+//   - the workspace under the ask is NOT the selected one, which is the case
+//     `host.el` routes to `agent-repl-status-blink-tab`.
+func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
+	t.Parallel()
+	box := requireSandbox(t)
+	gatePath := filepath.Join(box.Scratch(), "b12-ask-gate")
+	const askPrompt = "!perm-hold"
+	s := newPlaytestScenario(t, "b-arm-attention-on-permission",
+		"Plan B.12, first half. A permission ask raised against an unselected workspace, and the "+
+			"attention marker its tab paints. Answering the ask — B.12's second half — awaits the "+
+			"root feed's live tail.",
+		WithEmacsEnv(turnGatePathEnv, gatePath),
+		WithEmacsEnv(turnGateTextEnv, askPrompt))
+	p, e := s.Book, s.E
+
+	e.Eval(`(progn
+             (defun agent-repl-playtest--focused (&rest _) t)
+             (advice-add 'agent-repl--emacs-focused-p :override #'agent-repl-playtest--focused)
+             t)`)
+
+	first := s.repoAt(t, "repo-asking")
+	askingName := s.register(t, first.Dir)
+	s.openPanel(t)
+
+	// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send`
+	// submits to the CURRENT workspace, so the turn can only be started while
+	// this one is selected -- and the ask must ARRIVE while it is not. So the
+	// turn is started here, parked on the fake's gate, the second workspace is
+	// selected, and only then is the gate opened.
+	s.submit(t, askPrompt)
+	s.awaitArm(t, askingName, "the gated turn to be in flight before the switch", emGHIRunningArms...)
+	p.note("`!perm-hold` submitted and parked on the fake's turn gate",
+		"the arm is one of the module's own running arms, so the turn is genuinely in flight")
+
+	second := s.repoAt(t, "repo-other")
+	otherName := s.register(t, second.Dir)
+	e.AwaitEval("the second workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == otherName })
+	p.note("a second repository registered, which selects it",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q, so %q is genuinely unselected", otherName, askingName))
+
+	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
+		t.Fatalf("open the fake's turn gate at %s: %v", gatePath, err)
+	}
+	e.AwaitTrue("the unselected workspace's attention marker to be drawn",
+		`(and (agent-repl-status-attention-visible-p `+elispString(askingName)+`) t)`)
+	p.capture("attention-marker", "the gate opened, so the ask fired against the workspace the user is not looking at",
+		fmt.Sprintf("`agent-repl-status-attention-visible-p` is true for %q", askingName),
+		fmt.Sprintf("The tab bar carries BOTH workspaces. %q is the selected one, and %q — which is NOT "+
+			"selected — carries an ATTENTION MARKER beside its name. The marker blinks on the "+
+			"module's own schedule, so it may be caught mid-blink; what must be visible is that the "+
+			"two tabs are painted differently and the unselected one is the one calling for the user.",
+			otherName, askingName))
+
+	// Teardown hygiene, not an assertion: a parked ask must not outlive the
+	// playbook, or the world's own shutdown waits on an answer nobody will
+	// ever give.
+	e.Eval(`(ignore-errors (agent-repl-kill-workspace ` + elispString(askingName) + `) t)`)
+}
+
+// ---------------------------------------------------------------------------
+// SECTION I — PANELS AND LAYOUT
+// ---------------------------------------------------------------------------
+
+// TestPlaytestPanelAndFullscreen is plan I.53 and I.54: the panel opened into
+// the main area, made fullscreen, and restored.
+func TestPlaytestPanelAndFullscreen(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "i-panel-and-fullscreen",
+		"Plan I.53 and I.54. The panel opened into the main area, then fullscreen and back.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	s.register(t, repository.Dir)
+	s.openPanel(t)
+	windows := e.EvalInt(`(length (window-list))`)
+	p.capture("panel-open", "`agent-repl-frontend-open-panel`",
+		fmt.Sprintf("the panel's webview is live, the composer buffer exists, and the frame holds %d windows", windows),
+		"The frame is SPLIT: the WEBAPP is drawn inside the panel window — workspace sidebar down "+
+			"one side, an empty feed, and the progress footer along the bottom with a status word in "+
+			"it — and a separate Emacs window holds the composer. THE WEBAPP MUST NOT BE A BLANK "+
+			"WHITE RECTANGLE.")
 
 	e.Eval(`(agent-repl-fullscreen-and-focus)`)
 	e.AwaitTrue("the fullscreen configuration to be recorded",
 		`(and agent-repl--window-fullscreen-config t)`)
 	p.capture("fullscreen", "`agent-repl-fullscreen-and-focus` (`SPC w f`)",
-		"ONE window fills the whole frame. The webapp is drawn edge to edge and the composer window is gone.")
+		"`agent-repl--window-fullscreen-config` is non-nil, so the layout was saved to be restored",
+		"ONE window fills the whole frame. The webapp is drawn edge to edge and the composer window "+
+			"is gone.")
 
 	e.Eval(`(agent-repl-fullscreen-and-focus)`)
 	e.AwaitEval("the fullscreen configuration to be released",
 		`(and agent-repl--window-fullscreen-config t)`,
 		func(raw json.RawMessage) bool { return isJSONNull(raw) })
-	p.capture("fullscreen-restored", "the same command again, restoring the layout",
-		"The split of step 05 is back, with the same two bubbles still in the feed: "+
-			"the toggle restored the layout rather than rebuilding it.")
-}
-
-// ---------------------------------------------------------------------------
-// B. A PERMISSION ASK, DRAWN, ANSWERED AND SETTLED
-// ---------------------------------------------------------------------------
-
-// TestPlaytestPermissionAsk photographs the ask card through its whole life.
-//
-// EMACS ANSWERS NOTHING, by contract: there is no permission-answering
-// command in `lisp/`, and the card in the webapp is the answering surface.
-// So the answer is a click on the card, which is exactly what a user does.
-func TestPlaytestPermissionAsk(t *testing.T) {
-	t.Parallel()
-	s := newPlaytestScenario(t, "permission",
-		"A permission ask drawn as a card, answered from the card the way a user answers it, "+
-			"and the settled verdict pushed back onto the same row.")
-	p, e := s.Book, s.E
-
-	repository := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
-	s.register(t, repository.Dir)
-	s.openPanel(t)
-
-	// `!perm-hold` raises an ask and leaves it outstanding, so the card is
-	// guaranteed to be standing when the picture is taken rather than raced.
-	s.submit(t, "!perm-hold")
-	s.awaitInPage(t, "the permission card to be waiting",
-		`document.querySelector('[data-feed-row][data-row-kind="permission"] .perm-waiting')`)
-	p.capture("ask-waiting", "the fake SDK's `!perm-hold` scenario raised an ask that stays outstanding",
-		"The feed carries a PERMISSION CARD: the tool it wants to run, a reason line, and its "+
-			"action buttons (Allow once / Allow / Deny), with the card visibly WAITING for an answer. "+
-			"The workspace's tab-bar arm is a running one, and the footer says a turn is in flight.")
-
-	s.clickInPage(t, "the card's Allow-once button",
-		`[data-feed-row][data-row-kind="permission"] [data-permission="allowOnce"]`)
-	s.awaitInPage(t, "the answered verdict to be pushed back onto the same row",
-		`document.querySelector('[data-feed-row][data-row-kind="permission"] .perm-verdict')`)
-	p.capture("ask-answered", "the Allow-once button clicked in the card, as a user clicks it",
-		"THE SAME ROW now shows a settled verdict instead of buttons: the action buttons are gone "+
-			"and the card reads as answered. No second permission card appeared.")
-
-	s.awaitSettled(t, "the turn to settle once the ask was answered")
-	p.capture("turn-settled", "the turn ran on and finished",
-		"The turn has finished: the tab-bar arm is settled (green) rather than running, and the "+
-			"footer is idle. The answered permission card is still in the feed as history.")
-}
-
-// ---------------------------------------------------------------------------
-// C. A SUBAGENT'S NESTED SUB-FEED, AND A DETACHED SHELL
-// ---------------------------------------------------------------------------
-
-// TestPlaytestSubagentAndDetachedShell photographs the two feed families
-// that are containers rather than bubbles: a subagent, whose own activity
-// lives in a nested feed the user opens, and a background shell, which is
-// live and then settled.
-func TestPlaytestSubagentAndDetachedShell(t *testing.T) {
-	t.Parallel()
-	s := newPlaytestScenario(t, "subagent-and-shell",
-		"A subagent bubble with its nested sub-feed opened, and a detached shell row live and "+
-			"then settled.")
-	p, e := s.Book, s.E
-
-	repository := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
-	s.register(t, repository.Dir)
-	s.openPanel(t)
-
-	const subagentRow = `[data-feed-row][data-row-kind="activity"][data-unit="subagent"]`
-	s.submit(t, "!subagent")
-	s.awaitInPage(t, "the subagent bubble to be drawn", `document.querySelector('`+subagentRow+`')`)
-	p.capture("subagent-bubble", "the fake SDK's `!subagent` scenario ran a synchronous subagent",
-		"The feed carries a SUBAGENT BUBBLE whose head names the commission the agent issued, "+
-			"with a caret to open it. Its own activity is NOT on the top-level feed: the bubble is "+
-			"closed, so nothing of the subagent's work is visible yet.")
-
-	s.clickInPage(t, "the subagent bubble's caret", subagentRow+` [data-expand]`)
-	s.awaitInPage(t, "the nested sub-feed to be open",
-		`document.querySelector('`+subagentRow+`[data-expanded="true"]')`)
-	p.capture("subagent-subfeed-open", "the caret clicked, opening the subagent's nested sub-feed",
-		"The SAME bubble is now open and a NESTED FEED is drawn inside it, indented under the head, "+
-			"carrying the subagent's own commission prompt and its activity. The top-level feed above "+
-			"and below it is unchanged.")
-
-	s.awaitSettled(t, "the subagent turn to settle")
-
-	// A shell that never settles, so the live shape is photographable rather
-	// than raced against its own completion.
-	s.submit(t, "!bash-detach-live")
-	s.awaitInPage(t, "a live detached shell row to be drawn",
-		`document.querySelector('[data-feed-row][data-row-kind="detachedShell"][data-state="live"]')`)
-	p.capture("shell-live", "the fake SDK's `!bash-detach-live` scenario backgrounded a shell that keeps running",
-		"The feed carries a DETACHED SHELL row that is visibly LIVE: a running dot, a clock counting "+
-			"the run, and a control to stop it. It carries no exit code, because it has not exited.")
-
-	s.submit(t, "!bash-detach")
-	s.awaitInPage(t, "a settled detached shell row to be drawn",
-		`document.querySelector('[data-feed-row][data-row-kind="detachedShell"][data-state="completed"]')`)
-	p.capture("shell-settled", "the `!bash-detach` scenario backgrounded a shell that completes",
-		"A SECOND detached shell row, this one SETTLED: it names its exit code and reads as completed "+
-			"rather than running. The live row from step 03 is still live above it, so the two shapes "+
-			"are side by side in one picture.")
-}
-
-// ---------------------------------------------------------------------------
-// D. A TURN THAT DIES, AND AN ALLOWANCE THAT IS SPENT
-// ---------------------------------------------------------------------------
-
-// TestPlaytestQueryDeathAndAllowance photographs the two ways a session goes
-// wrong without anything being broken locally: the vendor's own query dying
-// under a turn, and a rate-limit window the account has spent.
-func TestPlaytestQueryDeathAndAllowance(t *testing.T) {
-	t.Parallel()
-	s := newPlaytestScenario(t, "query-death-and-allowance",
-		"A turn whose vendor query dies, and the footer's allowance line after a rate-limit event.")
-	p, e := s.Book, s.E
-
-	repository := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(repository.Dir, ".claude"))
-	s.register(t, repository.Dir)
-	s.openPanel(t)
-
-	// THE FAILURE OVERLAY IS NOT THIS. `[data-component="failure-overlay"]`
-	// is for client-local failures -- the daemon unreachable, a stale
-	// bundle, a frame that would not decode. A vendor query dying under a
-	// turn is a TURN-ENDED row carrying the cause, which is what this waits
-	// on and what the picture must show.
-	s.submit(t, "!query-eof")
-	s.awaitInPage(t, "the turn-ended row naming the query's death",
-		`document.querySelector('[data-feed-row][data-row-kind="turnEnded"] [data-turn-error="queryDied"]')`)
-	p.capture("query-died", "the fake SDK's `!query-eof` scenario ended the vendor query with an unexpected EOF",
-		"The feed's last row says the TURN ENDED IN ERROR because the vendor's query DIED -- the "+
-			"cause named as an unexpected end of the stream, not as a generic failure. It is drawn "+
-			"in the vendor's purple, not the local-environment blue: nothing on this machine broke.")
-
-	s.awaitSettled(t, "the workspace to settle after the query death")
-
-	// The allowance line is drawn while the footer's activity is the
-	// rate-limited arm, so the wait is on the line itself rather than on the
-	// turn, and the picture is taken the moment it is up.
-	s.submit(t, "!rate-limit-five-hour")
-	s.awaitInPage(t, "the footer's session allowance line",
-		`document.querySelector('.footer-allowance[data-allowance="session"]')`)
-	p.capture("allowance", "the fake SDK's `!rate-limit-five-hour` scenario reported a spent five-hour window",
-		"The PROGRESS FOOTER carries an ALLOWANCE LINE for the five-hour session window: how much of "+
-			"it is spent and when it resets. It is in the footer's own strip, NOT in the expanded "+
-			"footer, which carries the agent and task roster and nothing else.")
-
-	s.awaitSettled(t, "the workspace to settle after the rate-limit turn")
-}
-
-// ---------------------------------------------------------------------------
-// E. THE TAB BAR WITH TWO WORKSPACES, AND A SCHEDULED DRAIN
-// ---------------------------------------------------------------------------
-
-// TestPlaytestTabBarAndDrain photographs the surface a Connect client cannot
-// see at all -- Emacs's own tab bar -- and the standing banner a scheduled
-// shutdown puts on both the mode line and the webapp.
-func TestPlaytestTabBarAndDrain(t *testing.T) {
-	t.Parallel()
-	s := newPlaytestScenario(t, "tab-bar-and-drain",
-		"Two workspaces on the tab bar with the right arm painted on each, and the standing drain "+
-			"banner a scheduled shutdown raises.")
-	p, e := s.Book, s.E
-
-	first := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo-first"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(first.Dir, ".claude"))
-	firstName := s.register(t, first.Dir)
-	s.openPanel(t)
-	p.capture("one-workspace", "one repository registered and its panel open",
-		"The tab bar carries EXACTLY ONE workspace tab, and it is the selected one: its name is "+
-			"highlighted and its arm is settled.")
-
-	second := harness.NewRepoAt(t, filepath.Join(s.Box.Scratch(), "repo-second"))
-	e.ArtifactPaths = append(e.ArtifactPaths, filepath.Join(second.Dir, ".claude"))
-	secondName := s.register(t, second.Dir)
-	e.AwaitEval("the second workspace to become the selected one",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
-	names := e.EvalStrings(emacsWSTablineNamesForm)
-	if len(names) != 2 {
-		t.Fatalf("the tab bar draws %v, want both workspaces", names)
+	if got := e.EvalInt(`(length (window-list))`); got != windows {
+		t.Fatalf("the frame holds %d windows after restoring, want the %d it started with", got, windows)
 	}
-	p.capture("two-workspaces", "a second repository registered through the same command",
-		fmt.Sprintf("The tab bar carries TWO workspace tabs, %q then %q, in the roster's own order. "+
-			"The SECOND is the selected one -- registering selects it -- and only that one is "+
-			"highlighted. Both arms are settled discs.", firstName, secondName))
+	p.capture("fullscreen-restored", "the same command again, restoring the layout",
+		fmt.Sprintf("`agent-repl--window-fullscreen-config` is nil and the frame holds its original %d windows", windows),
+		"The split of the first capture is back, unchanged: the toggle RESTORED the layout rather "+
+			"than rebuilding some other one.")
+}
 
-	// A turn that parks in flight, so the running arm is photographable
-	// rather than raced against its own completion.
-	s.Name, s.Input = secondName, awaitInputBuffer(t, e, secondName)
-	s.submit(t, holdScenario)
-	emGHIAwaitStatus(t, e, secondName, "the held turn to be in flight", emGHIRunningArms...)
-	p.capture("running-arm", "a turn submitted on the selected workspace, parked in flight by the fake SDK",
-		fmt.Sprintf("The tab for %q now paints a RUNNING arm -- the red band -- while %q keeps its "+
-			"settled green disc. Two workspaces, two different arms, in one tab bar.",
-			secondName, firstName))
+// ---------------------------------------------------------------------------
+// SECTION J — DAEMON LIFECYCLE
+// ---------------------------------------------------------------------------
 
-	// The held turn is released before the drain: a drain announced over a
-	// turn nobody will ever end would make the world's own teardown wait on
-	// an interrupt that is not coming.
-	e.Eval(`(ignore-errors (agent-repl-kill-workspace ` + elispString(secondName) + `) t)`)
+// TestPlaytestScheduledDrainBanner is plan J.57: a scheduled shutdown, and
+// the standing banner it raises in two places at once.
+func TestPlaytestScheduledDrainBanner(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "j-drain",
+		"Plan J.57. A scheduled shutdown, and the standing drain banner it puts on Emacs's mode "+
+			"line and across the webapp.")
+	p, e := s.Book, s.E
+
+	repository := s.repoAt(t, "repo")
+	s.register(t, repository.Dir)
+	s.openPanel(t)
+	p.note("one repository registered with its panel open",
+		"the panel's webview is live and the webapp drew its footer")
 
 	// Five minutes out, so the daemon is still serving for the rest of the
-	// test and its teardown. `agent-repl-daemon-shutdown-schedule` prompts
-	// for its reason, so the reader is bound for the duration of the one
-	// call -- the standard ERT way, which keeps the command running its own
-	// argument collection.
+	// playbook and its teardown. The command prompts for its reason, so the
+	// reader is bound for the duration of the one call -- the standard ERT
+	// way, which keeps the command running its own argument collection.
 	const drainMinutes = 5
 	const drainReason = "maintenance"
 	e.Eval(`(cl-letf (((symbol-function 'completing-read)
@@ -486,8 +695,22 @@ func TestPlaytestTabBarAndDrain(t *testing.T) {
               (agent-repl-daemon-shutdown-schedule ` + strconv.Itoa(drainMinutes) + `)
               t)`)
 	e.AwaitTrue("the daemon's drain_scheduled push to reach Emacs", `(and agent-repl-link-drain t)`)
+	if arm := e.EvalString(`(format "%s" (plist-get (plist-get agent-repl-link-drain :reason) :arm))`); arm != ":"+drainReason {
+		t.Fatalf("the standing drain's reason arm is %q, want %q", arm, ":"+drainReason)
+	}
+	// The segment's own composition is the subject here, which is this
+	// layer's sanctioned exception to "never scrape human text where a
+	// variable exists".
+	segment := e.EvalString(`(or agent-repl-link-drain-segment "")`)
+	if !strings.HasPrefix(segment, "drain ") || !strings.HasSuffix(segment, "· "+drainReason) {
+		t.Fatalf("the drain segment is %q, want \"drain HH:MM · %s\"", segment, drainReason)
+	}
+	s.awaitInPage(t, "the webapp's own drain banner to be drawn",
+		`document.querySelector('[data-component="drain-banner"]') &&
+         document.querySelector('[data-component="drain-banner"]').textContent.trim() !== ""`)
 	p.capture("drain-scheduled", "`agent-repl-daemon-shutdown-schedule` five minutes out, reason \"maintenance\"",
-		"A STANDING DRAIN BANNER is up in two places at once: Emacs's mode line reads "+
-			"`drain HH:MM · maintenance`, and the webapp draws its own drain banner across the top "+
-			"of the panel. The tab bar is otherwise unchanged.")
+		fmt.Sprintf("`agent-repl-link-drain` carries the reason arm `:%s`, `agent-repl-link-drain-segment` renders %q, and the webapp's own drain banner is non-empty", drainReason, segment),
+		"A STANDING DRAIN BANNER is up in TWO places at once: Emacs's mode line reads "+
+			"`drain HH:MM · maintenance`, and the webapp draws its own drain banner across the top of "+
+			"the panel. The tab bar is otherwise unchanged.")
 }
