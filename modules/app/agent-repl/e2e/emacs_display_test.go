@@ -66,6 +66,11 @@ const xvfbReadyBound = 1 * time.Second
 // every 8 boots. With the searches serialized: zero in 32.
 var xvfbStartMu sync.Mutex
 
+// xvfbFramebufferFile is what Xvfb calls screen 0's framebuffer under
+// `-fbdir`. The name is the server's, not this layer's: one file per screen,
+// `Xvfb_screen<n>`.
+const xvfbFramebufferFile = "Xvfb_screen0"
+
 // xdisplay is one Xvfb server and the display it bound.
 type xdisplay struct {
 	// Display is the value to put in DISPLAY, e.g. ":1".
@@ -73,6 +78,12 @@ type xdisplay struct {
 	// LogPath is Xvfb's own stderr, preserved in failure artifacts: a GUI
 	// frame that never appears is usually explained there and nowhere else.
 	LogPath string
+	// FramebufferPath is screen 0's framebuffer, on disk and LIVE: Xvfb
+	// mmaps it under `-fbdir`, so reading it is reading what is on the
+	// screen at that instant. It is what a screenshot is taken from -- see
+	// playtest_capture_test.go, and PLAYTEST-SPEC.md for why nothing else
+	// in this image can take one.
+	FramebufferPath string
 
 	t    *testing.T
 	proc sandboxProc
@@ -93,6 +104,24 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 	}
 	logPath := filepath.Join(dir, "xvfb.log")
 	numPath := filepath.Join(dir, "xvfb.display")
+	// THE FRAMEBUFFER IS ON DISK, ALWAYS, AND NOT ONLY FOR THE PLAYTEST.
+	//
+	// `-fbdir` makes Xvfb mmap screen 0's framebuffer to a file instead of
+	// anonymous memory. It is the ONLY way anything in this image can see
+	// what is on the screen: the image carries no xwd, no ImageMagick, no
+	// scrot -- and Emacs's own `x-export-frames` is not a substitute,
+	// MEASURED: it re-renders the frame through Emacs's redisplay, so the
+	// panel's `xwidget-webkit` webview comes out as an empty white
+	// rectangle, which is precisely the surface a screenshot is wanted for.
+	//
+	// One code path rather than two: the cost is 5 MiB of the container's
+	// own tmpfs per display (1280x1024x32 plus a 3232-byte XWD header),
+	// against a measured whole-run peak of 1.22 GiB at two concurrent
+	// displays, and the same pages the server would have held anonymously.
+	fbDir := filepath.Join(dir, "fb")
+	if err := os.MkdirAll(fbDir, 0o700); err != nil {
+		t.Fatalf("prepare the Xvfb framebuffer directory %s: %v", fbDir, err)
+	}
 
 	// Xvfb writes the display number to `-displayfd` and everything else to
 	// stderr, so the two are separate files rather than one that has to be
@@ -112,12 +141,17 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	x := &xdisplay{LogPath: logPath, t: t}
+	x := &xdisplay{
+		LogPath:         logPath,
+		FramebufferPath: filepath.Join(fbDir, xvfbFramebufferFile),
+		t:               t,
+	}
 	// `-displayfd 1` makes the SERVER pick a free display and report it, so
 	// no two worlds can collide over a hard-coded number. `-nolisten tcp`
 	// keeps it to the container's own abstract/unix sockets.
 	proc, err := box.StartProcess(ctx, numFile, logFile,
-		"Xvfb", "-displayfd", "1", "-screen", "0", xvfbScreen, "-nolisten", "tcp")
+		"Xvfb", "-displayfd", "1", "-screen", "0", xvfbScreen, "-nolisten", "tcp",
+		"-fbdir", fbDir)
 	if err != nil {
 		cancel()
 		if closeErr := logFile.Close(); closeErr != nil {

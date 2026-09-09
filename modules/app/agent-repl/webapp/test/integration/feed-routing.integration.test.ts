@@ -356,11 +356,15 @@ describe("the merge bubble's parity with a subagent bubble", () => {
     harness = await startHarness();
   });
 
-  it("expands through OpenFeed then WatchFeed and nothing else", async () => {
+  it("expands through OpenFeed then a SUBSCRIPTION on the page's stream, and nothing else", async () => {
     // Arrange / Act
     const sequence = await sequenceFor(() => mergeUnit("update"));
-    // Assert
-    expect(sequence).toEqual(["openFeed", "watchFeed"]);
+    // Assert: the bubble's tail rides the stream the page already holds. The
+    // absence of `watchPage` here is the load-bearing half — the calls were
+    // cleared after boot, so a second connection for this tail would appear.
+    // `watchFeed` still follows because the subscription IS that watch: the
+    // fake serves it from the very source the dedicated rpc serves.
+    expect(sequence).toEqual(["openFeed", "subscribePage", "watchFeed"]);
     harness = await startHarness();
   });
 });

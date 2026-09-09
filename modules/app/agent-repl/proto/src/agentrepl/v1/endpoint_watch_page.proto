@@ -1,0 +1,191 @@
+// endpoint_watch_page.proto — WatchPage / SubscribePage / UnsubscribePage: the
+// ONE standing stream a browser page holds, and the two verbs that populate it.
+//
+// WHY THIS EXISTS: A BROWSER CANNOT HOLD MANY STANDING STREAMS AT ONCE. The
+// daemon serves h2c, but no browser negotiates cleartext HTTP/2, so a webview
+// talks HTTP/1.1 — which caps a page at about SIX connections per host, and a
+// server-streaming Connect call pins one for its whole life. The webapp held
+// six (`WatchWorkspaceRoster`, `WatchWebWorkspace`, `WatchDaemon`,
+// `WatchTopbar`, `WatchFooter`, `WatchDaemonHolds`) before its feed tail was
+// even opened, and every stream after those SILENTLY QUEUED FOREVER: no
+// request on the wire, no error, no frame. The root feed's tail was the
+// seventh, so no row a workspace produced after the page loaded was ever
+// drawn. Every expanded subagent bubble opens another feed tail, so the count
+// grew with the conversation and no fixed budget could contain it.
+//
+// THE COUNT IS THE FIX, NOT THE ORDER. A page multiplexes EVERY standing
+// subscription onto this one stream, so the number of connections a page holds
+// is ONE no matter how many views it watches. That is a structural property of
+// the protocol rather than a budget anyone has to respect: there is no second
+// stream to open.
+//
+// THE ATTACHMENT IS A LATCH, NOT A RACE. `SubscribePage` names a page that must
+// already be attached, so its first frame — `PageAttached` — is sent the moment
+// the daemon has registered the page and BEFORE any subscription can exist. A
+// client subscribes only after reading it; a `SubscribePage` for a page the
+// daemon has not attached is REFUSED, loudly, rather than buffered against a
+// stream that may never arrive.
+//
+// AN ENDING NAMES ITSELF. `PageSubscriptionEnded` carries a `how` arm, so a
+// client the daemon unsubscribed, a source that simply finished, and a watch
+// that failed are three distinguishable facts rather than one silent one.
+//
+// A SUBSCRIPTION IS EXACTLY THE STREAM IT REPLACES. Its request is the same
+// `Watch*Request` the dedicated rpc takes and its pushes are the same
+// `Watch*Response`, so every per-stream semantic — the subscription invariant,
+// `WatchFeed`'s token pin, a refused open — is unchanged. What changed is which
+// socket carries it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_watch_workspace_roster.proto";
+import "agentrepl/v1/endpoint_watch_web_workspace.proto";
+import "agentrepl/v1/endpoint_watch_daemon.proto";
+import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_watch_footer.proto";
+import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
+import "agentrepl/v1/endpoint_watch_feed.proto";
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the page's one stream.
+message WatchPageRequest {
+  // The page's own identity, minted by the client and unique for the life of
+  // the loaded document. `SubscribePage` and `UnsubscribePage` name it.
+  //
+  // TWO STREAMS FOR ONE PAGE ID IS A REFUSAL, not a replacement: a page holds
+  // exactly one, and a second would leave the first's subscriptions addressable
+  // by a client that no longer owns them.
+  string page = 1;
+}
+
+// One frame on the page's stream.
+message WatchPageResponse {
+  oneof frame {
+    // The page is registered and `SubscribePage` will find it. ALWAYS FIRST,
+    // and sent exactly once.
+    PageAttached attached = 1;
+    // One subscription's push, exactly as its own rpc would have sent it.
+    PageFrame push = 2;
+    // One subscription is over and will push nothing further.
+    PageSubscriptionEnded ended = 3;
+  }
+}
+
+// The latch: the daemon has registered this page.
+message PageAttached {}
+
+// One push, addressed to the subscription that asked for it.
+message PageFrame {
+  // The subscription id `SubscribePage` was given.
+  string subscription = 1;
+
+  // The push itself. Each arm is the response type of the rpc the
+  // subscription stands in for, unchanged.
+  oneof payload {
+    WatchWorkspaceRosterResponse roster = 2;
+    WatchWebWorkspaceResponse web_workspace = 3;
+    WatchDaemonResponse daemon = 4;
+    WatchTopbarResponse topbar = 5;
+    WatchFooterResponse footer = 6;
+    WatchDaemonHoldsResponse holds = 7;
+    WatchFeedResponse feed = 8;
+    LoginTerminalOutput login_terminal = 9;
+  }
+}
+
+// A subscription that has ended, AND WHY.
+//
+// THE WHY IS AN ARM, NOT AN INFERENCE. A subscription ends for three reasons
+// that mean three different things to a page — the client asked, the view's own
+// source finished, or the watch failed — and a frame carrying only the id
+// collapses them into one. A page that meant to unsubscribe and a page whose
+// feed tail broke would then be told the same thing, and the second one would
+// silently draw a view that had stopped updating. Every ending path fills
+// exactly one arm; an unset `how` is a malformed frame.
+message PageSubscriptionEnded {
+  string subscription = 1;
+
+  oneof how {
+    // The client's own `UnsubscribePage`. It is announced rather than
+    // suppressed so the END is one fact on one wire, whoever asked for it: a
+    // client is otherwise left inferring the difference between the end it
+    // asked for and an end that raced it.
+    PageSubscriptionUnsubscribed unsubscribed = 2;
+    // The view's own source finished — a login pty that exited, a topic that
+    // closed. Nothing failed; there is simply nothing further to push.
+    PageSubscriptionSourceEnded source_ended = 3;
+    // The watch failed. Carries the SAME error the dedicated rpc would have
+    // ended its own stream with.
+    PageSubscriptionFailed failed = 4;
+  }
+}
+
+// Presence is the fact: the client asked for this end.
+message PageSubscriptionUnsubscribed {}
+
+// Presence is the fact: the source finished of its own accord.
+message PageSubscriptionSourceEnded {}
+
+// A subscription that ended in FAILURE, carrying the error verbatim.
+//
+// WHY THESE TWO FIELDS AND NOT A `<Rpc>Error` ARM. A dedicated `Watch*` rpc has
+// no error message at all: by ruling (landing 6) a failed or refused stream is
+// a CONNECT ERROR — a code and a sentence — and never a frame. There is
+// therefore no existing message to reuse, and this is that same Connect error
+// carried as data because a multiplexed subscription has no status of its own
+// to fail with: the page's stream is still healthy and must stay open for its
+// other subscriptions.
+message PageSubscriptionFailed {
+  // The Connect code's own name, lower_snake_case as connect-go spells it —
+  // "not_found", "failed_precondition", "internal". The code the dedicated
+  // rpc's stream would have carried, unchanged.
+  string code = 1;
+  // The error's message, verbatim.
+  string message = 2;
+}
+
+// Starts one subscription on an already-attached page.
+//
+// A REFUSAL IS A CONNECT ERROR, exactly as a refused `Watch*` open is. This
+// verb IS the open, and a `SubscribePage` that answers is a subscription that
+// exists: the daemon registers it with its publisher BEFORE replying, so a view
+// published after the reply cannot be missed.
+message SubscribePageRequest {
+  // The page whose stream carries the pushes.
+  string page = 1;
+  // The subscription's own id, minted by the client. It addresses every
+  // `PageFrame` this subscription produces and is what `UnsubscribePage` names.
+  // Reusing a live one is a refusal.
+  string subscription = 2;
+
+  // What to watch. Each arm is the request of the rpc this subscription stands
+  // in for, unchanged.
+  oneof request {
+    WatchWorkspaceRosterRequest roster = 3;
+    WatchWebWorkspaceRequest web_workspace = 4;
+    WatchDaemonRequest daemon = 5;
+    WatchTopbarRequest topbar = 6;
+    WatchFooterRequest footer = 7;
+    WatchDaemonHoldsRequest holds = 8;
+    WatchFeedRequest feed = 9;
+    WatchLoginTerminalRequest login_terminal = 10;
+  }
+}
+
+// The subscription exists. It carries nothing: the acceptance IS the answer.
+message SubscribePageResponse {}
+
+// Ends one subscription without disturbing the page's other ones.
+message UnsubscribePageRequest {
+  string page = 1;
+  string subscription = 2;
+}
+
+// The subscription is over. Unsubscribing one that does not exist is NOT a
+// refusal — the end is the state the caller asked for, and a subscription the
+// daemon already ended is exactly that state.
+message UnsubscribePageResponse {}

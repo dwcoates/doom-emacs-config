@@ -56,6 +56,8 @@ let footerRevealRow: ((id: unknown) => void) | null = null;
 const feedRevealRow = vi.fn();
 /** The last `mountFeed` deps, for the composer-factory contract. */
 let feedDeps: { composerFactory?: unknown } | null = null;
+/** The context the boot built, so its stream's fate can be read off it. */
+let bootedContext: import("../src/rpc/context.js").AppContext | null = null;
 /** `log` out of the freshly-imported graph -- the instance main.ts installs into. */
 let freshLog: typeof import("../src/log.js").log;
 /** The element `drawCommandPanel` hands back. */
@@ -103,6 +105,21 @@ async function bootMain(): Promise<void> {
   logging.setLogger(new logging.ForwardingLogger(async () => {}, () => {}));
   logging.bindLogContext({ connection_id: "test-connection" });
 
+  // THE REAL CONTEXT, CAPTURED. `createAppContext` opens the page's one stream,
+  // so whether a failed boot stops dialing is a fact about the object it
+  // returns — not something a stub could answer.
+  vi.doMock("../src/rpc/context.js", async () => {
+    const actual = await vi.importActual<typeof import("../src/rpc/context.js")>(
+      "../src/rpc/context.js",
+    );
+    return {
+      ...actual,
+      createAppContext: (init: Parameters<typeof actual.createAppContext>[0]) => {
+        bootedContext = actual.createAppContext(init);
+        return bootedContext;
+      },
+    };
+  });
   vi.doMock("../src/rpc/transport.js", () => ({
     createDaemonTransport: vi.fn(() => ({ transport: true })),
   }));
@@ -207,6 +224,7 @@ async function bootMain(): Promise<void> {
 
 beforeEach(() => {
   order = [];
+  bootedContext = null;
   clientLogs = [];
   rethrown = [];
   adopt = async () => {};
@@ -411,6 +429,27 @@ describe("a boot that fails", () => {
 
     expect(rethrown).toHaveLength(1);
     expect(() => rethrown[0]?.()).toThrow("adoption refused");
+  });
+
+  test("stops the page's one stream when the boot fails", async () => {
+    // THE PAGE STREAM IS OPENED SEVERAL STEPS ABOVE ADOPTION, so a boot that
+    // fails at adoption used to leave it reopening on backoff forever against
+    // a daemon the page had already given up on — a dead page still holding a
+    // connection, burying its own `boot_failed` card under a reopen loop's
+    // error records. Caught as a timeout in the isolated coverage run.
+    adopt = () => Promise.reject(new Error("adoption refused"));
+
+    await bootMain();
+
+    expect(bootedContext?.isQuiesced()).toBe(true);
+  });
+
+  test("leaves the page's one stream running when the boot succeeds", async () => {
+    // The other side of it: quiescing is the FAILURE path's act, and a healthy
+    // page that stopped dialing would draw nothing ever again.
+    await bootMain();
+
+    expect(bootedContext?.isQuiesced()).toBe(false);
   });
 
   test("words a non-Error rejection on the card as the value itself", async () => {

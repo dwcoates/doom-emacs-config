@@ -36,6 +36,19 @@ type (
 	frontendTray   = frontendv1.DaemonHoldTray
 )
 
+// streamSink is what a standing stream's pump writes its pushes to.
+//
+// IT IS AN INTERFACE BECAUSE A STREAM'S PUSHES NO LONGER HAVE ONE DESTINATION.
+// A page multiplexes every standing subscription onto its single `WatchPage`
+// stream (endpoint_watch_page.proto), so a `WatchFooter` body serves either the
+// dedicated rpc's own `connect.ServerStream` or one page's mux — the same body,
+// the same order, the same acceptance, writing somewhere else.
+// `*connect.ServerStream[R]` satisfies it as it stands, so the dedicated rpcs
+// are unchanged by it.
+type streamSink[R any] interface {
+	Send(*R) error
+}
+
 // streamContext ties a stream's lifetime to BOTH the client's cancellation and
 // the daemon's Close, so nothing outlives the surface that serves it.
 func (s *server) streamContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -58,7 +71,7 @@ func serveTopic[T comparable, R any](
 	rpc string,
 	log dlog.Logger,
 	topic *publish.Topic[T],
-	out *connect.ServerStream[R],
+	out streamSink[R],
 	wrap func(T) *R,
 ) error {
 	return serveTopicWith(s, ctx, rpc, log, topic, out, wrap, topicHooks[T]{})
@@ -84,7 +97,7 @@ func serveTopicWith[T comparable, R any](
 	rpc string,
 	log dlog.Logger,
 	topic *publish.Topic[T],
-	out *connect.ServerStream[R],
+	out streamSink[R],
 	wrap func(T) *R,
 	hooks topicHooks[T],
 ) error {
@@ -142,8 +155,18 @@ func refuseStream(log dlog.Logger, rpc string, r refusal) *connect.Error {
 // for Emacs and every webview alike.
 func (s *server) WatchWorkspaceRoster(
 	ctx context.Context,
-	_ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
+	req *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
 	out *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse],
+) error {
+	return s.watchWorkspaceRoster(ctx, req.Msg, out)
+}
+
+// watchWorkspaceRoster is the body, written to whatever sink carries it: the
+// dedicated rpc's own stream, or one page's mux.
+func (s *server) watchWorkspaceRoster(
+	ctx context.Context,
+	_ *agentreplv1.WatchWorkspaceRosterRequest,
+	out streamSink[agentreplv1.WatchWorkspaceRosterResponse],
 ) error {
 	return serveTopic(s, ctx, "WatchWorkspaceRoster", s.log, s.deps.Sidebar.Topic(), out,
 		func(roster *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
@@ -157,11 +180,20 @@ func (s *server) WatchFooter(
 	req *connect.Request[agentreplv1.WatchFooterRequest],
 	out *connect.ServerStream[agentreplv1.WatchFooterResponse],
 ) error {
+	return s.watchFooter(ctx, req.Msg, out)
+}
+
+// watchFooter is the body, written to whatever sink carries it.
+func (s *server) watchFooter(
+	ctx context.Context,
+	msg *agentreplv1.WatchFooterRequest,
+	out streamSink[agentreplv1.WatchFooterResponse],
+) error {
 	const rpc = "WatchFooter"
-	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -180,11 +212,20 @@ func (s *server) WatchTopbar(
 	req *connect.Request[agentreplv1.WatchTopbarRequest],
 	out *connect.ServerStream[agentreplv1.WatchTopbarResponse],
 ) error {
+	return s.watchTopbar(ctx, req.Msg, out)
+}
+
+// watchTopbar is the body, written to whatever sink carries it.
+func (s *server) watchTopbar(
+	ctx context.Context,
+	msg *agentreplv1.WatchTopbarRequest,
+	out streamSink[agentreplv1.WatchTopbarResponse],
+) error {
 	const rpc = "WatchTopbar"
-	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -203,11 +244,20 @@ func (s *server) WatchDaemonHolds(
 	req *connect.Request[agentreplv1.WatchDaemonHoldsRequest],
 	out *connect.ServerStream[agentreplv1.WatchDaemonHoldsResponse],
 ) error {
+	return s.watchDaemonHolds(ctx, req.Msg, out)
+}
+
+// watchDaemonHolds is the body, written to whatever sink carries it.
+func (s *server) watchDaemonHolds(
+	ctx context.Context,
+	msg *agentreplv1.WatchDaemonHoldsRequest,
+	out streamSink[agentreplv1.WatchDaemonHoldsResponse],
+) error {
 	const rpc = "WatchDaemonHolds"
-	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -257,7 +307,7 @@ func (s *server) serveHost(
 	rpc string,
 	log dlog.Logger,
 	ws ids.WorkspaceID,
-	out *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse],
+	out streamSink[agentreplv1.WatchHostWorkspaceResponse],
 ) error {
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
@@ -312,11 +362,20 @@ func (s *server) WatchWebWorkspace(
 	req *connect.Request[agentreplv1.WatchWebWorkspaceRequest],
 	out *connect.ServerStream[agentreplv1.WatchWebWorkspaceResponse],
 ) error {
+	return s.watchWebWorkspace(ctx, req.Msg, out)
+}
+
+// watchWebWorkspace is the body, written to whatever sink carries it.
+func (s *server) watchWebWorkspace(
+	ctx context.Context,
+	msg *agentreplv1.WatchWebWorkspaceRequest,
+	out streamSink[agentreplv1.WatchWebWorkspaceResponse],
+) error {
 	const rpc = "WatchWebWorkspace"
-	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+	if err := validateWorkspaceRef("workspace", msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, msg.GetWorkspace())
 	if err != nil {
 		return endStream(s.log, rpc, err)
 	}
@@ -345,7 +404,7 @@ func (s *server) serveWeb(
 	rpc string,
 	log dlog.Logger,
 	ws ids.WorkspaceID,
-	out *connect.ServerStream[agentreplv1.WatchWebWorkspaceResponse],
+	out streamSink[agentreplv1.WatchWebWorkspaceResponse],
 ) error {
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
@@ -399,8 +458,17 @@ func (s *server) serveWeb(
 // the stand-down announcement are drawn by both.
 func (s *server) WatchDaemon(
 	ctx context.Context,
-	_ *connect.Request[agentreplv1.WatchDaemonRequest],
+	req *connect.Request[agentreplv1.WatchDaemonRequest],
 	out *connect.ServerStream[agentreplv1.WatchDaemonResponse],
+) error {
+	return s.watchDaemon(ctx, req.Msg, out)
+}
+
+// watchDaemon is the body, written to whatever sink carries it.
+func (s *server) watchDaemon(
+	ctx context.Context,
+	_ *agentreplv1.WatchDaemonRequest,
+	out streamSink[agentreplv1.WatchDaemonResponse],
 ) error {
 	w := &daemonWatcher{sent: make(chan struct{})}
 	return serveTopicWith(s, ctx, "WatchDaemon", s.log, &s.daemonTopic, out,

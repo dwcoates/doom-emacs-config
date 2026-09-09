@@ -388,6 +388,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   return harness;
 }
 
+// pageSerial names each mounted app's page. A page id addresses ONE stream on
+// the daemon, and a second stream for one id is refused, so two mounts in one
+// file must not share one.
+let pageSerial = 0;
+
 async function mountApp(
   endpoint: Endpoint,
   options: HarnessOptions,
@@ -438,12 +443,18 @@ async function mountApp(
   const failures = mountFailureOverlay(shell.failureOverlay);
   const composerEnabled = options.composer === true;
 
+  // THE REAL PAGE MUX, on purpose. This harness drives a REAL daemon, so its
+  // page attaches `WatchPage` and every watch it mounts rides that one stream —
+  // which is the only place in the suites where the multiplexing itself is
+  // exercised end to end. Each mounted app takes its own page id, so two
+  // harnesses in one file cannot collide on the daemon's page registry.
   const ctx = createAppContext({
     client,
     workspace: workspaceRef(options.workspaceId ?? WORKSPACE_ID, options.workspaceDir ?? WORKSPACE_DIR),
     ticker,
     failures,
     composerEnabled,
+    page: `harness-page-${(pageSerial += 1)}`,
   });
 
   // MAIN.TS'S OWN SINK, in main.ts's own order: the identity is bound and the

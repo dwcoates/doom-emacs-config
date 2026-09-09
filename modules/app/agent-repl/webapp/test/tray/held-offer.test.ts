@@ -14,7 +14,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { TrayContext } from "../../src/tray/context.js";
 import { answerHeldOfferRefusal, drawHeldOffer } from "../../src/tray/held-offer.js";
@@ -49,7 +49,7 @@ function trayContext(
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),

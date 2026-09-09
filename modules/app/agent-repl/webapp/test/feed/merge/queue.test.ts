@@ -18,7 +18,8 @@ import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/worksp
 import { createTicker } from "../../../src/clock.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../../src/rpc/context.js";
+import { type AppContext } from "../../../src/rpc/context.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import {
   drawFeedMergeQueue,
   drawFeedMergeQueueEntry,
@@ -51,7 +52,7 @@ function scripted(answer: SelectWorkspaceResponse): Scripted {
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(1000),
@@ -277,7 +278,7 @@ describe("an arm this build cannot draw is a refusal, never a default", () => {
       result: { case: "success", value: {} },
     });
     (answer as { result: unknown }).result = { case: "deferred", value: {} };
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: {
         selectWorkspace: () => Promise.resolve(answer),
       } as unknown as ReturnType<typeof createAgentReplClient>,
@@ -309,7 +310,7 @@ describe("a daemon that cannot be reached answers at the clicked row", () => {
         },
       });
     });
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: createTicker(1000),

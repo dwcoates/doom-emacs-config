@@ -110,10 +110,37 @@ func streamContentTypeFrom(ctx context.Context) string {
 	return contentType
 }
 
+// acceptNotifierKey carries a muxed subscription's acceptance signal.
+type acceptNotifierKey struct{}
+
+// withAcceptNotifier arms a subscription that runs on a page's mux rather than
+// on a stream of its own.
+//
+// A MUXED SUBSCRIPTION HAS NO HEADERS TO FLUSH — it shares the page's — so the
+// acceptance edge has to be delivered somewhere else. It is delivered to
+// `SubscribePage`, which withholds its answer until it fires: the unary's
+// answer is the acceptance a dedicated stream states by flushing headers, and
+// it means the same thing, at the same instant in the same body.
+func withAcceptNotifier(ctx context.Context, notify func()) context.Context {
+	return context.WithValue(ctx, acceptNotifierKey{}, notify)
+}
+
+// acceptNotifierFrom answers the acceptance signal armed for a muxed
+// subscription, nil for a stream serving its own request.
+func acceptNotifierFrom(ctx context.Context) func() {
+	notify, _ := ctx.Value(acceptNotifierKey{}).(func())
+	return notify
+}
+
 // acceptStream flushes the response headers for a stream this handler has just
 // accepted. It is called AFTER the subscription is registered and AFTER every
 // refusal has been answered, so a refused open stays a refusal.
 func (s *server) acceptStream(ctx context.Context, rpc string) {
+	if notify := acceptNotifierFrom(ctx); notify != nil {
+		notify()
+		s.log.Debug(rpc, "a muxed subscription was accepted on its page's stream", nil)
+		return
+	}
 	writer := acceptWriterFrom(ctx)
 	if writer == nil {
 		s.log.Debug(rpc, "no accept writer is installed for this request", nil)

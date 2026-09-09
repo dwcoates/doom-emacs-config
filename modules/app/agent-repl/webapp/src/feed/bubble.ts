@@ -299,7 +299,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       const token = pending ?? (await reopen(signal));
       pending = null;
       if (token === null || disposed || signal.aborted) return;
-      yield* client.watchFeed(buildWatchFeedRequest(token), { signal });
+      yield* opts.ctx.streams.watch("feed", buildWatchFeedRequest(token), signal);
     }
   }
 

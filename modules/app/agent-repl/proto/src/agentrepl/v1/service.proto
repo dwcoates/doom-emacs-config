@@ -57,6 +57,7 @@ import "agentrepl/v1/endpoint_watch_daemon.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
 import "agentrepl/v1/endpoint_watch_web_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
+import "agentrepl/v1/endpoint_watch_page.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -243,4 +244,20 @@ service AgentRepl {
   // The webview's half of the handover rendezvous, called on the NEW
   // daemon. See endpoint_adopt_web_workspace.proto.
   rpc AdoptWebWorkspace(AdoptWebWorkspaceRequest) returns (AdoptWebWorkspaceResponse);
+
+  // ---- THE PAGE'S ONE STREAM ----
+  //
+  // A browser page multiplexes EVERY standing subscription onto WatchPage,
+  // because HTTP/1.1 caps it at about six connections per host and a
+  // server-streaming call pins one for its whole life. See
+  // endpoint_watch_page.proto for what that cap actually cost.
+
+  // The page's one standing stream. Its first frame is the attachment latch;
+  // every frame after it is one subscription's push.
+  rpc WatchPage(WatchPageRequest) returns (stream WatchPageResponse);
+  // Start one subscription on an attached page. The acceptance IS the answer,
+  // and a refused open is a Connect error exactly as a refused Watch* is.
+  rpc SubscribePage(SubscribePageRequest) returns (SubscribePageResponse);
+  // End one subscription, leaving the page's others alone.
+  rpc UnsubscribePage(UnsubscribePageRequest) returns (UnsubscribePageResponse);
 }
