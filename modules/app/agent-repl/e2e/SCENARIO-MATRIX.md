@@ -139,6 +139,7 @@ Two further limits, stated rather than hidden:
 | `!hook-failed` | grounded | hooks_e2e_test.go | feed-families.layer.test.ts | — | Go: TestHookFailed asserts exact ExitCode==1 and exact Output.Text. Web: feed-families.layer only checks dataset.unit==hook (weak). | covered |
 | `!hook-success` | grounded | hooks_e2e_test.go | feed-families.layer.test.ts | — | Go: TestHookSucceeded asserts no hook card drawn plus exact log Context[hook]==PreToolUse:Read. Web: feed-families.layer asserts specific negative (no hook row). | covered |
 | `!ide-diagnostics` | grounded | filetools_e2e_test.go | — | — | Go: TestIdeDiagnosticsAfterEdit asserts a diff form alongside Diagnostics with composed lines. | covered |
+| `!ide-diagnostics-write` | grounded | filetools_e2e_test.go | — | — | Go: TestIdeDiagnosticsAfterWrite asserts the diagnostics hang off the tool card NAMED "Write", with composed lines — the write arm of the adjacency join, which a defect once folded onto the edit arm. | covered |
 | `!interrupt` | grounded | interrupt_e2e_test.go | — | emacs_interrupt_e2e_test.go | Go: TestInterruptAfterTextDelta asserts InterruptedTurn!=nil, terminal specifically Interrupted. Emacs: TestEmacsForcedRestartInterruptsTheTurn asserts roster arm settles to :interrupted specifically. | covered |
 | `!keepalive` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestKeepaliveTurnIsOrdinaryAndUnmarked asserts the ordinary conclusion, the exact row set (prompt + response + terminal and nothing more), and the specific negative that no `<!--agent-repl:keepalive-->` marker is minted onto the prompt row. (TestKeepAliveNeverAppearsOnWire in hibernation_e2e_test.go is the daemon-minted keep-alive, a different fact.) | covered |
 | `!max-tokens` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestMaxTokens asserts Concluded plus an exact truncated prose string. | covered |
@@ -223,13 +224,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **129**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **130**
 - Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **19**
 - Uncovered (no counted layer drives the scenario at all): **1**
-- Total canonical scenarios: 149
+- Total canonical scenarios: 150
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 147 scenarios referenced across 24 files
+- Go e2e (non-emacs): 148 scenarios referenced across 24 files
 - Webapp layer: 35 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 

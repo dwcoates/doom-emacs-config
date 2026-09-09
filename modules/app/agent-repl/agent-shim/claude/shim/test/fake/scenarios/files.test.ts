@@ -192,6 +192,53 @@ describe("IDE diagnostics", () => {
   });
 });
 
+describe("IDE diagnostics after a WRITE", () => {
+  it("follows the write with a diagnostics attachment naming the written file", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!ide-diagnostics-write"]);
+    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
+      type: string;
+      files: { uri: string }[];
+    };
+
+    // Assert. Same adjacency join as the edit sibling, over a Write instead.
+    expect({ type: attachment.type, uri: attachment.files[0]?.uri }).toEqual({
+      type: "diagnostics",
+      uri: "/w/s/created.ts",
+    });
+  });
+
+  it("answers the write with a CREATE result, so the preceding change is a write", async () => {
+    // Arrange + Act. The whole point of the scenario: the fold must know a
+    // Write, not an Edit, preceded the attachment.
+    const result = (await firstResult("!ide-diagnostics-write")) as { type: string };
+
+    // Assert
+    expect(result.type).toBe("create");
+  });
+
+  it("states an EMPTY structuredPatch, which is what a real creation carries", async () => {
+    // Arrange + Act. Grounded in testdata/captures/write-created-and-updated:
+    // a created file's result carries no hunks, unlike an edit's.
+    const result = (await firstResult("!ide-diagnostics-write")) as {
+      structuredPatch: unknown[];
+    };
+
+    // Assert
+    expect(result.structuredPatch).toEqual([]);
+  });
+
+  it("places the attachment AFTER the write's tool result, so adjacency resolves", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!ide-diagnostics-write"]);
+    const types = driven.transcript().map((l) => l.type);
+    const resultIndex = driven.transcript().findIndex((l) => l.toolUseResult !== undefined);
+
+    // Assert
+    expect(types.indexOf("attachment")).toBeGreaterThan(resultIndex);
+  });
+});
+
 describe("Grep", () => {
   it("reports content mode with a total that EXCEEDS the returned lines", async () => {
     // Arrange + Act
