@@ -3,9 +3,10 @@
  *
  * Two standing streams, and neither of them draws a component:
  *
- *   - `WatchWebWorkspace` is this webview's own per-workspace link. Its one
- *     push, `transferred{address}`, says this daemon has released the
- *     workspace to a successor.
+ *   - `WatchWebWorkspace` is this webview's own per-workspace link. It carries
+ *     two pushes: `transferred{address}` says this daemon has released the
+ *     workspace to a successor, and `session_identity` names the session this
+ *     page's forwarded log records belong to.
  *   - `WatchDaemon` is daemon-scoped: the standing drain schedule and the
  *     graceful-rollout shutdown announcement. R3 — every webview holds its
  *     OWN subscription, rather than learning about a restart second-hand.
@@ -33,6 +34,15 @@
  * the reader — "this page's daemon is going away" — at three distances, and two
  * of them stacked would read as two separate restarts.
  *
+ * THE PAGE'S LOG IDENTITY COMES FROM THE LINK STREAM (landing 15). A browser
+ * has no durable sink, so every diagnostic this page raises is written by the
+ * daemon into webapp.log — and without a session identity on it, that record
+ * could be joined to a workspace and no further, never to the session the page
+ * was showing when the fault happened. `session_identity` arrives on the
+ * stream's OPENING push and again on every edge that rotates the session, and
+ * each one rebinds the logger's context, so a restart's records are filed under
+ * the restart rather than under the session it replaced.
+ *
  * CLOCKS TICK CLIENT-SIDE: the wire ships `at_ms` and `minted_at_ms`, and the
  * countdowns here are the shared ticker's, never a `setInterval` of this
  * module's own.
@@ -48,11 +58,14 @@ import {
   type DaemonShutdownAnnounced,
   type DaemonShutdownCause,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
-import { WatchWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import {
+  WatchWebWorkspaceResponseSchema,
+  type WebWorkspaceSessionIdentity,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
 import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 import { controlPlaneFailed } from "../failure/sink.js";
 import { formatElapsed } from "../duration.js";
-import { log } from "../log.js";
+import { bindLogContext, log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
@@ -99,6 +112,27 @@ export const ADOPT_BUDGET_MS = 60_000;
 export { workspaceMoved } from "../rpc/moved.js";
 
 /**
+ * Bind the session the page's forwarded log records belong to.
+ *
+ * BOTH IDENTITIES ARE BOUND WHATEVER THEY HOLD, the empty string included: an
+ * empty one is the daemon saying there is no session (or no vendor
+ * conversation) right now, and the logger drops an empty identity rather than
+ * stamping it — so binding it is how a page that HAD an identity stops
+ * claiming the retired one. Remembering the old value instead is the one
+ * outcome that misattributes records.
+ */
+export function bindSessionIdentity(identity: WebWorkspaceSessionIdentity): void {
+  bindLogContext({
+    agent_repl_session_id: identity.agentReplSessionId,
+    claude_session_id: identity.claudeSessionId,
+  });
+  log("debug", "bound the page's session identity", {
+    operation: "lifecycle.session_identity",
+    context: { has_session: identity.agentReplSessionId !== "" },
+  });
+}
+
+/**
  * Start the page's lifecycle. Returns the handle that stops both streams.
  */
 export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
@@ -134,6 +168,9 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
       switch (push.case) {
         case "transferred":
           onMoved(push.value.address);
+          return;
+        case "sessionIdentity":
+          bindSessionIdentity(push.value);
           return;
         default: {
           const other: { case: string } = push;
