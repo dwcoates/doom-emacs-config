@@ -21,6 +21,13 @@
 ;; is stripped from the composer along with everything else the moment the
 ;; daemon accepts the submission.
 ;;
+;; AND IT IS NEVER SUBMITTED.  The marker span carries
+;; `agent-repl--input-image-marker-property' (declared by input.el), and
+;; `agent-repl--read-input-buffer' drops every span carrying it, so the
+;; words that reach the agent are the words the user typed.  Without that
+;; the marker line travelled INSIDE the text block of the `UserSaid' --
+;; exactly the "path token as WORDS" this design refuses.
+;;
 ;; Capture strategy is chosen BY PLATFORM at the source, never assumed.
 ;;
 ;; macOS: an AppleScript writes the clipboard's PNG flavor straight to a
@@ -57,6 +64,9 @@
 (declare-function agent-repl-input-attach-image "agent-repl-input" (path media-type))
 (declare-function agent-repl--input-buffer "agent-repl-input" (ws))
 (defvar agent-repl-input-mode-map)
+;; Defined by input.el, which loads first; the marker span and the strip
+;; that removes it name the SAME property, from one declaration.
+(defvar agent-repl--input-image-marker-property)
 
 (defcustom agent-repl-image-thumbnail-max-height 220
   "Max pixel height of the thumbnail overlaid on an attached image path.
@@ -308,8 +318,24 @@ accepts the submission."
   "Insert the attachment marker for PATH at point, overlaying a thumbnail.
 Returns the overlay, or nil when no thumbnail could be drawn.  The
 inserted text is the marker and never the path: the composer does not
-read this text to find the image."
-  (let ((started-at-bol (bolp)))
+read this text to find the image.
+
+EVERY character this function inserts carries
+`agent-repl--input-image-marker-property' -- the marker line, its
+trailing newline, and the leading newline that opens a line for it --
+so `agent-repl--read-input-buffer' drops the whole drawing and nothing
+about the image rides the words.  The leading newline is inserted HERE
+and was never typed, so leaving it behind would put a line break in the
+user's prose that they did not write.
+
+The property is the STRIPPING contract and the overlay is the thumbnail;
+they are not the same thing, because a TTY frame draws no overlay and
+still must not send the marker -- which is also why the overlay covers
+only the marker TEXT while the property covers the whole drawing.  The
+span is marked `rear-nonsticky' so text typed after it is the user's
+own, not more marker."
+  (let ((drawn-from (point))
+        (started-at-bol (bolp)))
     (unless started-at-bol (insert "\n"))
     (let ((start (point)))
       (insert (agent-repl--image-marker-text path))
@@ -321,6 +347,9 @@ read this text to find the image."
                  (overlay-put ov 'help-echo path)
                  ov))))
         (insert "\n")
+        (put-text-property drawn-from (point)
+                           agent-repl--input-image-marker-property path)
+        (put-text-property drawn-from (point) 'rear-nonsticky t)
         (agent-repl--log ws
                          "clipboard-image: inserted marker path=%s started-at-bol=%s thumbnail-overlay=%s"
                          path started-at-bol (not (null overlay)))
