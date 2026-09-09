@@ -163,16 +163,23 @@ export function scenarioNames(): string[] {
  * The prompt MARKER that selects the failing turn.
  *
  * It survives verbatim from the previous fake because the daemon's e2e
- * acceptance gate spells it identically (`mergeactions_e2e_test.go`): a turn
- * failure is otherwise unprovokable offline, and the daemon's merge pipeline
- * classifies a before-action failure and an after-action failure in OPPOSITE
- * directions, so neither branch is reachable without a way to make a turn go
- * badly.
+ * acceptance gate spells it identically: the merge pipeline classifies a
+ * before-action failure and an after-action failure in OPPOSITE directions (a
+ * failed precondition refuses the landing; a post-landing failure only rides
+ * the terminal), so neither branch is reachable without a way to make a turn
+ * go badly.
  *
- * A marker rather than an `!name` because that gate sends readable prose that
- * merely CONTAINS it, so a caller can say which of its turns should fail and
- * still send a sensible message. Named scenarios still win: an explicit
- * `!scenario` is a stronger statement of intent than a marker buried in prose.
+ * A marker rather than an `!name` because a CONFIGURED MERGE ACTION *is* its
+ * text — the daemon submits the recorded words verbatim — so the only way to
+ * fail one is to write an action a human would plausibly configure and bury
+ * the marker in it. Named scenarios still win: an explicit `!scenario` is a
+ * stronger statement of intent than a marker buried in prose.
+ *
+ * THE GATE IS `e2e/mergequeue_e2e_test.go`'s
+ * TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal. It
+ * replaces `mergeactions_e2e_test.go`, which this comment cited until that
+ * file was deleted — leaving the marker with no caller in any counted e2e
+ * layer at all.
  */
 export const FAIL_TURN_MARKER = "e2e-fail-this-turn";
 

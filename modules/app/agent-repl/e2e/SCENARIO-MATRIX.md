@@ -99,7 +99,7 @@ Two further limits, stated rather than hidden:
 | `!compact` | grounded | compaction_e2e_test.go | feed-families.layer.test.ts | — | Go: TestCompactionDirected(+summary override) asserts exact FeedContextCutCompacted.Summary text, non-nil separation tokens. Web: feed-families.layer asserts .sep-compacted. | covered |
 | `!compact-auto` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionAuto asserts exact summary string + non-nil tokens. | covered |
 | `!compact-failed` | ungrounded | compaction_e2e_test.go | — | — | Go: TestCompactionFailed asserts exact FeedContextCutCompactionFailed.Error, no Compacted row drawn. | covered |
-| `!context-budget-warning` | ungrounded | compaction_e2e_test.go | — | — | Go: TestContextBudgetWarning asserts FooterStatusActivityContextBudget.Text non-empty (named field, not a fixed string). | weak |
+| `!context-budget-warning` | ungrounded | compaction_e2e_test.go | — | — | Go: TestContextBudgetWarning asserts FooterStatusActivityContextBudget.text equals `The conversation is approaching its context window budget.` VERBATIM — the scenario's own attachment content, copied unchanged by the converter and stored uncomposed by the resolver, so one exact string pins the whole path. | covered |
 | `!context-tip` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextTipDrawsNoRow asserts the same only-prose-rows negative AND a second, named one — `FooterStatusBlockedActivity.context_budget` is nil, so a GENERIC CLI tip never draws as “your context is filling”. | covered |
 | `!context-usage-drift` | grounded | accounting_e2e_test.go | — | — | Go: TestContextUsage asserts ContextPanelView.Header non-empty and differs across two reads, Categories non-empty. | covered |
 | `!context-window` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestContextWindowExceededIsDrawnAsTurnFailed asserts the named arm `FeedTurnEndedErrored.turn_failed`, the exact `stop_reason` `prompt_too_long`, a non-empty composed headline, and the specific negative that `request_too_large` (feed.proto's 413-only arm) was NOT drawn. | covered |
@@ -113,7 +113,7 @@ Two further limits, stated rather than hidden:
 | `!fail-hook-stopped` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/HookStopped asserts TurnFailed.StopReason==hook_stopped, the exact headline "a hook ended the run" (distinct from the Stop hook's own sentence), the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-image` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ImageError asserts TurnFailed.StopReason==image_error, the exact headline "an image in the request could not be processed", the exact vendor message, and the surviving partial answer. | covered |
 | `!fail-malformed-tool-use` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/MalformedToolUseExhausted asserts TurnFailed.StopReason==malformed_tool_use_exhausted, the exact headline, the exact vendor message, and the surviving partial answer. | covered |
-| `e2e-fail-this-turn` (marker) | ungrounded | — | — | — | GENUINE GAP. No counted e2e layer submits a prompt carrying the `e2e-fail-this-turn` marker. `registry.ts` still cites `mergeactions_e2e_test.go` as the caller that spells it; that file no longer exists, and nothing replaced its use of the marker. The only remaining caller is the shim's own `test/fake/registry.test.ts`, which is not a counted layer. | uncovered |
+| `e2e-fail-this-turn` (marker) | ungrounded | mergequeue_e2e_test.go | — | — | Go: TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal configures the marker as a merge ACTION (the one prompt the daemon submits verbatim) and asserts the pair the marker exists for: the same failing turn settles the pre_prompt tab failed with the daemon's composed summary and ends the run at FeedMergeError.failed with no later tab ever opened, while as an after-action it settles the post_prompt tab failed and the run still reaches FeedMergeSuccess. | covered |
 | `!fail-max-turns` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestTurnStopMaxTurns asserts errored.GetMaxTurns()!=nil plus headline. | covered |
 | `!fail-model` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/ModelError asserts TurnFailed.StopReason==model_error and the exact headline "the model errored in a way the API did not classify" — specifically NOT the refusal sentence, which needs a witnessing response frame — plus the exact vendor message and the surviving partial answer. | covered |
 | `!fail-prompt-too-long` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestTerminalReasonTurnFailedArms/PromptTooLong asserts TurnFailed.StopReason==prompt_too_long (NOT request_too_large, the vendor's 413), the exact headline, the exact vendor message, and the surviving partial answer. | covered |
@@ -125,7 +125,7 @@ Two further limits, stated rather than hidden:
 | `!fail-turn-setup` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestApiRequestFailedArms/TurnSetupFailed asserts the named arm `FeedTurnEndedErrored.turn_failed`, the exact stop reason `turn_setup_failed`, the exact per-arm headline “the run could not be set up and never reached the model”, the exact vendor message, and that partial work in flight survives the failure. | covered |
 | `!fast-cooldown` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestFastModeOffAndCooldownStatesReachTheDaemon/cooldown asserts the exact conclusion prose and ONE FRESH `fast_mode` arm record reaching the topbar resolver. WEAK BY CONTRACT, not by neglect: frontend/v1 carries no fast-mode field at all, so no drawn shape exists to assert — the record count is every hop there is. | weak |
 | `!fast-off` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestFastModeOffAndCooldownStatesReachTheDaemon/off asserts the exact conclusion prose and ONE FRESH `fast_mode` arm record reaching the topbar resolver. WEAK BY CONTRACT: frontend/v1 carries no fast-mode field, so there is no drawn shape to pin. | weak |
-| `!fast-on` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestFastMode asserts only Concluded (explicitly documented gap, no fast_mode_state field checked). | weak |
+| `!fast-on` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestFastMode asserts the settled response markdown is `Fast mode is on.` VERBATIM, which pins the ON arm specifically (`!fast-off` and `!fast-cooldown` could not pass it). GAP, and it is the PROTO's rather than the test's: frontend/v1 named no fast-mode shape at all when this was written, so there was no fast_mode_state field to check; a frontend fast-mode field is a separate landing. | covered |
 | `!fault-converter` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestConverterDefectOpensADegradedWindow asserts three things — the turn still CONCLUDES, the malformed hook_started drew NO hook card (it reached no arm), and the diagnostics opened a TopbarDegradedWindowWarningDetail with a stated component, a stated reason and a positive began_at_ms. | covered |
 | `!fault-recover` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestConverterRecoveryClosesTheDegradedWindow asserts THAT window closed — matched by component plus began_at_ms, not merely "some closed window exists" — with ended_at_ms >= began_at_ms and a dropped_count >= 1 for the one message the converter refused. | covered |
 | `!findings` | grounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestReportFindings asserts 3 rows with exact Verdict/Outcome per row. Web: feed-families.layer asserts [data-finding] count>0. | covered |
@@ -147,7 +147,7 @@ Two further limits, stated rather than hidden:
 | `!mcp-healthy` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestMcpCatalogNarrowedToHealthyKeepsTheOmittedRows states the five-server catalog first, then narrows to it, and asserts all five McpPanelRow rows STAND with their healths unchanged — the specific negative that "absent from the newest catalog" is not "gone" (only an UNSET health arm drops a row). | covered |
 | `!md` | ungrounded | — | feed-families.layer.test.ts | — | Web: feed-families.layer asserts literal !md text in the user_prompt row and exact 'Markdown showcase' body text. | covered |
 | `!memory` | declared-only | remainder_e2e_test.go | — | — | Go: TestContextInjectedMemory asserts AgentContextInjected.GetMemory() non-nil with non-empty Path/Content. | covered |
-| `!model-fallback` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestModelChanged asserts only Concluded (explicitly documented gap). | weak |
+| `!model-fallback` | grounded | turnlifecycle_e2e_test.go | — | — | Go: TestModelChanged asserts TopbarModelSelector.selected.model.name is `fake-sonnet-5` — the model the VENDOR swapped to unasked, which session.proto:173-174 says is stated in one authoritative place whether or not the consumer asked for it. | covered |
 | `!monitor-deadline` | grounded | mcpmonitors_e2e_test.go | — | — | Go: TestMonitorDeadline asserts exact Description, Persistent==false, chip count==1. | covered |
 | `!monitor-persistent` | grounded | mcpmonitors_e2e_test.go | — | — | Go: TestMonitorPersistent asserts exact Description, Persistent==true. | covered |
 | `!perm-allow-once` | grounded | permission_e2e_test.go | — | — | Go: TestPermissionAskAnsweredArms/AllowOnce asserts AllowedOnce()!=nil, tool succeeded, turn concluded. | covered |
@@ -159,10 +159,10 @@ Two further limits, stated rather than hidden:
 | `!perm-no-standing` | ungrounded | permission_e2e_test.go | — | — | Go: TestPermissionAskOffersNoStanding asserts FeedPermission.standing_offered UNSET on the open card (feed.proto: "PRESENT iff the vendor offered a standing form"), still UNSET after answering, the allowed_once settle, and that the gated call then ran and the turn concluded. | covered |
 | `!perm-undecidable` | ungrounded | permission_e2e_test.go | cards.layer.test.ts | — | Go: TestPermissionDeniedForWantOfDecider drives it for real and asserts FeedPermissionAnswered.denied_undecidable BY NAME (landing 10's own arm, never folded onto denied_by_policy), the composed "denied for want of a decider" wording plus the vendor's own detail clause, the negative that no open ask was ever drawn, and the concluded turn. | covered |
 | `!plan` | grounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestPlanModeEnterExit asserts FeedPlan.Planned non-nil with non-empty Prose/Edit.Path. Web: feed-families.layer asserts .plan-prose,.plan-planned. | covered |
-| `!push-config-off` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent subtest asserts only Concluded (documented no-feed-row fact). | weak |
-| `!push-no-transport` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent subtest asserts only Concluded. | weak |
-| `!push-sent` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationSent asserts only Concluded (documented no-feed-row fact). | weak |
-| `!push-user-present` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent subtest asserts only Concluded. | weak |
+| `!push-config-off` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent's `push-config-off` subtest asserts the SPECIFIC NEGATIVE — no feed row of the whole workspace draws the pushed message as an agent_prompt address or as a response — PLUS the surface a push does reach: FooterStatusActivityNotification.text equal to `The offline run finished.` verbatim, read under whichever status arm stands. The disabled reason lives on the vendor's RESULT, so the standing line is the same as the sent arm's; what this row pins is that the `config_off` arm reaches the daemon and draws nothing extra. | covered |
+| `!push-no-transport` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent's `push-no-transport` subtest asserts the SPECIFIC NEGATIVE — no feed row of the whole workspace draws the pushed message as an agent_prompt address or as a response — PLUS the surface a push does reach: FooterStatusActivityNotification.text equal to `The offline run finished.` verbatim, read under whichever status arm stands. The disabled reason lives on the vendor's RESULT, so the standing line is the same as the sent arm's; what this row pins is that the `no_transport` arm reaches the daemon and draws nothing extra. | covered |
+| `!push-sent` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationSent asserts the SPECIFIC NEGATIVE — no feed row of the whole workspace draws the pushed message as an agent_prompt address or as a response — PLUS the surface a push does reach: FooterStatusActivityNotification.text equal to `The offline run finished.` verbatim, read under whichever status arm stands. | covered |
+| `!push-user-present` | grounded | remainder_e2e_test.go | — | — | Go: TestPushNotificationNotSent's `push-user-present` subtest asserts the SPECIFIC NEGATIVE — no feed row of the whole workspace draws the pushed message as an agent_prompt address or as a response — PLUS the surface a push does reach: FooterStatusActivityNotification.text equal to `The offline run finished.` verbatim, read under whichever status arm stands. The disabled reason lives on the vendor's RESULT, so the standing line is the same as the sent arm's; what this row pins is that the `user_present` arm reaches the daemon and draws nothing extra. | covered |
 | `!query-eof` | ungrounded | producerfaults_e2e_test.go | feed-families.layer.test.ts | — | Go: TestQueryEofEndsTheTurnAsQueryDied asserts the terminal is specifically FeedTurnEndedErrored.query_died with cause unexpected_eof (never concluded, never a generic vendor failure) plus a composed headline; TestQueryDiedBlocksTheFooter asserts the separate footer arm FooterSubStatusBlockedQueryDied and its FooterStatusActivityQueryDied line. | covered |
 | `!query-eof-mid-ask` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestQueryEofMidAskDeniesTheOpenAsk asserts the ask genuinely OPENED, then that the death settles it — FeedPermissionAnswered.denied_by_user, the gate's stand-down — and that the turn still ends on query_died. The fate of the in-flight ask, not only the notice. | covered |
 | `!query-fail` | ungrounded | producerfaults_e2e_test.go | query-death.layer.test.ts | — | Go: TestQueryFailEndsTheTurnAsQueryDied asserts FeedTurnEndedErrored.query_died with cause iterator_failure specifically, separating the rejecting iterable from the EOF half. | covered |
@@ -178,9 +178,9 @@ Two further limits, stated rather than hidden:
 | `!refusal-no-fallback` | ungrounded | failurearms_e2e_test.go | — | — | Go: TestModelRefusalWithoutFallback asserts FeedTurnEndedErrored.refusal BY NAME (feed.proto's arm for "the vendor refused to continue; there is no answer prose") plus the composed message. | covered |
 | `!residue` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestResidueAttachmentsDrawNoRow asserts the specific negative the arms line demands — the turn's row set is exactly prompt + response + terminal, so neither `deferred_tools_delta` nor `agent_listing_delta` reached any conversation.v1 arm. | covered |
 | `!rotate` | grounded | identityrotation_e2e_test.go | feed-families.layer.test.ts | — | Go: TestClearRotatesIdentity/TestSecondRotateUnderRotatedIdentity assert exact new session-line value, distinct Cleared rows. Web: feed-families.layer only checks dataset.rowKind==separation (tautological, weak). | covered |
-| `!send-message` | grounded | remainder_e2e_test.go | — | — | Go: TestSendMessageQueuedAndResumed asserts only Concluded. | weak |
+| `!send-message` | grounded | remainder_e2e_test.go | — | — | Go: TestSendMessageQueuedAndResumed waits on the DELIVERED version of the sender's own row (FeedAgentPrompt.delivery = queued_to_live), then asserts the composed address `→ a1234567890abcde` verbatim and the body as EXACTLY ONE text block carrying the caller's summary `check the branch`. | covered |
 | `!send-message-refused` | ungrounded | remainder_e2e_test.go | — | — | Go: TestSendMessageRefused asserts the attempt SURVIVES the refusal as a FeedAgentPrompt addressed "→ <recipient>" verbatim (no invented identity), the body as the caller's summary only, the delivery's `refused` arm BY NAME (never the unset oneof, which reads as "not yet delivered"), the refusal reason as the vendor's own prose verbatim, and the concluded turn. The GAP this row recorded is CLOSED by landing 14, which added FeedAgentPrompt.delivery.refused{reason}. | covered |
-| `!send-message-resumed` | ungrounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestSendMessageQueuedAndResumed asserts only Concluded. | weak |
+| `!send-message-resumed` | ungrounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestSendMessageQueuedAndResumed waits on FeedAgentPrompt.resumed_recipient (the arm that says a DORMANT agent was restarted), asserts the address is the composed `→ <recipient>` form naming the minted recipient — never the `an agent the send did not name` stand-in — and the body is the summary `resume the sweep`. | covered |
 | `!skill` | grounded | skills_e2e_test.go | feed-families.layer.test.ts | — | Go: TestSkillInvocation/TestSkillNamedAndArgsParameterized assert exact byte-for-byte Document.Markdown match. Web: feed-families.layer only checks dataset.unit==skill (weak). | covered |
 | `!skill-fail` | ungrounded | skills_e2e_test.go | feed-families.layer.test.ts | — | Go: TestSkillFailed asserts the skill card's `failed` arm against all three neighbours (not loaded, not denied), the EXACT composed reason “Error: no such skill: absent-skill”, and that the invocation line still names the attempted skill. Web: feed-families.layer only checks [data-state] is present and non-empty, which the running and loaded arms satisfy too. | covered |
 | `!skills-injected` | declared-only | remainder_e2e_test.go | — | — | Go: TestContextInjectedSkills asserts injected.GetSkills()!=nil and non-empty Skills slice. | covered |
@@ -197,7 +197,7 @@ Two further limits, stated rather than hidden:
 | `!task-reject` | grounded | remainder_e2e_test.go | — | — | Go: TestTaskActsCreateChangeReject asserts checklist rows persist and LiveWork.Tasks chip still non-nil after rejection. | covered |
 | `!tokens-reminder` | ungrounded | producerfaults_e2e_test.go | — | — | Go: TestTokensReminderDrawsNoRow asserts the only-prose-rows negative AND the named negative that no `context_budget` footer line was minted from a TOKEN-COUNT reminder. | covered |
 | `!unmodeled` | grounded | mcpmonitors_e2e_test.go | surfaces.layer.test.ts | — | Go: TestMcpUnmodeledTool asserts exactly 1 TopbarWarning.UnmodeledTool for the tool name, feed rows never mention it. Web: surfaces.layer asserts .topbar-warnings present and unchanged tool-call row count. | covered |
-| `!usage-available` | grounded | accounting_e2e_test.go | — | — | Go: TestAccountUsage asserts a specific daemon log record (Operation/Context[arm]) rather than a frontend/v1 shape. | weak |
+| `!usage-available` | grounded | accounting_e2e_test.go | — | — | Go: TestAccountUsageAvailableArm drives this arm's OWN spelling (rather than only its `!usage-full` alias) and asserts both halves: the resolver's `daemon.footer.on_session_update` record with arm=account_usage, AND the specific negative that these sub-threshold figures draw NO FooterStatusActivityRateLimited line — so the sample landed and the newsworthiness gate held. | covered |
 | `!usage-full` | grounded | accounting_e2e_test.go | surfaces.layer.test.ts | — | Go: TestAccountUsage (same log-record assertion as usage-available). Web: surfaces.layer asserts .footer-tokens/.footer-clock elements and a footer panel with named data-panel. | covered |
 | `!usage-historical` | ungrounded | subagents_e2e_test.go | — | — | Go: TestNestedSubagentHistoricalUsage asserts specifically that NO subagent bubble row is fabricated on the root feed (a shape-absence check) alongside Concluded. | covered |
 | `!usage-opus-absent` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: TestAccountUsageOutcomeArmsAreSampledAfterTheSwitch/opus_absent asserts the arm's exact conclusion prose and ONE FRESH `account_usage` sample after the switch. WEAK BY CONTRACT: observeAccountUsage reads five_hour/seven_day figures only and returns early on the unavailable arm, and the fake's figures sit below the newsworthiness gate, so every arm renders the identical empty footer. | weak |
@@ -206,8 +206,8 @@ Two further limits, stated rather than hidden:
 | `!usage-utilization-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the /utilization_unavailable subtest of the same table — exact prose plus one fresh `account_usage` sample. WEAK for the same contract reason. | weak |
 | `!usage-window-unavailable` | ungrounded | sessionfacts_e2e_test.go | — | — | Go: the /window_unavailable subtest of the same table — exact prose plus one fresh `account_usage` sample. WEAK for the same contract reason. | weak |
 | `!vendor-backgrounded` | grounded | detachedbash_e2e_test.go | — | — | Go: TestVendorBackgroundedTaskStartIsNoDetachment asserts the half that IS reachable — the vendor announces a live `local_bash` task for a call that has not left the turn, and the surface draws NO detached_shell row for it (convert/detached.ts: "A SHELL TASK IS NOT A DETACHMENT YET") while the unit's fate stays a running foreground FeedSimpleToolCall. GAP, recorded at the test: the detachment itself needs shim.v1's DetachForeground, which no agentrepl.v1 rpc exposes and the daemon never issues (PROTO-CHANGES.md Landing 8), so `backgroundedByUser`/AgentSuccess.backgrounded stay unreachable from this layer. | covered |
-| `!wakeup-schedule` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts only Concluded. | weak |
-| `!wakeup-stop` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts only Concluded. | weak |
+| `!wakeup-schedule` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts the no-feed-row fact's positive half on the footer: FooterSubStatusWaitingWakeup stands while the schedule does, and the ⏱ live-work chip counts the pending wakeup — both read off the ONE view they are resolved from. | covered |
+| `!wakeup-stop` | grounded | remainder_e2e_test.go | — | — | Go: TestScheduleWakeupScheduleAndStop asserts the stop RETIRES both arms the schedule raised: the waiting-wakeup status is gone and live_work.crons is unset. | covered |
 | `!web-fetch` | grounded | remainder_e2e_test.go | — | — | Go: TestWebFetch asserts tool call Succeeded, non-empty Text. Web: feed-families.layer only checks .tool-head exists and non-empty text (weak; no link-specific selector despite the file's own comment claiming one). | covered |
 | `!web-fetch-redirect` | ungrounded | webtools_e2e_test.go | — | — | Go: TestWebFetchRedirect asserts four named facts — the succeeded verdict for a 302 (and not failed), the body opening "302 Found", the vendor's redirect instruction kept verbatim, and the input link naming the URL THE AGENT ASKED FOR rather than the redirect destination. | covered |
 | `!web-search` | grounded | remainder_e2e_test.go | feed-families.layer.test.ts | — | Go: TestWebSearch asserts tool call Succeeded, non-empty Links. | covered |
@@ -224,13 +224,13 @@ a disagreement, so these are not hand tallies (they were, and they were
 wrong: the by-layer lines once read 33 and 5 where the table's columns held
 32 and 3).
 
-- Covered (at least one STRONG, specific-shape assertion in a counted layer): **130**
-- Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **19**
-- Uncovered (no counted layer drives the scenario at all): **1**
+- Covered (at least one STRONG, specific-shape assertion in a counted layer): **143**
+- Weak (a counted layer drives the scenario but only asserts turn-completion or a non-specific field, never a named arm/shape): **7**
+- Uncovered (no counted layer drives the scenario at all): **0**
 - Total canonical scenarios: 150
 
 By layer, scenarios with at least one hit:
-- Go e2e (non-emacs): 148 scenarios referenced across 24 files
+- Go e2e (non-emacs): 149 scenarios referenced across 24 files
 - Webapp layer: 35 scenarios referenced across 8 files
 - Emacs e2e: 3 scenarios referenced across 3 files
 
@@ -247,7 +247,7 @@ each row's `Strongest assertion` cell, which is where a reader can act on it.
 
 <!-- BEGIN DERIVED: uncovered -->
 
-- `e2e-fail-this-turn` (marker)
+_None._
 
 <!-- END DERIVED: uncovered -->
 
@@ -259,25 +259,13 @@ scenario named here really is driven, not that the reading is right.
 
 <!-- BEGIN DERIVED: weak -->
 
-- `!context-budget-warning`
 - `!fast-cooldown`
 - `!fast-off`
-- `!fast-on`
-- `!model-fallback`
-- `!push-config-off`
-- `!push-no-transport`
-- `!push-sent`
-- `!push-user-present`
-- `!send-message-resumed`
-- `!send-message`
-- `!usage-available`
 - `!usage-opus-absent`
 - `!usage-sampling-failure`
 - `!usage-service-unavailable`
 - `!usage-utilization-unavailable`
 - `!usage-window-unavailable`
-- `!wakeup-schedule`
-- `!wakeup-stop`
 
 <!-- END DERIVED: weak -->
 
