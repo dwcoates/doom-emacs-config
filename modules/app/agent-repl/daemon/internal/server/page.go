@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -63,13 +64,21 @@ type pageStream struct {
 	subs map[string]*pageSubscription
 }
 
-// pageSubscription is one watch running on a page.
+// pageSubscription is one watch running on a page. Every field is read and
+// written under its page's mutex.
 type pageSubscription struct {
 	cancel context.CancelFunc
-	// unsubscribed marks an end the CLIENT asked for. Such a subscription
-	// sends no `ended` frame: a client that asked for the end does not need to
-	// be told about it.
+	// unsubscribed marks an end the CLIENT asked for, which is the `how` arm
+	// its `ended` frame carries.
 	unsubscribed bool
+	// accepted marks a subscription whose body reached acceptance, which is
+	// the moment `SubscribePage` answered that it EXISTS.
+	//
+	// NOTHING BEFORE THAT MOMENT IS ANNOUNCED ON THE PAGE. A body that ended
+	// without accepting is a REFUSAL, and the refusal is `SubscribePage`'s own
+	// Connect error — exactly as a refused dedicated open is. An `ended` frame
+	// for it would name a subscription the client was told does not exist.
+	accepted bool
 }
 
 // send hands one frame to the page's writer, or reports that the page is gone.
@@ -252,12 +261,25 @@ func (s *server) SubscribePage(
 	// `acceptStream` means for the dedicated rpc.
 	accepted := make(chan struct{})
 	var once sync.Once
-	subCtx = withAcceptNotifier(subCtx, func() { once.Do(func() { close(accepted) }) })
+	subCtx = withAcceptNotifier(subCtx, func() {
+		once.Do(func() {
+			page.mu.Lock()
+			record.accepted = true
+			page.mu.Unlock()
+			close(accepted)
+		})
+	})
 
+	// THE END IS STATED BEFORE THE ANSWER IS, which is what keeps the two from
+	// racing: `endPageSubscription` runs before `done` carries the body's
+	// error, so the branch below that reads it never has to end the
+	// subscription a second time and the two can never disagree about which
+	// frame the ending owes.
 	done := make(chan error, 1)
 	go func() {
-		done <- watch.Run(subCtx)
-		s.endPageSubscription(page, req.Msg.GetSubscription())
+		err := watch.Run(subCtx)
+		s.endPageSubscription(page, req.Msg.GetSubscription(), err)
+		done <- err
 	}()
 
 	select {
@@ -269,8 +291,8 @@ func (s *server) SubscribePage(
 	case err := <-done:
 		// The body finished before it accepted: a refusal, or a validation
 		// failure. It is this call's answer, exactly as it would have been the
-		// dedicated rpc's.
-		s.endPageSubscription(page, req.Msg.GetSubscription())
+		// dedicated rpc's. The subscription is already ended and, never having
+		// been accepted, announced nothing on the page.
 		if err == nil {
 			err = TransportClosed(s.log, rpc, "watch_ended_before_acceptance",
 				fmt.Sprintf("the %s subscription ended before it was accepted", watch.Name), false)
@@ -283,6 +305,11 @@ func (s *server) SubscribePage(
 }
 
 // UnsubscribePage ends one subscription and leaves the page's others alone.
+//
+// THE END IS STILL ANNOUNCED, carrying the `unsubscribed` arm. The ending is
+// ONE fact on ONE wire whoever asked for it: suppressing the client's own would
+// leave a page inferring, from silence, the difference between the end it asked
+// for and an end that raced its request.
 //
 // Unsubscribing one that does not exist is SUCCESS: the end is the state the
 // caller asked for, and a subscription the daemon already ended is that state.
@@ -322,11 +349,21 @@ func (s *server) UnsubscribePage(
 }
 
 // endPageSubscription forgets a subscription whose body has returned and tells
-// the page it is over — unless the client is the one who ended it.
-func (s *server) endPageSubscription(page *pageStream, id string) {
+// the page it is over, NAMING WHY.
+//
+// err is the body's own return: the Connect error a dedicated rpc would have
+// ended its stream with, or nil for a source that simply finished.
+func (s *server) endPageSubscription(page *pageStream, id string, err error) {
+	// The flags are READ UNDER THE PAGE'S LOCK, in the same critical section
+	// that removes the record. UnsubscribePage sets `unsubscribed` on a record
+	// it found in this map under this lock, so reading it afterwards outside
+	// the lock would be a race with the very client whose request decides
+	// which arm this frame carries.
 	page.mu.Lock()
 	record, live := page.subs[id]
+	var accepted, unsubscribed bool
 	if live {
+		accepted, unsubscribed = record.accepted, record.unsubscribed
 		delete(page.subs, id)
 	}
 	page.mu.Unlock()
@@ -334,21 +371,70 @@ func (s *server) endPageSubscription(page *pageStream, id string) {
 		return
 	}
 	record.cancel()
-	if record.unsubscribed {
+	if !accepted {
+		// Never accepted, so the client was told the subscription does not
+		// exist. Announcing its end would name an id it never held.
 		return
 	}
+	ended, arm := endedFrame(id, unsubscribed, err)
 	// The page's writer may already be gone; a failed send here means the page
 	// itself ended, which is the strongest form of the same news.
-	if err := page.send(&agentreplv1.WatchPageResponse{
-		Frame: &agentreplv1.WatchPageResponse_Ended{
-			Ended: &agentreplv1.PageSubscriptionEnded{Subscription: id},
-		},
-	}); err != nil {
+	if sendErr := page.send(&agentreplv1.WatchPageResponse{
+		Frame: &agentreplv1.WatchPageResponse_Ended{Ended: ended},
+	}); sendErr != nil {
 		return
 	}
 	s.log.Debug("daemon.server.page_subscription_ended",
-		"a page subscription ended on its own and its page was told",
-		dlog.Context{"page": page.id, "subscription": id})
+		"a page subscription ended and its page was told why",
+		dlog.Context{"page": page.id, "subscription": id, "how": arm})
+}
+
+// endedFrame builds the ending's frame, naming its `how` arm and answering the
+// arm's own name for the log alongside it.
+//
+// AN ARM IS ALWAYS SET. An `ended` frame with no `how` says a subscription
+// stopped without saying whether anything went wrong, which is precisely the
+// fact the arm exists to carry.
+//
+// THE CLIENT'S OWN REQUEST WINS OVER THE BODY'S RETURN. UnsubscribePage cancels
+// the subscription's context and the body then reports whatever its source
+// reports on cancellation; calling that a failure would turn every ordinary
+// collapse of a subagent bubble into an error drawn on the page.
+func endedFrame(id string, unsubscribed bool, err error) (*agentreplv1.PageSubscriptionEnded, string) {
+	ended := &agentreplv1.PageSubscriptionEnded{Subscription: id}
+	switch {
+	case unsubscribed:
+		ended.How = &agentreplv1.PageSubscriptionEnded_Unsubscribed{
+			Unsubscribed: &agentreplv1.PageSubscriptionUnsubscribed{},
+		}
+		return ended, "unsubscribed"
+	case err != nil:
+		ended.How = &agentreplv1.PageSubscriptionEnded_Failed{Failed: failedAs(err)}
+		return ended, "failed"
+	default:
+		ended.How = &agentreplv1.PageSubscriptionEnded_SourceEnded{
+			SourceEnded: &agentreplv1.PageSubscriptionSourceEnded{},
+		}
+		return ended, "source_ended"
+	}
+}
+
+// failedAs renders one watch body's error as the failure the page draws: the
+// SAME Connect code and sentence the dedicated rpc's stream would have carried.
+//
+// An error that is not a Connect error at all is `internal`, which is exactly
+// what connect-go itself would have stamped on it had it reached the wire as a
+// dedicated stream's status.
+func failedAs(err error) *agentreplv1.PageSubscriptionFailed {
+	var coded *connect.Error
+	if errors.As(err, &coded) {
+		return &agentreplv1.PageSubscriptionFailed{
+			Code: coded.Code().String(), Message: coded.Message(),
+		}
+	}
+	return &agentreplv1.PageSubscriptionFailed{
+		Code: connect.CodeInternal.String(), Message: err.Error(),
+	}
 }
 
 // pageWatch is what ONE arm of the subscription oneof resolves to: the rpc it
