@@ -430,18 +430,13 @@ func TestModelChanged(t *testing.T) {
 // Scenario: `!fast-on` (session.ts's `fastModeScenario` family) — the
 // fake-registry name behind the `fast-mode` capture golden.
 //
-// OPEN QUESTION, again cited directly from the contract: shim.md's same "The
-// e2e mock additions" section states, verbatim, "GAP FOR THE ENGINE:
-// `fastMode` is in the engine's OWNED_ARMS, so the fold-produced `fast_mode`
-// update from `init` is DROPPED, and nothing in the engine pushes one.
-// WatchSession's `fast_mode` arm has no producer yet." `fast_mode` lives only
-// in conversation.v1's `session.proto` (`SessionUpdate.fast_mode`), which the
-// daemon consumes over shim.v1 but is not itself a frontend.v1 shape; with no
-// SessionUpdate push, there is no discoverable frontend surface for this
-// fact today. This test therefore asserts only the turn's own successful
-// completion (SPEC.md's own description: "turn terminal success.completed"),
-// and does not attempt the "fast-mode marker on the turn's record" half of
-// SPEC.md's test-list entry #8, per the same documented-gap rule as #7.
+// LANDING 13 CLOSED THE GAP THIS TEST USED TO RECORD. `fast_mode` used to
+// live only in conversation.v1's `session.proto`, with no frontend.v1 shape
+// and an empty branch in every resolver, so the test could assert nothing but
+// the turn's own completion. `TopbarView.fast_mode`
+// (frontend/v1/topbar.proto) now carries the state BY NAME and the topbar
+// resolver fills it, so SPEC.md test-list entry #8's second half — the
+// fast-mode state, drawn — is asserted below.
 func TestFastMode(t *testing.T) {
 	t.Parallel()
 	// Arrange
@@ -461,22 +456,21 @@ func TestFastMode(t *testing.T) {
 		t.Fatalf("FeedTurnEnded.Outcome = %v, want Concluded (success.completed)", ended)
 	}
 
-	// DISPUTE, reported rather than papered over: frontend/v1 names NO
-	// fast-mode shape anywhere — not on the footer, not on the topbar (a
-	// full grep of proto/src/frontend/v1 for "fast" answers nothing). Fast
-	// mode exists only as conversation/v1's SessionFastMode
-	// (session.proto:328-347) and as ModelOption.supports_fast_mode
-	// (api.proto:175-176), neither of which is a drawn surface. So the proto
-	// itself, not merely the engine, is where the fast-mode state stops; the
-	// strongest frontend fact available is the answer the fake's fast-mode
-	// turn concludes with, which names the state the result reported
-	// (session.ts fastModeScenario: `const conclusion = ` + "`Fast mode is ${state}.`" + `,
-	// echoed by both the assistant block and result.result). That pins the
-	// `on` arm specifically, so `!fast-off`/`!fast-cooldown` could not pass
-	// this test.
+	// The vendor's own account of which state ran (session.ts
+	// fastModeScenario composes it verbatim into both the assistant block and
+	// `result.result`). It pins the `on` arm specifically, so `!fast-off` and
+	// `!fast-cooldown` could not pass this line.
 	const wantFastAnswer = "Fast mode is on."
 	if got := tlResponseMarkdown(t, tlOpenRows(t, w, ws), ended.GetConcluded().GetAnswer()); got != wantFastAnswer {
 		t.Errorf("settled response markdown = %q, want %q (the fast-mode ON state)", got, wantFastAnswer)
+	}
+
+	// Assert: the state reaches the DRAWN strip under its own name, which is
+	// the half of SPEC.md #8 that had no contract to land on before Landing
+	// 13.
+	view := sfAwaitFastMode(t, w, ws, "on")
+	if got := sfFastModeArm(view); got != "on" {
+		t.Fatalf("TopbarView.fast_mode arm = %q, want on", got)
 	}
 }
 

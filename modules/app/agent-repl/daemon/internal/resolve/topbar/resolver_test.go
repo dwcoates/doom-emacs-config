@@ -622,3 +622,108 @@ func TestStatusFactsCarriesTheSessionsOwnFacts(t *testing.T) {
 		t.Fatalf("facts = %+v, want %+v", facts, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fast mode — the permission mode's sibling standing state. One test per arm,
+// plus the unset case, because "the vendor has not said" is its own fact.
+// ---------------------------------------------------------------------------
+
+// fastModeUpdate is one fast-mode session update carrying the given state.
+func fastModeUpdate(mode *conversationv1.SessionFastMode) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_FastMode{FastMode: mode},
+	}
+}
+
+func TestFastModeOnReachesTheStrip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, fastModeUpdate(&conversationv1.SessionFastMode{
+		State: &conversationv1.SessionFastMode_On{On: &conversationv1.SessionFastModeOn{}},
+	}))
+
+	// Assert
+	if _, ok := h.view(t).GetFastMode().GetState().(*frontendv1.TopbarFastMode_On); !ok {
+		t.Fatalf("state = %T, want the on arm", h.view(t).GetFastMode().GetState())
+	}
+}
+
+func TestFastModeOffCarriesTheVendorReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, fastModeUpdate(&conversationv1.SessionFastMode{
+		State: &conversationv1.SessionFastMode_Off{
+			Off: &conversationv1.SessionFastModeOff{Reason: "preference"},
+		},
+	}))
+
+	// Assert
+	off, ok := h.view(t).GetFastMode().GetState().(*frontendv1.TopbarFastMode_Off)
+	if !ok {
+		t.Fatalf("state = %T, want the off arm", h.view(t).GetFastMode().GetState())
+	}
+	if off.Off.GetReason() != "preference" {
+		t.Fatalf("reason = %q, want the vendor's own word", off.Off.GetReason())
+	}
+}
+
+func TestFastModeCooldownIsItsOwnArmAndNotOff(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, fastModeUpdate(&conversationv1.SessionFastMode{
+		State: &conversationv1.SessionFastMode_Cooldown{
+			Cooldown: &conversationv1.SessionFastModeCooldown{},
+		},
+	}))
+
+	// Assert
+	if _, ok := h.view(t).GetFastMode().GetState().(*frontendv1.TopbarFastMode_Cooldown); !ok {
+		t.Fatalf("state = %T, want the cooldown arm — never folded into off",
+			h.view(t).GetFastMode().GetState())
+	}
+}
+
+func TestFastModeUnstatedDrawsNoFastModeAtAll(t *testing.T) {
+	// Arrange: a session that has said nothing about fast mode.
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	view := h.view(t)
+
+	// Assert: UNSET, never defaulted to off — the vendor made no claim.
+	if view.GetFastMode() != nil {
+		t.Fatalf("fast_mode = %+v, want unset until the vendor states one", view.GetFastMode())
+	}
+}
+
+func TestAFastModeStateStandsUntilTheNextOne(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnSessionUpdate(testWS, fastModeUpdate(&conversationv1.SessionFastMode{
+		State: &conversationv1.SessionFastMode_On{On: &conversationv1.SessionFastModeOn{}},
+	}))
+
+	// Act: an unrelated session update must not retire the standing state.
+	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{
+			QueryDied: &conversationv1.SessionQueryDied{},
+		},
+	})
+
+	// Assert
+	if _, ok := h.view(t).GetFastMode().GetState().(*frontendv1.TopbarFastMode_On); !ok {
+		t.Fatalf("state = %T, want the on arm still standing",
+			h.view(t).GetFastMode().GetState())
+	}
+}

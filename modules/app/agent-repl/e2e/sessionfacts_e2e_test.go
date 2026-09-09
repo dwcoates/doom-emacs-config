@@ -29,15 +29,14 @@
 // THREE DISPUTES ARE RECORDED HERE RATHER THAN PAPERED OVER. Each is stated
 // in full at the test it constrains; in summary:
 //
-//  1. FAST MODE HAS NO FRONTEND SURFACE. `frontend/v1` carries no fast-mode
-//     field anywhere (grep for "fast" over proto/src/frontend/v1 answers
-//     nothing), and every daemon resolver that switches on
-//     SessionUpdate_FastMode does so with an EMPTY branch
-//     (daemon/internal/resolve/{footer,topbar,sidebar}/resolver.go,
-//     internal/resolve/feed/sink.go). So the strongest assertion available
-//     is the scenario's own exact prose plus the daemon's structured record
-//     that it took the typed arm — the same wait signal
-//     accounting_e2e_test.go uses for account usage.
+//  1. FAST MODE NOW HAS A FRONTEND SURFACE (Landing 13). It used to have
+//     none — `frontend/v1` carried no fast-mode field anywhere and every
+//     resolver's SessionUpdate_FastMode branch was empty — which is what
+//     made these tests weak BY CONTRACT rather than by neglect.
+//     `TopbarView.fast_mode` (frontend/v1/topbar.proto, TopbarFastMode)
+//     carries the state BY NAME and the topbar resolver fills it, so the
+//     assertions below are on the DRAWN ARM and no longer on a daemon log
+//     record.
 //
 //  2. `!rate-limit-seven-day` NOW DRAWS ITS ALLOWANCE. The scenario's
 //     utilization was 0.61 while the footer only draws the rate line when
@@ -50,21 +49,20 @@
 //     any kind, so there was no real figure to prefer — and the weekly cell
 //     is asserted on the drawn shape below.
 //
-//  3. THE ACCOUNT-USAGE OUTCOME ARMS REACH NO DRAWN SHAPE. The only
-//     consumer of SessionAccountUsage is the footer's `observeAccountUsage`,
-//     which files five_hour/seven_day FIGURES and returns early for every
-//     unavailable arm ("A sample that could read no figure... leaves the
-//     figures on hand standing"). The fake's figures (five_hour 41,
-//     seven_day 63 — catalogs.ts fakeAccountUsage) are below the same 0.8
-//     newsworthiness threshold, so neither the available nor the
-//     unavailable arms move any pixel: opus_absent draws exactly what
-//     available draws, and the four unavailable reasons draw exactly what
-//     the previous sample drew. What IS observable — and asserted — is the
-//     scenario's own prose and a FRESH account_usage arm reaching the
-//     daemon after the scenario switched it (the shim reprobes account
-//     usage at every turn close: agent-shim/claude/shim/src/engine/
-//     session.ts `reprobeSessionFacts`, "A TURN CAN CHANGE WHAT THE PROBES
-//     ANSWER").
+//  3. THE ACCOUNT-USAGE OUTCOME ARMS NOW REACH A DRAWN SHAPE (Landing 13).
+//     `observeAccountUsage` used to file five_hour/seven_day FIGURES and
+//     return early for every unavailable arm, so no arm of that oneof moved
+//     a pixel: opus_absent drew exactly what available drew, and the four
+//     unavailable reasons drew exactly what the previous sample drew.
+//     `FooterStatusActivityRateLimited.sample` (frontend/v1/footer.proto,
+//     FooterAllowanceSample) now carries the outcome BY NAME beside the
+//     figures, and the rate line's newsworthiness gate opens on an unread
+//     sample as well as on a newsworthy allowance — otherwise the cell would
+//     stay unreachable from this mock, whose figures (five_hour 41,
+//     seven_day 63 — catalogs.ts fakeAccountUsage) sit under the 0.8
+//     threshold. The daemon files a fresh sample at every turn close (the
+//     shim reprobes: agent-shim/claude/shim/src/engine/session.ts
+//     `reprobeSessionFacts`, "A TURN CAN CHANGE WHAT THE PROBES ANSWER").
 //
 // Every scenario here runs against the scripted fake git (harness.NewRepo)
 // and the fake-SDK vendor inside the real shim: no real git, no vendor
@@ -200,22 +198,49 @@ func sfRateLimited(v *frontendv1.FooterView) *frontendv1.FooterStatusActivityRat
 // off: "NOT the same as off: nothing needs doing and offering the user a way
 // to turn it on would offer something that cannot take effect."
 //
-// DISPUTE 1 (see the file header): no frontend surface exists for any of the
-// three arms, so the drawn assertion this test would otherwise make cannot
-// be written against the frozen contract. Asserted instead: the scenario's
-// exact conclusion prose (which of the two states ran), and a FRESH
-// fast_mode arm reaching the daemon's TOPBAR resolver for this workspace —
-// proof the typed SessionFastMode crossed the shim's converter and the
-// daemon's session-stream boundary, which is every hop that exists.
+// LANDING 13 STRENGTHENED THIS TEST (see the file header's dispute 1). The
+// assertion is now the DRAWN ARM on TopbarView.fast_mode, not a daemon log
+// record: each state reaches the strip under its own name, and `cooldown`
+// specifically is asserted NOT to arrive as `off` — the whole reason the
+// contract keeps it a separate arm. The scenario's exact conclusion prose is
+// still pinned, because it is what says which state the vendor reported.
 //
 // The topbar is the one resolver the arm reaches: sessionwatcher/route.go
 // routes fast_mode to the topbar alone, so the footer never takes it.
 // ===========================================================================
 
-func TestFastModeOffAndCooldownStatesReachTheDaemon(t *testing.T) {
+// sfFastModeArm names the topbar's drawn fast-mode state, or "" when the view
+// carries none. The NAME is what the test asserts on, so an arm the contract
+// grows later fails loudly here instead of being read as one of these.
+func sfFastModeArm(v *frontendv1.TopbarView) string {
+	switch v.GetFastMode().GetState().(type) {
+	case *frontendv1.TopbarFastMode_On:
+		return "on"
+	case *frontendv1.TopbarFastMode_Off:
+		return "off"
+	case *frontendv1.TopbarFastMode_Cooldown:
+		return "cooldown"
+	default:
+		return ""
+	}
+}
+
+// sfAwaitFastMode waits for the topbar to draw the named fast-mode arm and
+// answers the view that did. A FRESH stream is served the daemon's current
+// resolved state and then every later push, so this waits for an event and
+// never for a bound.
+func sfAwaitFastMode(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, want string) *frontendv1.TopbarView {
+	t.Helper()
+	topbar := w.WatchTopbar(ws)
+	defer topbar.Close()
+	return harness.AwaitView(t, w.Ctx(), topbar, "the topbar to draw fast mode "+want,
+		func(v *frontendv1.TopbarView) bool { return sfFastModeArm(v) == want })
+}
+
+func TestFastModeOffAndCooldownStatesReachTheStrip(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, ws, workspaceDir := sfNewWorkspace(t)
+	w, ws, _ := sfNewWorkspace(t)
 
 	cases := []struct {
 		name       string
@@ -228,17 +253,61 @@ func TestFastModeOffAndCooldownStatesReachTheDaemon(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: what the daemon had already taken before this
-			// scenario ran, so the wait below is for a NEW record.
-			before := sfSessionArmRecords(t, w, workspaceDir, sfTopbarSessionUpdate, "fast_mode")
-
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
 
-			// Assert
+			// Assert: the vendor said which state it is, and the strip draws
+			// that state under its own name.
 			sfAwaitConclusion(t, w, ws, turn, tc.conclusion)
-			sfAwaitSessionArmRecords(t, w, workspaceDir, sfTopbarSessionUpdate, "fast_mode", before+1)
+			view := sfAwaitFastMode(t, w, ws, tc.name)
+			if got := sfFastModeArm(view); got != tc.name {
+				t.Fatalf("TopbarView.fast_mode arm = %q, want %q", got, tc.name)
+			}
 		})
+	}
+}
+
+// COOLDOWN IS NOT OFF, asserted as a specific negative on the drawn shape.
+// session.proto states the reason the arms are separate — "NOT the same as
+// off: nothing needs doing and offering the user a way to turn it on would
+// offer something that cannot take effect" — and a resolver that folded the
+// two would pass every assertion above but fail this one.
+func TestFastModeCooldownIsNotDrawnAsOff(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fast-cooldown")
+	sfAwaitConclusion(t, w, ws, turn, "Fast mode is cooldown.")
+
+	// Assert
+	view := sfAwaitFastMode(t, w, ws, "cooldown")
+	if _, off := view.GetFastMode().GetState().(*frontendv1.TopbarFastMode_Off); off {
+		t.Fatal("the strip drew cooldown as off, which offers a switch that cannot take effect")
+	}
+}
+
+// THE OFF ARM CARRIES THE VENDOR'S REASON VERBATIM. `!fast-off` reports
+// `fast_mode_disabled_reason: "preference"` (session.ts fastModeScenario), and
+// the contract keeps the string rather than a class, so the strip can say why.
+func TestFastModeOffCarriesTheVendorsReason(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "fast-off")
+	sfAwaitConclusion(t, w, ws, turn, "Fast mode is off.")
+
+	// Assert
+	view := sfAwaitFastMode(t, w, ws, "off")
+	off, ok := view.GetFastMode().GetState().(*frontendv1.TopbarFastMode_Off)
+	if !ok {
+		t.Fatalf("TopbarView.fast_mode = %v, want the off arm", view.GetFastMode())
+	}
+	if got := off.Off.GetReason(); got != "preference" {
+		t.Fatalf("TopbarFastModeOff.reason = %q, want the vendor's own %q", got, "preference")
 	}
 }
 
@@ -509,26 +578,64 @@ func footerOf(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Str
 // answer could produce only the first arm, so the mock keeps all five and a
 // scenario picks").
 //
-// DISPUTE 3 (see the file header): none of the five arms reaches a drawn
-// shape. observeAccountUsage reads FIGURES only and returns early on the
-// unavailable arm, and the fake's figures (41 / 63) are below the footer's
-// newsworthiness gate, so every arm renders the identical (empty) footer.
-// Asserted instead, per arm: the scenario's own exact prose, and a FRESH
-// account_usage sample reaching the daemon after the arm was switched — the
-// turn-close reprobe the shim's engine performs precisely because "A TURN
-// CAN CHANGE WHAT THE PROBES ANSWER".
+// LANDING 13 STRENGTHENED THESE TESTS (see the file header's dispute 3). Each
+// arm now reaches FooterStatusActivityRateLimited.sample by name, and the
+// assertions below are on that drawn arm — plus, for every unavailable one,
+// the standing contract that a failed read LEAVES THE FIGURES ON HAND
+// STANDING ("A sample that could read no figure... leaves the figures on hand
+// standing", daemon/internal/resolve/footer/resolver.go).
+//
+// THE FAKE'S FIGURES ARE THE PROOF OF THAT SECOND HALF: five_hour 41 and
+// seven_day 63 (catalogs.ts fakeAccountUsage) are the figures an available
+// sample files, and they are what must still be drawn after an unread.
 // ===========================================================================
 
-func TestAccountUsageOutcomeArmsAreSampledAfterTheSwitch(t *testing.T) {
+// The five-hour and seven-day utilizations catalogs.ts's available shape
+// files, as the footer draws them (percent on the wire, fraction on the
+// contract).
+const (
+	sfFiveHourUtilization = 0.41
+	sfSevenDayUtilization = 0.63
+)
+
+// sfSampleArm names the footer's drawn account-usage outcome, or "" when the
+// rate line carries none (including when no line is drawn at all).
+func sfSampleArm(v *frontendv1.FooterView) string {
+	switch sfRateLimited(v).GetSample().GetOutcome().(type) {
+	case *frontendv1.FooterAllowanceSample_Available:
+		return "available"
+	case *frontendv1.FooterAllowanceSample_ServiceUnavailable:
+		return "service_unavailable"
+	case *frontendv1.FooterAllowanceSample_WindowUnavailable:
+		return "window_unavailable"
+	case *frontendv1.FooterAllowanceSample_UtilizationUnavailable:
+		return "utilization_unavailable"
+	case *frontendv1.FooterAllowanceSample_SamplingFailure:
+		return "sampling_failure"
+	default:
+		return ""
+	}
+}
+
+// sfAwaitSampleArm waits for the footer to draw the named account-usage
+// outcome and answers the view that did.
+func sfAwaitSampleArm(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, want string) *frontendv1.FooterView {
+	t.Helper()
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+	return harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to draw the "+want+" usage sample",
+		func(v *frontendv1.FooterView) bool { return sfSampleArm(v) == want })
+}
+
+func TestAccountUsageUnreadArmsAreNamedOnTheFooter(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	w, ws, workspaceDir := sfNewWorkspace(t)
+	w, ws, _ := sfNewWorkspace(t)
 
 	cases := []struct {
 		name     string
 		scenario string
 	}{
-		{name: "opus_absent", scenario: "usage-opus-absent"},
 		{name: "service_unavailable", scenario: "usage-service-unavailable"},
 		{name: "window_unavailable", scenario: "usage-window-unavailable"},
 		{name: "utilization_unavailable", scenario: "usage-utilization-unavailable"},
@@ -537,17 +644,87 @@ func TestAccountUsageOutcomeArmsAreSampledAfterTheSwitch(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			before := sfSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "account_usage")
+			// Arrange: a READ sample first, so the figures this arm must
+			// leave standing are figures the daemon actually holds. Driven
+			// rather than assumed: the session's own start-time probe is not
+			// this test's to rely on.
+			readable := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-available")
+			sfAwaitConclusion(t, w, ws, readable,
+				"The account-usage probe now answers with the available shape.")
 
 			// Act
 			turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, tc.scenario)
 
 			// Assert: the arm the scenario switched to, named in its own
-			// conclusion (session.ts usageScenario composes it verbatim).
+			// conclusion (session.ts usageScenario composes it verbatim) and
+			// then named again on the drawn footer.
 			sfAwaitConclusion(t, w, ws, turn,
 				"The account-usage probe now answers with the "+tc.name+" shape.")
-			sfAwaitSessionArmRecords(t, w, workspaceDir, sfFooterSessionUpdate, "account_usage", before+1)
+			view := sfAwaitSampleArm(t, w, ws, tc.name)
+
+			// Assert: ALONGSIDE, never instead of. The figures the last
+			// readable sample filed are still drawn.
+			line := sfRateLimited(view)
+			if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
+				t.Errorf("FooterAllowance(session).utilization = %v, want the standing %v left alone by an unread sample",
+					got, sfFiveHourUtilization)
+			}
+			if got := line.GetWeekly().GetUtilization(); got != sfSevenDayUtilization {
+				t.Errorf("FooterAllowance(weekly).utilization = %v, want the standing %v left alone by an unread sample",
+					got, sfSevenDayUtilization)
+			}
 		})
 	}
+}
+
+// THE SAMPLING FAILURE KEEPS THE SHIM'S OWN CAUSE. The arm exists so a reader
+// learns WHY the shim could not sample, and a cause the daemon dropped would
+// leave the arm saying only "something".
+func TestAccountUsageSamplingFailureCarriesACause(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-sampling-failure")
+	sfAwaitConclusion(t, w, ws, turn,
+		"The account-usage probe now answers with the sampling_failure shape.")
+
+	// Assert
+	view := sfAwaitSampleArm(t, w, ws, "sampling_failure")
+	failure, ok := sfRateLimited(view).GetSample().GetOutcome().(*frontendv1.FooterAllowanceSample_SamplingFailure)
+	if !ok {
+		t.Fatalf("sample outcome = %v, want the sampling_failure arm", sfRateLimited(view).GetSample())
+	}
+	if failure.SamplingFailure.GetCause() == "" {
+		t.Error("FooterAllowanceSampleSamplingFailure.cause is empty, want the shim's own account of what failed")
+	}
+}
+
+// `!usage-opus-absent` IS NOT AN UNAVAILABILITY, and that is the whole
+// scenario: the service answered in full and this account simply has no opus
+// window (catalogs.ts: "An ABSENT OPTIONAL WINDOW, which is NOT an
+// unavailability"). So the drawn fact is that it RETIRES a standing unread —
+// the sample reads again, and with the fake's figures under the
+// newsworthiness gate the rate line goes away entirely.
+func TestAccountUsageOpusAbsentRetiresAStandingUnread(t *testing.T) {
+	t.Parallel()
+	// Arrange: an unread standing on the footer to be retired.
+	w, ws, _ := sfNewWorkspace(t)
+	unread := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
+	sfAwaitConclusion(t, w, ws, unread,
+		"The account-usage probe now answers with the service_unavailable shape.")
+	sfAwaitSampleArm(t, w, ws, "service_unavailable")
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-opus-absent")
+	sfAwaitConclusion(t, w, ws, turn,
+		"The account-usage probe now answers with the opus_absent shape.")
+
+	// Assert: the sample reads again, so the unread is gone and — the figures
+	// being unremarkable — so is the line it rode on.
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
+	harness.AwaitView(t, w.Ctx(), footer.Stream, "the footer to retire the unread an absent optional window is not",
+		func(v *frontendv1.FooterView) bool { return sfRateLimited(v) == nil })
 }
