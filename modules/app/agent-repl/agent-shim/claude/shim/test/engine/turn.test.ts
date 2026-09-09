@@ -540,6 +540,84 @@ describe("KillTurn", () => {
     expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("noTurnOpen");
   });
 
+  // A TURN WHOSE START IS IN FLIGHT IS NOT "NO TURN OPEN". `startTurn` makes
+  // the prompt row durable and reads the opening page BEFORE `setOpenTurn`, so
+  // the session reports no open turn for the length of two store round trips
+  // -- and a forced restart's kill that lands there was refused, which
+  // `workspace.Restart` returns to its caller, so the relaunch never ran.
+  it("waits for a StartTurn still in flight and kills the turn it opened", async () => {
+    // Arrange: a start blocked exactly where the real one blocks, on the
+    // durable prompt row.
+    const h = await harness();
+    let releaseStart = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act: the kill arrives while the start is still inside that write.
+    const killing = h.turns.killTurn(kill(true));
+    releaseStart();
+    const [, killed] = await Promise.all([starting, killing]);
+
+    // Assert
+    expect(killed.result.case).toBe("success");
+    expect(h.open).toBeUndefined();
+  });
+
+  // The wait is for the START, not for a turn: a start that is refused leaves
+  // nothing open, and the kill must say so rather than claim it killed one.
+  it("still refuses noTurnOpen when the StartTurn it waited for was refused", async () => {
+    // Arrange
+    const h = await harness();
+    h.submitRejects = new Error("the vendor refused the prompt");
+    let releaseStart = (): void => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseStart = resolve;
+    });
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    const starting = h.turns.startTurn(startTurn());
+
+    // Act
+    const killing = h.turns.killTurn(kill(true));
+    releaseStart();
+    const [, killed] = await Promise.all([starting, killing]);
+
+    // Assert
+    expect(failureKind(killed)).toBe("noTurnOpen");
+  });
+
+  // The wait is addressed: a kill for a DIFFERENT turn must not be held behind
+  // somebody else's start.
+  it("does not wait for a start of some other turn", async () => {
+    // Arrange
+    const h = await harness();
+    const blocked = new Promise<void>(() => {});
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await blocked;
+      await durable(entries);
+    };
+    void h.turns.startTurn(startTurn());
+
+    // Act
+    const killed = await h.turns.killTurn(
+      kill(true, create(conversationv1.TurnIdSchema, { value: "turn-other" })),
+    );
+
+    // Assert
+    expect(failureKind(killed)).toBe("noTurnOpen");
+  });
+
   it("refuses a turn that is not the open one", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
