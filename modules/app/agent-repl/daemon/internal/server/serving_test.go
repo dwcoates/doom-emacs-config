@@ -324,3 +324,72 @@ func TestWriteBarrierDoesNotCallABusyConnectionALostAnswer(t *testing.T) {
 		t.Fatal("AwaitWrittenSince = false on a connection that wrote past the mark throughout; a busy link is not a lost answer")
 	}
 }
+
+// TestAwaitWritesQuietSettlesOnABarrierNothingHasWrittenTo covers the exit of a
+// daemon nothing is connected to: it owes nothing, so it must not spend the
+// bound proving that.
+func TestAwaitWritesQuietSettlesOnABarrierNothingHasWrittenTo(t *testing.T) {
+	// Arrange
+	barrier := &WriteBarrier{}
+
+	// Act
+	quiet := barrier.AwaitQuiescent(20 * time.Millisecond)
+
+	// Assert
+	if !quiet {
+		t.Fatal("AwaitQuiescent = false on a barrier no connection ever wrote to; the exit would wait out its bound for nothing")
+	}
+}
+
+// TestAwaitWritesQuietWaitsForAPushStillOnItsWayOut is the whole reason the
+// quiescent half exists: a push onto a STANDING stream is not a counted call,
+// so nothing else in the exit is holding it.
+func TestAwaitWritesQuietWaitsForAPushStillOnItsWayOut(t *testing.T) {
+	// Arrange: a connection whose Write is blocked mid-flight, exactly as a
+	// push whose bytes have not reached the socket is.
+	barrier := &WriteBarrier{}
+	inner, outer := net.Pipe()
+	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
+	counted := (&barrierListener{barrier: barrier}).count(inner)
+	writing := make(chan struct{})
+	go func() {
+		close(writing)
+		_, _ = counted.Write([]byte("push"))
+	}()
+	<-writing
+
+	// Act: the reader never takes the bytes, so the write stays in flight.
+	quiet := barrier.AwaitQuiescent(20 * time.Millisecond)
+
+	// Assert
+	if quiet {
+		t.Fatal("AwaitQuiescent = true while a write was still in flight; the exit would close the stream over the push")
+	}
+}
+
+// TestAwaitWritesQuietSettlesOnceThePushHasLeft is the other half: the bytes
+// are on the socket, so the exit may close the streams.
+func TestAwaitWritesQuietSettlesOnceThePushHasLeft(t *testing.T) {
+	// Arrange
+	barrier := &WriteBarrier{}
+	inner, outer := net.Pipe()
+	t.Cleanup(func() { _ = inner.Close(); _ = outer.Close() })
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		_, _ = io.ReadFull(outer, make([]byte, 4))
+	}()
+	counted := (&barrierListener{barrier: barrier}).count(inner)
+	if _, err := counted.Write([]byte("push")); err != nil {
+		t.Fatalf("Write() = %v, want the bytes to go out", err)
+	}
+	<-drained
+
+	// Act
+	quiet := barrier.AwaitQuiescent(time.Second)
+
+	// Assert
+	if !quiet {
+		t.Fatal("AwaitQuiescent = false after the connection wrote and went quiet")
+	}
+}

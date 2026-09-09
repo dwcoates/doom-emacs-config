@@ -312,3 +312,64 @@ func TestJoinQueueWorkReportsWorkThatOutlivesTheBound(t *testing.T) {
 		t.Fatalf("records = %+v, want the overrun reported", log.Records())
 	}
 }
+
+// recordingGate is a server.RequestGate that records the order of the waits the
+// exit performs, so a test can assert what the exit waited for and in which
+// order without standing a real daemon up.
+type recordingGate struct {
+	http.Handler
+	mu    sync.Mutex
+	calls []string
+}
+
+func (g *recordingGate) AwaitQuiet(time.Duration) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, "AwaitQuiet")
+	return 0
+}
+
+func (g *recordingGate) AwaitWritesQuiet(time.Duration) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.calls = append(g.calls, "AwaitWritesQuiet")
+	return true
+}
+
+func (g *recordingGate) Listener(inner net.Listener) net.Listener { return inner }
+
+func (g *recordingGate) recorded() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.calls...)
+}
+
+// TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown pins the half
+// of the exit that AwaitQuiet cannot cover: `counted` skips the standing-stream
+// paths on purpose, so the daemon's last push — `DaemonShutdownAnnounced`, sent
+// on every WatchDaemon stream one line before drain.fire calls Exit — is not an
+// in-flight call and nothing else holds the exit for it.
+func TestTheExitWaitsForTheStandingStreamsPushesBeforeShuttingDown(t *testing.T) {
+	// Arrange
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	gate := &recordingGate{Handler: http.NotFoundHandler()}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act
+	served := make(chan error, 1)
+	go func() { served <- serve(ctx, listener, gate) }()
+	cancel()
+	if err := <-served; err != nil {
+		t.Fatalf("serve() = %v, want an orderly shutdown", err)
+	}
+
+	// Assert
+	got := gate.recorded()
+	want := []string{"AwaitQuiet", "AwaitWritesQuiet"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("the exit's waits = %v, want %v — the answers being written first, then the standing streams' own last push", got, want)
+	}
+}
