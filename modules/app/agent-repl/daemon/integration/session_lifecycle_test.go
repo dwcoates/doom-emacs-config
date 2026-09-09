@@ -2282,3 +2282,84 @@ func TestAParkedWorkspaceKeepsAnOpenComposerOnItsHostView(t *testing.T) {
 		t.Fatalf("the parked workspace's composer = draining, want open: %v", live)
 	}
 }
+
+// TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault is the
+// SESSION-SCOPED half of the same park, and the one the webapp cannot work
+// around: the footer's `disconnected` step read the link the stand-down killed
+// as `disconnected · dead`, the topbar's indicator hollowed to the dead glyph,
+// and the webapp's composer gate IS the footer's word (webapp/src/main.ts — a
+// `disconnected` status closes the composer), so the page could not submit the
+// prompt that revives the session. Observed in the playtest world at
+// e2e/.playtest-out/playtest/05-tab-arms-lifecycle/15-arm-hibernated.
+//
+// THE STREAMS ARE OPENED AFTER THE SWEEP'S OWN HIBERNATION RECORD, exactly as
+// the roster test above does and for the same measured reason. Both topics
+// replay their LATEST value to a new subscriber, so what a late subscriber is
+// served is the last view the daemon resolved — which during the defect was
+// the link-death one. Opening either stream before the park instead matches
+// on a push taken while the session was still live: with the wiring disabled,
+// a footer stream opened early settled on `idle` and asserted nothing at all.
+//
+// The REVIVAL half is the guard on the park's release: the park must not
+// outlive the shim the reviving prompt spawns, or a later real death would be
+// masked as a stand-down nobody ordered.
+//
+// COST: the same 50ms cutoff and the same two shim round trips as the roster
+// and composer tests above, plus the revival's own StartSession, StartTurn and
+// turn conclusion; measured at 0.42s wall inside the parallel suite. The whole
+// `make integration` wall time was 17.9s before this test and 17.9s and 20.5s
+// on the two runs after it, at load averages of 10.8 and 18.6 -- this test's
+// half-second is inside the suite's own load-driven spread, not on top of it.
+func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
+	// means, and the terminal the park is derived from is written after it.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
+	footer := f.d.WatchFooter(f.ws)
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Assert: the strip settles on the IDLE family. `disconnected` is the word
+	// the webapp closes its composer on, and there is no fault to report.
+	settled := awaitFooter(t, f, footer, "the parked footer settling on an idle status", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+	if settled.GetStrip().GetStatus().GetDisconnected() != nil {
+		t.Fatalf("the parked footer status = %v, want an idle status and never disconnected", settled.GetStrip().GetStatus())
+	}
+
+	// Assert: the indicator reports an ABSENT session rather than a broken
+	// one. `dead` ("the session's process is gone") is a fault; the daemon put
+	// this route down itself.
+	awaitTopbar(t, f, topbar, "the parked connectivity indicator reporting an absent session", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "no session is running"
+	})
+
+	// Act: the prompt revives the session, and its turn runs to a conclusion.
+	f.submit("wake up", "k-parked-footer-revive", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: ordinary again — idle with the link attached, which is what
+	// tells that the park was LIFTED rather than still standing over a route
+	// that happens to serve.
+	awaitFooter(t, f, footer, "the revived footer back on idle.done", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
+	})
+	awaitTopbar(t, f, topbar, "the revived connectivity indicator back on a serving route", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "connected to the session"
+	})
+}
