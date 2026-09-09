@@ -36,6 +36,27 @@ describe("drawTopbarView", () => {
     ]).toEqual([true, true, true]);
   });
 
+  it("draws no fast-mode cell when the vendor has stated no fast mode", () => {
+    const { tc } = topbarContext();
+    expect(drawTopbarView(view(), tc).querySelector(".topbar-fast")).toBeNull();
+  });
+
+  it("draws the fast-mode cell beside the permission-mode picker", () => {
+    const { tc } = topbarContext();
+    const row = drawTopbarView(
+      view({
+        fastMode: {
+          $typeName: "frontend.v1.TopbarFastMode",
+          state: { case: "on", value: {} },
+        } as never,
+      }),
+      tc,
+    );
+    const right = row.querySelector(".topbar-right");
+    const cells = [...(right?.children ?? [])].map((el) => el.className);
+    expect(cells.indexOf("topbar-fast")).toBe(cells.indexOf("topbar-mode") + 1);
+  });
+
   it("draws no warning chip when the daemon reports nothing wrong", () => {
     const { tc } = topbarContext();
     expect(drawTopbarView(view(), tc).querySelector(".topbar-warning-chip")).toBeNull();
