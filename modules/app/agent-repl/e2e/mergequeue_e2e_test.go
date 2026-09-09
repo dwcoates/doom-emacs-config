@@ -909,7 +909,10 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		t.Parallel()
 		// Arrange: a child whose CONFIGURED before-merge action carries the
 		// marker, so the real shim's fake vendor fails that turn.
-		repo, _ := mqCleanRepo(t)
+		// harness.NewRepo directly, not mqCleanRepo: mqSelfRepoWorld writes
+		// the passing gate script itself, and writing bin/test-all.sh twice
+		// into one repo would leave two authors for one file.
+		repo := harness.NewRepo(t)
 		w := mqSelfRepoWorld(t, repo)
 		repoRef := mqRepositoryRef(t, w, repo)
 		child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-before", &agentreplv1.CreateWorkspaceMergeActions{
@@ -1004,7 +1007,10 @@ func TestFailMarkerFailsABeforeActionRunAndRidesAnAfterActionTerminal(t *testing
 		// (run.go:344-348) swallows it into the WARN the contract describes.
 		// This test asserts the contract where production honors it rather
 		// than lowering the assertion to what the other branch does.
-		repo, _ := mqCleanRepo(t)
+		// harness.NewRepo directly, not mqCleanRepo: mqSelfRepoWorld writes
+		// the passing gate script itself, and writing bin/test-all.sh twice
+		// into one repo would leave two authors for one file.
+		repo := harness.NewRepo(t)
 		w := mqSelfRepoWorld(t, repo)
 		repoRef := mqRepositoryRef(t, w, repo)
 		child := mqCreateChildWithActions(t, w, repoRef, "mq-marker-after", &agentreplv1.CreateWorkspaceMergeActions{
