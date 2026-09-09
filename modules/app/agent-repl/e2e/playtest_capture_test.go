@@ -712,15 +712,31 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 // redisplay changed nothing", which is a property of the screen rather than
 // of the poll interval, and the round count is logged so a capture that
 // needed more than one is on the record.
+//
+// AND WHY THE READS ARE AN INTERVAL APART, EACH BEHIND ITS OWN EVAL. On pgtk
+// `redisplay` paints Emacs's own surface; the pixels reach the X server only
+// when GTK's main loop runs, which happens while Emacs waits for input --
+// after an eval has answered, never inside it. A read taken the instant an
+// eval returns can therefore precede the flush of the very redisplay it
+// asked for. MEASURED: with one redisplay between the reads and no interval,
+// the tab bar after a roster push opened a new tab still read as the
+// previous tab set in one run of three, the "settled" read and the one
+// before it agreeing because neither had been flushed yet. So BOTH reads
+// compared here follow an eval of their own, with the poll interval between
+// them, and the first read taken before any eval is never one of the pair.
 func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration, rounds int) {
 	p.t.Helper()
 	started := time.Now()
 	deadline := started.Add(playtestSettleBound)
-	previous := p.readFramebuffer()
-	for {
+	redisplayAndRead := func() []byte {
 		rounds++
 		p.e.Eval(`(progn (redraw-frame) (redisplay t) t)`)
-		current := p.readFramebuffer()
+		return p.readFramebuffer()
+	}
+	previous := redisplayAndRead()
+	for {
+		time.Sleep(playtestSettleInterval)
+		current := redisplayAndRead()
 		if string(current) == string(previous) {
 			return current, true, time.Since(started), rounds
 		}
@@ -728,7 +744,6 @@ func (p *playbook) settleFrame() (body []byte, settled bool, took time.Duration,
 		if time.Now().After(deadline) {
 			return current, false, time.Since(started), rounds
 		}
-		time.Sleep(playtestSettleInterval)
 	}
 }
 
