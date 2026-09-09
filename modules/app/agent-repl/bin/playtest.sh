@@ -56,11 +56,12 @@ printf '%s\n' "$preflight_out"
 OUT="${AGENT_REPL_PLAYTEST_OUT:-$MODULE_ROOT/e2e/.playtest-out}"
 mkdir -p "$OUT"
 
-# EVERY PREVIOUS RUN'S PICTURES GO FIRST. A reviewer reads a directory of
-# PNGs against a manifest, and a stale picture that this run did not take is
-# indistinguishable from one it did — which is the one way a visual review
-# can reach a confident wrong answer.
-rm -rf "${OUT:?}/playtest"
+# THE SWEEP IS EACH PLAYBOOK'S OWN, and deliberately not this script's. A
+# stale picture is indistinguishable from a fresh one, which is the one way a
+# visual review reaches a confident wrong answer — but a sweep here would
+# also delete every playbook a `-run` of ONE playbook does not re-take, and
+# re-running one playbook to look again at its pictures is the ordinary way
+# this is used. Each playbook removes its own directory as it claims it.
 
 printf '[playtest] pictures will land in %s/playtest\n' "$OUT"
 printf '[playtest] the vendor is the FAKE SDK only; no real Claude call can occur\n'
