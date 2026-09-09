@@ -483,8 +483,9 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 	t.Parallel()
 	s := newPlaytestScenario(t, "02-fork",
 		"Plan A.6. A workspace with a settled conversation is forked through `SPC TAB f`; the fork's "+
-			"row nests under its parent's, its tab follows its parent's, and its feed carries the "+
-			"PARENT's prompt.")
+			"row nests under its parent's, its tab stands immediately after its parent's, and its own "+
+			"feed comes up live. The plan also asked for the PARENT's history in that feed, and the "+
+			"product does not put it there -- see the step that reads the fork's feed.")
 	p, e := s.Book, s.E
 
 	repository := s.repoAt(t, "repo")
@@ -595,19 +596,44 @@ func TestPlaytestForkWorkspaceAndConversation(t *testing.T) {
 			"(daemon/internal/workspace/create.go:329) -- FILED, not fixed here",
 			forkRows, playtestParentPrompt))
 
+	// THE FORK'S TAB FOLLOWS ITS PARENT'S, which is the same depth-first
+	// nesting A.5 asserts. It is a FUNCTIONAL assertion with a note rather
+	// than part of the picture's sentence below: the picture's subject is the
+	// FEED, and the panel fills the frame at the size every capture is taken
+	// at, so a sentence about the tab bar would send a reviewer looking for a
+	// surface this particular frame does not carry.
 	tabs := s.tabNames()
+	parentAt, forkAt := -1, -1
+	for i, name := range tabs {
+		switch name {
+		case parentName:
+			parentAt = i
+		case forkName:
+			forkAt = i
+		}
+	}
+	if parentAt < 0 || forkAt < 0 {
+		t.Fatalf("the tab bar draws %v, want both %q and %q on it", tabs, parentName, forkName)
+	}
+	if forkAt != parentAt+1 {
+		t.Fatalf("the tab bar draws %v: %q is at %d and its parent %q at %d, want the fork IMMEDIATELY after its parent -- the roster walk is depth-first",
+			tabs, forkName, forkAt, parentName, parentAt)
+	}
+	p.note("the tab bar read back after the fork arrived",
+		fmt.Sprintf("`agent-repl--ws-tabline-names` is %v: %q stands immediately after its parent %q, and its "+
+			"name carries NO nesting marker -- nesting is order here, not spelling", tabs, forkName, parentName))
+
 	p.capture("forked-feed", "the fork made current and its panel opened",
 		fmt.Sprintf("the fork's OWN prompt bubble (%q) and a SETTLED response bubble are on its standing tail, "+
 			"and its roster arm has settled", playtestForkPrompt),
-		fmt.Sprintf("The tab bar carries %q AFTER its parent %q (the full drawn order is %v), and the feed "+
-			"below shows the FORK's own conversation: the prompt bubble reading %q with a prose response "+
-			"beneath it. THE FORKED TAB'S NAME CARRIES NO NESTING MARKER -- nesting is order here, not "+
-			"spelling. WHAT THIS PICTURE DOES NOT SHOW, and the plan's A.6 asked for: the PARENT's own "+
-			"prompt %q and its answer are NOT in this feed. The fork resumes the parent's ported vendor "+
-			"transcript, so the agent has the context, but the daemon's own conversation rows are keyed "+
-			"by workspace and are neither ported nor inherited, so the child's feed starts at its own "+
-			"first turn. That is an OPEN QUESTION for the lead, recorded here rather than asserted.",
-			forkName, parentName, tabs, playtestForkPrompt, playtestParentPrompt))
+		fmt.Sprintf("The panel shows the FORK's own conversation: the prompt bubble reading %q with a prose "+
+			"response settled beneath it, and the sidebar drawing %q nested under its parent %q. "+
+			"WHAT THIS PICTURE DOES NOT SHOW, and the plan's A.6 asked for: the PARENT's own prompt %q "+
+			"and its answer are NOT in this feed. The fork resumes the parent's ported vendor transcript, "+
+			"so the agent has the context, but the daemon's own conversation rows are keyed by workspace "+
+			"and are neither ported nor inherited, so the child's feed starts at its own first turn. That "+
+			"is an OPEN QUESTION for the lead, recorded here rather than asserted.",
+			playtestForkPrompt, forkName, parentName, playtestParentPrompt))
 }
 
 // forkFeedFacts answers how many rows the current workspace's feed is drawing
