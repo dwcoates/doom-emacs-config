@@ -150,8 +150,14 @@ func pt10UserPromptWithText(text string) string {
                   function (bubble) { return bubble.textContent.indexOf(` + jsString(text) + `) !== -1; })`
 }
 
-// pt10CompactedSeparations is the predicate for "the feed carries at least N
+// pt10CompactedSeparations is the predicate for "the feed carries EXACTLY N
 // compacted context-cut dividers".
+//
+// EXACT, NOT "AT LEAST", AND THAT WAS BOUGHT WITH A DEFECT. An `>=` count
+// passed a page that drew EVERY successful compaction TWICE -- two identical
+// dividers per cut, the second one opening onto an empty summary -- so the
+// assertion agreed with a picture no reader would accept. An exact count is
+// the one that fails on a duplicate, and a lower bound is the one that cannot.
 //
 // COUNTED, NOT POSITIONED. Two rows of this table compact, and the second
 // cannot be told from the first by any attribute the divider carries -- both
@@ -160,11 +166,24 @@ func pt10UserPromptWithText(text string) string {
 // wire's own `folded`). So the second compaction's own evidence is that the
 // feed now holds TWO of them, which is a fact about the feed rather than about
 // where a row landed in it.
-func pt10CompactedSeparations(least int) string {
+func pt10CompactedSeparations(exactly int) string {
 	return fmt.Sprintf(
-		`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compacted"] .sep-compacted').length >= %d`,
-		least)
+		`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compacted"] .sep-compacted').length === %d`,
+		exactly)
 }
+
+// pt10SummariesAllCarryText is the predicate for "every compaction summary
+// drawn on this page says something".
+//
+// IT IS A NEGATIVE, AND IT EXISTS BECAUSE A PICTURE CAUGHT ONE. An EMPTY
+// summary bubble under a divider is a divider drawn for a compaction whose
+// account never arrived: the reader is offered a fold that opens onto nothing.
+// A COUNT OF DIVIDERS CANNOT SEE THAT -- the empty one is a well-formed row --
+// so the text is asserted directly, across every summary on the page rather
+// than the newest, because it is the DUPLICATE that came up empty.
+const pt10SummariesAllCarryText = `Array.prototype.every.call(
+                  document.querySelectorAll('.sep-compacted .sep-summary'),
+                  function (summary) { return summary.textContent.trim() !== ""; })`
 
 // pt10ContextFigureDrawn is the predicate for "the topbar's context budget
 // figure is drawn and says something".
@@ -341,7 +360,8 @@ func TestPlaytestFeedSession(t *testing.T) {
 			prompt:  "!compact",
 			settled: pt10CompactSummary,
 			waits: []pt10Wait{
-				{"the compacted context-cut divider to be drawn in the feed", pt10CompactedSeparations(1)},
+				{"exactly ONE compacted context-cut divider to be drawn in the feed", pt10CompactedSeparations(1)},
+				{"the compaction summary to say something rather than open onto nothing", pt10SummariesAllCarryText},
 				{"the topbar's context budget figure to be drawn", pt10ContextFigureDrawn},
 			},
 			asserted: "a `[data-row-kind=\"separation\"][data-state=\"compacted\"]` row holding " +
@@ -359,13 +379,16 @@ func TestPlaytestFeedSession(t *testing.T) {
 			prompt:  "!compact-auto",
 			settled: pt10CompactAutoSummary,
 			waits: []pt10Wait{
-				{"a SECOND compacted divider to be drawn, the first one still standing", pt10CompactedSeparations(2)},
+				{"exactly TWO compacted dividers, the first still standing and neither of them doubled", pt10CompactedSeparations(2)},
+				{"both compaction summaries to say something rather than open onto nothing", pt10SummariesAllCarryText},
 				{"the topbar's context budget figure to still be drawn", pt10ContextFigureDrawn},
 			},
 			asserted: "the feed now holds TWO compacted separation rows rather than one, the topbar still " +
 				"draws its context figure, and the turn concluded with `" + pt10CompactAutoSummary + "`",
-			expected: "TWO context-cut dividers are now visible, one under the other with the auto-compaction's " +
-				"turn between them, each with its own rule, label and folded summary toggle. The topbar " +
+			expected: "EXACTLY TWO context-cut dividers are visible -- ONE PER CUT -- with the auto-compaction's " +
+				"turn between them, each with its own rule, label and CLOSED summary toggle, and NOTHING " +
+				"drawn open beneath either toggle. FOUR dividers here -- each cut drawn twice -- or a " +
+				"fold that opens onto an EMPTY bubble, is a DEFECT and not a variation. The topbar " +
 				"still carries its context figure. Nothing about the drawn divider says which compaction " +
 				"was asked for and which happened on its own -- the vendor's trigger is not on the glass, " +
 				"which is a fact about the product and not a fault in the picture.",
@@ -392,7 +415,8 @@ func TestPlaytestFeedSession(t *testing.T) {
 					"the failed divider to carry NO size change, nothing having been cut",
 					`document.querySelectorAll('[data-feed-row][data-row-kind="separation"][data-state="compactionFailed"] .sep-tokens').length === 0`,
 				},
-				{"the two successful dividers to still be standing", pt10CompactedSeparations(2)},
+				{"the two successful dividers to still be standing, still undoubled", pt10CompactedSeparations(2)},
+				{"their summaries to still say something", pt10SummariesAllCarryText},
 			},
 			asserted: "a `[data-state=\"compactionFailed\"]` separation row carries exactly " +
 				"`" + pt10CompactFailedError + "`, carries NO `.sep-tokens` figure, and the two " +
