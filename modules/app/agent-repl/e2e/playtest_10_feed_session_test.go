@@ -186,9 +186,17 @@ const pt10ContextFigureDrawn = `document.querySelector(".topbar-context-figure")
 // that drew cooldown with off's words, which is the exact confusion
 // `fast-mode.ts` says it exists to avoid ("Drawing them the same would invite
 // a reader to go looking for a switch that cannot take effect").
+// THE SELECTOR IS BUILT IN GO AND QUOTED ONCE, which is not a style choice:
+// splicing `jsString(state)` INTO an already-quoted selector literal produced
+// `'.topbar-fast[data-fast-mode='on']'` -- a syntax error that made every
+// issue of the script answer null, so the wait failed with "last value was
+// null" rather than with anything about the page. A predicate that cannot
+// parse diagnoses nothing, so the whole selector is one Go string handed to
+// `jsString` exactly once.
 func pt10FastCell(state, label string) string {
+	selector := `.topbar-fast[data-fast-mode="` + state + `"]`
 	return `(function () {
-                  var cell = document.querySelector('.topbar-fast[data-fast-mode=` + jsString(state) + `]');
+                  var cell = document.querySelector(` + jsString(selector) + `);
                   return cell !== null && cell.textContent.trim() === ` + jsString(label) + `;
                 })()`
 }
