@@ -17,8 +17,9 @@ Branch `overhaul/int-play-05`, rebased onto overhaul/integration at 9b23085c6. T
 - 642e0883c, c1eb912b7 integration tests for the above.
 - b8218be5c fix(daemon/footer): a parked session is idle on the footer strip and topbar dot
   (was `disconnected · dead`, which also closed the webapp composer); 8f1a0d4a2 its integration test.
-  The subagent that landed these was stopped at the pause; its final gate report was NOT received —
-  rerun daemon `make test` + `make integration` before trusting b8218be5c/8f1a0d4a2.
+  Gates reported green by the landing agent (gofmt, vet, make test, make integration twice); one
+  unrelated shimclient flake (`TestSocketPeerPIDNamesTheServingProcess`, LOCAL_PEERPID race) seen once
+  under load, to file. The topbar dot got the same park exemption (hollow dot was `dead`).
 
 ## Runs
 - Run 4 (before the footer fix): all three playbooks PASS (`play05-run4.log` in the session scratchpad);
