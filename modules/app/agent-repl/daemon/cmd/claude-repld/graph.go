@@ -455,8 +455,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Announcer:    pushes,
 		LeaseChanged: queue.OnLeaseChanged,
 		PublishHost:  relay.PublishHostWorkspace,
-		Exit:         orderlyExit(p.Exit),
-		Log:          p.Surfaces,
+		// The verbs own the roster's durable half and are built AFTER this
+		// controller, so the republish reads them out of the forwarder --
+		// exactly as the merge orchestrator's own roster republish does.
+		PublishRegistry: func(ctx context.Context) error {
+			verbs, ok := verbsRef.verbs()
+			if !ok {
+				return fmt.Errorf("claude-repld: a session was hibernated before the workspace verbs existed")
+			}
+			return verbs.PublishRegistry(ctx)
+		},
+		Exit: orderlyExit(p.Exit),
+		Log:  p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the drain controller: %w", err)

@@ -638,3 +638,153 @@ func TestAHibernationWithNoHostSurfaceWiredIsTolerated(t *testing.T) {
 		t.Fatalf("hibernated = %v, want the idle session hibernated with no host surface wired", hibernated)
 	}
 }
+
+// TestTheHibernationRepublishesTheRoster pins the roster's half of the park.
+// The roster's arm for a parked session is a function of the SESSION TERMINAL
+// record ("A PARKED SESSION IS IDLE, NOT BROKEN", resolve/sidebar/status.go),
+// and the last event the roster resolver is handed during a stand-down is the
+// shim link going dead — handed BEFORE the terminal is written. Without this
+// republish the row the daemon parked on purpose stays resolved as `dead`.
+func TestTheHibernationRepublishesTheRoster(t *testing.T) {
+	// Arrange
+	published := 0
+	h := newHarness(t, func(d *Deps) {
+		d.PublishRegistry = func(context.Context) error { published++; return nil }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want the one idle session %q", hibernated, ws)
+	}
+	if published != 1 {
+		t.Fatalf("PublishRegistry calls = %d, want exactly 1 for the one hibernation", published)
+	}
+}
+
+// TestTheHibernationRepublishFollowsTheTerminalRecord is the ORDERING half,
+// and it is the whole defect: a republish composed before the terminal landed
+// would resolve the row from a session record that carries none, which is
+// exactly what the link-dead event already did. The assertion reads the
+// session record from inside the callback, which is what the roster resolver
+// itself reads.
+func TestTheHibernationRepublishFollowsTheTerminalRecord(t *testing.T) {
+	// Arrange
+	var terminalsAtPublish []string
+	h := newHarness(t)
+	var ws ids.WorkspaceID
+	h.c.deps.PublishRegistry = func(ctx context.Context) error {
+		session, found, err := h.db.Session(ctx, ws)
+		if err != nil {
+			return err
+		}
+		if !found || session.Terminal == nil {
+			terminalsAtPublish = append(terminalsAtPublish, "")
+			return nil
+		}
+		terminalsAtPublish = append(terminalsAtPublish, session.Terminal.Kind)
+		return nil
+	}
+	ws = h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(terminalsAtPublish) != 1 || terminalsAtPublish[0] != TerminalHibernated {
+		t.Fatalf("session terminals seen at the republish = %q, want one %q: the republish must follow the record",
+			terminalsAtPublish, TerminalHibernated)
+	}
+}
+
+// TestARefusedHibernationDoesNotRepublishTheRoster is the negative half:
+// nothing DURABLE changed on a deferral, so the roster has nothing new to say
+// and a republish would be a push that carries no news.
+func TestARefusedHibernationDoesNotRepublishTheRoster(t *testing.T) {
+	// Arrange
+	published := 0
+	h := newHarness(t, func(d *Deps) {
+		d.PublishRegistry = func(context.Context) error { published++; return nil }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = &shimv1.HibernateResponse{
+		Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+			Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+		}},
+	}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the refusal to defer", hibernated)
+	}
+	if published != 0 {
+		t.Fatalf("PublishRegistry calls = %d, want 0: a deferral changed nothing durable", published)
+	}
+}
+
+// TestARosterRepublishFailureStillReportsTheHibernation pins the failure
+// arm's shape. The stand-down HAPPENED — the shim is gone and the terminal is
+// written — so reporting the pass as refused would leave the sweep retrying a
+// session that is already parked. The stale view is what the record names.
+func TestARosterRepublishFailureStillReportsTheHibernation(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) {
+		d.PublishRegistry = func(context.Context) error { return errors.New("the roster surface is gone") }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want the hibernation to stand despite the republish failure", hibernated)
+	}
+	found := false
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == opSweep &&
+			r.Message == "could not republish the roster after the hibernation" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no ERROR record named the failed roster republish; records = %v", h.log.Records())
+	}
+}
+
+// TestAHibernationWithNoRosterSurfaceWiredIsTolerated pins the nil dep: the
+// controller is built in tests, and in a boot order where the workspace verbs
+// do not exist yet, so a sweep must not take the daemon down for it.
+func TestAHibernationWithNoRosterSurfaceWiredIsTolerated(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.PublishRegistry = nil })
+	h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 {
+		t.Fatalf("hibernated = %v, want the idle session hibernated with no roster surface wired", hibernated)
+	}
+}
