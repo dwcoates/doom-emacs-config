@@ -5,6 +5,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -143,6 +144,22 @@ func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []s
 // 23ms and the page-identity read answers in 21, 22 and 23ms, against
 // `playtestPageBound`'s 2s. A wider bound here would have bought nothing and
 // hidden both defects for another round.
+
+// trayText answers the daemon hold tray's own drawn text, whitespace
+// collapsed. It is read rather than asserted: what it is FOR is to put the
+// document's version of the tray into the manifest beside a picture of the
+// tray, so a reviewer who sees the two disagree is told so rather than left
+// to decide which one the product meant.
+func trayText(t *testing.T, s *playtestScenario) string {
+	t.Helper()
+	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
+	s.E.AwaitEvalFor(playtestPageBound, "the hold tray's own drawn text",
+		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
+			elispString(`(document.querySelector('[data-component="hold-tray"]') || {}).innerText`)+`)`,
+		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
+	return strings.Join(strings.Fields(s.E.EvalString(
+		`(format "%s" agent-repl-playtest--js)`)), " ")
+}
 
 // awaitPageIsForWorkspace asserts that the page in the webview on the glass
 // is THIS workspace's page, read from inside the page itself.
@@ -574,17 +591,32 @@ func TestPlaytestCloseWithAHeldPromptKeepsTheTab(t *testing.T) {
 	// a different fact from the one this step is about -- and the first round
 	// of this capture showed exactly that tray, drawn `held (1)`.
 	awaitPanelShown(t, s, name)
+	trayBefore := trayText(t, s)
 	s.awaitInPage(t, "the daemon's hold tray to still be empty at the instant of the capture",
 		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
 	p.capture("held-close-tab-stays", "`SPC j d` pressed while a prompt is held against the live turn",
 		fmt.Sprintf("the close was REFUSED (`*Messages*` carries \"close blocked\"), %q is still in "+
 			"`agent-repl--ws-tabline-names`, its held prompt is still in `agent-repl--prompt-queue`, and "+
-			"the daemon's hold tray is STILL empty at the instant of the capture", name),
+			"the daemon's hold tray reads %q immediately BEFORE this picture was taken", name, trayBefore),
 		fmt.Sprintf("The tab bar STILL carries %q. The close was asked for and refused, so nothing about "+
 			"the bar changed: there is no dialog, no missing tab and no gap where one was. The webapp's "+
 			"HOLD TRAY reads \"nothing held\" -- the held prompt is EMACS's queue, not the daemon's, and a "+
 			"tray with the `!hold` prompt still in it would mean the turn this close was refused against "+
 			"had never started.", name))
+
+	// AND THE TRAY IS READ AGAIN ON THE OTHER SIDE OF THE PICTURE, which
+	// BRACKETS the capture. The tray was empty when the step asserted it; if
+	// it is still empty now, no re-queue happened inside the moment the camera
+	// was open -- so a picture that nevertheless draws a held item is the
+	// WEBVIEW's pixels standing still while its document moved on, and the
+	// reviewer is told which of the two they are looking at rather than left
+	// to guess.
+	s.awaitInPage(t, "the daemon's hold tray to still be empty on the other side of the picture",
+		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
+	p.note("the daemon's hold tray read again immediately after the picture was taken",
+		fmt.Sprintf("it reads %q, the same as it read immediately before: nothing was re-queued while "+
+			"the camera was open, so the picture and the document are being compared at the same state",
+			trayText(t, s)))
 
 	// KILL IS FORCED and takes no refusal path even with the turn in flight,
 	// which is exactly the configuration the close just refused.
