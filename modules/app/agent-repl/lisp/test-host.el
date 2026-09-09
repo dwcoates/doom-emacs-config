@@ -351,6 +351,35 @@ unary rpc can produce, which the contract never collapses into one."
     ;; Assert
     (should (null agent-repl-test-host--calls))))
 
+(ert-deftest agent-repl-test-host-attaching-a-ref-selects-the-current-workspace ()
+  "A newly registered workspace activates its perspective BEFORE the daemon
+mints its ref, so the activation hook skips for want of one.  Attaching
+the ref is when that condition stops holding, and the selection the hook
+could not make is made then -- without it the daemon never stamps
+`current' and no sidebar row is ever drawn as the selected one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-1")
+    ;; Act
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Assert
+    (let ((call (assoc "SelectWorkspace" agent-repl-test-host--calls)))
+      (should call)
+      (should (equal (nth 2 call) (list :workspace (agent-repl-test-host--ref)))))))
+
+(ert-deftest agent-repl-test-host-attaching-a-ref-selects-nothing-in-the-background ()
+  "A workspace registered while the user stands somewhere else is NOT the
+selection.  Selecting it would move the daemon\='s `current' to a workspace
+nobody switched to, and would clear an attention marker the user has not
+looked at."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--current-ws "ws-elsewhere")
+    ;; Act
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Assert
+    (should (null (assoc "SelectWorkspace" agent-repl-test-host--calls)))))
+
 (ert-deftest agent-repl-test-host-select-refusal-is-logged-at-error ()
   "A refused selection is surfaced, never swallowed."
   (agent-repl-test-host--with-harness

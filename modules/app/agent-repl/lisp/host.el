@@ -331,10 +331,31 @@ workspace's attention marker."
   "Record REF and CONN as workspace WS's identity and owner.
 The ref is stored BOTH in this file's table and on workspace.el's plist
 under `:ref', so any module can read the identity from whichever it
-already holds; neither copy is ever derived from a path."
+already holds; neither copy is ever derived from a path.
+
+THE SELECTION THE ACTIVATION HOOK COULD NOT MAKE IS MADE HERE.
+`agent-repl-host--on-workspace-activated' issues the SelectWorkspace on
+every perspective activation, but a NEWLY REGISTERED workspace activates
+its perspective BEFORE the daemon has minted its ref -- Doom switches to
+the new perspective and the registration answers afterwards -- so that
+activation finds no ref and skips (`elisp.host.select-skipped
+reason=no-ref').  Nothing came back for it: the daemon therefore never
+stamped `current', every roster row it resolved carried
+`RosterRowCurrent.current' false, and no sidebar row in any webview was
+ever drawn as the selected one.
+
+Attaching the ref is exactly the moment the only condition that blocked
+that selection stops holding, so the repair belongs here rather than in a
+retry somewhere: the workspace has an identity now, and if it is the one
+the user is standing in, the daemon is told.  Selecting is idempotent by
+the verb\='s own contract -- re-selecting the current workspace succeeds and
+re-stamps nothing -- so a re-subscribe after a reconnect or a revival
+costs a round trip and changes no view."
   (agent-repl-host--put ws :ref ref)
   (agent-repl-host--put ws :conn conn)
-  (agent-repl--ws-put ws :ref ref))
+  (agent-repl--ws-put ws :ref ref)
+  (when (equal ws (agent-repl--ws-current-name))
+    (agent-repl-host-select ws)))
 
 (defun agent-repl-host-subscribe (conn ws ref)
   "Open WS's `WatchHostWorkspace' subscription on CONN, echoing REF.
