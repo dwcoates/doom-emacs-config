@@ -208,7 +208,7 @@ func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntr
 		return
 	}
 	if frame := entry.GetAgentFrame(); frame != nil {
-		w.routeAgentFrameLocked(a, frame)
+		w.routeAgentFrameLocked(a, frame, at.GetAt())
 		return
 	}
 	w.log.Warn("daemon.sessionwatcher.entry_unrouted", "a history entry carried no arm", dlog.Context{
@@ -239,12 +239,12 @@ func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentP
 // routeAgentFrameLocked routes one AgentFrame by its arm. THE UNIT UPSERTED IS
 // THE FRAME'S OWN agent_id, whichever stream carried it: frames are flat and
 // nothing here reconstructs ancestry.
-func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame) {
+func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
 	agent := frame.GetAgentId()
 
 	switch {
 	case frame.GetUpdate() != nil:
-		w.routeUpdateLocked(agent, frame.GetUpdate())
+		w.routeUpdateLocked(agent, frame.GetUpdate(), at)
 	case frame.GetSuccess() != nil:
 		w.routeTerminalLocked(a, agent, frame.GetSuccess(), nil)
 	case frame.GetFailure() != nil:
@@ -259,7 +259,7 @@ func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.Age
 }
 
 // routeUpdateLocked routes one AgentUpdate arm.
-func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate) {
+func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate, at *conversationv1.HistoryPointer) {
 	switch {
 	case update.GetActivity() != nil:
 		w.routeActivityLocked(agent, update.GetActivity())
@@ -287,7 +287,7 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", dlog.Context{
 			"agent_id": agent.GetValue(),
 		})
-		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), w.addr)
+		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
 		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
 
 	case update.GetApiError() != nil:
