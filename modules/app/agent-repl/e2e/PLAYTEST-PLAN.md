@@ -15,6 +15,23 @@ two Emacs slots per container. Throughput is 2 × containers. Sections D–H are
 table-driven over the fake's scenario registry and must be ONE loop each, not
 hand-written per scenario.
 
+## Functional first, pictures second
+
+Every step has a PROGRAMMATIC assertion, and it is mandatory: the verb
+returned, the buffer exists, the roster reports the tab's arm, the daemon's
+feed page holds the row. A step that cannot even start — a void function on
+opening agent-repl, a binding that is not there, a daemon that never answers
+— fails RIGHT THERE, loudly, with the elisp error text, the *Messages* tail
+and the world's daemon/shim/store/sidecar logs attached. That is an ordinary
+red test; it needs no picture and no reviewer.
+
+A capture is OPTIONAL and taken only where the step's subject is visual: the
+webapp's rendering (feed families, cards, footer, topbar, overlays) and the
+tab bar's painted state. It is taken only AFTER the step's functional
+assertion passed, so a reviewer never looks at a picture of a broken world.
+Most steps in sections A, C, I, J and K are functional-only; sections B
+(tab arms), D–H (webapp visuals) and the panel/fullscreen steps of I capture.
+
 ## What counts as reviewed
 
 Each capture has a manifest sentence. The mechanical gate is: every capture
