@@ -195,12 +195,10 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 
 	// Act.
 	h.Server.PushTransferred(testWorkspaceID, "127.0.0.1:4242")
-	if !stream.Receive() {
-		t.Fatalf("receive the transfer: %v", stream.Err())
-	}
+	push := receiveWebEvent(t, stream)
 
 	// Assert.
-	if got := stream.Msg().GetTransferred().GetAddress(); got != "127.0.0.1:4242" {
+	if got := push.GetTransferred().GetAddress(); got != "127.0.0.1:4242" {
 		t.Fatalf("address = %q, want the successor's", got)
 	}
 }
