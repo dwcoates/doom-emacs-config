@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"fmt"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -23,10 +24,23 @@ func (h *harness) separationRow() *frontendv1.FeedRow {
 	return nil
 }
 
-// cut sends one context cut.
+// cut sends one context cut, at the store position AT.
+//
+// EVERY CUT NEEDS A POSITION because the position is the cut's identity: the
+// two producing planes deliver the same entry, and the divider keys on the
+// entry rather than on a count of arrivals. A caller that wants to model the
+// SECOND delivery of the same cut passes the same AT again.
+func (h *harness) cutAt(at string, cut *conversationv1.ContextCut) {
+	h.t.Helper()
+	h.resolver.OnContextCut(testWorkspace, mainAgent(), cut,
+		&conversationv1.HistoryPointer{Value: at}, noAddress())
+}
+
+// cut sends one context cut at a position of its own.
 func (h *harness) cut(cut *conversationv1.ContextCut) {
 	h.t.Helper()
-	h.resolver.OnContextCut(testWorkspace, mainAgent(), cut, noAddress())
+	h.cutSeq++
+	h.cutAt(fmt.Sprintf("entry-%d", h.cutSeq), cut)
 }
 
 func TestAClearedContextDrawsItsDividerWithNoTokenFigure(t *testing.T) {
@@ -408,5 +422,108 @@ func TestEachWorktreeActIsItsOwnDividerAndNeverCoalesced(t *testing.T) {
 	}
 	if dividers != 2 {
 		t.Fatalf("dividers = %d, want 2 (unlike plan mode, worktree acts never coalesce)", dividers)
+	}
+}
+
+// separationRows answers every divider on the root feed, for the tests whose
+// subject is HOW MANY there are.
+func (h *harness) separationRows() []*frontendv1.FeedRow {
+	h.t.Helper()
+	var out []*frontendv1.FeedRow
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetSeparation() != nil {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// compactedCut is the cut a `!compact <summary>` scenario produces.
+func compactedCut(summary string) *conversationv1.ContextCut {
+	return &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{
+			Summary: &conversationv1.AgentResponseProse{Markdown: summary},
+			Tokens:  &conversationv1.ContextTokenDelta{TokensBefore: 180000, TokensAfter: 12000},
+		}},
+	}
+}
+
+// ONE CUT IS ONE DIVIDER, however many planes deliver it. The shim's stream
+// plane and the sidecar's file plane write the SAME store entry, and every
+// write of an entry is delivered on the agent's tail — so the daemon sees one
+// compaction twice, and a per-arrival counter drew it twice.
+func TestOneCutDeliveredTwiceDrawsOneDivider(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.cutAt("entry-7", compactedCut("the summary"))
+
+	// Act: the second plane's delivery of the SAME store entry.
+	h.cutAt("entry-7", compactedCut("the summary"))
+
+	// Assert
+	if got := len(h.separationRows()); got != 1 {
+		t.Fatalf("separation rows = %d, want 1: one cut is one divider however many planes deliver it", got)
+	}
+}
+
+// The second delivery UPSERTS the first's row, so a plane that carries less
+// than the other cannot leave the reader with a divider that says nothing.
+func TestASecondDeliveryOfACutRedrawsTheSameRow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.cutAt("entry-7", compactedCut("the summary"))
+	first := h.separationRow().GetId().GetValue()
+
+	// Act
+	h.cutAt("entry-7", compactedCut("the summary"))
+
+	// Assert
+	if got := h.separationRow().GetId().GetValue(); got != first {
+		t.Fatalf("the second delivery's row id = %q, want the first's %q", got, first)
+	}
+}
+
+// TWO DISTINCT CUTS ARE TWO DIVIDERS. The identity is the entry's position, so
+// cuts that are identical in content but at different positions stay apart —
+// which is what a `/clear` after a `/clear` looks like.
+func TestTwoCutsAtDifferentPositionsDrawTwoDividers(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	cleared := &conversationv1.ContextCut{
+		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
+	}
+
+	// Act
+	h.cutAt("entry-7", cleared)
+	h.cutAt("entry-9", cleared)
+
+	// Assert
+	if got := len(h.separationRows()); got != 2 {
+		t.Fatalf("separation rows = %d, want 2: two cuts at two positions are two dividers", got)
+	}
+}
+
+// A CUT WITH NO POSITION STILL DRAWS, and says so. A producer that states no
+// position is a fault to see rather than a divider to drop, and the duplicate
+// it may leave is strictly better than a missing one.
+func TestACutWithNoPositionStillDrawsAndIsReported(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.OnContextCut(testWorkspace, mainAgent(), compactedCut("the summary"), nil, noAddress())
+
+	// Assert
+	if got := len(h.separationRows()); got != 1 {
+		t.Fatalf("separation rows = %d, want the divider drawn anyway", got)
+	}
+	reported := false
+	for _, record := range h.records() {
+		if record.Operation == "daemon.feed.context_cut_unpositioned" {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatal("an unpositioned cut drew its divider silently; the fault must be recorded")
 	}
 }
