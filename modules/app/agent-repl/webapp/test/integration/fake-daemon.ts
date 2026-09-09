@@ -328,6 +328,31 @@ export interface FakeDaemon {
    * abort) rather than poll `liveStreams` on a timer.
    */
   awaitStreamClosed(rpc: RpcName, workspace?: string, feed?: FeedKey): Promise<void>;
+
+  // --- the page's one stream ----------------------------------------------
+  /**
+   * Every page id holding a `WatchPage` stream right now.
+   *
+   * A page holds ONE connection, so this is the count a leak shows up in: two
+   * entries for one document means the mux opened a second stream.
+   */
+  attachedPages(): string[];
+  /**
+   * The live subscription ids on PAGE, in the order they were subscribed.
+   *
+   * THIS IS WHERE A LEAK IS VISIBLE. A collapsed bubble, a switched workspace
+   * or a cancelled view that stopped drawing but never unsubscribed still
+   * appears here, costing the daemon work for a reader that is gone.
+   * Defaults to the only attached page when there is exactly one.
+   */
+  pageSubscriptions(page?: string): string[];
+  /**
+   * Kill the page's own stream WITHOUT a terminal frame — a dropped link.
+   *
+   * Every subscription riding it dies with it, which is what the client's
+   * degraded state and its re-subscribe are the answer to.
+   */
+  endPageStream(page?: string): void;
 }
 
 const key = (workspace: string, feed: FeedKey): string => `${workspace} ${feed}`;
@@ -939,6 +964,31 @@ export function createFakeDaemon(): FakeDaemon {
   }
 
   const pageStates = new Map<string, PageState>();
+
+  /**
+   * The page a control is about.
+   *
+   * NAMING NOTHING IS ONLY LEGAL WITH ONE PAGE ATTACHED. A harness mounts one
+   * document, so the common case needs no id; two attached pages make the
+   * default ambiguous and this THROWS rather than picking one, which would
+   * make an assertion about a leak depend on map order.
+   */
+  const requirePage = (page: string | undefined, control: string): PageState => {
+    if (page === undefined) {
+      const attached = [...pageStates.keys()];
+      if (attached.length !== 1) {
+        throw new Error(
+          `${control} was given no page and ${attached.length} are attached [${attached.join(", ")}]`,
+        );
+      }
+      page = attached[0];
+    }
+    const state = pageStates.get(page);
+    if (state === undefined) {
+      throw new Error(`${control}: no stream is attached for page ${JSON.stringify(page)}`);
+    }
+    return state;
+  };
 
   /** Wrap one source push as the frame addressing SUBSCRIPTION. */
   const pushFrame = (
@@ -1670,6 +1720,15 @@ export function createFakeDaemon(): FakeDaemon {
     awaitStreamClosed(rpc, workspace, feed) {
       if (countStreams(rpc, workspace, feed) === 0) return Promise.resolve();
       return new Promise<void>((resolve) => streamClosedWaiters.push({ rpc, workspace, feed, resolve }));
+    },
+    attachedPages() {
+      return [...pageStates.keys()];
+    },
+    pageSubscriptions(page) {
+      return [...requirePage(page, "pageSubscriptions").subscriptions.keys()];
+    },
+    endPageStream(page) {
+      requirePage(page, "endPageStream").outbound.end();
     },
   };
 }

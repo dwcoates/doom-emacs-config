@@ -24,7 +24,9 @@ import {
   type WatchPageResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_page_pb";
 import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
 import { FooterViewSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { TopbarViewSchema } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -79,6 +81,29 @@ function footerPush(subscription: string, mark: bigint): WatchPageResponse {
       },
     },
   });
+}
+
+/** A frame carrying one topbar push addressed to SUBSCRIPTION. */
+function topbarPush(subscription: string, title: string): WatchPageResponse {
+  return create(WatchPageResponseSchema, {
+    frame: {
+      case: "push",
+      value: {
+        subscription,
+        payload: {
+          case: "topbar",
+          value: create(WatchTopbarResponseSchema, {
+            topbar: create(TopbarViewSchema, { title: { text: title } }),
+          }),
+        },
+      },
+    },
+  });
+}
+
+/** A frame carrying a FOOTER payload addressed to SUBSCRIPTION. */
+function misaddressedPush(subscription: string): WatchPageResponse {
+  return footerPush(subscription, 7n);
 }
 
 /** A frame saying one subscription is over. */
@@ -503,6 +528,152 @@ describe("the page's one standing stream", () => {
     // Assert: exactly the page's own stream plus the context's, and neither
     // reopened after the cancel.
     expect(daemon.streamOpens).toEqual(["WatchPage", "WatchPage"]);
+    ctx.quiesce();
+  });
+
+  it("applies two views' interleaved frames in the order they arrived", async () => {
+    // Arrange: two subscriptions of DIFFERENT kinds on the one stream, which
+    // is the arrangement a dedicated stream apiece never had to order.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const arrivals: string[] = [];
+    const controller = new AbortController();
+    void (async () => {
+      for await (const response of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        arrivals.push(`footer:${response.footer?.strip?.clock?.turnStartedAtMs ?? 0n}`);
+      }
+    })();
+    void (async () => {
+      for await (const response of ctx.streams.watch("topbar", { workspace: WORKSPACE }, controller.signal)) {
+        arrivals.push(`topbar:${response.topbar?.title?.text ?? ""}`);
+      }
+    })();
+    await settle();
+    const [footerSub, topbarSub] = daemon.subscribes.map((req) => req.subscription);
+
+    // Act: alternate the two views on the single stream.
+    daemon.send(footerPush(footerSub, 1n));
+    daemon.send(topbarPush(topbarSub, "one"));
+    daemon.send(footerPush(footerSub, 2n));
+    daemon.send(topbarPush(topbarSub, "two"));
+    await settle();
+
+    // Assert: ARRIVAL ORDER, not per-view batching. One socket carries both,
+    // so a frame the daemon wrote second must not be drawn first.
+    expect(arrivals).toEqual(["footer:1", "topbar:one", "footer:2", "topbar:two"]);
+    controller.abort();
+    ctx.quiesce();
+  });
+
+  it("refuses a frame addressed to this subscription but carrying another view's payload", async () => {
+    // Arrange: one topbar subscription.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const seen: unknown[] = [];
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const response of ctx.streams.watch("topbar", { workspace: WORKSPACE }, controller.signal)) {
+        seen.push(response);
+      }
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act: the daemon addresses it correctly but sends a FOOTER payload.
+    daemon.send(misaddressedPush(daemon.subscribes[0].subscription));
+    await settle();
+
+    // Assert: ONE UNREADABLE FRAME, not another view's state drawn as this
+    // one's. The topbar never sees a footer, and the caller's own stream loop
+    // is handed the malformed frame to file.
+    expect(seen).toEqual([]);
+    expect(String(await outcome)).toMatch(/asked for topbar and was sent footer/);
+    ctx.quiesce();
+  });
+
+  it("does not deliver one view's frame to another view's subscription", async () => {
+    // Arrange: two subscriptions, so a frame has more than one place to go.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const footerSeen: bigint[] = [];
+    const topbarSeen: string[] = [];
+    const controller = new AbortController();
+    void (async () => {
+      for await (const response of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        footerSeen.push(response.footer?.strip?.clock?.turnStartedAtMs ?? 0n);
+      }
+    })();
+    void (async () => {
+      for await (const response of ctx.streams.watch("topbar", { workspace: WORKSPACE }, controller.signal)) {
+        topbarSeen.push(response.topbar?.title?.text ?? "");
+      }
+    })();
+    await settle();
+    const [footerSub] = daemon.subscribes.map((req) => req.subscription);
+
+    // Act: a push for the footer alone.
+    daemon.send(footerPush(footerSub, 99n));
+    await settle();
+
+    // Assert: the id on the frame is what routes it, so a page holding many
+    // views does not fan one view's push out to all of them.
+    expect(footerSeen).toEqual([99n]);
+    expect(topbarSeen).toEqual([]);
+    controller.abort();
+    ctx.quiesce();
+  });
+
+  it("leaves no subscription behind when its caller cancels", async () => {
+    // Arrange: two subscriptions; one of them is a bubble's tail that will
+    // collapse, which is the unbounded case the mux exists for.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const kept = new AbortController();
+    const collapsed = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, kept.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("topbar", { workspace: WORKSPACE }, collapsed.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+    const [keptSub, collapsedSub] = daemon.subscribes.map((req) => req.subscription);
+
+    // Act.
+    collapsed.abort();
+    await settle();
+
+    // Act again: the daemon pushes to the id that was just retired.
+    daemon.send(topbarPush(collapsedSub, "after"));
+    await settle();
+
+    // Assert: exactly the collapsed one was ended, the kept one was not, and
+    // a push for the retired id reaches nobody rather than reviving it.
+    expect(daemon.unsubscribes.map((req) => req.subscription)).toEqual([collapsedSub]);
+    expect(daemon.subscribes.map((req) => req.subscription)).toEqual([keptSub, collapsedSub]);
+    kept.abort();
     ctx.quiesce();
   });
 });
