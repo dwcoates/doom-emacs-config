@@ -67,13 +67,25 @@ subjects.
 Component-local commands:
 
 - Go runtimes: `make coverage`.
-- Shim and webapp: `npm run typecheck` then `npm run coverage`.
+- Shim and webapp: `npm run typecheck` then `npm run coverage`, and
+  `npm run coverage:verify` whenever the coverage provider, its version, or
+  the isolation the coverage script buys has changed.
 - Proto: `make coverage`.
 
 The repository target is at least 90 percent statement coverage for each
 authored non-Lisp component. Until a component reaches the target, never lower
 its measured baseline and add focused tests for every changed critical branch
 and error path.
+
+Both TypeScript packages measure with istanbul, never `@vitest/coverage-v8`.
+That provider merges each test-file window's raw V8 coverage before remapping
+it, so a module compiled in more than one window loses one window's counts and
+the surviving one depends on which test files shared a process; webapp
+`src/scroll.ts` read 47.71 percent of statements in the package report against
+100 percent with only its own test file running, and the figure moved between
+runs as test files were added. Treat a v8-provider number in an older report as
+unusable rather than merely stale. `npm run coverage:verify` is the check that
+catches a regression to it.
 
 The reporter currently measures rather than enforcing the 90 percent
 threshold. A passing command proves that tests and instrumentation ran. It

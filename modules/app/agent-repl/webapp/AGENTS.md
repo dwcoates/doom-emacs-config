@@ -157,7 +157,47 @@ npm run lint             # eslint, type-aware, over src/, test/ and the root con
 npm run typecheck        # tsc over src/ and test/
 npm test                 # the unit suite (un-isolated; see vitest.config.ts)
 npm run test:integration # the whole app under jsdom against the fake daemon
+npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
+npm run coverage:verify  # prove the per-file numbers are still a measurement
 ```
+
+### Coverage is istanbul, and the per-file numbers moved when it became one
+
+The package reads **98.47% of lines, 97.95% of statements, 94.82% of branches
+and 98.31% of functions**, against 97.97 / 97.98 / 95.96 / 97.09 under the old
+provider. The AVERAGE barely moved, which is exactly why the defect went
+unnoticed for so long: the per-file numbers underneath it were wrong in both
+directions and roughly cancelled.
+
+`@vitest/coverage-v8@2.1.9` merges each test-file window's RAW V8 coverage with
+`mergeProcessCovs` BEFORE remapping it through the source maps, so a module
+compiled in more than one window keeps one contributor's ranges instead of the
+sum. `src/scroll.ts` read 100% of its statements with only `test/scroll.test.ts`
+running and 47.71% with `test/feed` added; `src/format.ts` 100% against 84.61%;
+`src/markdown.ts` 100% against 59.52%. Which contributor survives depends on
+which files shared a process, so the figures also moved run to run: two whole
+suite runs differing only in test-FILE order disagreed on 66 of 100 files, some
+of them about how many lines the same module even has. `--isolate`,
+`--pool=forks` and `coverage.all: false` were each tried and none of them
+touches it.
+
+Under istanbul the files that were losing counts to the merge came back up
+(`scroll.ts` 47.71 → 98.82, `markdown.ts` 59.52 → 100, `format.ts` 84.61 →
+100), and files v8 had been flattering came down. The largest single fall is
+`src/main.ts`, from a fictional 100% to 0%: it is the mount entry, no unit test
+loads it, and its real exercise is `test/integration/` and the webapp layer.
+Three type-only modules (`src/feed/cards/context.ts`, `src/topbar/context.ts`,
+`src/tray/context.ts`) left the report entirely, because a file of `interface`
+declarations has no statement to cover and v8 was scoring it 100% of nothing.
+
+`npm run coverage:verify` (`bin/coverage-honesty.mjs` at the module root) is
+what stops a later provider bump bringing any of that back: it runs this
+package's own `npm run coverage` three times — once naturally ordered, twice
+with the test FILES shuffled under fixed seeds — and fails if any file's
+covered or total count moves, then checks that a probe module reads no LESS in
+the full suite than it does with only its own test file running. Run it after
+any change to the provider, its version, or the isolation the coverage script
+buys. Under the v8 provider it fails on 66 of the 100 files.
 
 `npm run lint` is TYPE-AWARE and is not a style pass: it reads the same program
 `tsc` does, and the rules it adds on top are the ones that catch what `tsc`
