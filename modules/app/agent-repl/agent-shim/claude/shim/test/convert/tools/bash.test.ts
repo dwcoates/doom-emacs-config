@@ -62,6 +62,71 @@ function textOf(success: conversationv1.AgentBashSuccess): conversationv1.AgentB
   return completed.output?.form.value as conversationv1.AgentBashOutputText;
 }
 
+/** A result answering with one inlined base64 image block, as the vendor does. */
+function outcomeShowingImage(mediaType: string, data: string): ToolOutcome {
+  return {
+    content: create(conversationv1.ToolResultContentSchema, {
+      blocks: [
+        create(conversationv1.ToolResultContentBlockSchema, {
+          block: {
+            case: "image",
+            value: create(conversationv1.ImageBlockSchema, {
+              mediaType,
+              location: {
+                case: "url",
+                value: create(conversationv1.ImageBlockUrlSchema, {
+                  url: `data:${mediaType};base64,${data}`,
+                }),
+              },
+            }),
+          },
+        }),
+      ],
+    }),
+    isError: false,
+    structured: { stdout: data, stderr: "", interrupted: false, isImage: true },
+    settledAtMs: 1_700_000_001_000,
+  };
+}
+
+/** A result naming an image only by a fetchable url — no bytes anywhere. */
+function outcomeShowingRemoteImage(mediaType: string): ToolOutcome {
+  return {
+    content: create(conversationv1.ToolResultContentSchema, {
+      blocks: [
+        create(conversationv1.ToolResultContentBlockSchema, {
+          block: {
+            case: "image",
+            value: create(conversationv1.ImageBlockSchema, {
+              mediaType,
+              location: {
+                case: "url",
+                value: create(conversationv1.ImageBlockUrlSchema, {
+                  url: "https://example.invalid/shot.png",
+                }),
+              },
+            }),
+          },
+        }),
+      ],
+    }),
+    isError: false,
+    structured: { stdout: "", stderr: "", interrupted: false, isImage: true },
+    settledAtMs: 1_700_000_001_000,
+  };
+}
+
+/** The output a settled, completed bash item carried. */
+function completedOutput(
+  item: ReturnType<typeof bashConverter.settle>,
+): conversationv1.AgentBashOutput | undefined {
+  const bash = item?.value as conversationv1.AgentBash | undefined;
+  if (bash?.result.case !== "success") return undefined;
+  const outcomeArm = bash.result.value.outcome;
+  if (outcomeArm.case !== "completed") return undefined;
+  return outcomeArm.value.output;
+}
+
 describe("bashConverter.start", () => {
   it("announces the command line verbatim, from the corpus call", () => {
     // Arrange.
@@ -292,8 +357,9 @@ describe("bashConverter.settle", () => {
     expect((item?.value as conversationv1.AgentBash).result.case).toBe("failure");
   });
 
-  it("produces NO frame for IMAGE output, which the vendor gives no media type for", () => {
-    // Arrange.
+  it("produces NO frame for IMAGE output whose result carries no image block", () => {
+    // Arrange: `isImage` alone states no media type and no bytes, and naming
+    // either would be inventing a fact the vendor never stated.
     const pending = call({ command: "screencapture -" });
 
     // Act.
@@ -301,6 +367,48 @@ describe("bashConverter.settle", () => {
       pending,
       outcome({ stdout: "iVBORw0KG", stderr: "", interrupted: false, isImage: true }),
     );
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("carries IMAGE output as the image arm, read off the answering result block", () => {
+    // Arrange.
+    const pending = call({ command: "screencapture -" });
+
+    // Act.
+    const item = bashConverter.settle(
+      pending,
+      outcomeShowingImage("image/png", "iVBORw=="),
+    );
+
+    // Assert.
+    const output = completedOutput(item);
+    expect(output?.form.case).toBe("image");
+    const image = output?.form.value as conversationv1.AgentBashOutputImage;
+    expect(image.mediaType).toBe("image/png");
+    expect(Buffer.from(image.data).toString("binary")).toBe("\u0089PNG");
+  });
+
+  it("produces NO frame for an image block whose payload does not decode to bytes", () => {
+    // Arrange: an empty payload is no picture, and half an image is worse than
+    // none.
+    const pending = call({ command: "screencapture -" });
+
+    // Act.
+    const item = bashConverter.settle(pending, outcomeShowingImage("image/png", ""));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("produces NO frame for an image the result names only by fetchable url", () => {
+    // Arrange: a url block carries no bytes at all, and AgentBashOutputImage is
+    // the bytes.
+    const pending = call({ command: "screencapture -" });
+
+    // Act.
+    const item = bashConverter.settle(pending, outcomeShowingRemoteImage("image/png"));
 
     // Assert.
     expect(item).toBeUndefined();
