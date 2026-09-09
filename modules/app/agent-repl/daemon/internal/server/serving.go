@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ type RequestGate interface {
 	// AwaitQuiet waits, bounded, for every in-flight call to be answered and
 	// reports how many were still running when the bound expired.
 	AwaitQuiet(bound time.Duration) int
+	// Listener wraps the listener this handler serves, so a call counts as
+	// answered only once its bytes have left the socket.
+	Listener(inner net.Listener) net.Listener
 }
 
 // Serving is the daemon's one serving handler: h2c over the loopback listener,
@@ -45,12 +49,21 @@ type RequestGate interface {
 type Serving struct {
 	handler http.Handler
 	log     dlog.Logger
+	// barrier counts what the sockets have actually written, because a
+	// handler returning is not its answer leaving. See WriteBarrier.
+	barrier WriteBarrier
 
 	mu       sync.Mutex
 	inFlight int
 	// quiet is closed when the count reaches zero. It exists only while
 	// somebody is waiting, so an ordinary call pays one comparison.
 	quiet chan struct{}
+}
+
+// Listener wraps the listener this handler serves, so the calls it counts are
+// held open until their bytes are on the wire and not merely produced.
+func (s *Serving) Listener(inner net.Listener) net.Listener {
+	return s.barrier.Listener(inner)
 }
 
 // H2C wraps the Connect handler so ONE loopback listener serves both HTTP/1.1
@@ -73,16 +86,26 @@ func (s *Serving) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // counted holds one call open for as long as its answer is still owed.
 //
-// THE COUNT COMES DOWN WHEN THE STREAM CLOSES, NOT WHEN THE HANDLER RETURNS,
-// and the difference is the whole defect. A returning handler has produced its
-// answer; net/http/http2 writes it from the CONNECTION's own goroutine
-// afterwards, so an exit that waited only for the return still cut the answer
-// off the wire — measured after the first attempt at this gate, with
-// "applied the shutdown schedule" and "every open stream was ended" 369
-// microseconds apart and the caller still reading `unexpected EOF`. net/http
-// cancels a request's context once its stream is closed, which is after the
-// last frame of the answer was written, so that cancellation is the answer
-// having left rather than a guess about it.
+// THE COUNT COMES DOWN WHEN THE ANSWER IS ON THE SOCKET, NOT WHEN THE HANDLER
+// RETURNS, and the difference is the whole defect: a returning handler has
+// produced its answer, and http2 writes it from the CONNECTION's own goroutine
+// afterwards, so an exit that waited only for the return cut the answer off the
+// wire — "applied the shutdown schedule" and "every open stream was ended" 369
+// microseconds apart, with the caller reading `unexpected EOF`.
+//
+// THE REQUEST CONTEXT IS NOT THAT SIGNAL EITHER, though this gate used to say
+// it was. `serverConn.runHandler` cancels it in a defer that runs BEFORE the
+// same defer's `rw.handlerDone()` produces the answer's final frames, so a gate
+// on `r.Context().Done()` is a gate on a moment at which the answer does not
+// yet exist. It measured as `TestHostRequestedStopLeavesNoProcessBehind`
+// failing every run in the e2e sandbox on a stop the daemon had in fact
+// performed.
+//
+// So the call is held until the socket has written past the mark taken on the
+// way in and then gone quiet, which is what WriteBarrier is for. The context's
+// cancellation is still waited on first: it is an exact statement that the
+// handler's own goroutine has reached its teardown, and that is what makes the
+// barrier's "written since" question a question about THIS answer.
 func (s *Serving) counted(inner http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if standingStreamPaths[r.URL.Path] {
@@ -91,6 +114,8 @@ func (s *Serving) counted(inner http.Handler) http.Handler {
 		}
 		s.enter()
 		answered := r.Context()
+		mark := s.barrier.Mark()
+		path := r.URL.Path
 		defer func() {
 			if answered.Done() == nil {
 				s.leave()
@@ -98,12 +123,26 @@ func (s *Serving) counted(inner http.Handler) http.Handler {
 			}
 			go func() {
 				<-answered.Done()
+				if !s.barrier.AwaitWrittenSince(mark, answerWriteBound) && s.log != nil {
+					s.log.Error("daemon.server.answer_unwritten",
+						"an answer's own frames never reached the socket within the bound; its caller will read a cut connection rather than this answer",
+						dlog.Context{"path": path, "bound_ms": answerWriteBound.Milliseconds()})
+				}
 				s.leave()
 			}()
 		}()
 		inner.ServeHTTP(w, r)
 	})
 }
+
+// answerWriteBound is how long ONE answer has to reach the socket after its
+// handler's goroutine has finished with it.
+//
+// A LAST RESORT, not the mechanism: the work it covers is the http2 serve
+// goroutine flushing a few dozen buffered bytes onto a loopback socket, and the
+// barrier ends on quiescence rather than on this clock. It is deliberately well
+// under the exit's own grace, so one stuck answer cannot spend the whole of it.
+const answerWriteBound = 250 * time.Millisecond
 
 func (s *Serving) enter() {
 	s.mu.Lock()

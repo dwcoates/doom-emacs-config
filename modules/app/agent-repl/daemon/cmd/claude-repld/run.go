@@ -367,7 +367,11 @@ func serve(ctx context.Context, l net.Listener, h http.Handler) error {
 	}
 	srv := &http.Server{Handler: h}
 	done := make(chan error, 1)
-	go func() { done <- srv.Serve(l) }()
+	// SERVED THROUGH THE GATE'S OWN LISTENER, so the calls it counts are held
+	// open until their bytes are on the socket. A handler returning is not its
+	// answer leaving, and neither is the request context's cancellation — see
+	// server.WriteBarrier.
+	go func() { done <- srv.Serve(gate.Listener(l)) }()
 	select {
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
