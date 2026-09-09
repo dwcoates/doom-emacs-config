@@ -388,6 +388,17 @@ func TestBashNonzeroExit(t *testing.T) {
 	if got := returned.GetText().GetText(); !strings.Contains(got, "boom") {
 		t.Errorf("returned text = %q, want it to contain the scenario's stderr (%q)", got, "boom")
 	}
+	// LANDING 16: the code is drawn, by name. The badge says the CALL was
+	// fine; without the chip the card never said what the command's own
+	// verdict on itself was. The element is FeedShellExit — the same one the
+	// detached shell's settled head wears — and the scenario states 3.
+	exit := returned.GetExit()
+	if exit == nil {
+		t.Fatalf("FeedToolCallReturned.exit = nil, want the exit code the command reported")
+	}
+	if exit.GetCode() != 3 {
+		t.Errorf("FeedToolCallReturned.exit.code = %d, want 3 (the scenario's stated status)", exit.GetCode())
+	}
 }
 
 // ===========================================================================
@@ -395,17 +406,16 @@ func TestBashNonzeroExit(t *testing.T) {
 //
 // Golden "bash-image-output" -> prompt "!bash-image" (shell.ts's BASH_IMAGE).
 // Per this area's explicit license to confirm the exact emitted
-// FeedToolCallReturned.form (SPEC.md §C #37): read
-// daemon/internal/resolve/feed/toolcall.go's bashOutputText, which handles
-// ONLY the AgentBashOutput_Text form — an AgentBashOutput_Image form falls
-// through its type assertion and yields an empty string, and textForm("")
-// answers `nil`, which applyReturnedForm renders as the `none` arm
-// (FeedToolCallNoOutput) rather than an empty text. So a bash call whose
-// output is image data currently draws SUCCEEDED with NO output body at the
-// frontend layer — this is the confirmed CURRENT shape (not a defect this
-// area writer is asked to judge), and the assertion below pins exactly that,
-// per the instruction not to adapt a test to a production behavior found by
-// reading source, only to confirm the shape when the spec explicitly says to.
+// FeedToolCallReturned.form (SPEC.md §C #37).
+//
+// LANDING 16 CHANGED THIS SHAPE, AND THIS TEST WITH IT. The card used to draw
+// SUCCEEDED with the `none` arm — nothing at all, indistinguishable from a
+// command that printed nothing — because the form oneof had no image arm and
+// the daemon's bashOutputText fell through its Text type assertion to "".
+// It now draws the `image` arm carrying FeedImageBlock, the very block a
+// prompt body's image uses, with the src the DAEMON composed from the bytes
+// and media type the producers now carry. This test pins the arm BY NAME and
+// the src's own shape, which is the whole of what the landing added.
 // ===========================================================================
 
 func TestBashImageOutput(t *testing.T) {
@@ -430,8 +440,21 @@ func TestBashImageOutput(t *testing.T) {
 	if returned.GetSucceeded() == nil {
 		t.Errorf("verdict = %v, want succeeded", returned.GetVerdict())
 	}
-	if returned.GetNone() == nil {
-		t.Errorf("form = %v, want `none` (FeedToolCallNoOutput) — image-form bash output currently draws no output body; see this test's header comment", returned.GetForm())
+	image := returned.GetImage()
+	if image == nil {
+		t.Fatalf("form = %T, want the `image` arm (FeedImageBlock); see this test's header comment", returned.GetForm())
+	}
+	// THE DAEMON RESOLVES THE REFERENCE: the client is handed something a
+	// browser can load, never the raw bytes and a media type to assemble.
+	if !strings.HasPrefix(image.GetSrc(), "data:image/png;base64,") {
+		t.Errorf("image src = %q, want a data url the webview can load", image.GetSrc())
+	}
+	if image.GetSrc() == "data:image/png;base64," {
+		t.Errorf("image src = %q, want the scenario's payload behind the prefix", image.GetSrc())
+	}
+	// The command line is the only caption the record affords.
+	if got := image.GetAlt(); !strings.Contains(got, "screencapture") {
+		t.Errorf("image alt = %q, want the command line as the caption", got)
 	}
 }
 
