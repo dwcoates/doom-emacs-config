@@ -23,6 +23,12 @@ import (
 //   - C23: an image attached to the composer, the thumbnail marker it
 //     draws there, and the attachment travelling as its own `ImageBlock`
 //     beside the words.
+//     The first capture in this world was measured blank -- 481 distinct
+//     colors, the webview unpainted and the composer text undrawn -- in three
+//     consecutive runs, while the next capture some 100ms later was fully
+//     painted. The roster await after `openPanel` is the one arrangement
+//     difference from owner 4's painted first capture, adopted here and
+//     measured by the next run.
 //   - C24: `agent-repl-history-search` recalling the last accepted prompt
 //     into the composer.
 //
@@ -333,6 +339,9 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	repository := s.repoAt(t, "repo")
 	name := s.register(t, repository.Dir)
 	s.openPanel(t)
+	s.awaitArm(t, name, "the tab's arm before anything is submitted", playtestUnwiredArm)
+	p.note("the panel opened and the roster's first push read",
+		"the workspace's arm is :none before anything is submitted")
 
 	if want, got := "agent-repl-attach-clipboard-image", e.BindingForIn(s.Input, "C-c C-i"); got != want {
 		t.Fatalf("composer C-c C-i resolves to %q, want %q", got, want)
@@ -357,10 +366,8 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	if got := composerText(e, s.Input); got != words {
 		t.Fatalf("the composer text is %q, want %q", got, words)
 	}
-	p.capture("composer-words", "the words typed into the composer, nothing attached yet",
-		"the composer text is exactly the typed words",
-		"The composer window (beneath the webview) shows the typed words on its first line; the "+
-			"webview above it shows the idle page: sidebar with the workspace, empty feed, footer status idle.")
+	p.note("the words typed into the composer, nothing attached yet",
+		"the composer text is exactly the typed words")
 
 	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
               (agent-repl-input-attach-image ` + elispString(imagePath) + ` ` + elispString(mediaType) + `)
