@@ -524,17 +524,19 @@ describe("the page's one standing stream", () => {
  * `client.watchLoginTerminal` from eight different modules — against a browser
  * cap measured, in the e2e sandbox on this daemon, at exactly six.
  */
-const STREAMING_RPCS = [
-  "watchWorkspaceRoster",
-  "watchWebWorkspace",
-  "watchDaemon",
-  "watchTopbar",
-  "watchFooter",
-  "watchDaemonHolds",
-  "watchFeed",
-  "watchLoginTerminal",
-  "watchHostWorkspace",
-] as const;
+/**
+ * THE FORBIDDEN LIST IS DERIVED, NEVER TYPED OUT.
+ *
+ * A hand-written list guards only the rpcs somebody remembered to add to it: a
+ * NEW server-streaming rpc in the service would be a second connection this
+ * check silently permits, which is the exact class of defect the mux exists to
+ * make impossible. So it is read off the service descriptor — every
+ * server-streaming method except the mux's own — and a streaming rpc landed
+ * tomorrow is guarded the moment its bindings regenerate.
+ */
+const STREAMING_RPCS: readonly string[] = Object.entries(AgentRepl.method)
+  .filter(([name, method]) => method.methodKind === "server_streaming" && name !== "watchPage")
+  .map(([name]) => name);
 
 /** Every .ts file under src/, recursively. */
 function sourceFiles(dir: string): string[] {
@@ -566,5 +568,30 @@ describe("the page's connection budget", () => {
     // Assert: a page holds ONE connection because there is nowhere else in the
     // tree that opens one, not because six components each remembered not to.
     expect(offenders).toEqual([]);
+  });
+
+  it("guards every server-streaming rpc the service declares but the mux's own", () => {
+    // Arrange: the rpcs the page used to open a connection apiece for, plus
+    // the host watch Emacs holds. Named here so a method DROPPED from the
+    // service is noticed too, rather than quietly shrinking the guard.
+    const expected = [
+      "watchFeed",
+      "watchWorkspaceRoster",
+      "watchTopbar",
+      "watchFooter",
+      "watchDaemonHolds",
+      "watchHostWorkspace",
+      "watchDaemon",
+      "watchWebWorkspace",
+      "watchLoginTerminal",
+    ];
+
+    // Act.
+    const guarded = [...STREAMING_RPCS].sort();
+
+    // Assert: the derivation covers exactly those, and `watchPage` — the one
+    // stream a page is allowed to hold — is not among them.
+    expect(guarded).toEqual([...expected].sort());
+    expect(guarded).not.toContain("watchPage");
   });
 });
