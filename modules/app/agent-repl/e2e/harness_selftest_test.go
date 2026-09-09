@@ -280,7 +280,7 @@ func TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink(t *testing.T) {
 	out := t.TempDir()
 
 	// Act
-	(&Emacs{t: t, Root: root}).preserveWorkspaceElispLogs(out)
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
 
 	// Assert
 	got, err := os.ReadFile(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log"))
@@ -310,10 +310,39 @@ func TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude(t *te
 	out := t.TempDir()
 
 	// Act
-	(&Emacs{t: t, Root: root}).preserveWorkspaceElispLogs(out)
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
 
 	// Assert
 	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs")); !os.IsNotExist(err) {
 		t.Fatalf("stat of the preserved tree = %v, want it never created for a non-.claude `emacs` directory", err)
+	}
+}
+
+// TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot is the defect the
+// first version of this sweep had: it walked `e.Root`, which is
+// `<scratch>/emacs`, while the workspaces live beside it under the same
+// scratch directory — so a red run's sweep found nothing and said nothing.
+func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
+	// Arrange: the real layout — the Emacs HOME and a registered workspace as
+	// siblings under one scratch root.
+	scratch := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(scratch, "emacs", ".emacs.d", "lisp"), 0o755); err != nil {
+		t.Fatalf("stage the Emacs home: %v", err)
+	}
+	sink := filepath.Join(scratch, "repo-a", ".claude", "emacs")
+	if err := os.MkdirAll(sink, 0o755); err != nil {
+		t.Fatalf("create the workspace sink directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sink, "emacs.log"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write the sink: %v", err)
+	}
+	out := t.TempDir()
+
+	// Act
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, scratch)
+
+	// Assert
+	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log")); err != nil {
+		t.Fatalf("stat of the preserved workspace sink = %v, want it collected from beside the Emacs root", err)
 	}
 }

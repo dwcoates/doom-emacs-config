@@ -227,13 +227,71 @@ export function promptEntry(
   };
 }
 
+/**
+ * How long a `KillTurn` waits for the START of the turn it names to finish.
+ *
+ * A LAST RESORT, NOT THE MECHANISM: the wait ends on the start's own promise,
+ * and this only covers a start that never settles at all -- which would
+ * already have hung the daemon's own `StartTurn` call. A forced kill exists to
+ * break a wedge, so it must not become the wedge.
+ *
+ * MEASURED: the window between `StartTurn` reaching the engine and the turn
+ * being open is two store round trips (the durable prompt row and the opening
+ * page) plus the vendor submit, observed at 17ms end to end in the e2e sandbox
+ * under a full `-parallel 8` run. 1s is ~60x that.
+ */
+const KILL_AWAITS_START_BUDGET_MS = 1_000;
+
 /** The turn verbs, over one session. */
 export class TurnEngine {
   constructor(private readonly session: SessionContext) {}
 
+  /**
+   * The turn whose `StartTurn` is being processed right now, and a promise
+   * that settles when it is.
+   *
+   * A TURN WHOSE START IS IN FLIGHT IS NOT "NO TURN OPEN", and answering that
+   * it is cost a whole restart. `startTurn` makes the prompt row durable and
+   * reads the opening page BEFORE it calls `setOpenTurn`, so for the duration
+   * of those two store round trips the session reports no open turn. Measured
+   * in the e2e sandbox: `StartTurn` was called at 16:50:05.203 and answered at
+   * .220; the forced restart's `KillTurn` for that same turn arrived at .213,
+   * was refused `no_turn_open`, and `workspace.Restart` returned that refusal
+   * to its caller -- so the relaunch never ran, the turn went on to park, and
+   * `TestEmacsForcedRestartInterruptsTheTurn` sat watching a roster arm that
+   * stayed `:thinking`.
+   *
+   * The shim is the sole owner of turn state, so the race closes here rather
+   * than in each caller: a kill addressed to the turn being opened waits for
+   * the open to settle and then acts on what it finds -- a killed turn if the
+   * start succeeded, and the same `no_turn_open` it would have given anyway if
+   * the start was refused.
+   */
+  private starting: { turn: string; settled: Promise<void> } | undefined;
+
   // -- StartTurn ------------------------------------------------------------
 
   async startTurn(request: shimv1.StartTurnRequest): Promise<shimv1.StartTurnResponse> {
+    // THE MARK GOES DOWN BEFORE ANY AWAIT, so no kill can slip between the
+    // call arriving and the turn being claimed. See `starting`.
+    let settle = (): void => {};
+    const starting = {
+      turn: request.turn?.value ?? "",
+      settled: new Promise<void>((resolve) => {
+        settle = resolve;
+      }),
+    };
+    this.starting = starting;
+    try {
+      return await this.openTurnForStart(request);
+    } finally {
+      if (this.starting === starting) this.starting = undefined;
+      settle();
+    }
+  }
+
+  /** `startTurn`'s body; the mark around it is what makes a kill wait. */
+  private async openTurnForStart(request: shimv1.StartTurnRequest): Promise<shimv1.StartTurnResponse> {
     const identity = this.session.identity();
     if (identity === undefined) {
       return startTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
@@ -556,8 +614,9 @@ export class TurnEngine {
     if (this.session.identity() === undefined) {
       return killTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
     }
-    const open = this.session.openTurn();
     const requested = request.turn?.value ?? "";
+    await this.awaitStartOf(requested);
+    const open = this.session.openTurn();
     // A TURN THAT CLOSED CAN STILL OWN LIVE WORK. Detached work outlives the
     // turn that spawned it by design, and KillTurn is the verb that ends a
     // turn AND EVERYTHING IT SPAWNED, transitively -- so answering `no turn is
@@ -616,6 +675,38 @@ export class TurnEngine {
     });
     LOGGER.log({ turn_id: open.id.value, stopped: spawned.length }, "killed a turn and everything it spawned");
     return killTurnKilled(killed);
+  }
+
+  /**
+   * Wait for the named turn's own `StartTurn` to settle, when one is in
+   * flight. See `starting` for the race this closes and the run that found it.
+   *
+   * Bounded, and the bound expiring is SAID OUT LOUD rather than swallowed: a
+   * start that never settles is a fault, and the kill then proceeds on what
+   * the session actually holds, which is never worse than not having waited.
+   */
+  private async awaitStartOf(turn: string): Promise<void> {
+    const starting = this.starting;
+    if (starting === undefined || starting.turn !== turn || turn === "") return;
+    LOGGER.log(
+      { turn_id: turn },
+      "KillTurn names the turn whose StartTurn is still being processed; waiting for the start to settle",
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<"expired">((resolve) => {
+      timer = setTimeout(() => resolve("expired"), KILL_AWAITS_START_BUDGET_MS);
+    });
+    try {
+      const outcome = await Promise.race([starting.settled.then(() => "settled" as const), expired]);
+      if (outcome === "expired") {
+        LOGGER.log(
+          { level: "error", turn_id: turn, budget_ms: KILL_AWAITS_START_BUDGET_MS },
+          "a KillTurn waited out its budget for a StartTurn that never settled; killing against the session as it stands",
+        );
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /**
