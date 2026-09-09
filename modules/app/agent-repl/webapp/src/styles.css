@@ -1162,6 +1162,15 @@ pre {
   align-items: flex-start;
   gap: 0.9rem;
 }
+/* A HIDDEN BUBBLE MUST ACTUALLY BE HIDDEN. The rule above sets `display`, and a
+   class selector outranks the user-agent stylesheet's own `[hidden]` rule — so
+   `el.hidden = true` on a bubble did NOTHING. Caught by the D30 playtest: a
+   compaction divider drew its `summary` toggle in the FOLDED state with the
+   summary body sitting open underneath it, so the fold hid nothing it claimed
+   to hide. Every other place in this sheet that sets `display` already pairs it
+   with this guard (#ws-sidebar, #account-menu, #login-overlay, #composer, the
+   sidebar panes and the create forms); this one was missed. */
+.bubble[hidden] { display: none; }
 .bubble-body { flex: 1; min-width: 0; }
 .bubble.user {
   background: var(--user);
