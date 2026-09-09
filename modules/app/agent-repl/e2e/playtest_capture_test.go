@@ -644,7 +644,16 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 	// with no further change, showed the right frame. Two content-changing
 	// redisplays inside one eval leave this X server one frame behind; one
 	// does not. The pictures those runs produced were the harness's doing.
+	//
+	// AND THE FRAME IS REVEALED BY A SECOND, SEPARATE EVAL. Also measured:
+	// what a redisplay draws inside one emacsclient eval reaches this X
+	// server's screen memory only once Emacs handles its next input, so a
+	// framebuffer read straight after the drawing eval sees the frame
+	// before it. The second eval is that input; the redisplay it carries
+	// has nothing new to draw and is there so the two evals are the same
+	// act, not a bare no-op.
 	p.e.Eval(`(progn (force-mode-line-update t) (redisplay t) t)`)
+	p.e.Eval(`(progn (redisplay t) t)`)
 
 	body, settled, took := p.settleFrame()
 	img, err := decodeXWD(body)
