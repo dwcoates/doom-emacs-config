@@ -33,8 +33,16 @@ import {
 
 let app: MountedApp;
 
+// THE PAGE'S OWN RECORDS ARE FORWARDED FOR THIS AREA, and it is the one area
+// that needs them: its subject is a banner drawn from a DAEMON PUSH, so
+// "the banner was never drawn" is answerable only by whether
+// `lifecycle.shutdown-announced` was written on the page side. Without it a red
+// run leaves the daemon's log saying the announcement was published to one
+// client and nothing at all saying whether that client acted on it. The cost is
+// the one measured in setup.ts (~0.9s on the heaviest file), paid by this file
+// alone.
 beforeAll(async () => {
-  app = await bootLayer();
+  app = await bootLayer({ clientLog: true });
 }, BOOT_BUDGET_MS);
 
 afterAll(async () => {
@@ -195,11 +203,26 @@ it(
     // stop at whichever notice happened to be standing first and then read a
     // null cause. Waiting on the cause attribute makes the assertion
     // order-independent.
-    await awaitDrawn(
-      app,
-      "the drain banner",
-      () => app.$('[data-component="drain-banner"] [data-shutdown-cause]') !== null,
-    );
+    // THE FAILURE HAS TO SPLIT THE TWO CAUSES ITSELF. "never drawn" leaves a
+    // reader unable to tell a push that never arrived from one that arrived and
+    // drew the wrong notice, and this area's own artifacts carry no page-side
+    // record to settle it -- which is exactly where one red run's diagnosis
+    // stopped. The banner host's own markup is the fact that separates them: an
+    // EMPTY host means no lifecycle push reached this page at all, and a host
+    // holding `data-drain-scheduled` means the schedule arrived and the
+    // announcement did not (or did not take precedence, which lifecycle.ts's
+    // `redraw` says it must).
+    const bannerHost = (): string =>
+      app.$('[data-component="drain-banner"]')?.innerHTML ?? "(no drain-banner host)";
+    try {
+      await awaitDrawn(
+        app,
+        "the drain banner",
+        () => app.$('[data-component="drain-banner"] [data-shutdown-cause]') !== null,
+      );
+    } catch (error) {
+      throw new Error(`${String(error)}; drain-banner host: ${bannerHost()}`);
+    }
     const banner = app.$('[data-component="drain-banner"] [data-shutdown-cause]');
     expect(banner).not.toBeNull();
     expect(banner?.getAttribute("data-shutdown-cause")).toBe("scheduledDrain");
