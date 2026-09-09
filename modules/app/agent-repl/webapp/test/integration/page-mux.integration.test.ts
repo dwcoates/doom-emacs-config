@@ -248,6 +248,47 @@ describe("one view's subscription refused", () => {
   });
 });
 
+describe("the workspace moving away", () => {
+  /**
+   * THE PAGE IS PINNED TO ONE WORKSPACE. `ctx.workspace` is readonly and a
+   * successor daemon is a different origin, so there is no in-page switch to
+   * cover: the move is the whole of it. The page draws the notice, goes quiet,
+   * and stops — and under the mux "stops" is one connection to let go of
+   * rather than seven, which is what these two assert.
+   */
+  const moveAway = async (): Promise<void> => {
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    const second = await harness.startSecondDaemon();
+    harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
+    await harness.settle();
+  };
+
+  it("lets go of the page's one stream", async () => {
+    // Arrange / Act.
+    await moveAway();
+
+    // Assert: the connection is released rather than left reopening on backoff
+    // for a workspace this page can never get back.
+    expect(harness.fake.attachedPages()).toEqual([]);
+  });
+
+  it("draws nothing the old workspace pushes afterwards", async () => {
+    // Arrange.
+    await moveAway();
+    const drawnBefore = harness.$(".topbar-title")?.textContent;
+
+    // Act: the daemon it left behind keeps talking.
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ title: "from-the-old-daemon" }));
+    await harness.settle();
+
+    // Assert: A PAGE THAT HAS GONE QUIET DOES NOT DRAW. A frame from the
+    // workspace's old home would be a view of a workspace that has moved on.
+    expect(harness.$(".topbar-title")?.textContent).toBe(drawnBefore);
+    expect(harness.$(".topbar-title")?.textContent).not.toContain("from-the-old-daemon");
+  });
+});
+
 describe("a live feed tail on the shared stream", () => {
   it("draws a row pushed after the page loaded", async () => {
     // Arrange: THE ORIGINAL DEFECT. The root feed's tail was the seventh
