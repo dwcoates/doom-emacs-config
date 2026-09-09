@@ -351,3 +351,49 @@ and earns no subagent_without_start warning; a success without one keeps the
 hold-then-warn path untouched. Held frames released by a non-start naming
 frame fold BEFORE it, since the terminal is later in the run than everything
 it outran.
+
+## Landing 14 (2026-09-09): a refused send is not a send that stated nothing
+
+OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
+behalf; protos 7660044a2).
+
+- frontend.v1 FeedAgentPrompt.delivery gains `refused` (tag 5,
+  FeedAgentPromptRefused), whose sole field is
+  `optional FeedAgentPromptRefusalReason reason` (tag 1, one `string text`).
+  The two existing arms are unchanged; the oneof's own comment now reads "how
+  the send FARED" rather than "was delivered".
+
+WHY. The oneof carried only arms that say how a send LANDED, so a REFUSED send
+was drawn exactly as one whose producer merely observed nothing — and the
+oneof's documented meaning for unset ("the producer observed nothing; the
+row's presence already says the attempt happened") is precisely what "not yet
+delivered" looks like. A reader was left assuming a message was still on its
+way to an agent that will never receive it. Two independent e2e agents
+recorded the same gap, and TestSendMessageRefused could only prove the refusal
+by asserting a negative that is also its own opposite.
+
+A REASON AND NO KIND, because a reason is all the producer has. The vendor
+answers a refused send with `success: false` and a sentence written for the
+model to read; it declares no refusal code, and the distinction between a
+recipient the user stopped and one that never existed lives only inside that
+prose. Recovering it would mean parsing the sentence — the same rule
+AgentSendMessageResumedRecipient states for itself. The reason is UNSET when
+the refusal carried no content at all: the arm is the refusal, the reason only
+its detail.
+
+NO CONVERSATION-TIER CHANGE. AgentSendMessage.failure has carried this fact
+since the foundation, and both producers already fill it — shim
+convert/tools/send-message.ts (`failureOf(outcome)`) and shim-sidecar
+internal/convert/settled_items.go (kindSendMessage, failed). The gap was
+entirely in the frontend tier; this landing is where the fact reaches a
+surface. Both producers gained a test pinning the refusal PROSE into
+AgentToolFailure.content, which is now load-bearing.
+
+CONSUMERS. daemon resolve/feed/sendmessage.go's failure arm sets `refused`
+ALWAYS — a contentless refusal is still a refusal and must not fall back to
+the unset oneof — reading the reason with failureText, the same reading every
+failed tool call's account gets. webapp feed/rows/agent-prompt.ts draws it on
+the SAME delivery marker the two landings wear, with a `refused` class in the
+feed's error color and the producer's words in an element of their own, so
+this client's wording and the vendor's stay tellable apart. Emacs draws no
+feed (no change).
