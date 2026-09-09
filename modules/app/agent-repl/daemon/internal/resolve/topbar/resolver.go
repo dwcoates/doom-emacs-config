@@ -162,7 +162,33 @@ func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
 		Context:              r.contextChip(s),
 		Account:              r.account(s),
 		PermissionModePicker: r.permissionModePicker(s),
+		FastMode:             fastMode(s),
 	}, nil
+}
+
+// fastMode projects the vendor's last fast-mode statement onto the strip, arm
+// for arm. Nil until the session has stated one: the field is UNSET rather
+// than defaulted to off, because "the vendor has not said" and "the vendor
+// said no" are different facts and only one of them is a claim.
+func fastMode(s *wsState) *frontendv1.TopbarFastMode {
+	switch state := s.fastMode.GetState().(type) {
+	case *conversationv1.SessionFastMode_On:
+		return &frontendv1.TopbarFastMode{
+			State: &frontendv1.TopbarFastMode_On{On: &frontendv1.TopbarFastModeOn{}},
+		}
+	case *conversationv1.SessionFastMode_Off:
+		return &frontendv1.TopbarFastMode{
+			State: &frontendv1.TopbarFastMode_Off{
+				Off: &frontendv1.TopbarFastModeOff{Reason: state.Off.GetReason()},
+			},
+		}
+	case *conversationv1.SessionFastMode_Cooldown:
+		return &frontendv1.TopbarFastMode{
+			State: &frontendv1.TopbarFastMode_Cooldown{Cooldown: &frontendv1.TopbarFastModeCooldown{}},
+		}
+	default:
+		return nil
+	}
 }
 
 // title composes the title line: the workspace's name, plus the branch when the
@@ -594,7 +620,7 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 	case *conversationv1.SessionUpdate_AccountUsage:
 		return "account_usage", func(*wsState) {}
 	case *conversationv1.SessionUpdate_FastMode:
-		return "fast_mode", func(*wsState) {}
+		return "fast_mode", func(s *wsState) { s.fastMode = u.FastMode }
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server", func(s *wsState) { s.putMcpServer(u.McpServer) }
 	case *conversationv1.SessionUpdate_RateLimitStatus:

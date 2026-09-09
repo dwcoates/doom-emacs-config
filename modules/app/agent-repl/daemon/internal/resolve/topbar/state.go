@@ -139,6 +139,11 @@ type wsState struct {
 	// picker is exactly the switchable set the daemon will accept.
 	picker *frontendv1.TopbarPermissionModePicker
 
+	// fastMode is the vendor's fast mode as last stated, nil until the
+	// session has stated one. Standing, like the permission mode beside it:
+	// the state sticks until the vendor states another.
+	fastMode *conversationv1.SessionFastMode
+
 	// email is the logged-in account, empty when the root is logged out.
 	email string
 	// accountSet reports whether the config root has been read at all.
