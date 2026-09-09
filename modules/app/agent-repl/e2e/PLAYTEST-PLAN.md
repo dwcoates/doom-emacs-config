@@ -107,7 +107,7 @@ E. Permissions and questions
 
 F. Tools — table over scenarios
 42. shell: !bash, -hold, -fail, -timeout, -spill, -image
-43. detached shell: !bash-detach, -poll, -fail, -live → row, sub-feed, settled
+43. detached shell: !bash-detach, -poll, -fail, -live → row live with its spool body riding the row (a shell bubble is NOT a feed and has no sub-feed, per feed.proto), then settled
 44. files: read(-head/-range/-truncated/-image), write-create/-update, edit, both diagnostics, grep/glob
 45. web: fetch, redirect, search
 46. skills: !skill, -fail, memory, injected
