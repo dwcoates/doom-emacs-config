@@ -127,6 +127,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -338,14 +339,30 @@ func raiseColdGate(t *testing.T) *coldGate {
 	return &coldGate{w: w, ws: ws, row: row, configDir: configDir, footer: footer}
 }
 
-// coldGateKillShims SIGKILLs this daemon's shim processes and nothing else. It
-// narrows Daemon.StrayPIDs (every live process naming the state directory) to
-// the ones whose argv names the shim bundle, so the store and the sidecar — which
-// name the same state root only because their logs live under it — are left
-// running.
+// coldGateKillShims SIGKILLs this daemon's shim processes and nothing else, and
+// does not return until they are GONE. It narrows Daemon.StrayPIDs (every live
+// process naming the state directory) to the ones whose argv names the shim
+// bundle, so the store and the sidecar — which name the same state root only
+// because their logs live under it — are left running.
+//
+// THE WAIT IS THE POINT, and leaving it out cost a run. `kill` only DELIVERS
+// the signal; the kernel closes the dead process's file descriptors, and with
+// them releases its workspace flock, on its own schedule afterwards. The
+// successor daemon was started the moment this returned, and its boot probes
+// that flock: on a loaded box it read the lock still HELD, concluded a shim
+// survives, tried to adopt it, got `connection refused` on a socket nobody was
+// listening to any more, and FAILED THE WHOLE BOOT — `boot: adopt the
+// surviving shim`. The successor never reached its serving record and the test
+// timed out waiting for it, with the sweep flagging the adoption errors on top.
+// Observed once in eight in-container runs of the package.
+//
+// A pid that no longer exists is the honest statement that the flock is gone:
+// a process closes its descriptors before it becomes a zombie, and a zombie is
+// reaped before its pid disappears. So the wait is on the pid, not on a guess
+// about how long a SIGKILL takes.
 func coldGateKillShims(t *testing.T, d *harness.Daemon) {
 	t.Helper()
-	killed := 0
+	killed := []int{}
 	for _, pid := range d.StrayPIDs() {
 		args, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 		if err != nil {
@@ -357,10 +374,50 @@ func coldGateKillShims(t *testing.T, d *harness.Daemon) {
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 			t.Fatalf("kill the seeding shim (pid %d): %v", pid, err)
 		}
-		killed++
+		killed = append(killed, pid)
 	}
-	if killed == 0 {
+	if len(killed) == 0 {
 		t.Fatal("no shim process was found to kill; the successor would adopt the survivor instead of resuming")
+	}
+	awaitPIDsGone(t, killed, coldGateReapBound)
+}
+
+// coldGateReapBound is how long a SIGKILLed shim has to leave the process table.
+//
+// It reclaims a REAL OS process, which is the one shape in this suite that
+// genuinely deserves seconds rather than milliseconds — the same reasoning the
+// Emacs suite records for its own 5s fake-daemon exit bound. The work itself is
+// the kernel tearing down one node process, and a loaded container is exactly
+// the case a bound exists to tolerate. It is never spent on a healthy run: the
+// loop ends the moment the pid is gone.
+const coldGateReapBound = 5 * time.Second
+
+// awaitPIDsGone blocks until none of pids names a live process, failing loudly
+// with whatever is left when the bound expires.
+func awaitPIDsGone(t *testing.T, pids []int, bound time.Duration) {
+	t.Helper()
+	// POLLED, because a pid this process did not fork gives no event to wait
+	// on: the shim was the FIRST daemon's child and was reparented when that
+	// daemon was killed, so there is no Wait to block in and no descriptor to
+	// select on. The cadence matches awaitWorldStraysGone's, which polls the
+	// same kernel fact for the same reason.
+	deadline := time.Now().Add(bound)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		alive := []int{}
+		for _, pid := range pids {
+			if syscall.Kill(pid, 0) == nil {
+				alive = append(alive, pid)
+			}
+		}
+		if len(alive) == 0 {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("SIGKILLed shim(s) %v were still alive after %s; the successor's boot would probe their workspace lock as HELD, try to adopt a shim that is going away, and fail the boot", alive, bound)
+		}
+		<-ticker.C
 	}
 }
 

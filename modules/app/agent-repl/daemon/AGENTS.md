@@ -69,6 +69,43 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | --- | --- | --- | --- |
   | `footer.DefaultMomentaryDwell` | 1500ms | `--footer-momentary-dwell`, `AGENT_REPL_FOOTER_MOMENTARY_DWELL` (the environment beats the flag; a malformed or non-positive value is REFUSED, never ignored), `harness.Opts.FooterMomentaryDwell` | the window is sized for a PERSON to read a momentary status, so it is a real product window and not a bound to be tightened. The two tests whose subject is its RETIREMENT read no clock, so they run the daemon at 150ms — ~25x the measured p90 push arrival, wide enough that the status and its successor stay two separately observed pushes — and cost 0.39s each instead of 1.74s |
 
+### An answer has left when the socket took it
+
+`server.WriteBarrier` (`internal/server/writebarrier.go`) is what both the
+daemon's orderly exit and the integration fake shim's stand-down wait on before
+ending the process. READ ITS DOC BEFORE REACHING FOR A SIMPLER SIGNAL: neither
+"the handler returned" nor "the request's context ended" means the answer has
+been written, because `golang.org/x/net/http2`'s `serverConn.runHandler` cancels
+that context in a defer that runs BEFORE the same defer produces the response's
+final frames. Both beliefs have been in this tree and both cost a run.
+
+| window | value | why |
+| --- | --- | --- |
+| `server.barrierSettle` | 1ms | how long the barrier lets pass with no write completing before it calls a connection quiet. NOT a delay: the loop ends on the condition and the ordinary case spends two of these. What it covers is one `write(2)` of a few dozen bytes onto a unix or loopback socket by an already-runnable goroutine — microseconds — so it is three orders of magnitude over the work |
+| `server.answerWriteBound` | 250ms | how long ONE answer has to reach the socket after its handler's goroutine has finished with it. A last resort, deliberately well under the exit's own 2s grace so a single stuck answer cannot spend all of it |
+| `fakeshim.killAnswerWriteBound` | 250ms | the same last resort on the fake's `KillSession` exit, far under the daemon's stand-down window so an overrun reads as a fake that took a moment rather than one that hung |
+
+The barrier settles true on quiet OR on a connection that is still writing past
+the mark — one h2 connection multiplexes the standing pushes with the unary
+calls, and calling a busy link a lost answer would put an ERROR record, and a
+warning-sweep failure, against a healthy run. FALSE means one thing: nothing at
+all was written since the mark.
+
+### The shim link's requests own the bytes they promise
+
+`shimclient.ownedRequestBody` (`internal/shimclient/transport.go`) copies a
+declared-length request body inside `RoundTrip`, and it is not defensive. Over
+HTTP/2 `Do` returns on the response HEAD while the body is still being written,
+connect-go releases its pooled payload the instant `Do` returns, and the shim
+answers a streaming head THE MOMENT IT ACCEPTS THE STREAM — so the daemon
+announced `content-length: 5` and then closed the stream with an empty DATA
+frame, which nghttp2 correctly RST_STREAMs with PROTOCOL_ERROR. Four to seven
+e2e tests per sandbox run read that as a severed shim link.
+
+Do not "fix" a peer's reset by retrying past it: connect-go's streaming request
+body is a pipe that cannot be replayed, and a request that contradicts its own
+length must not be sent at all.
+
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
 Emacs launches `daemon/bin/claude-repld` with NO argv — state comes from the
