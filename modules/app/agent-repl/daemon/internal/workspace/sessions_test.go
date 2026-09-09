@@ -1645,3 +1645,39 @@ func TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails(t *testing.T) {
 		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
 	}
 }
+
+// TestStartRevivesAWorkspaceWhoseShimWasReaped covers the other half of the
+// same defect: the dead shim's row made the bring-up answer "already live", so
+// the revival a held prompt waits on brought nothing up at all.
+func TestStartRevivesAWorkspaceWhoseShimWasReaped(t *testing.T) {
+	// Arrange: a session came up, then its shim was killed out from under the
+	// daemon and reaped.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.client.reaped = true
+	fresh := &fakeClient{response: startedResponse("vendor-2"), pid: 5151, standDown: f.standDown}
+	f.supervisor.client = fresh
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start after the shim died: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.spawns) != 2 {
+		t.Fatalf("spawns = %d, want a second shim spawned for the revival", len(f.supervisor.spawns))
+	}
+	client, live := f.fleet.Client(ws.ID)
+	if !live {
+		t.Fatal("the revived workspace has no live client; every prompt would answer no_session")
+	}
+	if client != shimclient.Client(fresh) {
+		t.Fatalf("Client() = %v, want the freshly spawned shim", client)
+	}
+	if !f.watcher.closed {
+		t.Fatal("the dead session's watches were left open by the revival")
+	}
+}
