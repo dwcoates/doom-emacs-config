@@ -278,6 +278,65 @@ func TestClientLogLandsInTheClientsOwnSink(t *testing.T) {
 	}
 }
 
+// TestClientLogPromotesTheClientsSessionIdentity pins the join key landing 15
+// exists for: the webapp states its session identity inside the record's
+// context, and it must land in the persisted record's OWN field, so one grep
+// on agent_repl_session_id joins the browser's records to the daemon's, the
+// shim's, Emacs's and the sidecar's.
+func TestClientLogPromotesTheClientsSessionIdentity(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if err := s.ClientLog(dir, ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "webapp.test.op",
+		Message:    "forwarded",
+		Context:    Context{KeyAgentReplSessionID: "sess-1"},
+	}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	records := workspaceRecords(t, dir, "webapp")
+	if len(records) != 1 {
+		t.Fatalf("webapp records = %d, want exactly one", len(records))
+	}
+	if got := records[0][KeyAgentReplSessionID]; got != "sess-1" {
+		t.Fatalf("agent_repl_session_id = %v, want the client's own", got)
+	}
+}
+
+// TestClientLogPromotesTheClientsVendorConversation pins the second identity
+// the same record carries, for the same join.
+func TestClientLogPromotesTheClientsVendorConversation(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if err := s.ClientLog(dir, ClientRecord{
+		ClientKind: RuntimeWebapp,
+		Level:      LevelInfo,
+		Operation:  "webapp.test.op",
+		Message:    "forwarded",
+		Context:    Context{KeyClaudeSessionID: "claude-1"},
+	}); err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+
+	// Assert.
+	records := workspaceRecords(t, dir, "webapp")
+	if len(records) != 1 {
+		t.Fatalf("webapp records = %d, want exactly one", len(records))
+	}
+	if got := records[0][KeyClaudeSessionID]; got != "claude-1" {
+		t.Fatalf("claude_session_id = %v, want the client's own", got)
+	}
+}
+
 func TestClientLogConvertsAForeignTimestampToTheLocalZone(t *testing.T) {
 	// Arrange: the instant from the vocab file's worked example, in UTC.
 	s, _ := testSurfaces(t)
