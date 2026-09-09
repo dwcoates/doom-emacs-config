@@ -1075,22 +1075,28 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	// grace and the escalation after it whatever its own budget said. The
 	// bound is real now, and shimclient.GracefulKillBound is what a caller
 	// must leave for a graceful stop to fit inside it.
-	if err := session.client.Kill(ctx, shimclient.KillAttribution{
+	killErr := session.client.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "workspace.stop",
 		Reason: "the workspace's session was stopped",
 		Force:  force,
-	}); err != nil {
-		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, err)
-	}
-	// THE VIEWS ARE TOLD HERE, not left to the connectivity feed. The watcher
-	// was closed above, so the client's own LinkDead publish has nobody left
-	// to route it: whether the views ever saw the death would otherwise depend
-	// on the exit landing before the close, which is a race the stop itself
-	// can settle. Kill has already passed the reap gate, so the process is
-	// gone by the time this runs.
+	})
+	// THE VIEWS ARE TOLD HERE, not left to the connectivity feed, AND ON EVERY
+	// PATH OUT. The watcher was closed above, so the client's own LinkDead
+	// publish has nobody left to route it: whether the views ever saw the death
+	// would otherwise depend on the exit landing before the close, which is a
+	// race the stop itself can settle.
+	//
+	// A FAILED KILL IS STILL A DEAD SESSION AS FAR AS THE VIEWS GO. The session
+	// left this fleet's map at the top of this function and the kill has sent
+	// everything it is going to send; a return that skipped this would leave the
+	// footer, topbar and sidebar showing a live link for a session nothing is
+	// serving. The error below is what says the reap was never witnessed.
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
+	if killErr != nil {
+		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, killErr)
+	}
 	return nil
 }
 
