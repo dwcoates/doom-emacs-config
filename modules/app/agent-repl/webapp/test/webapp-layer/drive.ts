@@ -105,13 +105,26 @@ export async function awaitDrawn(
 ): Promise<void> {
   // Date.now() advances with real time here (`shouldAdvanceTime`), so this
   // measures the real budget rather than the page's own fake clock.
-  const deadline = Date.now() + budgetMs;
+  const started = Date.now();
+  const deadline = started + budgetMs;
+  // HOW MANY TIMES THE LOOP ACTUALLY RAN, which is what separates a chain that
+  // did not answer from a PAGE THAT NEVER GOT THE CPU TO ASK. This suite runs
+  // `-parallel 8` worlds beside up to three vitest children, and a red run has
+  // been observed where the daemon, the shim and the store were all silent for
+  // 5.23 wall-clock seconds because this node process was descheduled for the
+  // whole budget: the submission was never sent, so nothing downstream had
+  // anything to answer. A wall-clock budget cannot tell those apart on its own,
+  // and the round count can: an ordinary 5s budget completes hundreds.
+  let rounds = 0;
   for (;;) {
     await app.settle();
+    rounds++;
     if (predicate()) return;
     if (Date.now() >= deadline) {
       throw new Error(
-        `${what} was never drawn within ${budgetMs}ms; ` +
+        `${what} was never drawn within ${budgetMs}ms ` +
+          `(${rounds} settle rounds in ${Date.now() - started}ms of wall clock; ` +
+          `a low count for the budget means this page was starved of CPU rather than left unanswered); ` +
           `row kinds drawn: [${drawnKinds(app).join(", ")}]; ` +
           `failure arms: [${app.failureArms().join(", ")}]; ` +
           `refusal arms: [${app.refusalArms().join(", ")}]`,
@@ -212,8 +225,12 @@ export async function driveTurn(
 /**
  * A drawn row's own identity: the FeedRow id the daemon minted for it, which
  * `rowSelector` already requires every matched element to carry.
+ *
+ * EXPORTED because identification is not `driveTurn`'s alone: any helper that
+ * asks "which row did MY submission draw" needs it, and the ones that counted
+ * and then read the last row by position have all been wrong in the same way.
  */
-function rowID(row: HTMLElement): string {
+export function rowID(row: HTMLElement): string {
   const id = row.dataset.feedRow;
   expect(id, "a drawn feed row carries no FeedRow id").toBeTruthy();
   return id as string;
