@@ -546,3 +546,16 @@ func TestFenceRegexMatchesThePythonShape(t *testing.T) {
 	}
 	_ = regexp.MustCompile
 }
+
+// --- Port-only: FormatBlock is the entry point for text that is itself a tree ---
+
+func TestFormatBlockWrapsABareTree(t *testing.T) {
+	lines, overflows, err := FormatBlock([]string{"├── 1.3. foo bar", "└── 1.4. x"}, 15)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustEqual(t, strings.Join(lines, "\n"), "├── 1.3. foo\n│        bar\n└── 1.4. x")
+	if len(overflows) != 0 {
+		t.Fatalf("overflows = %q", overflows)
+	}
+}

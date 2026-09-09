@@ -713,8 +713,11 @@ func JoinWrapped(lines []string) []Entry {
 	return entries
 }
 
-// formatBlock wraps every branch in one block's lines (format_block).
-func formatBlock(lines []string, width int) (output, overflows []string, err error) {
+// FormatBlock wraps every branch in one block's lines (format_block). It is
+// the entry point for text that IS a tree — a settled response under the
+// metaprompt is one tree with nothing outside it — where FormatText, which
+// looks only inside <pre> and fenced blocks, would touch nothing.
+func FormatBlock(lines []string, width int) (output, overflows []string, err error) {
 	entries := JoinWrapped(lines)
 	for i, entry := range entries {
 		if entry.Branch == nil {
@@ -761,7 +764,7 @@ func FormatText(text string, width int) (Result, error) {
 			output = append(output, lines[index:]...)
 			break
 		}
-		formatted, blockOverflows, err := formatBlock(body, width)
+		formatted, blockOverflows, err := FormatBlock(body, width)
 		if err != nil {
 			return Result{}, err
 		}
