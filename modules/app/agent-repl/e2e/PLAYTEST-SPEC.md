@@ -122,9 +122,9 @@ Pixel-golden comparison is not attempted anywhere: it is brittle against font
 hinting, a scrollbar, a clock, and every other honest difference between two
 runs of the same product.
 
-### A capture is of a settled screen, and of a redrawn one
+### A capture is of a settled screen, of a redrawn one, and of the CURRENT DOM
 
-Two things happen before the picture is taken:
+Three things happen before the picture is taken:
 
 - **A redisplay is forced.** A user's Emacs redisplays constantly because a
   user generates events; this one is driven entirely over the server socket
@@ -143,6 +143,35 @@ Two things happen before the picture is taken:
   cursor's own blink is switched off in the playbook's setup rather than
   waited out, because a blinking cursor alone would make every capture run
   its whole budget.
+- **The page's own frames are waited for, between the two redraws.** An
+  `xwidget-webkit` webview on X is OFFSCREEN-RENDERED: WebKit paints into a
+  GTK offscreen surface, and those pixels reach the glass only when Emacs's
+  redisplay copies that surface while drawing the xwidget's glyph. So a
+  redraw copies whatever the surface held at that instant, and if WebKit has
+  taken the DOM change but not yet produced a frame for it, the picture is of
+  the PREVIOUS page state under an assertion that legitimately passed —
+  while the frame WebKit produces a moment later raises a damage signal whose
+  INCREMENTAL redisplay swaps in a buffer carrying a current webview and none
+  of the chrome. Both were observed, in three runs of one owner's section: an
+  empty feed whose DOM held two settled bubbles, and a current webview with
+  no tab bar and no mode lines. Neither is a torn frame, which is why the
+  settle never caught them — the stale screen is perfectly still, so two
+  reads agree and the capture reports `settled=true` on a lie.
+
+  So a capture drives `requestAnimationFrame` twice through the page probe,
+  keyed by a token minted after the redraw was forced, and waits on the
+  layer's own `AwaitEval` polling until the page reports both frames
+  delivered. Two is the smallest count that proves anything: the first
+  callback runs BEFORE that frame is painted. Measured across owner 7's three
+  playbooks and this one, over two consecutive runs, the gate answered in
+  42–124ms, so a capture costs about a tenth of a second more than it did.
+  A workspace with no live webview answers its own word and the wait accepts
+  it, because several playbooks photograph a frame with no page in it.
+
+  `playtest_00_feed_tail_test.go`'s last step is this mechanism photographing
+  itself: the page appends a full-viewport magenta region, the DOM says so, a
+  capture is taken immediately, and the decoded pixels are counted —
+  957,676 of them exactly magenta with the gate, and zero without it.
 
 ## Driving the page
 
@@ -232,12 +261,17 @@ It is a permanent playbook rather than a one-off check: it is the thing that
 would go red first if the page ever again opens a stream off the client
 instead of the mux.
 
-## One open question this raised
+## One open question this raised, half of it since answered
 
-Clicking a subagent bubble's `[data-expand]` caret does not make the bubble
-read as open: `data-expanded` never becomes true and the bubble is still
-drawn collapsed, while a non-root feed container IS carrying rows. So the
-second tail is served and the toggle's own drawn state is a separate
-question, in the webapp's bubble rather than in the transport. It is
-recorded in `00-feed-tail`'s manifest rather than asserted, and owner 16
-(G49–52, subagents) inherits it.
+Clicking a subagent bubble's `[data-expand]` caret was reported here as not
+making the bubble read as open: `data-expanded` never became true and the
+bubble was *photographed still drawn collapsed*, while a non-root feed
+container WAS carrying rows.
+
+The photographed half was the capture's own staleness, not the product. With
+the paint gate above, the same step's picture shows the bubble drawn OPEN
+with its nested rows beneath the head. What remains open is only which
+attribute carries that state — `data-expanded` is not it — which is the
+webapp's own business in its bubble rather than anything about the
+transport. It stays recorded in `00-feed-tail`'s manifest rather than
+asserted, and owner 16 (G49–52, subagents) inherits that remainder.
