@@ -76,7 +76,14 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	case *conversationv1.AgentResponse_Success:
 		// THE TERMINAL RESTATES THE WHOLE. Whatever the fold accumulated is
 		// replaced outright, which is what makes a lost fragment harmless.
-		fold.markdown = state.Success.GetProse().GetMarkdown()
+		//
+		// AND THE WHOLE IS WRAPPED HERE, ONCE. The response is the tree the
+		// metaprompt prescribes, and the daemon is the one place both clients
+		// read it from, so the tree is wrapped to its column limit before it
+		// is served rather than by each client for itself (tree.go). Only the
+		// settled whole is wrapped: a streaming delta is a fragment of a line
+		// the formatter has not yet seen the end of.
+		fold.markdown = formatResponseTree(log, unit, state.Success.GetProse().GetMarkdown())
 		fold.settled = true
 		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
