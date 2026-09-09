@@ -116,6 +116,40 @@ function isEmojiRootLine(line: string): boolean {
   return line.charCodeAt(end + 1) >= EMOJI_FLOOR;
 }
 
+/**
+ * A CONTINUATION line: the remainder of a branch the DAEMON already wrapped
+ * to its 105-column limit before serving it
+ * (`daemon/internal/resolve/feed/tree.go`, via `treefmt`).
+ *
+ * The daemon writes such a remainder as the ancestors' rails followed by the
+ * wrapped branch's own label width in padding — `│   │   rest` under a `├──`
+ * branch that has children, eight spaces under a wrapped `└──` last branch,
+ * `  rest` or `│ rest` under a wrapped root. So the rule here is exactly:
+ *
+ * - the line's leading run consists only of spaces and `│`,
+ * - that run is NON-EMPTY (a column-0 line is prose, and ends the region),
+ * - text follows the run,
+ * - and the run is not followed by a connector (`├──`/`└──`), which would
+ *   make the line a branch of its own rather than someone's remainder.
+ *
+ * A continuation is part of the tree but is not tree CORE: it anchors
+ * nothing and is never counted toward the two-core-lines minimum, because a
+ * lone branch that merely wrapped is still a lone branch.
+ */
+function isContinuationLine(line: string): boolean {
+  let i = 0;
+  const n = line.length;
+  while (i < n) {
+    const c = line.charCodeAt(i);
+    if (c === CH_SPACE || c === CH_BAR) i++;
+    else break;
+  }
+  if (i === 0 || i >= n) return false;
+  const c = line.charCodeAt(i);
+  if (c === CH_TEE || c === CH_ELL) return false;
+  return true;
+}
+
 /** The mandated `Response (…)` opener that heads every metaprompt response. */
 function isHeaderLine(line: string): boolean {
   return line.startsWith(HEADER_PREFIX);
@@ -146,7 +180,10 @@ export function isMetapromptTree(text: string): boolean {
   for (const line of lines) {
     const connector = isConnectorLine(line);
     const emojiRoot = isEmojiRootLine(line);
-    if (connector || emojiRoot || isDottedLabelLine(line)) treeish++;
+    // A daemon-wrapped remainder is as tree-shaped as the branch it came
+    // from; counting it as prose sinks the ratio for a tree with several
+    // wraps, which is precisely the tree the daemon serves.
+    if (connector || emojiRoot || isDottedLabelLine(line) || isContinuationLine(line)) treeish++;
     if (connector || emojiRoot) anchored = true;
   }
   return anchored && treeish / lines.length >= TREE_LINE_RATIO;
@@ -175,8 +212,10 @@ export interface TreeRegion {
 export function findTreeRegion(text: string): TreeRegion | null {
   const lines = text.split("\n");
   const n = lines.length;
-  // core[i]: a connector/root line outside any fence. head[i]: the header.
+  // core[i]: a connector/root line outside any fence. cont[i]: a
+  // daemon-wrapped remainder of the branch above it. head[i]: the header.
   const core: boolean[] = new Array<boolean>(n).fill(false);
+  const cont: boolean[] = new Array<boolean>(n).fill(false);
   const head: boolean[] = new Array<boolean>(n).fill(false);
   let inFence = false;
   for (let i = 0; i < n; i++) {
@@ -187,6 +226,7 @@ export function findTreeRegion(text: string): TreeRegion | null {
     }
     if (inFence) continue;
     if (isConnectorLine(line) || isEmojiRootLine(line)) core[i] = true;
+    else if (isContinuationLine(line)) cont[i] = true;
     else if (isHeaderLine(line)) head[i] = true;
   }
   // The first tree-core line anchors the region.
@@ -198,8 +238,9 @@ export function findTreeRegion(text: string): TreeRegion | null {
     }
   }
   if (start === -1) return null;
-  // Extend across interior blanks; the first non-blank, non-core line (prose
-  // or a fence) ends the region. `end` tracks the last core line.
+  // Extend across interior blanks and across the daemon's own wrapped
+  // remainders; the first non-blank, non-core, non-continuation line (prose
+  // or a fence) ends the region. `end` tracks the last line kept.
   let end = start;
   let coreCount = 0;
   for (let i = start; i < n; i++) {
@@ -209,6 +250,14 @@ export function findTreeRegion(text: string): TreeRegion | null {
       continue;
     }
     if (lines[i].trim() === "") continue;
+    // A continuation belongs to the branch above it, so it stays in the
+    // region — including when it is the region's LAST line, which is what a
+    // wrapped `└──` last branch produces — but it is not core: it anchors
+    // nothing and never satisfies the two-core-lines minimum below.
+    if (cont[i]) {
+      end = i;
+      continue;
+    }
     break;
   }
   // A lone stray connector buried in prose is not a tree.

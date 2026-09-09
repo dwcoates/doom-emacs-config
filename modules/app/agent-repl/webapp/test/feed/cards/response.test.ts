@@ -19,6 +19,7 @@ import type { RowContext } from "../../../src/feed/cards/context.js";
 import {
   REVEALED_ATTRIBUTE,
   drawFeedResponse,
+  proseHtml,
   revealedSoFar,
 } from "../../../src/feed/cards/response.js";
 
@@ -441,5 +442,43 @@ describe("a host with no animation frames", () => {
     );
     // Assert
     expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+  });
+});
+
+/**
+ * What the DAEMON actually serves for the fake SDK's `!md` showcase: its bare
+ * tree wrapped to 105 columns by `treefmt`, so branch 1.1 and branch 1.2 each
+ * arrive as a head line plus a continuation line. These are that formatter's
+ * own output, not an invented shape.
+ */
+const WRAPPED_SHOWCASE_TREE = [
+  "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.",
+  "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped before it",
+  "│   │   is served, and every continuation line must still carry the rails of the branches around it.",
+  "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
+  "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs",
+  "        past the daemon's limit and wraps onto a second line.",
+].join("\n");
+
+describe("the wrapped tree a settled response carries", () => {
+  it("draws every line of the daemon-wrapped showcase tree as a tree line", () => {
+    // Arrange
+    const host = document.createElement("div");
+    // Act
+    host.innerHTML = proseHtml(WRAPPED_SHOWCASE_TREE);
+    // Assert — six drawn rows: four branches and the two continuations the
+    // daemon's wrap added. A sheared region drops the tree to two.
+    expect(host.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)")).toHaveLength(6);
+  });
+
+  it("carries the wrapped branch's rails on its continuation row's prefix", () => {
+    // Arrange
+    const host = document.createElement("div");
+    // Act
+    host.innerHTML = proseHtml(WRAPPED_SHOWCASE_TREE);
+    const prefixes = [...host.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
+    // Assert — the rails of 1.1's ancestors and of 1.1 itself, so the wrap
+    // does not sever 1.1 from the 1.1.1 beneath it.
+    expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
   });
 });
