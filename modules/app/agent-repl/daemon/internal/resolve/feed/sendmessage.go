@@ -39,8 +39,6 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	unitID := act.GetActivityId().GetValue()
 	u := s.unit(unitID)
 
-	var resolved *conversationv1.AgentId
-	var delivery deliveryArm
 	switch state := send.GetResult().(type) {
 	case *conversationv1.AgentSendMessage_Start:
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
@@ -53,14 +51,14 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 	case *conversationv1.AgentSendMessage_Progress:
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 	case *conversationv1.AgentSendMessage_Success:
-		resolved = state.Success.GetRecipientAgentId()
-		delivery = deliveryOf(state.Success)
+		u.sendResolved = state.Success.GetRecipientAgentId()
+		u.sendDelivery = deliveryOf(state.Success)
 	case *conversationv1.AgentSendMessage_Failure:
 		// A send that could not be delivered still HAPPENED, and its row is
 		// what explains the attempt. It is drawn against what the start said,
 		// and its delivery arm states the REFUSAL — never left unset, which a
 		// reader cannot tell apart from a producer that stated nothing.
-		delivery = refusedOf(state.Failure)
+		u.sendDelivery = refusedOf(state.Failure)
 	default:
 		return nil, errNotARow
 	}
@@ -69,13 +67,15 @@ func (r *resolver) drawSendMessage(s *wsState, at placement, act *conversationv1
 		Id: r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: unitID, Sub: "send"}),
 		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
 			Address: &frontendv1.FeedAgentPromptAddress{
-				Text: "→ " + r.sendRecipientLabel(s, resolved, u.sendAddressedTo),
+				Text: "→ " + r.sendRecipientLabel(s, u.sendResolved, u.sendAddressedTo),
 			},
 			Body: &frontendv1.FeedAgentPromptBody{Blocks: sendBodyBlocks(u.sendSummary)},
 		}},
 	}
-	if delivery != nil {
-		delivery(row.GetAgentPrompt())
+	// THE DELIVERY IS THE UNIT'S, NOT THIS FRAME'S. See unitState.sendDelivery
+	// for the replay that made the difference matter.
+	if u.sendDelivery != nil {
+		u.sendDelivery(row.GetAgentPrompt())
 	}
 	u.row = row
 	return row, nil
