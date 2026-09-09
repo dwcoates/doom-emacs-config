@@ -75,7 +75,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 			}})
 		}
 		return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
-			Result: &conversationv1.AgentBash_Success{Success: bashSuccess(call, result, exit, ts)},
+			Result: &conversationv1.AgentBash_Success{Success: bashSuccess(call, result, block, exit, ts)},
 		}})
 	case kindSubagent:
 		return c.subagentSettled(call, result, failed, failure, ts, at)

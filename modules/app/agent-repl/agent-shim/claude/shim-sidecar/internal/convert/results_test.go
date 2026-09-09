@@ -800,7 +800,7 @@ func TestBashSuccessReadsTheExitCodeTheVendorInterpreted(t *testing.T) {
 	result := map[string]any{"stdout": "", "returnCodeInterpretation": "exited with code 7"}
 
 	// Act
-	got := bashSuccess(call, result, bashExitCode(result, nil, false), 1000)
+	got := bashSuccess(call, result, nil, bashExitCode(result, nil, false), 1000)
 
 	// Assert
 	completed, ok := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
@@ -823,7 +823,7 @@ func TestBashSuccessLeavesTerminationUnsetWhenNoStatusWasStated(t *testing.T) {
 	result := map[string]any{"stdout": "ok"}
 
 	// Act
-	got := bashSuccess(call, result, bashExitCode(result, nil, false), 1000)
+	got := bashSuccess(call, result, nil, bashExitCode(result, nil, false), 1000)
 
 	// Assert
 	completed := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
@@ -1046,5 +1046,70 @@ func TestSendMessageFailureCarriesTheRefusalProseIntoItsContent(t *testing.T) {
 	blocks := failure.GetError().GetContent().GetBlocks()
 	if len(blocks) != 1 || blocks[0].GetText().GetText() != prose {
 		t.Fatalf("failure content = %v, want the refusal prose %q verbatim", blocks, prose)
+	}
+}
+
+// imageResultBlock is a `tool_result` answering with one base64 image block.
+func imageResultBlock(mediaType, data string) map[string]any {
+	return map[string]any{"content": []any{
+		map[string]any{"type": "image", "source": map[string]any{
+			"type":       "base64",
+			"media_type": mediaType,
+			"data":       data,
+		}},
+	}}
+}
+
+func TestBashSuccessCarriesTheImageBytesFromTheResultBlock(t *testing.T) {
+	// Arrange: the Output object says only THAT the output was an image; the
+	// bytes and the media type live on the answering result block.
+	call := openCall{input: map[string]any{"command": "screencapture -x -"}}
+	result := map[string]any{"stdout": "iVBORw==", "isImage": true}
+
+	// Act
+	got := bashSuccess(call, result, imageResultBlock("image/png", "iVBORw=="), nil, 1000)
+
+	// Assert
+	completed := got.GetOutcome().(*conversationv1.AgentBashSuccess_Completed)
+	image, ok := completed.Completed.GetOutput().GetForm().(*conversationv1.AgentBashOutput_Image)
+	if !ok {
+		t.Fatalf("Form = %T, want AgentBashOutput_Image", completed.Completed.GetOutput().GetForm())
+	}
+	if string(image.Image.GetData()) != "\x89PNG" {
+		t.Fatalf("Data = %q, want the decoded bytes", image.Image.GetData())
+	}
+	if image.Image.GetMediaType() != "image/png" {
+		t.Fatalf("MediaType = %q, want image/png", image.Image.GetMediaType())
+	}
+}
+
+func TestBashResultImageRefusesAPayloadThatDoesNotDecode(t *testing.T) {
+	// Arrange: a payload we cannot reconstruct is not half-carried.
+	block := imageResultBlock("image/png", "not base64 at all!!")
+
+	// Act
+	data, mediaType := bashResultImage(block)
+
+	// Assert: the media type still comes back so a refusal can name it.
+	if data != nil {
+		t.Fatalf("Data = %q, want nil for an undecodable payload", data)
+	}
+	if mediaType != "image/png" {
+		t.Fatalf("MediaType = %q, want image/png", mediaType)
+	}
+}
+
+func TestBashResultImageAnswersNothingForATextOnlyResult(t *testing.T) {
+	// Arrange
+	block := map[string]any{"content": []any{
+		map[string]any{"type": "text", "text": "hello"},
+	}}
+
+	// Act
+	data, mediaType := bashResultImage(block)
+
+	// Assert
+	if data != nil || mediaType != "" {
+		t.Fatalf("data, mediaType = %q, %q, want both empty", data, mediaType)
 	}
 }
