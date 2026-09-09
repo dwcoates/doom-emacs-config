@@ -325,10 +325,73 @@ func (s *server) WatchWebWorkspace(
 	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
-	return serveTopic(s, ctx, rpc, subject.Log, s.webTopic(subject.Record.ID), out,
-		func(push *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse {
-			return push
-		})
+
+	// COMPOSE BEFORE SUBSCRIBING, as the host stream does. The state topic
+	// replays its latest value to a new subscriber, so publishing here is what
+	// gives every fresh subscription its opening `session_identity` push --
+	// including the first one, before any session edge has ever fired. The
+	// page binds its log context from it, so a page that never got one would
+	// forward every record of its life unattributed.
+	s.publishWebSessionIdentity(ctx, subject.Log, subject.Record.ID)
+	return s.serveWeb(ctx, rpc, subject.Log, subject.Record.ID, out)
+}
+
+// serveWeb serves the web stream's TWO topics onto one wire: the
+// `session_identity` state and the `transferred` event. They are separate
+// topics (see webidentity.go) and this is the one place they are merged, in
+// publication order per topic.
+func (s *server) serveWeb(
+	ctx context.Context,
+	rpc string,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	out *connect.ServerStream[agentreplv1.WatchWebWorkspaceResponse],
+) error {
+	streamCtx, cancel := s.streamContext(ctx)
+	defer cancel()
+
+	states := s.webStateTopic(ws).Subscribe(streamCtx)
+	events := s.webTopic(ws).Subscribe(streamCtx)
+	s.acceptStream(ctx, rpc)
+	log.Debug(rpc, "accepted a standing stream", nil)
+
+	for {
+		var push *agentreplv1.WatchWebWorkspaceResponse
+		select {
+		case <-streamCtx.Done():
+			log.Debug(rpc, "the standing stream ended on cancellation", nil)
+			return nil
+		case identity, ok := <-states:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if identity == nil {
+				log.Error(rpc, "the web identity composer raised an empty identity; it was not sent", nil)
+				continue
+			}
+			push = &agentreplv1.WatchWebWorkspaceResponse{
+				Push: &agentreplv1.WatchWebWorkspaceResponse_SessionIdentity{
+					SessionIdentity: identity,
+				},
+			}
+		case event, ok := <-events:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if event == nil {
+				log.Error(rpc, "a publisher raised an empty push; it was not sent", nil)
+				continue
+			}
+			push = event
+		}
+		if err := out.Send(push); err != nil {
+			log.Debug(rpc, "the standing stream's client went away",
+				dlog.Context{"cause": err.Error()})
+			return nil
+		}
+	}
 }
 
 // WatchDaemon serves the DAEMON-LEVEL stream — daemon-scoped facts only. It is

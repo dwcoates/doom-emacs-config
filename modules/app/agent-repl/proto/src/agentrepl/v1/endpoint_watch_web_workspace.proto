@@ -4,6 +4,12 @@
 // workspace's web-client-facing link state), exactly as "Host" qualifies
 // Emacs's. NOT DRAWN: the webview uses it to follow its connection's
 // lifecycle, never to render.
+//
+// STATE AND EVENTS, EXACTLY AS THE HOST STREAM CARRIES THEM. `transferred` is
+// an EVENT and `session_identity` is STATE, so they are published on two
+// topics and merged onto this one wire (see daemon internal/server/host.go for
+// the rule: a Topic replays only its latest value, so a subscriber arriving
+// after an event would be handed that event and never the state).
 
 syntax = "proto3";
 
@@ -30,10 +36,36 @@ message WatchWebWorkspaceResponse {
     // answer for a non-handover boot; `not_yet_adopted` is retried with
     // backoff). The address rides HERE so the notice can name it.
     WebWorkspaceTransferred transferred = 1;
+    // THE SESSION THIS PAGE'S RECORDS BELONG TO. Landing 15: the webapp was
+    // the one runtime with no frame carrying a correlation identity, so a
+    // browser-side ClientLog record could not be joined to the daemon session
+    // it was logged against. It rides the webview's NON-DRAWN link stream
+    // rather than a frontend/v1 view because an agent-repl session identity is
+    // a vocabulary a rendering frontend does not have (failure.proto states
+    // that rule), and nothing here is drawn.
+    //
+    // STATE, so it is republished on every edge that can move it: the page
+    // rebinds its log context each time, and a restart or a handover that
+    // mints a new identity is followed rather than remembered from boot.
+    WebWorkspaceSessionIdentity session_identity = 2;
   }
 }
 
 message WebWorkspaceTransferred {
   // The new daemon's socket address, verbatim.
   string address = 1;
+}
+
+// The identities the page stamps on the diagnostic records it forwards
+// through ClientLog, so one grep joins its log to the other four runtimes'.
+// NOT ADDRESSING and NOT DRAWN: nothing routes on these and no view shows
+// them.
+message WebWorkspaceSessionIdentity {
+  // The daemon-minted host session identity (AGENT_REPL_SESSION_ID), the key
+  // the daemon and the shim already stamp their own records with. Empty when
+  // the workspace has no session yet — absence is a legitimate state, and the
+  // page then attributes its records to the workspace alone.
+  string agent_repl_session_id = 1;
+  // The vendor conversation, verbatim. Empty until one exists.
+  string claude_session_id = 2;
 }

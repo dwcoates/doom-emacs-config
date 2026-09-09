@@ -697,6 +697,24 @@ func (l *recordingLogger) at(level string) []logRecord {
 // Every fresh subscription now opens with the workspace's host STATE (the
 // stream's whole point), so a test asserting on one of the four event arms has
 // to read past it rather than assume the first frame is its own.
+// receiveWebEvent reads past the web stream's opening `session_identity`
+// state push to the next EVENT, exactly as receiveHostEvent reads past the
+// host stream's state.
+func receiveWebEvent(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchWebWorkspaceResponse],
+) *agentreplv1.WatchWebWorkspaceResponse {
+	t.Helper()
+	for stream.Receive() {
+		if stream.Msg().GetSessionIdentity() != nil {
+			continue
+		}
+		return stream.Msg()
+	}
+	t.Fatalf("the web stream ended before an event arrived: %v", stream.Err())
+	return nil
+}
+
 func receiveHostEvent(
 	t *testing.T,
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],

@@ -257,13 +257,13 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestFlushOnAcceptAcrossWatchKinds asserts that every Watch* stream's
-// response headers reach the client at accept time, before any push. Two
-// kinds — WatchDaemonHolds and WatchHostWorkspace — turn out to ALWAYS have a
-// view to send even on a workspace that was only just registered (holds
-// publishes the empty tray at SetWorkspaceDir/registration time;
-// WatchHostWorkspace composes and publishes its host view synchronously
-// before every subscribe — "COMPOSE BEFORE SUBSCRIBING",
-// internal/server/streams.go). For those two the no-view flush path this
+// response headers reach the client at accept time, before any push. Three
+// kinds — WatchDaemonHolds, WatchHostWorkspace and WatchWebWorkspace — turn
+// out to ALWAYS have a view to send even on a workspace that was only just
+// registered (holds publishes the empty tray at SetWorkspaceDir/registration
+// time; the two per-workspace link streams compose and publish their state
+// synchronously before every subscribe — "COMPOSE BEFORE SUBSCRIBING",
+// internal/server/streams.go). For those three the no-view flush path this
 // test exercises for every other kind never actually fires, so the
 // assertion here is deliberately per-kind rather than one blanket
 // ExpectNoPush, per the sub-brief's own instruction.
@@ -298,6 +298,22 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the host push a registered-but-unopened workspace opens with")
 				if push.(*agentreplv1.WatchHostWorkspaceResponse).GetHost().GetNone() == nil {
 					t.Fatalf("%s on a registered-but-unopened workspace = %v, want host.none (composed before every subscribe)", k.Name, push)
+				}
+			case "WatchWebWorkspace":
+				// LANDING 15 PUT A STATE ARM ON THIS STREAM TOO. The page binds
+				// its log context from `session_identity`, so a fresh stream
+				// that carried none would leave every record of that page's
+				// life unattributed; the identity is therefore composed before
+				// every subscribe, exactly as the host view is. A
+				// registered-but-unopened workspace has no session, and the
+				// EMPTY identity is the honest statement of that.
+				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the identity a registered-but-unopened workspace opens with")
+				identity := push.(*agentreplv1.WatchWebWorkspaceResponse).GetSessionIdentity()
+				if identity == nil {
+					t.Fatalf("%s on a registered-but-unopened workspace = %v, want session_identity (composed before every subscribe)", k.Name, push)
+				}
+				if identity.GetAgentReplSessionId() != "" {
+					t.Fatalf("%s on a workspace with no session = agent_repl_session_id %q, want empty", k.Name, identity.GetAgentReplSessionId())
 				}
 			case "WatchWorkspaceRoster":
 				// The BOOT publishes the roster: cmd/claude-repld's Prime step
