@@ -69,9 +69,24 @@ export const HANDOVER_BUDGET_MS = 15_000;
  */
 export const HANDOVER_TEST_MS = BOOT_BUDGET_MS + HANDOVER_BUDGET_MS + BOOT_BUDGET_MS;
 
+/** What a file may ask of its own mount, beyond the layer's defaults. */
+export interface BootOptions {
+  /**
+   * Mount with PRODUCTION'S OWN `ClientLog` sink, so every record this page
+   * emits is forwarded to the real daemon and lands in the workspace's
+   * `webapp.log`.
+   *
+   * OFF BY DEFAULT AND OPT-IN PER FILE, on the measurement recorded in
+   * `setup.ts`: forwarding costs every file real time (+50% across the eleven
+   * of them, +0.9s on the heaviest) and only the file that asserts about the
+   * forwarding needs it.
+   */
+  clientLog?: boolean;
+}
+
 /** Mount the real app, with the dev composer, against the real daemon. */
-export async function bootLayer(): Promise<MountedApp> {
-  return startAgainstRealDaemon({ composer: true });
+export async function bootLayer(options: BootOptions = {}): Promise<MountedApp> {
+  return startAgainstRealDaemon({ composer: true, clientLog: options.clientLog === true });
 }
 
 /**
