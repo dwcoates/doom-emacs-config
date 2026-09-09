@@ -5,7 +5,7 @@
 import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, type Socket } from "node:net";
 import { request as httpRequest } from "node:http";
 import { connect as http2Connect } from "node:http2";
 import { chmodSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
@@ -27,8 +27,33 @@ import {
 } from "../../src/service/server.js";
 
 const started: ShimServer[] = [];
+/**
+ * Every h2c connection this file dialed.
+ *
+ * A CLIENT SESSION THAT OUTLIVES ITS TEST TAKES ITS STREAM'S RESET WITH IT.
+ * The server records every stream it resets, and connect-node's h2 transport
+ * keeps its session open after a call ends -- so the reset of a stream one
+ * test provoked was landing in the NEXT test's stderr window, which is
+ * precisely what made "an h2c stream this server resets" pass or fail on the
+ * order it ran in. Hanging the connections up here, before the servers close,
+ * keeps each test's resets inside its own window.
+ */
+const dialed: Socket[] = [];
 
 afterEach(async () => {
+  await Promise.all(
+    dialed.splice(0).map(
+      (socket) =>
+        new Promise<void>((resolve) => {
+          if (socket.destroyed) {
+            resolve();
+            return;
+          }
+          socket.once("close", () => resolve());
+          socket.destroy();
+        }),
+    ),
+  );
   for (const server of started.splice(0)) await server.close();
 });
 
@@ -55,7 +80,13 @@ function client(sock: string, httpVersion: "1.1" | "2") {
   const nodeOptions =
     httpVersion === "1.1"
       ? { socketPath: sock }
-      : { createConnection: (): ReturnType<typeof netConnect> => netConnect({ path: sock }) };
+      : {
+          createConnection: (): ReturnType<typeof netConnect> => {
+            const socket = netConnect({ path: sock });
+            dialed.push(socket);
+            return socket;
+          },
+        };
   return createClient(
     shimv1.Shim,
     createConnectTransport({ httpVersion, baseUrl: "http://shim", nodeOptions }),
