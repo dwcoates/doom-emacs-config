@@ -136,6 +136,37 @@ func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []s
 	return both[0], both[1:]
 }
 
+// playtestPagePushBound bounds a wait on something the page draws only after
+// a DAEMON ROUND TRIP has landed -- the roster row's `current` flag, a
+// priority badge -- as opposed to a redraw of state the page already holds.
+//
+// It is `emacsVerbBound`, the Emacs layer's own named bound for one verb's
+// round trip, because that is exactly what is being waited on: Emacs's Select
+// or SetWorkspacePriority reaching the daemon, the daemon re-resolving the
+// roster, and the push reaching this page. `playtestPageBound` is sized for
+// the render ALONE -- measured at 242, 262, 423, 445 and 487ms for the
+// webapp's own first draw -- and says nothing about the trip in front of it,
+// so using it here was bounding the wrong work. MEASURED at this shape of
+// site in this owner's own runs: the daemon's hold tray emptying after a
+// submit, which is the same round trip, took 421 and 422ms.
+const playtestPagePushBound = emacsVerbBound
+
+// awaitPageIsForWorkspace asserts that the page in the webview on the glass
+// is THIS workspace's page, read from inside the page itself.
+//
+// It is the DETERMINISTIC half of "the webview swapped", and it sits beside
+// `awaitPanelFollows` rather than replacing it. That one reads which buffer a
+// window holds, which is EMACS's answer; this asks the document, and the
+// document's own `?workspace=`/`&dir=` query is what the panel navigated it
+// with. A window swapped over a page that never navigated satisfies the first
+// and fails this one, and no daemon round trip stands between the two -- the
+// url is a fact the page carries from its first byte.
+func awaitPageIsForWorkspace(t *testing.T, s *playtestScenario, dir string) {
+	t.Helper()
+	s.awaitInPage(t, fmt.Sprintf("the page in the webview to be the one opened for %s", dir),
+		`decodeURIComponent(location.href).indexOf(`+jsString(dir)+`) !== -1`)
+}
+
 // awaitSidebarNamesCurrent asserts that the page in the webview now on the
 // glass says, IN ITS OWN WORDS, which workspace is selected: the sidebar's
 // roster row carrying `[data-current="true"]` names WS.
@@ -147,7 +178,8 @@ func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []s
 // is the webapp suite's own hook for exactly that (`webapp/src/sidebar/row.ts`).
 func awaitSidebarNamesCurrent(t *testing.T, s *playtestScenario, ws string) {
 	t.Helper()
-	s.awaitInPage(t, fmt.Sprintf("the sidebar's current roster row to name %q", ws),
+	s.awaitInPageFor(t, playtestPagePushBound,
+		fmt.Sprintf("the sidebar's current roster row to name %q", ws),
 		`(function () { var row = document.querySelector('[data-roster-row][data-current="true"]');
                         return row && row.textContent.indexOf(`+jsString(ws)+`) !== -1; })()`)
 }
@@ -228,6 +260,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	// than one pair and a hole.
 	enterWorkspace(t, s, secondName)
 	awaitPanelFollows(t, s, secondName, firstName)
+	awaitPageIsForWorkspace(t, s, second.Dir)
 	awaitSidebarNamesCurrent(t, s, secondName)
 	names := s.tabNames()
 	if len(names) != 2 {
@@ -260,6 +293,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	// mount for the workspace it re-points the scenario at.
 	enterWorkspace(t, s, firstName)
 	awaitPanelFollows(t, s, firstName, secondName)
+	awaitPageIsForWorkspace(t, s, first.Dir)
 	awaitSidebarNamesCurrent(t, s, firstName)
 	p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows now hold %q's own webview "+
@@ -281,6 +315,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
 	enterWorkspace(t, s, secondName)
 	awaitPanelFollows(t, s, secondName, firstName)
+	awaitPageIsForWorkspace(t, s, second.Dir)
 	awaitSidebarNamesCurrent(t, s, secondName)
 	p.capture("switched-most-recent", "`SPC TAB R` (`agent-repl-open-most-recent-workspace`) pressed",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows hold %q's own webview and "+
@@ -537,9 +572,23 @@ func TestPlaytestCloseWithAHeldPromptKeepsTheTab(t *testing.T) {
 	if n := e.EvalInt(`(length (gethash ` + elispString(name) + ` agent-repl--prompt-queue))`); n < 1 {
 		t.Fatalf("agent-repl--prompt-queue holds %d entries for %q, want the held prompt still there: undelivered intent is never silently discarded", n, name)
 	}
+	// THE TURN'S PREMISE IS RE-READ AT CAPTURE TIME, for the same reason
+	// `captureArm` re-reads an arm there. This picture is of a close refused
+	// against a LIVE TURN, and the premise was established several acts
+	// earlier; a manifest sentence written from that earlier moment would send
+	// a reviewer looking for a state the world may since have left. The
+	// daemon's tray drawing this workspace's prompt AGAIN at the instant of
+	// the capture would mean the turn had gone back to being queued, which is
+	// a different fact from the one this step is about -- and the first round
+	// of this capture showed exactly that tray, drawn `held (1)`.
+	awaitPanelShown(t, s, name)
+	s.awaitInPageFor(t, playtestPagePushBound,
+		"the daemon's hold tray to still be empty at the instant of the capture",
+		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
 	p.capture("held-close-tab-stays", "`SPC j d` pressed while a prompt is held against the live turn",
 		fmt.Sprintf("the close was REFUSED (`*Messages*` carries \"close blocked\"), %q is still in "+
-			"`agent-repl--ws-tabline-names`, and its held prompt is still in `agent-repl--prompt-queue`", name),
+			"`agent-repl--ws-tabline-names`, its held prompt is still in `agent-repl--prompt-queue`, and "+
+			"the daemon's hold tray is STILL empty at the instant of the capture", name),
 		fmt.Sprintf("The tab bar STILL carries %q. The close was asked for and refused, so nothing about "+
 			"the bar changed: there is no dialog, no missing tab and no gap where one was. The webapp's "+
 			"HOLD TRAY reads \"nothing held\" -- the held prompt is EMACS's queue, not the daemon's, and a "+
