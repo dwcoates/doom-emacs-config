@@ -86,6 +86,19 @@ func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
 	case s.link == shimclient.LinkRedialing:
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
 			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
+	case s.link == shimclient.LinkDead && s.parked:
+		// A PARKED SESSION IS IDLE, NOT BROKEN — the same ruling the roster
+		// states at resolve/sidebar/status.go, whose `linkArm` promises to
+		// mirror THIS step "fact for fact, so the dot and the strip cannot
+		// disagree about the same link". The idle sweep put this route down
+		// itself and a prompt brings it straight back, so there is no fault to
+		// report and the status falls through to the idle family.
+		//
+		// The webapp makes that more than a wording question: its composer
+		// gate IS this word (webapp/src/main.ts — a `disconnected` status
+		// closes the composer), so `dead` here withholds the very prompt that
+		// revives the session.
+		return nil
 	case s.link == shimclient.LinkDead && s.everConnected:
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Dead{
 			Dead: &frontendv1.FooterSubStatusDisconnectedDead{}}

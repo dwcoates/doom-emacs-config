@@ -221,6 +221,12 @@ func (r *resolver) SetMerge(ws ids.WorkspaceID, facts MergeFacts) {
 		func(s *wsState) { s.merge = facts })
 }
 
+// SetParked installs, or lifts, the idle sweep's park.
+func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
+	r.mutate(ws, "daemon.footer.set_parked", "the footer took the idle sweep's park",
+		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
+}
+
 // SetClosing installs a close refusal.
 func (r *resolver) SetClosing(ws ids.WorkspaceID, blocked *CloseBlocked) {
 	ctx := dlog.Context{"blocked": blocked != nil}
@@ -298,6 +304,14 @@ func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 			if link == shimclient.LinkConnected {
 				s.everConnected = true
 			}
+			// THE REVIVAL ENDS THE PARK. The session watcher latches a dead
+			// link ("a later transition is a consequence of the death",
+			// sessionwatcher/watcher.go) and publishes nothing more on it, so
+			// any link state arriving after the park belongs to the shim the
+			// reviving prompt spawned. Clearing it here — rather than only on
+			// LinkConnected — is what makes a revival whose spawn then DIES
+			// read `dead` again instead of staying masked as a park.
+			s.parked = false
 		})
 }
 
