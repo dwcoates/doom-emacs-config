@@ -325,6 +325,101 @@ func TestShutdownNowIsNotHeldByAWedgedShim(t *testing.T) {
 	}
 }
 
+// TestShutdownNowStandsEverySessionDownWhenTheCallerOutlivesTheBound is the
+// first half of the bound-derivation contract: with room to spare in the
+// caller's budget, one wedged shim costs StandBound, is REPORTED, and its
+// sibling is still stood down.
+func TestShutdownNowStandsEverySessionDownWhenTheCallerOutlivesTheBound(t *testing.T) {
+	// Arrange
+	bound := 50 * time.Millisecond
+	h := newHarness(t, func(d *Deps) { d.StandBound = bound })
+	wedged := h.workspace(t, instant)
+	healthy := h.workspace(t, instant)
+	h.stand.wedgeKillOn(wedged)
+	caller, cancel := context.WithTimeout(context.Background(), 20*bound)
+	defer cancel()
+
+	// Act
+	started := time.Now()
+	if err := h.c.ShutdownNow(caller, maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+	elapsed := time.Since(started)
+
+	// Assert
+	assertSteppedOverTheWedgedShim(t, h, wedged, healthy, bound, elapsed)
+}
+
+// TestShutdownNowStandsEverySessionDownWhenTheCallerCannotOutliveTheBound is
+// the half the derivation used to get wrong.
+func TestShutdownNowStandsEverySessionDownWhenTheCallerCannotOutliveTheBound(t *testing.T) {
+	// Arrange: a caller whose whole budget is a fraction of ONE stand-down's.
+	// The daemon's own e2e harness is this caller — a single context created at
+	// the daemon's process start and spent by every call before this one — and
+	// with the bound derived as a child of it, the wedged workspace would eat
+	// the remainder and every sibling after it would be given up on with a
+	// context error before its shim was ever asked.
+	bound := 50 * time.Millisecond
+	h := newHarness(t, func(d *Deps) { d.StandBound = bound })
+	wedged := h.workspace(t, instant)
+	healthy := h.workspace(t, instant)
+	h.stand.wedgeKillOn(wedged)
+	caller, cancel := context.WithTimeout(context.Background(), bound/5)
+	defer cancel()
+
+	// Act
+	started := time.Now()
+	if err := h.c.ShutdownNow(caller, maintenanceReason()); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+	elapsed := time.Since(started)
+
+	// Assert
+	assertSteppedOverTheWedgedShim(t, h, wedged, healthy, bound, elapsed)
+}
+
+// assertSteppedOverTheWedgedShim is the shared assertion of the two tests
+// above: the daemon spent ITS OWN bound on the shim that would not go, said so
+// at ERROR, stood the sibling down anyway, and exited. It is one helper rather
+// than two copies because the two tests differ in exactly one arrangement —
+// the caller's budget — and that difference is the subject.
+func assertSteppedOverTheWedgedShim(
+	t *testing.T,
+	h *harness,
+	wedged, healthy ids.WorkspaceID,
+	bound, elapsed time.Duration,
+) {
+	t.Helper()
+	if elapsed < bound {
+		t.Fatalf("ShutdownNow returned after %s, short of the daemon's own %s stand-down bound; the bound came from the caller, not from the daemon", elapsed, bound)
+	}
+	// Ten times the bound: one wedged stand-down plus bookkeeping.
+	if elapsed > 10*bound {
+		t.Fatalf("ShutdownNow took %s on one wedged shim, want it bounded by %s", elapsed, bound)
+	}
+	stood := map[ids.WorkspaceID]bool{}
+	for _, call := range h.stand.Killed() {
+		stood[call.WS] = true
+	}
+	if !stood[healthy] {
+		t.Fatalf("the healthy workspace %s was never stood down; a workspace behind a wedged sibling must be stepped TO, not skipped", healthy)
+	}
+	var reported bool
+	for _, rec := range records(h.log, opNow) {
+		if rec.Level == "error" && rec.Context["workspace"] == string(wedged) {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("%s recorded no ERROR naming %s, whose shim will outlive this daemon", opNow, wedged)
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started after a wedged stand-down")
+	}
+}
+
 // maintenanceReason is the typed reason the immediate-shutdown tests state
 // when the reason itself is not the subject.
 func maintenanceReason() *agentreplv1.DrainReason {
