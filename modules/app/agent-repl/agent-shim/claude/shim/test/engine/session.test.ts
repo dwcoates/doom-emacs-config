@@ -31,7 +31,11 @@ import type {
   ModelInfoLike,
 } from "../../src/sdk/types.js";
 import { mainAgentId } from "../../src/convert/ids.js";
-import type { PersistEntry } from "../../src/store/persistence.js";
+// STATICALLY, NOT `await import(...)` AT THE CALL SITE: the engine recognizes
+// a store outage by `instanceof PersistenceError`, so a copy of the class
+// from a second module graph would sail past every one of those arms. The
+// static binding is the file's one copy and cannot drift from the engine's.
+import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
@@ -137,6 +141,15 @@ function harness(
     drainPrompts?: string[];
     /** Reach each scripted query the moment it is created, before it is returned. */
     onQueryCreated?: (query: ScriptedQuery, spec: QuerySpec, index: number) => void;
+    /**
+     * Build the engine with a DIFFERENT module graph's `createEngine`.
+     *
+     * The one caller is the durable-log poisoning scenario: the shim's logger
+     * is a process-wide singleton and a poisoning is one-way, so that test
+     * takes its own `log.ts` and needs the engine that registers on it to come
+     * from the same graph. Everything else gets this file's own engine.
+     */
+    engineFactory?: typeof createEngine;
   } = {},
 ): Harness {
   const stateDir = scratch();
@@ -150,7 +163,7 @@ function harness(
   const released: string[] = [];
   const workspaceLocks: string[] = [];
   const exits: number[] = [];
-  const engine = createEngine({
+  const engine = (options.engineFactory ?? createEngine)({
     ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
     persistence,
     fold,
@@ -1925,7 +1938,7 @@ describe("GetLiveWork reconciliation", () => {
       boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
     });
     await started(h);
-    h.persistence.openError = new (await import("../../src/store/persistence.js")).PersistenceError(
+    h.persistence.openError = new PersistenceError(
       "store_unavailable",
       "the store is down",
     );
@@ -1978,7 +1991,7 @@ describe("GetLiveWork reconciliation", () => {
 
   it("reports a fault rather than failing the start when the store is unreachable", async () => {
     const h = harness();
-    h.persistence.liveWorkError = new (await import("../../src/store/persistence.js")).PersistenceError(
+    h.persistence.liveWorkError = new PersistenceError(
       "store_unavailable",
       "down",
     );
@@ -2669,7 +2682,7 @@ describe("ReadHistory reports a store outage", () => {
   it("calls reportStoreUnreachable when the store answers store_unavailable", async () => {
     const h = harness();
     await started(h);
-    h.persistence.readError = new (await import("../../src/store/persistence.js")).PersistenceError(
+    h.persistence.readError = new PersistenceError(
       "store_unavailable",
       "the store is down",
     );
@@ -4173,7 +4186,7 @@ describe("reconciliation when the record cannot describe the work", () => {
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
     });
-    h.persistence.openError = new (await import("../../src/store/persistence.js")).PersistenceError(
+    h.persistence.openError = new PersistenceError(
       "store_unavailable",
       "the store is down",
     );
@@ -5986,17 +5999,28 @@ describe("StartSession's remaining steps when the query died under them", () => 
 /**
  * The shim's own durable log dying.
  *
- * LAST IN THIS FILE ON PURPOSE. The logger is ONE process-wide singleton and a
- * poisoning is one-way, so this must not run before anything that logs.
+ * IT OWNS ITS OWN LOGGER. The shim's log sink is ONE process-wide singleton
+ * and a poisoning is one-way -- a poisoned sink drops every later record --
+ * so poisoning the one this file shares would decide the verdict of every
+ * test that reads a log line, depending only on which ran first. Instead the
+ * scenario takes a FRESH module graph: its own `log.ts`, its own `node:fs`
+ * mock, and the `createEngine` bound to them, so the listener that must hear
+ * the poisoning is registered on the sink that was poisoned. The file's own
+ * logger is never touched, and this describe may run in any position.
  */
 describe("the durable log sink being poisoned", () => {
   it("states the loss on WatchSession, the only channel left once fd 3 is gone", async () => {
-    vi.mocked(writeSync).mockImplementationOnce(() => {
+    vi.resetModules();
+    const freshFs = await import("node:fs");
+    const freshLog = await import("../../src/log.js");
+    const { createEngine: freshCreateEngine } = await import("../../src/engine/session.js");
+    freshLog.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "poison-suite" });
+    vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
       throw new Error("fd 3 is gone");
     });
-    bindLog({ operation: "shim.test.poison" }).log({}, "the record this sink cannot take");
+    freshLog.bindLog({ operation: "shim.test.poison" }).log({}, "the record this sink cannot take");
 
-    const h = harness();
+    const h = harness({ engineFactory: freshCreateEngine });
 
     expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
   });
