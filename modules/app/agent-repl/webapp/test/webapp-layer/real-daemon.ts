@@ -7,6 +7,8 @@
  * naming the invocation that supplies it — never as a mysterious transport
  * failure fifty assertions later, and never as a quiet pass.
  */
+import { join } from "node:path";
+
 import { startAppAgainst, type MountedApp, type HarnessOptions } from "../integration/harness";
 
 /** The gate: set only by the Go driver that owns the daemon's lifecycle. */
@@ -70,4 +72,16 @@ export async function startAgainstRealDaemon(
     workspaceId: daemon.workspaceId,
     workspaceDir: daemon.workspaceDir,
   });
+}
+
+/**
+ * One of a workspace's own daemon log sinks, by name ("daemon", "shim",
+ * "webapp", "sidecar").
+ *
+ * THE SAME PATH THE GO HARNESS COMPUTES (`harness.WorkspaceLogPath`), because
+ * it is the same file: the daemon writes the canonical
+ * `<workspace>/.claude/emacs/<sink>.log` link and both sides read it.
+ */
+export function workspaceLogPath(workspaceDir: string, sink: string): string {
+  return join(workspaceDir, ".claude", "emacs", `${sink}.log`);
 }
