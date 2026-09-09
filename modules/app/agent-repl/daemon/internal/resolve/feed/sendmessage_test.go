@@ -424,3 +424,69 @@ func TestARefusalWithNoAccountStillStatesTheArmAndNoReason(t *testing.T) {
 		t.Fatalf("refusal reason = %q, want unset — no account was given", reason.GetText())
 	}
 }
+
+// A SEND'S UNIT IS DELIVERED TWICE. The shim's stream plane converts the SDK's
+// events live and the sidecar's file plane replays the SAME units out of the
+// vendor transcript under the SAME key, so the terminal frame is followed,
+// ~160ms later, by the start frame again. The row must not walk back.
+func TestAReplayedStartDoesNotUnstateARefusalTheSendAlreadyCarried(t *testing.T) {
+	// Arrange: the send is refused, exactly as the stream plane converted it.
+	h := newHarness(t)
+	const prose = "The agent was stopped by the user."
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+	h.sendMessage("unit-1", refusalOf(prose))
+
+	// Act: the file plane replays the unit, starting with its start frame.
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+	// Assert.
+	prompt := h.sendRow()
+	if got := deliveryWord(prompt); got != "refused" {
+		t.Fatalf("delivery after the replayed start = %q, want %q — an unset delivery is "+
+			"indistinguishable from a producer that stated nothing", got, "refused")
+	}
+	if got := prompt.GetRefused().GetReason().GetText(); got != prose {
+		t.Fatalf("refusal reason after the replayed start = %q, want the producer's words %q", got, prose)
+	}
+}
+
+// The same walk-back for the LANDING arms: a replayed start must not turn a
+// send the recipient received into one that reads as still on its way.
+func TestAReplayedStartDoesNotUnstateADeliveryTheSendAlreadyCarried(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
+		Delivery: &conversationv1.AgentSendMessageSuccess_QueuedToLive{
+			QueuedToLive: &conversationv1.AgentSendMessageQueuedToLive{},
+		},
+	})
+
+	// Act.
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+	// Assert.
+	if got := deliveryWord(h.sendRow()); got != "queued_to_live" {
+		t.Fatalf("delivery after the replayed start = %q, want %q", got, "queued_to_live")
+	}
+}
+
+// The resolved identity is the success arm's alone: the replayed start restates
+// the ADDRESSED string and never the id, so an address line drawn from the
+// frame walked back from the recipient's own bubble label to the raw string.
+func TestAReplayedStartKeepsTheRecipientTheSuccessResolved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessage("unit-1", startTo("", "vet the diff"))
+	h.sendMessage("unit-1", &conversationv1.AgentSendMessageSuccess{
+		RecipientAgentId: &conversationv1.AgentId{Value: "agent-unknown"},
+	})
+
+	// Act.
+	h.sendMessage("unit-1", startTo("", "vet the diff"))
+
+	// Assert.
+	if got := h.sendRow().GetAddress().GetText(); got != "→ agent-unknown" {
+		t.Fatalf("address after the replayed start = %q, want the resolved identity, not the unnamed fallback", got)
+	}
+}
