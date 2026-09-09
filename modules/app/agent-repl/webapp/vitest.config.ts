@@ -65,22 +65,40 @@ export default defineConfig({
     testTimeout: 850,
     hookTimeout: 850,
     coverage: {
-      provider: "v8",
+      // ISTANBUL, NOT V8, and the swap is a measurement rather than a taste.
+      //
+      // `@vitest/coverage-v8@2.1.9` merges the RAW V8 coverage of every
+      // test-file window with `mergeProcessCovs` BEFORE remapping it through
+      // the source maps. A module compiled in more than one window then loses
+      // most of one contributor's counts: src/scroll.ts read 100% statements
+      // with only test/scroll.test.ts running and 47.71% with test/feed added,
+      // src/format.ts 100% against 84.61%, src/markdown.ts 100% against
+      // 59.52%. Worse, the surviving contributor depends on which files share
+      // a process, so eleven files' counts moved between two runs of the whole
+      // suite that differed only in test-file order. Isolation does not repair
+      // it -- every one of those figures was taken with `--isolate` on.
+      //
+      // Istanbul instruments at transform time and counts inside the module,
+      // so there is no attribution to reconstruct afterwards: the same two
+      // runs agreed on all 100 files, and src/scroll.ts reads the same alone
+      // as it does in the full suite. `bin/coverage-honesty.mjs`
+      // (`npm run coverage:verify`) is the check that keeps it that way.
+      provider: "istanbul",
       all: true,
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.d.ts", "src/**/generated/**"],
       reporter: ["text", "json", "json-summary", "html"],
       reportsDirectory: "coverage",
-      // WHY: Establish the baseline before coverage-closing work enforces 90%.
-      //
-      // `npm run coverage` passes `--isolate` back, overriding the `isolate:
-      // false` above, because the v8 provider attributes a module's execution
-      // to the file run that instantiated it. When files share a worker the
-      // module is instantiated once and later files' exercise of it goes
-      // unattributed: src/rpc/streams.ts measured 130 covered lines isolated
-      // and 115 un-isolated, differing run to run. A number that moves without
-      // the code moving is not a measurement, so the reported figure is taken
-      // the slow, accurate way.
+      // WHY `npm run coverage` PASSES `--isolate` BACK, overriding the
+      // `isolate: false` above: the istanbul provider snapshots and RESETS the
+      // per-module counters at the end of each test file, and a module is only
+      // instantiated once per shared environment. Un-isolated, a module first
+      // loaded by one file therefore reports nothing for every later file that
+      // exercises it -- src/main.ts, src/feed/cards/hook.ts and
+      // src/panels/refused.ts each read 0% that way against 0%, 100% and
+      // 98.64% isolated. So the fast unit run keeps the shared environment and
+      // the coverage run buys a fresh one per file: 8.2s against 3.7s, which
+      // is what an honest per-file number costs here.
     },
   },
 });
