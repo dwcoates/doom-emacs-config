@@ -16,8 +16,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import type { MessageInitShape } from "@bufbuild/protobuf";
 import {
   PageAttachedSchema,
+  PageSubscriptionEndedSchema,
   WatchPageResponseSchema,
   type SubscribePageRequest,
   type UnsubscribePageRequest,
@@ -106,10 +108,19 @@ function misaddressedPush(subscription: string): WatchPageResponse {
   return footerPush(subscription, 7n);
 }
 
-/** A frame saying one subscription is over. */
-function ended(subscription: string): WatchPageResponse {
+/** A frame saying one subscription is over, and HOW. */
+function ended(
+  subscription: string,
+  how: MessageInitShape<typeof PageSubscriptionEndedSchema>["how"] = {
+    case: "sourceEnded",
+    value: {},
+  },
+): WatchPageResponse {
   return create(WatchPageResponseSchema, {
-    frame: { case: "ended", value: { subscription } },
+    frame: {
+      case: "ended",
+      value: create(PageSubscriptionEndedSchema, { subscription, how }),
+    },
   });
 }
 
@@ -528,6 +539,217 @@ describe("the page's one standing stream", () => {
     // Assert: exactly the page's own stream plus the context's, and neither
     // reopened after the cancel.
     expect(daemon.streamOpens).toEqual(["WatchPage", "WatchPage"]);
+    ctx.quiesce();
+  });
+
+  it("ends a subscription whose source finished, without an error", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+      return "concluded";
+    })().then(
+      (value) => value,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act.
+    daemon.send(ended(daemon.subscribes[0].subscription, { case: "sourceEnded", value: {} }));
+    await settle();
+
+    // Assert: NOTHING FAILED — there is simply nothing further to push, and
+    // the caller reads the clean conclusion a dedicated stream would have given
+    // it rather than an error it would draw a card for.
+    expect(await outcome).toBe("concluded");
+    ctx.quiesce();
+  });
+
+  it("raises a failed subscription as the Connect error the dedicated rpc would have", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+      return null;
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act.
+    daemon.send(
+      ended(daemon.subscribes[0].subscription, {
+        case: "failed",
+        value: { code: "not_found", message: "no such feed token" },
+      }),
+    );
+    await settle();
+
+    // Assert: THE SAME ERROR, KEYED ON THE SAME CODE. The view draws the card
+    // its own rpc's failure would have drawn, because it is handed the same
+    // ConnectError — a multiplexed subscription has no status of its own.
+    const err = ConnectError.from(await outcome);
+    expect(err.code).toBe(Code.NotFound);
+    expect(err.rawMessage).toBe("no such feed token");
+    ctx.quiesce();
+  });
+
+  it("delivers the frames a failed subscription had already sent before raising", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const seen: bigint[] = [];
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const response of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        seen.push(response.footer?.strip?.clock?.turnStartedAtMs ?? 0n);
+      }
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act: a push, then the failure.
+    daemon.send(footerPush(daemon.subscribes[0].subscription, 5n));
+    daemon.send(
+      ended(daemon.subscribes[0].subscription, {
+        case: "failed",
+        value: { code: "internal", message: "the resolver died" },
+      }),
+    );
+    await settle();
+
+    // Assert: the frame was TRUE WHEN IT WAS SENT, and nothing will resend it,
+    // so the failure does not take the backlog down with it.
+    expect(seen).toEqual([5n]);
+    expect(ConnectError.from(await outcome).rawMessage).toBe("the resolver died");
+    ctx.quiesce();
+  });
+
+  it("refuses a failure whose code is not a Connect code", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const failures = new RecordingSink();
+    const ctx = contextFor(client, failures);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+
+    // Act.
+    daemon.send(
+      ended(daemon.subscribes[0].subscription, {
+        case: "failed",
+        value: { code: "not_a_real_code", message: "whatever this is" },
+      }),
+    );
+    await settle();
+
+    // Assert: a daemon that spelled its own contract wrong is a MALFORMED
+    // FRAME, filed as such. Minting `Code.Unknown` from it would draw a
+    // plausible card for a wire nobody can trust.
+    expect(failures.reported).toContain("frameUndecodable");
+    controller.abort();
+    ctx.quiesce();
+  });
+
+  it("draws nothing for an ending it had already dropped the subscription for", async () => {
+    // Arrange: a subscription the caller cancels, which drops the id from the
+    // page's map BEFORE `UnsubscribePage` is sent — so the daemon's
+    // `unsubscribed` ending always arrives for an id this page no longer holds.
+    const { client, daemon } = fakeDaemon();
+    const failures = new RecordingSink();
+    const ctx = contextFor(client, failures);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+    const subscription = daemon.subscribes[0].subscription;
+    controller.abort();
+    await settle();
+
+    // Act: the ending the daemon announces for the end this page asked for.
+    daemon.send(ended(subscription, { case: "unsubscribed", value: {} }));
+    await settle();
+
+    // Assert: NOTHING HAPPENED THAT A READER DID NOT ASK FOR. No card, and the
+    // record is debug — this is the ordinary shape of every unsubscribe, not
+    // an event.
+    expect(failures.reported).toEqual([]);
+    ctx.quiesce();
+  });
+
+  it("refuses an ending that does not say how", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const failures = new RecordingSink();
+    const ctx = contextFor(client, failures);
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    void (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+    })();
+    await settle();
+
+    // Act: the oneof unset, which is a contract violation and not a fourth
+    // kind of ending.
+    daemon.send(
+      create(WatchPageResponseSchema, {
+        frame: {
+          case: "ended",
+          value: create(PageSubscriptionEndedSchema, {
+            subscription: daemon.subscribes[0].subscription,
+          }),
+        },
+      }),
+    );
+    await settle();
+
+    // Assert: surfaced loudly through the unreachable-arm path, never guessed
+    // at as one of the three.
+    expect(failures.reported).toContain("frameUndecodable");
+    controller.abort();
     ctx.quiesce();
   });
 
