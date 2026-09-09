@@ -192,14 +192,22 @@ this one looked at the running application.
    failure went to `console.error` and the page came up EMPTY AND SILENT.
    FIXED, with `webapp/test/main-boot-logger.test.ts` pinning it.
 
-2. **The root feed's live tail never opens.** `OpenFeed` succeeds and its
+2. **FIXED — the root feed's live tail never opened.** `OpenFeed` succeeds and its
    page paints, but `WatchFeed` is never issued: the daemon logs
    `daemon.feed.open_page` once and never a `WatchFeed` stream, while it
    publishes the rows. So every row produced after the page is invisible
    until the page is reloaded — proved by driving `location.reload()` in the
    same webview after a turn settled, which draws both bubbles within 120ms.
    The failure overlay stays empty, so `watchStream` never saw the stream
-   end. OPEN, under investigation.
+   end. ROOT CAUSE: a browser caps a host at about six HTTP/1.1 connections
+   and a server-streaming Connect call pins one for its whole life; the page
+   opened six before the feed's, so `WatchFeed` was the seventh and queued in
+   the browser forever. Measured from inside the live page: streams 1-6
+   reached the daemon within 9ms, streams 7-9 produced no daemon record at
+   all, and a plain same-origin GET with six held timed out after 5s.
+   Fixed by the `WatchPage` mux — every subscription rides one stream, so the
+   failure is unrepresentable rather than unlikely — and proved in the real
+   webview by `playtest_00_feed_tail_test.go`.
 
 3. **The tab bar does not follow the roster.** After registering one
    workspace the bar draws NO tab, while `agent-repl--ws-tabline-names`
@@ -209,16 +217,27 @@ this one looked at the running application.
    table paints RED — the tab is painted green. All three survive a forced
    redisplay. OPEN.
 
-## What is blocked
+## The substrate's own precondition
 
-Sections D–H of the plan are the webapp's feed visuals — feed families,
-cards, tool rows, subagents, failure arms — and every one of them needs rows
-to arrive live. They are blocked on defect 2 above, and they are deliberately
-NOT written yet: a table-driven loop over the scenario registry that
-photographs an empty feed 200 times would be worse than nothing, because a
-reviewer would have 200 pictures and no way to tell the product's failure
-from the harness's.
+Sixteen of the plan's twenty owners photograph things the webapp draws in its
+FEED, so all of them rest on one precondition: the feed's live tail is
+served. `playtest_00_feed_tail_test.go` is that precondition's own playbook —
+not an owner's — and it proves in the real `xwidget-webkit` webview that the
+sidebar, topbar, hold tray and footer all draw, that the root feed tails live
+rows with NO reload, and that an expanded subagent bubble's own nested feed
+carries rows too. That last one is the case no fixed connection budget could
+ever have held, since every expanded bubble opens another tail.
 
-Plan B.12's second half — the attention marker CLEARING when the ask is
-answered — is blocked for the same reason: answering means clicking a feed
-row, and the row never arrives.
+It is a permanent playbook rather than a one-off check: it is the thing that
+would go red first if the page ever again opens a stream off the client
+instead of the mux.
+
+## One open question this raised
+
+Clicking a subagent bubble's `[data-expand]` caret does not make the bubble
+read as open: `data-expanded` never becomes true and the bubble is still
+drawn collapsed, while a non-root feed container IS carrying rows. So the
+second tail is served and the toggle's own drawn state is a separate
+question, in the webapp's bubble rather than in the transport. It is
+recorded in `00-feed-tail`'s manifest rather than asserted, and owner 16
+(G49–52, subagents) inherits it.
