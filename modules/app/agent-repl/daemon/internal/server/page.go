@@ -289,6 +289,21 @@ func (s *server) SubscribePage(
 		})
 		return connect.NewResponse(&agentreplv1.SubscribePageResponse{}), nil
 	case err := <-done:
+		// ACCEPTANCE WINS WHEN BOTH ARE READY, and they are ready together
+		// whenever a body accepts and then finishes at once — a login terminal
+		// whose pty is already gone does exactly that. Go picks a ready case at
+		// random, so without this the same subscription would be answered
+		// "accepted" or "refused" depending on a coin toss, while the page's own
+		// stream had already announced the end of a subscription the client was
+		// told never existed. The two must never disagree.
+		select {
+		case <-accepted:
+			s.log.Debug(rpc, "a page subscription was accepted and ended at once", dlog.Context{
+				"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name,
+			})
+			return connect.NewResponse(&agentreplv1.SubscribePageResponse{}), nil
+		default:
+		}
 		// The body finished before it accepted: a refusal, or a validation
 		// failure. It is this call's answer, exactly as it would have been the
 		// dedicated rpc's. The subscription is already ended and, never having

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1157,4 +1158,46 @@ func TestSubscribePageIsHeldOpenUntilItsAnswerIsWritten(t *testing.T) {
 	if standing {
 		t.Fatal("SubscribePage is excluded from the exit's gate; its answer could be cut off the wire")
 	}
+}
+
+// TestASubscriptionThatAcceptsAndEndsAtOnceIsStillAccepted pins what
+// SubscribePage answers for a watch that accepts and finishes in the same
+// breath — a login terminal whose pty is already gone. The subscription DID
+// exist and the page's own stream announces its end, so answering a refusal
+// would tell the client something the page's frames contradict.
+//
+// It is taken fifty times because acceptance and ending arrive on two separate
+// channels the handler selects over, and an answer that depended on which the
+// scheduler made ready first would be an answer that varies run to run.
+func TestASubscriptionThatAcceptsAndEndsAtOnceIsStillAccepted(t *testing.T) {
+	// Arrange: a login source that is already over, so every subscription
+	// accepts and returns in the same breath.
+	closed := make(chan login.Output)
+	close(closed)
+	h := newHarness(t)
+	h.Login.watchFrames = closed
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := attachPageStream(t, h, ctx, "page-1")
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		for stream.Receive() {
+		}
+	}()
+
+	// Act, Assert.
+	for attempt := 0; attempt < 50; attempt++ {
+		id := fmt.Sprintf("login-%d", attempt)
+		if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+			Page: "page-1", Subscription: id,
+			Request: &agentreplv1.SubscribePageRequest_LoginTerminal{
+				LoginTerminal: &agentreplv1.WatchLoginTerminalRequest{Workspace: ref()},
+			},
+		})); err != nil {
+			t.Fatalf("subscription %s accepted and ended at once, and was answered %v; it must be answered accepted", id, err)
+		}
+	}
+	cancel()
+	<-drained
 }
