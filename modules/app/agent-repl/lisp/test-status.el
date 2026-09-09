@@ -864,6 +864,8 @@ arm until the dwell heartbeat's next tick."
           (arm :thinking))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) arm)))
         ;; Act
@@ -887,6 +889,8 @@ arm until the dwell heartbeat's next tick."
           (agent-repl--tabline-space-toggle nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-display-state)
                  (lambda (_ws) :thinking)))
         (should (equal (agent-repl-workspace-tabline-formatted)
@@ -912,7 +916,9 @@ arm until the dwell heartbeat's next tick."
     (let ((persp-names-cache '("solo"))
           (agent-repl--tabline-space-toggle nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "solo"))
-                ((symbol-function 'frame-width) (lambda () 80)))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 1 (cl-count ?\[ visible)))
@@ -926,7 +932,9 @@ arm until the dwell heartbeat's next tick."
     (let ((persp-names-cache '("first" "second"))
           (agent-repl--tabline-space-toggle nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "second"))
-                ((symbol-function 'frame-width) (lambda () 80)))
+                ((symbol-function 'frame-width) (lambda () 80))
+                ;; Before the roster's first push the registered names are drawn.
+                ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil)))
         (let ((visible (substring-no-properties
                         (agent-repl-workspace-tabline-formatted))))
           (should (= 2 (cl-count ?\[ visible)))
