@@ -34,10 +34,21 @@ export default defineConfig({
   resolve: { alias: protobufRuntimeAliases },
   test: {
     environment: "jsdom",
-    // The shared setup, plus this layer's own: the layer mounts in
-    // `beforeAll`, which runs before the shared setup's `beforeEach`, so the
-    // logger invariant needs installing one hook earlier (see that file).
-    setupFiles: ["./test/setup.ts", "./test/webapp-layer/setup.ts"],
+    // THIS LAYER'S OWN SETUP, AND NOT THE SHARED `test/setup.ts`.
+    //
+    // The shared setup reproduces production's "a logger is installed before
+    // any runtime work" invariant in a `beforeEach`, which is right for a
+    // suite that mounts inside `it`. This layer mounts ONCE per file in
+    // `beforeAll`, so that hook lands AFTER the mount and REPLACES whatever
+    // logger the mount installed — including production's real forwarding
+    // sink, and including the session identity the page had bound
+    // (`resetLoggingForTests` clears it). A file that opts into forwarding
+    // would then forward nothing from its second test onwards.
+    //
+    // `test/webapp-layer/setup.ts` makes the same invariant hold one hook
+    // earlier and leaves the mount's logger alone, so it is the whole setup
+    // here.
+    setupFiles: ["./test/webapp-layer/setup.ts"],
     include: ["test/webapp-layer/**/*.test.ts"],
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
