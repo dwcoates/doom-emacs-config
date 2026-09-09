@@ -698,6 +698,7 @@ re-routes their frontend resolution instead."
          ;; Frame-owned tab-bar view state and the hot-path log dedupe
          ;; signature are renderer globals.  Neither may leak between tests.
          (agent-repl--tabline-view-states (make-hash-table :test 'eq))
+         (agent-repl--tabline-render-identities (make-hash-table :test 'eq))
          (agent-repl--tabbar-observation-states
           (make-hash-table :test 'eq))
          (agent-repl--tabbar-diagnostic-until nil)

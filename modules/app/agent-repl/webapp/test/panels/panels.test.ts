@@ -24,7 +24,8 @@ import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import type { RowContext } from "../../src/feed/cards/context.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { drawCommandPanel, drawFeedCommandPanel } from "../../src/panels/panels.js";
 
@@ -32,7 +33,7 @@ const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
 
 function appContext(): AppContext {
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(createRouterTransport(({ service }) => service(AgentRepl, {}))),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),

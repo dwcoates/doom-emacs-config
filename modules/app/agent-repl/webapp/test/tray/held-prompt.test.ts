@@ -16,7 +16,8 @@ import {
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import type { Ticker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
@@ -64,7 +65,7 @@ function trayContext(
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker,

@@ -114,7 +114,15 @@
 ;; !!                                                                  !!
 ;; !! This has been accidentally removed multiple times.  DO NOT       !!
 ;; !! remove it again.  It is NOT dead code.  It is NOT cosmetic.     !!
-;; !! It is the mechanism that makes tab-bar updates work.             !!
+;; !!                                                                  !!
+;; !! It is, however, no longer the mechanism that makes an ARM        !!
+;; !! CHANGE reach the pixels.  The toggle changes the string on a     !!
+;; !! clock; `agent-repl--tabline-render-key' (below) changes it the   !!
+;; !! moment the rendered rows differ in ANY way, faces included, and  !!
+;; !! `agent-repl-status-repaint-on-roster-push' schedules the         !!
+;; !! redisplay that draws it.  Measured before the key existed: with  !!
+;; !! one gated turn in flight the bar painted the PREVIOUS arm until  !!
+;; !! the next tick, because the two strings compared `equal'.         !!
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 (defvar agent-repl--tabline-space-toggle nil
   "Non-nil means append the zero-width cache-buster to the tabline string.
@@ -142,6 +150,50 @@ replace this with a bare \" \" — see the block comment above
   (if agent-repl--tabline-space-toggle
       (propertize " " 'invisible t)
     ""))
+
+;; --- Render identity: the structural repaint key -------------------------
+;;
+;; The toggle above changes the string on a CLOCK.  That is not enough: the
+;; tab bar is repainted by Emacs's C redisplay, which keeps the last items
+;; vector it built and compares the next one with `Fequal' (src/xdisp.c,
+;; `update_tab_bar'; src/keyboard.c, `tab_bar_items').  `equal' ignores text
+;; properties, so a render whose only change is a FACE — every arm change —
+;; is the same item to that comparison, and nothing is repainted until the
+;; clock happens to tick.  Between a roster push and that tick the bar
+;; paints the arm the workspace had BEFORE the push.
+;;
+;; The repaint key below closes that gap structurally: every render carries
+;; an invisible generation number that advances exactly when the rendered
+;; string changes INCLUDING its properties.  Two renders that would paint
+;; differently therefore never compare `equal', on any Emacs, on any
+;; schedule, and the repaint follows the render instead of the clock.
+
+(defvar agent-repl--tabline-render-identities (make-hash-table :test 'eq)
+  "Frame -> (GENERATION . RENDERED) for the last tab-bar render on that frame.
+GENERATION is the integer `agent-repl--tabline-render-key' embedded in
+the frame's last render, and RENDERED is the propertized string it
+was derived from.  Keyed by frame because each frame renders its own
+anchor and width, and a shared last-render would advance the generation
+on every alternate frame's redisplay and repaint both bars for nothing.")
+
+(defun agent-repl--tabline-render-key (rendered &optional frame)
+  "Return the invisible run that gives RENDERED a property-aware identity.
+Advances FRAME's generation when RENDERED differs from FRAME's previous
+render under `equal-including-properties', and returns that generation
+as an `invisible'-propertized decimal string.  Appended to the visible
+formatter's output so the tab bar's C-side items cache, which compares
+with plain `equal', sees a DIFFERENT string whenever the paint differs
+and the SAME string when it does not.  Zero rendered width, like the
+clock-driven cache-buster, for the same row-wrap reason."
+  (let* ((frame (or frame (selected-frame)))
+         (last (gethash frame agent-repl--tabline-render-identities))
+         (generation
+          (if (and last (equal-including-properties rendered (cdr last)))
+              (car last)
+            (1+ (if last (car last) 0)))))
+    (puthash frame (cons generation rendered)
+             agent-repl--tabline-render-identities)
+    (propertize (number-to-string generation) 'invisible t)))
 
 (defun agent-repl--load-priority-images ()
   "Load priority badge PNGs from the module images/ directory.
@@ -842,6 +894,19 @@ blink still in flight."
           (agent-repl-status-clear-attention ws))))))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-status-sync-attention)
+
+(defun agent-repl-status-repaint-on-roster-push (_roster)
+  "Repaint the tab bar because a roster push just changed what it draws.
+Registered on `agent-repl-roster-update-functions'.  The roster is the
+tab bar's one source, so the push IS the paint event: this schedules the
+redisplay that reads the freshly applied roster, instead of leaving the
+bar to the dwell heartbeat's next tick and painting the previous arm
+until then.  The render key (`agent-repl--tabline-render-key') is what
+makes that redisplay actually reach the pixels when only a face changed."
+  (agent-repl--force-tab-bar-redraw))
+
+(add-hook 'agent-repl-roster-update-functions
+          #'agent-repl-status-repaint-on-roster-push)
 
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
@@ -1808,11 +1873,13 @@ The `(1- (frame-width))' cap also keeps the unfaced terminator that
 `agent-repl--join-tabline-rows' appends within the visible columns
 \(col < `frame-width'), and each row is centered by rendered pixel width
 through `agent-repl--center-tabline-row'.
-Appends the zero-width cache-buster
-\(`agent-repl--tabline-cache-buster') so the segment's string content
-actually changes across refresh ticks without changing its rendered
-width.  Without the cache-buster, face-only status transitions
-\(e.g. :thinking -> :done) stay invisible until a workspace switch.
+Appends two zero-width runs: the render key
+\(`agent-repl--tabline-render-key'), which changes the string's CONTENT
+exactly when the rows change in any way including their faces, so a
+face-only transition (e.g. :thinking -> :done) is a different string
+to the tab bar's `equal'-keyed items cache and is repainted at the very
+next redisplay; and the clock-driven cache-buster
+\(`agent-repl--tabline-cache-buster').
 
 Enumerates `agent-repl--ws-tabline-names', so workspaces belonging to
 a folded repo are absent from the rendered rows and the
@@ -1846,7 +1913,12 @@ remaining tabs carry contiguous 1-based numbers."
                     (agent-repl--center-tabline-row row line-width))
                   padded))
          (joined (agent-repl--join-tabline-rows centered))
-         (output (concat joined (agent-repl--tabline-cache-buster))))
+         ;; The render key LEADS the rows: an invisible run at the front
+         ;; of the first row leaves the last row's own characters exactly
+         ;; as the padding and join produced them.
+         (output (concat (agent-repl--tabline-render-key joined (selected-frame))
+                         joined
+                         (agent-repl--tabline-cache-buster))))
     (agent-repl--tabbar-log-render
      (selected-frame) width line-width names states current widths anchor-pos
      rows padded centered joined output)

@@ -8,7 +8,8 @@ import type { Ticker } from "../../src/clock.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import type { TopbarContext } from "../../src/topbar/context.js";
 import { mountRevealLayer, type RevealGeometry } from "../../src/topbar/reveal.js";
 
@@ -58,7 +59,7 @@ export function appContext(
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, impl);
   });
-  return createAppContext({
+  return testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker,

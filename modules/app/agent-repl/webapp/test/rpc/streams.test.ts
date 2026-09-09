@@ -12,7 +12,8 @@ import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { ForwardingLogger, setLogger } from "../../src/log.js";
 import type { ClientFailureArm, FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient, type AgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext, type AppContext } from "../../src/rpc/context.js";
+import { type AppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "./app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { createTicker } from "../../src/clock.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
@@ -73,7 +74,7 @@ function scriptedClient(script: ReadonlyArray<ReadonlyArray<WatchFooterResponse>
 }
 
 function contextFor(client: AgentReplClient, failures: FailureSink): AppContext {
-  return createAppContext({
+  return testAppContext({
     client,
     workspace: WORKSPACE,
     ticker: createTicker(1000),

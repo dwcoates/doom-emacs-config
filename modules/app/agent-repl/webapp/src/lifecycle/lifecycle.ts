@@ -162,7 +162,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   const webLink = watchStream(ctx, {
     name: "WatchWebWorkspace",
     schema: WatchWebWorkspaceResponseSchema,
-    open: (client, signal) => client.watchWebWorkspace({ workspace: ctx.workspace }, { signal }),
+    open: (_client, signal) => ctx.streams.watch("webWorkspace", { workspace: ctx.workspace }, signal),
     onPush: (response) => {
       const push = requireCase(response.push, "WatchWebWorkspaceResponse.push");
       switch (push.case) {
@@ -183,7 +183,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   const daemon = watchStream(ctx, {
     name: "WatchDaemon",
     schema: WatchDaemonResponseSchema,
-    open: (client, signal) => client.watchDaemon({}, { signal }),
+    open: (_client, signal) => ctx.streams.watch("daemon", {}, signal),
     onPush: (response) => {
       const push = requireCase(response.push, "WatchDaemonResponse.push");
       switch (push.case) {
