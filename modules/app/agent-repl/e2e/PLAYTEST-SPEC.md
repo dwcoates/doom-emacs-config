@@ -163,8 +163,10 @@ Three things happen before the picture is taken:
   layer's own `AwaitEval` polling until the page reports both frames
   delivered. Two is the smallest count that proves anything: the first
   callback runs BEFORE that frame is painted. Measured across owner 7's three
-  playbooks and this one, over two consecutive runs, the gate answered in
-  42–124ms, so a capture costs about a tenth of a second more than it did.
+  playbooks and this one, over three consecutive runs — twenty-one gates —
+  the gate answered in 44–144ms, mean 76ms, so a capture costs about a
+  fourteenth of its own 2s settle budget more than it did, and a whole
+  playbook a fraction of a second.
   A workspace with no live webview answers its own word and the wait accepts
   it, because several playbooks photograph a frame with no page in it.
 

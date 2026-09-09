@@ -211,14 +211,15 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 // capture needs.
 //
 // MEASURED, over the seven captures of owner 7's three playbooks and the
-// substrate's own, in each of two consecutive runs: the gate answered in
-// 42, 44, 45, 46, 54, 65, 66, 67, 75, 83, 84 and 124ms. It is bounded by
-// playtestPageBound -- 16x the worst of those -- rather than by a tighter
-// number of its own, because the case it must tolerate is the same one that
-// bound exists for: a WebKit view that has just started its web and network
-// processes on a container's first scenario. A page whose compositor
-// produces NO frame in that long is a page whose picture would be a lie, so
-// running this bound out is the right failure rather than a wait to widen.
+// substrate's own, in each of three consecutive runs -- twenty-one gates in
+// all. Every one answered between 44 and 144ms, mean 76ms, and none took
+// two polls more than the one before it. It is bounded by playtestPageBound
+// -- 14x the worst of those -- rather than by a tighter number of its own,
+// because the case it must tolerate is the same one that bound exists for:
+// a WebKit view that has just started its web and network processes on a
+// container's first scenario. A page whose compositor produces NO frame in
+// that long is a page whose picture would be a lie, so running this bound
+// out is the right failure rather than a wait to widen.
 const playtestPaintBound = playtestPageBound
 
 // playtestPaintToken numbers the paint requests within one page, so a
