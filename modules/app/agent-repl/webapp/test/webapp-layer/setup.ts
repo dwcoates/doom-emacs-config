@@ -53,6 +53,10 @@ import { ForwardingLogger, bindLogContext, resetLoggingForTests, setLogger } fro
  * forwarding is per-file and opt-in, and `client-log.layer.test.ts` — the file
  * that proves a browser record reaches the daemon's `webapp.log` carrying its
  * correlation identity — is the file that takes it.
+ *
+ * The right-hand column is what EVERY file forwarding would cost, which is the
+ * thing that was rejected. As landed, only the client-log file pays it (267ms
+ * for its six tests) and the other ten sit at their quiet times.
  */
 beforeAll(() => {
   resetLoggingForTests();
