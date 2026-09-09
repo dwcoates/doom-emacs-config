@@ -183,9 +183,13 @@ touches it.
 
 Under istanbul the files that were losing counts to the merge came back up
 (`scroll.ts` 47.71 → 98.82, `markdown.ts` 59.52 → 100, `format.ts` 84.61 →
-100), and files v8 had been flattering came down. The largest single fall is
-`src/main.ts`, from a fictional 100% to 0%: it is the mount entry, no unit test
-loads it, and its real exercise is `test/integration/` and the webapp layer.
+100), and files v8 had been flattering came down. The largest single fall was
+`src/main.ts`, from a fictional 100% to 0%: it is the mount entry, and no unit
+test loaded it -- its only exercise was `test/integration/` and the webapp
+layer, neither of which counts here or can say which of its branches a
+regression hit. `test/main.test.ts` now runs the real boot under jsdom, with
+only the wire and the mounts substituted, and it reads 100% again -- honestly
+this time.
 Three type-only modules (`src/feed/cards/context.ts`, `src/topbar/context.ts`,
 `src/tray/context.ts`) left the report entirely, because a file of `interface`
 declarations has no statement to cover and v8 was scoring it 100% of nothing.
