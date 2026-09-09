@@ -80,11 +80,36 @@ func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
 	// the hold tray while the session comes up -- which is a real state, and
 	// not the one this step is about.
 	s.awaitArm(t, name, "the tab's arm to reach thinking once the turn is in flight", ":thinking")
+	// THE PAGE IS AWAITED, NOT ASSUMED TO HAVE FOLLOWED. The arm await is
+	// satisfied by the ROSTER's push, and the footer, the feed and the hold
+	// tray are three other views on the same turn -- so a capture taken the
+	// instant the arm arrives has photographed the page's PRE-TURN state
+	// twice already: an `idle` footer, an empty feed, and the prompt still
+	// badged in the hold tray, under a manifest sentence promising the
+	// opposite. Each of the three is awaited on its own so a picture can only
+	// be taken once the page says what the sentence claims, and so a view
+	// that genuinely lags names ITSELF in the failure rather than leaving a
+	// reviewer to guess which one did.
+	s.awaitInPage(t, "the footer's status word to leave idle, which is the footer following the turn's start",
+		`document.querySelector(".footer-status") &&
+         document.querySelector(".footer-status").getAttribute("data-arm") !== "idle"`)
+	s.awaitInPage(t, "the user's own prompt bubble to arrive on the standing tail",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"]')`)
+	// THE TRAY HOLDS THE PROMPT ONLY UNTIL THE SESSION IS UP. A held card
+	// carries `data-held-turn` (`webapp/src/tray/held-prompt.ts`), so its
+	// ABSENCE from the drawn tray is the release, and the tray having drawn
+	// at all is what distinguishes a released prompt from a tray that never
+	// rendered.
+	s.awaitInPage(t, "the hold tray to have released the prompt, so nothing is still held",
+		`document.querySelector('[data-component="hold-tray"]').textContent.trim() !== "" &&
+         document.querySelector('[data-component="hold-tray"] [data-held-turn]') === null`)
 	s.captureArm(t, "arm-thinking", name,
 		"the prompt submitted with composer RET, and held in flight by the fake's turn gate",
 		":thinking",
-		"The webapp's footer says a turn is RUNNING, and the feed carries the user's own prompt "+
-			"bubble. The turn cannot conclude: the fake's gate is still shut.")
+		"The webapp's footer status word is NOT `idle` -- the footer is following the running turn -- "+
+			"the feed carries the user's own prompt bubble, and the hold tray holds nothing: the "+
+			"prompt has been released to the session. The turn cannot conclude: the fake's gate is "+
+			"still shut.")
 
 	// The gate opens only now, so the turn concludes on this playbook's own
 	// schedule rather than whenever the fake got there.
@@ -92,9 +117,17 @@ func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
 		t.Fatalf("open the fake's turn gate at %s: %v", gatePath, err)
 	}
 	done := s.awaitArm(t, name, "the tab's arm to settle when the turn concludes", emGHISettledArms...)
+	// The same two views, awaited on the settle edge for the same reason.
+	s.awaitInPage(t, "the assistant's response bubble to settle on the standing tail",
+		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
+	s.awaitInPage(t, "the footer's status word to return to idle once the turn is over",
+		`document.querySelector(".footer-status") &&
+         document.querySelector(".footer-status").getAttribute("data-arm") === "idle"`)
 	s.captureArm(t, "arm-done", name, "the gate opened, and the fake's prose answer concluded the turn",
 		done,
-		"The turn is over: the webapp's footer is idle again and the feed carries the answer.")
+		"The turn is over: the webapp's footer status word reads `idle` again, and the feed carries "+
+			"BOTH bubbles -- the user's prompt above, and beneath it the assistant's settled prose "+
+			"answer.")
 }
 
 // ---------------------------------------------------------------------------
