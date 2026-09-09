@@ -2179,3 +2179,58 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 		t.Fatalf("vendor_start_failed.detail = %q, want the shim's own account %q", failed.GetDetail(), shimDetail)
 	}
 }
+
+// TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord is the
+// roster half of "A PARKED SESSION IS IDLE, NOT BROKEN"
+// (internal/resolve/sidebar/status.go), asserted where the real sequence
+// actually breaks it.
+//
+// The roster resolver publishes on the events it is handed, and the LAST event
+// a stand-down produces is the shim link going dead — handed during the
+// hibernation's KillSession, BEFORE the sweep writes the session's hibernated
+// terminal. The row resolved on that event therefore reads `dead`, and in the
+// playtest world nothing republished afterwards: the daemon log's last
+// daemon.sidebar.row for the workspace said `dead`, and Emacs painted the tab
+// blue for a session the daemon had parked on purpose.
+//
+// The roster stream is opened AFTER the sweep's own hibernation record so the
+// first view it is served is one resolved from the parked record. A stream
+// opened earlier would match on a push taken BEFORE the park, which is how
+// TestHibernationParksAnIdleSessionAndRevivesOnPrompt's own roster assertion
+// stayed green through the defect.
+//
+// COST: the 50ms cutoff is the whole of the arrangement's wait; the test's
+// own edges are the two shim round trips and one roster push, measured at
+// 0.31s wall inside the parallel suite.
+func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testing.T) {
+	t.Parallel()
+	// Arrange: a very short idle cutoff so hibernation fires promptly.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+
+	// Act: wait for the durable stand-down record, then ask for the roster.
+	// THE RECORD IS THE PARK'S COMPLETION: the shim's exit is the sweep's
+	// means, and the session terminal the roster reads is written after it.
+	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the sweep's own hibernation record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.drain.sweep" && strings.Contains(r.Message, "hibernated an idle session")
+	})
+	roster := f.d.WatchRoster()
+
+	// Assert: the row settles on an IDLE arm. `dead` and `severed` both report
+	// a fault, and there is none: the daemon put the route down itself.
+	settled := awaitRoster(t, f.d, roster, "the parked row settling on an idle arm", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && (row.GetReady() != nil || row.GetDone() != nil)
+	})
+	row := rosterRow(settled, f.ws.GetId())
+	if row.GetDead() != nil || row.GetSevered() != nil {
+		t.Fatalf("the parked roster row = %v, want an idle arm and never a fault arm", row)
+	}
+}
