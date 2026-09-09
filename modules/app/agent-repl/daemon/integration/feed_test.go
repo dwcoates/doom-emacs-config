@@ -849,6 +849,108 @@ func TestBashForegroundToolCardDrawsTextOutput(t *testing.T) {
 	}
 }
 
+func TestBashForegroundToolCardDrawsTheImageArm(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-bash-image", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: a command whose output IS image data, the shape `!bash-image`
+	// produces end to end.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("bash-image"),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
+			Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: "screencapture -x -"},
+				StartedAt: startedAt(1),
+			},
+		}}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("bash-image"),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
+			Success: &conversationv1.AgentBashSuccess{
+				Command: &conversationv1.AgentBashCommand{Line: "screencapture -x -"},
+				Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+					Output: &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_Image{
+						Image: &conversationv1.AgentBashOutputImage{
+							Data:      []byte{0x89, 'P', 'N', 'G'},
+							MediaType: "image/png",
+						},
+					}},
+				}},
+				SettledAt: settledAt(2),
+			},
+		}}},
+	}))
+
+	// Assert: the card draws the shared image block, with the src the DAEMON
+	// composed — not the `none` arm, which draws nothing at all.
+	row := awaitRow(t, f, tail, "the image-output bash card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetReturned() != nil
+	})
+	returned := row.GetActivity().GetSimpleToolCall().GetReturned()
+	if returned.GetImage() == nil {
+		t.Fatalf("form = %T, want the image arm", returned.GetForm())
+	}
+	if want := "data:image/png;base64,iVBORw=="; returned.GetImage().GetSrc() != want {
+		t.Fatalf("src = %q, want %q", returned.GetImage().GetSrc(), want)
+	}
+}
+
+func TestBashForegroundToolCardDrawsTheExitCode(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-bash-exit", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: a non-zero exit is the command's own verdict on itself, stated by
+	// the producer as a termination.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("bash-exit"),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
+			Start: &conversationv1.AgentBashStart{
+				Command:   &conversationv1.AgentBashCommand{Line: "exit 3"},
+				StartedAt: startedAt(1),
+			},
+		}}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("bash-exit"),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
+			Success: &conversationv1.AgentBashSuccess{
+				Command: &conversationv1.AgentBashCommand{Line: "exit 3"},
+				Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+					Output: &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stderr: "boom",
+						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+					}}},
+					Termination: &conversationv1.AgentBashTermination{
+						How: &conversationv1.AgentBashTermination_Exited{
+							Exited: &conversationv1.AgentBashExited{Code: 3},
+						},
+					},
+				}},
+				SettledAt: settledAt(2),
+			},
+		}}},
+	}))
+
+	// Assert: the SAME chip element the detached shell's settled shape carries.
+	row := awaitRow(t, f, tail, "the exiting bash card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetReturned() != nil
+	})
+	exit := row.GetActivity().GetSimpleToolCall().GetReturned().GetExit()
+	if exit == nil {
+		t.Fatal("exit = nil, want the code the command reported")
+	}
+	if exit.GetCode() != 3 {
+		t.Fatalf("exit code = %d, want 3", exit.GetCode())
+	}
+}
+
 func TestAProgressFrameRepushesRunningLastProgress(t *testing.T) {
 	t.Parallel()
 	// Arrange

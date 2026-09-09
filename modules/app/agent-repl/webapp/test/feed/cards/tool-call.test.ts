@@ -946,3 +946,113 @@ describe("a returned card a newer daemon wrote", () => {
     ]).toEqual([true, "arm 'moved' is not one this build can draw"]);
   });
 });
+
+describe("the image output form (landing 16)", () => {
+  it("draws the shared image block with the daemon's resolved src", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "image", value: { src: "data:image/png;base64,iVBORw==", alt: "" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const img = el.querySelector<HTMLImageElement>("img.prompt-block-image");
+    expect(img?.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+  });
+
+  it("draws the daemon's alt text on the image", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "image",
+              value: { src: "data:image/png;base64,iVBORw==", alt: "screencapture -x -" },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector<HTMLImageElement>("img.prompt-block-image")?.alt).toBe(
+      "screencapture -x -",
+    );
+  });
+
+  it("states the image arm as the card's output form", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "image", value: { src: "data:image/png;base64,iVBORw==", alt: "" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.getAttribute("data-output-form")).toBe("image");
+  });
+});
+
+describe("the returned card's exit chip (landing 16)", () => {
+  it("draws the code the command reported, on the head", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "failed", value: {} },
+            form: { case: "text", value: { text: "boom" } },
+            exit: { code: 3 },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const chip = el.querySelector(".tool-head .shell-exit");
+    expect(chip?.textContent).toBe("exit 3");
+    expect(chip?.getAttribute("data-exit-code")).toBe("3");
+  });
+
+  it("gives a zero exit the ok tone, as the detached shell's chip does", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok" } },
+            exit: { code: 0 },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".shell-exit")?.className).toBe("badge ok shell-exit");
+  });
+
+  it("draws NO chip when the producer stated no exit code", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "failed", value: {} },
+            form: { case: "text", value: { text: "boom" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".shell-exit")).toBeNull();
+  });
+});

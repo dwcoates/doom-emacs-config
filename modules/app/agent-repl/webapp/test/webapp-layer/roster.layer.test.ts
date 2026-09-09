@@ -221,7 +221,7 @@ it(
         () => app.$('[data-component="drain-banner"] [data-shutdown-cause]') !== null,
       );
     } catch (error) {
-      throw new Error(`${String(error)}; drain-banner host: ${bannerHost()}`);
+      throw new Error(`${String(error)}; drain-banner host: ${bannerHost()}`, { cause: error });
     }
     const banner = app.$('[data-component="drain-banner"] [data-shutdown-cause]');
     expect(banner).not.toBeNull();
