@@ -108,6 +108,10 @@ func (s *server) PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID) {
 		})
 		return
 	}
+	// THE WEB LINK'S IDENTITY MOVES ON EXACTLY THESE EDGES. It is composed
+	// from the same session facts the host view's identity is, so giving it a
+	// second set of publish sites would only give it a way to drift from them.
+	s.publishWebSessionIdentity(ctx, log, ws)
 	view, ok := s.composeHostWorkspace(ctx, log, ws)
 	if !ok {
 		return

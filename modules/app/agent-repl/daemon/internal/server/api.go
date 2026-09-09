@@ -171,8 +171,15 @@ type server struct {
 	// its latest value: sharing one would hand a late subscriber whichever
 	// event happened last instead of the state it subscribed for.
 	hostStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]
-	// webTopics is one push topic per workspace's WatchWebWorkspace stream.
+	// webTopics is one EVENT topic per workspace's WatchWebWorkspace stream.
 	webTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]
+	// webStateTopics is one STATE topic per workspace, carrying the
+	// `session_identity` arm. It is separate from the event topic for the same
+	// reason hostStateTopics is separate from hostTopics: a Topic replays
+	// exactly its latest value, so a subscriber arriving after `transferred`
+	// would be handed the identity instead of the transfer notice, and never
+	// learn the workspace had moved.
+	webStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]
 	// daemonTopic is the one daemon-level push topic, for Emacs and every
 	// webview alike.
 	daemonTopic publish.Topic[*agentreplv1.WatchDaemonResponse]
@@ -255,6 +262,7 @@ func New(deps Deps) (Server, error) {
 		cancel:          cancel,
 		hostTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
 		hostStateTopics: make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
+		webStateTopics:  make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]),
 		webTopics:       make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
 		daemonWatchers:  make(map[*daemonWatcher]struct{}),
 		hostHeld:        make(map[ids.WorkspaceID]int),
@@ -302,6 +310,21 @@ func (s *server) webTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.WatchW
 	if !ok {
 		t = &publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]{}
 		s.webTopics[ws] = t
+	}
+	return t
+}
+
+// webStateTopic answers a workspace's web STATE topic, minting it on first use
+// exactly as webTopic mints the event one.
+func (s *server) webStateTopic(
+	ws ids.WorkspaceID,
+) *publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity] {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.webStateTopics[ws]
+	if !ok {
+		t = &publish.Topic[*agentreplv1.WebWorkspaceSessionIdentity]{}
+		s.webStateTopics[ws] = t
 	}
 	return t
 }
