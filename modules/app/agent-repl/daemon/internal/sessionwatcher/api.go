@@ -113,7 +113,12 @@ type FeedSink interface {
 	// OnContextCut is the AgentUpdate.context_cut page line — /clear, a
 	// compaction, or a compaction that failed. The feed draws the separation
 	// divider from it. Instantaneous: one frame, no lifecycle.
-	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, addr OutputAddress)
+	//
+	// `at` IS THE CUT'S IDENTITY. A cut reaches this daemon once per plane —
+	// the shim's stream and the sidecar's file both write the same store entry
+	// — so the feed keys its divider on the entry's own stable position rather
+	// than on a count of arrivals. See feed.drawContextCut.
+	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, at *conversationv1.HistoryPointer, addr OutputAddress)
 	// OnApiError is the AgentUpdate.api_error page line: a vendor request that
 	// failed MID-TURN and the turn went on. EVIDENCE, never a terminal — the
 	// turn's end is the frame-level failure arm and nothing else.

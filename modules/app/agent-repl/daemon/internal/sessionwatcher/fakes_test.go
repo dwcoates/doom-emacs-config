@@ -426,7 +426,7 @@ func (s *feedSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.AgentId
 	s.rec.emit(event{sink: "feed", method: "OnPermission", agent: agent.GetValue(), detail: p.GetId().GetValue()})
 }
 
-func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ OutputAddress) {
+func (s *feedSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut, _ *conversationv1.HistoryPointer, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnContextCut", agent: agent.GetValue()})
 }
 

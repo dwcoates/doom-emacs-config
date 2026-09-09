@@ -50,6 +50,29 @@ type unitState struct {
 	// scratch on every later frame. EMPTY MEANS NONE WAS GIVEN, which draws no
 	// body rather than falling back to the message itself.
 	sendSummary string
+	// sendDelivery is HOW the send settled -- queued, resumed, or REFUSED --
+	// kept for the same reason `denied` is kept: a late frame must never
+	// redraw a settled unit as unsettled.
+	//
+	// A SEND'S UNIT IS DELIVERED TWICE, and that is by design rather than by
+	// accident. The shim's stream plane converts the SDK's events live, and
+	// the sidecar's file plane replays the SAME units out of the vendor
+	// transcript under the SAME key, so a send arrives as start-then-terminal
+	// and then, ~160ms later, as start-then-terminal again. Drawn from the
+	// current frame alone, the replayed START un-stated a refusal the first
+	// pass had already drawn: for the ~2ms between the replay's two frames
+	// the row said nothing about delivery -- which feed.proto's `refused` arm
+	// exists precisely to distinguish from "the producer stated nothing", and
+	// which any reader that opened the feed in that window read as a message
+	// still on its way to an agent that will never receive it. That window is
+	// what `TestSendMessageRefused` caught, once in eight in-container runs.
+	sendDelivery deliveryArm
+	// sendResolved is the recipient identity the success arm resolved, kept
+	// for the same reason: the replayed start restates the ADDRESSED string
+	// and never the resolved id, so drawing from the frame alone walked the
+	// address line back from the recipient's own bubble label to the raw
+	// string the caller typed.
+	sendResolved *conversationv1.AgentId
 }
 
 // unit resolves a unit's accumulation, creating it on first sight.

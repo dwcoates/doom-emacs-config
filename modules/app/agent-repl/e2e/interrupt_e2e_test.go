@@ -162,6 +162,20 @@ func TestBashInterruptedByTimeout(t *testing.T) {
 	// call anywhere in this test, deliberately, per the header note.
 	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "bash-timeout")
 
+	// THE SPOOL IS NOT THE TURN'S, so the turn concluding does not mean it has
+	// arrived. `driveScenarioToCompletion` waits for the turn's terminal, and
+	// the detached shell OUTLIVES that turn by design — its spool text is
+	// appended to the spool FILE and reaches the daemon on the sidecar's own
+	// pickup, after the turn is over. A page read on the line after the
+	// conclusion therefore races it, and found `spool text is empty` once in
+	// twenty-five in-container runs. The wait is on the row this test is about,
+	// on the feed's own tail; every assertion below then reads a page that has
+	// it.
+	rmAwaitFeedRow(t, w, ws, "the detached shell's row carrying its spool text",
+		func(row *frontendv1.FeedRow) bool {
+			return row.GetDetachedShell().GetShell().GetSpool().GetText() != ""
+		})
+
 	// Assert: fetch the settled page and find both facts durably recorded —
 	// the turn's ORDINARY concluded terminal, and the Bash unit's own
 	// detached-shell placement, still live (no EXIT= line was ever written,

@@ -255,3 +255,94 @@ func TestWebappWritableRejectsADirectoryItCannotCreateTheCacheIn(t *testing.T) {
 		t.Fatalf("wlWebappWritable(%s) = %v, want the message to name the directory", readonly, err)
 	}
 }
+
+// TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink covers the whole
+// reason the sweep exists: what a workspace holds is a SYMLINK, and the
+// records live in the durable target it names.
+func TestPreserveWorkspaceElispLogsFollowsTheCanonicalSymlink(t *testing.T) {
+	// Arrange: a workspace under the Emacs root whose canonical elisp sink is
+	// a symlink to a target OUTSIDE the root, exactly as
+	// `agent-repl--workspace-emacs-log-target` mints it.
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "agent-repl-emacs-abc.log")
+	const record = `{"operation":"agent-repl.elisp-host-transferred"}`
+	if err := os.WriteFile(target, []byte(record), 0o600); err != nil {
+		t.Fatalf("write the durable target: %v", err)
+	}
+	sink := filepath.Join(root, "repo-a", ".claude", "emacs")
+	if err := os.MkdirAll(sink, 0o755); err != nil {
+		t.Fatalf("create the workspace sink directory: %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(sink, "emacs.log")); err != nil {
+		t.Fatalf("link the canonical path: %v", err)
+	}
+	out := t.TempDir()
+
+	// Act
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
+
+	// Assert
+	got, err := os.ReadFile(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log"))
+	if err != nil {
+		t.Fatalf("the preserved workspace sink could not be read: %v", err)
+	}
+	if string(got) != record {
+		t.Fatalf("preserved sink = %q, want the durable target's own bytes %q", got, record)
+	}
+}
+
+// TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude keeps
+// the sweep to the ONE shape it is about. `emacs` is an ordinary directory
+// name — the staged `~/.emacs.d` lives under this same root — and copying
+// every one of them would put hundreds of megabytes of Doom into a failure's
+// artifacts.
+func TestPreserveWorkspaceElispLogsIgnoresAnEmacsDirectoryOutsideDotClaude(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	stray := filepath.Join(root, "state", "emacs")
+	if err := os.MkdirAll(stray, 0o755); err != nil {
+		t.Fatalf("create the stray directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stray, "not-a-sink.log"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write the stray file: %v", err)
+	}
+	out := t.TempDir()
+
+	// Act
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, root)
+
+	// Assert
+	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs")); !os.IsNotExist(err) {
+		t.Fatalf("stat of the preserved tree = %v, want it never created for a non-.claude `emacs` directory", err)
+	}
+}
+
+// TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot is the defect the
+// first version of this sweep had: it walked `e.Root`, which is
+// `<scratch>/emacs`, while the workspaces live beside it under the same
+// scratch directory — so a red run's sweep found nothing and said nothing.
+func TestPreserveWorkspaceElispLogsFindsASinkBesideTheEmacsRoot(t *testing.T) {
+	// Arrange: the real layout — the Emacs HOME and a registered workspace as
+	// siblings under one scratch root.
+	scratch := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(scratch, "emacs", ".emacs.d", "lisp"), 0o755); err != nil {
+		t.Fatalf("stage the Emacs home: %v", err)
+	}
+	sink := filepath.Join(scratch, "repo-a", ".claude", "emacs")
+	if err := os.MkdirAll(sink, 0o755); err != nil {
+		t.Fatalf("create the workspace sink directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sink, "emacs.log"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write the sink: %v", err)
+	}
+	out := t.TempDir()
+
+	// Act
+	(&Emacs{t: t}).preserveWorkspaceElispLogs(out, scratch)
+
+	// Assert
+	if _, err := os.Stat(filepath.Join(out, "workspace-elisp-logs", "repo-a", ".claude", "emacs", "emacs.log")); err != nil {
+		t.Fatalf("stat of the preserved workspace sink = %v, want it collected from beside the Emacs root", err)
+	}
+}

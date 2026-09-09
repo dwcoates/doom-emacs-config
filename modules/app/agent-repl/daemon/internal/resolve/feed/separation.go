@@ -19,13 +19,51 @@ import (
 // A separation belongs to NO TURN and is deliberately left unstamped.
 
 // drawContextCut draws the divider a context cut leaves.
-func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
+//
+// THE CUT'S IDENTITY IS THE STORE ENTRY IT ARRIVED ON, never a count of
+// arrivals, and that is the whole of why `pointer` is here.
+//
+// A cut reaches this daemon MORE THAN ONCE by design. The shim's stream plane
+// converts the vendor's `compact_boundary` live and the sidecar's file plane
+// reads the same boundary out of the transcript, both writing the SAME store
+// entry — and every write of an entry is delivered on the agent's tail, so the
+// daemon sees the cut twice. A per-workspace counter minted a fresh row key on
+// each of those, so ONE compaction drew TWO separation rows:
+//
+//	17:59:09.014 daemon.feed.separation kind=compacted row=…separation.context_cut:1
+//	17:59:09.020 daemon.feed.separation kind=compacted row=…separation.context_cut:2
+//
+// with the second drawn from whichever plane's frame was less complete.
+// `TestCompactionDirectedWithSummaryOverride` read the summary off the wrong
+// one and found it empty, and the webapp layer's `!rotate` scenario took the
+// duplicate for its own turn's row and read `compacted` where it wanted
+// `cleared`.
+//
+// The store's `position` is never in its upsert's UPDATE clause — an upsert
+// "supersedes a row's content whole and leaves its place in the book exactly
+// where the first insert put it" — so the pointer is the same for every
+// delivery of one entry and different for every distinct cut. Keyed on it, the
+// second delivery UPSERTS the first's row, which is what every other family
+// here already does.
+//
+// A DELIVERY WITH NO POINTER still draws, on the counter, and says so: a
+// producer that states no position is a fault to see rather than a row to
+// drop, and the duplicate it may leave is strictly better than a missing
+// divider.
+func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, pointer *conversationv1.HistoryPointer) {
 	log := r.logger(s.id)
 	at := r.place(s, agent)
-	s.synthSeq++
+	key := pointer.GetValue()
+	if key == "" {
+		s.synthSeq++
+		key = fmt.Sprintf("unpositioned:%d", s.synthSeq)
+		log.Warn("daemon.feed.context_cut_unpositioned",
+			"a context cut arrived with no store pointer, so its divider is keyed on an arrival counter and a second delivery of the same cut would draw a second row",
+			dlog.Context{"agent": agent.GetValue()})
+	}
 	id := r.rowID(s.id, at.feed, feedid.RowKey{
 		Kind: feedid.KindSeparation,
-		ID:   fmt.Sprintf("context_cut:%d", s.synthSeq),
+		ID:   "context_cut:" + key,
 	})
 
 	separation := &frontendv1.FeedSessionSeparation{}

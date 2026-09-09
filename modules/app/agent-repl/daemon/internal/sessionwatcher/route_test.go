@@ -170,7 +170,7 @@ func TestRouteContextCut(t *testing.T) {
 	got := h.routeNow(func(w *watcher) {
 		w.routeUpdateLocked(agentID("main-1"), &conversationv1.AgentUpdate{
 			Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: &conversationv1.ContextCut{}},
-		})
+		}, &conversationv1.HistoryPointer{Value: "entry-1"})
 	})
 
 	// Assert.
@@ -186,7 +186,7 @@ func TestRouteContextBudgetWarning(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame()) })
+	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame(), nil) })
 
 	// Assert.
 	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
