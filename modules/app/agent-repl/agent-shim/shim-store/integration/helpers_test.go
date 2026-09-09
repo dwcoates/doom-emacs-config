@@ -59,6 +59,23 @@ const (
 	// readyTimeout.
 	streamTimeout = 2 * time.Second
 
+	// burstCallTimeout and burstStreamTimeout are the EXPLICIT per-site bounds
+	// for the one place in this package that moves thousands of items in a
+	// single call: the default-buffer burst test. The package-wide 2s bounds
+	// above are sized off single-item calls, so applying them to a
+	// 4096-entry WriteBatch left this site with no stated basis at all.
+	//
+	// Measured on the burst test at -count=10 under REPRESENTATIVE contention
+	// (16 cpu burners on 16 cores, matching the 8-parallel full-package run):
+	// worst WriteBatch 0.40s, worst 4096-frame delivery 0.28s. The bounds are
+	// ~3x those, the same small multiple readyTimeout uses.
+	//
+	// Both land BELOW the 2s they replace: this site is now bounded tighter
+	// than before, not looser. The bounds are deliberately NOT sized to the
+	// pathological load that first exposed the missing basis.
+	burstCallTimeout   = 1200 * time.Millisecond
+	burstStreamTimeout = 900 * time.Millisecond
+
 	// baseURL is a syntactic placeholder: every transport below dials the
 	// unix socket, so the authority is never resolved.
 	baseURL = "http://store.localhost"
@@ -1389,7 +1406,14 @@ func registerEmptyBook(ctx context.Context, t *testing.T, p *producer, spawner, 
 
 func callContext(t *testing.T) (context.Context, context.CancelFunc) {
 	t.Helper()
-	return context.WithTimeout(context.Background(), callTimeout)
+	return callContextWithin(t, callTimeout)
+}
+
+// callContextWithin is callContext with an explicit bound, for the sites whose
+// call is not a single-item rpc and cannot honestly be held to callTimeout.
+func callContextWithin(t *testing.T, within time.Duration) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(context.Background(), within)
 }
 
 func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string, pageSize uint32, knownThrough *storev1.StoreItemPointer) *storev1.OpenAgentSessionSuccess {
@@ -1724,6 +1748,13 @@ type receivedLine struct {
 // there is no polling and no sleeping anywhere in this path.
 func receiveLines(t *testing.T, stream *watch, n int) []receivedLine {
 	t.Helper()
+	return receiveLinesWithin(t, stream, n, streamTimeout)
+}
+
+// receiveLinesWithin is receiveLines with an explicit bound, for the sites that
+// read a burst rather than a frame or two.
+func receiveLinesWithin(t *testing.T, stream *watch, n int, within time.Duration) []receivedLine {
+	t.Helper()
 
 	type result struct {
 		lines []receivedLine
@@ -1752,8 +1783,8 @@ func receiveLines(t *testing.T, stream *watch, n int) []receivedLine {
 			t.Fatalf("watch stream: %v", res.err)
 		}
 		return res.lines
-	case <-time.After(streamTimeout):
-		t.Fatalf("watch stream delivered fewer than %d frames within %s", n, streamTimeout)
+	case <-time.After(within):
+		t.Fatalf("watch stream delivered fewer than %d frames within %s", n, within)
 		return nil
 	}
 }
