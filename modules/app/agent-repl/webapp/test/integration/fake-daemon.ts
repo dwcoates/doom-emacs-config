@@ -28,6 +28,8 @@ import {
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { Code, ConnectError } from "@connectrpc/connect";
+// Connect's own spelling of a code, the one `PageSubscriptionFailed` carries.
+import { codeToString } from "@connectrpc/connect/protocol-connect";
 
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
@@ -1029,26 +1031,43 @@ export function createFakeDaemon(): FakeDaemon {
     source: AsyncGenerator<object>,
     controller: AbortController,
   ): Promise<void> => {
+    let ending: MessageInitShape<typeof PageSubscriptionEndedSchema>["how"];
     try {
       for (;;) {
         const step = await source.next();
         if (step.done === true) break;
         pushFrame(state, subscription, kind, step.value);
       }
+      ending = { case: "sourceEnded", value: {} };
+    } catch (err) {
+      // THE DEDICATED RPC'S OWN ERROR, CARRIED AS DATA. A multiplexed
+      // subscription has no status of its own to fail with, so the Connect
+      // error its stream would have ended with rides an `ended` frame instead
+      // and the page's stream stays open for its other subscriptions.
+      const connectError = ConnectError.from(err);
+      ending = {
+        case: "failed",
+        value: { code: codeToString(connectError.code), message: connectError.rawMessage },
+      };
     } finally {
       if (state.subscriptions.get(subscription) === controller) {
         state.subscriptions.delete(subscription);
-        state.outbound.push(
-          create(WatchPageResponseSchema, {
-            frame: {
-              case: "ended",
-              value: create(PageSubscriptionEndedSchema, { subscription }),
-            },
-          }),
-        );
+        state.outbound.push(endedFrame(subscription, ending));
       }
     }
   };
+
+  /** One `ended` frame, saying HOW the subscription ended. */
+  const endedFrame = (
+    subscription: string,
+    how: MessageInitShape<typeof PageSubscriptionEndedSchema>["how"],
+  ): WatchPageResponse =>
+    create(WatchPageResponseSchema, {
+      frame: {
+        case: "ended",
+        value: create(PageSubscriptionEndedSchema, { subscription, how }),
+      },
+    });
 
   const routes = (router: ConnectRouter): void => {
     router.service(AgentRepl, {
@@ -1430,10 +1449,14 @@ export function createFakeDaemon(): FakeDaemon {
         // ENDING ONE THAT DOES NOT EXIST IS NOT A REFUSAL: the end is the state
         // the caller asked for, and a subscription already gone is that state.
         if (state !== undefined && controller !== undefined) {
-          // Dropped BEFORE the abort, so the pump reads it as the client's own
-          // act and announces no `ended` frame for it.
+          // Dropped BEFORE the abort, so the pump does not also announce this
+          // ending as the source's own. THE END IS ONE FACT ON ONE WIRE
+          // whoever asked for it, so the `unsubscribed` arm is announced here
+          // rather than suppressed — the client's own bookkeeping is what
+          // makes it harmless, not the daemon's silence.
           state.subscriptions.delete(request.subscription);
           controller.abort();
+          state.outbound.push(endedFrame(request.subscription, { case: "unsubscribed", value: {} }));
         }
         return {};
       },

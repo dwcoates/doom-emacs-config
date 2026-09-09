@@ -36,6 +36,13 @@
  * page's stream has reopened and re-attached.
  */
 import type { MessageInitShape } from "@bufbuild/protobuf";
+import { ConnectError } from "@connectrpc/connect";
+// CONNECT'S OWN PARSER, not a second copy of its table. `PageSubscriptionFailed`
+// carries the code as connect-go spells it, and this is the function connect
+// itself parses that spelling with; duplicating the mapping here would be two
+// contracts for one wire. It is marked internal by the package, so the version
+// is pinned and an unparseable code is refused rather than defaulted (below).
+import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { log } from "../log.js";
 import {
   SubscribePageRequestSchema,
@@ -119,6 +126,8 @@ class FrameQueue<T> {
   private readonly waiting: T[] = [];
   private wake: (() => void) | null = null;
   private closed = false;
+  /** The error this subscription ended IN, thrown after the backlog drains. */
+  private failure: { cause: unknown } | null = null;
 
   push(value: T): void {
     if (this.closed) return;
@@ -132,12 +141,29 @@ class FrameQueue<T> {
     this.wake?.();
   }
 
+  /**
+   * End this subscription IN FAILURE.
+   *
+   * The frames already delivered are still drawn — they were true when they
+   * were sent, and dropping them would lose rows nothing will resend — and the
+   * error is thrown once the backlog is empty, so the caller's own
+   * `watchStream` reads it as the open failure it is.
+   */
+  fail(cause: unknown): void {
+    if (this.closed) return;
+    this.failure = { cause };
+    this.close();
+  }
+
   async *drain(): AsyncGenerator<T> {
     for (;;) {
       while (this.waiting.length > 0) {
         yield this.waiting.shift() as T;
       }
-      if (this.closed) return;
+      if (this.closed) {
+        if (this.failure !== null) throw this.failure.cause;
+        return;
+      }
       await new Promise<void>((resolve) => {
         this.wake = () => {
           this.wake = null;
@@ -242,14 +268,79 @@ export function startPageStreams(ctx: PageStreamContext, page: string): PageStre
         return;
       }
       case "ended": {
-        const queue = subscriptions.get(frame.value.subscription);
-        if (queue === undefined) return;
-        log("info", "a page subscription was ended by the daemon", {
-          operation: "rpc.page-subscription-ended",
-          context: { page, subscription: frame.value.subscription },
-        });
-        queue.close();
-        return;
+        const ended = frame.value;
+        const queue = subscriptions.get(ended.subscription);
+        if (queue === undefined) {
+          // THE ENDING OF A SUBSCRIPTION THIS PAGE HAS ALREADY DROPPED, which
+          // is the ordinary shape of the client's own `UnsubscribePage`: the
+          // id leaves this map BEFORE the verb is sent, so its `unsubscribed`
+          // frame always lands here. Nothing is drawn and nothing above debug
+          // is said, because nothing happened that a reader did not ask for.
+          log("debug", "an ending arrived for a subscription this page had already dropped", {
+            operation: "rpc.page-ended-unclaimed",
+            context: { page, subscription: ended.subscription, how: String(ended.how.case) },
+          });
+          return;
+        }
+        switch (ended.how.case) {
+          case "unsubscribed":
+            // This page asked for it. It reaches a queue only when the ending
+            // raced the drop, and it is still the end this page wanted.
+            log("debug", "a page subscription ended at this page's own request", {
+              operation: "rpc.page-subscription-unsubscribed",
+              context: { page, subscription: ended.subscription },
+            });
+            queue.close();
+            return;
+          case "sourceEnded":
+            // NOTHING FAILED; there is simply nothing further to push. The
+            // subscription's iterable ends without an error, which is exactly
+            // what a dedicated `Watch*` stream concluding cleanly gave its
+            // caller — and what the caller does with that is unchanged.
+            log("info", "a page subscription's source finished", {
+              operation: "rpc.page-subscription-source-ended",
+              context: { page, subscription: ended.subscription },
+            });
+            queue.close();
+            return;
+          case "failed": {
+            // THE DEDICATED RPC'S OWN ERROR, CARRIED AS DATA. A multiplexed
+            // subscription has no status of its own to fail with — the page's
+            // stream is healthy and must stay open for its other
+            // subscriptions — so the code and message are rebuilt into the
+            // ConnectError the caller's `watchStream` would have caught from
+            // its own stream, and it draws the same card off the same code.
+            // AN UNREADABLE CODE IS A MALFORMED FRAME, NOT `Unknown`. Passing
+            // the undefined straight to `ConnectError` would quietly mint
+            // `Code.Unknown` and draw a plausible card for a daemon that
+            // spelled its own contract wrong — the fallback this layer is not
+            // allowed to have.
+            const code = codeFromString(ended.how.value.code);
+            if (code === undefined) {
+              throw new MalformedView(
+                "PageSubscriptionFailed.code",
+                `subscription ${ended.subscription} failed with ${JSON.stringify(ended.how.value.code)}, which is not a Connect code`,
+              );
+            }
+            const failure = new ConnectError(ended.how.value.message, code);
+            log("error", `a page subscription failed: ${ended.how.value.message}`, {
+              operation: "rpc.page-subscription-failed",
+              context: {
+                page,
+                subscription: ended.subscription,
+                code: ended.how.value.code,
+                cause: ended.how.value.message,
+              },
+            });
+            queue.fail(failure);
+            return;
+          }
+          default:
+            throw new MalformedView(
+              "PageSubscriptionEnded.how",
+              `subscription ${ended.subscription} ended with no arm saying how`,
+            );
+        }
       }
       default:
         throw new MalformedView(
