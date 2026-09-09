@@ -87,7 +87,7 @@ C. Composer and delivery
 D. Feed families (webapp visuals) — table over scenarios, settled feed per row
 25. !md markdown: headings, fence, list
 26. !interrupt then SPC o C-c → interrupted terminal
-27. !query-eof / !query-fail / !query-eof-mid-ask → failure overlay, ask denied
+27. !query-eof / !query-fail / !query-eof-mid-ask → errored terminal row with the cause, footer blocked line; mid-ask shows the ask denied
 28. !rotate → separator, new session line
 29. !slash, shape-a, shape-a-unnamed
 30. !compact / compact-auto / compact-failed → context-cut row, footer budget
