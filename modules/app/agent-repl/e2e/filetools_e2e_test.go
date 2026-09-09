@@ -26,7 +26,8 @@
 // write-create/write-update, grep-content/grep-files/grep-count. Each test
 // below drives every fake scenario its golden capture bundles, as named
 // table rows, rather than inventing a single nonexistent combined `!name`.
-// None of the eleven scenarios this file drives (edit, ide-diagnostics, glob,
+// None of the twelve scenarios this file drives (edit, ide-diagnostics,
+// ide-diagnostics-write, glob,
 // read, read-head, read-range, write-create, write-update, grep-content,
 // grep-files, grep-count) carry an UNGROUNDED/INVENTED/DECLARED-ONLY mark in
 // the shim's own MANIFEST.md — every fixture here is corpus-grounded or, for
@@ -335,6 +336,46 @@ func TestIdeDiagnosticsAfterEdit(t *testing.T) {
 	diagnostics := returned.GetDiagnostics()
 	if len(diagnostics.GetLines()) == 0 {
 		t.Fatal("the edit's diagnostics carry no composed lines, want the vendor's typescript error")
+	}
+}
+
+// TestIdeDiagnosticsAfterWrite drives the `ide-diagnostics-write` fake
+// scenario (files.ts IDE_DIAGNOSTICS_WRITE) — the WRITE sibling of
+// TestIdeDiagnosticsAfterEdit above.
+//
+// It exists because the adjacency join has to know WHICH KIND of change it
+// is joining to: a diagnostics attachment following a Write once landed on
+// the edit arm, because the fold remembered that a change had happened and
+// not that it was a write. That defect is unit-tested in the shim's fold and
+// the daemon's resolver; this is the end-to-end statement of it, asserting
+// the diagnostics hang off the tool card NAMED "Write" at the feed.
+//
+// GROUNDING: the scenario composes the real `Write` `type: "create"` result
+// from testdata/captures/write-created-and-updated with the real harvested
+// attachment in testdata/corpus/attachments/diagnostics.jsonl — the same two
+// grades of evidence its edit sibling composes, and the same as every other
+// scenario this file drives. No capture grounds a diagnostics attachment on
+// any host (it requires a connected editor integration), which the shim's
+// testdata/captures/MANIFEST.md states once for both siblings.
+func TestIdeDiagnosticsAfterWrite(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := newFileToolsWorkspace(t)
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "ide-diagnostics-write")
+
+	// Assert
+	row := awaitFeedRow(t, w, ws, "the write's diagnostics-carrying tool card", func(r *frontendv1.FeedRow) bool {
+		call := r.GetActivity().GetSimpleToolCall()
+		return r.GetTurn().GetValue() == turn.GetValue() &&
+			call.GetName().GetText() == "Write" &&
+			call.GetReturned().GetDiagnostics() != nil
+	})
+	returned := requireSucceeded(t, row, "Write")
+	diagnostics := returned.GetDiagnostics()
+	if len(diagnostics.GetLines()) == 0 {
+		t.Fatal("the write's diagnostics carry no composed lines, want the vendor's typescript error")
 	}
 }
 
