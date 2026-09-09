@@ -637,12 +637,18 @@ describe("the account-usage probe", () => {
     expect(answer.rate_limits?.five_hour).toMatchObject({ utilization: null });
   });
 
-  it("answers null behaviors when the local scan failed", async () => {
-    // Arrange + Act
-    const answer = await usage(["!usage-sampling-failure"]);
-
-    // Assert
-    expect(answer.behaviors).toBeNull();
+  // AMENDED, deliberately. This used to assert `behaviors: null`, a shape the
+  // converter never reads: `accountUsageUpdate` branches on
+  // `rate_limits_available`, `rate_limits` and the five-hour window only, so
+  // the arm the scenario names — `sampling_failure` — was unreachable and the
+  // trigger was dead while looking covered. The shim's ONE producer of that
+  // arm is the catch around this probe, so the mock of a failed sampling is
+  // the probe RAISING.
+  it("raises when the shim's own sampling failed, which is that arm's only producer", async () => {
+    // Arrange + Act + Assert
+    await expect(usage(["!usage-sampling-failure"])).rejects.toThrow(
+      "the local transcript scan that produces `behaviors` failed",
+    );
   });
 });
 

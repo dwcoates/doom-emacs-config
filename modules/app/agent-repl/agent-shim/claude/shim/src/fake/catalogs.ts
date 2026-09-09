@@ -333,7 +333,17 @@ export function fakeAccountUsage(arm: AccountUsageArm): AccountUsageLike {
       // The window exists and its utilization does not.
       return { ...base, rate_limits: { ...allWindows, five_hour: window(null, "2026-08-29T20:00:00.000Z") } };
     case "sampling_failure":
-      // The local-transcript scan that produces `behaviors` failed.
-      return { ...base, rate_limits: allWindows, behaviors: null };
+      // THE SHIM'S OWN SAMPLING FAILING IS A THROW, NOT A SHAPE. This arm used
+      // to answer `{ ...base, behaviors: null }`, which the converter never
+      // reads: `accountUsageUpdate` (engine/session.ts) branches only on
+      // `rate_limits_available`, `rate_limits` and the five-hour window, so a
+      // null `behaviors` produced the AVAILABLE outcome and the scenario named
+      // an arm it could not reach — a dead trigger that looked covered.
+      //
+      // `sampling_failure` has exactly one producer in the shim: the catch
+      // around the usage probe, which states the thrown error's message as the
+      // cause. So the mock of "the shim's own sampling failed" is the probe
+      // raising, and this is where it raises.
+      throw new Error("the local transcript scan that produces `behaviors` failed");
   }
 }
