@@ -170,6 +170,7 @@ func (c *controller) releaseScheduleHolds(ctx context.Context, operation string,
 			continue
 		}
 		c.leaseChanged(ws)
+		c.publishHost(ws)
 	}
 }
 
@@ -178,6 +179,16 @@ func (c *controller) releaseScheduleHolds(ctx context.Context, operation string,
 func (c *controller) leaseChanged(ws ids.WorkspaceID) {
 	if c.deps.LeaseChanged != nil {
 		c.deps.LeaseChanged(ws)
+	}
+}
+
+// publishHost recomposes the workspace's host view after this controller
+// released its lease. The composer arm is a function of the lease, and the
+// server never sees a release, so a client's last push would otherwise stand
+// as `draining` after the drain is gone.
+func (c *controller) publishHost(ws ids.WorkspaceID) {
+	if c.deps.PublishHost != nil {
+		c.deps.PublishHost(ws)
 	}
 }
 

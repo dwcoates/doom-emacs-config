@@ -99,6 +99,13 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		if c.deps.LeaseChanged != nil {
 			c.deps.LeaseChanged(ws)
 		}
+		// AND THE HOST VIEW IS STALE UNTIL SOMETHING RECOMPOSES IT. The
+		// composer arm was `draining` for as long as this lease stood, the
+		// last push every host client received was taken while it was held,
+		// and no other flow republishes after a hibernation. Emacs refuses a
+		// submission while its gate reads draining, so the republish is what
+		// makes the hibernated workspace revivable by a prompt.
+		c.publishHost(ws)
 	}()
 
 	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
