@@ -66,7 +66,7 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 
 func (c *fakeClient) PID() int { return c.pid }
 
-func (c *fakeClient) Kill(attr shimclient.KillAttribution) error {
+func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
 	if c.killErr != nil {
 		return c.killErr
 	}

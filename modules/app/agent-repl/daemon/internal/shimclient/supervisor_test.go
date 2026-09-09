@@ -234,7 +234,7 @@ func TestSpawnIsReadyOnlyAfterHealthyDiagnostics(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("Spawn() error = %v", r.err)
 	}
-	t.Cleanup(func() { _ = r.c.Kill(KillAttribution{Actor: "test", Reason: "cleanup"}) })
+	t.Cleanup(func() { _ = r.c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "cleanup"}) })
 }
 
 // TestSpawnDeathDuringBringUpSurfacesExitAndStderr asserts a process that dies
@@ -368,7 +368,7 @@ func TestAdoptKillRefusesTheDaemonsOwnProcessGroup(t *testing.T) {
 	client := adoptReady(t, f, dir, uds)
 
 	// Act.
-	err := client.Kill(KillAttribution{Actor: "test", Reason: "no process"})
+	err := client.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "no process"})
 
 	// Assert.
 	if err == nil {
@@ -574,7 +574,7 @@ func TestStandDownEverySpawnForgetsAShimThatAlreadyExited(t *testing.T) {
 	sup := newSupervisor(t, WithKillGrace(50*time.Millisecond))
 	c := spawnReadyOn(t, sup, f, spec)
 	record := sink.record(t)
-	if err := c.Kill(KillAttribution{Actor: "test", Reason: "already stopped", Force: true}); err != nil {
+	if err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "already stopped", Force: true}); err != nil {
 		t.Fatalf("Kill() error = %v", err)
 	}
 	waitForExit(t, record.PID)

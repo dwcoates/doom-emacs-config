@@ -237,7 +237,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	go c.reap()
 
 	if err := c.bringUp(ctx); err != nil {
-		c.abandonBringUp(err)
+		c.abandonBringUp(ctx, err)
 		return nil, err
 	}
 	return c, nil
@@ -305,7 +305,7 @@ func (s *supervisor) workspaceProbe(workspaceDir string) func(ids.WorkspaceID) (
 
 // abandonBringUp stops a spawned process whose bring-up failed, so a failed
 // spawn never leaves an orphan holding the workspace lock.
-func (c *client) abandonBringUp(cause error) {
+func (c *client) abandonBringUp(ctx context.Context, cause error) {
 	// THE ABANDONMENT IS RECORDED ON BOTH PATHS. A bring-up that failed
 	// because the process had already died leaves nothing to stop, but it is
 	// the same failure and the workspace's own log is where it belongs: the
@@ -321,7 +321,14 @@ func (c *client) abandonBringUp(cause error) {
 	c.log.Warn("daemon.shimclient.spawn", "bring-up failed; stopping the spawned shim", dlog.Context{
 		"pid": c.PID(), "error": cause.Error(),
 	})
-	if err := c.Kill(KillAttribution{
+	// THE ABANDONMENT GETS ITS OWN BUDGET, DETACHED FROM THE BRING-UP'S. The
+	// commonest reason a bring-up fails is that ITS context ended, and a kill
+	// handed that same dead context would SIGKILL a shim the grace would have
+	// let leave cleanly. GracefulKillBound is exactly what a graceful stop can
+	// cost, so this is the smallest bound that can still observe one.
+	stop, cancelStop := context.WithTimeout(context.WithoutCancel(ctx), GracefulKillBound)
+	defer cancelStop()
+	if err := c.Kill(stop, KillAttribution{
 		Actor:  "shimclient.bringup",
 		Reason: "bring-up failed: " + cause.Error(),
 	}); err != nil {
