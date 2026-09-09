@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -160,13 +161,29 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 		label, func(raw json.RawMessage) bool { return decodeString(raw) == "" })
 	s.awaitInPage(t, "the sidebar's roster rows to draw NO priority badge at all",
 		`document.querySelectorAll('[data-roster-row] [data-priority]').length === 0`)
+	// AND THE BAR'S OWN STRING HAS LOST IT. The set step asserted the label
+	// INTO the drawn tabline, so this is the same read negated -- and it is
+	// the only assertion that can tell a bar which stopped drawing the badge
+	// apart from a bar that was never redrawn at all, which is precisely the
+	// pair of possibilities the two pictures could not distinguish when they
+	// came back byte for byte identical.
+	if drawn := tablineDrawn(t, s); strings.Contains(drawn, setLabel) {
+		t.Fatalf("the drawn tabline is %q and still carries %q after the clear: "+
+			"`agent-repl-roster-row-priority-label` reports nothing for %q, so the bar's own string "+
+			"must have lost the label too", drawn, setLabel, thirdName)
+	}
 	p.capture("priority-cleared", "`agent-repl-set-priority` answered with the clear entry",
-		fmt.Sprintf("`agent-repl-roster-row-priority-label` reports nothing for %q: clearing is the "+
-			"ABSENCE of the field and the daemon pushed that absence back", thirdName),
+		fmt.Sprintf("`agent-repl-roster-row-priority-label` reports nothing for %q -- clearing is the "+
+			"ABSENCE of the field and the daemon pushed that absence back -- and the line "+
+			"`agent-repl-workspace-tabline-formatted` now writes has LOST %q: %q",
+			thirdName, setLabel, tablineDrawn(t, s)),
 		fmt.Sprintf("The same THREE tabs in the same order and the same three sidebar rows, and NO "+
-			"priority badge anywhere — %q's row has lost the one it carried in `priority-set`. Clearing "+
-			"is the absence of the field, so the bar and the sidebar look exactly as they did before the "+
-			"priority was ever set.", thirdName))
+			"priority badge anywhere — %q's tab has lost the %q badge it carried before its name in "+
+			"`priority-set`, and %q's sidebar row has lost its badge too. Clearing is the absence of the "+
+			"field, so the bar and the sidebar look exactly as they did before the priority was ever set. "+
+			"THIS PICTURE MUST DIFFER FROM `priority-set`: two identical frames here would mean the "+
+			"screen was never redrawn rather than that the badge went away.",
+			thirdName, setLabel, thirdName))
 
 	// The push acts on the CURRENT workspace, so the subject is selected
 	// first -- and that switch is asserted, or the shuffle below would move
@@ -177,6 +194,13 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 		func(raw json.RawMessage) bool { return decodeString(raw) == firstName })
 	enterWorkspace(t, s, firstName)
 
+	// THE PLAN'S "DEPRIO CLOSE" IS THIS VERB. `SPC o C` resolves to
+	// `agent-repl`, whose own docstring is "Hide Agent REPL panels and deprio
+	// the workspace": the close branch hides both panels and pushes the tab to
+	// the back. It is neither `agent-repl-close-workspace` (`SPC j d`, the
+	// roster-side view close, which touches no order) nor `agent-repl-simple`
+	// (`SPC o c`, the plain hide, which does not deprio) -- and A.8's line
+	// names the one that reorders, so this is it.
 	if want, got := "agent-repl", e.LeaderBinding("o C"); got != want {
 		t.Fatalf("SPC o C resolves to %q, want %q: the deprioritizing close is `agent-repl`", got, want)
 	}
@@ -199,19 +223,41 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 	e.AwaitEval("focus to move off the workspace that was pushed to the back",
 		`(format "%s" (agent-repl--ws-current-name))`,
 		func(raw json.RawMessage) bool { return decodeString(raw) != firstName })
+	// AND THE PANELS ARE GONE, which is the OTHER half of the verb and the
+	// half the picture is mostly made of. `agent-repl`'s own docstring says it
+	// "Always hides, regardless of whether the agent is running or panels are
+	// currently visible", so a frame still showing this workspace's webview
+	// and composer after the gesture is the verb not having done what it says.
+	awaitPanelHidden(t, s, firstName)
 	// AND THE ORDER IS RE-READ AT CAPTURE TIME, for the same reason
 	// `captureArm` re-reads an arm there: the shuffle is a transient by the
 	// product's own design, so a sentence written from the atomic read alone
 	// would send a reviewer looking for an order the module had already,
 	// correctly, stopped holding.
-	atCapture := s.tabNames()
+	// AND THE ORDER THE BAR'S OWN STRING SPELLS IS READ WITH IT, in one form,
+	// so the enumeration a reviewer is given and the line the bar is painted
+	// from cannot be two sides of a roster push. The enumeration is what the
+	// manifest sentence names; the rendered line is what says the paint had
+	// the same answer, and a picture that then disagrees with BOTH is the
+	// display failing to take a string that was already right.
+	drawnLine, atCapture := tablineAndNames(t, s)
 	focus := e.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	if err := assertDrawnTablineOrder(drawnLine, atCapture); err != nil {
+		t.Fatalf("the tab bar's own rendered line disagrees with `agent-repl--ws-tabline-names`: %v. "+
+			"`agent-repl-workspace-tabline-formatted` renders from that same enumeration, in the same "+
+			"form that read it, so a line that spells another order is a defect in `status.el` rather "+
+			"than in the display", err)
+	}
 	p.capture("deprio-shuffled-to-the-end", "`SPC o C` (`agent-repl`) pressed on the front workspace",
 		fmt.Sprintf("`agent-repl--ws-tabline-names`, read in the SAME form that ran the command, is %v: "+
 			"%q moved from the FRONT to the LAST slot and no tab was lost. Read again at capture time it "+
-			"is %v, and the selected workspace is %q.", shuffled, firstName, atCapture, focus),
+			"is %v, and the selected workspace is %q. No window of the frame is showing %q's webview or "+
+			"its composer any more, and the line `agent-repl-workspace-tabline-formatted` writes spells "+
+			"that same order: %q.", shuffled, firstName, atCapture, focus, firstName, drawnLine),
 		fmt.Sprintf("The tab bar still carries all THREE tabs, and the highlight is on %q rather than on "+
-			"%q: the deprio gesture moved the user on, which is the half of it that lasts. "+
+			"%q: the deprio gesture moved the user on, which is the half of it that lasts. THE PANELS ARE "+
+			"GONE — %q's webview and composer are off the frame, because `agent-repl` always hides — so "+
+			"what fills the main area is whatever the workspace behind them was showing, NOT a webapp. "+
 			"THE ORDER DRAWN HERE IS %v, and that is what the reviewer should see — NOT the shuffled %v. "+
 			"OBSERVED AND FILED, NOT ASSERTED: `agent-repl-workspace-push-to-back` moves the tab to the "+
 			"last slot, and the next accepted roster push then RE-DERIVES the order from the daemon's "+
@@ -220,7 +266,28 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 			"be taken of it, and `SPC o C`'s reordering has no lasting visible effect at all. Whether "+
 			"that gesture should still reorder anything is a contract question about who owns tab order, "+
 			"so it is filed rather than changed here.",
-			focus, firstName, atCapture, shuffled))
+			focus, firstName, firstName, atCapture, shuffled))
+}
+
+// assertDrawnTablineOrder answers an error unless the tab bar's RENDERED line
+// spells NAMES in that order.
+//
+// The check is on relative order rather than on an exact rendering, and
+// deliberately so: the line carries bracket numbers, padding, a badge run and
+// the zero-width cache-buster `status.el` appends, none of which this owner's
+// steps are about. What IS this owner's business is that the line the bar is
+// painted from enumerates the workspaces in the order the roster does.
+func assertDrawnTablineOrder(line string, names []string) error {
+	at := 0
+	for _, name := range names {
+		i := strings.Index(line[at:], name)
+		if i < 0 {
+			return fmt.Errorf("the rendered line %q does not carry %q after position %d, "+
+				"so it does not spell the order %v", line, name, at, names)
+		}
+		at += i + len(name)
+	}
+	return nil
 }
 
 // priorityLabelForm reads WS's priority badge label off its roster row, as a
@@ -268,6 +335,7 @@ func TestPlaytestCopyNameAndReference(t *testing.T) {
 	repository := s.repoAt(t, "repo")
 	name := s.register(t, repository.Dir)
 	s.openPanel(t)
+	awaitPanelShown(t, s, name)
 
 	// The file is minted and visited BEFORE the baseline picture, so the two
 	// captures differ in nothing but the two copy verbs between them: a
