@@ -198,6 +198,25 @@ describe("the model selector", () => {
     expect(harness.text(".topbar-model")).toContain("Opus");
   });
 
+  it("names the model in force by the served AgentModel, not by the label drawn", async () => {
+    // Arrange / Act: the pushed selection is `sonnet` while the chip's text is
+    // the catalog's first display name, so only the echo token identifies it.
+    await withTopbar({ selected: "sonnet" });
+    // Assert
+    expect(harness.$(".topbar-model")?.getAttribute("data-model")).toBe("sonnet");
+  });
+
+  it("marks the offered row that the served selection names", async () => {
+    // Arrange
+    await withTopbar({ selected: "sonnet" });
+    // Act
+    await harness.click(".topbar-model");
+    // Assert
+    expect(
+      harness.$$("[data-model-option][data-selected]").map((el) => el.dataset.modelOption),
+    ).toEqual(["sonnet"]);
+  });
+
   it("lists exactly the options the view carries", async () => {
     // Arrange
     await withTopbar({});
@@ -898,6 +917,13 @@ describe("the model selector with nothing selected", () => {
     await withTopbar({ unselected: true });
     // Assert
     expect(harness.$(".topbar-model-button")?.hasAttribute("data-unselected")).toBe(true);
+  });
+
+  it("names no model at all", async () => {
+    // Arrange / Act
+    await withTopbar({ unselected: true });
+    // Assert: absent, not empty — an empty name would read as a nameless model.
+    expect(harness.$(".topbar-model")?.hasAttribute("data-model")).toBe(false);
   });
 
   it("still lists every option the view carries", async () => {
