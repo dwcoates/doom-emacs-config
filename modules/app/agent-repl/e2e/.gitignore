@@ -1,0 +1,3 @@
+# The playtest writes PNGs and manifests here for a human to read. They are
+# evidence of one run, never a tracked artifact: the next run deletes them.
+.playtest-out/
