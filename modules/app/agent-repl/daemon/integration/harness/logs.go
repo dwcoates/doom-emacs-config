@@ -28,6 +28,18 @@ type LogRecord struct {
 	Operation string         `json:"operation"`
 	Message   string         `json:"message"`
 	Context   map[string]any `json:"context"`
+
+	// THE PROMOTED IDENTITY FIELDS (internal/dlog/record.go's reservedKeys).
+	// The contract requires every identifier to live in its OWN top-level
+	// field and never only inside context, so a test that joins two runtimes'
+	// records on one session reads them here rather than out of Context,
+	// where dlog deliberately does not leave them.
+	WorkspaceDir       string `json:"workspace_dir"`
+	WorkspaceID        string `json:"workspace_id"`
+	AgentReplSessionID string `json:"agent_repl_session_id"`
+	ClaudeSessionID    string `json:"claude_session_id"`
+	RequestID          string `json:"request_id"`
+
 	// Raw is the line as written, for the assertions that care about shape.
 	Raw string `json:"-"`
 }
