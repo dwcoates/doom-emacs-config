@@ -13,8 +13,17 @@ import (
 // OWNER 4 of PLAYTEST-PLAN.md's partition: B11-B13 -- the tab's arm through
 // one turn, attention on a permission ask, and attention on a question.
 //
-// B.11 and B.12's first half are here. B.13 is unwritten, and B.12's second
-// half is blocked (see PLAYTEST-SPEC.md, "What is blocked").
+// All three are here. B.12 and B.13 answer their asks from the webapp's own
+// card in the real webview, which became possible once the root feed's live
+// tail was served (PLAYTEST-SPEC.md, "What this has already found", 2).
+//
+// WHAT "CLEARS" MEANS, read off the contract rather than the plan's
+// shorthand. `RosterRow.attention` (frontend/v1/sidebar.proto) is set when a
+// notification fires and CLEARED WHEN SelectWorkspace NAMES THE WORKSPACE --
+// never by the answer itself. A user who answers an ask has, by then,
+// selected the workspace to look at its card, so the marker leaves on the
+// selection and the ask closes on the answer; both playbooks photograph both
+// edges apart, so a reviewer is told which of the two each picture shows.
 
 // playtestUnwiredArm is the arm a workspace carries before anything has been
 // wired to it, and playtestVendorBlockedArm is the arm a vendor failure
@@ -39,14 +48,6 @@ const (
 // `!` prefix, so it falls through to the fake's default prose scenario and
 // concludes ordinarily once the gate opens.
 const playtestGatedPrompt = "hold this turn open for the playtest"
-
-// TestPlaytestTabArmIdleThinkingDone is plan B.11: the tab's arm through one
-// ordinary turn, photographed at each of the three states the owner named.
-//
-// The turn is GATED rather than raced. Waiting for a running arm and then
-// photographing would be a race against the fake answering, and a picture
-// taken on the wrong side of it is worse than no picture: it looks like a
-// product that never paints a running tab.
 
 // TestPlaytestTabArmIdleThinkingDone is plan B.11: the tab's arm through one
 // ordinary turn, photographed at each of the three states the owner named.
@@ -96,24 +97,37 @@ func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
 		"The turn is over: the webapp's footer is idle again and the feed carries the answer.")
 }
 
-// TestPlaytestTabArmFailed is plan B.14: a turn that fails, and the tab that
-// says so.
-//
-// `!fail-execution` ends the turn on the vendor's own execution error, which
-// is a PURPLE fault by the module's color rule — the vendor's work — and not
-// the blue of a broken local environment. That distinction is the picture's
-// whole subject.
+// ---------------------------------------------------------------------------
+// B.12 and B.13 share one arrangement: an ask raised against a workspace the
+// user is NOT looking at.
+// ---------------------------------------------------------------------------
 
-// TestPlaytestTabArmAttentionOnPermission is plan B.12's first half: a
-// permission ask raised against a workspace the user is NOT looking at, and
-// the attention marker the tab then paints.
+// playtestAsk is one ask-raising world: the workspace the ask is raised
+// against, the workspace the user is looking at instead, and the gate that
+// orders the two.
+type playtestAsk struct {
+	s          *playtestScenario
+	gatePath   string
+	askingDir  string
+	askingName string
+	otherName  string
+}
+
+// rowAttentionForm reads the attention flag off WS's roster row -- the
+// DAEMON's own marker, as pushed, rather than the blink the tab bar times
+// from it. It is the assertion behind both "attention set" and "attention
+// cleared": `agent-repl-status-attention-visible-p` is what the bar DRAWS,
+// and this is what the daemon SAID.
+func rowAttentionForm(ws string) string {
+	return `(and (agent-repl-roster-row-attention-p (agent-repl-roster-row-for-ws ` + elispString(ws) + `)) t)`
+}
+
+// newPlaytestAsk arranges an ask against an unselected workspace and waits
+// for the attention marker it raises.
 //
-// EMACS ANSWERS NOTHING. There is no permission-answering command in
+// EMACS ANSWERS NOTHING OF ITS OWN. There is no ask-answering command in
 // `lisp/`; the notification policy is Emacs's whole reaction to an ask, and
-// the card in the webapp is the answering surface. B.12's second half —
-// the marker CLEARING when the ask is answered from that card — is not here,
-// because answering means clicking a feed row and the root feed's live tail
-// is broken (see PLAYTEST-SPEC.md, "What is blocked").
+// the card in the webapp is the answering surface.
 //
 // Two arrangements are forced, and both are the Emacs layer's own:
 //   - `agent-repl--emacs-focused-p` is overridden, because it is an
@@ -121,15 +135,17 @@ func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
 //     truthfully.
 //   - the workspace under the ask is NOT the selected one, which is the case
 //     `host.el` routes to `agent-repl-status-blink-tab`.
-func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
-	t.Parallel()
+//
+// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send` submits
+// to the CURRENT workspace, so the turn can only be started while this one
+// is selected -- and the ask must ARRIVE while it is not. So the turn is
+// started here, parked on the fake's gate, the second workspace is selected,
+// and only then is the gate opened.
+func newPlaytestAsk(t *testing.T, book, purpose, gateName, askPrompt string) *playtestAsk {
+	t.Helper()
 	box := requireSandbox(t)
-	gatePath := filepath.Join(box.Scratch(), "b12-ask-gate")
-	const askPrompt = "!perm-hold"
-	s := newPlaytestScenario(t, "04-arm-attention-on-permission",
-		"Plan B.12, first half. A permission ask raised against an unselected workspace, and the "+
-			"attention marker its tab paints. Answering the ask — B.12's second half — awaits the "+
-			"root feed's live tail.",
+	gatePath := filepath.Join(box.Scratch(), gateName)
+	s := newPlaytestScenario(t, book, purpose,
 		WithEmacsEnv(turnGatePathEnv, gatePath),
 		WithEmacsEnv(turnGateTextEnv, askPrompt))
 	p, e := s.Book, s.E
@@ -142,15 +158,13 @@ func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
 	first := s.repoAt(t, "repo-asking")
 	askingName := s.register(t, first.Dir)
 	s.openPanel(t)
+	s.awaitArm(t, askingName, "the tab's arm before anything is submitted", playtestUnwiredArm)
+	p.note("the asking repository registered, its panel open, nothing submitted",
+		"the roster's arm for it is "+playtestUnwiredArm+" and the webapp drew its footer against this daemon")
 
-	// THE ORDER PROBLEM, and the gate that solves it. `agent-repl-send`
-	// submits to the CURRENT workspace, so the turn can only be started while
-	// this one is selected -- and the ask must ARRIVE while it is not. So the
-	// turn is started here, parked on the fake's gate, the second workspace is
-	// selected, and only then is the gate opened.
 	s.submit(t, askPrompt)
 	s.awaitArm(t, askingName, "the gated turn to be in flight before the switch", emGHIRunningArms...)
-	p.note("`!perm-hold` submitted and parked on the fake's turn gate",
+	p.note("`"+askPrompt+"` submitted with composer RET and parked on the fake's turn gate",
 		"the arm is one of the module's own running arms, so the turn is genuinely in flight")
 
 	second := s.repoAt(t, "repo-other")
@@ -164,18 +178,153 @@ func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
 	if err := os.WriteFile(gatePath, nil, 0o644); err != nil {
 		t.Fatalf("open the fake's turn gate at %s: %v", gatePath, err)
 	}
-	e.AwaitTrue("the unselected workspace's attention marker to be drawn",
-		`(and (agent-repl-status-attention-visible-p `+elispString(askingName)+`) t)`)
-	p.capture("attention-marker", "the gate opened, so the ask fired against the workspace the user is not looking at",
-		fmt.Sprintf("`agent-repl-status-attention-visible-p` is true for %q", askingName),
-		fmt.Sprintf("The tab bar carries BOTH workspaces. %q is the selected one, and %q — which is NOT "+
-			"selected — carries an ATTENTION MARKER beside its name. The marker blinks on the "+
-			"module's own schedule, so it may be caught mid-blink; what must be visible is that the "+
-			"two tabs are painted differently and the unselected one is the one calling for the user.",
-			otherName, askingName))
+	return &playtestAsk{s: s, gatePath: gatePath, askingDir: first.Dir, askingName: askingName, otherName: otherName}
+}
 
-	// Teardown hygiene, not an assertion: a parked ask must not outlive the
-	// playbook, or the world's own shutdown waits on an answer nobody will
-	// ever give.
-	e.Eval(`(ignore-errors (agent-repl-kill-workspace ` + elispString(askingName) + `) t)`)
+// awaitAttentionRaised waits for the daemon's marker on the asking row AND
+// for the tab bar to have drawn it, in that order: the push is the fact and
+// the drawing is the tab bar following it.
+func (a *playtestAsk) awaitAttentionRaised(t *testing.T) {
+	t.Helper()
+	a.s.E.AwaitTrue("the daemon's roster push to carry the attention marker on the asking workspace",
+		rowAttentionForm(a.askingName))
+	a.s.E.AwaitTrue("the unselected workspace's attention marker to be drawn",
+		`(and (agent-repl-status-attention-visible-p `+elispString(a.askingName)+`) t)`)
+}
+
+// captureAttention photographs the asking tab with its marker up, on the
+// arm the step is about.
+func (a *playtestAsk) captureAttention(t *testing.T, name, act, arm, subject string) {
+	t.Helper()
+	a.s.captureArm(t, name, a.askingName, act, arm,
+		fmt.Sprintf("The tab bar carries BOTH workspaces. %q is the selected one, and %q -- which is NOT "+
+			"selected -- carries an ATTENTION MARKER (the `%s` glyph) beside its name. The marker blinks on the "+
+			"module's own schedule, so it may be caught mid-blink; what must be visible is that the "+
+			"two tabs are painted differently and the unselected one is the one calling for the user. %s",
+			a.otherName, a.askingName, "●", subject))
+}
+
+// selectAsking switches back to the asking workspace, which is the ONE
+// edge the contract clears the marker on: `RosterRow.attention` is cleared
+// when SelectWorkspace names the workspace, re-pushing the roster. The
+// panel is then re-shown so the ask's card is the thing on screen, and the
+// probe is re-pointed at that workspace's webview.
+func (a *playtestAsk) selectAsking(t *testing.T) {
+	t.Helper()
+	s, e, p := a.s, a.s.E, a.s.Book
+	e.Eval(`(agent-repl-switch-to-project ` + elispString(a.askingDir) + `)`)
+	e.AwaitEval("the asking workspace to become the selected one again",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == a.askingName })
+	e.AwaitTrue("the daemon's roster push to have dropped the attention marker now the workspace is selected",
+		`(not `+rowAttentionForm(a.askingName)+`)`)
+	e.AwaitTrue("the tab bar to have undrawn the marker",
+		`(not (agent-repl-status-attention-visible-p `+elispString(a.askingName)+`))`)
+	p.note("`agent-repl-switch-to-project` back to the asking workspace, which is SelectWorkspace",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the roster row no longer carries `attention`, "+
+			"and `agent-repl-status-attention-visible-p` is nil: the marker left on the selection, "+
+			"which is the edge the contract clears it on", a.askingName))
+	s.Name = a.askingName
+	s.openPanel(t)
+}
+
+// TestPlaytestTabArmAttentionOnPermission is plan B.12: a permission ask
+// raised against an unselected workspace, the attention marker its tab
+// paints, and the marker gone once the user comes to answer it.
+//
+// `!perm-allow-once` is the ask that HOLDS: the fake's gate keeps the ask
+// open until the card answers it, and the turn concludes on that answer --
+// so the last picture is of a settled tab and not of a turn parked forever
+// (`!perm-hold` never concludes on its own and can only be interrupted,
+// which would make "done" unphotographable).
+func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
+	t.Parallel()
+	const askPrompt = "!perm-allow-once"
+	a := newPlaytestAsk(t, "04-arm-attention-on-permission",
+		"Plan B.12. A permission ask raised against an unselected workspace, the attention marker "+
+			"its tab paints, the marker leaving when the workspace is selected to answer, and the "+
+			"ask answered from the webapp's own card.",
+		"b12-ask-gate", askPrompt)
+	s, p := a.s, a.s.Book
+
+	// `:permission` BY NAME: the daemon's own arm for "a gated call is
+	// waiting on the user", and the one the tab bar must paint here.
+	s.awaitArm(t, a.askingName, "the asking workspace's arm to reach permission once the ask is open", ":permission")
+	a.awaitAttentionRaised(t)
+	a.captureAttention(t, "attention-on-permission",
+		"the gate opened, so the permission ask fired against the workspace the user is not looking at",
+		":permission",
+		"Its arm is permission, so the bracket is painted GREEN beneath the marker.")
+
+	a.selectAsking(t)
+	s.awaitInPage(t, "the permission card to be open in the asking workspace's webview",
+		`document.querySelector('[data-feed-row] [data-permission="allowOnce"]')`)
+	s.captureArm(t, "selected-marker-cleared", a.askingName,
+		"the asking workspace selected, its panel showing the open permission card",
+		":permission",
+		fmt.Sprintf("%q is now the SELECTED tab and carries NO attention marker; its arm is still "+
+			"permission, so the selected tab is painted GREEN. The webapp shows the OPEN permission "+
+			"card for `Bash` with its `allow once` button.", a.askingName))
+
+	s.clickInPage(t, "the permission card's `allow once` button", `[data-feed-row] [data-permission="allowOnce"]`)
+	s.awaitInPage(t, "the card to settle as allowed once",
+		`document.querySelector('[data-permission-verdict="allowedOnce"]')`)
+	done := s.awaitArm(t, a.askingName, "the turn to conclude once the allowed call ran", emGHISettledArms...)
+	s.captureArm(t, "answered-done", a.askingName,
+		"`allow once` clicked on the card, the allowed call run, and the turn concluded",
+		done,
+		"The card carries the `allowed once` verdict and the feed carries the closing answer; the "+
+			"tab carries no marker.")
+	p.note("teardown", "nothing is parked: the ask was answered and the turn concluded, so the world shuts down on its own")
+}
+
+// TestPlaytestTabArmAttentionOnQuestion is plan B.13: `!ask-single` raised
+// against an unselected workspace, the attention marker its tab paints, and
+// the marker gone once the user comes to answer it.
+//
+// A question has NO arm of its own: the daemon's status walk knows
+// permissions (a gated call waiting on the user) but a question is asked
+// through the tool plane and the turn is simply still running, so the arm
+// under an open question is `:thinking`. The tab is therefore RED with the
+// marker on it -- which is the picture, and what tells B.13 apart from B.12.
+func TestPlaytestTabArmAttentionOnQuestion(t *testing.T) {
+	t.Parallel()
+	const askPrompt = "!ask-single"
+	a := newPlaytestAsk(t, "04-arm-attention-on-question",
+		"Plan B.13. A single-select question raised against an unselected workspace, the attention "+
+			"marker its tab paints, the marker leaving when the workspace is selected to answer, and "+
+			"the question answered from the webapp's own card.",
+		"b13-ask-gate", askPrompt)
+	s, p := a.s, a.s.Book
+
+	a.awaitAttentionRaised(t)
+	s.awaitArm(t, a.askingName, "the asking workspace's arm while the question is open", ":thinking")
+	a.captureAttention(t, "attention-on-question",
+		"the gate opened, so the question fired against the workspace the user is not looking at",
+		":thinking",
+		"Its arm is thinking -- a question has no arm of its own -- so the bracket is painted RED beneath the marker.")
+
+	a.selectAsking(t)
+	const option = `[data-feed-row] [data-question-option="New worktree off master"]`
+	s.awaitInPage(t, "the question card to be open in the asking workspace's webview",
+		`document.querySelector('`+option+`') && document.querySelector('[data-feed-row] [data-question-submit]')`)
+	s.captureArm(t, "selected-marker-cleared", a.askingName,
+		"the asking workspace selected, its panel showing the open question card",
+		":thinking",
+		fmt.Sprintf("%q is now the SELECTED tab and carries NO attention marker; its arm is still "+
+			"thinking, so the selected tab is painted RED. The webapp shows the OPEN question card "+
+			"headed `Setup` with four option chips and a submit button.", a.askingName))
+
+	s.clickInPage(t, "the question's first option chip", option)
+	s.awaitInPage(t, "the option to read as checked", `document.querySelector('`+option+`').checked`)
+	s.clickInPage(t, "the question card's submit button", `[data-feed-row] [data-question-submit]`)
+	s.awaitInPage(t, "the question card to settle as answered",
+		`document.querySelector('[data-feed-row] .question[data-state="answered"]')`)
+	done := s.awaitArm(t, a.askingName, "the turn to conclude once the question was answered", emGHISettledArms...)
+	s.captureArm(t, "answered-done", a.askingName,
+		"the first option chosen, the card submitted, and the turn concluded",
+		done,
+		"The card carries the given answer `New worktree off master` and the feed carries the "+
+			"closing answer; the tab carries no marker.")
+	p.note("teardown", "nothing is parked: the question was answered and the turn concluded, so the world shuts down on its own")
 }
