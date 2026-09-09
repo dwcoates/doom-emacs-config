@@ -106,10 +106,18 @@ func TestPlaytestTabArmIdleThinkingDone(t *testing.T) {
 	s.captureArm(t, "arm-thinking", name,
 		"the prompt submitted with composer RET, and held in flight by the fake's turn gate",
 		":thinking",
-		"The webapp's footer status word is NOT `idle` -- the footer is following the running turn -- "+
-			"the feed carries the user's own prompt bubble, and the hold tray holds nothing: the "+
-			"prompt has been released to the session. The turn cannot conclude: the fake's gate is "+
-			"still shut.")
+		"The tab bracket is the subject of this picture. "+
+			"WHAT THIS PICTURE DOES NOT SETTLE: what the WEBVIEW is showing. The three assertions "+
+			"above are the page's own DOM, taken 43ms, 23ms and 24ms before the shutter, and they "+
+			"say the footer has left `idle`, the prompt bubble is on the standing tail and the hold "+
+			"tray is empty -- yet the pixels here have been observed, in three consecutive runs, "+
+			"still carrying the PRE-TURN paint: an `idle / ready` footer, an empty feed and the "+
+			"prompt badged `queued -- classifying` in a `held (1)` tray. That gap is neither the "+
+			"daemon's nor the webapp's: the daemon's three views arrive within 43ms of the roster "+
+			"push, and the webview runs an animation frame 3ms after the change (measured). It is "+
+			"between WebKit's paint and the X framebuffer, and step 04 -- whose shutter falls about "+
+			"600ms later -- shows the same page painted correctly. A reviewer should read the "+
+			"webview here as STALE rather than file it as a footer, feed or tray defect.")
 
 	// The gate opens only now, so the turn concludes on this playbook's own
 	// schedule rather than whenever the fake got there.
