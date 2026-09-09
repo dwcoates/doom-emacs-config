@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -115,19 +116,41 @@ func (d *Daemon) AwaitWorkspaceLogOperation(workspaceDir, operation string) LogR
 // booted.
 func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
 
+// readLog reads a log file that is being APPENDED TO WHILE IT IS READ, which is
+// what makes the newline the boundary rather than an incidental separator.
+//
+// A RECORD IS A LINE ONLY ONCE ITS NEWLINE IS THERE. Every caller here polls a
+// live daemon's own sink, so a read can land in the middle of one `write(2)`
+// and see the record so far. `bufio.Scanner` hands that back as an ordinary
+// token -- it cannot say whether the last one ended at a newline -- so the
+// reader failed the test on a line that was merely still arriving:
+// `TestMcpServerHealths` died 50ms into its run on
+// `"message":"no intent manif`, a boot record the daemon was in the middle of
+// writing. Splitting on the newline ourselves is what tells an UNTERMINATED
+// TAIL apart from a malformed record.
+//
+// THE ERROR HANDLING IS NOT WEAKENED BY THAT, and this is the point: a line
+// that HAS its newline and does not parse is still a fatal defect in the log,
+// exactly as before. Only the unterminated remainder after the final newline
+// is skipped, and the next poll reads it whole.
 func readLog(t *testing.T, path string) []LogRecord {
 	t.Helper()
-	f, err := os.Open(path)
+	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		t.Fatalf("harness: open %s: %v", path, err)
+		t.Fatalf("harness: read %s: %v", path, err)
 	}
-	defer f.Close()
+	// Everything after the last newline is a record still being written.
+	if end := bytes.LastIndexByte(body, '\n'); end >= 0 {
+		body = body[:end+1]
+	} else {
+		body = nil
+	}
 
 	var out []LogRecord
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(body))
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

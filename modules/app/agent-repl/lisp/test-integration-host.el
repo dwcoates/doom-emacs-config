@@ -1088,22 +1088,27 @@ rather than dropped as a missing-successor breach."
                                  (plist-get ref :id)))))
             (agent-repl-connect-close successor-conn)))))))
 
-(ert-deftest agent-repl-itest-host-transferred-without-a-successor-logs-error ()
-  "`transferred' with no successor connection is an ERROR, stream kept.
-There is nowhere to adopt, and dropping the stream would lose the only
-channel carrying this workspace's state."
+(ert-deftest agent-repl-itest-host-transferred-before-the-announcement-waits ()
+  "`transferred' ahead of the announcement is a WAIT, and the stream is kept.
+The daemon announces the stand-down and THEN transfers each free
+workspace, and the two pushes ride different streams — so a transfer this
+Emacs decodes first is a notice that overtook its own announcement, never
+a missing one.  It waits on daemon-link's acceptance seam; dropping the
+stream would lose the only channel carrying this workspace's state, and
+calling it an error dropped the adopt with it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
-      (cl-letf (((symbol-function 'agent-repl-link-successor) (lambda () nil)))
+      (cl-letf (((symbol-function 'agent-repl-link-successor) (lambda () nil))
+                ((symbol-function 'agent-repl-link-successor-pending-p) (lambda () nil)))
         ;; Act.
         (agent-repl-itest--push primary "host" '((transferred . ()))
                                 (plist-get ref :id))
         ;; Assert.
-        (agent-repl-itest--await-log primary "elisp.host.transferred-without-successor"
-                                     "error")
-        (should (agent-repl-itest--logged-p
-                 primary "elisp.host.transferred-without-successor" "error"))
+        (agent-repl-itest--await-log primary "elisp.host.transferred-before-the-announcement"
+                                     "warn")
+        (should-not (agent-repl-itest--logged-p
+                     primary "elisp.host.transferred-without-successor" "error"))
         (should (equal 1 (length (agent-repl-itest--subscribers
                                   primary "host" (plist-get ref :id)))))))))
 

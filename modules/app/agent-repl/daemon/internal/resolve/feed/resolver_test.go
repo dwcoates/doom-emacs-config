@@ -85,6 +85,10 @@ type harness struct {
 	painter  *fakePainter
 	// nowMs is the injected clock, advanced explicitly rather than slept on.
 	nowMs int64
+	// cutSeq mints a distinct store position per context cut for the helper
+	// that does not name one, so two ordinary cuts in one test are two
+	// entries rather than the same entry twice.
+	cutSeq int
 }
 
 // newHarness builds a resolver with deterministic dependencies: a fixed clock,
