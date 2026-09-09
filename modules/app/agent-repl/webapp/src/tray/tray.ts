@@ -56,8 +56,8 @@ export function mountHoldTray(host: HTMLElement, ctx: AppContext): Handle {
   const stream = watchStream(ctx, {
     name: "WatchDaemonHolds",
     schema: WatchDaemonHoldsResponseSchema,
-    open: (client, signal) =>
-      client.watchDaemonHolds({ workspace: ctx.workspace }, { signal }),
+    open: (_client, signal) =>
+      ctx.streams.watch("holds", { workspace: ctx.workspace }, signal),
     onPush: (response) => {
       const tray = requireMessage(response.tray, "WatchDaemonHoldsResponse.tray");
       // The teardowns come down BEFORE the draw, so a card whose subscription

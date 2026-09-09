@@ -20,7 +20,7 @@ import { createTicker } from "../../src/clock.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import type { RowContext } from "../../src/feed/cards/context.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
-import { createAppContext } from "../../src/rpc/context.js";
+import { testAppContext } from "../rpc/app-context.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   drawFeedCommandRefused,
@@ -62,7 +62,7 @@ function rowContext(
       },
     });
   });
-  const ctx = createAppContext({
+  const ctx = testAppContext({
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),
@@ -247,7 +247,7 @@ describe("an answer this build cannot read", () => {
     const transport = createRouterTransport(({ service }) => {
       service(AgentRepl, { requestCommandSupport: () => answer() });
     });
-    const ctx = createAppContext({
+    const ctx = testAppContext({
       client: createAgentReplClient(transport),
       workspace: WORKSPACE,
       ticker: createTicker(60_000),

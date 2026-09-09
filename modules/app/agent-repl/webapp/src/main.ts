@@ -104,6 +104,7 @@ export async function boot(): Promise<void> {
       ticker,
       failures: overlay,
       composerEnabled: address.composer,
+      page: connectionId,
     });
     log("info", "the webapp booted", {
       operation: "main.boot",
