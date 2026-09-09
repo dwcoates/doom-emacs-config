@@ -107,6 +107,26 @@ func tablineDrawn(t *testing.T, s *playtestScenario) string {
 	return s.E.EvalString(`(substring-no-properties (agent-repl-workspace-tabline-formatted))`)
 }
 
+// tablineAndNames reads the RENDERED line and the roster's own enumeration IN
+// ONE FORM, and answers them together.
+//
+// ONE FORM BECAUSE THEY ARE BEING COMPARED. Tab order is a transient by the
+// product's own design -- `agent-repl-roster-move-tab-to-back`'s docstring
+// says the next accepted roster push re-derives it from the daemon's walk --
+// so two evals could straddle a push and report an enumeration from before it
+// beside a line rendered after it. That disagreement would be the harness's
+// own race dressed up as a defect in the renderer, which is exactly the
+// reading a manifest must never invite.
+func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []string) {
+	t.Helper()
+	both := s.E.EvalStrings(`(cons (substring-no-properties (agent-repl-workspace-tabline-formatted))
+                                   (agent-repl--ws-tabline-names))`)
+	if len(both) < 1 {
+		t.Fatalf("reading the tabline and its names answered %v, want the rendered line and the names", both)
+	}
+	return both[0], both[1:]
+}
+
 // awaitSidebarNamesCurrent asserts that the page in the webview now on the
 // glass says, IN ITS OWN WORDS, which workspace is selected: the sidebar's
 // roster row carrying `[data-current="true"]` names WS.
@@ -462,9 +482,15 @@ func TestPlaytestCloseWithAHeldPromptKeepsTheTab(t *testing.T) {
 	// again -- `.hold-tray-empty[data-empty]` is how `webapp/src/tray/tray.ts`
 	// spells "nothing held" -- and the prompt has been drawn as a feed row of
 	// the session's own turn.
-	s.awaitInPage(t, "the daemon's hold tray to be empty again, so the prompt is no longer queued behind a booting session",
+	// The bound is `emacsTurnBound`, not the page's redraw bound: what is
+	// being waited for is a fake-SDK turn reaching a state, which is the shape
+	// of work that constant is sized for -- the daemon and shim plumbing plus
+	// the session's own start, with no model call in it.
+	s.awaitInPageFor(t, emacsTurnBound,
+		"the daemon's hold tray to be empty again, so the prompt is no longer queued behind a booting session",
 		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
-	s.awaitInPage(t, "the submitted prompt to be drawn as a row of the session's own turn",
+	s.awaitInPageFor(t, emacsTurnBound,
+		"the submitted prompt to be drawn as a row of the session's own turn",
 		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"]') !== null`)
 	arm := s.awaitArm(t, name, "the held turn to be in flight before anything is queued", emGHIRunningArms...)
 	p.note("`!hold` submitted, parking a turn that will not conclude",
