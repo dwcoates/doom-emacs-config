@@ -23,10 +23,55 @@ import (
 	"claude-repld/internal/ids"
 )
 
-// defaultKillGrace is how long a SIGTERMed shim has to exit before the
+// HealthyStandDownExit is the MEASURED time a healthy shim takes to leave on
+// SIGTERM. Every bound below is derived from it rather than rounded to a
+// pleasing number.
+//
+// MEASURED on this host by signalling a bound, serving shim's process group
+// and waiting for the child's exit: the real Node shim (`dist/main.js`,
+// `--fake`) 2.97ms min / 4.24ms p50 / 5.03ms p90 / 6.69ms max over 20 spawns,
+// and the integration suite's fake shim 0.45ms min / 0.61ms p50 / 0.68ms p90 /
+// 0.71ms max over 30. The Node shim's SIGTERM handler runs the SAME teardown
+// its `KillSession` rpc runs, so this is the whole graceful stop, not a
+// prefix of one.
+const HealthyStandDownExit = 7 * time.Millisecond
+
+// DefaultKillGrace is how long a SIGTERMed shim has to exit before the
 // SIGKILL. Bounded, because a wedged shim must not wedge the daemon's
 // shutdown.
-const defaultKillGrace = 5 * time.Second
+//
+// IT IS THE SHIM'S OWN SINGLE-STAGE LAST RESORT PLUS A MARGIN, not a round
+// number and not a guess. The shim's SIGTERM stand-down runs the teardown
+// whose per-stage bound is `WATCHER_CONCLUSION_BUDGET_MS` (1s,
+// agent-shim/claude/shim/src/engine/session.ts), so a grace at or below 1s
+// would SIGKILL a shim that was still legitimately concluding one tail; 250ms
+// on top of that is the margin. Against the measurement above, 1250ms is ~187x
+// the Node shim's observed maximum and ~1760x the fake shim's, so nothing
+// healthy is anywhere near it.
+//
+// IT DOES NOT COVER FOUR STAGES BACK TO BACK, and that is deliberate rather
+// than an oversight. Every graceful path in this daemon sends SIGTERM only
+// AFTER the `KillSession` rpc has already run that teardown -- the drain's
+// sweep, the relaunch engine's stand-down, and `Fleet.KillSession` itself all
+// ask before they signal -- so the SIGTERM handler is re-entering a teardown
+// that has already concluded. The one path that signals without asking first
+// (`abandonBringUp`) has no session to tear down at all.
+const DefaultKillGrace = 1250 * time.Millisecond
+
+// EscalationBound is the room a caller must leave AFTER the grace for the
+// SIGKILL to be delivered and its exit decode to land. SIGKILL is not
+// negotiable and the reap that follows it is the kernel handing over a wait
+// status already waiting to be read: measured sub-millisecond on every kill in
+// this package's suite, so 250ms is two orders of magnitude of headroom.
+const EscalationBound = 250 * time.Millisecond
+
+// GracefulKillBound is the whole of a graceful Kill's worst case: the SIGTERM
+// grace, then the SIGKILL and the reap after it. A caller whose own bound is
+// smaller than this CANNOT observe the escalation -- it gives up at the exact
+// moment the shim would have been SIGKILLed and reports a shim this daemon is
+// still stopping as leaked. `drain.DefaultStandBound` is derived from it for
+// that reason.
+const GracefulKillBound = DefaultKillGrace + EscalationBound
 
 // client is one shim connection AND, when it spawned the process, its
 // supervisor. Adopted clients have no cmd: they supervise the LINK only, and
@@ -102,7 +147,7 @@ func newClient(log dlog.Logger, ws ids.WorkspaceID, udsPath string, back backoff
 		udsPath:       udsPath,
 		rpc:           shimv1connect.NewShimClient(newUDSClient(udsPath), udsBaseURL),
 		back:          back,
-		grace:         defaultKillGrace,
+		grace:         DefaultKillGrace,
 		lockProbe:     probe,
 		link:          newLinkFeed(),
 		exit:          make(chan ExitInfo, 1),
@@ -179,7 +224,26 @@ func (c *client) Occupy(holder string) (func(), error) {
 // AN ADOPTED SHIM IS STOPPED TOO, down its own path — see killAdopted. It used
 // to be refused with ErrNoProcess, which made a successor daemon unable to
 // stand down the very shims a handover had just given it.
-func (c *client) Kill(attr KillAttribution) error {
+//
+// CTX BOUNDS THE WAITS, AND ONLY THE WAITS. This call took no context at all
+// and blocked unconditionally on the reap, which made every bound its callers
+// held a fiction: `drain`'s stand-down handed it a 5s context and then sat
+// through the 5s grace plus the escalation plus the reap regardless. There are
+// exactly two waits here and ctx now selects against both.
+//
+// A CONTEXT THAT EXPIRES MID-GRACE ESCALATES; IT DOES NOT ABANDON. The caller
+// saying "your time is up" cannot mean "leave a SIGTERMed shim running", so the
+// expiry converts the graceful stop into a forced one: the SIGKILL goes out
+// before this returns, and the error names both the escalation and the cause.
+//
+// THE REAP ITSELF IS NOT CANCELLABLE, and that is a different thing from the
+// WAIT for it. `cmd.Wait` runs on the client's own reaper goroutine, started at
+// the spawn and owned by nothing a caller holds; ctx ends this function's wait
+// for that goroutine's result, never the goroutine. So a caller whose bound
+// expires after the SIGKILL gets its answer immediately AND the wait status is
+// still collected, which is the only reason the daemon does not accumulate a
+// zombie per abandoned kill.
+func (c *client) Kill(ctx context.Context, attr KillAttribution) error {
 	c.mu.Lock()
 	switch {
 	case c.detached:
@@ -197,7 +261,7 @@ func (c *client) Kill(attr KillAttribution) error {
 		c.attribution = &attr
 		grace := c.grace
 		c.mu.Unlock()
-		return c.killAdopted(attr, grace)
+		return c.killAdopted(ctx, attr, grace)
 	case c.pgid == 0:
 		c.mu.Unlock()
 		return ErrNoProcess
@@ -212,6 +276,7 @@ func (c *client) Kill(attr KillAttribution) error {
 		"actor": attr.Actor, "reason": attr.Reason, "force": attr.Force,
 	})
 
+	var expired error
 	if !attr.Force {
 		gone, err := c.signalGroup(syscall.SIGTERM, pgid)
 		if err != nil {
@@ -229,8 +294,7 @@ func (c *client) Kill(attr KillAttribution) error {
 			// this daemon never registered is being stood down" against it.
 			// The wait is the same one the ordinary path takes below, and it
 			// is already over whenever the reaper got there first.
-			<-c.dead
-			return nil
+			return c.awaitReap(ctx, pgid, "the process group was already gone")
 		}
 		timer := time.NewTimer(grace)
 		defer timer.Stop()
@@ -240,6 +304,17 @@ func (c *client) Kill(attr KillAttribution) error {
 		case <-timer.C:
 			c.log.Warn("daemon.shimclient.kill", "graceful stop timed out; escalating", dlog.Context{
 				"workspace_id": string(c.ws), "pgid": pgid, "grace_ms": grace.Milliseconds(),
+			})
+		case <-ctx.Done():
+			// THE CALLER'S BOUND EXPIRED INSIDE THE GRACE. Escalating anyway is
+			// the only answer that leaves no shim behind: a return here would
+			// hand back a process that has been asked to leave and given
+			// nothing that makes it. The error below says so; the SIGKILL goes
+			// out first.
+			expired = ctx.Err()
+			c.log.Warn("daemon.shimclient.kill", "the caller's bound expired inside the grace; escalating", dlog.Context{
+				"workspace_id": string(c.ws), "pgid": pgid, "grace_ms": grace.Milliseconds(),
+				"error": expired.Error(),
 			})
 		}
 	}
@@ -254,8 +329,35 @@ func (c *client) Kill(attr KillAttribution) error {
 		})
 		return fmt.Errorf("shimclient: SIGKILL %d: %w", pgid, err)
 	}
-	<-c.dead
-	return nil
+	if expired != nil {
+		// THE SIGKILL HAS LEFT, SO THE PROCESS IS GOING; the reaper will
+		// collect its wait status whether or not anyone is still waiting here.
+		// The caller asked for its answer by now and gets it, named as the
+		// escalation it was rather than as a plain deadline.
+		return fmt.Errorf("shimclient: pgid %d was SIGKILLed because the kill's context ended inside the %s grace; the reap continues: %w",
+			pgid, grace, expired)
+	}
+	return c.awaitReap(ctx, pgid, "the process group was SIGKILLed")
+}
+
+// awaitReap waits for the reaper's exit decode, on the caller's bound.
+//
+// THE WAIT IS CANCELLABLE AND THE REAP IS NOT. `cmd.Wait` is already running on
+// the client's own goroutine; ending this wait ends only the caller's interest
+// in its result, so no abandoned kill can leave a zombie behind. The overrun is
+// REPORTED rather than swallowed: a caller that never learns the exit landed is
+// a caller that must treat the workspace as still occupied.
+func (c *client) awaitReap(ctx context.Context, pgid int, why string) error {
+	select {
+	case <-c.dead:
+		return nil
+	case <-ctx.Done():
+		c.log.Warn("daemon.shimclient.kill", "the caller's bound expired before the exit decode landed; the reap continues", dlog.Context{
+			"workspace_id": string(c.ws), "pgid": pgid, "why": why, "error": ctx.Err().Error(),
+		})
+		return fmt.Errorf("shimclient: %s for pgid %d but its exit decode did not land inside the caller's bound; the reap continues: %w",
+			why, pgid, ctx.Err())
+	}
 }
 
 // adoptedGonePoll is how often an adopted process is re-checked for having
@@ -292,7 +394,7 @@ const adoptedGonePoll = 25 * time.Millisecond
 // same pid — the spawn contract sets Setpgid, so a shim always leads its own
 // group — and a peer that does not is REFUSED rather than signalled, because
 // signalling a group we cannot account for could reach the daemon's own.
-func (c *client) killAdopted(attr KillAttribution, grace time.Duration) error {
+func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace time.Duration) error {
 	pid, err := socketPeerPID(c.udsPath)
 	if err != nil {
 		if isSocketGone(err) {
@@ -354,7 +456,7 @@ func (c *client) killAdopted(attr KillAttribution, grace time.Duration) error {
 	if err := c.signalAdoptedGroup(signal, pgid); err != nil {
 		return err
 	}
-	if c.awaitAdoptedGone(pgid, grace) {
+	if c.awaitAdoptedGone(ctx, pgid, grace) {
 		c.publishAdoptedKill(pid, signal)
 		return nil
 	}
@@ -371,7 +473,12 @@ func (c *client) killAdopted(attr KillAttribution, grace time.Duration) error {
 	if err := c.signalAdoptedGroup(syscall.SIGKILL, pgid); err != nil {
 		return err
 	}
-	if !c.awaitAdoptedGone(pgid, grace) {
+	// THE SIGKILL IS SENT WHATEVER THE CALLER'S BOUND SAYS, exactly as on the
+	// supervised path: a caller running out of time cannot mean a SIGTERMed
+	// shim is left standing. Only the wait that FOLLOWS it is the caller's to
+	// bound, and an adopted process has no reap of ours to leak — the kernel
+	// gave its wait status to init the moment we were not its parent.
+	if !c.awaitAdoptedGone(ctx, pgid, grace) {
 		return fmt.Errorf("shimclient: adopted shim %d for %q did not go down within %s of SIGKILL", pid, c.ws, grace)
 	}
 	c.publishAdoptedKill(pid, syscall.SIGKILL)
@@ -395,9 +502,15 @@ func (c *client) signalAdoptedGroup(sig syscall.Signal, pgid int) error {
 }
 
 // awaitAdoptedGone polls until the process group holds nothing, or the bound
-// expires. It reports whether the group is gone.
-func (c *client) awaitAdoptedGone(pgid int, bound time.Duration) bool {
+// expires, or the caller's context ends. It reports whether the group is gone.
+//
+// THE CALLER'S CONTEXT ENDS THE POLL, not the kill: whoever called has already
+// sent the signal by the time this runs, so giving up here abandons an
+// OBSERVATION and never a process.
+func (c *client) awaitAdoptedGone(ctx context.Context, pgid int, bound time.Duration) bool {
 	deadline := time.Now().Add(bound)
+	poll := time.NewTicker(adoptedGonePoll)
+	defer poll.Stop()
 	for {
 		if err := syscall.Kill(-pgid, 0); errors.Is(err, syscall.ESRCH) {
 			return true
@@ -405,7 +518,11 @@ func (c *client) awaitAdoptedGone(pgid int, bound time.Duration) bool {
 		if !time.Now().Before(deadline) {
 			return false
 		}
-		time.Sleep(adoptedGonePoll)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			return false
+		}
 	}
 }
 
@@ -595,20 +712,22 @@ func (c *client) releaseHold() {
 
 // killWithin forces the process down and waits for the reaper, on a bound.
 //
-// Kill's own last step is an UNBOUNDED wait on the reap, which is correct for
-// its callers -- the process has been SIGKILLed and the kernel does not
-// negotiate -- but the immediate shutdown cannot stake the whole exit on that:
-// a child stopped in the kernel (a ptrace stop, an uninterruptible D state)
-// does not reap, and an exit that waited on one is a daemon that never leaves.
-// So the kill runs on its own goroutine and this waits on bound, whose value
-// the caller states; the goroutine's channel is buffered, so a kill that lands
-// after the bound has passed still completes and never leaks a blocked writer.
+// THE BOUND IS STATED TWICE, and both statements are needed. It is handed to
+// Kill, which selects its waits against it; and this ALSO waits on it from the
+// outside, because Kill's non-waiting steps are not all cancellable -- a
+// `socketPeerPID` dial or a signal syscall does not consult a context -- and a
+// child stopped in the kernel (a ptrace stop, an uninterruptible D state) must
+// not turn an immediate shutdown into a daemon that never leaves. So the kill
+// runs on its own goroutine and this waits on bound, whose value the caller
+// states; the goroutine's channel is buffered, so a kill that lands after the
+// bound has passed still completes and never leaks a blocked writer.
 func (c *client) killWithin(ctx context.Context, bound time.Duration, attr KillAttribution) error {
-	done := make(chan error, 1)
-	go func() { done <- c.Kill(attr) }()
-
 	within, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- c.Kill(within, attr) }()
+
 	select {
 	case err := <-done:
 		return err

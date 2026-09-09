@@ -48,7 +48,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   | bound | value | where | reason |
   | --- | --- | --- | --- |
   | `harness.DefaultTimeout` | 5s | ONE wait's failure bound: every `Daemon.waitCtx` child, `harness.AwaitView`, and the per-call contexts the e2e suite derives for a single rpc | ~3x run 8's observed 1.7s max. RE-MEASURED at `-parallel 8`: the suite's slowest test is 2.84s and its p99 leaf is under 1s, so 5s is still ~1.8x the observed max under the concurrency the suite now runs at |
-  | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 30s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits plus one `drain.DefaultStandBound` stand-down; it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
+  | the `harness.Daemon` context (`DefaultTimeout * runBudgetWaits`) | 35s | the WHOLE-RUN budget one daemon process's test shares, and the lifetime of every watch stream held across it | **it used to be `DefaultTimeout` itself**, so a test's whole run was as short as its single longest permitted wait, and the LAST call in a test answered `deadline_exceeded` for budget the earlier ones had spent. That is what made `TestHostRequestedStopLeavesNoProcessBehind` fail ~1 in 20 at ~5.09s on the stop -- a step measured at 9ms p50 and 15ms max across 104 runs. Sized as five `DefaultTimeout` waits (25s) plus one `drain.DefaultStandBound` stand-down (6s) = 31s, rounded up to the next whole multiple (7 x 5s = 35s); it is a MULTIPLE so an `Opts.Timeout` override widens the run in the same proportion it widens the wait |
   | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s wait bound (3x default), 90s run budget | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
   | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event, so unlike every other row here it is paid IN FULL on a green run, at 27 sites. MEASURED BASIS (`AwaitView` arrival times over the whole suite at `-parallel 8`, 472 samples): p50 0.4ms, p90 5.8ms, p95 47ms, p97 99ms, max 294ms. The 294ms is `commandfile_test.go`'s ingress, which the daemon polls every 250ms and which is itself one of the negative-probe sites; the only slower arrivals in the run were the two gated by the footer's own 1.5s dwell. 500ms is ~1.7x that measured maximum, so it is NOT shrinkable on this evidence — shortening it would make the command-file and handover probes report "nothing came" about a push that was still on its way |
   | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
@@ -259,6 +259,45 @@ script in tests. No `git init`, no temp repositories, anywhere in tests. Unlande
 arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
+
+## Production stop bounds NEST; they are never equal
+
+A stop is a SEQUENCE of promises, and each outer one must strictly contain
+every inner one with room left over for what follows it. Two bounds that
+happen to carry the same number are two different promises colliding: the
+outer can never observe what the inner does, so it gives up at the exact
+instant the inner one acted and reports the thing it was still doing as
+leaked. `drain.DefaultStandBound` and `shimclient.defaultKillGrace` were both
+5s, set independently, and that is exactly the defect they produced on the
+GRACEFUL path -- the idle sweep's `KillSession(..., false)`.
+
+The graceful stand-down's nesting, outermost first:
+
+| bound | value | contains | derivation |
+| --- | --- | --- | --- |
+| `drain.DefaultStandBound` | 6s | the whole `KillSession(..., false)`: the shim's own teardown inside the rpc, then the process stop | `shimTeardownWorstCase` (4s) + `shimclient.GracefulKillBound` (1.5s) + `standBoundMargin` (0.5s). A SUM of what it contains, never a round number chosen next to them |
+| `shimclient.GracefulKillBound` | 1.5s | one graceful `Client.Kill`, end to end | `DefaultKillGrace` + `EscalationBound` |
+| `shimclient.DefaultKillGrace` | 1250ms | the shim's SIGTERM stand-down before the SIGKILL | the shim's own single-stage last resort (`WATCHER_CONCLUSION_BUDGET_MS`, 1s) + 250ms. MEASURED: a healthy shim leaves on SIGTERM in 4.24ms p50 / 6.69ms max (real Node shim, 20 spawns) and 0.61ms p50 / 0.71ms max (the integration fake, 30 spawns), so this is ~187x the observed worst case |
+| `shimclient.EscalationBound` | 250ms | the SIGKILL and the exit decode after it | measured sub-millisecond on every kill in the package suite; two orders of magnitude of headroom |
+
+Rules that fall out of it, and that a change to any of these numbers must keep:
+
+- **A wait takes a context, and the context is honoured.** `Client.Kill` took
+  none and blocked unconditionally on the reap, which made every bound its
+  callers held a fiction. Its two waits -- the grace, and the wait for the exit
+  decode -- both select against ctx now.
+- **A caller's bound expiring escalates; it never abandons.** "Your time is up"
+  cannot mean "leave a SIGTERMed shim standing", so a ctx that ends inside the
+  grace sends the SIGKILL before it returns, and its error names the escalation
+  and the cause.
+- **The reap is not cancellable, and that is not the same as its wait.**
+  `cmd.Wait` runs on the client's own reaper goroutine, owned by nothing a
+  caller holds. ctx ends this daemon's WAIT for the wait status, never the
+  collection of it -- which is the only reason an abandoned kill leaves no
+  zombie behind.
+- **`now` FORCES**, so a forced kill skips the grace and pays only
+  `EscalationBound`. That derivation is separate and is not sized by the table
+  above.
 
 ## Coverage deliberately not attainable under the no-git-in-tests directive
 

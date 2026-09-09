@@ -145,8 +145,12 @@ type Client interface {
 	// the session's shim_died fault — reads it here instead of racing that
 	// waiter for the value.
 	Reaped() (ExitInfo, bool)
-	// Kill stops the process, recording who asked and why.
-	Kill(attr KillAttribution) error
+	// Kill stops the process, recording who asked and why. ctx bounds the
+	// call's WAITS -- the SIGTERM grace and the wait for the exit decode --
+	// and never the reap itself, which runs on the client's own goroutine. A
+	// ctx that ends inside the grace ESCALATES to the SIGKILL rather than
+	// leaving a signalled process standing, and says so in its error.
+	Kill(ctx context.Context, attr KillAttribution) error
 	// Detach stops supervising while LEAVING THE PROCESS RUNNING — the
 	// handover's per-workspace transfer.
 	Detach()
@@ -227,7 +231,9 @@ func WithBackoff(initial, max time.Duration, factor float64) Option {
 	return func(s *supervisor) { s.back = backoff{Initial: initial, Max: max, Factor: factor} }
 }
 
-// WithKillGrace replaces how long a SIGTERMed shim has before the SIGKILL.
+// WithKillGrace replaces how long a SIGTERMed shim has before the SIGKILL. A
+// caller that shortens it must shorten its own bound with it: see
+// GracefulKillBound.
 func WithKillGrace(grace time.Duration) Option {
 	return func(s *supervisor) { s.grace = grace }
 }
@@ -247,7 +253,7 @@ func NewSupervisor(log dlog.Surfaces, opts ...Option) (Supervisor, error) {
 	if log == nil {
 		return nil, errors.New("shimclient: log surfaces are required")
 	}
-	s := &supervisor{surfaces: log, back: defaultBackoff, grace: defaultKillGrace}
+	s := &supervisor{surfaces: log, back: defaultBackoff, grace: DefaultKillGrace}
 	for _, opt := range opts {
 		opt(s)
 	}

@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -180,7 +181,7 @@ func TestKillStopsAnAdoptedShim(t *testing.T) {
 	c := adoptedClientFor(p.uds, 2*time.Second)
 
 	// Act.
-	err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
 
 	// Assert.
 	if err != nil {
@@ -203,7 +204,7 @@ func TestKillTakesTheAdoptedShimsWholeProcessGroup(t *testing.T) {
 	c := adoptedClientFor(p.uds, 2*time.Second)
 
 	// Act.
-	if err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"}); err != nil {
+	if err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"}); err != nil {
 		t.Fatalf("Kill() error = %v, want nil", err)
 	}
 
@@ -221,7 +222,7 @@ func TestKillEscalatesAnAdoptedShimThatIgnoresSIGTERM(t *testing.T) {
 	c := adoptedClientFor(p.uds, 250*time.Millisecond)
 
 	// Act.
-	err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
 
 	// Assert.
 	if err != nil {
@@ -241,7 +242,7 @@ func TestKillRecordsTheAdoptedShimsDeath(t *testing.T) {
 	c := adoptedClientFor(p.uds, 2*time.Second)
 
 	// Act.
-	if err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"}); err != nil {
+	if err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"}); err != nil {
 		t.Fatalf("Kill() error = %v, want nil", err)
 	}
 
@@ -262,7 +263,7 @@ func TestKillReadsAnAbsentAdoptedSocketAsAlreadyStopped(t *testing.T) {
 	c := adoptedClientFor(filepath.Join(shortDir(t), "absent.sock"), 2*time.Second)
 
 	// Act.
-	err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
 
 	// Assert.
 	if err != nil {
@@ -282,7 +283,7 @@ func TestKillRefusesAnAdoptedShimThatLeadsNoProcessGroup(t *testing.T) {
 	c := adoptedClientFor(p.uds, 2*time.Second)
 
 	// Act.
-	err := c.Kill(KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
+	err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "the daemon is standing down"})
 
 	// Assert.
 	if err == nil {

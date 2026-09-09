@@ -185,7 +185,7 @@ func (c *controller) standDown(ctx context.Context, old shimclient.Client, ws id
 	c.log.Error(opRelaunch, "the old shim did not exit inside the stand-down window; force-killing it. "+
 		"The stream-only residue of the window is lost",
 		merge(fields, dlog.Context{"stand_down_window": c.deps.StandDownWindow.String()}))
-	if err := old.Kill(shimclient.KillAttribution{
+	if err := old.Kill(ctx, shimclient.KillAttribution{
 		Actor:  "rollout.relaunch",
 		Reason: fmt.Sprintf("the stand-down window expired during a %s relaunch", reason),
 		Force:  true,

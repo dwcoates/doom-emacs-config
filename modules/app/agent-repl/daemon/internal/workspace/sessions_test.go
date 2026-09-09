@@ -66,7 +66,7 @@ func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*
 
 func (c *fakeClient) PID() int { return c.pid }
 
-func (c *fakeClient) Kill(attr shimclient.KillAttribution) error {
+func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
 	if c.killErr != nil {
 		return c.killErr
 	}
@@ -1614,3 +1614,34 @@ func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
 // and still owns. These fakes spawn no process, so there is never one to
 // sweep.
 func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
+
+// TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails covers the other path
+// out of Stop. A kill that reports a failure -- and Client.Kill can now report
+// one, because its caller's context bounds its waits -- has still sent
+// everything it is going to send, and the session left this fleet's map before
+// it ran. Views left showing a live link for a session nothing serves is the
+// worse answer than an error with the views correct.
+func TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.links.links = nil
+	f.client.killErr = errors.New("the exit decode did not land inside the caller's bound")
+
+	// Act
+	err := f.fleet.Stop(context.Background(), ws.ID, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Stop() error = nil, want the kill's failure surfaced")
+	}
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+}
