@@ -30,7 +30,19 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
+
+	daemonserver "claude-repld/internal/server"
 )
+
+// killAnswerWriteBound is how long the KillSession answer has to reach the
+// socket before this fake ends the process anyway.
+//
+// A LAST RESORT, not the mechanism: the barrier ends on the connection going
+// quiet, and the work it covers is one flush of a few dozen bytes onto a unix
+// socket. It is deliberately far under the daemon's own stand-down window, so
+// an overrun still looks to the daemon like a fake that took a moment rather
+// than one that hung.
+const killAnswerWriteBound = 250 * time.Millisecond
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -112,24 +124,36 @@ func run(args []string) error {
 	// answered KillSession and kept running would leave every stand-down
 	// waiting out its window and then force-killing.
 	//
-	// THE EXIT WAITS FOR THE REQUEST'S OWN CONTEXT, NOT FOR THE HANDLER TO
-	// RETURN. A handler returning does not mean its answer has left: over h2c
-	// the response's final frames are written by the connection's own
-	// goroutine after `handlerDone`, and an `os.Exit` on the handler's
-	// goroutine raced them. The daemon then read `unavailable: unexpected EOF`
-	// from a `KillSession` this fake had accepted, recorded "the session kill
-	// did not answer" against an orderly stand-down, and failed the warning
-	// sweep with it -- `TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous`
-	// and `TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall`, in 2 of 2
-	// integration runs. net/http cancels a request's context when its stream
-	// is closed, which is after the last frame of the answer was written, so
-	// that cancellation is the answer having left rather than a guess about it.
+	// THE EXIT WAITS FOR THE ANSWER'S BYTES, NOT FOR THE HANDLER AND NOT FOR
+	// THE REQUEST CONTEXT. A handler returning does not mean its answer has
+	// left: over h2c the response's final frames are written by the
+	// connection's own goroutine after `handlerDone`, and an `os.Exit` on the
+	// handler's goroutine raced them -- the daemon read
+	// `unavailable: unexpected EOF` from a `KillSession` this fake had
+	// accepted, recorded "the session kill did not answer" against an orderly
+	// stand-down, and failed the warning sweep with it.
+	//
+	// Waiting on the request's context was the first repair and it was one
+	// step short: `serverConn.runHandler` cancels that context in a defer that
+	// runs BEFORE the same defer's `rw.handlerDone()` produces those frames at
+	// all, so the exit still landed ahead of the answer in about one
+	// integration run in ten. The wait is now on the SOCKET having written
+	// them -- see the daemon's server.WriteBarrier, which carries the whole account.
+	answers := &daemonserver.WriteBarrier{}
 	mux.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		standingDown := strings.HasSuffix(r.URL.Path, "/KillSession")
+		mark := answers.Mark()
 		handler.ServeHTTP(w, r)
-		if strings.HasSuffix(r.URL.Path, "/KillSession") && proc.srv.killedSession() {
+		if standingDown && proc.srv.killedSession() {
 			answered := r.Context()
 			go func() {
 				<-answered.Done()
+				if !answers.AwaitWrittenSince(mark, killAnswerWriteBound) {
+					proc.log.write("kill-answer-unwritten", map[string]any{
+						"detail":   "the KillSession answer never reached the socket within the bound; the daemon will read a cut connection instead of the stand-down it asked for",
+						"bound_ms": killAnswerWriteBound.Milliseconds(),
+					})
+				}
 				proc.die(0, "")
 			}()
 		}
@@ -146,7 +170,7 @@ func run(args []string) error {
 	}()
 
 	log.write("listening", map[string]any{"uds": argv.Listen, "control": argv.Listen + ".ctl"})
-	if err := httpSrv.Serve(rpcListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := httpSrv.Serve(answers.Listener(rpcListener)); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("fakeshim: serve: %w", err)
 	}
 	return nil
