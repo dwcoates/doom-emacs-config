@@ -100,21 +100,61 @@ function textExtent(
   };
 }
 
+/**
+ * The image an answering `tool_result` carried: the bytes and their media type.
+ *
+ * The shim carries an inlined image by REFERENCE, as the data URL the bytes
+ * already are (convert/blocks.ts imageBlock), so the payload is read back out of
+ * that URL here. A block naming a FETCHABLE url carries no bytes at all and a
+ * payload that does not decode carries none either: both answer `undefined`
+ * rather than half an image, and the caller refuses loudly.
+ */
+function resultImage(
+  content: conversationv1.ToolResultContent | undefined,
+): { data: Uint8Array; mediaType: string } | undefined {
+  for (const block of content?.blocks ?? []) {
+    if (block.block.case !== "image") continue;
+    const image = block.block.value;
+    if (image.mediaType === "" || image.location.case !== "url") continue;
+    const match = /^data:[^,]*;base64,(.*)$/s.exec(image.location.value.url);
+    if (match === null) continue;
+    const data = Buffer.from(match[1], "base64");
+    if (data.length === 0) continue;
+    return { data: new Uint8Array(data), mediaType: image.mediaType };
+  }
+  return undefined;
+}
+
 /** What the command said, in the form it said it. */
 function bashOutput(
   call: PendingCall,
   record: Record<string, unknown>,
+  outcome: ToolOutcome,
 ): conversationv1.AgentBashOutput | undefined {
   if (bool(record, "isImage") === true) {
-    // NO MEDIA TYPE EXISTS ANYWHERE IN `BashOutput`, and `AgentBashOutputImage`
-    // requires one so a consumer need not sniff the bytes. Naming a type the
-    // vendor never stated would be inventing a fact, and an empty one would be
-    // the sentinel this contract forbids — so no terminal is produced.
-    LOGGER.log(
-      { level: "error", tool_use_id: call.toolUseId },
-      "a command produced image output with no stated media type; no terminal frame is produced",
-    );
-    return undefined;
+    // THE PICTURE IS IN THE ANSWERING RESULT, NOT IN `BashOutput`. The vendor's
+    // Output object states only THAT the output was an image; the bytes and
+    // their media type arrive as the `tool_result`'s own image content block,
+    // which is the only place either is stated. `AgentBashOutputImage` requires
+    // the media type so a consumer need not sniff the bytes, and this is where
+    // it comes from.
+    const image = resultImage(outcome.content);
+    if (image === undefined) {
+      // NAMING A TYPE THE VENDOR NEVER STATED WOULD BE INVENTING A FACT, and an
+      // empty one would be the sentinel this contract forbids — so no terminal
+      // is produced, exactly as before this arm could ever be filled.
+      LOGGER.log(
+        { level: "error", tool_use_id: call.toolUseId },
+        "a command produced image output the result carries no loadable bytes for; no terminal frame is produced",
+      );
+      return undefined;
+    }
+    return create(conversationv1.AgentBashOutputSchema, {
+      form: {
+        case: "image",
+        value: create(conversationv1.AgentBashOutputImageSchema, image),
+      },
+    });
   }
   const stdout = strOr(record, "stdout");
   const stderr = strOr(record, "stderr");
@@ -324,7 +364,7 @@ export const bashConverter: ToolConverter = {
       );
       return undefined;
     }
-    const output = bashOutput(call, record);
+    const output = bashOutput(call, record, outcome);
     if (output === undefined) return undefined;
     return {
       case: "bash",
