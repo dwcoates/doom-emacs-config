@@ -140,3 +140,32 @@ K. Multi-workspace concurrency (one Emacs, several workspaces)
 63. merge one workspace while another runs a turn
 
 ~63 playbooks, ~250 captures.
+
+## Partition — twenty owners, one worktree each
+
+| owner | playbooks | subject |
+|---|---|---|
+| 1 | A1–3 | cold start, adopt, build failure |
+| 2 | A4–6 | add project, new + child, fork |
+| 3 | A7–10 | switch, priority, close/reopen/kill, copy |
+| 4 | B11–13 | thinking→done, attention on ask, attention on question |
+| 5 | B14–16 | failed, hibernated, merging/parked |
+| 6 | B17–18 | detached indicator, link severed/recovered |
+| 7 | C19–21 | composer, held prompt, deferred drain |
+| 8 | C22–24 | region prompts, clipboard image, history recall |
+| 9 | D25–28 | markdown, interrupt, query death, rotate |
+| 10 | D29–32 | slash, compaction, model fallback, fast mode |
+| 11 | D33–36 | rate limits, usage outcomes, context tips, mcp |
+| 12 | E37–41 | permissions, questions, mode picker |
+| 13 | F42–43 | shell, detached shell |
+| 14 | F44–45 | files, web |
+| 15 | F46–48 | skills, hooks, automation |
+| 16 | G49–52 | subagents, tasks, send-message |
+| 17 | H | every failure and API arm |
+| 18 | I53–56 | panels, fullscreen, reload/rescue, visit-file routing |
+| 19 | J57–60 | scheduled/now shutdown, restarts, handover |
+| 20 | K61–63 | multi-workspace concurrency |
+
+Each owner: branch `overhaul/int-play-NN`, worktree under integration-agents/play-NN,
+playbook files `e2e/playtest_NN_<subject>_test.go`, artifacts under
+`playtest/NN-<subject>/`. Owners share the substrate and nothing else.
