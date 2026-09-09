@@ -522,7 +522,8 @@ way a refusal does.
 npm run lint          # eslint, type-aware, over src/, test/, scripts/ and the root configs
 npm run typecheck     # tsc over src/, test/, scripts/ and the generated stubs
 npm test              # vitest
-npm run coverage      # vitest with v8 coverage over authored src/**/*.ts
+npm run coverage      # vitest with istanbul coverage over authored src/**/*.ts
+npm run coverage:verify  # prove the per-file numbers are still a measurement
 npm run build         # esbuild -> dist/main.js (the entry the daemon spawns)
 npm run smoke         # spawn and dial dist/main.js for real (needs a build first)
 ```
@@ -540,6 +541,26 @@ npm run smoke         # spawn and dial dist/main.js for real (needs a build firs
   tracked suite across the module.
 - Maintain at least 90% statement coverage. Never reduce the measured baseline,
   and add focused tests for every critical branch and every error path changed.
+  The baseline is **98.61% of statements**; it reads lower than the 99.34% this
+  package used to report because the provider changed, not because the tests
+  did.
+- COVERAGE IS ISTANBUL, and `npm run coverage:verify` is what keeps it honest.
+  `@vitest/coverage-v8@2.1.9` merges each test-file window's raw V8 coverage
+  with `mergeProcessCovs` before remapping it through the source maps, so a
+  module compiled in more than one window loses one window's counts and which
+  window survives depends on which test files shared a process: two runs of this
+  suite differing only in test-FILE order reported different branch counts for
+  `src/convert/hooks.ts`, `src/convert/stream-events.ts`,
+  `src/convert/tools/cron.ts`, `src/convert/tools/unmodeled.ts` and
+  `src/engine/turn.ts`. v8 was also scoring five type-only modules
+  (`src/proto.ts`, `src/proto-conversation.ts`, `src/proto-shim.ts`,
+  `src/proto-store.ts`, `src/fake/scenario.ts`) at 100% of nothing; istanbul
+  drops them, because a file with no executable statement has no coverage.
+  `npm run coverage:verify` runs this package's own coverage command three times
+  — once naturally ordered, twice with the test files shuffled under fixed seeds
+  — and fails if any file's counts move. Run it after any change to the
+  provider, its version, or this config's isolation, which the istanbul provider
+  needs and vitest gives by default.
 - `modules/app/agent-repl/bin/report-logging-density.sh shim` is a rough review
   aid, not semantic coverage: audit critical branches and errors directly even
   when the ratio rises.
