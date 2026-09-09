@@ -196,9 +196,47 @@ func (s *playtestScenario) openPanel(t *testing.T) {
            (and xw (xwidget-webkit-uri xw)))`,
 		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
 	s.E.Eval(playtestProbeSetup)
-	s.awaitInPage(t, "the webapp to draw its footer, which means the daemon's push arrived",
+	s.awaitPageMounted(t)
+}
+
+// awaitPageMounted is the boot assertion every playbook makes before it
+// looks at anything, and it exists because a URI is not a page.
+//
+// `TestEmacsProofOfLife` asserts that the panel's WKWebView was created and
+// NAVIGATED -- it reads the widget's own `xwidget-webkit-uri` -- and that is
+// all it asserts. A page that loads its bundle, throws out of `boot` and
+// renders NOTHING satisfies that completely, which is exactly what happened:
+// the webapp could not boot at all for as long as `mountFailureOverlay` ran
+// before `setLogger`, and every xwidget scenario on that tree was looking at
+// an empty document while reporting on the product.
+//
+// So this asserts the page MOUNTED, in three claims that fail apart:
+//
+//   - the feed controller drew its host. `mountFeed` runs after the login
+//     overlay, the sidebar and the topbar, so `[data-feed="root"]` existing
+//     means the boot got past every mount before it -- one cheap check
+//     standing for the whole sequence.
+//   - the footer carries a status word, which is empty until the daemon's
+//     own push has arrived AND been rendered. That is the page being live
+//     against THIS daemon rather than merely having run its own code.
+//   - the failure overlay is EMPTY. A page that filed `bootFailed` has
+//     already told us why it is blank, and a wait that timed out instead
+//     would bury that answer.
+//
+// The topbar is deliberately NOT in here even though it is a mount too:
+// MEASURED, it draws only once the session has something to say about the
+// account and the model, which is after the first turn on a cold workspace,
+// so requiring it here would fail every playbook that photographs an idle
+// editor.
+func (s *playtestScenario) awaitPageMounted(t *testing.T) {
+	t.Helper()
+	s.awaitInPage(t, "the webapp's feed host to be mounted, which means the boot got past every mount before it",
+		`document.querySelector('[data-feed="root"]') !== null`)
+	s.awaitInPage(t, "the webapp to draw its footer status, which means the daemon's push arrived and was rendered",
 		`document.querySelector(".footer-status") &&
          document.querySelector(".footer-status").textContent.trim() !== ""`)
+	s.awaitInPage(t, "the failure overlay to be carrying nothing",
+		`document.querySelector('[data-component="failure-overlay"]').hasAttribute("data-empty")`)
 }
 
 // submit types a prompt into the composer and PRESSES RET, which is how a
@@ -311,6 +349,40 @@ func (s *playtestScenario) armPaint(t *testing.T, ws string) (arm, color string)
 	return pair[0], pair[1]
 }
 
+// tabFaceFor answers the FACE the module actually put on this workspace's
+// name in the string `tab-bar-format` renders.
+//
+// WHY THIS EXISTS BESIDE `armPaint`. `armPaint` reads the DECISION -- the
+// arm, and the color the module's own table gives it. This reads what the
+// module then WROTE. The two answer different questions, and when a picture
+// disagrees with the manifest they are what says which half is wrong: a face
+// that matches the arm means the paint was produced correctly and the
+// display did not show it, and a face that does not means the string was
+// wrong before any redisplay was involved.
+//
+// It reads `agent-repl-workspace-tabline-formatted`, which is the function
+// installed in `tab-bar-format` and therefore the one that drives the
+// VISIBLE bar -- not the Doom-API path `agent-repl--tabline-advice` serves.
+func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
+	t.Helper()
+	// EVERY distinct face in the drawn line, not the one at the name's first
+	// character: the module puts the state color on the tab's own bracket and
+	// background while the NAME may carry Doom's selected-tab face, so reading
+	// one position answers the wrong question.
+	return s.E.EvalString(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                  (seen nil)
+                                  (i 0)
+                                  (n (length line)))
+                             (while (< i n)
+                               (let ((f (get-text-property i 'face line)))
+                                 (when (and f (not (member (format "%S" f) seen)))
+                                   (push (format "%S" f) seen)))
+                               (setq i (1+ i)))
+                             (if seen
+                                 (mapconcat #'identity (nreverse seen) " | ")
+                               "<the drawn tabline carries no face at all>"))`)
+}
+
 // armSentence is the manifest sentence for a tab painted from one arm.
 //
 // "none" is a real answer and not a missing one: the color table maps
@@ -336,7 +408,8 @@ func (s *playtestScenario) captureArm(t *testing.T, name, ws, act string, want s
 		t.Fatalf("the arm for %s is %s at capture time, want %s: the step's subject moved before its picture was taken",
 			ws, arm, want)
 	}
+	face := s.tabFaceFor(t, ws)
 	s.Book.capture(name, act,
-		fmt.Sprintf("`agent-repl-roster-status-for-ws` still reads %s at the instant of the capture, which the module's color table paints %s", arm, color),
+		fmt.Sprintf("`agent-repl-roster-status-for-ws` still reads %s at the instant of the capture, which the module's color table paints %s, and `agent-repl-workspace-tabline-formatted` wrote the face %s onto that tab", arm, color, face),
 		armSentence(ws, arm, color)+" "+extra)
 }

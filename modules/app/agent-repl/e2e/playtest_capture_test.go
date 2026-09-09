@@ -622,23 +622,44 @@ func (p *playbook) capture(step, act, asserted, expected string) {
 	p.step++
 	name := fmt.Sprintf("%02d-%s.png", p.step, step)
 
-	// REDISPLAY IS FORCED FIRST, AND IT IS NOT A WAY OF HIDING A SLOW PAINT.
+	// THE MODULE'S OWN REPAINT IS DRIVEN FIRST, AND `force-mode-line-update`
+	// IS NOT IT.
 	//
-	// A user's Emacs redisplays constantly, because a user is generating
-	// events. This one is driven entirely over the server socket and sits on
-	// an Xvfb nobody is typing into, so between two evals it can be several
-	// state changes behind what it has DRAWN -- and it was, measured: the
-	// first tab-bar captures showed no tab at all after a workspace was
-	// registered, and showed the PREVIOUS selection after a switch, while the
-	// module's own `agent-repl--ws-tabline-names` already carried the new
-	// state.
+	// A user's Emacs repaints its tab bar on the 1Hz
+	// `agent-repl--status-dwell-tick` timer, which calls
+	// `agent-repl--force-tab-bar-redraw` every tick. That helper exists
+	// because the tab bar caches its format result by STRING EQUALITY, and
+	// `equal` ignores text properties -- so a change that differs only in
+	// FACE, which is every state-color change, does not repaint at all. The
+	// block comment above `agent-repl--tabline-space-toggle` in
+	// `lisp/status.el` states it outright: without the cache-buster,
+	// "state-color changes (thinking -> done, etc.) are invisible until the
+	// user manually triggers a redisplay".
 	//
-	// So a capture asks for the redraw a user's own keystrokes would have
-	// asked for, and THEN waits for the screen to settle. What it must never
-	// do is paper over a paint the product itself never performs: the forced
-	// redisplay only makes Emacs draw what it already decided, so a tab bar
-	// that is still wrong afterwards is wrong in the product.
-	p.e.Eval(`(progn (force-mode-line-update t) (redisplay t) t)`)
+	// A capture that asked only for `force-mode-line-update` was therefore
+	// asking for exactly the insufficient path that comment warns about, and
+	// it photographed stale tabs for it -- no tab at all after a
+	// registration, the previous selection after a switch, green while the
+	// arm read `:thinking`. Those pictures were the harness's own doing.
+	//
+	// So the capture calls the product's OWN repaint, the same function the
+	// product's own timer calls, and only then waits for the screen to
+	// settle. It makes Emacs draw what it has already decided and nothing
+	// else: a tab bar still wrong after its own repaint ran is wrong in the
+	// product. The guard is there so a build without the helper degrades to
+	// the plain redisplay rather than erroring inside a capture.
+	// TWICE, and that is not superstition. The helper flips a cache-buster
+	// that the NEXT tabline render reads, so one round busts the cache and
+	// the round after it is what actually reaches the glass -- which is why
+	// the product drives this from a repeating 1Hz timer rather than calling
+	// it once. A capture that ran one round photographed the previous
+	// string's pixels: measured, a tab whose drawn string carried
+	// `#cc3333` for `:thinking` was still shown green.
+	p.e.Eval(`(dotimes (_ 2)
+             (when (fboundp 'agent-repl--force-tab-bar-redraw)
+               (agent-repl--force-tab-bar-redraw))
+             (force-mode-line-update t)
+             (redisplay t))`)
 
 	body, settled, took := p.settleFrame()
 	img, err := decodeXWD(body)
