@@ -5619,3 +5619,13 @@ body.draining #composer-input::placeholder {
   padding: 2px 8px;
   font-size: 0.85em;
 }
+
+/* The refused delivery (src/feed/rows/agent-prompt.ts). A send that reached
+   nobody wears the feed's error color, so it is not read as one of the two
+   landings the same marker otherwise announces. */
+.prompt-delivery.refused { color: var(--err); }
+.prompt-delivery.refused .prompt-refusal-reason {
+  display: block;
+  color: var(--muted);
+  font-style: italic;
+}

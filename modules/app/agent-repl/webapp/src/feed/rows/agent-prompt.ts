@@ -21,6 +21,7 @@ import type {
   FeedAgentPromptAddress,
   FeedAgentPromptBlock,
   FeedAgentPromptBody,
+  FeedAgentPromptRefused,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawPromptBlockArm } from "./blocks.js";
 
@@ -37,6 +38,9 @@ const PATH = "FeedAgentPrompt";
 export const DELIVERY_WORDS = {
   queuedToLive: "queued for the live recipient",
   resumedRecipient: "resumed the recipient",
+  // NOT A LANDING. The other two say where the message got to; this one says
+  // it got nowhere, and says so in the past tense so no reader waits for it.
+  refused: "refused — never delivered",
 } as const satisfies Record<string, string>;
 
 /**
@@ -108,6 +112,14 @@ export function drawFeedAgentPromptDelivery(
       el.setAttribute("data-delivery", delivery.case);
       el.textContent = DELIVERY_WORDS[delivery.case];
       break;
+    case "refused":
+      // The SAME marker the two landings wear, carrying the refusal class —
+      // a refused send is one of this row's outcomes, not a card of its own.
+      el.setAttribute("data-delivery", delivery.case);
+      el.classList.add("refused");
+      el.textContent = DELIVERY_WORDS.refused;
+      appendRefusalReason(el, delivery.value);
+      break;
     default:
       return unreachableArm(
         `${PATH}.delivery`,
@@ -119,4 +131,20 @@ export function drawFeedAgentPromptDelivery(
     context: { delivery: delivery.case },
   });
   return el;
+}
+
+/**
+ * The refusal's own words, beside the marker.
+ *
+ * ITS OWN ELEMENT rather than a sentence spliced onto the marker: the words
+ * are the producer's and are drawn verbatim, while the marker is this client's
+ * wording, and the two must stay tellable apart. UNSET DRAWS NOTHING — the
+ * producer observed a refusal with no account, which is not an empty one.
+ */
+function appendRefusalReason(el: HTMLElement, refused: FeedAgentPromptRefused): void {
+  if (refused.reason === undefined) return;
+  const reason = document.createElement("span");
+  reason.className = "prompt-refusal-reason";
+  reason.textContent = refused.reason.text;
+  el.append(reason);
 }
