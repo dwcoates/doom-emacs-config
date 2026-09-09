@@ -5629,3 +5629,35 @@ body.draining #composer-input::placeholder {
   color: var(--muted);
   font-style: italic;
 }
+
+/* THE FAST-MODE CELL — the permission picker's read-only sibling. A LABEL,
+   not a control: nothing on the contract sets fast mode, so it takes the
+   button padding for alignment but neither the cursor nor the hover border
+   that would promise a click. */
+.topbar-fast {
+  padding: 0.15rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* On is the only state worth any emphasis: it is the one that changes what
+   sending a prompt does. */
+.topbar-fast[data-fast-mode="on"] {
+  color: var(--fg);
+}
+/* Cooldown is drawn AS ITS OWN STATE, never as off — dimmed and italic says
+   "not right now" where off's plain label says "not set". */
+.topbar-fast[data-fast-mode="cooldown"] {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+/* THE UNREAD-USAGE CELL. It rides beside the allowance figures it is a
+   caveat about, so it takes the muted weight of a caveat rather than the
+   paint of a verdict — the figures keep their own colors, and this says only
+   that they are the last ones read. */
+.footer-allowance-unread {
+  color: var(--muted);
+  font-style: italic;
+}
