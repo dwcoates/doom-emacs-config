@@ -81,6 +81,29 @@ it(
   TURN_TEST_MS,
 );
 
+// §F2 #4 (continued) — the DAEMON'S OWN WRAP, seen through the real chain.
+//
+// No new drive: this reads the SAME `md` row family the test above drove, so
+// the file spends no extra suite time on it. What it adds is the one fact only
+// this chain can show — the daemon wrapped the showcase's tree to 105 columns
+// on the way out (daemon/internal/resolve/feed/tree.go), and the page drew
+// every continuation line the wrap produced instead of shearing the tree there.
+it(
+  "draws the tree the daemon wrapped, continuation lines and rails included",
+  async () => {
+    // Arrange / Act
+    const row = await family("md", "activity", "response");
+    // Assert — six drawn tree rows (four branches plus the two continuations
+    // the 105-column wrap added), and the wrapped branch's own rails on the
+    // continuation that hangs beneath it.
+    const lines = row.querySelectorAll(".mp-tree .mp-line:not(.mp-blank)");
+    expect(lines.length).toBeGreaterThanOrEqual(6);
+    const prefixes = [...row.querySelectorAll(".mp-prefix")].map((el) => el.textContent ?? "");
+    expect(prefixes.some((text) => text.startsWith("│   │"))).toBe(true);
+  },
+  TURN_TEST_MS,
+);
+
 // NOT ASSERTED HERE, AND DELIBERATELY: the response's USAGE STAMP.
 //
 // The contract says the usage stamp "rides every state" of a FeedResponse
