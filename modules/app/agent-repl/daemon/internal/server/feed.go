@@ -119,11 +119,21 @@ func (s *server) WatchFeed(
 	req *connect.Request[agentreplv1.WatchFeedRequest],
 	out *connect.ServerStream[agentreplv1.WatchFeedResponse],
 ) error {
+	return s.watchFeed(ctx, req.Msg, out)
+}
+
+// watchFeed is the body, written to whatever sink carries it: the dedicated
+// rpc's own stream, or one page's mux.
+func (s *server) watchFeed(
+	ctx context.Context,
+	msg *agentreplv1.WatchFeedRequest,
+	out streamSink[agentreplv1.WatchFeedResponse],
+) error {
 	const rpc = "WatchFeed"
-	if err := validateWatchFeedRequest(req.Msg); err != nil {
+	if err := validateWatchFeedRequest(msg); err != nil {
 		return err
 	}
-	token := req.Msg.GetWatch()
+	token := msg.GetWatch()
 	target, known := s.tokenTargetFor(token.GetValue())
 	if !known {
 		return TransportClosed(s.log, rpc, "unknown_token",

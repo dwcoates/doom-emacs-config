@@ -242,3 +242,33 @@ func (s *fakeServer) OpenInEditor(ctx context.Context, req *connect.Request[v1.O
 func (s *fakeServer) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return handleUnary[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](ctx, s, "AdoptWebWorkspace", req.Msg)
 }
+
+// The page mux. `WatchPage`, `SubscribePage` and `UnsubscribePage` are how a
+// BROWSER holds its standing subscriptions on one connection
+// (endpoint_watch_page.proto); Emacs holds its three streams directly and never
+// attaches a page, so this fake refuses all three loudly rather than mocking a
+// surface no Emacs scenario can reach.
+
+func (s *fakeServer) WatchPage(ctx context.Context, req *connect.Request[v1.WatchPageRequest], stream *connect.ServerStream[v1.WatchPageResponse]) error {
+	s.record(ctx, "WatchPage", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
+		map[string]any{"method": "WatchPage"})
+	return connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; WatchPage is the webapp's page mux"))
+}
+
+func (s *fakeServer) SubscribePage(ctx context.Context, req *connect.Request[v1.SubscribePageRequest]) (*connect.Response[v1.SubscribePageResponse], error) {
+	s.record(ctx, "SubscribePage", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a page-mux verb this fake does not mock was called",
+		map[string]any{"method": "SubscribePage"})
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; SubscribePage is the webapp's page mux"))
+}
+
+func (s *fakeServer) UnsubscribePage(ctx context.Context, req *connect.Request[v1.UnsubscribePageRequest]) (*connect.Response[v1.UnsubscribePageResponse], error) {
+	s.record(ctx, "UnsubscribePage", req.Msg)
+	logWarn("fakedaemon.stream.not-mocked", "a page-mux verb this fake does not mock was called",
+		map[string]any{"method": "UnsubscribePage"})
+	return nil, connect.NewError(connect.CodeUnimplemented,
+		fmt.Errorf("fakedaemon mocks only Emacs's streams; UnsubscribePage is the webapp's page mux"))
+}

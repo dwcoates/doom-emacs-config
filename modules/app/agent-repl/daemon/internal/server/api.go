@@ -198,6 +198,11 @@ type server struct {
 	// resolver's Tail takes the workspace and feed explicitly, so the one mint
 	// site — OpenFeed — records the pair here.
 	watchTokens map[string]tokenTarget
+	// pages are the attached browser pages, by the id each minted for itself.
+	// A page holds ONE stream and multiplexes every standing subscription onto
+	// it, because HTTP/1.1 caps a browser at about six connections per host and
+	// a server-streaming call pins one for its whole life (page.go).
+	pages map[string]*pageStream
 }
 
 // tokenTarget is the workspace and feed one minted watch token addresses.
@@ -268,6 +273,7 @@ func New(deps Deps) (Server, error) {
 		hostHeld:        make(map[ids.WorkspaceID]int),
 		webHeld:         make(map[ids.WorkspaceID]int),
 		watchTokens:     make(map[string]tokenTarget),
+		pages:           make(map[string]*pageStream),
 	}
 
 	mux := http.NewServeMux()
