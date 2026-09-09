@@ -1023,3 +1023,28 @@ func TestReadSuccessLeavesTheExtentUnsetForAnImageRead(t *testing.T) {
 		t.Fatal("SettledAt = nil, want the settle instant: the read did finish")
 	}
 }
+
+// THE REFUSAL PROSE IS LOAD-BEARING. It is the only thing the vendor says
+// about a refused send — it declares no refusal code — and the frontend's
+// `refused` delivery arm draws it as the reason (feed.proto, landing 14).
+// The transcript is the delivery that carries it when no shim was watching.
+func TestSendMessageFailureCarriesTheRefusalProseIntoItsContent(t *testing.T) {
+	// Arrange
+	const prose = "Agent a85a6434719755df1 was stopped by the user and won't be resumed."
+	c := newTestConverter(t)
+	call := openCall{input: map[string]any{"to": "a85a6434719755df1"}}
+	block := map[string]any{"content": prose}
+
+	// Act
+	got := c.settledItem(kindSendMessage, call, nil, block, true, 1000, Attribution{})
+
+	// Assert
+	failure := got.GetSendMessage().GetFailure()
+	if failure == nil {
+		t.Fatalf("result = %T, want AgentSendMessage_Failure", got.GetSendMessage().GetResult())
+	}
+	blocks := failure.GetError().GetContent().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetText().GetText() != prose {
+		t.Fatalf("failure content = %v, want the refusal prose %q verbatim", blocks, prose)
+	}
+}

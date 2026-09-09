@@ -1478,19 +1478,50 @@ message FeedAgentPrompt {
   // block vocabulary. Long bodies fold/cap as client presentation, like
   // any long prompt.
   FeedAgentPromptBody body = 2;
-  // How the send was delivered, when the producer stated it (landing 10).
-  // UNSET on the recipient's copy and when the producer observed nothing;
-  // the row's presence already says the attempt happened.
+  // How the send FARED, when the producer stated it (landing 10; the refusal
+  // arm, landing 14). UNSET on the recipient's copy and when the producer
+  // observed nothing; the row's presence already says the attempt happened.
   oneof delivery {
     // The recipient was already running; the message queued for it.
     FeedAgentPromptQueuedToLive queued_to_live = 3;
     // The recipient was not running and WAS RESUMED to receive it — the
     // cause of that agent's renewed activity and renewed cost.
     FeedAgentPromptResumedRecipient resumed_recipient = 4;
+    // The send was REFUSED: it reached nobody and never will.
+    //
+    // WHY THIS ARM EXISTS — A REFUSAL IS NOT AN ABSENCE. Without it the two
+    // landing arms are the whole vocabulary, so a refused send is drawn
+    // exactly as one whose producer merely stated nothing, and a reader is
+    // left to assume a message is still on its way to an agent that will
+    // never receive it. The conversation tier has carried this fact from the
+    // start (AgentSendMessage.failure); this is where it reaches a surface.
+    FeedAgentPromptRefused refused = 5;
   }
 }
 message FeedAgentPromptQueuedToLive {}
 message FeedAgentPromptResumedRecipient {}
+// The send was refused. Nothing is implied about a retry: the row records the
+// attempt and its refusal, and no more.
+message FeedAgentPromptRefused {
+  // WHY the producer refused, resolved for drawing.
+  //
+  // A REASON AND NO KIND, because a reason is all the producer has. The
+  // vendor answers a refused send with `success: false` and a sentence
+  // written for the model to read; it declares no refusal code, and the
+  // distinction between a recipient the user stopped and one that never
+  // existed lives only inside that sentence. Recovering it would mean parsing
+  // prose, so this states the fact that is structurally available and no more
+  // — the rule FeedAgentPromptResumedRecipient's own sibling follows.
+  //
+  // UNSET when the producer observed a refusal carrying no content at all,
+  // which happens: the ARM is the refusal, the reason is only its detail.
+  optional FeedAgentPromptRefusalReason reason = 1;
+}
+// The refusal reason element.
+message FeedAgentPromptRefusalReason {
+  // The producer's own words, drawn verbatim.
+  string text = 1;
+}
 // The address element.
 message FeedAgentPromptAddress {
   // The composed line, drawn verbatim.

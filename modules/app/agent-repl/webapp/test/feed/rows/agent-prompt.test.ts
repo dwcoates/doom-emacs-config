@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedAgentPromptQueuedToLiveSchema,
+  FeedAgentPromptRefusedSchema,
   FeedAgentPromptResumedRecipientSchema,
   FeedAgentPromptSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -54,6 +55,51 @@ describe("drawFeedAgentPrompt", () => {
     expect(el.querySelector("[data-delivery]")?.textContent).toBe(
       DELIVERY_WORDS.resumedRecipient,
     );
+  });
+
+  it("marks the sender's row refused when the send reached nobody", () => {
+    const msg = agentPrompt();
+    msg.delivery = {
+      case: "refused",
+      value: create(FeedAgentPromptRefusedSchema, {}),
+    };
+    const el = drawFeedAgentPrompt(msg);
+    expect(el.querySelector("[data-delivery]")?.getAttribute("data-delivery")).toBe("refused");
+  });
+
+  it("draws a refusal apart from a landing, so the two are not read alike", () => {
+    const msg = agentPrompt();
+    msg.delivery = {
+      case: "refused",
+      value: create(FeedAgentPromptRefusedSchema, {}),
+    };
+    const el = drawFeedAgentPrompt(msg);
+    expect(el.querySelector("[data-delivery]")?.classList.contains("refused")).toBe(true);
+  });
+
+  it("draws the producer's refusal words verbatim beside the marker", () => {
+    const msg = agentPrompt();
+    msg.delivery = {
+      case: "refused",
+      value: create(FeedAgentPromptRefusedSchema, {
+        reason: { text: "The agent was stopped by the user." },
+      }),
+    };
+    const el = drawFeedAgentPrompt(msg);
+    expect(el.querySelector(".prompt-refusal-reason")?.textContent).toBe(
+      "The agent was stopped by the user.",
+    );
+  });
+
+  it("draws a refusal that gave no account with the marker and no reason", () => {
+    const msg = agentPrompt();
+    msg.delivery = {
+      case: "refused",
+      value: create(FeedAgentPromptRefusedSchema, {}),
+    };
+    const el = drawFeedAgentPrompt(msg);
+    expect(el.querySelector("[data-delivery]")?.textContent).toBe(DELIVERY_WORDS.refused);
+    expect(el.querySelector(".prompt-refusal-reason")).toBeNull();
   });
 
   it("draws no delivery marker on the recipient's copy, whose delivery is unset", () => {

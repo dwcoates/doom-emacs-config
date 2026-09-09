@@ -350,6 +350,77 @@ func deliveryWord(prompt *frontendv1.FeedAgentPrompt) string {
 		return "queued_to_live"
 	case *frontendv1.FeedAgentPrompt_ResumedRecipient:
 		return "resumed_recipient"
+	case *frontendv1.FeedAgentPrompt_Refused:
+		return "refused"
 	}
 	return ""
+}
+
+// refusalOf is a failure arm answering with `text` as its only account, the
+// shape the vendor's refusal prose arrives in.
+func refusalOf(text string) *conversationv1.AgentSendMessageFailure {
+	return &conversationv1.AgentSendMessageFailure{
+		Error: &conversationv1.AgentToolFailure{
+			Content: &conversationv1.ToolResultContent{
+				Blocks: []*conversationv1.ToolResultContentBlock{{
+					Block: &conversationv1.ToolResultContentBlock_Text{
+						Text: &conversationv1.TextBlock{Text: text},
+					},
+				}},
+			},
+		},
+	}
+}
+
+// A refusal must be distinguishable from an ABSENCE: an unset delivery is what
+// a producer that stated nothing leaves behind, so the refused send has to
+// state an arm of its own (feed.proto, landing 14).
+func TestARefusedSendStatesTheRefusedArmRatherThanNoArmAtAll(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+	// Act.
+	h.sendMessage("unit-1", refusalOf("The agent was stopped by the user."))
+
+	// Assert.
+	if got := deliveryWord(h.sendRow()); got != "refused" {
+		t.Fatalf("delivery = %q, want %q", got, "refused")
+	}
+}
+
+func TestARefusedSendCarriesTheProducersOwnWordsAsItsReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	const prose = "The agent was stopped by the user."
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+	// Act.
+	h.sendMessage("unit-1", refusalOf(prose))
+
+	// Assert.
+	if got := h.sendRow().GetRefused().GetReason().GetText(); got != prose {
+		t.Fatalf("refusal reason = %q, want the producer's words %q", got, prose)
+	}
+}
+
+// The ARM is the refusal; the reason is only its detail. A refusal the producer
+// gave no account for is still a refusal, and must not fall back to the unset
+// oneof that means "the producer stated nothing".
+func TestARefusalWithNoAccountStillStatesTheArmAndNoReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.sendMessage("unit-1", startTo("vetter", "vet the diff"))
+
+	// Act.
+	h.sendMessage("unit-1", &conversationv1.AgentSendMessageFailure{})
+
+	// Assert.
+	prompt := h.sendRow()
+	if got := deliveryWord(prompt); got != "refused" {
+		t.Fatalf("delivery = %q, want %q", got, "refused")
+	}
+	if reason := prompt.GetRefused().GetReason(); reason != nil {
+		t.Fatalf("refusal reason = %q, want unset — no account was given", reason.GetText())
+	}
 }

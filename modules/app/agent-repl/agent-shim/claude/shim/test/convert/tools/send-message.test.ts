@@ -185,6 +185,30 @@ describe("sendMessageConverter.settle", () => {
     // Assert.
     expect(arm.case).toBe("failure");
   });
+
+  // THE REFUSAL PROSE IS LOAD-BEARING. It is the only thing the vendor says
+  // about a refused send — it declares no refusal code — and the frontend's
+  // `refused` delivery arm draws it as the reason (feed.proto, landing 14).
+  // Dropping it here would leave the surface with a refusal it cannot explain.
+  it("carries the vendor's refusal prose into the failure's own content", () => {
+    // Arrange.
+    const prose = "The agent was stopped by the user.";
+    const refused: ToolOutcome = {
+      content: create(conversationv1.ToolResultContentSchema, {
+        blocks: [{ block: { case: "text", value: { text: prose } } }],
+      }),
+      isError: true,
+      structured: undefined,
+      settledAtMs: 8_000,
+    };
+
+    // Act.
+    const arm = armOf(sendMessageConverter.settle(call({ to: "v" }), refused));
+
+    // Assert.
+    const failure = arm.value as conversationv1.AgentSendMessageFailure;
+    expect(failure.error?.content?.blocks[0]?.block.value).toMatchObject({ text: prose });
+  });
 });
 
 describe("sendMessageConverter.progress", () => {
