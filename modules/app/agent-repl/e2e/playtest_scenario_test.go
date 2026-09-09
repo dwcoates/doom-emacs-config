@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,6 +198,61 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 		func(raw json.RawMessage) bool { return decodeString(raw) != "" })
 	s.E.Eval(playtestProbeSetup)
 	s.awaitPageMounted(t)
+	// EVERY CAPTURE FROM HERE ON WAITS FOR THE PAGE'S OWN FRAMES. See
+	// playtestPaintFrames: an xwidget webview reaches the glass only when
+	// Emacs copies its offscreen surface, so a capture taken before WebKit
+	// produced a frame photographs the previous page state under an
+	// assertion that legitimately passed. The playbook's hook is installed
+	// here because here is where a page first exists to paint.
+	s.Book.awaitPaint = func() time.Duration { return s.awaitPagePainted(t) }
+}
+
+// playtestPaintBound bounds one wait on the page delivering the frames the
+// capture needs.
+//
+// MEASURED, over the seven captures of owner 7's three playbooks and the
+// substrate's own, in each of two consecutive runs: the gate answered in
+// 42, 44, 45, 46, 54, 65, 66, 67, 75, 83, 84 and 124ms. It is bounded by
+// playtestPageBound -- 16x the worst of those -- rather than by a tighter
+// number of its own, because the case it must tolerate is the same one that
+// bound exists for: a WebKit view that has just started its web and network
+// processes on a container's first scenario. A page whose compositor
+// produces NO frame in that long is a page whose picture would be a lie, so
+// running this bound out is the right failure rather than a wait to widen.
+const playtestPaintBound = playtestPageBound
+
+// playtestPaintToken numbers the paint requests within one page, so a
+// capture's wait can never be satisfied by the frames an earlier capture
+// asked for.
+var playtestPaintToken atomic.Uint64
+
+// awaitPagePainted blocks until the webview has delivered
+// playtestPaintFrames animation frames raised after this call, and answers
+// how long that took.
+//
+// A WORKSPACE WITH NO LIVE WEBVIEW IS A REAL ANSWER, not a swallowed error.
+// A playbook may photograph the frame after its panel is gone, and there is
+// then no page whose paint could be waited for -- so the form below reports
+// that case as its own word and the wait accepts it, rather than the probe
+// raising "no live webview" and failing a capture that has nothing to do
+// with a page. Every other failure still fails.
+func (s *playtestScenario) awaitPagePainted(t *testing.T) time.Duration {
+	t.Helper()
+	started := time.Now()
+	token := fmt.Sprintf("capture-%d", playtestPaintToken.Add(1))
+	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
+	s.E.AwaitEvalFor(playtestPaintBound, "the webview to deliver its own frames for what the DOM now holds",
+		`(let* ((buf (get-buffer (agent-repl--frontend-webview-buffer-name `+elispString(s.Name)+`)))
+                (xw (and buf (agent-repl--frontend-webview-live-widget buf))))
+           (if (not xw)
+               "no-webview"
+             (agent-repl-playtest--probe `+elispString(s.Name)+` `+
+			elispString(playtestPaintGateScript(token))+`)))`,
+		func(raw json.RawMessage) bool {
+			answer := decodeString(raw)
+			return answer == "yes" || answer == "no-webview"
+		})
+	return time.Since(started)
 }
 
 // awaitPageMounted is the boot assertion every playbook makes before it
@@ -286,21 +342,6 @@ func (s *playtestScenario) clickInPage(t *testing.T, what, selector string) {
                                                 el.click();
                                                 return true; })()`))+`)`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
-}
-
-// jsString renders a Go string as a JavaScript string literal. The selectors
-// here carry double quotes, so single quotes are the delimiter and the two
-// characters that could still end the literal are escaped.
-func jsString(s string) string {
-	out := make([]rune, 0, len(s)+2)
-	out = append(out, '\'')
-	for _, r := range s {
-		if r == '\'' || r == '\\' {
-			out = append(out, '\\')
-		}
-		out = append(out, r)
-	}
-	return string(append(out, '\''))
 }
 
 // tabNames reads the names the tab bar DRAWS, in roster order.
