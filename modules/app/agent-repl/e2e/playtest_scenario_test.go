@@ -333,15 +333,25 @@ func (s *playtestScenario) awaitArm(t *testing.T, ws, what string, arms ...strin
 // reviewer to expect a color the product had already correctly stopped
 // painting, and the reviewer would file the harness's own race as a defect.
 //
-// The color comes from `agent-repl-status-color-table` and
-// `agent-repl--color-by-name` -- the module's own two tables, which
-// `AGENTS.md` names as the one source for tab coloring -- so the sentence a
-// reviewer checks is the module's own decision rather than this file's guess
-// at it.
+// The color comes from `agent-repl-status-tab-bar-color-table` -- the
+// module's own derived table, `agent-repl-status-color-table` with
+// `agent-repl-status-tab-bar-color-overrides` layered over it -- so the
+// sentence a reviewer checks is the module's own decision rather than this
+// file's guess at it.
+//
+// THE TAB-BAR TABLE, NOT THE SHARED ONE, and the difference is a real one
+// every caller of `captureArm` depends on. What is photographed is the TAB
+// BAR, and the tab bar declares its own overrides: the three IN-FLIGHT merge
+// arms and `:vendor-blocked` are painted differently there. Reading the
+// shared table wrote "carries NO status disc at all" into the manifest for a
+// merging tab the product paints PURPLE -- a sentence that sends a reviewer
+// to file the harness's own mistake as a defect in the paint. The tab-bar
+// table is DERIVED from the shared one, so it can never disagree about which
+// arms EXIST, only about the four colors it explicitly overrides.
 func (s *playtestScenario) armPaint(t *testing.T, ws string) (arm, color string) {
 	t.Helper()
 	pair := s.E.EvalStrings(`(let* ((arm (agent-repl-roster-status-for-ws ` + elispString(ws) + `))
-                                     (color (cdr (assq arm agent-repl-status-color-table))))
+                                     (color (cdr (assq arm agent-repl-status-tab-bar-color-table))))
                                 (list (format "%s" arm) (format "%s" (or color "<no color-table entry>"))))`)
 	if len(pair) != 2 {
 		t.Fatalf("reading the arm and color for %s answered %v, want an arm and a color", ws, pair)
