@@ -400,6 +400,11 @@ func (f *Fleet) noteConversationAbandoned(ctx context.Context, log dlog.Logger, 
 //     paying for it;
 //  5. record the session facts and start the watcher.
 func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
+	// A DEAD SHIM'S ROW IS RETIRED BEFORE LIVENESS IS JUDGED. The row outlives
+	// the process, so a bring-up that read map presence alone answered "already
+	// live" for a workspace whose shim was killed out from under the daemon —
+	// and a prompt's revival then had nothing to revive.
+	f.retireReaped(ws)
 	if f.Live(ws) {
 		return nil
 	}
@@ -1152,6 +1157,45 @@ func stampSession(log dlog.Logger, hostSessionID string) dlog.Logger {
 		return log
 	}
 	return log.With(dlog.Context{dlog.KeyAgentReplSessionID: hostSessionID})
+}
+
+// retireReaped drops the workspace's session row when the process behind it is
+// GONE, and closes the watches that were open on it. It is the teardown a shim
+// killed out from under the daemon never gets: nothing signals the fleet that
+// the row is stale, so the next bring-up is what tears it down.
+//
+// It is a NO-OP on a live session, which is what lets every bring-up call it
+// unconditionally. The dead link's faults are untouched — they are the
+// operator's record of the death and the next healthy attach retracts them.
+func (f *Fleet) retireReaped(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	session, ok := f.sessions[ws]
+	if !ok {
+		f.mu.Unlock()
+		return
+	}
+	if _, reaped := session.client.Reaped(); !reaped {
+		f.mu.Unlock()
+		return
+	}
+	delete(f.sessions, ws)
+	delete(f.coldGates, ws)
+	delete(f.lastCold, ws)
+	delete(f.buildSHA, ws)
+	f.mu.Unlock()
+
+	// The watcher is closed OUTSIDE the lock: closing joins whatever sink work
+	// it still had in flight, and those sinks read the fleet.
+	if session.watcher != nil {
+		if err := session.watcher.Close(); err != nil {
+			f.deps.Log.Global().Error(opBringUp, "a dead session's watcher could not be closed",
+				dlog.Context{"workspace": string(ws), "cause": err.Error()})
+		}
+	}
+	f.deps.Log.Global().Info(opBringUp, "retired the session of a shim that is gone", dlog.Context{
+		"workspace": string(ws), "shim_pid": session.client.PID(),
+	})
+	f.publishHost(ws)
 }
 
 // remember records a workspace's live session.
