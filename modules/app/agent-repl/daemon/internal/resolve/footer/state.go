@@ -4,6 +4,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/sessionwatcher"
@@ -112,6 +113,25 @@ type rateState struct {
 	weekly allowanceWindow
 	// at is when the newest evidence for either window was observed.
 	at time.Time
+	// sample is the newest account-usage SAMPLE's outcome, arm for arm from
+	// conversation.v1 SessionAccountUsage, nil until a sample has been
+	// observed. It says what the last ATTEMPT read; the windows above say
+	// what was last READ, and an unreadable attempt never clears them.
+	//
+	// ORDERED BY ARRIVAL, like the figures and for the same reason
+	// (`fileFigures`): every account_usage arm rides ONE SessionUpdate
+	// stream from ONE shim, routed to this sink serially, so the outcome
+	// that arrives last is the outcome the shim stated last. The sample
+	// guard in `observeSampledFigures` does not apply here — it exists to
+	// stop an older READING overwriting a newer one, and an outcome carries
+	// no reading.
+	sample *frontendv1.FooterAllowanceSample
+	// sampleUnread reports whether that newest sample read NO figure. It is
+	// kept beside the sample rather than sniffed back out of its drawn arm,
+	// because an unavailable sample whose own reason oneof the producer left
+	// UNSET is still an unavailability, and reading the arm would call it a
+	// success.
+	sampleUnread bool
 }
 
 // hookState is a hook running right now.

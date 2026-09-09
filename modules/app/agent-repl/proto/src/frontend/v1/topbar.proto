@@ -53,7 +53,45 @@ message TopbarView {
   TopbarAccount account = 8;
   // The permission-mode picker, the model selector's sibling.
   TopbarPermissionModePicker permission_mode_picker = 9;
+  // The vendor's fast mode, the permission mode's sibling: the other
+  // session-level standing state a reader has to know before sending, and
+  // the only one that can be neither on nor off. UNSET means the vendor has
+  // stated no fast mode for this session yet — presence, never a bool that
+  // would have to guess.
+  TopbarFastMode fast_mode = 10;
 }
+
+// The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
+// name from conversation.v1's SessionFastMode rather than flattened to a
+// bool: cooldown is neither on nor off, and a bool would force the client to
+// draw it as one of them — offering a switch that cannot take effect, or
+// claiming a speed the session does not have.
+//
+// STANDING, not momentary: the state sticks until the vendor states another,
+// so the strip draws it continuously beside the permission mode.
+message TopbarFastMode {
+  oneof state {
+    TopbarFastModeOn on = 1;
+    TopbarFastModeOff off = 2;
+    TopbarFastModeCooldown cooldown = 3;
+  }
+}
+
+// Fast mode is in effect.
+message TopbarFastModeOn {}
+
+// Fast mode is not in effect.
+message TopbarFastModeOff {
+  // The vendor's reason, verbatim — drawn as the cell's tooltip. Empty when
+  // the vendor gave none.
+  string reason = 1;
+}
+
+// Fast mode is unavailable for now and returns on its own. DISTINCT FROM
+// OFF: nothing needs doing, so the cell draws no affordance to turn it back
+// on. SessionFastModeCooldown carries no reset instant, so neither does
+// this — a countdown would be invented rather than reported.
+message TopbarFastModeCooldown {}
 
 // The permission-mode picker: the mode in force and the modes this session
 // may switch to (the daemon serves exactly the set SetPermissionMode will

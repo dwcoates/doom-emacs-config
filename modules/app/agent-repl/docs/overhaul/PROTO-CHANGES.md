@@ -352,6 +352,69 @@ hold-then-warn path untouched. Held frames released by a non-start naming
 frame fold BEFORE it, since the terminal is later in the run than everything
 it outran.
 
+## Landing 13 (2026-09-09): a standing state the strip never drew, and a read nobody could tell had failed
+
+OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
+behalf). Seven scenarios stood in the matrix as WEAK BY CONTRACT: the fake
+produced them, the shim converted them, the daemon received them on
+conversation.v1 SessionUpdate, and then nothing could be asserted at any
+user-visible surface because frontend/v1 carried no field for them. A mock
+the product cannot draw is a product gap.
+
+- frontend.v1 TopbarView.fast_mode (tag 10, TopbarFastMode with arms
+  on / off{reason} / cooldown) — the permission mode's sibling, the other
+  session-level standing state a reader has to know before sending. UNSET
+  stays legal and means the vendor has stated none.
+- frontend.v1 FooterStatusActivityRateLimited.sample (tag 3,
+  FooterAllowanceSample with arms available / service_unavailable /
+  window_unavailable / utilization_unavailable / sampling_failure{cause}) —
+  arm for arm with conversation.v1 SessionAccountUsage's own outcome oneof.
+
+WHY FAST MODE IS THE TOPBAR'S. It is a session-level standing state, not a
+turn fact and not an activity, which is the permission mode's own shape and
+the permission mode's own home. THE ARM IS THE STATE, never a bool: cooldown
+is neither on nor off, and a bool forces the client to draw it as one of them
+— offering a switch that cannot take effect, or claiming a speed the session
+does not have. SessionFastModeCooldown carries no reset instant, so neither
+does ours; a countdown would be invented rather than reported. It is a LABEL
+and not a picker, because nothing on the contract sets fast mode.
+
+WHY THE OUTCOME RIDES BESIDE THE FIGURES. The allowance figures are the last
+ones READ; the outcome says whether the last ATTEMPT read anything. Without
+it a sample that failed is indistinguishable from one that never happened,
+and the strip goes on drawing yesterday's percentage as though it were
+today's. It is carried ALONGSIDE the standing figures and NEVER by clearing
+them — the footer's own sourcing rule ("a sample that could read no figure
+leaves the figures on hand standing") is unchanged, and now has a
+drawn-surface test.
+
+ONE BEHAVIOR CHANGE, STATED. The rate line's newsworthiness gate now opens on
+an unread sample as well as on a newsworthy allowance. Without that the
+outcome cell is unreachable from any session whose figures sit under the 0.8
+threshold — which is every session this mock produces. An unremarkable
+allowance is not news; an allowance nobody could read is.
+
+CONSUMERS. daemon resolve/topbar (the empty fast_mode branch fills the view
+arm for arm) and resolve/footer (every sample files its outcome, readable or
+not; unreadability is kept in state rather than sniffed back out of the drawn
+arm, so a producer's reasonless unavailable is not read as a success).
+webapp draws a read-only `.topbar-fast` cell after the mode picker and a
+`.footer-allowance-unread` caveat beside the allowance figures; `available`
+draws nothing, being the outcome that reports nothing is wrong.
+
+EMACS IS UNTOUCHED, deliberately: `lisp/` draws neither the permission mode
+nor the allowance line, so there is no sibling surface for either field to
+join.
+
+A DEAD TRIGGER FOUND AND CLOSED. `!usage-sampling-failure` answered
+`behaviors: null`, a shape `accountUsageUpdate` never reads — it branches on
+`rate_limits_available`, `rate_limits` and the five-hour window only — so the
+scenario produced the AVAILABLE outcome and named an arm it could not reach.
+The shim's one producer of `sampling_failure` is the catch around the usage
+probe, so the mock now RAISES there.
+
+Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ
+
 ## Landing 14 (2026-09-09): a refused send is not a send that stated nothing
 
 OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's

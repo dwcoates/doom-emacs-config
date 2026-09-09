@@ -29,6 +29,7 @@ import { drawTopbarContextChip } from "./context-chip.js";
 import type { TopbarContext } from "./context.js";
 import { drawTopbarModelSelector } from "./model.js";
 import { drawTopbarPermissionModePicker } from "./permission-mode.js";
+import { drawTopbarFastMode } from "./fast-mode.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
   bindSessionReveal,
@@ -129,8 +130,12 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
       requireMessage(u.permissionModePicker, "TopbarView.permission_mode_picker"),
       tc,
     ),
-    drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc),
   );
+  // The fast-mode cell sits directly after the mode picker it is the sibling
+  // of. It is ABSENT, not empty, when the vendor has stated no fast mode.
+  const fastMode = drawTopbarFastMode(u.fastMode);
+  if (fastMode !== null) right.append(fastMode);
+  right.append(drawTopbarContextChip(requireMessage(u.context, "TopbarView.context"), tc));
   // NOTHING IS DRAWN WHEN NOTHING IS WRONG: an empty warning list yields no
   // chip at all, not a quiet one.
   const warnings = drawTopbarWarningStrip(requireMessage(u.warnings, "TopbarView.warnings"), tc);

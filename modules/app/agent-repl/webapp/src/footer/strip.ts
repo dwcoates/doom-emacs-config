@@ -53,6 +53,7 @@ import type {
   FooterStatusActivityNotification,
   FooterStatusActivityQueryDied,
   FooterStatusActivityQuestionLead,
+  FooterAllowanceSample,
   FooterStatusActivityRateLimited,
   FooterStatusActivityRetrying,
   FooterStatusActivityWakeup,
@@ -522,8 +523,16 @@ export function drawFooterStatusActivityWakeup(
 }
 
 /**
- * The rate-limit rung: BOTH allowances, always, because the newsworthy
- * percentage is meaningless without knowing which window it belongs to.
+ * The rate-limit rung: BOTH allowances where both were read, because the
+ * newsworthy percentage is meaningless without knowing which window it belongs
+ * to — plus the sample outcome when the last read FAILED.
+ *
+ * AN ALLOWANCE THE PRODUCER LEFT UNSET IS DRAWN ABSENT, never required. The
+ * contract says so in as many words ("an unset weekly is representable, and
+ * stating a figure nobody reported would be worse than stating none"), and the
+ * line is now reachable with NEITHER window figured — a session whose very
+ * first usage sample failed has read nothing yet and still has an unread to
+ * state.
  */
 export function drawFooterStatusActivityRateLimited(
   u: FooterStatusActivityRateLimited,
@@ -532,14 +541,75 @@ export function drawFooterStatusActivityRateLimited(
 ): HTMLElement {
   const line = document.createElement("span");
   line.className = "footer-activity-rate-limited";
-  line.appendChild(
-    drawFooterAllowance(requireMessage(u.session, `${path}.session`), "session", deps, `${path}.session`),
-  );
-  line.appendChild(document.createTextNode(" | "));
-  line.appendChild(
-    drawFooterAllowance(requireMessage(u.weekly, `${path}.weekly`), "weekly", deps, `${path}.weekly`),
-  );
+  const parts: HTMLElement[] = [];
+  if (u.session !== undefined) {
+    parts.push(drawFooterAllowance(u.session, "session", deps, `${path}.session`));
+  }
+  if (u.weekly !== undefined) {
+    parts.push(drawFooterAllowance(u.weekly, "weekly", deps, `${path}.weekly`));
+  }
+  const sample = drawFooterAllowanceSample(u.sample, `${path}.sample`);
+  if (sample !== null) parts.push(sample);
+  parts.forEach((part, index) => {
+    if (index > 0) line.appendChild(document.createTextNode(" | "));
+    line.appendChild(part);
+  });
   return line;
+}
+
+/** The sentence each unread outcome draws. */
+const ALLOWANCE_UNREAD_SENTENCES = {
+  serviceUnavailable: "the usage service did not answer",
+  windowUnavailable: "no five-hour window was reported",
+  utilizationUnavailable: "no utilization figure was reported",
+} as const;
+
+/**
+ * WHAT THE LAST USAGE SAMPLE MANAGED TO READ, drawn only when it read NOTHING.
+ *
+ * The figures beside this cell are the last ones READ, not the last ones
+ * ATTEMPTED, and a failed read leaves them standing on purpose — the daemon
+ * never clears a figure it cannot replace. Without this cell a reader cannot
+ * tell a fresh 41% from one the vendor stopped answering about an hour ago,
+ * which is exactly the sentence the cell says.
+ *
+ * `available` DRAWS NOTHING. It is the unremarkable outcome — the figures are
+ * as fresh as the sample — and a strip cell saying so would crowd the line to
+ * report that nothing is wrong. Unset draws nothing either: no sample has been
+ * attempted at all, so there is no read to report on.
+ */
+export function drawFooterAllowanceSample(
+  u: FooterAllowanceSample | undefined,
+  path: string,
+): HTMLElement | null {
+  const outcome = u?.outcome;
+  if (outcome === undefined || outcome.case === undefined) return null;
+  if (outcome.case === "available") return null;
+
+  const cell = document.createElement("span");
+  cell.className = "footer-allowance-unread";
+  cell.setAttribute("data-sample", outcome.case);
+  switch (outcome.case) {
+    case "serviceUnavailable":
+    case "windowUnavailable":
+    case "utilizationUnavailable":
+      cell.textContent = `usage unread — ${ALLOWANCE_UNREAD_SENTENCES[outcome.case]}`;
+      break;
+    case "samplingFailure":
+      // THE SHIM'S CAUSE VERBATIM where it stated one; the fixed half of the
+      // sentence carries the meaning when it did not.
+      cell.textContent =
+        outcome.value.cause === ""
+          ? "usage unread — the sampling failed"
+          : `usage unread — the sampling failed: ${outcome.value.cause}`;
+      break;
+    default: {
+      const other: { case: string } = outcome;
+      return unreachableArm(path, other.case);
+    }
+  }
+  cell.title = "the figures beside this were the last ones read, and may be stale";
+  return cell;
 }
 
 /**

@@ -369,7 +369,21 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 // could read no figure (the unavailable arm) leaves the figures on hand
 // standing, and a sample whose seven_day window the vendor omitted leaves the
 // weekly allowance unfigured, which draws it absent rather than invented.
+//
+// EVERY sample, readable or not, files its OUTCOME. That is the whole point
+// of the outcome cell: a failed read left no trace at all before, so the strip
+// went on drawing the last percentage as though it were the current one, and
+// nothing on the wire could say otherwise.
 func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.SessionAccountUsage) {
+	if usage == nil {
+		return
+	}
+	if sample := allowanceSample(usage); sample != nil {
+		_, unavailable := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Unavailable)
+		s.rate.sample = sample
+		s.rate.sampleUnread = unavailable
+		s.rate.at = r.opts.clock.Now()
+	}
 	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
 	if !ok {
 		return
@@ -385,6 +399,54 @@ func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.Session
 	if moved {
 		s.rate.at = r.opts.clock.Now()
 	}
+}
+
+// allowanceSample names the sample's outcome for the strip, arm for arm with
+// SessionAccountUsage's own oneof. A sample whose outcome oneof is UNSET
+// states nothing — the producer chose no arm — so it files nothing rather
+// than retiring an outcome that is still the newest one anybody stated.
+func allowanceSample(usage *conversationv1.SessionAccountUsage) *frontendv1.FooterAllowanceSample {
+	switch outcome := usage.GetOutcome().(type) {
+	case *conversationv1.SessionAccountUsage_Available:
+		return &frontendv1.FooterAllowanceSample{
+			Outcome: &frontendv1.FooterAllowanceSample_Available{
+				Available: &frontendv1.FooterAllowanceSampleAvailable{},
+			},
+		}
+	case *conversationv1.SessionAccountUsage_Unavailable:
+		return unavailableSample(outcome.Unavailable)
+	default:
+		return nil
+	}
+}
+
+// unavailableSample names WHY no figure was read. An unavailable arm whose
+// own reason oneof is UNSET is still an unavailability — the sample failed —
+// so it files the sample with no reason arm rather than being dropped, which
+// would draw it as a success.
+func unavailableSample(unavailable *conversationv1.SessionAccountUsageUnavailable) *frontendv1.FooterAllowanceSample {
+	sample := &frontendv1.FooterAllowanceSample{}
+	switch reason := unavailable.GetReason().(type) {
+	case *conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable:
+		sample.Outcome = &frontendv1.FooterAllowanceSample_ServiceUnavailable{
+			ServiceUnavailable: &frontendv1.FooterAllowanceSampleServiceUnavailable{},
+		}
+	case *conversationv1.SessionAccountUsageUnavailable_WindowUnavailable:
+		sample.Outcome = &frontendv1.FooterAllowanceSample_WindowUnavailable{
+			WindowUnavailable: &frontendv1.FooterAllowanceSampleWindowUnavailable{},
+		}
+	case *conversationv1.SessionAccountUsageUnavailable_UtilizationUnavailable:
+		sample.Outcome = &frontendv1.FooterAllowanceSample_UtilizationUnavailable{
+			UtilizationUnavailable: &frontendv1.FooterAllowanceSampleUtilizationUnavailable{},
+		}
+	case *conversationv1.SessionAccountUsageUnavailable_SamplingFailure:
+		sample.Outcome = &frontendv1.FooterAllowanceSample_SamplingFailure{
+			SamplingFailure: &frontendv1.FooterAllowanceSampleSamplingFailure{
+				Cause: reason.SamplingFailure.GetCause(),
+			},
+		}
+	}
+	return sample
 }
 
 // observeRateLimitStatus takes one rate-limit event and files it under the

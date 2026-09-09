@@ -39,6 +39,13 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 // The verdict arm joins each allowance later, when a rate-limit event for
 // that window arrives.
 //
+// A SAMPLE THAT READ NOTHING IS THE SECOND THING THAT MAKES THE LINE NEWS,
+// whatever the figures say. An unremarkable allowance is not news, but an
+// allowance nobody could read IS: the figures drawn beside it are whatever
+// survived the failed read, and a reader who is never told cannot tell a
+// fresh 41% from one the vendor stopped answering about an hour ago. The
+// figures still stand — the outcome joins them, it never clears them.
+//
 // WHEN THE SAMPLE CARRIES NO SEVEN-DAY WINDOW (an account with no weekly
 // allowance, or a vendor that reported none) the weekly allowance is drawn
 // ABSENT rather than synthesized: FooterStatusActivityRateLimited.weekly is a
@@ -47,13 +54,18 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimited {
 	session := r.allowance(&s.rate.session)
 	weekly := r.allowance(&s.rate.weekly)
-	if session == nil && weekly == nil {
+	unreadable := s.rate.sampleUnread
+	if session == nil && weekly == nil && !unreadable {
 		return nil
 	}
-	if !session.GetNewsworthy() && !weekly.GetNewsworthy() {
+	if !session.GetNewsworthy() && !weekly.GetNewsworthy() && !unreadable {
 		return nil
 	}
-	return &frontendv1.FooterStatusActivityRateLimited{Session: session, Weekly: weekly}
+	return &frontendv1.FooterStatusActivityRateLimited{
+		Session: session,
+		Weekly:  weekly,
+		Sample:  s.rate.sample,
+	}
 }
 
 // allowance projects one window's evidence onto the drawn allowance, or nil

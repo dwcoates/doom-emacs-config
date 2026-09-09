@@ -425,6 +425,88 @@ describe("the ticking activity figures", () => {
     return row;
   }
 
+  // ---- The sample outcome: what the LAST READ managed, beside the figures it
+  // did not clear. One test per arm.
+
+  /** One rate-limit line whose sample OUTCOME stands at `outcome`. */
+  function sampleRow(outcome: { case: string; value: unknown }): HTMLElement {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: false, utilization: 0.41, resetsAtS: BigInt(NOW / 1000) },
+        sample: { outcome: outcome as never },
+      }),
+    });
+    return row;
+  }
+
+  /** The unread cell's text, or undefined when the line drew none. */
+  function unreadText(row: HTMLElement): string | undefined {
+    return row.querySelector(".footer-allowance-unread")?.textContent ?? undefined;
+  }
+
+  it("names a service-unavailable read on the strip", () => {
+    expect(unreadText(sampleRow({ case: "serviceUnavailable", value: {} }))).toBe(
+      "usage unread — the usage service did not answer",
+    );
+  });
+
+  it("names a window-unavailable read on the strip", () => {
+    expect(unreadText(sampleRow({ case: "windowUnavailable", value: {} }))).toBe(
+      "usage unread — no five-hour window was reported",
+    );
+  });
+
+  it("names a utilization-unavailable read on the strip", () => {
+    expect(unreadText(sampleRow({ case: "utilizationUnavailable", value: {} }))).toBe(
+      "usage unread — no utilization figure was reported",
+    );
+  });
+
+  it("keeps the shim's sampling-failure cause verbatim", () => {
+    const row = sampleRow({ case: "samplingFailure", value: { cause: "socket hang up" } });
+    expect(unreadText(row)).toBe("usage unread — the sampling failed: socket hang up");
+  });
+
+  it("says the sampling failed even when the shim named no cause", () => {
+    expect(unreadText(sampleRow({ case: "samplingFailure", value: { cause: "" } }))).toBe(
+      "usage unread — the sampling failed",
+    );
+  });
+
+  it.each(["serviceUnavailable", "windowUnavailable", "utilizationUnavailable", "samplingFailure"])(
+    "draws the %s unread arm distinctly on the cell",
+    (arm) => {
+      const row = sampleRow({ case: arm, value: { cause: "" } });
+      expect(row.querySelector(".footer-allowance-unread")?.getAttribute("data-sample")).toBe(arm);
+    },
+  );
+
+  // AVAILABLE IS NOT NEWS. The figures are as fresh as the sample, and a cell
+  // saying so would crowd the line to report that nothing is wrong.
+  it("draws no unread cell for an available sample", () => {
+    expect(sampleRow({ case: "available", value: {} }).querySelector(".footer-allowance-unread")).toBeNull();
+  });
+
+  // THE STANDING CONTRACT AT THE DRAWN SURFACE: an unread joins the figures,
+  // it never replaces them.
+  it("leaves the standing figures drawn beside an unread sample", () => {
+    const row = sampleRow({ case: "serviceUnavailable", value: {} });
+    expect(row.querySelector('[data-allowance="session"]')?.textContent).toContain("session 41%");
+  });
+
+  // A session whose very first sample failed has read nothing yet, so the line
+  // is reachable with NO allowance at all.
+  it("draws the unread alone when no figure has ever been read", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
+      }),
+    });
+    expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
+      "usage unread — the usage service did not answer",
+    );
+  });
+
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the cell", (arm) => {
     expect(allowanceRow(arm).querySelector('[data-allowance="session"]')?.getAttribute("data-arm")).toBe(
       arm,
