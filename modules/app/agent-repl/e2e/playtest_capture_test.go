@@ -539,7 +539,7 @@ func newPlaybook(t *testing.T, e *Emacs, name, purpose string) *playbook {
 		if err := manifest.Close(); err != nil {
 			t.Errorf("close the playbook manifest: %v", err)
 		}
-		t.Logf("playtest %s: %d captures in %s", name, p.step, dir)
+		t.Logf("playtest %s: %d steps in %s", name, p.step, dir)
 	})
 
 	p.write("# Playbook: %s\n\n%s\n\n", name, purpose)
@@ -547,8 +547,9 @@ func newPlaybook(t *testing.T, e *Emacs, name, purpose string) *playbook {
 		playtestFrameWidth, playtestFrameHeight)
 	p.write("- Vendor: **the fake SDK only**. `AGENT_REPL_FORBID_VENDOR_CALLS=1` is on the Emacs process and inherited by the daemon, the shim, the store and the sidecar, so no real Claude call can occur.\n")
 	p.write("- Git: the scripted fake git. No real git process runs anywhere.\n")
-	p.write("- Every picture is the X server's own screen memory, so what is drawn INSIDE the webview is in it.\n\n")
-	p.write("| # | image | the act | what the image must show |\n|---|---|---|---|\n")
+	p.write("- Every picture is the X server's own screen memory, so what is drawn INSIDE the webview is in it.\n")
+	p.write("- FUNCTIONAL FIRST: every step carries a programmatic assertion, and a step that cannot start fails the run right there. A picture is taken ONLY where the step's subject is visual, and only AFTER its assertion passed, so no picture here is a picture of a broken world.\n\n")
+	p.write("| # | the act | asserted | image | what the image must show |\n|---|---|---|---|---|\n")
 	return p
 }
 
@@ -575,17 +576,60 @@ func (p *playbook) prepareFrame() {
              t)`, playtestFrameWidth, playtestFrameHeight))
 }
 
+// note records a step that has NO picture.
+//
+// Most steps are like this. Per PLAYTEST-PLAN.md's "Functional first,
+// pictures second", a capture is taken only where the step's subject is
+// VISUAL -- the webapp's rendering and the tab bar's painted state -- and
+// photographing anything else only gives a reviewer more pictures to read
+// and no more to decide. The step is still recorded, because a manifest a
+// reviewer follows must carry the whole sequence and not only the parts
+// that produced an image.
+//
+// `asserted` names what the step PROVED programmatically. It is not
+// re-checked here: the assertion has already run, and a step whose
+// assertion failed never reaches this line.
+func (p *playbook) note(act, asserted string) {
+	p.t.Helper()
+	p.step++
+	p.write("| %02d | %s | %s | — | — |\n", p.step, act, asserted)
+}
+
 // capture takes one picture, holds it to the mechanical assertions, and
 // records what a reviewer should see in it.
 //
-// `act` is what was just done and `expected` is the sentence the reviewer
-// checks the picture against. Both go in the manifest; neither is asserted,
-// because what the picture SHOWS is the reviewer's judgment and the whole
-// reason this suite exists.
-func (p *playbook) capture(step, act, expected string) {
+// IT IS CALLED ONLY AFTER THE STEP'S OWN FUNCTIONAL ASSERTION HAS PASSED,
+// which is the plan's rule and not a convention: a reviewer must never be
+// handed a picture of a world that was already broken, because then every
+// difference in it is unexplained.
+//
+// `act` is what was just done, `asserted` is what the step proved
+// programmatically, and `expected` is the sentence the reviewer checks the
+// picture against. The last of those is never asserted, because what the
+// picture SHOWS is the reviewer's judgment and the whole reason this suite
+// exists.
+func (p *playbook) capture(step, act, asserted, expected string) {
 	p.t.Helper()
 	p.step++
 	name := fmt.Sprintf("%02d-%s.png", p.step, step)
+
+	// REDISPLAY IS FORCED FIRST, AND IT IS NOT A WAY OF HIDING A SLOW PAINT.
+	//
+	// A user's Emacs redisplays constantly, because a user is generating
+	// events. This one is driven entirely over the server socket and sits on
+	// an Xvfb nobody is typing into, so between two evals it can be several
+	// state changes behind what it has DRAWN -- and it was, measured: the
+	// first tab-bar captures showed no tab at all after a workspace was
+	// registered, and showed the PREVIOUS selection after a switch, while the
+	// module's own `agent-repl--ws-tabline-names` already carried the new
+	// state.
+	//
+	// So a capture asks for the redraw a user's own keystrokes would have
+	// asked for, and THEN waits for the screen to settle. What it must never
+	// do is paper over a paint the product itself never performs: the forced
+	// redisplay only makes Emacs draw what it already decided, so a tab bar
+	// that is still wrong afterwards is wrong in the product.
+	p.e.Eval(`(progn (force-mode-line-update t) (redisplay t) t)`)
 
 	body, settled, took := p.settleFrame()
 	img, err := decodeXWD(body)
@@ -624,7 +668,7 @@ func (p *playbook) capture(step, act, expected string) {
 		// reading a torn picture is owed the reason.
 		note = fmt.Sprintf(" _(the screen was still changing after %s, so this frame may be torn)_", playtestSettleBound)
 	}
-	p.write("| %02d | `%s` | %s | %s%s |\n", p.step, name, act, expected, note)
+	p.write("| %02d | %s | %s | `%s` | %s%s |\n", p.step, act, asserted, name, expected, note)
 	p.t.Logf("playtest phase capture-%02d-%s settled=%v took %s (%d distinct colors)",
 		p.step, step, settled, took.Round(time.Millisecond), colors)
 }
