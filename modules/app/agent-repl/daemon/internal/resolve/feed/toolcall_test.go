@@ -855,3 +855,164 @@ func TestAReadWithNoExtentDrawsTheNoneArm(t *testing.T) {
 		t.Fatalf("output form = %v, want the `none` arm", returned.GetForm())
 	}
 }
+
+// ---- BASH: the image arm, and the exit chip (landing 16) ----
+
+// bashImageActivity is a settled foreground shell whose output was image data.
+func bashImageActivity(mediaType string, data []byte) *conversationv1.AgentActivity {
+	return activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "screencapture -x -"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Image{Image: &conversationv1.AgentBashOutputImage{
+						Data:      data,
+						MediaType: mediaType,
+					}},
+				},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	})
+}
+
+func TestAnImageProducingShellDrawsTheImageArm(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashImageActivity("image/png", []byte{0x89, 'P', 'N', 'G'}))
+
+	// Assert: the shared image block, with the daemon's resolved src.
+	image := h.card().GetReturned().GetImage()
+	if image == nil {
+		t.Fatalf("form = %T, want the image arm", h.card().GetReturned().GetForm())
+	}
+	if want := "data:image/png;base64,iVBORw=="; image.GetSrc() != want {
+		t.Fatalf("src = %q, want %q", image.GetSrc(), want)
+	}
+}
+
+func TestAnImageProducingShellCaptionsTheImageWithItsCommand(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashImageActivity("image/png", []byte{0x89}))
+
+	// Assert: the command line is the only caption the record affords.
+	if got := h.card().GetReturned().GetImage().GetAlt(); got != "screencapture -x -" {
+		t.Fatalf("alt = %q, want the command line", got)
+	}
+}
+
+func TestAnImageWithNoMediaTypeDrawsNoOutputBody(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashImageActivity("", []byte{0x89, 'P'}))
+
+	// Assert: a src the daemon cannot compose is not invented; the card falls
+	// back to the `none` arm rather than a broken image.
+	if h.card().GetReturned().GetNone() == nil {
+		t.Fatalf("form = %T, want none when no src can be composed", h.card().GetReturned().GetForm())
+	}
+}
+
+func TestAnImageWithNoBytesRecordsTheGap(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashImageActivity("image/png", nil))
+
+	// Assert: the gap is legible in the daemon's own narrative, not only in
+	// the drawn absence.
+	var found bool
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.feed.bash_image_unresolved" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("records = %v, want one under daemon.feed.bash_image_unresolved", h.log.Records())
+	}
+}
+
+// bashExitActivity is a settled foreground shell with the given termination.
+func bashExitActivity(termination *conversationv1.AgentBashTermination) *conversationv1.AgentActivity {
+	return activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "exit 3"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stderr: "boom",
+						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+					}},
+				},
+				Termination: termination,
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	})
+}
+
+func TestAStatedExitCodeReachesTheForegroundCard(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashExitActivity(&conversationv1.AgentBashTermination{
+		How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 3}},
+	}))
+
+	// Assert: the SAME element the detached shell's settled shape carries.
+	exit := h.card().GetReturned().GetExit()
+	if exit == nil {
+		t.Fatal("exit = nil, want the code the command reported")
+	}
+	if exit.GetCode() != 3 {
+		t.Fatalf("exit code = %d, want 3", exit.GetCode())
+	}
+}
+
+func TestAShellThatStatedNoTerminationDrawsNoExitChip(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashExitActivity(nil))
+
+	// Assert: absence draws no chip, NEVER a zero.
+	if exit := h.card().GetReturned().GetExit(); exit != nil {
+		t.Fatalf("exit = %v, want unset when the producer stated no termination", exit)
+	}
+}
+
+func TestAKilledShellDrawsNoExitChip(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(bashExitActivity(&conversationv1.AgentBashTermination{
+		How: &conversationv1.AgentBashTermination_Killed{Killed: &conversationv1.AgentBashKilled{}},
+	}))
+
+	// Assert: an exit code and a kill are different endings, and only one of
+	// them has a number.
+	if exit := h.card().GetReturned().GetExit(); exit != nil {
+		t.Fatalf("exit = %v, want unset for a killed command", exit)
+	}
+}
+
+func TestATextOutputShellDrawsNoExitChipWhenNoneWasStated(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "sleep 999"},
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stdout: "still going",
+						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+					}},
+				},
+				Cause: &conversationv1.AgentBashInterrupted_ByUser{ByUser: &conversationv1.AgentBashInterruptedByUser{}},
+			}},
+		}},
+	}))
+
+	// Assert: an interrupted command reported no status, so the card shows none.
+	if exit := h.card().GetReturned().GetExit(); exit != nil {
+		t.Fatalf("exit = %v, want unset for an interrupted command", exit)
+	}
+}
