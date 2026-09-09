@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { MARKDOWN_SHOWCASE } from "../../../src/fake/scenarios/prose.js";
+import { DAEMON_TREE_WRAP_COLUMNS, MARKDOWN_SHOWCASE } from "../../../src/fake/scenarios/prose.js";
 import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 const blockTypes = (driven: Awaited<ReturnType<typeof driveScenario>>): string[] =>
@@ -92,6 +92,20 @@ describe("the markdown showcase", () => {
 
     // Assert
     expect(theResult(driven).result).toBe(MARKDOWN_SHOWCASE);
+  });
+
+  it("carries a tree branch wider than the daemon's wrap width, so the wrap is exercised", () => {
+    // Arrange — the branch lines are the ones opening with a connector.
+    const branches = MARKDOWN_SHOWCASE.split("\n").filter((line) => /^[│ ]*[├└]── /u.test(line));
+
+    // Act
+    const widest = Math.max(...branches.map((line) => [...line].length));
+
+    // Assert — a showcase every branch of which fits would never make the
+    // daemon wrap anything, and the wrapped tree is what the webapp is
+    // photographed drawing.
+    expect(branches.length).toBeGreaterThan(0);
+    expect(widest).toBeGreaterThan(DAEMON_TREE_WRAP_COLUMNS);
   });
 
   it("emits one PROSE block, behind the reasoning every turn opens with", async () => {
