@@ -625,10 +625,36 @@ on daemon-link\='s own acceptance seam — the same one the
 `not_yet_adopted' refusal already uses — so the adopt goes out the
 instant the successor proves it is listening.
 
-With NEITHER a standing nor a pending successor there is nothing to adopt
-ONTO and no address to recover one from, which is the real breach of the
-announcement order: it is logged ERROR and the workspace keeps the old
-stream."
+WITH NEITHER A STANDING NOR A PENDING SUCCESSOR, THE ANNOUNCEMENT HAS
+NOT BEEN READ YET, AND THAT IS THE SECOND HALF OF THE SAME DEFECT.  The
+pending branch above closes the window between the dial going out and the
+successor accepting it; it does NOT close the window before the dial goes
+out at all, because `agent-repl-link-successor-pending-p' only becomes
+true inside the announcement handler.  The two pushes are in flight
+together and arrive on different streams, so which one this Emacs
+processes first is a coin toss on the transport.
+
+Measured, in the e2e sandbox: the outgoing daemon announced the stand-down
+at 16:43:37.310 and pushed the transfer notices at .314; Emacs decoded the
+two `WatchHostWorkspaceResponse' pushes at .321 and the
+`DaemonShutdownAnnounced' at .322.  On the earlier order this branch
+called the ordering a breach and dropped the notice, no adopt was ever
+sent, the outgoing daemon sat out its whole adoption window, and the
+successor was promoted only by the old stream dying underneath it -- which
+is `TestEmacsHandoverTransfersAtFreeness' waiting out 21s for a promotion
+that healthy runs make in about two.
+
+The daemon sends the announcement BEFORE the transfer, always
+(`rollout.handover': announce, snapshot the participants, write the
+manifest, then transfer each free workspace).  So a transfer with no
+successor yet is a notice that overtook its own announcement, not a
+missing one, and it WAITS on the same acceptance seam the pending branch
+uses.  A successor that genuinely never arrives simply never wakes it, and
+the workspace keeps the old stream throughout -- exactly as before.
+
+It is a WARNING rather than an INFO because the overtaking order is
+unusual and worth seeing in a log, and never an ERROR because nothing is
+wrong: the announcement is on its way."
   (let ((new (agent-repl-link-successor)))
     (cond
      (new
@@ -639,7 +665,8 @@ stream."
       (agent-repl--info ws "elisp.host.transferred-awaiting-successor ws=%s" ws)
       (agent-repl-host--adopt-on-acceptance ws))
      (t
-      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws)))))
+      (agent-repl--warn ws "elisp.host.transferred-before-the-announcement ws=%s" ws)
+      (agent-repl-host--adopt-on-acceptance ws)))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 

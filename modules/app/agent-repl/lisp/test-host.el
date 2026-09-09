@@ -1026,19 +1026,70 @@ unary rpc can produce, which the contract never collapses into one."
       ;; Assert
       (should (eq (agent-repl-host-conn "ws-1") successor)))))
 
-(ert-deftest agent-repl-test-host-transferred-without-a-successor-is-an-error ()
-  "No successor means the client relay broke; that is loud."
+(ert-deftest agent-repl-test-host-transferred-before-the-announcement-is-not-an-error ()
+  "A notice that overtook its own announcement is an ordering, not a breach.
+The daemon announces the stand-down and THEN transfers each free
+workspace, and the two pushes ride different streams — so which one this
+Emacs decodes first is a coin toss.  Measured in the e2e sandbox: the two
+`WatchHostWorkspaceResponse\=' transfer pushes were decoded at
+16:43:37.321 and the `DaemonShutdownAnnounced\=' at .322."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (setq agent-repl-test-host--successor nil)
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    ;; Assert
+    (should-not (agent-repl-test-host--logged-p
+                 :error "elisp.host.transferred-without-successor"))))
+
+(ert-deftest agent-repl-test-host-transferred-before-the-announcement-records-the-order ()
+  "The overtaking order is unusual, so it is seen; it is not an error."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending nil)
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
     (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :error "elisp.host.transferred-without-successor"))))
+             :warn "elisp.host.transferred-before-the-announcement"))))
 
-(ert-deftest agent-repl-test-host-transferred-without-a-successor-keeps-the-stream ()
+(ert-deftest agent-repl-test-host-transferred-before-the-announcement-adopts-on-acceptance ()
+  "THE DEFECT: this adopt was dropped, so the workspace was never handed over.
+The outgoing daemon then sat out its whole adoption window and the
+successor was promoted only by the old stream dying underneath it, which
+is `TestEmacsHandoverTransfersAtFreeness\=' waiting out 21s for a
+promotion healthy runs make in about two."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      ;; Act — daemon-link's acceptance seam, once the announcement lands
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-transferred-before-the-announcement-sends-no-adopt-yet ()
+  "Nothing is sent to a daemon this Emacs has not even dialed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor nil
+          agent-repl-test-host--successor-pending nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    ;; Assert
+    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-transferred-before-the-announcement-keeps-the-stream ()
   "A workspace whose old stream was dropped would be served by nobody."
   (agent-repl-test-host--with-harness
     ;; Arrange
