@@ -213,6 +213,11 @@ export interface FakeDaemon {
 
   // --- web-link and daemon-lifecycle pushes --------------------------------
   transfer(workspace: string, address: string): void;
+  /** Name the session this workspace's page should attribute its logs to. */
+  pushSessionIdentity(
+    workspace: string,
+    identity: { agentReplSessionId: string; claudeSessionId?: string },
+  ): void;
   announceShutdown(init: Parameters<typeof shutdownAnnounced>[0]): void;
   scheduleDrain(atMs: bigint, reason: DrainReason): void;
   cancelDrain(): void;
@@ -1212,6 +1217,22 @@ export function createFakeDaemon(): FakeDaemon {
       return [...(tokens.get(key(workspace, feed)) ?? [])];
     },
 
+    pushSessionIdentity(workspace, identity) {
+      broadcast(
+        "watchWebWorkspace",
+        workspace,
+        undefined,
+        create(WatchWebWorkspaceResponseSchema, {
+          push: {
+            case: "sessionIdentity",
+            value: {
+              agentReplSessionId: identity.agentReplSessionId,
+              claudeSessionId: identity.claudeSessionId ?? "",
+            },
+          },
+        }),
+      );
+    },
     transfer(workspace, address) {
       broadcast(
         "watchWebWorkspace",

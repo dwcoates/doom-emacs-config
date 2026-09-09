@@ -241,3 +241,78 @@ describe("the app's own diagnostics", () => {
     expect(recorded().at(-1)?.workspace?.dir).toBe(harness.ctx.workspace.dir);
   });
 });
+
+/**
+ * The one record the daemon was handed for OPERATION. Absence throws rather
+ * than reading as an absent field: "the record never went" and "it went
+ * without the identity" are different facts, and only one is under test.
+ */
+function recordFor(operation: string): ClientLogRecord {
+  const found = recorded().find((call) => call.record?.operation === operation)?.record;
+  if (found === undefined) throw new Error(`no ClientLog record for ${operation}`);
+  return found;
+}
+
+describe("the session identity", () => {
+  it("stamps the session the link stream named on a later record", async () => {
+    // Arrange: the daemon names the workspace's session on the page's own
+    // non-drawn link stream, which is where the page learns it.
+    await withLogSink();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    harness.fake.pushSessionIdentity(WORKSPACE_ID, { agentReplSessionId: "sess-1" });
+    await harness.settle();
+    // Act
+    log("error", "the view arrived thin", { operation: "harness.identity-case" });
+    await harness.settle();
+    // Assert
+    expect(recordFor("harness.identity-case").context).toMatchObject({
+      agent_repl_session_id: "sess-1",
+    });
+  });
+
+  it("stamps the vendor conversation the same frame named", async () => {
+    // Arrange
+    await withLogSink();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    harness.fake.pushSessionIdentity(WORKSPACE_ID, {
+      agentReplSessionId: "sess-1",
+      claudeSessionId: "claude-1",
+    });
+    await harness.settle();
+    // Act
+    log("error", "the view arrived thin", { operation: "harness.vendor-case" });
+    await harness.settle();
+    // Assert
+    expect(recordFor("harness.vendor-case").context).toMatchObject({
+      claude_session_id: "claude-1",
+    });
+  });
+
+  it("re-stamps a rotation's new session without a page reload", async () => {
+    // Arrange: a restart mints a new identity while the page stays open.
+    await withLogSink();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    harness.fake.pushSessionIdentity(WORKSPACE_ID, { agentReplSessionId: "sess-1" });
+    await harness.settle();
+    harness.fake.pushSessionIdentity(WORKSPACE_ID, { agentReplSessionId: "sess-2" });
+    await harness.settle();
+    // Act
+    log("error", "the view arrived thin", { operation: "harness.rotation-case" });
+    await harness.settle();
+    // Assert
+    expect(recordFor("harness.rotation-case").context).toMatchObject({
+      agent_repl_session_id: "sess-2",
+    });
+  });
+
+  it("leaves a record raised before the frame unattributed", async () => {
+    // Arrange: the stream is open and the daemon has named nothing.
+    await withLogSink();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Act
+    log("error", "the view arrived thin", { operation: "harness.unattributed-case" });
+    await harness.settle();
+    // Assert
+    expect(recordFor("harness.unattributed-case").context).not.toHaveProperty("agent_repl_session_id");
+  });
+});
