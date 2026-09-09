@@ -297,6 +297,41 @@ arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
 
+## A BROWSER page holds ONE stream; Emacs holds its own
+
+Every standing watch a webview holds is a SUBSCRIPTION on that page's single
+`WatchPage` stream (`internal/server/page.go`). Emacs is unaffected: it dials
+the dedicated `WatchDaemon`, `WatchHostWorkspace` and `WatchWorkspaceRoster`
+rpcs directly, and those are unchanged.
+
+THE REASON IS THE BROWSER'S, NOT THIS DAEMON'S. This daemon serves h2c, but no
+browser negotiates cleartext HTTP/2, so a webview talks HTTP/1.1 — which caps
+a page at SIX connections per host. Measured against this daemon in the e2e
+sandbox: standing streams 1-6 arrived within 9ms and were logged as accepted;
+streams 7, 8 and 9 produced NO record at all, and a plain same-origin `GET`
+issued while six were held timed out in the browser after 5s. The webapp held
+six panel watches before opening its feed tail, so the tail QUEUED forever and
+the root feed never drew a live row.
+
+Two rules follow for anything added here:
+
+- **A NEW STANDING STREAM THE WEBAPP WILL HOLD NEEDS AN ARM IN
+  `SubscribePageRequest` AND `PageFrame`, NOT JUST AN RPC.** A dedicated rpc a
+  page dials directly is one more connection against a budget of six, and the
+  page cannot know which of its watches will be the one over the line.
+- **A WATCH BODY WRITES TO `streamSink[R]`, NEVER TO A `connect.ServerStream`
+  DIRECTLY.** That is what lets the SAME body serve the dedicated rpc and the
+  page mux — the subscription invariant, `WatchFeed`'s token pin, the
+  acceptance and the refusals are one implementation rather than two kept in
+  step by hand. `*connect.ServerStream[R]` satisfies the interface as it
+  stands.
+
+Acceptance for a muxed subscription is `SubscribePage`'s own ANSWER: the body
+signals through the notifier on its context (`acceptStream`, `accept.go`) at
+exactly the point a dedicated stream flushes status 200, and the unary is
+withheld until it does. So a view published after `SubscribePage` returns
+cannot be missed, which is the same guarantee the header flush gives.
+
 ## Production stop bounds NEST; they are never equal
 
 A stop is a SEQUENCE of promises, and each outer one must strictly contain
