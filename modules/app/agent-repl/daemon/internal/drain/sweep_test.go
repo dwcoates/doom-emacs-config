@@ -521,3 +521,120 @@ func TestSweepGivesUpOnAShimThatNeverAnswersTheStandDown(t *testing.T) {
 		t.Fatalf("hibernated = %v, want %s deferred behind a stand-down that never answered", hibernated, ws)
 	}
 }
+
+// TestTheHibernationReleaseRepublishesTheHostView pins the composer's way back
+// open. The host view's composer arm is composed from the OCCUPANCY LEASE, so
+// every push taken while the hibernation lease stood said `draining`, and the
+// server never sees a lease released — without this republish the last push a
+// host client holds keeps the composer shut, and Emacs refuses the prompt that
+// would have revived the session.
+func TestTheHibernationReleaseRepublishesTheHostView(t *testing.T) {
+	// Arrange
+	var published []ids.WorkspaceID
+	h := newHarness(t, func(d *Deps) {
+		d.PublishHost = func(ws ids.WorkspaceID) { published = append(published, ws) }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 {
+		t.Fatalf("hibernated = %v, want the one idle session", hibernated)
+	}
+	if len(published) != 1 || published[0] != ws {
+		t.Fatalf("PublishHost calls = %v, want exactly the hibernated workspace %q", published, ws)
+	}
+}
+
+// TestTheHibernationRepublishHappensAfterTheLeaseIsReleased is the ORDERING
+// half: a republish composed while the lease still stood would compose the
+// draining arm all over again, so the fix would push the very state it exists
+// to clear. The assertion reads the lease row from inside the callback, which
+// is exactly what the composer would read.
+func TestTheHibernationRepublishHappensAfterTheLeaseIsReleased(t *testing.T) {
+	// Arrange
+	var heldAtPublish []wsm.LeaseHolder
+	h := newHarness(t)
+	h.c.deps.PublishHost = func(published ids.WorkspaceID) {
+		lease, held, err := h.db.Lease(context.Background(), published)
+		if err != nil {
+			t.Errorf("Lease: %v", err)
+			return
+		}
+		if held {
+			heldAtPublish = append(heldAtPublish, lease.Holder)
+		}
+	}
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 1 || hibernated[0] != ws {
+		t.Fatalf("hibernated = %v, want the one idle session %q", hibernated, ws)
+	}
+	if len(heldAtPublish) != 0 {
+		t.Fatalf("a lease was still held at the republish (holders %v), want the release to come first", heldAtPublish)
+	}
+}
+
+// TestARefusedHibernationStillRepublishesTheHostView covers the deferral path:
+// the lease was taken, so a push taken meanwhile already said `draining`, and
+// the release runs on every path out of the hibernation. The republish must
+// follow it there too, or a turn_in_flight refusal leaves the composer shut.
+func TestARefusedHibernationStillRepublishesTheHostView(t *testing.T) {
+	// Arrange
+	var published []ids.WorkspaceID
+	h := newHarness(t, func(d *Deps) {
+		d.PublishHost = func(ws ids.WorkspaceID) { published = append(published, ws) }
+	})
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.stand.answer[ws] = &shimv1.HibernateResponse{
+		Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+			Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+		}},
+	}
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert
+	if len(hibernated) != 0 {
+		t.Fatalf("hibernated = %v, want the refusal to defer", hibernated)
+	}
+	if len(published) != 1 || published[0] != ws {
+		t.Fatalf("PublishHost calls = %v, want the refused workspace %q republished", published, ws)
+	}
+}
+
+// TestAHibernationWithNoHostSurfaceWiredIsTolerated pins the nil dep: the
+// controller is built in tests and in a boot order where no host surface
+// exists yet, and a sweep must not take the daemon down for it.
+func TestAHibernationWithNoHostSurfaceWiredIsTolerated(t *testing.T) {
+	// Arrange
+	h := newHarness(t, func(d *Deps) { d.PublishHost = nil })
+	h.workspace(t, instant.Add(-2*time.Hour))
+
+	// Act
+	hibernated, err := h.c.Sweep(context.Background(), instant)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if len(hibernated) != 1 {
+		t.Fatalf("hibernated = %v, want the idle session hibernated with no host surface wired", hibernated)
+	}
+}
