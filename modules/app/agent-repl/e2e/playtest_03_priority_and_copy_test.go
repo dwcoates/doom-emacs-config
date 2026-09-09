@@ -125,9 +125,19 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 	awaitPanelShown(t, s, thirdName)
 	// AND THE PAGE DREW IT. The roster label is the daemon's answer; this is
 	// that answer rendered, on the one surface that renders it.
-	s.awaitInPageFor(t, playtestPagePushBound,
-		"the sidebar's roster row to draw the priority badge",
-		`document.querySelector('[data-roster-row] [data-priority=`+jsString(decodeString(set))+`]')`)
+	//
+	// THE WHOLE SELECTOR GOES THROUGH `jsString`, and that is not style. Built
+	// the other way round -- a Go string carrying the selector's own single
+	// quotes with `jsString(label)` spliced into the middle -- the label's
+	// quotes CLOSE the literal, and the injected script is a syntax error.
+	// WebKit then never runs it and never calls back, so the probe stores
+	// nothing and the wait times out reporting `last value was null` with no
+	// diagnosis string at all: the one failure mode that looks like the page
+	// answering "the badge is absent" while the page has in fact drawn it.
+	// It had (`sidebar.row.priority label=P1` in the webapp's own log) through
+	// two whole rounds of this step timing out.
+	s.awaitInPage(t, "the sidebar's roster row to draw the priority badge",
+		`document.querySelector(`+jsString(`[data-roster-row] [data-priority="`+decodeString(set)+`"]`)+`) !== null`)
 	// AND THE TAB BAR'S OWN STRING CARRIES IT, which is the claim the PICTURE
 	// is about and the one the roster accessor cannot make.
 	//
@@ -170,8 +180,7 @@ func TestPlaytestPriorityAndDeprioClose(t *testing.T) {
 	e.AwaitEval(fmt.Sprintf("the roster's priority badge for %q to go away", thirdName),
 		label, func(raw json.RawMessage) bool { return decodeString(raw) == "" })
 	awaitPanelShown(t, s, thirdName)
-	s.awaitInPageFor(t, playtestPagePushBound,
-		"the sidebar's roster rows to draw NO priority badge at all",
+	s.awaitInPage(t, "the sidebar's roster rows to draw NO priority badge at all",
 		`document.querySelectorAll('[data-roster-row] [data-priority]').length === 0`)
 	// AND THE BAR'S OWN STRING HAS LOST IT. The set step asserted the label
 	// INTO the drawn tabline, so this is the same read negated -- and it is

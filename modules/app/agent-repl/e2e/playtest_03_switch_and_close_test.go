@@ -136,20 +136,13 @@ func tablineAndNames(t *testing.T, s *playtestScenario) (drawn string, names []s
 	return both[0], both[1:]
 }
 
-// playtestPagePushBound bounds a wait on something the page draws only after
-// a DAEMON ROUND TRIP has landed -- the roster row's `current` flag, a
-// priority badge -- as opposed to a redraw of state the page already holds.
-//
-// It is `emacsVerbBound`, the Emacs layer's own named bound for one verb's
-// round trip, because that is exactly what is being waited on: Emacs's Select
-// or SetWorkspacePriority reaching the daemon, the daemon re-resolving the
-// roster, and the push reaching this page. `playtestPageBound` is sized for
-// the render ALONE -- measured at 242, 262, 423, 445 and 487ms for the
-// webapp's own first draw -- and says nothing about the trip in front of it,
-// so using it here was bounding the wrong work. MEASURED at this shape of
-// site in this owner's own runs: the daemon's hold tray emptying after a
-// submit, which is the same round trip, took 421 and 422ms.
-const playtestPagePushBound = emacsVerbBound
+// NO WIDER BOUND IS USED FOR A PUSH-DRIVEN WAIT, and that is a measurement
+// rather than a preference. Both of this owner's page waits that follow a
+// daemon round trip were once suspected of needing one; MEASURED once their
+// real causes were fixed, the sidebar's `current` row arrives in 22, 22 and
+// 23ms and the page-identity read answers in 21, 22 and 23ms, against
+// `playtestPageBound`'s 2s. A wider bound here would have bought nothing and
+// hidden both defects for another round.
 
 // awaitPageIsForWorkspace asserts that the page in the webview on the glass
 // is THIS workspace's page, read from inside the page itself.
@@ -178,8 +171,7 @@ func awaitPageIsForWorkspace(t *testing.T, s *playtestScenario, dir string) {
 // is the webapp suite's own hook for exactly that (`webapp/src/sidebar/row.ts`).
 func awaitSidebarNamesCurrent(t *testing.T, s *playtestScenario, ws string) {
 	t.Helper()
-	s.awaitInPageFor(t, playtestPagePushBound,
-		fmt.Sprintf("the sidebar's current roster row to name %q", ws),
+	s.awaitInPage(t, fmt.Sprintf("the sidebar's current roster row to name %q", ws),
 		`(function () { var row = document.querySelector('[data-roster-row][data-current="true"]');
                         return row && row.textContent.indexOf(`+jsString(ws)+`) !== -1; })()`)
 }
@@ -582,8 +574,7 @@ func TestPlaytestCloseWithAHeldPromptKeepsTheTab(t *testing.T) {
 	// a different fact from the one this step is about -- and the first round
 	// of this capture showed exactly that tray, drawn `held (1)`.
 	awaitPanelShown(t, s, name)
-	s.awaitInPageFor(t, playtestPagePushBound,
-		"the daemon's hold tray to still be empty at the instant of the capture",
+	s.awaitInPage(t, "the daemon's hold tray to still be empty at the instant of the capture",
 		`document.querySelector('[data-component="hold-tray"] .hold-tray-empty[data-empty]') !== null`)
 	p.capture("held-close-tab-stays", "`SPC j d` pressed while a prompt is held against the live turn",
 		fmt.Sprintf("the close was REFUSED (`*Messages*` carries \"close blocked\"), %q is still in "+
