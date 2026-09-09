@@ -221,6 +221,19 @@ func (s *server) SubscribePage(
 				req.Msg.GetPage()), true)
 	}
 
+	watch, known := s.pageWatchFor(page, req.Msg)
+	if !known {
+		// An arm the schema grew and `pageWatchFor` did not. It is a defect in
+		// this daemon, not a client error, and it is raised rather than
+		// answered with a subscription that could never push anything.
+		s.log.Error("daemon.server.page_subscription_unhandled",
+			"a SubscribePage arm has no watch behind it; the subscription was refused",
+			dlog.Context{"page": page.id, "subscription": req.Msg.GetSubscription(),
+				"arm": fmt.Sprintf("%T", req.Msg.GetRequest())})
+		return nil, connect.NewError(connect.CodeUnimplemented,
+			fmt.Errorf("%s: arm %T has no watch behind it", rpc, req.Msg.GetRequest()))
+	}
+
 	subCtx, cancel := context.WithCancel(page.ctx)
 	record := &pageSubscription{cancel: cancel}
 	page.mu.Lock()
@@ -243,15 +256,14 @@ func (s *server) SubscribePage(
 
 	done := make(chan error, 1)
 	go func() {
-		done <- s.runPageSubscription(subCtx, page, req.Msg)
+		done <- watch.Run(subCtx)
 		s.endPageSubscription(page, req.Msg.GetSubscription())
 	}()
 
 	select {
 	case <-accepted:
 		s.log.Debug(rpc, "a page subscription was accepted", dlog.Context{
-			"page": page.id, "subscription": req.Msg.GetSubscription(),
-			"watch": pageWatchName(req.Msg),
+			"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name,
 		})
 		return connect.NewResponse(&agentreplv1.SubscribePageResponse{}), nil
 	case err := <-done:
@@ -261,7 +273,7 @@ func (s *server) SubscribePage(
 		s.endPageSubscription(page, req.Msg.GetSubscription())
 		if err == nil {
 			err = TransportClosed(s.log, rpc, "watch_ended_before_acceptance",
-				fmt.Sprintf("the %s subscription ended before it was accepted", pageWatchName(req.Msg)), false)
+				fmt.Sprintf("the %s subscription ended before it was accepted", watch.Name), false)
 		}
 		return nil, err
 	case <-ctx.Done():
@@ -339,97 +351,95 @@ func (s *server) endPageSubscription(page *pageStream, id string) {
 		dlog.Context{"page": page.id, "subscription": id})
 }
 
-// runPageSubscription runs one subscription's body against the page's mux.
+// pageWatch is what ONE arm of the subscription oneof resolves to: the rpc it
+// stands for, and the body that serves it.
+//
+// THE ARM IS READ ONCE. Naming the watch and running it are the same question
+// asked of the same oneof, and asking it in two switches is how the two come to
+// disagree about an arm somebody added to only one of them.
+type pageWatch struct {
+	// Name is the rpc this subscription stands in for, for the log.
+	Name string
+	// Run serves it, writing into the page's mux.
+	Run func(context.Context) error
+}
+
+// pageWatchFor resolves one subscription request onto the watch behind it.
 //
 // EVERY ARM CALLS THE SAME BODY THE DEDICATED RPC CALLS. There is no second
 // implementation of any watch here, only a second destination for its pushes.
-func (s *server) runPageSubscription(
-	ctx context.Context,
+// An arm with nothing behind it answers false, which its caller raises.
+func (s *server) pageWatchFor(
 	page *pageStream,
 	req *agentreplv1.SubscribePageRequest,
-) error {
+) (pageWatch, bool) {
 	sub := req.GetSubscription()
 	switch watch := req.GetRequest().(type) {
 	case *agentreplv1.SubscribePageRequest_Roster:
-		return s.watchWorkspaceRoster(ctx, watch.Roster,
-			pageSink[agentreplv1.WatchWorkspaceRosterResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchWorkspaceRosterResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Roster{Roster: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchWorkspaceRosterResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchWorkspaceRosterResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Roster{Roster: m}}
+			}}
+		return pageWatch{"WatchWorkspaceRoster", func(ctx context.Context) error {
+			return s.watchWorkspaceRoster(ctx, watch.Roster, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_WebWorkspace:
-		return s.watchWebWorkspace(ctx, watch.WebWorkspace,
-			pageSink[agentreplv1.WatchWebWorkspaceResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WebWorkspace{WebWorkspace: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchWebWorkspaceResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WebWorkspace{WebWorkspace: m}}
+			}}
+		return pageWatch{"WatchWebWorkspace", func(ctx context.Context) error {
+			return s.watchWebWorkspace(ctx, watch.WebWorkspace, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Daemon:
-		return s.watchDaemon(ctx, watch.Daemon,
-			pageSink[agentreplv1.WatchDaemonResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchDaemonResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Daemon{Daemon: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchDaemonResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchDaemonResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Daemon{Daemon: m}}
+			}}
+		return pageWatch{"WatchDaemon", func(ctx context.Context) error {
+			return s.watchDaemon(ctx, watch.Daemon, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Topbar:
-		return s.watchTopbar(ctx, watch.Topbar,
-			pageSink[agentreplv1.WatchTopbarResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchTopbarResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Topbar{Topbar: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchTopbarResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchTopbarResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Topbar{Topbar: m}}
+			}}
+		return pageWatch{"WatchTopbar", func(ctx context.Context) error {
+			return s.watchTopbar(ctx, watch.Topbar, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Footer:
-		return s.watchFooter(ctx, watch.Footer,
-			pageSink[agentreplv1.WatchFooterResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchFooterResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Footer{Footer: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchFooterResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchFooterResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Footer{Footer: m}}
+			}}
+		return pageWatch{"WatchFooter", func(ctx context.Context) error {
+			return s.watchFooter(ctx, watch.Footer, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Holds:
-		return s.watchDaemonHolds(ctx, watch.Holds,
-			pageSink[agentreplv1.WatchDaemonHoldsResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchDaemonHoldsResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Holds{Holds: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchDaemonHoldsResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchDaemonHoldsResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Holds{Holds: m}}
+			}}
+		return pageWatch{"WatchDaemonHolds", func(ctx context.Context) error {
+			return s.watchDaemonHolds(ctx, watch.Holds, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_Feed:
-		return s.watchFeed(ctx, watch.Feed,
-			pageSink[agentreplv1.WatchFeedResponse]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.WatchFeedResponse) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Feed{Feed: m}}
-				}})
+		sink := pageSink[agentreplv1.WatchFeedResponse]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.WatchFeedResponse) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Feed{Feed: m}}
+			}}
+		return pageWatch{"WatchFeed", func(ctx context.Context) error {
+			return s.watchFeed(ctx, watch.Feed, sink)
+		}}, true
 	case *agentreplv1.SubscribePageRequest_LoginTerminal:
-		return s.watchLoginTerminal(ctx, watch.LoginTerminal,
-			pageSink[agentreplv1.LoginTerminalOutput]{page: page, sub: sub,
-				wrap: func(m *agentreplv1.LoginTerminalOutput) *agentreplv1.PageFrame {
-					return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_LoginTerminal{LoginTerminal: m}}
-				}})
+		sink := pageSink[agentreplv1.LoginTerminalOutput]{page: page, sub: sub,
+			wrap: func(m *agentreplv1.LoginTerminalOutput) *agentreplv1.PageFrame {
+				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_LoginTerminal{LoginTerminal: m}}
+			}}
+		return pageWatch{"WatchLoginTerminal", func(ctx context.Context) error {
+			return s.watchLoginTerminal(ctx, watch.LoginTerminal, sink)
+		}}, true
 	default:
-		// An arm the schema grew and this switch did not. It is a defect in
-		// this daemon, not a client error, and it is raised rather than
-		// answered with an empty subscription that would never push.
-		s.log.Error("daemon.server.page_subscription_unhandled",
-			"a SubscribePage arm has no watch behind it; the subscription was refused",
-			dlog.Context{"page": page.id, "subscription": sub, "arm": fmt.Sprintf("%T", watch)})
-		return connect.NewError(connect.CodeUnimplemented,
-			fmt.Errorf("server: SubscribePage arm %T has no watch behind it", watch))
-	}
-}
-
-// pageWatchName names a subscription's arm for the log.
-func pageWatchName(req *agentreplv1.SubscribePageRequest) string {
-	switch req.GetRequest().(type) {
-	case *agentreplv1.SubscribePageRequest_Roster:
-		return "WatchWorkspaceRoster"
-	case *agentreplv1.SubscribePageRequest_WebWorkspace:
-		return "WatchWebWorkspace"
-	case *agentreplv1.SubscribePageRequest_Daemon:
-		return "WatchDaemon"
-	case *agentreplv1.SubscribePageRequest_Topbar:
-		return "WatchTopbar"
-	case *agentreplv1.SubscribePageRequest_Footer:
-		return "WatchFooter"
-	case *agentreplv1.SubscribePageRequest_Holds:
-		return "WatchDaemonHolds"
-	case *agentreplv1.SubscribePageRequest_Feed:
-		return "WatchFeed"
-	case *agentreplv1.SubscribePageRequest_LoginTerminal:
-		return "WatchLoginTerminal"
-	default:
-		return "unknown"
+		return pageWatch{}, false
 	}
 }
