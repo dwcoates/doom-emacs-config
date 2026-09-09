@@ -46,7 +46,7 @@ import { bootFailed } from "./failure/sink.js";
 import { mountFailureOverlay, type FailureOverlayHandle } from "./failure/overlay.js";
 import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
 import { createAgentReplClient, type AgentReplClient } from "./rpc/client.js";
-import { createAppContext } from "./rpc/context.js";
+import { createAppContext, type AppContext } from "./rpc/context.js";
 import { pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
@@ -86,6 +86,12 @@ function clientLogSink(getClient: () => AgentReplClient, workspace: WorkspaceRef
 
 export async function boot(): Promise<void> {
   let overlay: FailureOverlayHandle | null = null;
+  // HOISTED SO A FAILED BOOT CAN STOP DIALING. The page's one stream is opened
+  // by `createAppContext`, which is several steps ABOVE `adoptAtBoot` — so a
+  // boot that fails at adoption, or at any mount after it, leaves that stream
+  // reopening on backoff against a daemon the page has already given up on,
+  // forever, behind a `boot_failed` card. See the catch.
+  let opened: AppContext | null = null;
   try {
     // THE LOGGER GOES IN BEFORE THE FIRST THING THAT LOGS, AND THAT ORDER IS
     // THE WHOLE OF THIS BLOCK'S SHAPE.
@@ -143,6 +149,7 @@ export async function boot(): Promise<void> {
       composerEnabled: address.composer,
       page: connectionId,
     });
+    opened = ctx;
     log("info", "the webapp booted", {
       operation: "main.boot",
       context: {
@@ -218,6 +225,12 @@ export async function boot(): Promise<void> {
     }
 
   } catch (err) {
+    // THE PAGE GOES QUIET BEFORE IT REPORTS. There is no workspace to show and
+    // nothing on this page can get one back, so the one stream is cancelled and
+    // not reopened — a dead page that keeps dialing costs the daemon a
+    // connection and buries its own `boot_failed` card under a reopen loop's
+    // error records.
+    opened?.quiesce();
     reportBootFailure(err, overlay);
     throw err;
   }
