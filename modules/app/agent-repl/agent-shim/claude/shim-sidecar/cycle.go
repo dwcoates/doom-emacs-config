@@ -729,8 +729,14 @@ func (s *sidecar) mainAgentFor(target discover.Target) string {
 // DISCOVERY ORDER IS NOT CAUSAL ORDER, exactly as it is not for refreshSpawnFacts
 // beside it: the rotated transcript can be discovered in the window before its
 // link file is visible to this process, and the book was frozen at watch time.
-// Re-reading it every rescan is what makes a mid-tail rotation land in the right
-// book without a restart.
+// Re-reading it is what makes a mid-tail rotation land in the right book without
+// a restart.
+//
+// IT RUNS ON EVERY POLL, not only on every rescan, and pollAll states why: a
+// record read under a book the link file has already superseded is never read
+// again, so the resolution must share the read's clock rather than discovery's.
+// Running it twice per rescan tick costs nothing — an unchanged book is a map
+// lookup and returns before it writes a word.
 //
 // IT UNPARKS A FILE THE STORE REFUSED. A park is otherwise permanent and that is
 // right — a batch the store can never accept is a producer defect and re-reading
@@ -857,8 +863,27 @@ func (s *sidecar) trackDetached(target discover.Target, now time.Time) {
 // cursor only after that write was DURABLE. It is reachable only while
 // production is live, so a file is never read without somewhere to put what it
 // says.
+//
+// THE BOOKS ARE RE-RESOLVED HERE, IN THE SAME PASS THAT READS THE BYTES, and
+// not only on the rescan tick beside discovery. A rotation's link file appears
+// without warning, the reader polls four times for every rescan, and a record
+// converted under the id its file is NAMED by is wrong FOREVER: an accepted
+// batch advances the cursor, and a file that was never parked is never re-read,
+// so nothing afterwards revisits the book those rows landed in. Resolving the
+// book on a slower clock than the read is therefore not a staleness bound, it
+// is a window in which one conversation is silently split across two books —
+// the very split ("would move the row from book A to book B") this resolution
+// exists to prevent. Tying it to the read closes the window: no byte is
+// converted under an identity the disk has already contradicted.
+//
+// IT IS CHEAP, because identity.Index answers a known id from its maps and only
+// an id NO record names costs a lookup on disk — and that miss is exactly the
+// answer a rotation invalidates, so it is the one that must never be cached.
+// The heavier full Refresh (which also retires records the shim has REMOVED)
+// stays on the rescan tick, where discovery's own scan already is.
 func (s *sidecar) pollAll() {
 	s.requireCursors("pollAll")
+	s.rekeyRotations()
 	nowMs := s.now().UnixMilli()
 	for path, w := range s.watchers {
 		if s.parked[path] {
