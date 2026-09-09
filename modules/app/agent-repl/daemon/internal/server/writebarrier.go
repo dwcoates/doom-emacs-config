@@ -126,6 +126,52 @@ func (b *WriteBarrier) AwaitWrittenSince(mark uint64, bound time.Duration) bool 
 	}
 }
 
+// AwaitQuiescent waits, bounded, for the connections to stop writing, and
+// reports whether they did.
+//
+// IT IS THE HALF OF THE EXIT `AwaitWrittenSince` DOES NOT COVER. `Serving`'s
+// counted gate skips `standingStreamPaths` on purpose — a Watch* handler does
+// not return until its client goes away, so counting it would make every exit
+// wait out its whole grace — but the daemon's LAST WORDS go out on exactly
+// those streams. `DaemonShutdownAnnounced` is pushed onto every `WatchDaemon`
+// stream and the drain then calls `Exit` on the next line, so the exit's own
+// `AwaitQuiet` (which sees no in-flight unary call at all) returns at once and
+// `Server.Shutdown` closes the streams over a push that has not reached the
+// socket. That is the same failure the unary half of this file exists for, on
+// the path that carries the announcement a client acts on.
+//
+// There is no mark here, and that is deliberate: the exit is not asking
+// whether ONE answer left, it is asking whether the connections owe anything
+// at all. So a barrier that has never been written to is quiescent, which is
+// the correct answer for a daemon nothing is connected to.
+//
+// FALSE means the connections were STILL WRITING when the bound expired. That
+// is not automatically a fault — one h2 connection multiplexes the standing
+// pushes with everything else, and a link that is genuinely busy will not fall
+// silent — so the caller states it rather than this type deciding it is an
+// error.
+func (b *WriteBarrier) AwaitQuiescent(bound time.Duration) bool {
+	deadline := time.Now().Add(bound)
+	ticker := time.NewTicker(barrierSettle)
+	defer ticker.Stop()
+	b.mu.Lock()
+	previous := b.written
+	b.mu.Unlock()
+	for {
+		<-ticker.C
+		b.mu.Lock()
+		written, active := b.written, b.active
+		b.mu.Unlock()
+		if active == 0 && written == previous {
+			return true
+		}
+		previous = written
+		if !time.Now().Before(deadline) {
+			return false
+		}
+	}
+}
+
 // barrierListener counts every connection it hands out.
 type barrierListener struct {
 	net.Listener
