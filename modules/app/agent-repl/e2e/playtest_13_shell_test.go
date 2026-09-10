@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -115,7 +116,7 @@ func TestPlaytestShellFamily(t *testing.T) {
 			          card.querySelector("[data-output-body]").textContent.indexOf("one") >= 0 &&
 			          card.querySelector("[data-output-body]").textContent.indexOf("two") >= 0 &&
 			          card.querySelector(".shell-exit") === null`,
-			expected: "A tool card titled `Bash` with the command line `pwd; ls | head`, a SUCCEEDED badge, " +
+			expected: "A tool card titled `Bash` with the command line `pwd; ls | head`, a green `done` badge, " +
 				"and an output body carrying the two lines `one` and `two`. NO exit chip in the head: this " +
 				"result states no status at all, and absence draws no chip rather than a green `exit 0` the " +
 				"shell never reported.",
@@ -135,6 +136,24 @@ func TestPlaytestShellFamily(t *testing.T) {
 				}
 				s.E.Eval(`(agent-repl-restart-workspace t ` + elispString(s.Name) + `)`)
 				s.awaitArm(t, s.Name, "the held turn to settle interrupted", ":interrupted")
+				// A FORCED RESTART BOUNCES THE SHIM, and the composer is
+				// CLOSED while it does: the gate reads `:restarting` and
+				// refuses every submission with "composer closed: restarting"
+				// (lisp/input.el). The interrupted arm says the turn ended, not
+				// that the workspace came back -- so the act is not over until
+				// the gate reopens, and the next row's submit would otherwise
+				// race the bounce. It did, the moment the captures stopped
+				// costing two seconds each. The bound is the layer's own
+				// default, the same one its `agent-repl-restart-workspace`
+				// scenario waits on (emacs_interrupt_e2e_test.go).
+				s.E.AwaitEval("the composer gate to reopen after the forced restart",
+					`(symbol-name (agent-repl-host-composer-gate `+elispString(s.Name)+`))`,
+					func(raw json.RawMessage) bool { return decodeString(raw) != ":restarting" })
+				// The bounce reloads the webview, so the page this playbook
+				// reads must be mounted again before the next row asserts on
+				// it.
+				s.Input = awaitInputBuffer(t, s.E, s.Name)
+				s.awaitPageMounted(t)
 			},
 			// THE STOP SETTLES THE CALL IT LANDED INSIDE. The vendor returns no
 			// `tool_result` for a held command -- the captured `interrupt`
@@ -148,7 +167,7 @@ func TestPlaytestShellFamily(t *testing.T) {
 			          card.getAttribute("data-output-form") === "text" &&
 			          card.querySelector("[data-output-body]").textContent.indexOf("interrupted by the user") >= 0 &&
 			          document.querySelector('[data-feed-row][data-row-kind="turnEnded"] [data-arm="interrupted"]') !== null`,
-			expected: "The `Bash` card for `tail -f /var/log/system.log` is SETTLED: a SUCCEEDED badge (a stop " +
+			expected: "The `Bash` card for `tail -f /var/log/system.log` is SETTLED: a green `done` badge (a stop " +
 				"is not the call breaking) and an output body reading `interrupted by the user` and nothing " +
 				"else -- no output was ever returned, so none is drawn. Beneath it the turn's INTERRUPTED " +
 				"terminal row, and the footer idle again. NOTHING is still drawn running.",
@@ -162,7 +181,7 @@ func TestPlaytestShellFamily(t *testing.T) {
 			          card.querySelector(".shell-exit") !== null &&
 			          card.querySelector(".shell-exit").getAttribute("data-exit-code") === "3" &&
 			          card.querySelector(".shell-exit").className.indexOf("err") >= 0`,
-			expected: "A tool card titled `Bash` with the command line `exit 3`, a SUCCEEDED badge (a non-zero " +
+			expected: "A tool card titled `Bash` with the command line `exit 3`, a green `done` badge (a non-zero " +
 				"exit is the command's verdict on itself, never a failure of the call), a RED `exit 3` chip in " +
 				"the head beside that badge, and an output body carrying `boom`. The chip is the very one a " +
 				"detached shell wears: the two cards are the same command told twice.",
@@ -211,7 +230,7 @@ func TestPlaytestShellFamily(t *testing.T) {
 			settled: `card.getAttribute("data-state") === "returned" &&
 			          card.getAttribute("data-verdict") === "succeeded" &&
 			          card.querySelector("[data-output-body]").textContent.indexOf("bytes more not shown") >= 0`,
-			expected: "A tool card titled `Bash` with the command line `yes | head -100000`, a SUCCEEDED badge, " +
+			expected: "A tool card titled `Bash` with the command line `yes | head -100000`, a green `done` badge, " +
 				"and an output body of a few `y` lines ending in the daemon's own truncation notice: " +
 				"`<count> bytes more not shown`. The spill file itself is never drawn.",
 		},
@@ -224,10 +243,14 @@ func TestPlaytestShellFamily(t *testing.T) {
 			          card.querySelector(".tool-image-output img") !== null &&
 			          card.querySelector(".tool-image-output img").getAttribute("src").indexOf("data:image/png;base64,") === 0 &&
 			          card.querySelector(".tool-image-output img").getAttribute("alt").indexOf("screencapture") >= 0`,
-			expected: "A tool card titled `Bash` with the command line `screencapture -x -`, a SUCCEEDED badge, " +
-				"and AN IMAGE where every other card's output body sits -- the scenario's one-pixel PNG, " +
-				"drawn by the very function a prompt's own image block is drawn by, captioned with the " +
-				"command line. The daemon resolved the bytes into a data url; the webview merely loaded it.",
+			expected: "A tool card titled `Bash` with the command line `screencapture -x -`, a green `done` badge, " +
+				"and AN IMAGE where every other card's output body sits -- so the output area holds a single " +
+				"faint DOT and no text at all. The dot is the whole picture on purpose: the payload is the " +
+				"1x1 PNG the `bash-image-output` capture recorded verbatim, and a bigger stand-in would be " +
+				"the fake diverging from the vendor it mirrors. That it is an IMAGE and not text is asserted " +
+				"rather than eyeballed (`data-output-form=\"image\"`, an `<img>` whose src is the data url the " +
+				"DAEMON composed, captioned with the command line); what the picture shows is that the card " +
+				"draws it in the output slot every other form uses.",
 		},
 	}
 
@@ -303,7 +326,11 @@ func TestPlaytestDetachedShellFamily(t *testing.T) {
 				"a running dot and a ticking clock while live, a spool box with the `line-N` lines that have " +
 				"arrived so far, and a stop button. No caret and no sub-feed: the spool IS the body.",
 			expected: "The same row SETTLED: the outcome word `completed`, a green `exit 0` chip in the head, the " +
-				"spool box carrying `line-1`, `line-2`, `line-3`, and no stop button.",
+				"spool box carrying `line-1`, `line-2`, `line-3` and the spool's own `EXIT=0` line, and NO stop " +
+				"button. ABOVE IT, a `Bash` tool card for the same command is drawn `running...` and stays that " +
+				"way: the command was launched into the background, so no plane answers a terminal for the call " +
+				"and the card has no arm that says the work MOVED. Two rows for one command is the shape, and " +
+				"the remainder is filed.",
 		},
 		{
 			prompt: "!bash-detach-poll", command: "tail -f build.log", exit: 0,
