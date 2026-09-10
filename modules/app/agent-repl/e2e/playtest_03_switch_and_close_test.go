@@ -5,6 +5,10 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -228,6 +232,236 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 }
 
 // ---------------------------------------------------------------------------
+// WHAT THE BAR DECIDED, WHAT IT WROTE, AND WHETHER IT CAN BE READ
+// ---------------------------------------------------------------------------
+
+// tabPaint answers what the module DECIDED about WS's tab and what it then
+// WROTE for it, in ONE form, as a sentence a manifest can carry.
+//
+// WHY BOTH HALVES, AND WHY IN ONE FORM. A picture of the bar can disagree
+// with the manifest in two entirely different ways, and only these two reads
+// together say which: the DECISION is the roster arm, the display state that
+// drives the full-tab color, the bracket state that colors the `[N]` run when
+// the full color is suppressed, and the ready-view latch that is the one
+// thing which suppresses it for a `:ready` workspace the user has stood in;
+// what was WRITTEN is the face actually on that workspace's name run in the
+// line `tab-bar-format` renders. A face that follows the decision means the
+// string was right and the glass did not take it; a face that does not means
+// the string was already wrong. One form because the two would otherwise
+// straddle a roster push or a dwell tick and disagree for the harness's own
+// reasons -- the same rule `tablineAndNames` is written to.
+//
+// IT IS WHAT FOUND THIS OWNER'S ONE PRODUCT DEFECT. Two captures of this
+// playbook drew the same unselected tab in two different colors; this read
+// said the module had written the SAME face in both, which is what moved the
+// question off `status.el`'s string and onto the pair of colors that face
+// resolved to -- and that pair turned out not to exist at all.
+//
+// THE NAME MUST BE IN THE DRAWN LINE, and that is asserted here rather than
+// reported: a workspace on `agent-repl--ws-tabline-names` whose name the
+// rendered line does not carry is a bar that lost a tab, which is a defect in
+// `status.el` before any picture is taken.
+func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
+	t.Helper()
+	parts := s.E.EvalStrings(`(let* ((line (agent-repl-workspace-tabline-formatted))
+                                     (plain (substring-no-properties line))
+                                     (at (string-match (regexp-quote ` + elispString(ws) + `) plain)))
+                                (list (format "%s" (or at ""))
+                                      (format "%s" (agent-repl-roster-status-for-ws ` + elispString(ws) + `))
+                                      (format "%s" (agent-repl--ws-display-state ` + elispString(ws) + `))
+                                      (format "%s" (agent-repl--ws-bracket-state ` + elispString(ws) + `))
+                                      (format "%s" (and (agent-repl--ws-ready-view-acknowledged-p ` + elispString(ws) + `) t))
+                                      (format "%S" (and at (get-text-property at 'face line)))))`)
+	if len(parts) != 6 {
+		t.Fatalf("reading %q's tab paint answered %v, want the offset, the arm, the display state, "+
+			"the bracket state, the ready-view latch and the name face", ws, parts)
+	}
+	if parts[0] == "" {
+		t.Fatalf("the line `agent-repl-workspace-tabline-formatted` writes does not carry %q at all, "+
+			"while `agent-repl--ws-tabline-names` reports it: the bar lost a tab", ws)
+	}
+	return fmt.Sprintf("%q: arm %s, display-state %s, bracket-state %s, ready-view-acknowledged %s, "+
+		"and the face on its name run is %s", ws, parts[1], parts[2], parts[3], parts[4], parts[5])
+}
+
+// tabPaints answers `tabPaint` for every name on the bar, joined, so a
+// capture's assertion cell says what EVERY tab was decided and written as
+// rather than only the one the step moved.
+func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
+	t.Helper()
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		out = append(out, tabPaint(t, s, name))
+	}
+	return strings.Join(out, "; ")
+}
+
+// barFaceColors answers the BACKGROUNDS the frame currently resolves the tab
+// bar's faces to, at the instant of a capture.
+//
+// WHY THIS SITS BESIDE `tabPaint`. That one says which FACE the module wrote
+// on a tab's name run; this says what that face is worth on this frame right
+// now. A run where two captures carry the SAME face and DIFFERENT pixels is
+// otherwise unattributable, and this is the read that attributes it.
+func barFaceColors(t *testing.T, s *playtestScenario) string {
+	t.Helper()
+	parts := s.E.EvalStrings(`(list (format "%s" (face-background 'default nil t))
+                                    (format "%s" (face-background 'agent-repl-tab-unarmed nil t))
+                                    (format "%s" (face-foreground 'agent-repl-tab-unarmed nil t))
+                                    (format "%s" (face-background (agent-repl--ws-tab-selected-face) nil t))
+                                    (format "%s" (face-background 'tab-bar nil t)))`)
+	if len(parts) != 5 {
+		t.Fatalf("reading the bar's face colors answered %v, want default, the un-armed pair, the "+
+			"selected tab face and `tab-bar`", parts)
+	}
+	return fmt.Sprintf("`default` %s, the un-armed tab face %s on %s, the selected tab face %s, "+
+		"`tab-bar` %s", parts[0], parts[2], parts[1], parts[3], parts[4])
+}
+
+// ---------------------------------------------------------------------------
+// THE BAR MUST BE READABLE, AND THAT IS READ OFF THE PICTURE
+// ---------------------------------------------------------------------------
+
+// assertTabBarLegible requires every run of text the tab bar draws to reach
+// `agent-repl-tab-contrast-floor` against the ground it is drawn on, measured
+// in the PHOTOGRAPH rather than in the palette.
+//
+// WHY IT IS MEASURED HERE AND NOT ONLY IN ERT. The palette's own pairs are
+// asserted in `lisp/test-status.el`, and they were not the whole story: an
+// un-armed tab left BOTH halves of its pair `unspecified`, so there was no
+// pair for an ERT test to check and the two colors only came into existence
+// when a frame resolved them. Measured on this frame, that resolved to black
+// glyphs on `#14141a` -- 1.06:1 -- and a white numeral on the tab bar's own
+// `#d9d9d9` -- 1.3:1. The only place those numbers exist is the glass, so the
+// assertion belongs where the picture is.
+//
+// THE FLOOR IS READ FROM THE MODULE, never restated here: the number is
+// `status.el`'s, and a copy of it in this file could drift from the one the
+// palette is held to.
+//
+// HOW A RUN IS FOUND, without geometry this file would have to guess at. A
+// GROUND is any color covering at least `playtestTabBarFieldArea` pixels of
+// the band -- the tab bar's own and each tab's -- and the text on one is
+// every pixel beside it in the same row that is not itself a ground. A ground
+// carrying no text at all is skipped rather than failed: padding is not
+// illegible. What is required is that the BEST contrast any pixel achieves on
+// a given ground reaches the floor, because a ground where nothing drawn on
+// it clears the floor is a ground whose text cannot be read at all -- which
+// is exactly the defect this was written for.
+func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, capture string) {
+	t.Helper()
+	// THE FLOOR COMES ACROSS AS A STRING and is parsed here, because the
+	// layer's eval helpers answer bools, strings and ints and a ratio is none
+	// of those. Reading it rather than restating it keeps the number the
+	// MODULE's.
+	raw := s.E.EvalString(`(format "%s" agent-repl-tab-contrast-floor)`)
+	floor, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		t.Fatalf("`agent-repl-tab-contrast-floor` reads %q, which is not a ratio: %v", raw, err)
+	}
+	band := s.E.EvalInt(`(tab-bar-height nil t)`)
+	if band <= 0 {
+		t.Fatalf("capture %s: `tab-bar-height` answers %d pixels, so there is no tab bar to read",
+			capture, band)
+	}
+	if band > img.Bounds().Dy() {
+		band = img.Bounds().Dy()
+	}
+
+	rows := make([][]color.RGBA, band)
+	area := map[color.RGBA]int{}
+	for y := 0; y < band; y++ {
+		row := make([]color.RGBA, img.Bounds().Dx())
+		for x := range row {
+			r, g, b, _ := img.At(x, y).RGBA()
+			c := color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff}
+			row[x] = c
+			area[c]++
+		}
+		rows[y] = row
+	}
+
+	grounds := map[color.RGBA]bool{}
+	for c, n := range area {
+		if n >= playtestTabBarFieldArea {
+			grounds[c] = true
+		}
+	}
+	if len(grounds) == 0 {
+		t.Fatalf("capture %s: no color covers %d pixels of the %d-pixel tab bar band, so the bar drew "+
+			"no ground at all", capture, playtestTabBarFieldArea, band)
+	}
+
+	best := map[color.RGBA]float64{}
+	inked := map[color.RGBA]bool{}
+	for _, row := range rows {
+		for x, c := range row {
+			if grounds[c] {
+				continue
+			}
+			for _, dx := range []int{-1, 1} {
+				n := x + dx
+				if n < 0 || n >= len(row) || !grounds[row[n]] {
+					continue
+				}
+				inked[row[n]] = true
+				if r := contrastRatio(c, row[n]); r > best[row[n]] {
+					best[row[n]] = r
+				}
+			}
+		}
+	}
+
+	for ground := range inked {
+		if best[ground] < floor {
+			t.Errorf("capture %s: the tab bar draws text on %s that reaches only %.2f:1 at its very "+
+				"best, under the %.2f:1 floor `agent-repl-tab-contrast-floor` states. Nothing drawn on "+
+				"that ground can be read: this is a foreground and a background that were never paired, "+
+				"and every appearance in `agent-repl--tab-palette` states its pair.",
+				capture, hexOf(ground), best[ground], floor)
+		}
+	}
+}
+
+// playtestTabBarFieldArea is how many pixels of the tab-bar band a color must
+// cover to be one of its GROUNDS rather than ink drawn on one.
+//
+// MEASURED, not chosen: on this frame the smallest ground -- one tab of a
+// two-tab bar -- covers about 1,500 pixels of the band, and the largest ink
+// run covers under 200. 600 sits between the two populations by more than a
+// factor of two on either side, so it separates them rather than cutting
+// through one.
+const playtestTabBarFieldArea = 600
+
+// contrastRatio answers the WCAG contrast ratio between two colors -- the
+// same arithmetic `agent-repl-color-contrast-ratio` does in the module.
+//
+// It is computed here rather than asked of Emacs because it is asked of
+// hundreds of thousands of pixel pairs per capture, and a round trip each
+// would cost more than the run it is part of. The MODULE's floor is still
+// what it is compared against, so only the arithmetic is local.
+func contrastRatio(a, b color.RGBA) float64 {
+	la, lb := relativeLuminance(a), relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func relativeLuminance(c color.RGBA) float64 {
+	channel := func(v uint8) float64 {
+		f := float64(v) / 255
+		if f <= 0.03928 {
+			return f / 12.92
+		}
+		return math.Pow((f+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(c.R) + 0.7152*channel(c.G) + 0.0722*channel(c.B)
+}
+
+func hexOf(c color.RGBA) string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
+
+// ---------------------------------------------------------------------------
 // A.7 -- SWITCH
 // ---------------------------------------------------------------------------
 
@@ -275,13 +509,17 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	if len(names) != 2 {
 		t.Fatalf("the tab bar draws %v, want both workspaces", names)
 	}
-	p.capture("two-tabs", "a second repository registered through the same verb, and its panel opened",
+	twoTabsShot := p.capture("two-tabs", "a second repository registered through the same verb, and its panel opened",
 		fmt.Sprintf("`agent-repl--ws-tabline-names` is %v, `agent-repl--ws-current-name` is %q, and the "+
 			"panel's windows hold %q's own webview and composer buffers and NOT %q's, and that page's "+
-			"sidebar draws %q's row as the current one",
-			names, secondName, secondName, firstName, secondName),
+			"sidebar draws %q's row as the current one. The bar wrote %s, on a frame resolving %s, and "+
+			"every run of text it draws clears `agent-repl-tab-contrast-floor` in the picture itself",
+			names, secondName, secondName, firstName, secondName,
+			tabPaints(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The tab bar must carry TWO workspace tabs, %q and %q, in that order, and the "+
 			"SECOND must be the highlighted one — registering selects it.", names[0], names[1]))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, twoTabsShot, "two-tabs")
 
 	// `agent-repl-switch-to-project` takes a PROJECT ROOT PATH, not a
 	// workspace name -- its own docstring says so -- and taking the target as
@@ -304,13 +542,18 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	awaitPanelFollows(t, s, firstName, secondName)
 	awaitPageIsForWorkspace(t, s, first.Dir)
 	awaitSidebarNamesCurrent(t, s, firstName)
-	p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
+	switchedBackShot := p.capture("switched-back", "`agent-repl-switch-to-project` back to the first workspace",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows now hold %q's own webview "+
 			"and composer and NOT %q's, that webview's page is mounted (its feed host is drawn and its "+
-			"footer carries a status word), and that page's sidebar draws %q's row as the current one",
-			firstName, firstName, secondName, firstName),
+			"footer carries a status word), and that page's sidebar draws %q's row as the current one. "+
+			"The bar wrote %s, on a frame resolving %s, and every run of text it draws clears the floor "+
+			"in the picture itself",
+			firstName, firstName, secondName, firstName,
+			tabPaints(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The SAME two tabs in the SAME order, with the highlight moved back to %q. "+
 			"The selection moved; the roster did not.", firstName))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, switchedBackShot, "switched-back")
 
 	// `SPC TAB R` takes NO argument -- it picks from the roster's when-column
 	// -- so it is PRESSED: real keymap lookup, real command. With two
@@ -326,13 +569,18 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 	awaitPanelFollows(t, s, secondName, firstName)
 	awaitPageIsForWorkspace(t, s, second.Dir)
 	awaitSidebarNamesCurrent(t, s, secondName)
-	p.capture("switched-most-recent", "`SPC TAB R` (`agent-repl-open-most-recent-workspace`) pressed",
+	switchedMostRecentShot := p.capture("switched-most-recent", "`SPC TAB R` (`agent-repl-open-most-recent-workspace`) pressed",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q, the panel's windows hold %q's own webview and "+
 			"composer and NOT %q's, that webview's page is mounted, and that page's sidebar draws %q's "+
-			"row as the current one", secondName, secondName, firstName, secondName),
+			"row as the current one. The bar wrote %s, on a frame resolving %s, and every run of text it "+
+			"draws clears the floor in the picture itself",
+			secondName, secondName, firstName, secondName,
+			tabPaints(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The SAME two tabs in the SAME order once more, with the highlight back on %q. "+
 			"`SPC TAB R` walks the roster's when-column, so it lands on the OTHER workspace and the bar "+
 			"looks exactly as it did in the first capture.", secondName))
+	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
+	assertTabBarLegible(t, s, switchedMostRecentShot, "switched-most-recent")
 }
 
 // ---------------------------------------------------------------------------
