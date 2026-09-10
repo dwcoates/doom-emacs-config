@@ -94,8 +94,13 @@
 #                  files from `git diff --name-only RANGE`
 #
 # Environment:
-#   AGENT_REPL_STORE_SOCK_TIMEOUT  seconds to wait for store.sock after the
-#                                  store kickstart (default 15)
+#   AGENT_REPL_STORE_SOCK_TIMEOUT  seconds the store may go without writing a
+#                                  single byte to its log while store.sock is
+#                                  still absent (default 15). It is a STALL
+#                                  budget, not a deadline: a boot that is
+#                                  visibly working resets it.
+#   AGENT_REPL_STORE_SOCK_MAX      the upper bound on the whole wait, however
+#                                  busy the store looks (default 180)
 
 set -euo pipefail
 
@@ -109,9 +114,13 @@ MOD_REL="${ROOT#"$REPO_ROOT/"}"            # e.g. modules/app/agent-repl
 
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 STORE_SOCK="$HOME/.cache/agent-repl/sock/store.sock"
+# The store's launchd StandardErrorPath (launchd/com.agentrepl.shim-store.plist).
+# It is the only view this script has of a boot in progress.
+STORE_LOG="$HOME/.cache/agent-repl/log/shim-store.err.log"
 STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
-SOCK_TIMEOUT="${AGENT_REPL_STORE_SOCK_TIMEOUT:-15}"
+SOCK_STALL="${AGENT_REPL_STORE_SOCK_TIMEOUT:-15}"
+SOCK_MAX="${AGENT_REPL_STORE_SOCK_MAX:-180}"
 READINESS_REPORT="$THIS_DIR/readiness-report.sh"
 
 # Overridable so the hermetic test harness can substitute its PATH stub — the
@@ -245,16 +254,95 @@ fi
 
 kickstart() { launchctl kickstart -k "gui/$(id -u)/$1"; }
 
+# The store's pid as launchd reports it, or empty when the service is not
+# running. A flat deadline could not tell "still booting" from "died on boot",
+# and answered both the same way; this is the difference.
+store_service_pid() {
+    launchctl print "gui/$(id -u)/$STORE_LABEL" 2>/dev/null |
+        awk '/^[[:space:]]*pid = /{ gsub(/[^0-9]/, "", $3); print $3; exit }'
+}
+
+# How much the store has written. A boot that is still emitting records is
+# WORKING, not wedged, and every byte resets the stall budget.
+store_log_size() {
+    if [ -f "$STORE_LOG" ]; then wc -c < "$STORE_LOG" | tr -d ' '; else echo 0; fi
+}
+
+store_log_tail() {
+    if [ -f "$STORE_LOG" ]; then tail -n 5 "$STORE_LOG"; else echo "(no $STORE_LOG)"; fi
+}
+
+# WAIT ON THE SERVICE, NOT ON A STOPWATCH.
+#
+# This wait was a flat 15s, and on 2026-09-09 that cost a deploy: the incoming
+# store found an 11.5 GB events.db at a superseded schema version and began
+# emptying it table by table, minutes of work with the socket absent. The wait
+# expired, the script exited, and the sidecar and the runtime were left on the
+# old build with no signal beyond one timeout line. (The store no longer empties
+# anything — it unlinks the file — but a boot can still be slower than any
+# constant somebody guessed, and the deploy must not answer that by walking off
+# half-done.)
+#
+# So the wait continues while the service is ALIVE and its log is ADVANCING, and
+# it ends on one of three terminal answers, all of them loud, none of them
+# continuing to the sidecar:
+#   - launchd reports no pid: the store died on boot,
+#   - the log has not grown for SOCK_STALL seconds: it is wedged,
+#   - SOCK_MAX seconds have passed: it is beyond the stated upper bound.
 wait_for_store_sock() {
-    local waited=0
+    local waited=0 progress=0 size last_size announced=0 pid
+    # WHAT THIS BOOT WROTE, NOT WHAT THE FILE HOLDS. launchd appends to the same
+    # stderr log across every boot, so a nuke recorded weeks ago is still in
+    # there; only the bytes written after this kickstart say anything about the
+    # boot being waited on.
+    local start_size
+    start_size="$(store_log_size)"
+    last_size="$start_size"
     while [ ! -S "$STORE_SOCK" ]; do
-        if [ "$waited" -ge "$SOCK_TIMEOUT" ]; then
-            echo "[deploy-all] store.sock did not appear within ${SOCK_TIMEOUT}s after kickstart" >&2
+        pid="$(store_service_pid)"
+        if [ -z "$pid" ]; then
+            echo "[deploy-all] the store died before $STORE_SOCK appeared (${waited}s after kickstart; launchd reports no pid for $STORE_LABEL). The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] the store's last words:" >&2
+            store_log_tail >&2
+            exit 1
+        fi
+        size="$(store_log_size)"
+        if [ "$size" != "$last_size" ]; then
+            last_size="$size"
+            progress="$waited"
+        fi
+        # A nuke is the one slow boot with a known cause, so it is named rather
+        # than left to look like a hang.
+        if [ "$announced" -eq 0 ] && [ -f "$STORE_LOG" ] &&
+           tail -c "+$((start_size + 1))" "$STORE_LOG" | grep -q "nuked, never migrated"; then
+            announced=1
+            log "store: the on-disk schema was superseded and the database is being replaced (the store is nuked, never migrated) — waiting up to ${SOCK_MAX}s for $STORE_SOCK"
+        fi
+        # LOOK AGAIN BEFORE CALLING IT A FAILURE. launchd binds the socket
+        # whenever the store gets there, which can be while this iteration was
+        # reading the pid and the log; declaring a timeout on a socket that
+        # already exists would fail a deploy that had in fact succeeded.
+        if [ -S "$STORE_SOCK" ]; then
+            break
+        fi
+        if [ $((waited - progress)) -ge "$SOCK_STALL" ]; then
+            echo "[deploy-all] $STORE_SOCK did not appear and the store (pid $pid) has written nothing for ${SOCK_STALL}s, so it is wedged rather than working. The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] the store's last words:" >&2
+            store_log_tail >&2
+            exit 1
+        fi
+        if [ "$waited" -ge "$SOCK_MAX" ]; then
+            echo "[deploy-all] $STORE_SOCK did not appear within the ${SOCK_MAX}s upper bound, though the store (pid $pid) is alive and still writing. The sidecar was NOT kickstarted and the runtime was NOT bounced." >&2
+            echo "[deploy-all] the store's last words:" >&2
+            store_log_tail >&2
             exit 1
         fi
         sleep 1
         waited=$((waited + 1))
     done
+    if [ "$waited" -gt 0 ]; then
+        log "store: socket appeared ${waited}s after kickstart"
+    fi
 }
 
 if [ "$STORE_STALE" -eq 1 ]; then
