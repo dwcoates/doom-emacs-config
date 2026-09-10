@@ -12,7 +12,9 @@ package convert
 // in a session that compacted more than once.
 //
 // Both land as a page line of the MAIN AGENT'S book, keyed
-// `session:context_cut:<record uuid>`.
+// `session:context_cut:<the cut's identity>` — the boundary's uuid for a
+// compaction, and for a clear THE SESSION IT ROTATED TO, because those are the
+// spellings the STREAM plane can mint for the same cut. See `clearCutIdentity`.
 
 import (
 	"strings"
@@ -29,11 +31,45 @@ import (
 // system prompt, skills and memory files are reloaded — which is exactly why
 // fabricating a zero here would be a lie a reader could see.
 func (c *Converter) contextCleared(record map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	c.log.With(at.ctxFor("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
+	identity := clearCutIdentity(at, env)
+	if identity == env.uuid {
+		// The file the envelope lives in does not name its session, which is
+		// the one identity the stream plane can also spell. The cut is still
+		// recorded — a reader must see WHERE the conversation was cut — but on
+		// a key the other plane cannot reach, so the divider may be drawn
+		// twice, and that is said out loud rather than discovered in the feed.
+		c.log.With(at.ctxWarn("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", identity)}).
+			Log("context clear: the transcript names no session, so the cut is keyed on its own record uuid and the stream plane's write cannot collapse onto it")
+	}
+	c.log.With(at.ctxFor("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", identity)}).
 		Log("context clear: history discarded outright, with no token delta the vendor stated")
-	return c.contextCutEntry(at, env, agent, &conversationv1.ContextCut{
+	return c.contextCutEntry(at, identity, agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
 	})
+}
+
+// clearCutIdentity is WHICH CUT a `/clear` is, in the one spelling the STREAM
+// plane can also mint.
+//
+// THE TWO PLANES SEE DIFFERENT RECORDS FOR A CLEAR. This reader's only evidence
+// is the expanded `/clear` command envelope; the shim's is the SDK's
+// `conversation_reset`, and the two carry unrelated uuids in unrelated places
+// (`testdata/captures/identity-rotation-clear`: `04f97c00-…` here,
+// `cc07c2a0-…` there, and a `new_conversation_id` nothing ever uses). Keying on
+// this record's own uuid therefore left ONE clear as TWO store rows and TWO
+// "context cleared" dividers in the feed.
+//
+// What both planes DO hold is THE SESSION THE CLEAR ROTATED TO. The vendor
+// writes the envelope into the NEW transcript, so it is this file's own session
+// uuid; the shim learns the same id from the `system:init` that follows the
+// reset. `Attribution.VendorSessionID` is that file's uuid — deliberately the
+// BASENAME and never the per-record `sessionId` field, which diverges from the
+// runtime's answer in ~22% of records.
+func clearCutIdentity(at Attribution, env envelope) string {
+	if at.VendorSessionID != "" {
+		return at.VendorSessionID
+	}
+	return env.uuid
 }
 
 // contextCompacted stores that history was replaced by a summary of itself.
@@ -64,7 +100,10 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		Log("compaction trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
 			str(metadata["trigger"]), compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
 
-	return c.contextCutEntry(at, env, agent, &conversationv1.ContextCut{
+	// A COMPACTION IS ONE VENDOR RECORD ON BOTH PLANES — the stream's
+	// `compact_boundary` and this one share a uuid — so the boundary's own uuid
+	// IS the cut's identity, and the two writes collapse onto one row.
+	return c.contextCutEntry(at, env.uuid, agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},
 	})
 }
@@ -87,12 +126,16 @@ func compactTokens(metadata map[string]any) *conversationv1.ContextTokenDelta {
 // THE MAIN AGENT'S BOOK SPECIFICALLY: a cut is a fact about the session's
 // context, not about whichever subagent happened to be running, and the feed
 // draws it as the separation divider in the main conversation.
-func (c *Converter) contextCutEntry(at Attribution, env envelope, agent string, cut *conversationv1.ContextCut) *storev1.StoreEntry {
+//
+// `identity` IS THE CUT, not the record: the two planes see one record for a
+// compaction and two unrelated records for a clear, so each arm states the one
+// spelling the other plane can also mint.
+func (c *Converter) contextCutEntry(at Attribution, identity, agent string, cut *conversationv1.ContextCut) *storev1.StoreEntry {
 	book := firstNonEmpty(at.MainAgentID, agent)
 	frame := updateFrame(book, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_ContextCut{ContextCut: cut},
 	})
-	return c.landFrame(at, book, SessionKey("context_cut", env.uuid), "context_cut", frame)
+	return c.landFrame(at, book, SessionKey("context_cut", identity), "context_cut", frame)
 }
 
 // IsCompactBoundary reports whether a record is a compaction boundary — the one

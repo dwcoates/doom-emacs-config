@@ -142,6 +142,7 @@ type controlCommand struct {
 	Op        string `json:"op"`
 	RPC       string `json:"rpc,omitempty"`
 	Agent     string `json:"agent,omitempty"`
+	Pointer   string `json:"pointer,omitempty"`
 	Work      string `json:"work,omitempty"`
 	Stream    string `json:"stream,omitempty"`
 	Code      int    `json:"code,omitempty"`
@@ -358,6 +359,15 @@ func (s *ShimControl) PushUnhealthy(faults ...*conversationv1.SessionFault) {
 func (s *ShimControl) PushAgentFrame(agent string, f *conversationv1.AgentFrame) {
 	s.t.Helper()
 	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Payload: encode(s.t, f)})
+}
+
+// PushAgentFrameAt delivers one agent frame AT A NAMED HistoryPointer, which is
+// how a store row that TWO PLANES wrote reaches the daemon: one entry, one
+// position, delivered once per write. An empty agent addresses the frame's own
+// agent_id.
+func (s *ShimControl) PushAgentFrameAt(agent, pointer string, f *conversationv1.AgentFrame) {
+	s.t.Helper()
+	s.send(controlCommand{Op: "push_agent_frame", Agent: agent, Pointer: pointer, Payload: encode(s.t, f)})
 }
 
 // PushUserPrompt delivers one DELIVERED PROMPT on the matching WatchAgent

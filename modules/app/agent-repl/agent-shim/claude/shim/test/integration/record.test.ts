@@ -319,6 +319,47 @@ describe("every entry's envelope", () => {
     stream.close();
   });
 
+  test("a clear's cut is keyed session:context_cut:<the session it rotated to>", async () => {
+    // ONE CLEAR IS ONE ROW, and the two planes see DIFFERENT records for it.
+    // This plane's evidence is the SDK `conversation_reset`; the sidecar's is
+    // the expanded `/clear` envelope the vendor writes into the NEW transcript,
+    // and it keys on that file's session uuid. Their record uuids are
+    // unrelated — `identity-rotation-clear` has `cc07c2a0-…` on the stream and
+    // `04f97c00-…` on disk — so the ONLY identity both can mint is the session
+    // the clear rotated to, which is why this row waits for the init that
+    // states it.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!rotate");
+
+    const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
+    expect(links).toHaveLength(1);
+    const rotatedTo = links[0].replace(/\.json$/, "");
+    expect(writtenKeys(shim.store?.writes() ?? [])).toContain(
+      `session:context_cut:${rotatedTo}`,
+    );
+    stream.close();
+  });
+
+  test("a clear writes exactly one context-cut row, however many planes saw it", async () => {
+    // The duplicate the key fixes is COUNTED here rather than spelled: two keys
+    // for one clear is two store rows, two positions, and two "context cleared"
+    // dividers in the feed.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!rotate");
+
+    const cutKeys = new Set(
+      writtenKeys(shim.store?.writes() ?? []).filter((key) => key.startsWith("session:context_cut:")),
+    );
+    expect([...cutKeys]).toHaveLength(1);
+    stream.close();
+  });
+
   test("a question's rows are keyed question:<the ask's tool_use_id>", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

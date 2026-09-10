@@ -11,9 +11,11 @@ import { describe, expect, it } from "vitest";
 import { conversationv1 } from "../../src/proto.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import {
+  clearedCutEntry,
   compactionEntry,
   convertSessionMessage,
   fastModeUpdate,
+  type PendingClear,
   type PendingCompaction,
 } from "../../src/convert/session-updates.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
@@ -227,19 +229,49 @@ describe("conversation_reset", () => {
     expect(rotated.previousVendorSessionId).toBe("");
   });
 
-  it("cuts the conversation so the reader sees WHERE it was cleared", () => {
+  it("writes no cut on the reset itself, which does not name the cut", () => {
+    // The reset's uuids are this plane's alone: the FILE plane's only evidence
+    // of a clear is the `/clear` envelope, in a transcript the reset never
+    // names. The cut waits for the init that states the session it rotated to.
     const entries = convert({ type: "conversation_reset", new_conversation_id: "new" });
 
-    expect(entries[1]?.source.discriminator).toBe("agent_update.context_cut.cleared");
+    expect(entries).toHaveLength(1);
   });
 
-  it("keys the clear's cut the way the sidecar spells it, so one clear is one row", () => {
-    // The file plane reads the same reset record and mints
-    // `session:context_cut:<uuid>`; a different spelling here would leave the
-    // clear in the book twice.
-    const entries = convert({ type: "conversation_reset", new_conversation_id: "new" });
+  it("hands the held clear to the sink, so the fold can release it", () => {
+    const held: PendingClear[] = [];
 
-    expect(entries[1]?.upsertKey).toBe("session:context_cut:uuid-1");
+    convertSessionMessage(
+      message({ type: "conversation_reset", new_conversation_id: "new" }),
+      foldContext(),
+      undefined,
+      (pending) => held.push(pending),
+    );
+
+    expect(held).toEqual([{ vendorUuid: "uuid-1" }]);
+  });
+
+  it("cuts the conversation so the reader sees WHERE it was cleared", () => {
+    const entry = clearedCutEntry(foldContext(), { vendorUuid: "uuid-1" }, "session-2");
+
+    expect(entry.source.discriminator).toBe("agent_update.context_cut.cleared");
+  });
+
+  it("keys the clear's cut on the session it rotated to, as the sidecar spells it", () => {
+    // The file plane reads the `/clear` envelope out of `<session-2>.jsonl` and
+    // mints `session:context_cut:session-2`; a different spelling here would
+    // leave one clear in the book twice.
+    const entry = clearedCutEntry(foldContext(), { vendorUuid: "uuid-1" }, "session-2");
+
+    expect(entry.upsertKey).toBe("session:context_cut:session-2");
+  });
+
+  it("names the reset record it converted as the cut's provenance", () => {
+    // IDENTITY AND PROVENANCE ARE DIFFERENT FACTS: the key says which cut, the
+    // source says which record this plane read to state it.
+    const entry = clearedCutEntry(foldContext(), { vendorUuid: "uuid-1" }, "session-2");
+
+    expect(entry.source.vendorUuid).toBe("uuid-1");
   });
 });
 

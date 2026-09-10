@@ -21,7 +21,7 @@ func TestClearIsDetectedByUnwrappingTheCommandEnvelope(t *testing.T) {
 	entries := convertLines(t, c, clearEnvelope("u1", inner))
 
 	// Assert.
-	entry := entryByKey(t, entries, SessionKey("context_cut", "u1"))
+	entry := entryByKey(t, entries, SessionKey("context_cut", "session-uuid"))
 	cut := frameOf(entry).GetUpdate().GetContextCut()
 	if cut.GetCleared() == nil {
 		t.Fatal("an unwrapped /clear must land on the cleared arm")
@@ -69,7 +69,7 @@ func TestABareSlashClearPromptIsStillRecognized(t *testing.T) {
 	entries := convertLines(t, c, clearEnvelope("u1", "/clear"))
 
 	// Assert.
-	entry := entryByKey(t, entries, SessionKey("context_cut", "u1"))
+	entry := entryByKey(t, entries, SessionKey("context_cut", "session-uuid"))
 	if frameOf(entry).GetUpdate().GetContextCut().GetCleared() == nil {
 		t.Fatal("a bare /clear must be recognized too")
 	}
@@ -104,10 +104,50 @@ func TestClearCarriesNoTokenDelta(t *testing.T) {
 
 	// Assert: the cleared arm has no token field at all, which is the schema's
 	// own statement of this. Asserting the arm is what pins the choice.
-	cut := frameOf(entryByKey(t, entries, SessionKey("context_cut", "u1"))).GetUpdate().GetContextCut()
+	cut := frameOf(entryByKey(t, entries, SessionKey("context_cut", "session-uuid"))).GetUpdate().GetContextCut()
 	if cut.GetCompacted() != nil {
 		t.Fatal("a clear must not be reported as a compaction, which is the only arm carrying a delta")
 	}
+}
+
+func TestAClearIsKeyedByTheSessionItRotatedTo(t *testing.T) {
+	// Arrange. ONE CLEAR IS ONE ROW, and the two planes see DIFFERENT records
+	// for it: this reader's only evidence is the `/clear` envelope, the shim's
+	// is the SDK `conversation_reset`, and their uuids are unrelated
+	// (identity-rotation-clear: `04f97c00-…` here, `cc07c2a0-…` there). The one
+	// identity both can mint is the session the clear rotated to — the vendor
+	// writes the envelope into the NEW transcript, so it is this file's own
+	// session uuid.
+	c := newTestConverter(t)
+	inner := "<command-name>/clear</command-name><command-args></command-args>"
+
+	// Act.
+	entries := convertLines(t, c, clearEnvelope("the-record-uuid", inner))
+
+	// Assert.
+	for _, e := range entries {
+		if e.GetUpsertKey() == SessionKey("context_cut", "the-record-uuid") {
+			t.Fatal("a clear keyed by its own record uuid can never collide with the stream plane's write, and the feed draws the divider twice")
+		}
+	}
+	entryByKey(t, entries, SessionKey("context_cut", "session-uuid"))
+}
+
+func TestAClearInAFileThatNamesNoSessionFallsBackToItsRecordUUID(t *testing.T) {
+	// Arrange. A cut is still recorded when the one shared identity is missing —
+	// a reader must see WHERE the conversation was cut — and the converter says
+	// out loud that this key cannot collapse with the other plane's.
+	c := newTestConverter(t)
+	inner := "<command-name>/clear</command-name><command-args></command-args>"
+	record := decode(t, clearEnvelope("u1", inner))
+	at := testAttribution(0)
+	at.VendorSessionID = ""
+
+	// Act.
+	entries := c.Line(record, at, nil)
+
+	// Assert.
+	entryByKey(t, entries, SessionKey("context_cut", "u1"))
 }
 
 func TestAutomaticCompactionIsDistinguishedFromAManualOne(t *testing.T) {

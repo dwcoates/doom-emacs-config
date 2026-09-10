@@ -40,6 +40,17 @@ type Command struct {
 	RPC string `json:"rpc,omitempty"`
 	// Agent addresses push_agent_frame; empty means the session's main agent.
 	Agent string `json:"agent,omitempty"`
+	// Pointer overrides the HistoryPointer push_agent_frame delivers the frame
+	// at. Empty mints the next per-stream pointer, which is the normal case.
+	//
+	// IT EXISTS BECAUSE ONE STORE ROW CAN BE DELIVERED TWICE. The shim's stream
+	// plane and the sidecar's file plane write the SAME store entry for one
+	// fact, and every write of an entry is delivered on the agent's tail — at
+	// the entry's OWN position both times, because an upsert supersedes a row's
+	// content and leaves its place in the book. A fake that always minted a
+	// fresh pointer could not express that, so a test for it would be testing a
+	// shape production never produces.
+	Pointer string `json:"pointer,omitempty"`
 	// Work addresses push_bash (a DetachedWorkId value).
 	Work string `json:"work,omitempty"`
 	// Stream names the stream family drop_stream severs.
