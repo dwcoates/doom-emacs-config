@@ -130,6 +130,21 @@ type playtestScenario struct {
 // registered in it yet.
 func newPlaytestScenario(t *testing.T, name, purpose string, options ...EmacsWorldOption) *playtestScenario {
 	t.Helper()
+	s := newColdPlaytestScenario(t, name, purpose, options...)
+	s.ensureDaemon(t)
+	return s
+}
+
+// newColdPlaytestScenario is newPlaytestScenario WITHOUT the daemon: Emacs
+// is up and the frame is sized, and no launcher has run yet.
+//
+// It exists for the playbooks whose subject IS the launch -- section A's
+// cold start and build failure -- which must arrange the launcher (a build
+// script that fails, an address file that is absent) before it runs, and
+// must observe the editor from the instant before it does. Every other
+// playbook wants the daemon up and takes newPlaytestScenario.
+func newColdPlaytestScenario(t *testing.T, name, purpose string, options ...EmacsWorldOption) *playtestScenario {
+	t.Helper()
 	box := requireSandbox(t)
 	w := NewEmacsWorld(t, box, options...)
 	e := w.Emacs
@@ -141,14 +156,19 @@ func newPlaytestScenario(t *testing.T, name, purpose string, options ...EmacsWor
 	// existed would photograph a webapp laid out for a different window.
 	book.prepareFrame()
 
-	s := &playtestScenario{Book: book, World: w, E: e, Box: box}
-	// THE COLD-START LAUNCH IS AN ASSERTION, not arrangement: `EnsureDaemon`
-	// waits for `agent-repl-link--primary`, so a launcher that composes a
-	// wrong argv fails here rather than somewhere downstream.
-	e.EnsureDaemon()
-	book.note("Emacs spawned the daemon through its own launcher (`agent-repl-frontend-daemon-ensure`)",
+	return &playtestScenario{Book: book, World: w, E: e, Box: box}
+}
+
+// ensureDaemon runs the module's own cold-start ensure and records it.
+//
+// THE COLD-START LAUNCH IS AN ASSERTION, not arrangement: `EnsureDaemon`
+// waits for `agent-repl-link--primary`, so a launcher that composes a wrong
+// argv fails here rather than somewhere downstream.
+func (s *playtestScenario) ensureDaemon(t *testing.T) {
+	t.Helper()
+	s.E.EnsureDaemon()
+	s.Book.note("Emacs spawned the daemon through its own launcher (`agent-repl-frontend-daemon-ensure`)",
 		"Emacs holds a live link: `agent-repl-link--primary` is non-nil")
-	return s
 }
 
 // repoAt mints one scripted fake-git worktree under this world's own
