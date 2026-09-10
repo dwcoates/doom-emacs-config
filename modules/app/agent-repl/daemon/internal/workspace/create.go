@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/wsm"
 )
 
@@ -347,7 +348,8 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		return "", fmt.Errorf("fork from %q: locate the transcript: %w", parent, err)
 	}
 	forked := wsm.NewVendorSessionID()
-	if err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked); err != nil {
+	minted, err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked)
+	if err != nil {
 		log.Error(opCreate, "could not port the parent transcript", dlog.Context{
 			"parent": string(parent), "transcript": transcript.Path,
 			"from_config_dir": transcript.ConfigDir, "cause": err.Error(),
@@ -359,6 +361,9 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		"parent_vendor_session_id": parentSession.VendorSessionID,
 		"child_vendor_session_id":  forked,
 	})
+	if err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil {
+		return "", err
+	}
 	return forked, nil
 }
 
@@ -406,14 +411,8 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 // SaidText composes the one canonical prompt form from plain text. It is
 // exported because the command-file ingress composes prompts the same way, and
 // two spellings of "the user said this" would drift.
-func SaidText(text string) *conversationv1.UserSaid {
-	return &conversationv1.UserSaid{
-		Content: &conversationv1.UserContent{
-			Blocks: []*conversationv1.UserContentBlock{{
-				Block: &conversationv1.UserContentBlock_Text{
-					Text: &conversationv1.TextBlock{Text: text},
-				},
-			}},
-		},
-	}
-}
+//
+// THE COMPOSITION ITSELF LIVES IN THE FEED PACKAGE, which draws a fork's
+// ported prompt rows from the same shape and cannot import this one. This is
+// the name the daemon's ingress paths already code against.
+func SaidText(text string) *conversationv1.UserSaid { return feed.SaidText(text) }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
 )
@@ -149,9 +150,18 @@ func TestAFrameIsAttributedByItsOwnAgentIdAndNotThePagesAgent(t *testing.T) {
 		}),
 	))
 
-	// Assert: on the subagent's sub-feed.
+	// Assert: on the subagent's sub-feed. The row is SOUGHT rather than taken
+	// from the end, because this test's subject is ATTRIBUTION and a replayed
+	// row's PLACE is the ordering rule's subject: a history-plane row stands
+	// above the commission the arrangement drew live.
 	rows := h.rows(feedid.Feed{Agent: created})
-	if last(rows).GetActivity().GetResponse() == nil {
+	var prose *frontendv1.FeedRow
+	for _, row := range rows {
+		if row.GetActivity().GetResponse() != nil {
+			prose = row
+		}
+	}
+	if prose == nil {
 		t.Fatalf("sub-feed rows = %+v, want the subagent's prose", rows)
 	}
 }

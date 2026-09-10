@@ -70,6 +70,15 @@ type wsState struct {
 	// sequence non-durable rows mint their identity from.
 	synthSeq uint64
 
+	// plane is the ORDERING PLANE rows are currently being drawn into. It is
+	// planeLive except while a history page is being replayed, and it is what
+	// keeps a fork's ported conversation above the rows the fork draws for
+	// itself no matter which of the two arrives first.
+	plane rowPlane
+	// portedDrawn records that this workspace's ported conversation has been
+	// drawn, so it is replayed once rather than on every agent's page.
+	portedDrawn bool
+
 	// readers are the standing page walks, one per open connection.
 	readers map[ReaderID]*walk
 
@@ -160,14 +169,55 @@ type subFeedHead struct {
 	label string
 }
 
+// THE FEED'S ORDERING KEY IS THE PLANE A ROW WAS DRAWN IN, then the order it
+// was drawn within that plane. It is not bare arrival order, and the reason is
+// a FORK: a forked workspace's feed carries three things — the parent's
+// conversation the fork ported, the store's replay of the ported transcript,
+// and the rows the fork draws as it runs — and the first two arrive by routes
+// that race the third. Ordered by arrival alone, one run put the parent's
+// answer above the fork's first question and the next run put it below.
+//
+// Within a plane the order is still first appearance, and an upsert still
+// never moves a row: a plane is decided when a row is FIRST drawn.
+type rowPlane uint8
+
+const (
+	// planePorted is a fork's ported parent conversation: older than anything
+	// this workspace has of its own, by construction.
+	planePorted rowPlane = iota
+	// planeHistory is the store's own replayed history.
+	planeHistory
+	// planeLive is everything drawn as it happens.
+	planeLive
+)
+
+// rowRank is one row's place in its feed's order.
+type rowRank struct {
+	plane rowPlane
+	// seq is the publication sequence the row was FIRST drawn at, which
+	// orders rows within one plane.
+	seq uint64
+}
+
+// before reports whether this rank sorts ahead of other.
+func (r rowRank) before(other rowRank) bool {
+	if r.plane != other.plane {
+		return r.plane < other.plane
+	}
+	return r.seq < other.seq
+}
+
 // feedState is one feed: its rows in first-appearance order, the publication
 // log a tail replays from, and the subscribers following it.
 type feedState struct {
 	// key is the encoded feed address.
 	key string
-	// order is the row ids in FIRST-APPEARANCE order; an upsert never moves a
-	// row.
+	// order is the row ids in ORDERING-KEY order (see rowPlane); an upsert
+	// never moves a row.
 	order []string
+	// rank is each row's ordering key, kept so an insertion knows where the
+	// row belongs among the rows already drawn.
+	rank map[string]rowRank
 	// rows is the current whole of each row.
 	rows map[string]*frontendv1.FeedRow
 	// nonDurable marks the rows that exist in resolver memory only and never
@@ -320,6 +370,8 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 
 		unitAPIResponse:  map[string]uint64{},
 		apiResponseUsage: map[uint64]string{},
+
+		plane: planeLive,
 	}
 	r.workspaces[ws] = s
 	return s
@@ -336,6 +388,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 	f = &feedState{
 		key:        key,
 		rows:       map[string]*frontendv1.FeedRow{},
+		rank:       map[string]rowRank{},
 		nonDurable: map[string]bool{},
 		retention:  r.deps.TailRetention,
 		subs:       map[*tailSub]struct{}{},
@@ -343,6 +396,23 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 	s.feeds[key] = f
 	s.feedAddrs[key] = addr
 	return f
+}
+
+// insert files a row's id at the place its rank names.
+//
+// THE SCAN IS BACKWARD because the ordinary case is a live row after every row
+// already drawn, which the first comparison settles. Only a plane that arrives
+// late — a history page replayed into a feed that already carries live rows —
+// walks any distance, and it walks it once per row.
+func (f *feedState) insert(id string, rank rowRank) {
+	f.rank[id] = rank
+	at := len(f.order)
+	for at > 0 && rank.before(f.rank[f.order[at-1]]) {
+		at--
+	}
+	f.order = append(f.order, "")
+	copy(f.order[at+1:], f.order[at:])
+	f.order[at] = id
 }
 
 // feedKey renders a feed address as the string this resolver keys by.
@@ -454,14 +524,14 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 			dlog.Context{"feed": f.key, "row": id})
 		return
 	}
+	f.seq++
 	if !seen {
-		f.order = append(f.order, id)
+		f.insert(id, rowRank{plane: s.plane, seq: f.seq})
 	}
 	f.rows[id] = snapshot
 	if !durable {
 		f.nonDurable[id] = true
 	}
-	f.seq++
 	f.log = append(f.log, &loggedRow{seq: f.seq, row: snapshot})
 	if len(f.log) > f.retention {
 		f.log = f.log[len(f.log)-f.retention:]
@@ -480,6 +550,7 @@ func (r *resolver) retire(s *wsState, addr feedid.Feed, id string) bool {
 	}
 	delete(f.rows, id)
 	delete(f.nonDurable, id)
+	delete(f.rank, id)
 	for i, existing := range f.order {
 		if existing == id {
 			f.order = append(f.order[:i], f.order[i+1:]...)
