@@ -390,26 +390,26 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 	s.awaitPageMounted(t)
 	s.awaitInPage(t, "the webapp's failure overlay to be carrying nothing again",
 		`document.querySelector('[data-component="failure-overlay"]').hasAttribute("data-empty")`)
-	// AND THE PANEL IS PUT BACK ON SCREEN BY THE USER, WHICH IS A FILED
-	// DEFECT RATHER THAN A STEP THIS PLAYBOOK WANTED.
+	// AND THE SELECTION IS STILL THE USER'S, which was the defect this
+	// playbook filed and is now the assertion that guards the fix.
 	//
-	// Measured here, twice: after the ensure the frame's only window holds
-	// `*magit: <the OTHER workspace>/*`. The page itself is healthy -- every
-	// assertion above passed against it -- but the restart moved the
-	// SELECTION off the workspace the user was in, so the recovered panel is
-	// behind a perspective nobody asked to be in. `roster.el`'s
-	// `agent-repl-roster-react-to-current` follows a `current` it did not
-	// originate, and after a restart the fresh roster's `current` is not the
-	// one Emacs last selected. It is filed rather than fixed here: which
-	// side owns the selection across a daemon restart is a contract question
-	// between the daemon's roster and Emacs's `agent-repl-host-last-selected-id`,
-	// not this section's to settle.
+	// Measured here, twice, before it was fixed: after the ensure the
+	// frame's only window held `*magit: <the OTHER workspace>/*`. The page
+	// itself was healthy -- every assertion above passed against it -- but
+	// the restart moved the SELECTION off the workspace the user was in, so
+	// the recovered panel sat behind a perspective nobody asked to be in.
+	// The ruling is that EMACS owns the user's selection across a daemon
+	// restart: a relaunched daemon stamps `current` on whichever workspace
+	// re-registered first, which is a walk order and not a click, so
+	// `host.el` holds the frame still for the length of the re-registration
+	// and re-asserts the selection with SelectWorkspace afterwards.
 	//
-	// So the user's own two acts are made -- switch back, re-open the panel
-	// -- and the picture is of the view they get back.
-	playtestSwitchToWorkspace(t, s, first)
-	s.openPanel(t)
-	e.AwaitEval("the panel's webview to be the buffer on screen again",
+	// It is asserted AFTER the re-registration has settled, which is the
+	// window the defect lived in.
+	e.AwaitEval("the user's selection to survive the daemon restart",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == first })
+	e.AwaitEval("the panel's webview to still be the buffer on screen",
 		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
 		func(raw json.RawMessage) bool {
 			for _, name := range decodeStrings(raw) {
@@ -443,8 +443,8 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 			"`*agent-frontend-repo-one*`), the failure card is gone and nothing reports a disconnection. "+
 			"What is FILED, and is expected in this picture until it is fixed: the feed is EMPTY -- the two "+
 			"bubbles of the pre-stop turn are gone and the footer reads `ready` rather than `done` -- and the "+
-			"panel had to be re-selected and re-opened at all, because the restart left the frame showing the "+
-			"OTHER workspace's magit buffer. Neither is a fault in this capture.")
+			"panel is the one the user was already in -- the restart no longer moves the selection onto the "+
+			"OTHER workspace's magit buffer. The empty feed is not a fault in this capture.")
 }
 
 // ---------------------------------------------------------------------------
