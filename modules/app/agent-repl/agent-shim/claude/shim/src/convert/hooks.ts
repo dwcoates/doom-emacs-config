@@ -56,6 +56,7 @@ export function createHookRegistry(): HookRegistry {
       if (hooks.size >= HOOK_REGISTRY_CAPACITY) {
         const oldest = hooks.keys().next();
         if (oldest.done !== true) {
+          // warn: a defect because bounded hook bookkeeping discarded an unanswered hook.
           LOGGER.warn(
             { hook_id: oldest.value },
             "forgetting the oldest unanswered hook: the in-flight registry is full",
@@ -92,7 +93,7 @@ function hookEvent(literal: string): conversationv1.AgentHookEvent {
   const key = screaming as keyof typeof conversationv1.AgentHookEvent;
   const value = conversationv1.AgentHookEvent[key];
   if (typeof value !== "number" || value === conversationv1.AgentHookEvent.UNSPECIFIED) {
-    LOGGER.warn(
+    LOGGER.debug(
       { hook_event: literal },
       "the vendor named a hook event this contract does not spell",
     );
@@ -167,7 +168,7 @@ export function convertHookResponse(
 
   let result: conversationv1.AgentHook["result"];
   if (message.outcome === "cancelled") {
-    LOGGER.warn({ hook_id: message.hook_id }, "a hook was cancelled before it finished");
+    LOGGER.info({ hook_id: message.hook_id }, "a hook was cancelled before it finished");
     result = {
       case: "cancelled",
       value: create(conversationv1.AgentHookCancelledSchema, {}),
@@ -184,16 +185,16 @@ export function convertHookResponse(
     // failure as a refusal of a call that was never gated.
     const blockingText = message.output;
     if (blockingText !== "") {
-      LOGGER.warn(
+      LOGGER.info(
         { hook_id: message.hook_id, hook: message.hook_name },
-        "a hook BLOCKED the gated action",
+        "a hook blocked the gated action",
       );
       result = {
         case: "blockingError",
         value: create(conversationv1.AgentHookBlockingErrorSchema, { command, blockingText }),
       };
     } else {
-      LOGGER.warn(
+      LOGGER.info(
         { hook_id: message.hook_id, hook: message.hook_name, exit_code: exitCode },
         "a hook failed without blocking anything",
       );

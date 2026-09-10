@@ -94,6 +94,21 @@ export interface StoreClient {
 /** The generated Connect client, before it is narrowed to {@link StoreClient}. */
 type GeneratedStoreClient = Client<typeof storev1.ShimStore>;
 
+/** Record both sides of one unary store round-trip without owning its failures. */
+async function unaryRoundTrip<T>(rpc: string, act: () => Promise<T>): Promise<T> {
+  LOGGER.debug({ rpc, boundary: "entered" }, `calling store.v1.${rpc}`);
+  const response = await act();
+  LOGGER.debug({ rpc, boundary: "completed" }, `completed store.v1.${rpc}`);
+  return response;
+}
+
+/** Record both sides of one streaming store round-trip without owning its failures. */
+async function* streamingRoundTrip<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
+  LOGGER.debug({ rpc, boundary: "entered" }, `calling store.v1.${rpc}`);
+  yield* frames();
+  LOGGER.debug({ rpc, boundary: "completed" }, `completed store.v1.${rpc} stream`);
+}
+
 /** Build the generated Connect client for a store listening on `socketPath`. */
 function createStoreTransportClient(socketPath: string): GeneratedStoreClient {
   if (socketPath === "") {
@@ -120,13 +135,13 @@ function createStoreTransportClient(socketPath: string): GeneratedStoreClient {
 export function createStoreClient(socketPath: string): StoreClient {
   const client = createStoreTransportClient(socketPath);
   return {
-    openAgentSession: (request) => client.openAgentSession(request),
-    watchAgentSession: (request, signal) => client.watchAgentSession(request, { signal }),
-    watchBashRun: (request, signal) => client.watchBashRun(request, { signal }),
-    readAgentPage: (request) => client.readAgentPage(request),
-    getWorkflow: (request) => client.getWorkflow(request),
-    getSidecarCursors: (request) => client.getSidecarCursors(request),
-    getLiveWork: (request) => client.getLiveWork(request),
-    writeBatch: (request) => client.writeBatch(request),
+    openAgentSession: (request) => unaryRoundTrip("OpenAgentSession", () => client.openAgentSession(request)),
+    watchAgentSession: (request, signal) => streamingRoundTrip("WatchAgentSession", () => client.watchAgentSession(request, { signal })),
+    watchBashRun: (request, signal) => streamingRoundTrip("WatchBashRun", () => client.watchBashRun(request, { signal })),
+    readAgentPage: (request) => unaryRoundTrip("ReadAgentPage", () => client.readAgentPage(request)),
+    getWorkflow: (request) => unaryRoundTrip("GetWorkflow", () => client.getWorkflow(request)),
+    getSidecarCursors: (request) => unaryRoundTrip("GetSidecarCursors", () => client.getSidecarCursors(request)),
+    getLiveWork: (request) => unaryRoundTrip("GetLiveWork", () => client.getLiveWork(request)),
+    writeBatch: (request) => unaryRoundTrip("WriteBatch", () => client.writeBatch(request)),
   };
 }

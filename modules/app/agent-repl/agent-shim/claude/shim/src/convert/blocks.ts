@@ -70,7 +70,7 @@ export function imageBlock(block: VendorBlock): conversationv1.ImageBlock | unde
       mediaType,
     });
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { source_type: source.type },
     "an image block names no location this contract can carry",
   );
@@ -92,7 +92,7 @@ export function toolResultBlock(block: VendorBlock): conversationv1.ToolResultCo
       });
     }
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { block_type: block.type },
     "a tool result block's kind is not modelled; it is kept whole as unsupported",
   );
@@ -119,8 +119,9 @@ export function toolResultContent(content: unknown): conversationv1.ToolResultCo
     });
   }
   if (!Array.isArray(content)) {
-    LOGGER.warn(
-      { content_type: typeof content },
+  // warn: a defect because an invalid tool-result content shape cannot be represented on the wire.
+  LOGGER.warn(
+    { content_type: typeof content },
       "a tool result's content is neither a string nor a block array",
     );
     return undefined;
@@ -145,7 +146,7 @@ export function userContentBlock(block: VendorBlock): conversationv1.UserContent
       });
     }
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { block_type: block.type },
     "a user content block's kind is not modelled; it is kept whole as unsupported",
   );

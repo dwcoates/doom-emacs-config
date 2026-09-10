@@ -55,11 +55,12 @@ export function backupTranscript(options: {
   try {
     mkdirSync(directory, { recursive: true });
     copyFileSync(options.transcript, target);
-    LOGGER.debug(
+    LOGGER.info(
       { transcript: options.transcript, backup: target, vendor_session_id: options.vendorSessionId },
       "backed up the vendor transcript",
     );
   } catch (err) {
+    // warn: a defect because the transcript backup failed while the turn continued.
     LOGGER.warn(
       {
         transcript: options.transcript,
@@ -85,6 +86,7 @@ export function pruneBackups(directory: string, keep: number): void {
   try {
     names = readdirSync(directory).filter((name) => name.endsWith(".jsonl"));
   } catch (err) {
+    // warn: a defect because backup retention could not inspect its directory.
     LOGGER.warn(
       { directory, cause: err instanceof Error ? err.message : String(err) },
       "could not list the transcript backup directory to prune it",
@@ -98,6 +100,7 @@ export function pruneBackups(directory: string, keep: number): void {
       rmSync(path.join(directory, name));
       LOGGER.debug({ directory, pruned: name, keep }, "pruned an old transcript backup");
     } catch (err) {
+      // warn: a defect because backup retention left an expired copy on disk.
       LOGGER.warn(
         { directory, pruned: name, cause: err instanceof Error ? err.message : String(err) },
         "could not prune a transcript backup",

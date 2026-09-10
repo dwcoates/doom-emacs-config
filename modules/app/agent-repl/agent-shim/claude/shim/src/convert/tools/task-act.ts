@@ -75,7 +75,7 @@ function statusOf(
       // nothing about where the task stands, and `pending` would invent it.
       return { case: undefined };
     default:
-      LOGGER.warn(
+      LOGGER.debug(
         { status },
         "the tracker named a status this contract has no arm for; the status is left unset",
       );
@@ -138,7 +138,7 @@ export const taskActConverter: ToolConverter = {
     }
     const id = str(call.input, "taskId");
     if (id === undefined || id === "") {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, tool: call.toolName },
         "a task update names no task; no frame is produced",
       );
@@ -178,7 +178,7 @@ function settleCreate(
 ): conversationv1.AgentActivity["item"] | undefined {
   const id = str(obj(structured, "task"), "id");
   if (id === undefined || id === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a task create returned no tracker identity; no frame is produced",
     );
@@ -222,7 +222,7 @@ function settleUpdate(
 ): conversationv1.AgentActivity["item"] | undefined {
   const id = str(structured, "taskId") ?? str(call.input, "taskId");
   if (id === undefined || id === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a task update names no task; no frame is produced",
     );

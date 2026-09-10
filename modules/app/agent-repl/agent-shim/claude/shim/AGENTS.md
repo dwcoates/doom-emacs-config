@@ -428,6 +428,8 @@ at build time and is not a vendor import site.
   `.log(...)` call in production source. The only stderr exceptions are the
   documented pre-logger bootstrap/sink emergency and sink-mirror paths owned by
   `src/log.ts`.
+- Every `warn` call is immediately preceded by `// warn: a defect because …`
+  or `// warn: a decision because …`; ESLint rejects a warning without one.
 - The full contract is `modules/app/agent-repl/logging-contract.md`.
 
 Read shim records and harvest run windows through `../../../bin/logs.sh`; the

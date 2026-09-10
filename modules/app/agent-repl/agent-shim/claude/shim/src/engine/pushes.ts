@@ -206,6 +206,7 @@ export class SessionPushes {
       if (subscriber.offer(update)) continue;
       // A subscriber that cannot take a session fact is REPORTED, never
       // silently skipped: the consumer needs to know its view has a hole.
+      // warn: a defect because a full subscriber queue lost a session fact.
       LOGGER.warn(
         { arm, queue_limit: SUBSCRIBER_QUEUE_LIMIT },
         "a WatchSession consumer's queue is full; the fact could not be delivered",
