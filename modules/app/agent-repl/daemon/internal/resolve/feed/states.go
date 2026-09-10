@@ -53,6 +53,12 @@ type unitState struct {
 	row *frontendv1.FeedRow
 	// feedKey is the feed that row landed on.
 	feedKey string
+	// artifactFavicon is the emoji the PUBLISH announced. Kept because the
+	// published outcome restates the title and never the favicon, and
+	// feed.proto words the artifact heading as "favicon emoji + title" — so a
+	// heading recomposed from the outcome alone would lose the glyph the
+	// bubble had while it was publishing.
+	artifactFavicon string
 	// sendAddressedTo is WHO a send addressed, exactly as the caller wrote it.
 	// Kept because the send's success arm resolves an identity but never
 	// restates the addressed string, and the address line prefers a name a
@@ -133,13 +139,28 @@ func (s *wsState) prose(id string) *proseState {
 // time, which is the invariant the enter/exit coalescing rests on: both calls
 // key onto the episode's single FeedId.
 type planState struct {
-	// episode numbers the agent's episodes so a second one never collides with
-	// the first's identity.
-	episode uint64
+	// opener is the ACTIVITY ID of the call that opened the episode, and it is
+	// what the bubble's FeedId is made of.
+	//
+	// A COUNTER CANNOT BE USED HERE, and that is a measurement rather than a
+	// preference. Every other unit in this package keys on
+	// `act.GetActivityId()`, which is why the SAME vendor record arriving on
+	// both planes — the shim's stream and the sidecar's file tail — collapses
+	// onto one row instead of drawing twice. The plan bubble alone numbered
+	// its episodes, so the file plane's replay of one `!plan` turn found no
+	// open episode, took the next number, and drew a SECOND identical plan
+	// card: observed in the playtest's own picture and pinned by
+	// TestPlanModeCoalescesOntoOneBubble. Keyed on the opener's activity id,
+	// a re-delivery of the same call lands on the same FeedId by construction.
+	opener string
 	// row is the bubble's identity.
 	row *frontendv1.FeedId
 	// feed is where the bubble landed.
 	feed placement
+	// closed says the episode has reached its final state. A closed episode is
+	// KEPT rather than forgotten, so the other plane's copies of its calls are
+	// recognized as re-deliveries instead of opening a second episode.
+	closed bool
 }
 
 // shellState is one detached shell's accumulation: the spool the daemon caps
