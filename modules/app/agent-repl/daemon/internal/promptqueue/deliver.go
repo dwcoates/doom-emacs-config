@@ -133,24 +133,12 @@ func (q *queue) mirrorAccepted(ws ids.WorkspaceID, turn ids.TurnID, said *conver
 	q.deps.Feed.UpsertAtOutputAddress(ws, feedid.RowKey{Kind: feedid.KindPrompt, ID: string(turn)}, row)
 }
 
-// mirrorBlocks renders a submission's content as drawn blocks. Only text is
-// mirrored: an image's `src` is the feed resolver's to resolve, and the
-// resolver's own draw of the same row replaces this one the moment the prompt
-// comes back on the watch.
+// mirrorBlocks renders a submission's content as drawn blocks, through the
+// SAME function the feed resolver draws a replayed user prompt with. A live
+// session sees only this mirror -- nothing brings a delivered user prompt
+// back on the watch -- so a mirror that drew less than the resolver drew LESS
+// THAN THE PERSON SAID, for the whole session. It dropped every image block.
 func (q *queue) mirrorBlocks(said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
-	blocks := make([]*frontendv1.FeedUserPromptBlock, 0, len(said.GetContent().GetBlocks()))
-	for _, block := range said.GetContent().GetBlocks() {
-		text, ok := block.GetBlock().(*conversationv1.UserContentBlock_Text)
-		if !ok {
-			continue
-		}
-		drawn := q.deps.StripSentinels(text.Text.GetText())
-		if drawn == "" {
-			continue
-		}
-		blocks = append(blocks, &frontendv1.FeedUserPromptBlock{
-			Block: &frontendv1.FeedUserPromptBlock_Text{Text: &frontendv1.FeedTextBlock{Text: drawn}},
-		})
-	}
-	return blocks
+	return feed.DrawUserBlocks(said.GetContent(), q.deps.StripSentinels, q.deps.ResolveImage,
+		q.deps.Log.Global())
 }

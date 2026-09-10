@@ -26,6 +26,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/imageorigin"
 	"claude-repld/internal/login"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/prompthandler"
@@ -110,6 +111,12 @@ type Deps struct {
 	// Its entry point is re-stat'd per request and answered with
 	// Cache-Control: no-store; nothing else gets that header.
 	WebappDist string
+	// ImageOrigin serves the images a drawn feed refers to, mounted on
+	// imageorigin.Route beneath the same origin as the webapp and the Connect
+	// routes -- which is what lets a bubble's `<img src="/feed-images/...">`
+	// load without a second host. It is REQUIRED like every other dependency:
+	// a daemon that cannot draw an attached image is not one to start.
+	ImageOrigin http.Handler
 	// Log is the server's logger.
 	Log dlog.Surfaces
 }
@@ -250,6 +257,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a holds resolver")
 	case deps.WebappDist == "":
 		return nil, missing("the webapp dist directory")
+	case deps.ImageOrigin == nil:
+		return nil, missing("an image origin")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	case deps.SessionFacts == nil:
@@ -279,8 +288,10 @@ func New(deps Deps) (Server, error) {
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(s)
 	mux.Handle(path, handler)
-	// The Connect routes sit on their own longer prefix, so http.ServeMux
-	// gives them precedence over the asset origin at "/".
+	// The Connect routes and the image origin sit on their own longer
+	// prefixes, so http.ServeMux gives them precedence over the asset origin
+	// at "/".
+	mux.Handle(imageorigin.Route, deps.ImageOrigin)
 	mux.Handle("/", s.assets())
 	s.mux = withAcceptWriter(mux)
 	return s, nil

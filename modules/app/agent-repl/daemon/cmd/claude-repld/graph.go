@@ -25,6 +25,7 @@ import (
 	"claude-repld/internal/handover"
 	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/imageorigin"
 	"claude-repld/internal/login"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/paint"
@@ -260,16 +261,27 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// keeps the full text. Both the feed resolver and the queue's mirror draw
 	// prompt rows, so both take the same one implementation.
 	stripSentinels := sentinelStripper(log)
+	// THE IMAGE ORIGIN AND THE RESOLVER ARE ONE WIRING. A path becomes
+	// servable only by the feed resolver drawing a record that referenced it,
+	// so the registrar the resolver holds IS the origin's own Register: there
+	// is no way to serve an image that no conversation carried.
+	images, err := imageorigin.New(log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the image origin: %w", err)
+	}
+	resolveImage, err := feed.PathImageResolver(images.Register, log)
+	if err != nil {
+		return nil, fmt.Errorf("claude-repld: build the image resolver: %w", err)
+	}
 	feedResolver, err := feed.New(feed.Deps{
 		Log:            p.Surfaces,
 		WorkspaceDir:   workspaceDir,
 		Painter:        painter,
 		StripSentinels: stripSentinels,
-		// THE IMAGE ORIGIN HAS NO PRODUCER. The daemon serves the webapp's
-		// dist directory and nothing else, so an image reference has no
-		// servable source; the resolver refuses loudly and names what is
-		// missing rather than drawing a broken image.
-		ResolveImage: feed.UnproducedImageResolver(log),
+		// An image reference is turned into a source on the daemon's own
+		// image origin (`path`) or answered verbatim (`url`); an unset arm
+		// is refused loudly rather than drawn as an empty src.
+		ResolveImage: resolveImage,
 		// Zero leaves the resolver's own DefaultTailRetention in force; the
 		// flag and its environment knob are what make token_expired reachable.
 		TailRetention: p.Opts.feedTailRetention,
@@ -345,6 +357,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
 		StripSentinels: stripSentinels,
+		ResolveImage:   resolveImage,
 		DB:             p.DB,
 		Judge:          judge,
 		Feed:           feedResolver,
@@ -637,6 +650,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Sidebar:          sidebarResolver,
 			Holds:            holdsResolver,
 			WebappDist:       paths.WebappDist,
+			ImageOrigin:      images.Handler(),
 			Log:              p.Surfaces,
 		},
 		Boot: boot.Deps{
