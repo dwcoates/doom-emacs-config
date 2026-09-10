@@ -688,7 +688,7 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 	if opts.StateDir == "" {
 		opts.StateDir = t.TempDir()
 	}
-	daemon := startFakeClientLog(t, opts.StateDir, opts.LogPath)
+	daemon := startFakeClientLog(t, opts.StateDir, opts.LogPath, opts.ConfigRoots)
 	mustMkdirAll(t, filepath.Dir(opts.LogPath))
 	args := []string{
 		"--store-socket", opts.StoreSocket,

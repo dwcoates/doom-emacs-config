@@ -7,7 +7,7 @@ and writes it to the store as `store.v1.StoreEntry` batches with the reader
 position riding the same transaction.
 
 It is a COPIER. It has no view of process liveness, no session semantics, and
-owns no database. Its daemon calls are the idempotent `RegisterWorkspace`
+owns no database. Its daemon calls are the read-only `WatchWorkspaceRoster`
 lookup needed to obtain a daemon-minted ref and `ClientLog` for file-scoped
 diagnostics; the daemon persists those records into workspace `sidecar.log`.
 The only thing it concludes on its own is that it STOPPED SEEING a detached run.
@@ -583,9 +583,10 @@ foreground harnesses may use `logging.NewAtLevel`.
 - FILE-SCOPED DIAGNOSTICS GO THROUGH `agentrepl.v1.AgentRepl.ClientLog` with
   the `sidecar` runtime arm, the sidecar's timestamp and verbosity class, its
   PID and Claude session in context, and the complete daemon-minted workspace
-  ref returned by idempotent `RegisterWorkspace(dir)`. The daemon address is
-  re-read from `<state-dir>/daemon.addr` for every record so handover changes
-  the destination without a sidecar restart.
+  ref read from `WatchWorkspaceRoster`. The most recently used ref is cached at
+  constant size; the daemon address is still re-read from
+  `<state-dir>/daemon.addr` for every record so handover changes the destination
+  without a sidecar restart.
 - GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
   forwarding failure writes one global error per daemon address and outage
   window and never fails the file-plane operation that produced the diagnostic.
