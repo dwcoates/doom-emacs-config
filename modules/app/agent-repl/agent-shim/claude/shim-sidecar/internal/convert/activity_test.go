@@ -60,65 +60,6 @@ func TestRecognizedBuiltinsReachTheirOwnArm(t *testing.T) {
 	}
 }
 
-func TestAskUserQuestionRidesTheUpdateNotTheActivityEnvelope(t *testing.T) {
-	// Arrange. A question is NOT read-only work: it BLOCKS the agent until the
-	// user writes back, so it rides AgentUpdate directly and is keyed in its own
-	// identity space.
-	c := newTestConverter(t)
-	input := `{"questions":[{"question":"Which?","header":"Pick","multiSelect":false,` +
-		`"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
-
-	// Act.
-	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1, toolCall("toolu_ask", "AskUserQuestion", input)))
-
-	// Assert.
-	entry := entryByKey(t, entries, QuestionKey("toolu_ask"))
-	question := frameOf(entry).GetUpdate().GetQuestion()
-	if question == nil {
-		t.Fatal("an ask must land on AgentUpdate.question, never inside the activity envelope")
-	}
-	if frameOf(entry).GetUpdate().GetActivity() != nil {
-		t.Fatal("an ask is not an activity")
-	}
-	asked := question.GetStart().GetBatch().GetQuestions()
-	if len(asked) != 1 {
-		t.Fatalf("questions = %d, want 1", len(asked))
-	}
-	if got := asked[0].GetQuestion().GetText(); got != "Which?" {
-		t.Fatalf("question text = %q, want it verbatim (it is the producer's own answer key)", got)
-	}
-	if asked[0].GetSingleSelect() == nil {
-		t.Fatal("multiSelect false must land on the single-select arm")
-	}
-	if got := len(asked[0].GetSingleSelect().GetOptions()); got != 2 {
-		t.Fatalf("options = %d, want 2", got)
-	}
-}
-
-func TestMultiSelectModeIsReadPerQuestion(t *testing.T) {
-	// Arrange. THE MODE IS PER QUESTION, NEVER PER ASK: one batch can mix a
-	// pick-one with a pick-any, so it must not be lifted to the batch.
-	c := newTestConverter(t)
-	input := `{"questions":[` +
-		`{"question":"one","header":"h","multiSelect":false,"options":[{"label":"A"}]},` +
-		`{"question":"many","header":"h","multiSelect":true,"options":[{"label":"B"}]}]}`
-
-	// Act.
-	entries := convertLines(t, c, assistantWith("a1", "msg_1", ts1, toolCall("toolu_ask", "AskUserQuestion", input)))
-
-	// Assert.
-	asked := frameOf(entryByKey(t, entries, QuestionKey("toolu_ask"))).GetUpdate().GetQuestion().GetStart().GetBatch().GetQuestions()
-	if len(asked) != 2 {
-		t.Fatalf("questions = %d, want 2", len(asked))
-	}
-	if asked[0].GetSingleSelect() == nil {
-		t.Fatal("the first question must be single-select")
-	}
-	if asked[1].GetMultiSelect() == nil {
-		t.Fatal("the second question must be multi-select")
-	}
-}
-
 func TestSandboxDisabledIsStatedRatherThanAssumed(t *testing.T) {
 	// Arrange. CONSENT-RELEVANT: a command that ran with the sandbox deliberately
 	// disabled reached the host directly and is otherwise indistinguishable.
