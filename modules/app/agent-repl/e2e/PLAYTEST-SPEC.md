@@ -124,7 +124,10 @@ runs of the same product.
 
 ### A capture is of a settled screen, of a redrawn one, and of the CURRENT DOM
 
-Three things happen before the picture is taken:
+Three things happen before the picture is taken, in this order: the frame is
+redrawn, the page's own frames are waited for and the frame is redrawn again,
+and only then is the framebuffer read until it settles. They are listed here
+smallest first.
 
 - **A redisplay is forced.** A user's Emacs redisplays constantly because a
   user generates events; this one is driven entirely over the server socket
@@ -134,15 +137,41 @@ Three things happen before the picture is taken:
   A capture asks for the redraw a user's keystrokes would have asked for.
   It only makes Emacs draw what it already decided — a tab bar still wrong
   afterwards is wrong in the product, and one is (see below).
-- **The framebuffer is read until two consecutive reads agree byte for
-  byte.** A screenshot of a frame mid-redraw is half of one state and half of
-  another. This is a PATIENCE BUDGET rather than an assertion: a surface that
+- **The framebuffer is read, a full redisplay apart, until it has held still
+  for a whole 50ms window.** A screenshot of a frame mid-redraw is half of
+  one state and half of another. Two agreeing reads are not enough for that,
+  twice over:
+
+  - Reads with nothing driven between them agree trivially about a screen
+    Emacs has simply not repainted. Measured, on the tab bar after a roster
+    push opened a new tab: with the redraws above already done, the bar still
+    showed the tab set from BEFORE the push in three registrations of four,
+    and one more `(redraw-frame) (redisplay t)` showed the new one every
+    time. So a full redisplay sits between the reads, each read follows an
+    eval of its own with the poll interval between them — on pgtk the pixels
+    reach the X server only when GTK's main loop runs, which is after an eval
+    has answered and never inside it — and the round count is logged.
+  - Reads a few milliseconds apart agree about a frame still ARRIVING at the
+    X server. Measured, in two real runs: `04-arm-link-severed` was declared
+    settled at 2ms carrying the webview alone with every piece of Emacs's own
+    chrome blank white, and `04-arm-detached-settled` at 5ms with a correctly
+    green tab bar over a webview still showing the previous state. Both were
+    whole on the glass about 22ms later. So the window is 50ms — three
+    periods of a 60Hz display frame — and any change restarts it.
+
+  This is a PATIENCE BUDGET rather than an assertion: a surface that
   is genuinely animating never settles, and refusing to photograph it would
   refuse exactly the states a playtest exists to show — so a capture that
   runs out its budget takes the last read and SAYS SO in the manifest. The
   cursor's own blink is switched off in the playbook's setup rather than
   waited out, because a blinking cursor alone would make every capture run
   its whole budget.
+
+  The window and the paint gate below are not the same gate wearing two
+  names. The gate proves the PAGE produced a frame for the DOM the step
+  asserted; the window proves the SCREEN then stopped changing. The blank
+  chrome above was Emacs's own drawing in flight, which no page-side gate can
+  see.
 - **The page's own frames are waited for, between the two redraws.** An
   `xwidget-webkit` webview on X is OFFSCREEN-RENDERED: WebKit paints into a
   GTK offscreen surface, and those pixels reach the glass only when Emacs's
