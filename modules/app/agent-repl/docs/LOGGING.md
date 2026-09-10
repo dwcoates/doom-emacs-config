@@ -91,7 +91,8 @@ Webapp
   (proto landed); remove the dead localStorage verbose toggle.
 
 Reader and docs
-- `bin/logs.sh` as specified; the module AGENTS.md "Logs" section (path,
-  writer, format, window selection, attribution field, level switch, recipe);
+- Landed in this work: `bin/logs.sh` as specified; the module AGENTS.md "Logs"
+  section (path, writer, format, window selection, attribution field, level switch, recipe);
   per-system AGENTS.md sections; `logging-contract.md` amended for rotation,
-  the level switch, the reader, and the sidecar seam once implemented.
+  the level switch, and the reader. The sidecar seam remains owned by the
+  sidecar/daemon implementation work above.
