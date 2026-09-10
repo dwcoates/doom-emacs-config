@@ -625,14 +625,12 @@ func TestEvictingAnUnknownWorkspaceIsSuccess(t *testing.T) {
 	}
 }
 
-func TestScanOnceReportsAPoisonedSinkAgainstItsWorkspace(t *testing.T) {
-	// Arrange: the shim grows shim.log past the cap and the workspace has
-	// redirected the canonical link, so maintenance must refuse.
-	s, runLogPath := testSurfaces(t)
+func TestShimSinkRotatesAMarkedTargetAtTheNextProcessRoll(t *testing.T) {
+	// Arrange: fd 3 has carried the shim target past the soft cap and the scan
+	// has marked it. A separate reader models the descriptor inherited by the
+	// retiring child, which survives the daemon closing its own descriptor.
+	s, _ := testSurfaces(t)
 	dir := t.TempDir()
-	if _, err := s.Workspace(dir); err != nil {
-		t.Fatalf("Workspace: %v", err)
-	}
 	if _, err := s.ShimSink(dir); err != nil {
 		t.Fatalf("ShimSink: %v", err)
 	}
@@ -640,11 +638,105 @@ func TestScanOnceReportsAPoisonedSinkAgainstItsWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if err := shim.f.Truncate(CapBytes + 1); err != nil {
+	if err := shim.file.File().Truncate(CapBytes); err != nil {
 		t.Fatalf("grow: %v", err)
 	}
-	if err := os.Remove(shim.link); err != nil {
-		t.Fatalf("remove link: %v", err)
+	held, err := os.Open(shim.target)
+	if err != nil {
+		t.Fatalf("open the retiring shim's target: %v", err)
+	}
+	defer held.Close()
+	oldInfo, err := held.Stat()
+	if err != nil {
+		t.Fatalf("stat old target: %v", err)
+	}
+	s.scanOnce()
+
+	// Act: the replacement shim requests its fd 3.
+	borrow, err := s.ShimSink(dir)
+	if err != nil {
+		t.Fatalf("ShimSink at process roll: %v", err)
+	}
+
+	// Assert.
+	newInfo, err := borrow.File().Stat()
+	if err != nil {
+		t.Fatalf("stat fresh target: %v", err)
+	}
+	if os.SameFile(oldInfo, newInfo) {
+		t.Fatal("the replacement shim inherited the retiring shim's inode")
+	}
+	if generation, err := os.Stat(shim.target + ".1"); err != nil || !os.SameFile(oldInfo, generation) {
+		t.Fatalf("generation .1 = %v, %v; want the retiring shim's inode", generation, err)
+	}
+	if shim.rotatePending {
+		t.Fatal("the shim target remains marked after its process roll")
+	}
+}
+
+func TestShimHardCeilingReportsOnceAndRequestsAForcedRoll(t *testing.T) {
+	// Arrange: fd 3 has carried the shim target through the hard ceiling.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	if _, err := s.ShimSink(dir); err != nil {
+		t.Fatalf("ShimSink: %v", err)
+	}
+	_, shim, err := s.resolve(dir, "shim")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := shim.file.File().Truncate(HardCapBytes + 1); err != nil {
+		t.Fatalf("grow: %v", err)
+	}
+
+	// Act: two scans observe the same over-ceiling target.
+	s.scanOnce()
+	s.scanOnce()
+
+	// Assert: exactly one error and one forced-roll request are emitted, and
+	// the managed write path refuses further bytes until the roll happens.
+	records := workspaceRecords(t, dir, "daemon")
+	seen := 0
+	for _, rec := range records {
+		if rec["operation"] == "daemon.dlog.shim_hard_ceiling" {
+			seen++
+		}
+	}
+	if seen != 1 {
+		t.Fatalf("hard-ceiling records = %d, want exactly 1", seen)
+	}
+	select {
+	case req := <-s.ShimRollRequests():
+		if req.Dir != filepath.Clean(dir) || req.SizeBytes != HardCapBytes+1 || req.HardBytes != HardCapBytes {
+			t.Fatalf("roll request = %+v, want this workspace and its ceiling", req)
+		}
+	default:
+		t.Fatal("the hard ceiling emitted no forced-roll request")
+	}
+	select {
+	case req := <-s.ShimRollRequests():
+		t.Fatalf("the repeated scan emitted a second roll request: %+v", req)
+	default:
+	}
+	if err := shim.write([]byte("refused\n")); err == nil {
+		t.Fatal("the managed shim write path accepted bytes past the hard ceiling")
+	}
+}
+
+func TestScanOnceReportsAPoisonedSinkAgainstItsWorkspace(t *testing.T) {
+	// Arrange: the shim sink's descriptor fails while the cap scanner owns the
+	// observation and therefore owns the error record.
+	s, runLogPath := testSurfaces(t)
+	dir := t.TempDir()
+	if _, err := s.ShimSink(dir); err != nil {
+		t.Fatalf("ShimSink: %v", err)
+	}
+	_, shim, err := s.resolve(dir, "shim")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if err := shim.file.Close(); err != nil {
+		t.Fatalf("close the descriptor under the scanner: %v", err)
 	}
 
 	// Act.
@@ -652,10 +744,10 @@ func TestScanOnceReportsAPoisonedSinkAgainstItsWorkspace(t *testing.T) {
 
 	// Assert.
 	if !hasOperation(workspaceRecords(t, dir, "daemon"), "daemon.dlog.sink_poisoned") {
-		t.Fatalf("the poisoned sink was not reported against its workspace")
+		t.Fatal("the poisoned sink was not reported against its workspace")
 	}
 	if hasOperation(readRecords(t, runLogPath), "daemon.dlog.sink_poisoned") {
-		t.Fatalf("the poisoned sink was reported globally; it is workspace-attributed")
+		t.Fatal("the poisoned sink was reported globally; it is workspace-attributed")
 	}
 }
 
@@ -768,10 +860,7 @@ func TestSinkPoisonSurfacesThroughShimSink(t *testing.T) {
 	if err := os.Remove(shim.link); err != nil {
 		t.Fatalf("remove link: %v", err)
 	}
-	shim.size = CapBytes
-	if err := shim.write([]byte("x\n")); err == nil {
-		t.Fatalf("the sink was not poisoned")
-	}
+	shim.rotatePending = true
 
 	// Act.
 	_, err = s.ShimSink(dir)

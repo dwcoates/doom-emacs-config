@@ -125,6 +125,7 @@ func (s testSurfaces) Workspace(string) (dlog.Logger, error) { return s.log, nil
 func (s testSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	return nil, errors.New("testSurfaces: ShimSink is not used by shimclient tests")
 }
+func (s testSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 func (s testSurfaces) ClientLog(string, dlog.ClientRecord) error { return nil }
 
