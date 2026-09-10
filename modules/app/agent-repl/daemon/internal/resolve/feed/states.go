@@ -27,6 +27,24 @@ type unitState struct {
 	// denied records that the permission gate refused this call, so a late
 	// frame never redraws it as running.
 	denied bool
+	// name is the tool's drawn name, remembered because a card is sometimes
+	// RESTATED by something that is not one of the tool's own frames -- a
+	// detachment announcement, which names the unit and nothing else -- and
+	// re-minting the card needs the name the unit already drew under.
+	name string
+	// moved records that this call's WORK LEFT for the background, so no later
+	// frame ever redraws it as running or as returned.
+	//
+	// A MOVE IS NOT AN ENDING, and it is not the card's ending either: the
+	// command went on running under a detached shell row of its own, and that
+	// row is where the run reports. Kept for the same reason `denied` and
+	// `sendDelivery` are kept -- the producer restates the unit's own frames
+	// after the move (the vendor's receipt for the launch, a replay from the
+	// other plane, the next turn's live-work reconciliation), and none of them
+	// says the work moved. Drawn from the frame alone the card sat on
+	// `running` forever above a detached row already reporting `exit 0`
+	// (playtest F43, 2026-09-09).
+	moved bool
 	// diagnostics are the IDE findings raised against this change, composed.
 	diagnostics []string
 	// row is the last row this unit drew, so a post-terminal frame (an
