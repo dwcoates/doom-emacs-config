@@ -2512,3 +2512,84 @@ func TestTheResponseBubbleStampsItsApiResponsesUsage(t *testing.T) {
 		t.Fatalf("the response's usage stamp = %q, want the cache-miss sum %q", got, "18.2k")
 	}
 }
+
+// TestApiRequestFailedTerminalDoesNotRestateItsOwnMidTurnRecord drives BOTH
+// producers of one vendor failure through the real daemon, in the order that
+// used to lose: the mid-turn `system:api_error` the sidecar tails out of the
+// session transcript FIRST, then the shim's own stream terminal for the same
+// failure.
+//
+// Section H's playtest (e2e/playtest_17_failure_arms_test.go) caught this as a
+// 3ms race — `api-401` drew "the credential was rejected — sign in again (a
+// vendor request failed mid-turn and the turn went on: Authentication failed.)"
+// while `api-429`, 17ms the other way, drew its arm's sentence alone. The turn
+// did NOT go on, so the evidence clause is false wherever it appears, and the
+// headline is now the arm's sentence whatever the schedule.
+func TestApiRequestFailedTerminalDoesNotRestateItsOwnMidTurnRecord(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	const message = "Authentication failed."
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; these records are the vendor failure the
+	// test feeds, stated once by each producer.
+	f.d.ExpectWarnings("daemon.feed.api_error", "daemon.sessionwatcher.api_error")
+	f.submit("go", "k-401-twice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the transcript's mid-turn record, then the stream's terminal.
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
+			Message: message,
+			Kind:    &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
+		}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: message,
+			Kind:    &conversationv1.ApiRequestFailed_AuthenticationFailed{AuthenticationFailed: &conversationv1.ApiAuthenticationFailed{}},
+		}},
+	}))
+
+	// Assert: the arm's sentence, with nothing appended to it.
+	row := awaitRow(t, f, tail, "the authentication-failed terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetAuthenticationFailed() != nil
+	})
+	if got := row.GetTurnEnded().GetErrored().GetHeadline().GetText(); got != "the credential was rejected — sign in again" {
+		t.Fatalf("headline = %q, want the arm's sentence with no evidence clause", got)
+	}
+}
+
+// TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived is the specific
+// negative: only the failure the turn DIED OF is dropped. A 429 the turn
+// recovered from, followed by a 500 it then died of, is two facts and both ride.
+func TestApiRequestFailedTerminalStatesAMidTurnFailureItSurvived(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.feed.api_error", "daemon.sessionwatcher.api_error")
+	f.submit("go", "k-429-then-500", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ApiError{ApiError: &conversationv1.ApiRequestFailed{
+			Message: "rate limited",
+			Kind:    &conversationv1.ApiRequestFailed_RateLimited{RateLimited: &conversationv1.ApiRateLimited{}},
+		}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: "the service raised",
+			Kind:    &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}},
+		}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the internal-error terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetInternal() != nil
+	})
+	got := row.GetTurnEnded().GetErrored().GetHeadline().GetText()
+	if !strings.Contains(got, "rate limited") {
+		t.Fatalf("headline = %q, want the surviving mid-turn failure folded in as evidence", got)
+	}
+}
