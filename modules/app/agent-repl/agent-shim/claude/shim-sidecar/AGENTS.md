@@ -843,6 +843,19 @@ the suite rather than quietly shrinking what the feed can show.
 - EXACTLY ONE UNIT PER API RESPONSE carries `usage` and `effort`: the unit for
   block 0 of the response. Every other unit leaves both UNSET, or a consumer
   summing units over-counts the bill by the number of blocks.
+- A RESPONSE THAT PRODUCES NO UNITS AT ALL IS LEGITIMATE, AND THE RECORD THAT
+  REPORTS IT NAMES THE REAL CAUSE. There are two, and they are different
+  decisions: the EXEMPT SET (the tool is dropped at the call and at the result
+  alike) and the DEFERRED ANNOUNCE (the unit is real and appears at the call's
+  RESULT, because the subagent spawn's `created_agent_id` is not knowable until
+  the launch answers). The record used to assert the exempt set unconditionally,
+  which is a lie on the commonest shape it fires for — a response whose only
+  block is a spawn — and it sent a reader hunting a modelling gap into a
+  decision that was never taken. Each block that produced nothing answers WHY;
+  the record renders the distinct causes in block order. A response producing
+  nothing for a cause NO BLOCK NAMED is stated as a modelling gap, because that
+  is what it is. The accounting still has nowhere to land either way, so the
+  record stays loud.
 - INSTANTS COME FROM THE FILE, never a clock here. Every `started_at` /
   `settled_at` is the record's own timestamp, so a re-read after a restart mints
   byte-identical frames under byte-identical write ids.
