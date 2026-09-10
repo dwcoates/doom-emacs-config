@@ -54,7 +54,6 @@
 (declare-function agent-repl--ws-gui-frontend-p "agent-repl-frontends" (ws))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
-(declare-function agent-repl--webview-recovery-sweep "webview-recovery" (reason))
 (declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
@@ -266,32 +265,6 @@ external call; tests mock via `cl-letf'.  Registered in
 `agent-repl--external-boundary-functions'."
   (require 'xwidget)
   (xwidget-webkit-uri xwidget)) ;; ALLOW-EXTERNAL-BOUNDARY
-
-(defun agent-repl-refresh-webviews ()
-  "Bring every workspace webview onto the deployed bundle, returning the count.
-
-The deploy-time entry point bin/deploy-all.sh calls over emacsclient
-right after it restarts the daemon.  It holds no sweep logic of its own:
-the sweep is `agent-repl--webview-recovery-sweep' (webview-recovery.el),
-which is the SAME sweep the daemon link-up edge fires.  The two edges
-are one mechanism deliberately — a deploy and a link-up differ only in
-what named them, and a page's staleness is decided by comparing what it
-is running against what is on disk either way.
-
-ALWAYS RETURNS AN INTEGER — the number of webviews the sweep acted on,
-and 0 when the sweep was debounced away by a recent one.  The caller is
-bin/deploy-all.sh, which formats this answer over emacsclient with a
-`%d'; the sweep's own nil-for-debounced is an internal distinction, and
-handing it out over the wire made a debounced deploy report `Format
-specifier doesn\\='t match argument type' instead of a count.  Nothing was
-acted on when a sweep is debounced, so 0 is the true count, not a
-papered-over failure."
-  (interactive)
-  (let ((acted (or (agent-repl--webview-recovery-sweep "deploy_refresh") 0)))
-    (when (called-interactively-p 'interactive)
-      (agent-repl--user-message nil "webview sweep acted on %s webview(s)"
-                                (list acted)))
-    acted))
 
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 
