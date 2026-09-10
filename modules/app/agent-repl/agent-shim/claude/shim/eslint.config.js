@@ -125,6 +125,39 @@ export default tseslint.config(
     },
   },
 
+  // Every production call site selects its severity in the method name. A
+  // generic `.log(...)` call has no reviewable level and is therefore a lint
+  // failure, whether its receiver is the canonical logger or a bound child.
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='log']",
+          message: "Shim log sites must call debug, info, warn, error, or logVerbose explicitly.",
+        },
+      ],
+    },
+  },
+
+  // src/log.ts owns both permitted stderr escape hatches: bootstrap/emergency
+  // output and the sink mirror. No other production layer may bypass fd 3.
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/log.ts"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "process",
+          property: "stderr",
+          message: "Production diagnostics must use the canonical shim logger.",
+        },
+      ],
+    },
+  },
+
   // `no-floating-promises` keeps its default `ignoreVoid: true`, so an
   // explicit `void` still marks a fire-and-forget — the spelling this package
   // already uses for the detached pumps it starts and never joins.
