@@ -251,6 +251,32 @@ export function fakeContextUsage(
 
 const window = (utilization: number | null, resetsAt: string | null) => ({ utilization, resets_at: resetsAt });
 
+/**
+ * HOW FAR AFTER THE FAKE'S OWN NOW EACH SAMPLED WINDOW RESETS.
+ *
+ * These used to be ABSOLUTE instants (`2026-08-29T20:00:00.000Z` and
+ * `2026-09-02T00:00:00.000Z`), which meant every countdown a consumer drew off
+ * a SAMPLE read `resets in 0m` the moment those instants fell into the past —
+ * while a countdown drawn off a rate-limit EVENT (minted at `now + 3600s`)
+ * counted down properly. A footer showing `0m` for one source and a live
+ * countdown for the other is not a shape the vendor has; it was the fixture
+ * rotting.
+ *
+ * So a window is stated as an OFFSET from the fake's own clock — the same
+ * `nowMs` seam the transcript stamps and the rate-limit event already use, and
+ * the only notion of "now" the fake has. The goldens stay deterministic because
+ * that clock is injected: a fixed clock in, fixed instants out.
+ *
+ * The offsets are the windows' own natural lengths, so a reader of the drawn
+ * countdown sees a plausible session/weekly reset rather than an arbitrary one.
+ */
+export const FAKE_SESSION_WINDOW_RESETS_IN_MS = 5 * 60 * 60 * 1_000;
+export const FAKE_WEEKLY_WINDOW_RESETS_IN_MS = 7 * 24 * 60 * 60 * 1_000;
+
+/** That offset as the vendor spells an instant, off the fake's own clock. */
+const resetsAfter = (nowMs: number, offsetMs: number): string =>
+  new Date(nowMs + offsetMs).toISOString();
+
 const FAKE_SESSION_COST = {
   total_cost_usd: 0.1234,
   total_api_duration_ms: 4_200,
@@ -296,20 +322,22 @@ const FAKE_BEHAVIOR_WINDOW = {
  * could produce only the first arm, so the mock keeps all five and a scenario
  * picks.
  */
-export function fakeAccountUsage(arm: AccountUsageArm): AccountUsageLike {
+export function fakeAccountUsage(arm: AccountUsageArm, nowMs: number): AccountUsageLike {
   const base = {
     session: FAKE_SESSION_COST,
     subscription_type: "max",
     rate_limits_available: true,
     behaviors: { day: FAKE_BEHAVIOR_WINDOW, week: FAKE_BEHAVIOR_WINDOW },
   };
+  const sessionResetsAt = resetsAfter(nowMs, FAKE_SESSION_WINDOW_RESETS_IN_MS);
+  const weeklyResetsAt = resetsAfter(nowMs, FAKE_WEEKLY_WINDOW_RESETS_IN_MS);
   const allWindows = {
-    five_hour: window(41, "2026-08-29T20:00:00.000Z"),
-    seven_day: window(63, "2026-09-02T00:00:00.000Z"),
-    seven_day_oauth_apps: window(5, "2026-09-02T00:00:00.000Z"),
-    seven_day_opus: window(77, "2026-09-02T00:00:00.000Z"),
-    seven_day_sonnet: window(21, "2026-09-02T00:00:00.000Z"),
-    model_scoped: [{ display_name: "Fable", utilization: 12, resets_at: "2026-09-02T00:00:00.000Z" }],
+    five_hour: window(41, sessionResetsAt),
+    seven_day: window(63, weeklyResetsAt),
+    seven_day_oauth_apps: window(5, weeklyResetsAt),
+    seven_day_opus: window(77, weeklyResetsAt),
+    seven_day_sonnet: window(21, weeklyResetsAt),
+    model_scoped: [{ display_name: "Fable", utilization: 12, resets_at: weeklyResetsAt }],
     extra_usage: { is_enabled: true, monthly_limit: 100, used_credits: 13, utilization: 13, currency: "USD" },
   };
   switch (arm) {
@@ -331,7 +359,7 @@ export function fakeAccountUsage(arm: AccountUsageArm): AccountUsageLike {
       return { ...base, rate_limits: { ...allWindows, five_hour: null } };
     case "utilization_unavailable":
       // The window exists and its utilization does not.
-      return { ...base, rate_limits: { ...allWindows, five_hour: window(null, "2026-08-29T20:00:00.000Z") } };
+      return { ...base, rate_limits: { ...allWindows, five_hour: window(null, sessionResetsAt) } };
     case "sampling_failure":
       // THE SHIM'S OWN SAMPLING FAILING IS A THROW, NOT A SHAPE. This arm used
       // to answer `{ ...base, behaviors: null }`, which the converter never
