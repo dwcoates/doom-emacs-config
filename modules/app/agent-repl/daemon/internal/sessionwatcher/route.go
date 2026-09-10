@@ -819,12 +819,19 @@ func unmodeledToolName(unmodeled *conversationv1.AgentUnmodeled) string {
 // ---- notifications ----
 
 // notifyPermissionLocked raises the host notification a blocked permission
-// deserves, naming the TOOL the consent gates.
+// deserves, naming the TOOL the consent gates — and RETIRES that notification
+// when the ask settles, because a decided gate is nothing left to see.
 func (w *watcher) notifyPermissionLocked(permission *conversationv1.AgentPermission) {
+	key := askKey("permission", permission.GetId().GetValue())
 	start := permission.GetStart()
 	if start == nil {
+		// SETTLED, however it settled: the user's answer, a policy denial, or a
+		// failure to put the ask at all. Each of them ends the ask, and the
+		// marker names asks that have not ended.
+		w.askSettledLocked(key)
 		return
 	}
+	w.unseenAsks[key] = struct{}{}
 	note := HostNotification{
 		Text:     start.GetPrompt().GetTitle(),
 		At:       instantOf(start.GetStartedAt().GetAtMs()),
@@ -855,14 +862,19 @@ func (w *watcher) permissionToolNameLocked(permission *conversationv1.AgentPermi
 // deserves: HostNotificationKind.question_asked, which gets a permission ask's
 // attention treatment and carries the first question's chip label.
 func (w *watcher) notifyQuestionLocked(question *conversationv1.AgentQuestion) {
+	key := askKey("question", question.GetId().GetValue())
 	start := question.GetStart()
 	if start == nil {
+		// SETTLED: answered, or concluded with nobody answering. Either way the
+		// ask is over and its marker has nothing left to point at.
+		w.askSettledLocked(key)
 		return
 	}
 	asked := start.GetBatch().GetQuestions()
 	if len(asked) == 0 {
 		return
 	}
+	w.unseenAsks[key] = struct{}{}
 	text := asked[0].GetHeader()
 	if text == "" {
 		text = asked[0].GetQuestion().GetText()
@@ -877,6 +889,39 @@ func (w *watcher) notifyQuestionLocked(question *conversationv1.AgentQuestion) {
 		"question_id": question.GetId().GetValue(),
 	})
 	w.sinks.Lifecycle.OnNotification(w.ws, note)
+}
+
+// askKey names one ask inside the unseen set. The two ask kinds have their own
+// identity spaces — a question joins to no unit of work, where a permission's
+// identity is the tool unit it gates — so the kind is part of the key rather
+// than trusted not to collide.
+func askKey(kind, id string) string {
+	return kind + ":" + id
+}
+
+// askSettledLocked retires one ask's unseen notification, and reports the
+// workspace SEEN once the last of them is gone.
+//
+// ONLY THE LAST ONE CLEARS. Four permission cards answered one after another
+// leave the marker standing until the fourth is answered — while any ask is
+// still open there is still something unseen. An ask this watcher never
+// announced (a policy denial that never opened) retires nothing: it never
+// raised a marker, so its settle must not clear another ask's.
+func (w *watcher) askSettledLocked(key string) {
+	if _, ok := w.unseenAsks[key]; !ok {
+		return
+	}
+	delete(w.unseenAsks, key)
+	if len(w.unseenAsks) > 0 {
+		w.log.Debug("daemon.sessionwatcher.notify", "an ask settled with others still open", dlog.Context{
+			"ask": key, "open": len(w.unseenAsks),
+		})
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "the last open ask settled; the attention marker is cleared", dlog.Context{
+		"ask": key,
+	})
+	w.sinks.Lifecycle.OnAsksSettled(w.ws)
 }
 
 // instantOf reads a producer's unix-millis instant; an unstated instant is

@@ -4,7 +4,8 @@
 //
 // A merged, closed or KILLED workspace's row carries closed = true; a nuked
 // workspace LEAVES the roster. The attention marker is set on a notification
-// and cleared on SelectWorkspace. See ARCHITECTURE.md "resolvers".
+// and cleared on SelectWorkspace or on the last open ask settling — the two
+// ways a notification becomes SEEN. See ARCHITECTURE.md "resolvers".
 //
 // ONE GLOBAL ROSTER. The roster is editor-global: one accumulation, one topic,
 // one stream serving every webview alike. Per-workspace session facts arrive
