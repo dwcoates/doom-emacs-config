@@ -13,6 +13,9 @@ package convert
 // the number of blocks.
 
 import (
+	"slices"
+	"strings"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
@@ -53,6 +56,9 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 	}
 
 	var out []*storev1.StoreEntry
+	// reasons collects, in block order, why each block that produced no unit
+	// produced none. It is only ever read when the WHOLE record produced none.
+	var reasons []noUnitReason
 	for _, raw := range blocks {
 		index := c.nextBlockOrdinal
 		// EVERY block consumes an ordinal, including a tool_use block that is
@@ -67,7 +73,10 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 			out = append(out, UnknownEntry(at, "assistant.block", "message.content[]", record))
 			continue
 		}
-		entries := c.assistantBlock(block, index, messageID, record, at, env, agent)
+		entries, reason := c.assistantBlock(block, index, messageID, record, at, env, agent)
+		if len(entries) == 0 && reason != "" {
+			reasons = append(reasons, reason)
+		}
 		// USAGE RIDES BLOCK 0 OF THE RESPONSE ALONE — the first block of the
 		// first line, never "index 0 of each line". It is stamped after the
 		// block converted, so a block that produced no unit (an exempt tool
@@ -79,10 +88,16 @@ func (c *Converter) assistantLine(record map[string]any, at Attribution) []*stor
 	}
 
 	if len(out) == 0 {
-		// Every block was dropped as exempt. That is a legitimate outcome and
-		// the accounting has nowhere to land, which is worth one loud record.
+		// A LEGITIMATE OUTCOME WITH SEVERAL CAUSES, AND THE RECORD MUST NAME
+		// THE REAL ONE. This used to assert the exempt set unconditionally,
+		// which is a lie on the commonest shape it fires for: a response whose
+		// only block is a subagent SPAWN, whose unit is real and simply
+		// appears at the call's result. A reader hunting a modelling gap then
+		// found a sentence about a decision that was never taken. The
+		// accounting still has nowhere to land either way, so the record
+		// stands — it just says which.
 		c.log.With(at.ctxWarn("assistant-line")).
-			Log("assistant record produced no units: every content block is in the exempt set, so this response's usage is not carried")
+			Log("assistant record produced no units (%s), so this response's usage is not carried", describeNoUnits(reasons))
 	}
 	return out
 }
@@ -101,14 +116,15 @@ func stampAccounting(entries []*storev1.StoreEntry, usage *conversationv1.TokenU
 	}
 }
 
-// assistantBlock converts ONE content block into the entries it implies.
-func (c *Converter) assistantBlock(block map[string]any, index int, messageID string, record map[string]any, at Attribution, env envelope, agent string) []*storev1.StoreEntry {
+// assistantBlock converts ONE content block into the entries it implies, and —
+// when it implies none — WHY.
+func (c *Converter) assistantBlock(block map[string]any, index int, messageID string, record map[string]any, at Attribution, env envelope, agent string) ([]*storev1.StoreEntry, noUnitReason) {
 	kind := str(block["type"])
 	switch kind {
 	case "thinking", "redacted_thinking":
-		return c.thinkingBlock(block, index, messageID, at, env, agent)
+		return c.thinkingBlock(block, index, messageID, at, env, agent), ""
 	case "text":
-		return c.textBlock(block, index, messageID, record, at, env, agent)
+		return c.textBlock(block, index, messageID, record, at, env, agent), ""
 	case "tool_use", "server_tool_use", "mcp_tool_use":
 		return c.toolCallBlock(block, index, messageID, at, env, agent)
 	default:
@@ -117,7 +133,7 @@ func (c *Converter) assistantBlock(block map[string]any, index int, messageID st
 		// own — never a silent drop and never prose the agent did not write.
 		c.log.With(at.ctxWarn("assistant-block")).With(logging.Context{ActivityID: BlockActivityID(messageID, index)}).
 			Log("assistant content block type=%q is not modeled; stored as vendor_specific", kind)
-		return []*storev1.StoreEntry{VendorSpecificEntry(at, "content_block/"+kind, block)}
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "content_block/"+kind, block)}, ""
 	}
 }
 
@@ -223,4 +239,22 @@ func hasNoticePrefix(text string) bool {
 		}
 	}
 	return false
+}
+
+// describeNoUnits renders, in block order and without repeating itself, why a
+// response produced no units at all.
+func describeNoUnits(reasons []noUnitReason) string {
+	if len(reasons) == 0 {
+		// Every block produced nothing for a reason no block owner named. That
+		// is a converter gap rather than a decision, and saying so is the
+		// point of this record.
+		return "for no reason any block could name, which is a modelling gap rather than a decision"
+	}
+	var distinct []string
+	for _, reason := range reasons {
+		if !slices.Contains(distinct, string(reason)) {
+			distinct = append(distinct, string(reason))
+		}
+	}
+	return "every content block produced none: " + strings.Join(distinct, "; ")
 }
