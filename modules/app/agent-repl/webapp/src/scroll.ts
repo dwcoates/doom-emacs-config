@@ -411,6 +411,48 @@ export class TailFollow {
   }
 }
 
+/**
+ * Wire a REAL scroll box to its tail owner: the box's own scroll events, and
+ * the box's own size changes.
+ *
+ * THE SIZE HALF IS WHAT KEEPS THE LAST BUBBLE OUT FROM UNDER THE FOOTER.
+ * The progress footer is a flex sibling laid out BELOW the scroll box
+ * (index.html), so the box's height is the window's minus whatever the footer
+ * currently occupies. Every time the footer appears, gains a row, or opens its
+ * panel, the box loses exactly that much height — and losing height moves
+ * nothing on its own: `scrollTop` stays where it was, so the tail the reader
+ * was parked at now sits that many pixels below the fold and the last bubble
+ * is clipped by the footer's top edge. Reserving space would not help, because
+ * the space is already reserved by the layout; what is stale is the POSITION.
+ *
+ * It came and went between otherwise identical runs because it turns entirely
+ * on ORDER: a footer that settles BEFORE the render that parks the tail is
+ * already accounted for, and one that settles after is not. `TailFollow` was
+ * written for exactly this (`onResize`), but nothing in production had ever
+ * subscribed it to anything — the owner only ever heard about renders. This is
+ * the subscription.
+ *
+ * A ResizeObserver reports the box's new size before paint, so a following
+ * feed is re-parked on the settled viewport rather than a frame later; a
+ * reader who scrolled away is left where they are, which is `onResize`'s own
+ * rule and not re-decided here.
+ *
+ * Returns the unsubscriber. A mount that drops it leaks an observer onto an
+ * element the next workspace will mount over.
+ */
+export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void {
+  const observer = new ResizeObserver(() => tail.onResize());
+  const onScroll = (): void => tail.onScroll();
+  tail.observe(
+    () => box.addEventListener("scroll", onScroll, { passive: true }),
+    () => observer.observe(box),
+  );
+  return () => {
+    box.removeEventListener("scroll", onScroll);
+    observer.disconnect();
+  };
+}
+
 /** Where a revealed node lands: flush with the top, or as little as possible. */
 export type RevealBlock = "start" | "nearest";
 
