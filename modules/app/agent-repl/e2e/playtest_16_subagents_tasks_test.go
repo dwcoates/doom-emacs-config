@@ -122,6 +122,34 @@ func pt16NoRootRowSays(text string) string {
                  })()`
 }
 
+// pt16PanelOnScreen is "the sub-feed the caret just opened is actually where
+// the reader can see it".
+//
+// THE DEFECT THIS EXISTS FOR, measured at a click in this very playbook:
+// `below=208 scrollTop=40`. Expanding a fold grows the feed BELOW the fold and
+// growth moves nothing on its own, so the panel the reader had just asked for
+// unrolled entirely off the bottom of the screen while every attribute
+// assertion above -- `data-expanded`, `aria-expanded`, the glyph, even WebKit's
+// computed `display` -- stood true. A fold that is "open" off screen is
+// indistinguishable, to a reader, from one that never opened.
+//
+// So the claim is a POSITION, taken off the live boxes: the panel's own top
+// edge sits inside the scroll box's viewport. Its bottom deliberately is not
+// asserted -- a sub-feed taller than the viewport cannot fit, and the rule is
+// that as much of it as fits is shown, not that all of it is.
+//
+// The 2px slack is subpixel layout, the same hair `awaitTailClearsFooter`
+// allows, and not tolerance for being wrong.
+func pt16PanelOnScreen(rowSel string) string {
+	return `(function () {
+                   var box = document.getElementById('feed-scroll');
+                   var panel = document.querySelector(` + jsString(rowSel+` [data-subfeed]`) + `);
+                   if (!box || !panel) { return false; }
+                   var b = box.getBoundingClientRect();
+                   var p = panel.getBoundingClientRect();
+                   return p.top >= b.top - 2 && p.top <= b.bottom + 2; })()`
+}
+
 // ---------------------------------------------------------------------------
 // G49 -- `!subagent`: the bubble is drawn once, and its caret folds it.
 // ---------------------------------------------------------------------------
@@ -185,6 +213,10 @@ func TestPlaytest16SubagentBubble(t *testing.T) {
 		pt16BubbleOpen(pt16SyncBubble))
 	s.awaitInPage(t, "the bubble's own sub-feed to carry rows of its own",
 		pt16SubFeedRows(pt16SyncBubble)+` > 0`)
+	// AND ON SCREEN. Everything above is satisfied by a panel the reader
+	// cannot see; this is the one assertion that is not.
+	s.awaitInPage(t, "the opened sub-feed to sit inside the feed's own viewport",
+		pt16PanelOnScreen(pt16SyncBubble))
 	s.awaitTailClearsFooter(t)
 	opened := s.readInPage(t, "the sub-feed's row count", pt16SubFeedRows(pt16SyncBubble))
 	p.capture("subagent-bubble-expanded",
