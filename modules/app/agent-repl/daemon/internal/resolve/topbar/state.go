@@ -4,6 +4,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/apiresponses"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/shimclient"
 )
@@ -166,21 +167,14 @@ type wsState struct {
 	// counted is every unit whose usage has been folded into the session
 	// totals, with what it reported.
 	counted map[string]usageFingerprint
-	// responses are the response units settled this session, each mapped to
-	// the API RESPONSE it arrived in.
-	responses map[string]int
-	// apiResponses reports, per API response, whether its carrying unit's
-	// usage has been observed. Usage rides EXACTLY ONE unit per API response
-	// (the first content block's), so absence on a unit means "not the
-	// carrying unit", never "free": the reconciliation is per API response and
-	// never per unit.
-	apiResponses map[int]bool
-	// unitResponse is the API response each unit seen this session belongs to.
-	unitResponse map[string]int
-	// apiResponseSeq is the API response units are currently arriving for.
-	// Zero is the response NOTHING has claimed — the units seen before any
-	// usage-carrying unit — and it never counts as carrying usage.
-	apiResponseSeq int
+	// responses files this session's units under the API RESPONSE each
+	// arrived in, and is the accounting warning's denominator. Usage rides
+	// EXACTLY ONE unit per API response (the first content block's), so
+	// absence on a unit means "not the carrying unit", never "free": the
+	// reconciliation is per API response and never per unit. The ledger is
+	// SHARED with the footer's per-turn verdict so the rule cannot drift
+	// between the two.
+	responses *apiresponses.Ledger
 	// totals are the session's summed figures.
 	totals usageFingerprint
 	// perModel is each model's share of the spend, by model name.
@@ -216,14 +210,12 @@ type wsState struct {
 // newWSState builds an empty accumulation.
 func newWSState() *wsState {
 	return &wsState{
-		counted:      map[string]usageFingerprint{},
-		responses:    map[string]int{},
-		apiResponses: map[int]bool{},
-		unitResponse: map[string]int{},
-		perModel:     map[string]*modelTotals{},
-		unmodeled:    map[string]*unmodeledCall{},
-		faults:       map[string]*faultRecord{},
-		windows:      map[string]*windowRecord{},
+		counted:   map[string]usageFingerprint{},
+		responses: apiresponses.New(),
+		perModel:  map[string]*modelTotals{},
+		unmodeled: map[string]*unmodeledCall{},
+		faults:    map[string]*faultRecord{},
+		windows:   map[string]*windowRecord{},
 	}
 }
 

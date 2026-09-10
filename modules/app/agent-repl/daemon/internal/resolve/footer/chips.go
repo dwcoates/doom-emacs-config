@@ -25,6 +25,10 @@ func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 	r.mutate(ws, "daemon.footer.on_activity", "the footer took an activity frame",
 		dlog.Context{"arm": arm, "activity_id": unit}, func(s *wsState) {
 			s.sawActivity = true
+			// FILED BEFORE THE USAGE IS FOLDED IN: the ledger needs to know
+			// whether THIS frame carried usage to decide which API response
+			// the unit belongs to, and folding first would tell it nothing new.
+			s.tok.responses.Observe(unit, act.GetUsage() != nil)
 			s.tok.observeUsage(unit, act.Usage)
 			s.tok.evaluateAlarm(r.opts.alarmTokens)
 			r.applyActivity(ws, s, unit, act)
@@ -100,7 +104,7 @@ func (r *resolver) applyResponse(s *wsState, unit string, resp *conversationv1.A
 			s.tok.firstToken = &latency
 		}
 	case *conversationv1.AgentResponse_Success, *conversationv1.AgentResponse_Failure:
-		s.tok.responses[unit] = true
+		s.tok.responses.Settle(unit)
 	}
 }
 
