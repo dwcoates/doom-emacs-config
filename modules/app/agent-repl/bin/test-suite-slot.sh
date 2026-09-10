@@ -40,9 +40,11 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/ss.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-# The harness may itself run behind the host gate. Its subjects use private
-# slot directories and must begin as independent process trees; the nested
-# cases below establish their own marker through the outer subject invocation.
+# This harness always gives the subject a private slot directory. An outer
+# host gate may legitimately wrap the whole verification sweep, but its
+# process-tree marker does not describe the isolated subject processes below.
+# Clear it once here; the nested-invocation rows establish their own marker by
+# acquiring their private outer gate.
 unset AGENT_REPL_SUITE_SLOT_HELD
 
 # --- 1. the plain case: the command runs and its status is this script's ----
