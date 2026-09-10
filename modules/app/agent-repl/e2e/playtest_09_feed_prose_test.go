@@ -197,7 +197,10 @@ func p09QueryDeathExpected(causeWords string) string {
 		"hue, not the green of a conclusion. Its headline says THE QUERY DIED and names the fault, and " +
 		"on a smaller line directly BENEATH the headline is the cause sentence \"" + causeWords +
 		"\". The footer's leftmost cells read BLOCKED and QUERY DIED, and its status line says the " +
-		"next prompt restarts the session."
+		"next prompt restarts the session. The manifest's \"still changing after 2s\" note is EXPECTED " +
+		"here and is not a torn frame: the sidebar draws a pulsing dot for every workspace that is not " +
+		"idle (`ws-pulse`, 1.3s, infinite), so from the second row on the screen never runs out of " +
+		"changes and every capture spends its whole settle budget."
 }
 
 // TestPlaytestFeedProseFamilies is plan D25-D28.
@@ -265,7 +268,8 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 			expected: "The response bubble shows \"Markdown showcase\" as a LARGE HEADING (not a literal `#`), " +
 				"a BULLETED LIST, an ORDERED LIST numbered 1. and 2., a BLOCKQUOTE behind a left bar, a " +
 				"monospaced FENCED CODE BLOCK carrying the Go line, and — between that fence and the " +
-				"\"A numbered tree\" heading — a faint HAIRLINE RULE across the bubble. Beneath that " +
+				"\"A numbered tree\" heading — a faint HAIRLINE RULE across the bubble (one pixel of " +
+				"`--border`, so look for it rather than expecting it to announce itself). Beneath that " +
 				"heading is a Unicode tree whose branch 1.1 runs onto a SECOND LINE: that continuation " +
 				"line starts with two vertical rails `│   │` aligned EXACTLY under the rails of the " +
 				"lines around it, and `└── 1.1.1` hangs beneath it. Branch 1.2's continuation is " +
@@ -505,13 +509,15 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				"bubbles are STILL ABOVE it — a rotation separates the conversation, it does not erase " +
 				"the feed. Hanging under the topbar is the SESSION REVEAL, a small panel opened before " +
 				"the rotate and still open, carrying one line of the form " +
-				"`<vendor session id> · <account root> · <model>`; the session id in it is the NEW one " +
+				"`<vendor session id> · <account root> · <model>`, CLIPPED at the panel's right edge so " +
+				"the model at its end is off the panel; the session id it begins with is the NEW one " +
 				"the rotation minted, not the one the panel opened with. KNOWN DEFECT, filed and not " +
 				"this section's to fix: a SECOND identical \"context cleared\" rule is drawn BELOW the " +
 				"response. One `/clear` reaches the daemon on two store entries — run 10 measured the " +
 				"row keys `context_cut:sip1-33` and `context_cut:sip1-3k` — and a divider is keyed on " +
-				"the pointer it arrived at, so the two planes draw two rules. The picture matches this " +
-				"sentence while that second rule is there.",
+				"the pointer it arrived at, so the two planes draw two rules. The second one arrives " +
+				"LATE, after the census this row logs, which is why the log can say one while the " +
+				"picture shows two.",
 		},
 	}
 
