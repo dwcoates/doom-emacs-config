@@ -351,6 +351,10 @@ func TestPlaytestDetachedShellFamily(t *testing.T) {
 		},
 	}
 
+	// The rows that reached a settled state, re-checked once the whole family
+	// has run; see the loop's tail.
+	var settled []playtestDetachedRow
+
 	for _, row := range rows {
 		bubbleOf := playtestShellBubbleJS(row.command)
 		s.submit(t, row.prompt)
@@ -391,5 +395,22 @@ func TestPlaytestDetachedShellFamily(t *testing.T) {
 			fmt.Sprintf("the `detachedShell` row for `%s` reads `data-state=\"completed\"`, its `.shell-exit` chip carries "+
 				"`data-exit-code=\"%d\"`, and its stop control is gone; the roster arm is %s", row.command, row.exit, settledArm),
 			row.expected)
+		settled = append(settled, row)
 	}
+
+	// A SETTLED ROW STAYS SETTLED, asserted at the END rather than at the
+	// instant of settling, because that is where it broke: the pictures of the
+	// LATER rows showed an already-`completed` run drawn live again -- an
+	// orange dot, a `quiet for Ns` progress note and a stop button on a run
+	// whose spool holds `EXIT=0`. Every per-row assertion above had passed,
+	// each one reading the row a moment after it settled, so only a check made
+	// once the world has moved on can catch a settled state being walked back.
+	for _, row := range settled {
+		s.awaitInPage(t, "the settled shell row for "+row.command+" to have STAYED settled",
+			`(function () { var sh = `+playtestShellBubbleJS(row.command)+`;
+			               return sh !== null && sh.getAttribute("data-state") === "completed" &&
+			                      sh.querySelector("[data-interrupt]") === null; })()`)
+	}
+	p.note("every settled shell row is still settled at the end of the run",
+		fmt.Sprintf("%d rows that reached `completed` still read `completed` and still carry no stop control", len(settled)))
 }
