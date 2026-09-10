@@ -208,6 +208,36 @@ func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
 	})
 }
 
+// TestAttentionMarkerIsClearedWhenTheLastAskSettles pins the OTHER clear the
+// marker has: the ask the notification was about is ANSWERED, so the
+// notification is seen. A workspace nobody ever selects — the whole of a
+// single-workspace session — would otherwise keep an amber dot for asks that
+// resolved long ago (frontend.v1.RosterRow.attention).
+func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
+	t.Parallel()
+	// Arrange: an open ask has raised the marker.
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-settle", "act-settle")},
+	}))
+	awaitRoster(t, f.d, roster, "the attention marker set by the ask", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetAttention() != nil
+	})
+
+	// Act: the ask is answered.
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: answeredPermission("perm-settle", "act-settle")},
+	}))
+
+	// Assert
+	awaitRoster(t, f.d, roster, "the attention marker cleared by the answer", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetAttention() == nil
+	})
+}
+
 func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	t.Parallel()
 	// Arrange
