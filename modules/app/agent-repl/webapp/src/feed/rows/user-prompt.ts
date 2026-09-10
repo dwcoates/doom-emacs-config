@@ -34,6 +34,11 @@ const PATH = "FeedUserPrompt";
  * a row's body wholesale and a fresh node restarts a CSS animation at 0%, so
  * without the negative delay every redraw would jump the wave back to the left
  * edge.
+ *
+ * WHETHER THE WAVE RUNS AT ALL IS NOT DECIDED HERE. A renderer is handed one
+ * message and draws it; whether this prompt's turn is still in flight is a fact
+ * about the FEED's rows, not about this message, so the feed marks the bubble
+ * (`markWorkingPrompts` in feed-view.ts) and this stamps only the phase.
  */
 export function drawFeedUserPrompt(msg: FeedUserPrompt): HTMLElement {
   log("debug", "drawing a user prompt row", {
