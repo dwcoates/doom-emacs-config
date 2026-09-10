@@ -44,8 +44,8 @@ function lifetimeOf(call: PendingCall): conversationv1.AgentMonitorStart["lifeti
   }
   const timeoutMs = uint(call.input, "timeout_ms");
   if (timeoutMs === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a monitor call stated neither a persistent flag nor a timeout; the watch's lifetime is left unstated",
     );
     return { case: undefined };
@@ -72,8 +72,8 @@ function sourceOf(call: PendingCall): conversationv1.AgentMonitorStart["source"]
       value: create(conversationv1.AgentMonitorWebsocketSchema, { url }),
     };
   }
-  LOGGER.log(
-    { level: "warn", tool_use_id: call.toolUseId },
+  LOGGER.warn(
+    { tool_use_id: call.toolUseId },
     "a monitor call named neither a command nor a websocket; the watch's source is left unstated",
   );
   return { case: undefined };
@@ -104,8 +104,8 @@ export const monitorConverter: ToolConverter = {
   start(call) {
     const description = str(call.input, "description");
     if (description === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a monitor call carries no description; the footer row has nothing to draw",
       );
     }

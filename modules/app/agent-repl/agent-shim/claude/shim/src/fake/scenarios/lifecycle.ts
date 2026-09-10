@@ -24,13 +24,13 @@ const HOLD = scenario({
   writes: "the opening assistant line, the prompt line and (at the interrupt) the turn record",
   arms: "AgentInterrupted.by_user, reached without any permission question",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "hold" }, "fake HOLD turn; it ends only on an interrupt");
+    ctx.log.debug({ turn: ctx.turn, branch: "hold" }, "fake HOLD turn; it ends only on an interrupt");
     ctx.assistant([{ type: "text", text: "Working…" }], { stopReason: null });
     // The park is armed in the same synchronous run as the frame above, so
     // there is no window in which the turn is live and the stop has nothing to
     // resolve: a consumer only sees the frame after the resolver is in place.
     await ctx.awaitInterrupt();
-    ctx.log({ turn: ctx.turn }, "fake HOLD turn released by an interrupt");
+    ctx.log.debug({ turn: ctx.turn }, "fake HOLD turn released by an interrupt");
     // No explicit result: the engine emits the interrupt terminal, which is the
     // ONE place that shape is spelled, so a scenario cannot get it wrong.
   },
@@ -45,10 +45,10 @@ const INTERRUPT_MID_TOOL = scenario({
   writes: "the aborted assistant line, the interrupted tool_result line, the prompt line and the turn record",
   arms: "AgentBashInterrupted.cause=by_user and AgentInterrupted.by_user",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "interrupt" }, "fake mid-tool interrupt turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "interrupt" }, "fake mid-tool interrupt turn");
     const call = ctx.toolUse("Bash", { command: "sleep 600" }, { aborted: true });
     await ctx.awaitInterrupt();
-    ctx.log({ turn: ctx.turn }, "fake interrupt landed inside a tool call");
+    ctx.log.debug({ turn: ctx.turn }, "fake interrupt landed inside a tool call");
     ctx.toolResult(call, "", {
       stdout: "",
       stderr: "",
@@ -69,7 +69,7 @@ const QUERY_EOF = scenario({
   writes: "the prompt line only; there is no turn record because there was no turn end",
   arms: "SessionQueryDied.cause=unexpected_eof",
   run(ctx) {
-    ctx.log({ level: "warn", turn: ctx.turn, branch: "query-eof" }, "fake query ENDING with no result");
+    ctx.log.warn({ turn: ctx.turn, branch: "query-eof" }, "fake query ENDING with no result");
     ctx.endStream();
   },
 });
@@ -81,7 +81,7 @@ const QUERY_FAIL = scenario({
   writes: "the prompt line only",
   arms: "SessionQueryDied.cause=iterator_failure",
   run(ctx) {
-    ctx.log({ level: "warn", turn: ctx.turn, branch: "query-fail" }, "fake query FAILING its iterable");
+    ctx.log.warn({ turn: ctx.turn, branch: "query-fail" }, "fake query FAILING its iterable");
     ctx.failStream(new Error("fake vendor query died mid-turn"));
   },
 });
@@ -97,8 +97,8 @@ const QUERY_EOF_MID_ASK = scenario({
   writes: "the tool_use line and the prompt line; there is no turn record because there was no turn end",
   arms: "SessionQueryDied.cause=unexpected_eof with an AgentPermission settling denied",
   async run(ctx) {
-    ctx.log(
-      { level: "warn", turn: ctx.turn, branch: "query-eof-mid-ask" },
+    ctx.log.warn(
+      { turn: ctx.turn, branch: "query-eof-mid-ask" },
       "fake query ENDING with a permission ask still open",
     );
     const call = ctx.toolUse("Bash", { command: "git status" });
@@ -120,7 +120,7 @@ const KEEPALIVE_ECHO = scenario({
   writes: "the assistant line, the prompt line (marker and all) and the turn record",
   arms: "AgentResponse.from_model, AgentSuccess.completed — classified keep-alive by the marker on the PROMPT",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "keepalive" }, "fake keep-alive-shaped turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "keepalive" }, "fake keep-alive-shaped turn");
     conclude(ctx, "ok");
   },
 });

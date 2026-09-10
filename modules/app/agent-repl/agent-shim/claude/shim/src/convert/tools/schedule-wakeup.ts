@@ -81,8 +81,8 @@ export const scheduleWakeupConverter: ToolConverter = {
     if (output === undefined) {
       // Both outcome arms are entirely made of the typed output's fields; a
       // scheduled arm without wake_at_ms would name an instant nothing stated.
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a settled self-wakeup carried no typed output; neither outcome arm can be built from nothing",
       );
       return undefined;
@@ -103,8 +103,8 @@ export const scheduleWakeupConverter: ToolConverter = {
     }
     const wakeAtMs = big(output, "scheduledFor");
     if (wakeAtMs === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a scheduled wakeup named no instant to fire at; the countdown has nothing to tick from",
       );
       return undefined;

@@ -179,7 +179,7 @@ export function bashDetachmentEntry(
       : output?.backgroundedByUser === true
         ? "by_user"
         : "requested";
-  LOGGER.log(
+  LOGGER.info(
     { vendor_task_id: vendorTaskId, work: toolUseId, tool_use_id: toolUseId, cause },
     "a shell command moved to the background rather than ending",
   );
@@ -315,8 +315,8 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     const [oldest] = facts.keys();
     if (oldest === undefined) return;
     facts.delete(oldest);
-    LOGGER.log(
-      { level: "warn", task_id: oldest },
+    LOGGER.warn(
+      { task_id: oldest },
       "the task-facts table is full; the oldest task's kind and cause are forgotten and its notification cannot be typed",
     );
   };
@@ -366,8 +366,8 @@ export function convertDetached(
 
   const taskId = raw.task_id;
   if (typeof taskId !== "string" || taskId === "") {
-    LOGGER.log(
-      { level: "error", uuid, subtype: raw.subtype },
+    LOGGER.warn(
+      { uuid, subtype: raw.subtype },
       "a task message named no task; nothing can be addressed by it",
     );
     return [residueEntry(context, message, residueForMessage(message, "task message has no task_id"), "residue.unparsed")];
@@ -383,8 +383,8 @@ export function convertDetached(
         // NO ORIGINATING CALL AND NO PAYLOAD WE CAN BUILD: `created` needs a
         // DetachableWork describing the work, and nothing here states one. An
         // invented description would be worse than residue.
-        LOGGER.log(
-          { level: "warn", uuid, task_id: taskId },
+        LOGGER.warn(
+          { uuid, task_id: taskId },
           "a task started with no originating call; it cannot be announced and lands as residue",
         );
         return [
@@ -412,14 +412,14 @@ export function convertDetached(
       // reason. (No real capture carries a `task` message at all; the ctrl-b
       // and timeout captures announce from the result.)
       if (raw.task_type === "local_bash") {
-        LOGGER.log(
+        LOGGER.debug(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
           "a shell task started; its own tool result announces the detachment and states the cause",
         );
         return [];
       }
       taskKinds.rememberCause(taskId, "requested");
-      LOGGER.log(
+      LOGGER.info(
         { uuid, task_id: taskId, tool_use_id: toolUseId, task_type: raw.task_type ?? "" },
         "work left the turn",
       );
@@ -440,8 +440,8 @@ export function convertDetached(
         return [];
       }
       if (toolUseId === undefined || toolUseId === "") {
-        LOGGER.log(
-          { level: "warn", uuid, task_id: taskId },
+        LOGGER.warn(
+          { uuid, task_id: taskId },
           "a task was backgrounded by hand but names no originating call; nothing can be upserted",
         );
         return [];
@@ -449,7 +449,7 @@ export function convertDetached(
       // THE CANDIDATE PRODUCER FOR A BACKGROUNDED AGENT, confirmed at this wave:
       // a person backgrounded running work by hand, which the shell path
       // harvests from its tool result and the agent path only states here.
-      LOGGER.log({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
+      LOGGER.info({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
       taskKinds.rememberCause(taskId, "by_user");
       return [
         detachmentEntry(context, agentId, uuid, {
@@ -482,8 +482,8 @@ export function convertDetached(
         );
       }
       if (toolUseId === undefined || toolUseId === "") {
-        LOGGER.log(
-          { level: "warn", uuid, task_id: taskId },
+        LOGGER.warn(
+          { uuid, task_id: taskId },
           "a task notification names no originating call; its unit cannot be settled",
         );
         return entries;
@@ -493,7 +493,7 @@ export function convertDetached(
         // vendor already returned the `Bash` call with the backgrounding notice,
         // and stamping a subagent terminal on it would restate a shell command
         // as an agent run carrying a prompt it never had.
-        LOGGER.log(
+        LOGGER.debug(
           { uuid, task_id: taskId, tool_use_id: toolUseId },
           "the settling task is not an agent run; its own unit's result settles it and no subagent terminal is written",
         );
@@ -504,8 +504,8 @@ export function convertDetached(
     }
 
     default:
-      LOGGER.log(
-        { level: "warn", uuid, subtype: raw.subtype },
+      LOGGER.warn(
+        { uuid, subtype: raw.subtype },
         "no detached-work converter owns this task message; it lands as residue",
       );
       return [residueEntry(context, message, residueForMessage(message), `unknown.${String(raw.subtype)}`)];
@@ -531,7 +531,7 @@ function subagentTerminalEntries(
   const settled = settledAt(context.nowMs());
   const totalTokens = raw.usage?.total_tokens;
   if (raw.status === "stopped") {
-    LOGGER.log({ task_id: raw.task_id }, "a person stopped the detached run");
+    LOGGER.info({ task_id: raw.task_id }, "a person stopped the detached run");
     return [
       activityEntry(
         context,
@@ -554,7 +554,7 @@ function subagentTerminalEntries(
     ];
   }
   if (raw.status === "failed") {
-    LOGGER.log({ level: "warn", task_id: raw.task_id }, "a detached run failed");
+    LOGGER.warn({ task_id: raw.task_id }, "a detached run failed");
     return [
       activityEntry(
         context,
@@ -592,7 +592,7 @@ function subagentTerminalEntries(
   // describe itself, and this message carries no prompt — so the spawn's own
   // success frame (from its tool result) is the self-describing one, and this is
   // the ASYNC path, where the vendor gives a summary and a token total.
-  LOGGER.log({ task_id: raw.task_id }, "a detached run completed");
+  LOGGER.info({ task_id: raw.task_id }, "a detached run completed");
   return [
     activityEntry(
       context,
@@ -672,13 +672,13 @@ export function lostBashEntry(
   how: conversationv1.DetachedLost,
 ): PersistEntry | undefined {
   if (originalStart.command === undefined) {
-    LOGGER.log(
-      { level: "error", run: run.value },
+    LOGGER.warn(
+      { run: run.value },
       "the recorded start for this shell run states no command; no terminal is produced",
     );
     return undefined;
   }
-  LOGGER.log(
+  LOGGER.warn(
     { run: run.value, how: how.how.case },
     "a detached shell run was concluded LOST: not known to have failed, not known to have finished",
   );
@@ -729,7 +729,7 @@ export function lostSubagentEntry(
   spawn: conversationv1.AgentActivityId,
   how: conversationv1.DetachedLost,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.warn(
     { spawn: spawn.value, how: how.how.case },
     "a detached spawn was concluded LOST: not known to have failed, not known to have finished",
   );
@@ -772,7 +772,7 @@ export function lostAgentEntry(
   agentId: conversationv1.AgentId,
   how: conversationv1.DetachedLost,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.warn(
     { agent: agentId.value, how: how.how.case },
     "a detached agent was concluded LOST: not known to have failed, not known to have finished",
   );

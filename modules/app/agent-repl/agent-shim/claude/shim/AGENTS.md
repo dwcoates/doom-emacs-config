@@ -397,8 +397,11 @@ at build time and is not a vendor import site.
 
 ## Logging
 
-- `src/log.ts` is the one canonical JSON logging API, split between normal and
-  verbose emission. New or changed shim code uses that API only.
+- `src/log.ts` is the one canonical JSON logging API. A logger has exactly one
+  normal-emission method per level: `debug`, `info`, `warn`, and `error`.
+  `logVerbose` is the debug-level verbose-class variant. Every call site names
+  its level in the method, and every method uses the same record builder and
+  inherited-fd sink.
 - The durable sink is the **inherited fd 3**, never a pipe to the daemon's
   stderr: a shim must survive its daemon's death without dying on its own log
   line (EPIPE incident, 2026-08-10). A poisoned sink is surfaced, never
@@ -408,14 +411,23 @@ at build time and is not a vendor import site.
   known agent-repl and Claude session identifier. Before a session exists the
   `agent_repl_session_id` is the process's own `shim-<workspace-key>-<pid>`,
   which correlates a log line with its lock file.
-- **Every logical branch logs** — warnings at `warn`, errors at `error`. This
-  instrumentation exists for the remediation loop: the integration suite is run
-  to read the production code's logs.
+- `AGENT_REPL_LOG_LEVEL` is the process-startup threshold for both durable
+  persistence and stderr mirroring. It accepts exactly `debug`, `info`, `warn`,
+  or `error` and defaults to `info`. An invalid value aborts logger setup.
+  `AGENT_REPL_LOG_VERBOSE=1` only permits verbose-class records to mirror to
+  stderr after the level threshold admits them. It never changes persistence.
+- **Every logical branch logs.** Request boundaries, store round-trips, and
+  ordinary state transitions are `debug`. Session and turn start/end, kill,
+  hibernate, compaction, and detach edges are `info`. A defect or explicitly
+  named refusal/decision is `warn`. Only an actual error is `error`, with its
+  text carried by the message or structured cause.
 - Each error is logged exactly once by its owning layer, with session, store
   key, socket, request, operation, resolved inputs, branch outcome and cause.
-- Frequent or hot diagnostics use the verbose helper. Direct `console`,
-  `process.stderr` or ad hoc logger aliases are forbidden except the documented
-  pre-logger bootstrap failure and logger-sink emergency paths.
+- Frequent or hot diagnostics use `logVerbose`. ESLint rejects direct
+  `console`, direct `process.stderr` outside `src/log.ts`, and every generic
+  `.log(...)` call in production source. The only stderr exceptions are the
+  documented pre-logger bootstrap/sink emergency and sink-mirror paths owned by
+  `src/log.ts`.
 - The full contract is `modules/app/agent-repl/logging-contract.md`.
 
 ### Standing streams

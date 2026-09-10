@@ -75,7 +75,7 @@ export const PROSE = scenario({
   writes: "four assistant lines sharing one `message.id`, then the user prompt line and the turn record",
   arms: "AgentThinking (withheld + text), AgentResponse.from_model, AgentSuccess.completed",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "prose" }, "fake prose turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "prose" }, "fake prose turn");
     const conclusion = `echo: ${ctx.prompt} [mode=${ctx.permissionMode}] [model=${ctx.model}]`;
     ctx.assistant(
       [
@@ -98,7 +98,7 @@ const MARKDOWN = scenario({
   writes: "one assistant line, the prompt line and the turn record",
   arms: "AgentResponse.from_model, AgentSuccess.completed",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "markdown" }, "fake markdown-showcase turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "markdown" }, "fake markdown-showcase turn");
     conclude(ctx, MARKDOWN_SHOWCASE);
   },
 });

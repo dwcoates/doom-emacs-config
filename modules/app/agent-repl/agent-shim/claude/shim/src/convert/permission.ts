@@ -108,8 +108,8 @@ export function convertPermissionDenied(
 ): readonly PersistEntry[] {
   const toolUseId = message.tool_use_id;
   if (toolUseId === "") {
-    LOGGER.log(
-      { level: "error", uuid: message.uuid },
+    LOGGER.warn(
+      { uuid: message.uuid },
       "a permission denial named no gated call; no unit can be identified",
     );
     return [];
@@ -131,7 +131,7 @@ export function convertPermissionDenied(
     message.agent_id === undefined || message.agent_id === ""
       ? context.mainAgentId
       : create(conversationv1.AgentIdSchema, { value: message.agent_id });
-  LOGGER.log(
+  LOGGER.debug(
     {
       tool: message.tool_name,
       tool_use_id: toolUseId,

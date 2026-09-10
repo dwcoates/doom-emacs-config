@@ -178,8 +178,8 @@ export function createFold(): Fold {
         // is residue plus a loud log — never a dead session, and never a
         // half-built message on the wire.
         const detail = error instanceof Error ? error.message : String(error);
-        LOGGER.log(
-          { level: "error", sdk_message_type: (message as { type?: string }).type, detail },
+        LOGGER.error(
+          { sdk_message_type: (message as { type?: string }).type, detail },
           "converter defect: the message produced no frame and lands as residue",
         );
         // THE CONTROL PLANE IS TOLD TOO. Residue keeps the record honest; the
@@ -226,8 +226,8 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // unmodelled: it has no identity for either plane to key on, so the two
       // planes could never collapse it into one row. That is a failure, and
       // `unparsed` is the arm that says so investigably.
-      LOGGER.log(
-        { level: "error", sdk_message_type: type },
+      LOGGER.warn(
+        { sdk_message_type: type },
         "an attachment record carried no uuid; it cannot be keyed and lands unparsed",
       );
       return {
@@ -308,8 +308,8 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       };
 
     default:
-      LOGGER.log(
-        { level: "warn", sdk_message_type: type },
+      LOGGER.warn(
+        { sdk_message_type: type },
         "no converter owns this SDK message type; it lands as residue",
       );
       return {
@@ -382,8 +382,8 @@ function settleClear(
   if (pending === undefined) return [];
   const sessionId = (message as { session_id?: unknown }).session_id;
   if (typeof sessionId !== "string" || sessionId === "") {
-    LOGGER.log(
-      { level: "warn", uuid: pending.vendorUuid },
+    LOGGER.warn(
+      { uuid: pending.vendorUuid },
       "the init after a conversation reset named no session; the clear's cut is still held",
     );
     return [];
@@ -418,8 +418,8 @@ function settleCompaction(
       ? content
       : "";
   if (summary === "") {
-    LOGGER.log(
-      { level: "warn" },
+    LOGGER.warn(
+      {},
       "the assistant message after a compaction boundary carried no prose; the cut is still held",
     );
     return [];

@@ -280,7 +280,7 @@ function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promi
   const gateText = process.env[TURN_GATE_TEXT_ENV] ?? "";
   if (path === "" || gateText === "" || text.trim() !== gateText.trim()) return Promise.resolve();
   if (existsSync(path)) return Promise.resolve();
-  LOGGER.log({ gate_path: path }, "fake turn PARKED on its gate");
+  LOGGER.debug({ gate_path: path }, "fake turn PARKED on its gate");
   const gate = awaitGateFile(path);
   return new Promise<void>((resolve) => {
     let settled = false;
@@ -288,7 +288,7 @@ function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promi
       if (settled) return;
       settled = true;
       gate.cancel();
-      LOGGER.log({ gate_path: path, released_by: why }, "fake turn RELEASED by its gate");
+      LOGGER.debug({ gate_path: path, released_by: why }, "fake turn RELEASED by its gate");
       resolve();
     };
     // THE KILL PATH. Resolved by `interrupt()`, whatever the gate does; the
@@ -313,9 +313,9 @@ function awaitTurnGate(text: string, awaitInterrupt: () => Promise<void>): Promi
 function awaitDetachGate(): Promise<void> {
   const path = process.env[DETACH_GATE_PATH_ENV] ?? "";
   if (path === "" || existsSync(path)) return Promise.resolve();
-  LOGGER.log({ gate_path: path }, "fake detached work PARKED on its gate");
+  LOGGER.debug({ gate_path: path }, "fake detached work PARKED on its gate");
   return awaitGateFile(path).promise.then(() => {
-    LOGGER.log({ gate_path: path, released_by: "gate" }, "fake detached work RELEASED by its gate");
+    LOGGER.debug({ gate_path: path, released_by: "gate" }, "fake detached work RELEASED by its gate");
   });
 }
 
@@ -531,7 +531,7 @@ export function createFakeQuery(
         description: run.description,
         backgrounded: true,
       });
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid, task_id: run.taskId, tool_use_id: run.toolUseId },
         "fake vendor resumed a session that still holds a running shell; re-adopted from its unterminated spool",
       );
@@ -1056,7 +1056,7 @@ export function createFakeQuery(
     });
     // THE SECOND INIT is where the real new id is stated.
     emitInit();
-    LOGGER.log(
+    LOGGER.info(
       { claude_session_id: next, announced_conversation_id: announcedButUnused },
       "fake vendor session identity ROTATED; new_conversation_id is announced and never used again",
     );
@@ -1173,13 +1173,13 @@ export function createFakeQuery(
       fastModeDisabledReason = state === "on" ? undefined : reason;
     },
     fallbackTo: (next) => {
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid, previous_model: model, model: next },
         "fake vendor fell back to another model ON ITS OWN; nothing asked it to",
       );
       model = next;
     },
-    log: (fields, message) => LOGGER.log({ claude_session_id: sessionUuid, ...fields }, message),
+    log: LOGGER.with({ claude_session_id: sessionUuid }),
   };
 
   const promptTextOf = (message: SdkUserMessage): string => {
@@ -1206,7 +1206,7 @@ export function createFakeQuery(
 
   const main = async (): Promise<void> => {
     emitInit();
-    LOGGER.log(
+    LOGGER.info(
       {
         claude_session_id: sessionUuid,
         resumed: opts.resume !== undefined,
@@ -1261,7 +1261,7 @@ export function createFakeQuery(
         permissionMode,
         promptSource: "sdk",
       });
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid, turn, scenario: scenario.name === "" ? "prose" : scenario.name },
         "fake vendor selected a scenario for the turn",
       );
@@ -1276,22 +1276,22 @@ export function createFakeQuery(
       // mock, not a vendor behavior. Failing the stream surfaces it at the
       // consumer instead of leaving a turn that never terminates.
       const message = `fake scenario "${scenario.name}" returned without emitting a result`;
-      LOGGER.log(
-        { level: "error", claude_session_id: sessionUuid, turn, scenario: scenario.name },
+      LOGGER.error(
+        { claude_session_id: sessionUuid, turn, scenario: scenario.name },
         message,
       );
       throw new Error(message);
     }
     out.end();
-    LOGGER.log({ claude_session_id: sessionUuid, turns: turn }, "fake vendor input ended");
+    LOGGER.info({ claude_session_id: sessionUuid, turns: turn }, "fake vendor input ended");
   };
 
   void main().catch((err: unknown) => {
     // The mock is the producer boundary, so it owns the one causal error record
     // and FAILS the iterable. Ending cleanly here would make callers see
     // ordinary SDK EOF and silently erase the producer failure.
-    LOGGER.log(
-      { level: "error", claude_session_id: sessionUuid, cause: err },
+    LOGGER.error(
+      { claude_session_id: sessionUuid, cause: err },
       `fake vendor producer failed: ${err instanceof Error ? err.message : String(err)}`,
     );
     out.fail(err);
@@ -1313,7 +1313,7 @@ export function createFakeQuery(
       const release = releaseInterrupt;
       releaseInterrupt = null;
       release?.();
-      LOGGER.log({ claude_session_id: sessionUuid, turn }, "fake vendor interrupt accepted");
+      LOGGER.info({ claude_session_id: sessionUuid, turn }, "fake vendor interrupt accepted");
       return { still_queued: [] };
     },
 
@@ -1321,7 +1321,7 @@ export function createFakeQuery(
       if (refuse.has("set_permission_mode")) {
         throw new Error("the mocked vendor refused the permission mode change");
       }
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid, previous_permission_mode: permissionMode, permission_mode: mode },
         "fake vendor permission mode changed",
       );
@@ -1336,7 +1336,7 @@ export function createFakeQuery(
         throw new Error("the mocked vendor refused the model change");
       }
       const resolved = next ?? FAKE_DEFAULT_MODEL;
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid, previous_model: model, model: resolved },
         "fake vendor model changed",
       );
@@ -1379,7 +1379,7 @@ export function createFakeQuery(
     stopTask: async (taskId: string): Promise<void> => {
       const live = liveTasks.get(taskId);
       if (live === undefined) {
-        LOGGER.log(
+        LOGGER.debug(
           { claude_session_id: sessionUuid, task_id: taskId },
           "fake vendor stop_task named no live task; accepted as a no-op",
         );
@@ -1398,7 +1398,7 @@ export function createFakeQuery(
       if (isShellTaskId(taskId) && files.unfinishedSpools().includes(taskId)) {
         files.spool(taskId).finish(143);
       } else if (files.unfinishedSpools().includes(taskId)) {
-        LOGGER.log(
+        LOGGER.info(
           { claude_session_id: sessionUuid, task_id: taskId },
           "fake vendor stopped an AGENT task; its spool is left unterminated, as an agent spool always is",
         );
@@ -1424,7 +1424,7 @@ export function createFakeQuery(
           timestamp: nowIso(),
         });
       }
-      LOGGER.log(
+      LOGGER.info(
         { claude_session_id: sessionUuid, task_id: taskId, tool_use_id: live.toolUseId },
         "fake vendor stop_task stopped a live task",
       );
@@ -1444,8 +1444,8 @@ export function createFakeQuery(
       if (toolUseId === undefined) return liveTasks.size > 0;
       const live = [...liveTasks.values()].find((t) => t.toolUseId === toolUseId);
       if (live === undefined) {
-        LOGGER.log(
-          { level: "warn", claude_session_id: sessionUuid, tool_use_id: toolUseId },
+        LOGGER.warn(
+          { claude_session_id: sessionUuid, tool_use_id: toolUseId },
           "fake vendor background_tasks named no live task for that tool call",
         );
         return liveTasks.size > 0;
@@ -1468,7 +1468,7 @@ export function createFakeQuery(
         backgroundWaiters.delete(toolUseId);
         await new Promise<void>((resolve) => waiter(resolve));
       }
-      LOGGER.log(
+      LOGGER.info(
         { claude_session_id: sessionUuid, task_id: live.taskId, tool_use_id: toolUseId },
         "fake vendor moved a foreground task to the background",
       );
@@ -1485,7 +1485,7 @@ export function createFakeQuery(
      * it logs the fact and resolves.
      */
     streamInput: async (stream: AsyncIterable<SdkUserMessage>): Promise<void> => {
-      LOGGER.log(
+      LOGGER.debug(
         { claude_session_id: sessionUuid },
         "fake vendor stream_input accepted; the mock drains its original prompt iterable",
       );
@@ -1493,7 +1493,7 @@ export function createFakeQuery(
     },
 
     close: (): void => {
-      LOGGER.log({ claude_session_id: sessionUuid, turns: turn }, "fake vendor query closed");
+      LOGGER.info({ claude_session_id: sessionUuid, turns: turn }, "fake vendor query closed");
       out.end();
     },
   };

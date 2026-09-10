@@ -70,8 +70,8 @@ export function diagnosticSeverity(literal: unknown): conversationv1.AgentDiagno
     case "hint":
       return conversationv1.AgentDiagnosticSeverity.HINT;
     default:
-      LOGGER.log(
-        { level: "warn", severity: String(literal) },
+      LOGGER.warn(
+        { severity: String(literal) },
         "the vendor named a diagnostic severity this contract does not spell",
       );
       return conversationv1.AgentDiagnosticSeverity.UNSPECIFIED;
@@ -137,7 +137,7 @@ function convertDiagnostics(
           result: { case: "diagnostics", value: report },
         }),
       };
-  LOGGER.log(
+  LOGGER.debug(
     { unit: unit.value, files: report.files.length, arm: kind },
     "attaching IDE diagnostics to the last change unit by adjacency",
   );
@@ -179,7 +179,7 @@ function convertContextInjected(
     const content = attachment.content as { path?: unknown; content?: unknown } | undefined;
     const path = typeof attachment.path === "string" ? attachment.path : content?.path;
     if (typeof path !== "string" || path === "") {
-      LOGGER.log({ level: "error" }, "an injected memory file named no path; no unit is produced");
+      LOGGER.warn({}, "an injected memory file named no path; no unit is produced");
       return [];
     }
     injected = {
@@ -225,8 +225,8 @@ function convertContextInjected(
   }
 
   if (injected === undefined) {
-    LOGGER.log(
-      { level: "warn", attachment_type: String(type) },
+    LOGGER.warn(
+      { attachment_type: String(type) },
       "no context-injection converter owns this attachment; it lands as residue",
     );
     return [
@@ -239,7 +239,7 @@ function convertContextInjected(
     ];
   }
 
-  LOGGER.log({ attachment_type: String(type) }, "recording context the vendor injected silently");
+  LOGGER.debug({ attachment_type: String(type) }, "recording context the vendor injected silently");
   const activity = agentActivity(activityId, {
     case: "contextInjected",
     value: create(conversationv1.AgentContextInjectedSchema, { injected }),
@@ -283,11 +283,11 @@ function convertContextBudgetWarning(
 ): readonly PersistEntry[] {
   const text = record.attachment?.content ?? record.attachment?.text;
   if (typeof text !== "string" || text === "") {
-    LOGGER.log({ level: "warn" }, "a context-budget warning carried no text; no row is produced");
+    LOGGER.warn({}, "a context-budget warning carried no text; no row is produced");
     return [];
   }
   const uuid = record.uuid ?? "context-budget-warning";
-  LOGGER.log({}, "the vendor warned that the context window is filling");
+  LOGGER.debug({}, "the vendor warned that the context window is filling");
   return [
     pageLineEntry(
       context,
@@ -347,8 +347,8 @@ export function convertAttachment(
   if (type === "diagnostics") {
     const change = context.lastChange;
     if (change === undefined) {
-      LOGGER.log(
-        { level: "warn" },
+      LOGGER.warn(
+        {},
         "IDE diagnostics arrived with no preceding write or edit; nothing to attach them to",
       );
       return [
@@ -375,8 +375,8 @@ export function convertAttachment(
   if (type === "nested_memory" || type === "invoked_skills" || type === "dynamic_skill") {
     return convertContextInjected(record, context, activityId);
   }
-  LOGGER.log(
-    { level: "warn", attachment_type: type },
+  LOGGER.warn(
+    { attachment_type: type },
     "no attachment converter owns this record; it lands as vendor-specific residue",
   );
   return [

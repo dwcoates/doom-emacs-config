@@ -254,8 +254,8 @@ export function createCallRegistry(): CallRegistry {
       if (calls.size >= CALL_REGISTRY_CAPACITY) {
         const oldest = calls.keys().next();
         if (oldest.done !== true) {
-          LOGGER.log(
-            { level: "warn", tool_use_id: oldest.value, capacity: CALL_REGISTRY_CAPACITY },
+          LOGGER.warn(
+            { tool_use_id: oldest.value, capacity: CALL_REGISTRY_CAPACITY },
             "forgetting the oldest unsettled tool call: the in-flight registry is full",
           );
           calls.delete(oldest.value);
@@ -370,8 +370,8 @@ export function convertToolUse(
       ];
     }
     default: {
-      LOGGER.log(
-        { level: "warn", tool: call.toolName, tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool: call.toolName, tool_use_id: call.toolUseId },
         "no converter owns this tool name; it becomes an unmodeled unit",
       );
       const unmodeled = converters.get(UNMODELED_KEY);
@@ -422,8 +422,8 @@ export function convertToolResult(
 ): readonly PersistEntry[] {
   const call = registry.take(toolUseId);
   if (call === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: toolUseId },
+    LOGGER.warn(
+      { tool_use_id: toolUseId },
       "a tool result arrived for a call this shim never saw announced; no terminal is produced",
     );
     return [];
@@ -546,7 +546,7 @@ export function cutOpenCalls(
     const item = converter.cut?.(call, context.nowMs());
     if (item === undefined) continue;
     registry.take(call.toolUseId);
-    LOGGER.log(
+    LOGGER.debug(
       { tool: call.toolName, kind: converter.kind, tool_use_id: call.toolUseId },
       "the turn was stopped with this call still open; its unit is settled as cut short",
     );

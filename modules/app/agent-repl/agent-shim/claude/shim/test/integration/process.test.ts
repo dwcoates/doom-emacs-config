@@ -378,7 +378,7 @@ describe("--listen over an existing socket file", () => {
 });
 
 describe("signals", () => {
-  test("SIGINT is refused, logged at error, and the shim keeps serving", async () => {
+  test("SIGINT is refused, logged as a named decision, and the shim keeps serving", async () => {
     // A shim may be spawned under an attached terminal, and a Ctrl-C there must
     // not end a turn the user is watching.
     const shim = await spawnShim();
@@ -388,7 +388,7 @@ describe("signals", () => {
       (record) => record.context.signal === "SIGINT" && record.context.outcome === "refused_shutdown",
     );
 
-    expect(refusal.level).toBe("error");
+    expect(refusal.level).toBe("warn");
     // Still serving: a legal rpc still answers after the refused signal.
     const still = await shim.clients.h1.startSession(freshSession());
     expect(still.result.case).toBe("success");

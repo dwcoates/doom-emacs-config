@@ -23,7 +23,7 @@ const HOOK_SUCCESS = scenario({
   writes: "the tool_use line, a `hook_success` attachment line carrying `toolUseID`, the tool_result line",
   arms: "AgentHook.result=succeeded",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "hook-success" }, "fake succeeding-hook turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "hook-success" }, "fake succeeding-hook turn");
     const call = ctx.toolUse("Read", { file_path: `${ctx.cwd}/AGENTS.md` });
     const hookId = ctx.newUuid();
     ctx.systemMessage("hook_started", {
@@ -68,7 +68,7 @@ const HOOK_BLOCKED = scenario({
   writes: "the tool_use line, a `hook_blocking_error` attachment line, the error tool_result line",
   arms: "AgentHook.result=blocking_error; the TURN still succeeds, because a blocked tool is not a stopped turn",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "hook-blocked" }, "fake blocking-hook turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "hook-blocked" }, "fake blocking-hook turn");
     const call = ctx.toolUse("Edit", {
       replace_all: false,
       file_path: "/w/s/example.ts",
@@ -113,7 +113,7 @@ const HOOK_FAILED = scenario({
   writes: "a `hook_non_blocking_error` attachment line carrying stderr, exitCode, command and durationMs",
   arms: "AgentHook.result=non_blocking_error",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "hook-failed" }, "fake failing-hook turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "hook-failed" }, "fake failing-hook turn");
     const hookId = ctx.newUuid();
     ctx.systemMessage("hook_started", {
       hook_id: hookId,
@@ -152,7 +152,7 @@ const HOOK_CANCELLED = scenario({
   writes: "the tool_use line, a `hook_cancelled` attachment line — four fields and nothing else — the tool_result line",
   arms: "AgentHook.result=cancelled",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "hook-cancelled" }, "fake cancelled-hook turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "hook-cancelled" }, "fake cancelled-hook turn");
     const call = ctx.toolUse("Edit", {
       replace_all: false,
       file_path: "/w/s/example.ts",

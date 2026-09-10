@@ -45,16 +45,16 @@ function editSuccess(
 ): conversationv1.AgentEditSuccess | undefined {
   const record = asRecord(outcome.structured);
   if (record === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "an edit settled with no typed output; no success frame is produced",
     );
     return undefined;
   }
   const path = str(record, "filePath") ?? requestedPath(call);
   if (path === undefined) {
-    LOGGER.log(
-      { level: "error", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "an edit settled with no path at all; no success frame is produced",
     );
     return undefined;
@@ -75,8 +75,8 @@ export const editConverter: ToolConverter = {
   start(call) {
     const path = requestedPath(call);
     if (path === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "an edit was announced with no file path; no start frame is produced",
       );
       return undefined;

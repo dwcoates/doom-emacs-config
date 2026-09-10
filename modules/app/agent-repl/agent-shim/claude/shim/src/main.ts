@@ -52,7 +52,7 @@ import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { configureLog } from "./log.js";
-import { logMainLifecycle, reportFatal } from "./fatal.js";
+import { MAIN_LIFECYCLE_LOGGER, reportFatal } from "./fatal.js";
 import { lockBinaryPath, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
@@ -73,7 +73,7 @@ import { serve, type ShimServer } from "./service/server.js";
 export {
   MAIN_LIFECYCLE_OPERATION,
   MAIN_FATAL_OPERATION,
-  logMainLifecycle,
+  MAIN_LIFECYCLE_LOGGER,
   reportFatal,
 } from "./fatal.js";
 
@@ -217,22 +217,22 @@ function resolveFakeMsOverride(
   const raw = env[variable];
   if (raw === undefined || raw === "") return undefined;
   if (!fake) {
-    logMainLifecycle(
-      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
+    MAIN_LIFECYCLE_LOGGER.warn(
+      { env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
       `the ${subject} override is honored only under --fake; ignoring it for this real session`,
     );
     return undefined;
   }
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    logMainLifecycle(
-      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
+    MAIN_LIFECYCLE_LOGGER.warn(
+      { env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
       `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
     );
     return undefined;
   }
-  logMainLifecycle(
-    { level: "info", env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
+  MAIN_LIFECYCLE_LOGGER.debug(
+    { env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
     `a fake session took its ${subject} from the environment`,
   );
   return parsed;
@@ -322,9 +322,8 @@ export function resolveRetryPolicy(
   const raw = env[FAKE_STORE_BACKOFF_ENV];
   if (raw === undefined || raw === "") return DEFAULT_RETRY_POLICY;
   if (!fake) {
-    logMainLifecycle(
+    MAIN_LIFECYCLE_LOGGER.warn(
       {
-        level: "warn",
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
         outcome: "store_backoff_override_refused",
@@ -338,9 +337,8 @@ export function resolveRetryPolicy(
   // An empty slot is checked SEPARATELY because `Number("")` is 0, so a
   // malformed "1,,2" would otherwise be read silently as a valid "1,0,2".
   if (parts.some((part) => part === "") || parsed.some((ms) => !Number.isInteger(ms) || ms < 0)) {
-    logMainLifecycle(
+    MAIN_LIFECYCLE_LOGGER.warn(
       {
-        level: "warn",
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
         outcome: "store_backoff_override_invalid",
@@ -349,9 +347,8 @@ export function resolveRetryPolicy(
     );
     return DEFAULT_RETRY_POLICY;
   }
-  logMainLifecycle(
+  MAIN_LIFECYCLE_LOGGER.debug(
     {
-      level: "info",
       env: FAKE_STORE_BACKOFF_ENV,
       backoff_ms: parsed,
       outcome: "store_backoff_override_applied",
@@ -527,13 +524,13 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
   return {
     onSigterm(): void {
       if (standDown !== null) {
-        logMainLifecycle(
+        MAIN_LIFECYCLE_LOGGER.debug(
           { signal: "SIGTERM", outcome: "shutdown_already_in_flight" },
           "ignored a second SIGTERM: the graceful stand-down is already running",
         );
         return;
       }
-      logMainLifecycle(
+      MAIN_LIFECYCLE_LOGGER.info(
         { signal: "SIGTERM", outcome: "graceful_stand_down_started" },
         "received the authorized shutdown signal; standing the session down",
       );
@@ -541,18 +538,18 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
         try {
           const code = await targets.engine.standDown("SIGTERM");
           await targets.server.close();
-          logMainLifecycle(
-            {
-              ...(code === 0 ? {} : { level: "error" as const }),
-              signal: "SIGTERM",
-              outcome:
-                code === 0 ? "graceful_stand_down_complete" : "stand_down_with_lost_writes",
-              exit_code: code,
-            },
+          const fields = {
+            signal: "SIGTERM",
+            outcome:
+              code === 0 ? "graceful_stand_down_complete" : "stand_down_with_lost_writes",
+            exit_code: code,
+          };
+          const message =
             code === 0
               ? "stood down cleanly"
-              : "stood down with writes the store never acked; exiting nonzero",
-          );
+              : "stood down with writes the store never acked; exiting nonzero";
+          if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
+          else MAIN_LIFECYCLE_LOGGER.error(fields, message);
           targets.exit(code);
         } catch (err) {
           // A failed stand-down is still an exit, but NOT a clean one: reporting
@@ -564,9 +561,8 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
       })();
     },
     onSigint(): void {
-      logMainLifecycle(
+      MAIN_LIFECYCLE_LOGGER.warn(
         {
-          level: "error",
           signal: "SIGINT",
           outcome: "refused_shutdown",
           query_preserved: true,
@@ -682,7 +678,7 @@ export async function main(): Promise<void> {
   configureLog({ fd: args.logFd, cwd, agentReplSessionId: correlation.agentReplSessionId });
 
   const identity = runtimeIdentity();
-  logMainLifecycle(
+  MAIN_LIFECYCLE_LOGGER.info(
     {
       workspace_dir: cwd,
       listen_socket: args.listen,
@@ -731,8 +727,8 @@ export async function main(): Promise<void> {
   // Filled the moment the listener exists; `KillSession` cannot fire before
   // then, because it arrives over that listener.
   let endProcess: (code: number) => void = (code) => {
-    logMainLifecycle(
-      { level: "error", outcome: "exit_before_serving", exit_code: code },
+    MAIN_LIFECYCLE_LOGGER.error(
+      { outcome: "exit_before_serving", exit_code: code },
       "a session end was requested before the listener existed; exiting immediately",
     );
     process.exit(code);
@@ -770,16 +766,16 @@ export async function main(): Promise<void> {
       try {
         await server.quiet(exitQuietBudgetMs);
         await server.close();
-        logMainLifecycle(
-          {
-            ...(code === 0 ? {} : { level: "error" as const }),
-            outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",
-            exit_code: code,
-          },
+        const fields = {
+          outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",
+          exit_code: code,
+        };
+        const message =
           code === 0
             ? "the session was killed over the wire; the process is ending"
-            : "the session was killed with writes the store never acked; exiting nonzero",
-        );
+            : "the session was killed with writes the store never acked; exiting nonzero";
+        if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
+        else MAIN_LIFECYCLE_LOGGER.error(fields, message);
       } catch (err) {
         reportFatal(err);
         process.exit(1);
@@ -803,7 +799,7 @@ export async function main(): Promise<void> {
   process.on("SIGTERM", handlers.onSigterm);
   process.on("SIGINT", handlers.onSigint);
 
-  logMainLifecycle(
+  MAIN_LIFECYCLE_LOGGER.info(
     { listen_socket: args.listen, outcome: "serving" },
     "shim.v1 is being served; the daemon may dial",
   );

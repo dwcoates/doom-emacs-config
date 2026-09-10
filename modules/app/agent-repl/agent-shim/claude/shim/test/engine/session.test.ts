@@ -3054,7 +3054,7 @@ describe("the vendor request the turn runs under", () => {
   /** The request_id the logger stamps right now, undefined when it stamps none. */
   function stampedRequestId(): string | undefined {
     const before = vi.mocked(writeSync).mock.calls.length;
-    bindLog({ operation: "shim.test.request-id" }).log({}, "probe");
+    bindLog({ operation: "shim.test.request-id" }).debug({}, "probe");
     const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
     const [, bytes, offset, length] = calls[before];
     const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
@@ -6087,7 +6087,7 @@ describe("the durable log sink being poisoned", () => {
     vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
       throw new Error("fd 3 is gone");
     });
-    freshLog.bindLog({ operation: "shim.test.poison" }).log({}, "the record this sink cannot take");
+    freshLog.bindLog({ operation: "shim.test.poison" }).debug({}, "the record this sink cannot take");
 
     const h = harness({ engineFactory: freshCreateEngine });
 

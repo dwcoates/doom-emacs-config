@@ -59,8 +59,8 @@ export function subagentPrompt(call: PendingCall): conversationv1.AgentSubagentP
   const input = call.input;
   const text = str(input, "prompt");
   if (text === undefined) {
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId, tool: call.toolName },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId, tool: call.toolName },
       "a subagent spawn states no prompt text; the instruction is carried empty",
     );
   }
@@ -101,8 +101,8 @@ function isolationOf(call: PendingCall): conversationv1.AgentSubagentPrompt["iso
     case undefined:
       return { case: "none", value: create(conversationv1.AgentSubagentIsolationNoneSchema, {}) };
     default:
-      LOGGER.log(
-        { level: "warn", tool_use_id: call.toolUseId, isolation },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId, isolation },
         "a subagent spawn names an isolation this contract has no arm for; none is carried",
       );
       return { case: "none", value: create(conversationv1.AgentSubagentIsolationNoneSchema, {}) };
@@ -148,8 +148,8 @@ export function subagentStartFrom(
 function reportOf(structured: Record<string, unknown>): conversationv1.AgentSubagentReport | undefined {
   const content = arr(structured, "content");
   if (content === undefined) {
-    LOGGER.log(
-      { level: "error" },
+    LOGGER.warn(
+      {},
       "a completed subagent stated no report content; no success frame is produced",
     );
     return undefined;
@@ -213,8 +213,8 @@ function totalsOf(
   const durationMs = num(structured, "totalDurationMs");
   const toolUseCount = uint(structured, "totalToolUseCount");
   if (durationMs === undefined || toolUseCount === undefined) {
-    LOGGER.log(
-      { level: "error", duration_stated: durationMs !== undefined },
+    LOGGER.warn(
+      { duration_stated: durationMs !== undefined },
       "a completed subagent stated no duration or no tool-use count; no success frame is produced",
     );
     return undefined;
@@ -246,8 +246,8 @@ function worktreeOf(
   const branch = str(structured, "worktreeBranch");
   if (path === undefined || branch === undefined) {
     if (path !== undefined || branch !== undefined) {
-      LOGGER.log(
-        { level: "warn", path_stated: path !== undefined },
+      LOGGER.warn(
+        { path_stated: path !== undefined },
         "a subagent stated half a worktree; a worktree without both a path and a branch is not one",
       );
     }
@@ -300,16 +300,16 @@ export const subagentConverter: ToolConverter = {
     }
     const structured = asRecord(outcome.structured);
     if (structured === undefined) {
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a subagent result carried no typed output; no terminal frame is produced",
       );
       return undefined;
     }
     const status = str(structured, "status");
     if (status !== undefined && BACKGROUNDED_STATUSES.has(status)) {
-      LOGGER.log(
-        { level: "info", tool_use_id: call.toolUseId, status, is_async: bool(structured, "isAsync") },
+      LOGGER.info(
+        { tool_use_id: call.toolUseId, status, is_async: bool(structured, "isAsync") },
         "a subagent spawn moved to the background; this result is a launch receipt, not the run's conclusion",
       );
       return undefined;
@@ -332,8 +332,8 @@ function settleCompleted(
     // agent is the SPAWNING CALL'S OWN ID (the minting rule at the head of this
     // file), which is stated below whether or not the vendor echoed its own
     // 17-hex locator here. What is lost is only the link to this run's files.
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a completed subagent named no vendor agent id; its transcript files cannot be linked to this spawn",
     );
   }
