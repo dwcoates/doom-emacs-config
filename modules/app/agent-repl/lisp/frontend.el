@@ -80,6 +80,7 @@
 (declare-function agent-repl--clear-main-area-for-panels "agent-repl-panels" ())
 (declare-function agent-repl--close-buffer-windows "agent-repl-panels" (&rest bufs))
 (declare-function agent-repl--restore-fullscreen-config "agent-repl-panels" (ws))
+(declare-function agent-repl--panels-cover-frame-p "agent-repl-panels" (ws))
 (declare-function agent-repl--buffer-name "agent-repl-core" (suffix ws))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
 (declare-function agent-repl--frontend-validate-pair "agent-repl-frontends" (frontend-name backend-name &optional env))
@@ -464,16 +465,6 @@ panels — the extra-windows-on-first-switch bug."
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
-  ;; Save the pre-panel layout before mounting: the gui hide/close
-  ;; paths restore it, which is what removes BOTH gui windows
-  ;; (deleting them directly is impossible once the input window is
-  ;; the frame's sole survivor). Guarded so re-shows never clobber the
-  ;; saved work layout.
-  (unless (or (agent-repl--ws-get ws :fullscreen-config)
-              (let ((webview (agent-repl--ws-get ws :frontend-buffer)))
-                (and (buffer-live-p webview) (get-buffer-window webview))))
-    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
-    (agent-repl--log ws "display-webview: saved-fullscreen-layout"))
   (let* ((input-buf (agent-repl--ensure-input-buffer ws))
          (stale-input-win (get-buffer-window input-buf)))
     ;; A surviving input window from a previous webview mount (the
@@ -488,6 +479,34 @@ panels — the extra-windows-on-first-switch bug."
       (if (one-window-p)
           (set-window-dedicated-p stale-input-win nil)
         (delete-window stale-input-win)))
+    ;; Save the pre-panel layout before mounting: the gui hide/close
+    ;; paths restore it, which is what removes BOTH gui windows
+    ;; (deleting them directly is impossible once the input window is
+    ;; the frame's sole survivor).
+    ;;
+    ;; What is skipped is a mount that still COVERS THE FRAME: a re-show
+    ;; over standing panels, or the reconciler remounting over the
+    ;; remains of the pair.  In both the layout already saved is the one
+    ;; underneath, and clobbering it would lose the user's real
+    ;; pre-panel frame.
+    ;;
+    ;; Anything else on the frame means the saved configuration no
+    ;; longer describes it — `delete-other-windows' from the composer
+    ;; leaves the delete-protected composer alone with a landing-era
+    ;; configuration behind it, and the user then builds their own
+    ;; windows on top — so it is REPLACED here by the layout actually
+    ;; being covered now.  Keeping it instead is what used to make the
+    ;; next close restore the landing over the user's own windows.  The
+    ;; same rule reads the key on the restore side
+    ;; (`agent-repl--fullscreen-config-stale-p').
+    ;;
+    ;; Saved AFTER the stale-input-window reclaim above so a leftover
+    ;; composer window is not baked into the layout a later close
+    ;; restores.
+    (if (agent-repl--panels-cover-frame-p ws)
+        (agent-repl--log ws "display-webview: kept-fullscreen-layout reason=panels-cover-frame")
+      (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
+      (agent-repl--log ws "display-webview: saved-fullscreen-layout"))
     (let ((win (agent-repl--frontend-main-area-window)))
       (select-window win)
       (agent-repl--clear-main-area-for-panels)
