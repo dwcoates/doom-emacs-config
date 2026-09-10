@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/wsm"
 )
 
@@ -410,14 +411,8 @@ func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record
 // SaidText composes the one canonical prompt form from plain text. It is
 // exported because the command-file ingress composes prompts the same way, and
 // two spellings of "the user said this" would drift.
-func SaidText(text string) *conversationv1.UserSaid {
-	return &conversationv1.UserSaid{
-		Content: &conversationv1.UserContent{
-			Blocks: []*conversationv1.UserContentBlock{{
-				Block: &conversationv1.UserContentBlock_Text{
-					Text: &conversationv1.TextBlock{Text: text},
-				},
-			}},
-		},
-	}
-}
+//
+// THE COMPOSITION ITSELF LIVES IN THE FEED PACKAGE, which draws a fork's
+// ported prompt rows from the same shape and cannot import this one. This is
+// the name the daemon's ingress paths already code against.
+func SaidText(text string) *conversationv1.UserSaid { return feed.SaidText(text) }
