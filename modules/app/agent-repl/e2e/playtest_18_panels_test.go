@@ -287,7 +287,22 @@ func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
 	// it. Registering opens the worktree's magit status in the selected
 	// window, so a layout arranged ahead of it is not the one the panels'
 	// open would save -- which is the layout the restore is judged against.
-	s.register(t, s.repoAt(t, "repo").Dir)
+	//
+	// AND THE REGISTRATION'S OWN LANDING IS WAITED OUT AND PUT AWAY BEFORE
+	// THE ARRANGEMENT. A registered workspace comes up on its own panel
+	// asynchronously (`agent-repl--arm-landing-panels`, drained when the
+	// minted tab arrives), so a layout arranged while that show is still in
+	// flight is arranged ON TOP of panels that are about to take the frame:
+	// the `delete-other-windows` that starts the arrangement then falls on
+	// the landing's own webview window, the delete-protected composer
+	// survives it, and the reconciler remounts over the work buffers.
+	// Measured, that left the frame showing the landing's panels at the
+	// moment the work layout was read, and the close under test was then
+	// judged against a "work layout" that was never on the frame.
+	repository := s.repoAt(t, "repo")
+	s.register(t, repository.Dir)
+	awaitRegistrationLanding(e, repository.Dir)
+	putTheLandingAway(e, s.Name)
 
 	const workA, workB = "*playtest-work-a*", "*playtest-work-b*"
 	e.Eval(`(progn
