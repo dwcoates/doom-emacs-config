@@ -5744,3 +5744,44 @@ body.draining #composer-input::placeholder {
   color: var(--muted);
   font-style: italic;
 }
+
+/* ---------------------------------------------------------------------------
+   MOTION HELD: `data-motion="paused"` on the root element
+   ---------------------------------------------------------------------------
+
+   THE PAGE'S RESTING ANIMATIONS FREEZE WHERE THEY STAND, for as long as the
+   attribute is set. It is a photographer's flag, and the only thing that sets
+   it is a driver OUTSIDE the page that is about to take the page's picture:
+   the headless playtest (e2e/PLAYTEST-SPEC.md) sets it around one capture and
+   removes it after. Nothing in this app's own code sets it, and a page nobody
+   photographs never carries it — so this rule cannot change what a user sees.
+
+   WHY IT EXISTS. Several of this sheet's animations run FOREVER and by
+   design: the prompt bubble's `bubble-wave`, the sidebar's `ws-pulse` state
+   dots, the footer's breath, a running tool's arc. A screenshot must wait for
+   the screen to stop changing before it fires — a frame caught mid-redraw is
+   half of one state and half of another — and against an animation that never
+   stops, that wait can only run its whole budget out and photograph a torn
+   frame anyway. MEASURED, one full playbook run: 10 of 10 captures ran the
+   full 2s budget, and every persistent change was inside a `.bubble.user`
+   fill, one box per prompt bubble in the scrollback.
+
+   `animation-play-state: paused`, NOT `animation: none`. A stopped animation
+   is a DIFFERENT PICTURE: `animation: none` snaps every animated property back
+   to its unanimated value, so a running tool's arc would lose the fade-in that
+   makes it visible at all and the wave would park its band at the fill's
+   edge. Pausing holds every element exactly where the animation had already
+   carried it, so the photograph shows the page as the eye had it a frame
+   earlier — which is the whole point of taking one.
+
+   The pseudo-elements are named because two of the animations live on them
+   (`.animated-ellipsis::after`, the compaction sweep), and `!important` is
+   here because the declarations it overrides are shorthand `animation`
+   properties spread across a hundred rules, several of them more specific
+   than anything a single selector could outrank. */
+:root[data-motion="paused"],
+:root[data-motion="paused"] *,
+:root[data-motion="paused"] *::before,
+:root[data-motion="paused"] *::after {
+  animation-play-state: paused !important;
+}

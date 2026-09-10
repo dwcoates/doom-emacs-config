@@ -225,6 +225,33 @@ func (s *playtestScenario) openPanel(t *testing.T) {
 	// assertion that legitimately passed. The playbook's hook is installed
 	// here because here is where a page first exists to paint.
 	s.Book.awaitPaint = func() time.Duration { return s.awaitPagePainted(t) }
+	// AND EVERY CAPTURE FROM HERE ON HOLDS THE PAGE'S RESTING ANIMATIONS
+	// STILL WHILE IT FIRES. See playtestMotionPaused: the webapp's prompt
+	// bubbles, state dots and footer breath animate forever by design, and a
+	// capture cannot wait out a screen that never stops changing. Installed
+	// here, beside the paint gate, because here is where a page first exists
+	// to hold.
+	s.Book.holdMotion = func() func() { return s.holdPageMotion(t) }
+}
+
+// holdPageMotion freezes the page's resting animations and answers the
+// release.
+//
+// BOTH HALVES ARE WAITED ON. `xwidget-webkit-execute-script` is
+// asynchronous, so a script that was merely ISSUED has not necessarily run:
+// a capture that photographed before the flag landed would settle against a
+// still-animating page, and a playbook that moved on before the release
+// landed would leave every later capture in it frozen. So each half asserts
+// the attribute it just wrote, through the same probe every other page act
+// here goes through.
+func (s *playtestScenario) holdPageMotion(t *testing.T) func() {
+	t.Helper()
+	s.awaitInPage(t, "the page's resting animations to be held still for the capture",
+		playtestHoldMotionScript())
+	return func() {
+		s.awaitInPage(t, "the page's resting animations to be released after the capture",
+			playtestReleaseMotionScript())
+	}
 }
 
 // playtestPaintBound bounds one wait on the page delivering the frames the
@@ -538,14 +565,31 @@ func (s *playtestScenario) tabFaceFor(t *testing.T, ws string) string {
 //
 // "none" is a real answer and not a missing one: the color table maps
 // `:none` and the whole merge family to it, and the index badge then carries
-// NO arm color at all -- it is drawn in the tab's ordinary background.
-// Saying "a none-colored badge" would send a reviewer looking for something
-// that is not there.
-func armSentence(ws, arm, color string) string {
+// NO arm color at all. Saying "a none-colored badge" would send a reviewer
+// looking for something that is not there.
+//
+// AND "NO ARM COLOR" IS NOT "THE SAME COLOR AS THE BAR". The ground the
+// badge is drawn on is the TAB'S OWN, and a selected tab's is
+// `agent-repl--color-selected-bg` -- a grey visibly darker than the bar
+// around it, from `agent-repl--tab-default`'s `:selected` plist. A sentence
+// promising "the tab's ordinary background" therefore told a reviewer
+// looking at a selected tab that a darker badge was wrong, when it is the
+// selection the product is drawing. SELECTEDBG carries that color when the
+// tab is selected and is empty when it is not, so the sentence names the
+// ground the reviewer will actually see; it is READ OFF THE MODULE at
+// capture time rather than written here, because a color spelled twice
+// drifts.
+func armSentence(ws, arm, color, selectedBg string) string {
 	if color == "none" {
+		ground := "the tab bar's own ordinary background"
+		if selectedBg != "" {
+			ground = fmt.Sprintf("the SELECTED tab's own background (`%s`), which is visibly darker "+
+				"than the bar around it -- that darker ground is the SELECTION, not an arm color",
+				selectedBg)
+		}
 		return fmt.Sprintf("The tab for %q carries NO arm color at all on its %s index badge: its arm "+
-			"is %s, which the module's own color table maps to no color, so the badge is drawn in the "+
-			"tab's ordinary background and only the name beside it is faced.", ws, tabBadgeShape, arm)
+			"is %s, which the module's own color table maps to no color, so the badge is drawn on "+
+			"%s and only the name beside it is faced.", ws, tabBadgeShape, arm, ground)
 	}
 	return fmt.Sprintf("The tab for %q is painted %s on its %s index badge, the bracketed number drawn "+
 		"BEFORE the workspace name: its arm is %s, and %s is the color the module's own table gives that "+
@@ -570,5 +614,21 @@ func (s *playtestScenario) captureArm(t *testing.T, name, ws, act string, want s
 	face := s.tabFaceFor(t, ws)
 	s.Book.capture(name, act,
 		fmt.Sprintf("`agent-repl-roster-status-for-ws` still reads %s at the instant of the capture, which the module's color table paints %s, and `agent-repl-workspace-tabline-formatted` wrote the face %s onto that tab", arm, color, face),
-		armSentence(ws, arm, color)+" "+extra)
+		armSentence(ws, arm, color, s.tabSelectedBackground(t, ws))+" "+extra)
+}
+
+// tabSelectedBackground answers the background a SELECTED tab is drawn on
+// when WS is the selected one, and the empty string when it is not.
+//
+// Both halves come from the module: selection is `agent-repl--ws-current-name`,
+// which is the very comparison `agent-repl--render-tab-entry` makes, and the
+// color is `agent-repl--color-selected-bg`, which is what
+// `agent-repl--tab-default`'s `:selected` plist puts under the badge. Reading
+// them rather than restating them is what keeps the manifest sentence from
+// promising a color the module has since changed.
+func (s *playtestScenario) tabSelectedBackground(t *testing.T, ws string) string {
+	t.Helper()
+	return s.E.EvalString(`(if (equal ` + elispString(ws) + ` (agent-repl--ws-current-name))
+                               agent-repl--color-selected-bg
+                             "")`)
 }
