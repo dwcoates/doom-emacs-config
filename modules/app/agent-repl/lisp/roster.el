@@ -73,6 +73,7 @@
 (declare-function agent-repl-host-rename "host" (old new))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-last-selected-id)
+(defvar agent-repl-host-reselect-pending)
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-promote-functions)
 (defvar agent-repl-link-down-functions)
@@ -458,11 +459,23 @@ A sidebar row click or a merge-queue entry click in the webapp calls
 SelectWorkspace, and the roster's new `current' is how that reaches
 Emacs — there is no daemon-to-host command loop.  The resulting
 SelectWorkspace from Emacs's own switch is idempotent, so no loop
-forms.  Returns the workspace switched to, or nil."
+forms.  Returns the workspace switched to, or nil.
+
+A RE-REGISTRATION IS THE ONE TIME `current' IS NOT A REQUEST.  A daemon
+that just relaunched stamps `current' on whichever workspace Emacs
+re-registered first — a walk order, not a click — and Emacs is at that
+moment re-asserting the selection the user actually made.  Following the
+stamp there took the frame to the other workspace's magit buffer.  So
+while `agent-repl-host-reselect-pending' stands, nothing here moves the
+frame; host.el clears it when its re-select is acknowledged."
   (let ((id (agent-repl-roster--current-id roster)))
     (cond
      ((null id)
       (agent-repl--log nil "elisp.roster.current: none")
+      nil)
+     ((bound-and-true-p agent-repl-host-reselect-pending)
+      (agent-repl--log nil "elisp.roster.current: relink-pending id=%s dir=%s"
+                       id agent-repl-host-reselect-pending)
       nil)
      ((equal id (and (boundp 'agent-repl-host-last-selected-id)
                      agent-repl-host-last-selected-id))
