@@ -147,13 +147,32 @@ func TestPlaytestContextPrompts(t *testing.T) {
               (forward-line 2)
               (call-interactively #'agent-repl-explain)
               t)`)
-	// THE DRAWN LINE IS AN ASSERTION, so a picture that disagrees with the
-	// sentence fails here rather than only under a reviewer's eye.
+	// WHERE POINT IS, IS AN ASSERTION. Where the LINE HIGHLIGHT is drawn is
+	// not one, and deliberately: the popup is not the selected window when
+	// the picture is taken, so which line wears a background there is
+	// `hl-line''s business and the frame's, not this step's. The manifest
+	// sentence therefore claims the file and its lines, which are visual,
+	// and the line the verb acted on is proved HERE.
 	if got := e.EvalInt(`(with-current-buffer agent-repl-playtest08--context
                             (line-number-at-pos
                              (window-point (get-buffer-window agent-repl-playtest08--context))))`); got != 3 {
 		t.Fatalf("the popup window draws its point on line %d, want line 3", got)
 	}
+	// The highlighted line is RECORDED rather than asserted, so a reviewer
+	// reading a band on some other line has the number in front of them and
+	// this stays a known, measured difference instead of a fresh surprise.
+	highlighted := e.EvalString(`(let* ((w (get-buffer-window agent-repl-playtest08--context))
+                                        (ov (with-current-buffer agent-repl-playtest08--context
+                                              (seq-find (lambda (o) (eq (overlay-get o 'face) 'hl-line))
+                                                        (overlays-in (point-min) (point-max))))))
+                                   (format "window-point line %d, hl-line overlay %s, selected window %s"
+                                           (with-current-buffer agent-repl-playtest08--context
+                                             (line-number-at-pos (window-point w)))
+                                           (if ov (number-to-string
+                                                   (with-current-buffer agent-repl-playtest08--context
+                                                     (line-number-at-pos (overlay-start ov))))
+                                             "none")
+                                           (buffer-name (window-buffer (selected-window)))))`)
 	lineRef := playtestContextFileName + ":3"
 	sent := awaitSubmissions(t, e, 1, "the line prompt to reach the RPC boundary")[0]
 	if sent.Origin != playtestExplainOriginContext {
@@ -169,9 +188,11 @@ func TestPlaytestContextPrompts(t *testing.T) {
 			playtestExplainOriginContext, sent.Text, lineRef),
 		fmt.Sprintf("The webview fills the left of the frame and its feed's user prompt bubble reads "+
 			"%q -- the canned template around the file:line reference -- with a prose response bubble "+
-			"beneath it; the composer sits under the webview. The right half of the frame is the "+
-			"editor popup showing %s, whose point is on line 3 (`line three`).",
-			fmt.Sprintf(template, lineRef), playtestContextFileName))
+			"beneath it; the composer sits under the webview, dark and empty. The right half of the "+
+			"frame is the editor popup showing %s and all five of its lines. WHICH line wears a "+
+			"background there is not this step's claim -- the popup is not the selected window -- and "+
+			"the state behind it was measured as: %s.",
+			fmt.Sprintf(template, lineRef), playtestContextFileName, highlighted))
 
 	// --- a region, through the PROMPTING verb ----------------------------
 	//
