@@ -143,6 +143,19 @@ type shellState struct {
 	row *frontendv1.FeedId
 	// feed is where the bubble landed.
 	feed placement
+	// settled is HOW THE RUN ENDED, once it has, kept for the same reason
+	// `denied` and `sendDelivery` are kept: a later frame must never redraw a
+	// settled bubble as unsettled.
+	//
+	// A RUN ENDS ONCE, and every push after that one is a restatement of a
+	// finished run: an announcement replayed on the next turn's live-work
+	// reconciliation, a spool replay from the other plane, a beat. None of them
+	// carries the settled state — only the run's own terminal does — so drawn
+	// from the frame alone the bubble walked BACK to live, an orange dot and a
+	// stop button over a spool holding `EXIT=0`. Owner 13's F43 pictures caught
+	// it: every per-row assertion passed, each reading the row a moment after
+	// it settled, and the LATER captures showed the finished runs live again.
+	settled *frontendv1.FeedShellSettled
 }
 
 // stateCommand records WHAT WAS RUN, once.

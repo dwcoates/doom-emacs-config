@@ -870,6 +870,108 @@ func TestADetachedShellsFailureSettlesTheBubble(t *testing.T) {
 	}
 }
 
+// A SETTLED SHELL STAYS SETTLED. A run ends once, and every push after its
+// terminal is a restatement of a finished run: an announcement replayed by the
+// next turn's live-work reconciliation, the other plane's spool replay, a beat.
+// None of them carries the ending, so a bubble drawn from the frame in hand
+// walked BACK to live -- an orange dot and a stop button over a spool holding
+// `EXIT=0`. Owner 13's F43 pictures caught it in the running application.
+
+// settledShell is a run that has ended, exit 0, with output on its spool.
+func settledShell(h *harness, work string) {
+	h.t.Helper()
+	h.bash(work, &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash(work, &conversationv1.AgentBashUpdate{FromOffset: 0, NewOutput: "line-1\n"})
+	h.bash(work, &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm test"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}},
+			},
+		}},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+	})
+}
+
+func TestAReannouncedDetachmentDoesNotUnsettleASettledShell(t *testing.T) {
+	// Arrange: a run that has already ended.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+	settledShell(h, "work-1")
+
+	// Act: the next turn's live-work reconciliation announces it again.
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+			Cause:          &conversationv1.DetachedWorkDetached_ByUser{ByUser: &conversationv1.DetachedCauseByUser{}},
+		}},
+	}, noAddress())
+
+	// Assert.
+	if h.shellRow().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a replayed announcement", h.shellRow().GetState())
+	}
+}
+
+func TestASpoolReplayDoesNotUnsettleASettledShell(t *testing.T) {
+	// Arrange: the run ended, and the OTHER plane then re-delivers bytes it
+	// already holds -- a routine two-plane replay, carrying no ending.
+	h := newHarness(t)
+	settledShell(h, "work-1")
+
+	// Act
+	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 0, NewOutput: "line-1\n"})
+
+	// Assert
+	if h.shellRow().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a spool replay", h.shellRow().GetState())
+	}
+}
+
+func TestABeatAfterTheEndDoesNotUnsettleASettledShell(t *testing.T) {
+	// Arrange: a beat says the producer saw the call alive, and it says nothing
+	// about an ending.
+	h := newHarness(t)
+	settledShell(h, "work-1")
+
+	// Act
+	h.bash("work-1", &conversationv1.AgentToolCallProgress{LastProgressAtMs: 12_000})
+
+	// Assert
+	if h.shellRow().GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled after a beat", h.shellRow().GetState())
+	}
+}
+
+func TestASettledShellKeepsTheEXITBytesAReplayDelivers(t *testing.T) {
+	// Arrange: staying settled must not mean freezing the body -- a replay of
+	// the run's own trailing bytes still belongs on the spool.
+	h := newHarness(t)
+	settledShell(h, "work-1")
+
+	// Act
+	h.bash("work-1", &conversationv1.AgentBashUpdate{FromOffset: 7, NewOutput: "EXIT=0\n"})
+
+	// Assert
+	shell := h.shellRow()
+	if shell.GetSettled() == nil {
+		t.Fatalf("state = %T, want the bubble still settled", shell.GetState())
+	}
+	if got := shell.GetSpool().GetText(); got != "line-1\nEXIT=0\n" {
+		t.Fatalf("spool = %q, want the appended bytes on a settled row", got)
+	}
+}
+
 // TestAReannouncedStartDoesNotUnsettleASettledBubble covers the re-announcement
 // a settled spawn's start rides in on: SessionStarted.live_work and the work's
 // own stream both replay it, and taking it as live would leave a finished
