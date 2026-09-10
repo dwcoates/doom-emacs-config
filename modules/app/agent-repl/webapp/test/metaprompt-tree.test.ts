@@ -272,3 +272,92 @@ describe("looksLikeIntendedTree: nothing to judge", () => {
     expect(looksLikeIntendedTree("\n   \n\n")).toBe(false);
   });
 });
+
+/**
+ * The daemon wraps a settled response's bare tree to 105 columns before it is
+ * served (`daemon/internal/resolve/feed/tree.go`), so every consumer sees
+ * branches split across a head line and CONTINUATION lines: the ancestors'
+ * rails then the wrapped branch's label width in padding. A continuation is
+ * neither a connector line nor an emoji root, and before this was pinned the
+ * region ended at the first one — shearing the tree exactly where the daemon
+ * wrapped it and dropping the rest onto the markdown path.
+ */
+describe("daemon-wrapped continuation lines", () => {
+  const ROOT = "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.";
+  // The exact lines `treefmt.FormatBlock(…, 105)` produces for the fake SDK's
+  // `!md` showcase tree, taken from that formatter rather than invented.
+  const WRAPPED = [
+    ROOT,
+    "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped before it",
+    "│   │   is served, and every continuation line must still carry the rails of the branches around it.",
+    "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
+    "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs",
+    "        past the daemon's limit and wraps onto a second line.",
+  ].join("\n");
+
+  it("keeps a wrapped ├── branch's continuation inside the region", () => {
+    // Arrange — 1.1 wrapped, with 1.1.1 beneath it, so the continuation is
+    // rails-only (`│   │   `).
+    const text = [ROOT, WRAPPED.split("\n")[1], WRAPPED.split("\n")[2], WRAPPED.split("\n")[3]].join(
+      "\n",
+    );
+    // Act
+    const region = findTreeRegion(text);
+    // Assert — all four lines, not the two the shear left.
+    expect(region?.tree.split("\n")).toHaveLength(4);
+  });
+
+  it("keeps a wrapped └── last branch's spaces-only continuation inside the region", () => {
+    // Arrange — the last branch's continuation carries no rail at all.
+    // Act
+    const region = findTreeRegion(WRAPPED);
+    // Assert — including the trailing continuation, which ends the region.
+    expect(region).toEqual({ before: "", tree: WRAPPED, after: "" });
+  });
+
+  it.each([
+    { name: "a childless root, padded with spaces", cont: "  answers in." },
+    { name: "a root with children, whose first pad column is a rail", cont: "│ answers in." },
+  ])("keeps a wrapped root's continuation inside the region: $name", ({ cont }) => {
+    // Arrange
+    const text = ["1 🌳 A bare Unicode tree, the shape the metaprompt", cont, "├── 1.1 Detail"].join(
+      "\n",
+    );
+    // Act
+    const region = findTreeRegion(text);
+    // Assert
+    expect(region?.tree.split("\n")).toHaveLength(3);
+  });
+
+  it("never counts a continuation toward the two-core-lines minimum", () => {
+    // Arrange — one root that wrapped, and nothing else: still a lone branch.
+    const text = ["1 🌳 A bare Unicode tree, the shape the metaprompt", "  answers in."].join("\n");
+    // Act + Assert
+    expect(findTreeRegion(text)).toBeNull();
+  });
+
+  it("still ends the region at a plain prose line in column 0", () => {
+    // Arrange — prose starts at column 0, so it is no one's remainder.
+    const text = `${WRAPPED}\nThat is the whole demo.`;
+    // Act
+    const region = findTreeRegion(text);
+    // Assert
+    expect(region?.tree).toBe(WRAPPED);
+    expect(region?.after).toBe("That is the whole demo.");
+  });
+
+  it("reads a wrapped tree as a tree despite the continuations' share of its lines", () => {
+    // Arrange — two of the six lines are continuations; counting them as
+    // prose puts the tree-shaped ratio under TREE_LINE_RATIO.
+    // Act + Assert
+    expect(isMetapromptTree(WRAPPED)).toBe(true);
+  });
+
+  it("paints a rail at every │ column of a continuation's prefix", () => {
+    // Act — the rails-only continuation under a wrapped ├── branch.
+    const html = renderTreeHtml("│   │   is served, and every continuation line", identity);
+    // Assert — one hairline per rail column, centered in its ch cell.
+    expect(html).toContain(`<i class="mp-rail" style="left:0.5ch"></i>`);
+    expect(html).toContain(`<i class="mp-rail" style="left:4.5ch"></i>`);
+  });
+});
