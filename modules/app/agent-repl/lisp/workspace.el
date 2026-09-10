@@ -1731,17 +1731,30 @@ that did not happen must not read as one that did."
           (survivors (agent-repl--ws-all-names)))
       (if (and current
                (not (equal current ws))
+               (not (agent-repl--pseudo-workspace-name-p current))
                (member current survivors))
           (progn
             (agent-repl--log ws "land-after-teardown: already-live persp=%s" current)
             nil)
-        (let ((target (or (car (agent-repl--ws-list-names))
-                          (car (cl-remove-if
-                                (lambda (n)
-                                  (or (equal n ws)
-                                      (and (boundp 'persp-nil-name)
-                                           (equal n persp-nil-name))))
-                                survivors)))))
+        ;; A BUILT-IN PERSPECTIVE IS NOT A LANDING.  "none" and Doom's
+        ;; startup "main" are persp-mode's own perspectives
+        ;; (`agent-repl--pseudo-workspace-name-p'): they own no project, no
+        ;; session and no panels, and Doom's "main" is auto-vivified into
+        ;; the registry by a persp hook, so it can lead
+        ;; `agent-repl--ws-list-names' and be picked ahead of every real
+        ;; workspace.  Landing there put the user on an EMPTY frame -- the
+        ;; fallback buffer under a lone tab, observed as `*scratch*' in
+        ;; playbook B.16 after the merged child's tab was torn down.  So
+        ;; both candidate sources are filtered to workspaces this module
+        ;; actually owns, and standing in a built-in does not count as
+        ;; standing anywhere either: it is a landing still owed, not a
+        ;; landing already made.
+        (let* ((landable-p (lambda (n)
+                             (and (stringp n)
+                                  (not (equal n ws))
+                                  (not (agent-repl--pseudo-workspace-name-p n)))))
+               (target (or (car (cl-remove-if-not landable-p (agent-repl--ws-list-names)))
+                           (car (cl-remove-if-not landable-p survivors)))))
           (if (null target)
               (progn
                 (agent-repl--warn
