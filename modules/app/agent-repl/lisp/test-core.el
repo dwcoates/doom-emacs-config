@@ -55,87 +55,12 @@
       (should-error (agent-repl--warn-once "ws" "" "impossible")))
     (should (= (hash-table-count agent-repl--warn-once-fingerprints) 0))))
 
-(ert-deftest agent-repl-test-log-on-transition-emits-only-initial-and-changed-states ()
-  "Hot diagnostics retain initial state and causal state transitions."
-  (let ((agent-repl--log-transition-states (make-hash-table :test 'equal))
-        (logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose)
-               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logs))))
-      (should (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
-      (should-not (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
-      (should (agent-repl--log-on-transition "ws" "poll" '(2 2) "state=%S" '(2 2)))
-      (should (equal (nreverse logs)
-                     '(("ws" "state=(1 2)") ("ws" "state=(2 2)")))))))
-
-(ert-deftest agent-repl-test-log-on-transition-fifo-bound-evicts-oldest-key ()
-  "Transition state retains a fixed number of caller keys."
-  (let ((agent-repl--log-transition-capacity 2)
-        (agent-repl--log-transition-states (make-hash-table :test 'equal))
-        (agent-repl--log-transition-order nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil)))
-      (dolist (key '("first" "second" "third"))
-        (should (agent-repl--log-on-transition "ws" key :state "key=%s" key)))
-      (should (= (hash-table-count agent-repl--log-transition-states) 2))
-      (should (agent-repl--log-on-transition "ws" "first" :state "key=first")))))
-
-(ert-deftest agent-repl-test-diagnostic-fingerprint-distinguishes-same-byte-content ()
-  "Same-size status payloads with different content get distinct transition keys."
-  (let ((first (agent-repl--diagnostic-fingerprint "state=idle"))
-        (second (agent-repl--diagnostic-fingerprint "state=done")))
-    (should (= (length "state=idle") (length "state=done")))
-    (should (= (length first) 64))
-    (should-not (equal first second))))
-
 (ert-deftest agent-repl-test-workspace-id-from-project-root ()
   "Workspace ID should be first 8 chars of MD5 of the canonical ws-dir path."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
             ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/test/project")))
     (should (equal (agent-repl--workspace-id)
                    (substring (md5 (agent-repl--path-canonical "/test/project")) 0 8)))))
-
-;;;; ---- Tests: resolve-current-git-root ----
-
-(ert-deftest agent-repl-test-resolve-current-git-root-prefers-ws-dir ()
-  "When the current workspace has a :project-dir, the resolver uses it as
-the directory to run `git rev-parse --show-toplevel' from (not
-`default-directory')."
-  (let ((captured-default-dir nil))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-dir)
-               (lambda (_ws) "/repo/subdir"))
-              ((symbol-function 'agent-repl--git-string-quiet)
-               (lambda (&rest _)
-                 (setq captured-default-dir default-directory)
-                 "/repo")))
-      (let ((default-directory "/elsewhere/"))
-        (should (equal (agent-repl--resolve-current-git-root) "/repo/"))
-        ;; git was invoked from the ws-dir, not default-directory
-        (should (equal captured-default-dir "/repo/subdir"))))))
-
-(ert-deftest agent-repl-test-resolve-current-git-root-falls-back-to-default-directory ()
-  "When no workspace has a :project-dir, the resolver runs git from
-`default-directory'."
-  (let ((captured-default-dir nil))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-dir)
-               (lambda (_ws) (error "no dir")))
-              ((symbol-function 'agent-repl--git-string-quiet)
-               (lambda (&rest _)
-                 (setq captured-default-dir default-directory)
-                 "/fallback/repo")))
-      (let ((default-directory "/fallback/repo/deep/"))
-        (should (equal (agent-repl--resolve-current-git-root) "/fallback/repo/"))
-        (should (equal captured-default-dir "/fallback/repo/deep/"))))))
-
-(ert-deftest agent-repl-test-resolve-current-git-root-errors-outside-repo ()
-  "When `git rev-parse' returns empty (not inside any repo), the resolver
-signals `user-error' rather than silently returning a bogus path."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-            ((symbol-function 'agent-repl--ws-dir)
-             (lambda (_ws) (error "no dir")))
-            ((symbol-function 'agent-repl--git-string-quiet)
-             (lambda (&rest _) "")))
-    (should-error (agent-repl--resolve-current-git-root) :type 'user-error)))
 
 ;;;; ---- Tests: Buffer naming ----
 
@@ -270,13 +195,6 @@ environments without notification tools (terminal-notifier or osascript)."
   "Package should provide 'agent-repl feature."
   (should (featurep 'agent-repl)))
 
-;;;; ---- Tests: Workspace-for-buffer ----
-
-(ert-deftest agent-repl-test-workspace-for-buffer-no-persp ()
-  "When `persp-mode' is nil, `workspace-for-buffer' should return nil."
-  (let ((persp-mode nil))
-    (should-not (agent-repl--workspace-for-buffer (current-buffer)))))
-
 ;;;; ---- Tests: cancel-all-timers ----
 
 (ert-deftest agent-repl-test-cancel-all-timers-empty-list ()
@@ -316,18 +234,6 @@ environments without notification tools (terminal-notifier or osascript)."
     (should (null agent-repl--timers))
     (agent-repl--cancel-all-timers)
     (should (null agent-repl--timers))))
-
-(ert-deftest agent-repl-test-cancel-all-timers-clears-update-in-flight-flag ()
-  "Cancelling all timers tears down the workspace-state update chain.
-The chain's continuations are unregistered one-shot timers, so cancelling
-the registry alone left its in-flight flag armed across a module reload —
-observed as a stale flag force-cleared with a warning minutes later."
-  (let ((agent-repl--timers nil)
-        (agent-repl--keyed-timers nil)
-        (agent-repl--update-chain-timer nil)
-        (agent-repl--update-in-flight (float-time)))
-    (agent-repl--cancel-all-timers)
-    (should-not agent-repl--update-in-flight)))
 
 ;;;; ---- Tests: log-format ----
 
@@ -539,7 +445,7 @@ observed as a stale flag force-cleared with a warning minutes later."
               (agent-repl--log ws "normal-entry")
               (agent-repl--info ws "info-entry")
               (agent-repl--warn ws "warn-entry")
-              (should-error (agent-repl--error ws "error-entry") :type 'error)
+              (agent-repl--error ws "error-entry")
               ;; Verbose records persist even when terminal visibility is off.
               (agent-repl--log-verbose ws "terminal-hidden-verbose-entry")
               (let ((agent-repl-debug 'verbose))
@@ -555,7 +461,7 @@ observed as a stale flag force-cleared with a warning minutes later."
                               records)))
               (should (equal messages
                              '("normal-entry" "info-entry"
-                               "WARNING: warn-entry" "error-entry"
+                               "WARNING: warn-entry" "ERROR: error-entry"
                                "terminal-hidden-verbose-entry"
                                "terminal-visible-verbose-entry")))))
         (when (buffer-live-p buf)
@@ -566,9 +472,10 @@ observed as a stale flag force-cleared with a warning minutes later."
 ;;
 ;; The invariant under test: the log file and *Messages* are the QUIET sink
 ;; and take everything; the echo area / modeline is the LOUD sink and is
-;; reserved for GENUINE FATAL errors alone — `agent-repl--error', which
-;; reaches it by SIGNALLING an `error', not through the gate below.  Every
-;; ladder level (including `agent-repl--warn') emits quietly.
+;; reserved for GENUINE FATAL conditions alone, which reach it by SIGNALLING
+;; an `error' (`agent-repl--do-log' with ERROR-P), not through the gate
+;; below.  EVERY ladder level — `agent-repl--warn' and `agent-repl--error'
+;; alike — emits quietly.
 ;; `inhibit-message' is what separates the quiet emits — when it is non-nil
 ;; at the moment `message' runs, the line reaches *Messages* but never the
 ;; echo area.  So "did this quiet line reach the modeline?" is exactly "was
@@ -678,6 +585,76 @@ existing bug-capture path WITHOUT dropping ARGS on the floor."
       (agent-repl--warn nil "wrote this")
       (should (string-match-p "WARNING: wrote this" written)))))
 
+(defun agent-repl-test--recorded-log-field (field thunk)
+  "Return FIELD of the single JSONL record THUNK writes to the global sink."
+  (let ((written nil)
+        (agent-repl-log-to-file t))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+               (lambda (text &rest _args) (setq written text)))
+              ((symbol-function 'message) #'ignore))
+      (funcall thunk))
+    (alist-get (intern field)
+               (json-parse-string written :object-type 'alist))))
+
+(ert-deftest agent-repl-test-warn-operation-drops-the-severity-tag ()
+  "A warned operation is recorded under its BARE slug, not a warning- one.
+logging-contract.md reserves `level' for severity and requires
+`operation' to be stable, so the same logical operation must not change
+name because the warn rung logged it."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
+(ert-deftest agent-repl-test-warn-records-the-warn-level ()
+  "The severity a warn dropped from `operation' is carried by `level'."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "level"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "warn")))
+
+(ert-deftest agent-repl-test-warn-record-keeps-the-displayed-tag ()
+  "Dropping the tag from `operation' does not drop it from the message."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "message"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "WARNING: elisp.daemon.stale-addr")))
+
+(ert-deftest agent-repl-test-error-operation-drops-the-severity-tag ()
+  "An errored operation is recorded under its BARE slug too."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "agent-repl.elisp-rpc-push-invalid")))
+
+(ert-deftest agent-repl-test-error-records-the-error-level ()
+  "The error rung's severity lives in `level', as the contract says."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "level"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "error")))
+
+(ert-deftest agent-repl-test-error-record-keeps-the-displayed-tag ()
+  "The `ERROR: ' tag still reaches the recorded message."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "message"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "ERROR: elisp.rpc.push-invalid")))
+
+(ert-deftest agent-repl-test-debug-operation-is-unchanged ()
+  "The debug rung tags nothing, so its operation is untouched by the fix."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--log nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
+(ert-deftest agent-repl-test-info-operation-is-unchanged ()
+  "The info rung tags nothing either."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--info nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
 (ert-deftest agent-repl-test-log-never-reaches-echo-area-when-debug-on ()
   "Turning debug logging on must not turn the modeline into a firehose."
   (let* ((agent-repl-debug t)
@@ -722,31 +699,214 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 
 ;;;; ---- Tests: error ----
 
-(ert-deftest agent-repl-test-error-signals-regardless-of-debug ()
-  "`agent-repl--error' should signal even when `agent-repl-debug' is nil."
+(ert-deftest agent-repl-test-fatal-signals ()
+  "`agent-repl--fatal' aborts the caller: it signals, unlike `--error'."
   (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (let ((agent-repl-debug nil))
-      (should-error (agent-repl--error nil "bad %s" "thing") :type 'error))))
+    (should-error (agent-repl--fatal nil "bad %s" "thing") :type 'error)))
+
+(ert-deftest agent-repl-test-fatal-formats-fmt-and-args ()
+  "`agent-repl--fatal' expands FMT with ARGS in the signalled message."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+    (let ((err (should-error (agent-repl--fatal nil "ws=%s code=%d" "foo" 7))))
+      (should (string-match-p "ws=foo code=7" (error-message-string err))))))
+
+(ert-deftest agent-repl-test-fatal-includes-agent-repl-tag ()
+  "`agent-repl--fatal' output includes the [agent-repl] tag."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+    (let ((err (should-error (agent-repl--fatal nil "something"))))
+      (should (string-match-p "\\[agent-repl\\] something"
+                              (error-message-string err))))))
+
+(ert-deftest agent-repl-test-fatal-persists-record-at-level-error ()
+  "`agent-repl--fatal' records at level \"error\" before it signals."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
+      (should-error (agent-repl--fatal nil "boom"))
+      (should (equal captured "error")))))
+
+(ert-deftest agent-repl-test-fatal-persists-before-signalling ()
+  "The record is written BEFORE the signal, so the failure is never lost."
+  (let ((order nil))
+    (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+               (lambda (&rest _) (push 'persisted order))))
+      (ignore-errors (agent-repl--fatal nil "boom"))
+      (push 'unwound order))
+    (should (equal (nreverse order) '(persisted unwound)))))
+
+(ert-deftest agent-repl-test-error-does-not-signal ()
+  "`agent-repl--error' RECORDS a failure; it never unwinds the caller.
+The error rung exists so a branch can log its own failure and still return
+one to its caller.  A caller that must abort signals for itself."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+            ((symbol-function 'agent-repl--emit-message) #'ignore))
+    (should (equal (progn (agent-repl--error nil "bad %s" "thing") 'returned)
+                   'returned))))
+
+(ert-deftest agent-repl-test-error-emits-regardless-of-debug ()
+  "`agent-repl--error' emits with `agent-repl-debug' nil — it is ungated."
+  (let ((agent-repl-debug nil))
+    (let ((res (agent-repl-test--capture-emission
+                (lambda () (agent-repl--error nil "bad %s" "thing")))))
+      (should (plist-get res :called)))))
+
+(ert-deftest agent-repl-test-error-emits-quietly ()
+  "`agent-repl--error' stays on the QUIET sink: it never reaches the echo area."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "bad thing")))))
+    (should-not (plist-get res :echoed))))
 
 (ert-deftest agent-repl-test-error-formats-fmt-and-args ()
-  "`agent-repl--error' should expand FMT with ARGS in the error message."
-  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (condition-case err
-        (progn
-          (agent-repl--error nil "ws=%s code=%d" "foo" 7)
-          (should nil))
-      (error
-       (should (string-match-p "ws=foo code=7" (error-message-string err)))))))
+  "`agent-repl--error' expands FMT with ARGS in the emitted line."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "ws=%s code=%d" "foo" 7)))))
+    (should (string-match-p "ws=foo code=7" (plist-get res :text)))))
 
 (ert-deftest agent-repl-test-error-includes-agent-repl-tag ()
-  "`agent-repl--error' output should include the [agent-repl] tag."
-  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-    (condition-case err
-        (progn
-          (agent-repl--error nil "something")
-          (should nil))
-      (error
-       (should (string-match-p "\\[agent-repl\\] something" (error-message-string err)))))))
+  "`agent-repl--error' output includes the [agent-repl] tag."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "something")))))
+    (should (string-match-p "\\[agent-repl\\] ERROR: something" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-error-prepends-severity-tag ()
+  "`agent-repl--error' prepends the `ERROR: ' severity tag, as `--warn' does."
+  (let ((res (agent-repl-test--capture-emission
+              (lambda () (agent-repl--error nil "boom")))))
+    (should (string-match-p "ERROR: boom" (plist-get res :text)))))
+
+(ert-deftest agent-repl-test-error-passes-non-string-fmt-through-untouched ()
+  "A non-string FMT is handed through rather than `concat'-ed into a type error."
+  (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore)
+            ((symbol-function 'agent-repl--emit-message) #'ignore))
+    (should (equal (progn (agent-repl--error nil 'not-a-string) 'returned)
+                   'returned))))
+
+(ert-deftest agent-repl-test-error-persists-record-at-level-error ()
+  "The persisted JSONL record carries `level' = \"error\" per logging-contract.md."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
+      (agent-repl--error nil "boom")
+      (should (equal captured "error")))))
+
+(ert-deftest agent-repl-test-error-persists-record-at-normal-verbosity ()
+  "The persisted record is `normal' verbosity, so the durable sink keeps it."
+  (let ((captured nil))
+    (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
+              ((symbol-function 'agent-repl--persist-log-record)
+               (lambda (_ws _level verbosity _fmt _args &optional _op) (setq captured verbosity))))
+      (agent-repl--error nil "boom")
+      (should (equal captured "normal")))))
+
+(ert-deftest agent-repl-test-error-record-clears-default-file-threshold ()
+  "An error record persists under the default `agent-repl-log-file-level'."
+  (should (agent-repl--log-record-persists-p "error" "normal")))
+
+(ert-deftest agent-repl-test-error-record-clears-default-buffer-threshold ()
+  "An error record displays under the default `agent-repl-log-buffer-level'."
+  (should (agent-repl--log-record-displays-p "error" "normal")))
+
+;;;; ---- Tests: runtime log-verbosity controls ----
+
+(ert-deftest agent-repl-test-toggle-debug-turns-visibility-on ()
+  "`agent-repl-toggle-debug' turns *Messages* visibility on from nil."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-debug t)))))
+
+(ert-deftest agent-repl-test-toggle-debug-turns-visibility-off ()
+  "`agent-repl-toggle-debug' turns visibility back off from t."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug t))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-toggle-debug-prefix-selects-verbose ()
+  "With a prefix argument the toggle selects the verbose rung."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil))
+      (agent-repl-toggle-debug t)
+      (should (eq agent-repl-debug 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-debug-prefix-clears-verbose ()
+  "With a prefix argument the toggle clears an existing verbose setting."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug 'verbose))
+      (agent-repl-toggle-debug t)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-toggle-debug-leaves-the-file-level-alone ()
+  "The visibility toggle does not touch durable log volume."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-debug nil)
+          (agent-repl-log-file-level 'debug))
+      (agent-repl-toggle-debug)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-toggle-debug-is-interactive ()
+  "`agent-repl-toggle-debug' is a user-facing command."
+  (should (commandp 'agent-repl-toggle-debug)))
+
+(ert-deftest agent-repl-test-set-log-file-level-sets-the-threshold ()
+  "`agent-repl-set-log-file-level' sets the durable threshold."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (agent-repl-set-log-file-level 'warn)
+      (should (eq agent-repl-log-file-level 'warn)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-rejects-an-unknown-level ()
+  "An unknown level is refused rather than silently installed."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (should-error (agent-repl-set-log-file-level 'chatty) :type 'error)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-leaves-debug-visibility-alone ()
+  "Changing durable volume does not change *Messages* visibility."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug)
+          (agent-repl-debug nil))
+      (agent-repl-set-log-file-level 'error)
+      (should (eq agent-repl-debug nil)))))
+
+(ert-deftest agent-repl-test-set-log-file-level-is-interactive ()
+  "`agent-repl-set-log-file-level' is a user-facing command."
+  (should (commandp 'agent-repl-set-log-file-level)))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-on ()
+  "The verbose-to-disk toggle raises the durable threshold to verbose."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-turns-it-off ()
+  "The verbose-to-disk toggle drops back to debug from verbose."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'verbose))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'debug)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-from-a-quieter-rung-goes-verbose ()
+  "From a rung above debug the toggle still turns verbose ON, never off."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'warn))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-file-level 'verbose)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-leaves-the-buffer-level-alone ()
+  "The verbose-to-disk toggle affects the FILE only, not the log buffers."
+  (cl-letf (((symbol-function 'message) #'ignore))
+    (let ((agent-repl-log-file-level 'debug)
+          (agent-repl-log-buffer-level 'info))
+      (agent-repl-toggle-verbose-to-disk)
+      (should (eq agent-repl-log-buffer-level 'info)))))
+
+(ert-deftest agent-repl-test-toggle-verbose-to-disk-is-interactive ()
+  "`agent-repl-toggle-verbose-to-disk' is a user-facing command."
+  (should (commandp 'agent-repl-toggle-verbose-to-disk)))
 
 ;;;; ---- Tests: state-dir / state-file ----
 
@@ -1034,8 +1194,8 @@ workspace beside it can."
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
               (cl-letf (((symbol-function 'message) #'ignore)
-                        ((symbol-function 'agent-repl--frontend-session-view)
-                         (lambda (_) '(:claudeSessionId "claude-session-1"))))
+                        ((symbol-function 'agent-repl-host--live)
+                         (lambda (_) '(:vendor-info (:arm :claude :value (:session-id "claude-session-1"))))))
                 (agent-repl--log ws "identity test")))
             (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
                    (record (with-temp-buffer
@@ -1099,8 +1259,8 @@ workspace beside it can."
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (let ((agent-repl-log-to-file t))
-              (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-                         (lambda (_) '(:claudeSessionId 99))))
+              (cl-letf (((symbol-function 'agent-repl-host--live)
+                         (lambda (_) '(:vendor-info (:arm :claude :value (:session-id 99))))))
                 (should-error (agent-repl--log ws "invalid claude identity"))))
             (should-not (agent-repl--workspace-log-target-entry ws)))
         (delete-directory project t)))))
@@ -1413,75 +1573,6 @@ the record must still be persisted rather than silently discarded."
   "dir-has-git-p with empty string should not error."
   ;; No ignore-errors: if it signals, ERT correctly fails the test.
   (should (or (agent-repl--dir-has-git-p "") t)))
-
-;;;; ---- Tests: git-root ----
-
-(ert-deftest agent-repl-test-git-root-in-repo ()
-  "git-root should return the repo root when called from within a git repo."
-  (let ((tmpdir (make-temp-file "test-git-root-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((subdir (expand-file-name "a/b/c" tmpdir)))
-            (make-directory subdir t)
-            (let ((result (agent-repl--git-root subdir)))
-              ;; Should find the tmpdir as root (it has .git)
-              (should result)
-              (should (string-match-p (regexp-quote (file-name-nondirectory tmpdir)) result)))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-no-repo ()
-  "git-root should return nil when called outside any git repo."
-  ;; /tmp is very unlikely to be a git repo
-  (let ((tmpdir (make-temp-file "test-no-repo-" t)))
-    (unwind-protect
-        ;; Stub dir-has-git-p to always return nil so we don't depend on host
-        (cl-letf (((symbol-function 'agent-repl--dir-has-git-p) (lambda (_d) nil)))
-          (should-not (agent-repl--git-root tmpdir)))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-uses-default-directory ()
-  "git-root with no DIR arg should use `default-directory'."
-  (let ((tmpdir (make-temp-file "test-git-dd-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((default-directory (file-name-as-directory tmpdir)))
-            (let ((result (agent-repl--git-root)))
-              (should result))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-deeply-nested ()
-  "git-root should find root from deeply nested subdirectory."
-  (let ((tmpdir (make-temp-file "test-git-deep-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((deep (expand-file-name "a/b/c/d/e" tmpdir)))
-            (make-directory deep t)
-            (should (agent-repl--git-root deep))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-explicit-dir ()
-  "git-root with explicit DIR argument should search from that directory."
-  (let ((tmpdir (make-temp-file "test-git-explicit-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (should (agent-repl--git-root tmpdir)))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-worktree ()
-  "git-root should find root when .git is a file (worktree)."
-  (let ((tmpdir (make-temp-file "test-git-wt-" t)))
-    (unwind-protect
-        (progn
-          (with-temp-file (expand-file-name ".git" tmpdir)
-            (insert "gitdir: /some/other/.git/worktrees/foo"))
-          (let ((subdir (expand-file-name "sub" tmpdir)))
-            (make-directory subdir t)
-            (should (agent-repl--git-root subdir))))
-      (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: git-string / git-string-quiet ----
 ;;
@@ -1979,13 +2070,6 @@ ownership intact across that transition."
           (should (eq first second)))
       (when (buffer-live-p first) (kill-buffer first)))))
 
-;;;; ---- Tests: active-inst ----
-
-(ert-deftest agent-repl-test-active-inst-default-bare-metal ()
-  "active-inst should error when no :active-env is set (initialize-ws-env not called)."
-  (agent-repl-test--with-clean-state
-    (should-error (agent-repl--active-inst "ws1") :type 'error)))
-
 ;;;; ---- Tests: ws-observed-claude-session-id ----
 ;;
 ;; Emacs holds NO durable copy of a vendor conversation uuid. It reads the
@@ -1994,31 +2078,32 @@ ownership intact across that transition."
 ;; handed it back as a resume pointer, which made Emacs a second authority on
 ;; which conversation a workspace owns.
 
-(ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-view ()
-  "ws-observed-claude-session-id reads the daemon-pushed SessionView."
+(ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-host-frame ()
+  "ws-observed-claude-session-id reads the pushed HostWorkspace's vendor arm."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (key) (when (equal key "/w") '(:claudeSessionId "cli-uuid-1")))))
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (ws) (when (equal ws "ws1")
+                              '(:vendor-info (:arm :claude :value (:session-id "cli-uuid-1")))))))
       (should (equal (agent-repl--ws-observed-claude-session-id "ws1") "cli-uuid-1")))))
 
 (ert-deftest agent-repl-test-observed-session-id-ignores-the-in-memory-instantiation ()
   "An instantiation carrying a uuid is NOT a source for attribution.
 Reading it back would be the persisted-pointer path returning by another
-name; the daemon-pushed view is the only source."
+name; the daemon-pushed host frame is the only source."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :active-env :bare-metal)
     (agent-repl--ws-put "ws1" :bare-metal
                         (make-agent-repl-instantiation :session-id "stale-uuid"))
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+    (cl-letf (((symbol-function 'agent-repl-host--live)
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-observed-session-id-nil-without-a-bound-session ()
-  "A workspace with no daemon session has nothing to attribute to."
+(ert-deftest agent-repl-test-observed-session-id-nil-while-no-vendor-conversation-exists ()
+  "The vendor oneof is legally UNSET until a conversation exists."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
-               (lambda (_) '(:claudeSessionId "cli-uuid-1"))))
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (_) '(:vendor-info nil))))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
 (ert-deftest agent-repl-test-observed-session-id-nil-before-the-first-push ()
@@ -2026,35 +2111,16 @@ name; the daemon-pushed view is the only source."
 An unattributed log record is accepted by the daemon; a misattributed one is
 what gets rejected, so guessing would be strictly worse than saying nothing."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+    (cl-letf (((symbol-function 'agent-repl-host--live)
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-active-inst-returns-same-struct ()
-  "active-inst should return the same struct on second call (not create a new one)."
+(ert-deftest agent-repl-test-observed-session-id-nil-for-an-empty-vendor-id ()
+  "An empty vendor id is the vendor naming nothing, not an identity."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst1 (agent-repl--active-inst "ws1"))
-          (inst2 (agent-repl--active-inst "ws1")))
-      (should (eq inst1 inst2)))))
-
-(ert-deftest agent-repl-test-active-inst-is-struct ()
-  "active-inst should return a agent-repl-instantiation struct."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst (agent-repl--active-inst "ws1")))
-      (should (agent-repl-instantiation-p inst)))))
-
-(ert-deftest agent-repl-test-active-inst-fields-nil-by-default ()
-  "active-inst struct fields should be nil by default."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst (agent-repl--active-inst "ws1")))
-      (should-not (agent-repl-instantiation-session-id inst))
-      (should-not (agent-repl-instantiation-start-cmd inst)))))
+    (cl-letf (((symbol-function 'agent-repl-host--live)
+               (lambda (_) '(:vendor-info (:arm :claude :value (:session-id ""))))))
+      (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
 ;;;; ---- Tests: buffer-name edge cases ----
 
@@ -2134,55 +2200,6 @@ now that vterm is gone: the input composer and the webview."
   (agent-repl-test--with-temp-buffer "*normal-test-buf2*"
     (should-not (agent-repl--non-user-buffer-p (current-buffer)))))
 
-;;;; ---- Tests: non-agent-buffers ----
-
-(ert-deftest agent-repl-test-non-agent-buffers-empty-list ()
-  "non-agent-buffers with empty list should return empty list."
-  (should (null (agent-repl--non-agent-buffers nil))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-all-claude ()
-  "non-agent-buffers with all claude buffers should return empty list."
-  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
-    (let ((buf1 (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*agent-panel-input-bbbb2222*"
-        (let ((buf2 (current-buffer)))
-          (should (null (agent-repl--non-agent-buffers (list buf1 buf2)))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-no-agent ()
-  "non-agent-buffers with no claude buffers should return all."
-  (agent-repl-test--with-temp-buffer "*normal-a*"
-    (let ((buf1 (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*normal-b*"
-        (let ((buf2 (current-buffer)))
-          (let ((result (agent-repl--non-agent-buffers (list buf1 buf2))))
-            (should (= (length result) 2))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-mixed ()
-  "non-agent-buffers with mixed list should filter correctly."
-  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
-    (let ((agent-buf (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*normal-buf*"
-        (let ((normal-buf (current-buffer)))
-          (let ((result (agent-repl--non-agent-buffers (list agent-buf normal-buf))))
-            (should (= (length result) 1))
-            (should (eq (car result) normal-buf))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-nil-entries ()
-  "non-agent-buffers should filter out nil entries."
-  (agent-repl-test--with-temp-buffer "*normal-c*"
-    (let ((buf (current-buffer)))
-      (let ((result (agent-repl--non-agent-buffers (list nil buf nil))))
-        (should (= (length result) 1))
-        (should (eq (car result) buf))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-string-names ()
-  "non-agent-buffers should handle string names (non-existent buffers are filtered)."
-  (agent-repl-test--with-temp-buffer "*normal-str*"
-    ;; String names of non-existent buffers should be filtered (non-user-buffer-p returns t)
-    (let ((result (agent-repl--non-agent-buffers (list "*normal-str*" "nonexistent-xyz"))))
-      (should (= (length result) 1))
-      (should (equal (car result) "*normal-str*")))))
-
 ;;;; ---- Tests: current-ws-p ----
 
 (ert-deftest agent-repl-test-current-ws-p-match ()
@@ -2199,6 +2216,19 @@ now that vterm is gone: the input composer and the webview."
   "current-ws-p with empty string should not match non-empty workspace."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
     (should-not (agent-repl--current-ws-p ""))))
+
+(ert-deftest agent-repl-test-current-ws-p-no-current-workspace-is-nil-not-an-error ()
+  "No workspace selected answers nil rather than signalling.
+`agent-repl--ws-current-name' documents nil as legal, and the finish-edge
+reactions read this predicate: a signal there would abort the reactions
+still queued behind it for that edge."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+    (should-not (agent-repl--current-ws-p "my-ws"))))
+
+(ert-deftest agent-repl-test-current-ws-p-nil-ws-is-nil-not-an-error ()
+  "A nil WS is not the current workspace, and asking is not an error."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
+    (should-not (agent-repl--current-ws-p nil))))
 
 ;;;; ---- Tests: instantiation struct ----
 
@@ -2646,17 +2676,6 @@ The master kill-switch overrides the always-on file-write decoupling."
   (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
     (should (equal (agent-repl--workspace-prefix) ""))))
 
-(ert-deftest agent-repl-test-workspace-prefix-slash-env-set ()
-  "workspace-prefix-slash appends a trailing slash to a non-empty prefix."
-  (cl-letf (((symbol-function 'getenv)
-             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
-    (should (equal (agent-repl--workspace-prefix-slash) "DWC/"))))
-
-(ert-deftest agent-repl-test-workspace-prefix-slash-env-unset ()
-  "workspace-prefix-slash returns the empty string when the env var is unset."
-  (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
-    (should (equal (agent-repl--workspace-prefix-slash) ""))))
-
 ;;;; ---- Tests: agent-repl--output-dir constant ----
 
 (ert-deftest agent-repl-test-output-dir-is-absolute ()
@@ -2665,16 +2684,6 @@ The master kill-switch overrides the always-on file-write decoupling."
   (should (string-match-p "output/$" agent-repl--output-dir)))
 
 ;;;; ---- Tests: Buffer background color (moved from overlay.el) ----
-
-(ert-deftest agent-repl-test-grey-hex-format ()
-  "grey-hex should format N as a #rrggbb hex string with equal channels."
-  (should (equal (agent-repl--grey-hex 0) "#000000"))
-  (should (equal (agent-repl--grey-hex 255) "#ffffff"))
-  (should (equal (agent-repl--grey-hex 15) "#0f0f0f")))
-
-(ert-deftest agent-repl-test-grey-hex-boundary-128 ()
-  "grey-hex for 128 (middle grey) should return #808080."
-  (should (equal (agent-repl--grey-hex 128) "#808080")))
 
 (ert-deftest agent-repl-test-rgb-hex-format ()
   "rgb-hex should format R, G, B independently into a #rrggbb string."
@@ -2753,9 +2762,9 @@ unattributed teardown is visible in the log rather than silently blank."
 
 (ert-deftest agent-repl-test-kill-cause-str-returns-bound-cause ()
   "A let-bound kill-cause is returned verbatim for the log line."
-  (let ((agent-repl--kill-cause "interactive nuke command (test)"))
+  (let ((agent-repl--kill-cause "interactive kill command (test)"))
     (should (equal (agent-repl--kill-cause-str)
-                   "interactive nuke command (test)"))))
+                   "interactive kill command (test)"))))
 
 ;;;; ---- Tests: assert-main-thread ----
 
@@ -3377,6 +3386,26 @@ survives into the rest of the batch run."
           (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
+
+(ert-deftest agent-repl-test-core-input-buffer-name-carries-the-title ()
+  "The title rides after the identity segment, inside the name form."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "Refactor the codec")
+                 "*agent-panel-input-ws-1 Refactor the codec*")))
+
+(ert-deftest agent-repl-test-core-input-buffer-name-without-a-title-is-canonical ()
+  "The row-name fallback adds nothing, so the name stays the bare one."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "ws-1")
+                 "*agent-panel-input-ws-1*")))
+
+(ert-deftest agent-repl-test-core-input-buffer-name-drops-asterisks-from-the-title ()
+  "The asterisk is the name form's own delimiter and cannot ride a title."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "a*b")
+                 "*agent-panel-input-ws-1 ab*")))
+
+(ert-deftest agent-repl-test-core-titled-input-buffer-name-still-matches ()
+  "A titled composer must still match the input buffer regexp."
+  (should (string-match-p agent-repl--input-buffer-re
+                          "*agent-panel-input-ws-1 Refactor the codec*")))
 
 (provide 'test-core)
 
@@ -4013,23 +4042,6 @@ that froze Emacs; this pins the equivalence the bound relies on."
     (should (equal copy
                    "prompt refused — this workspace is not live; start or wake it first"))))
 
-(ert-deftest agent-repl-test-user-message-for-error-echoes-copy-and-files-the-chain ()
-  "The composition echoes only the sentence and files the raw chain beside it."
-  ;; Arrange
-  (let ((echoed nil)
-        (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--emit-message)
-               (lambda (text &optional _echo) (setq echoed text)))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-      ;; Act
-      (agent-repl--user-message-for-error
-       "ws" "prompt" "ssm: invariant failed: state=RENDER_STATE_MERGE_QUEUED turn_active=true")
-      ;; Assert
-      (should-not (string-match-p "RENDER_STATE" echoed))
-      (should (seq-find (lambda (line) (string-match-p "RENDER_STATE_MERGE_QUEUED" line))
-                        logged)))))
-
 ;;;; ---- Tests: one-shot settle latch ----
 ;;
 ;; The latch is what makes an asynchronous operation's settle atomic with
@@ -4044,13 +4056,6 @@ that froze Emacs; this pins the equivalence the bound relies on."
     ;; Act / Assert
     (should (agent-repl--latch-claim latch))
     (should-not (agent-repl--latch-claim latch))))
-
-(ert-deftest agent-repl-test-latch-claim-reports-settled ()
-  "A claimed latch reports itself settled."
-  (let ((latch (agent-repl--make-latch)))
-    (should-not (agent-repl--latch-settled-p latch))
-    (agent-repl--latch-claim latch)
-    (should (agent-repl--latch-settled-p latch))))
 
 (ert-deftest agent-repl-test-latch-claim-cancels-held-timers ()
   "Claiming a latch cancels every timer it holds.
@@ -4335,6 +4340,77 @@ an orphan."
                               (agent-repl--workspace-emacs-log-path project))))))
         (delete-directory project t)))))
 
+(ert-deftest agent-repl-test-reuse-repoints-a-stolen-canonical-link ()
+  "A reuse of the owned target re-establishes a canonical link that was stolen.
+Another runtime registering the same directory replaces the symlink; the
+registry keeps returning the owned target, so every record written after
+the theft would land in a file no reader opens."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-stolen-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target interloper canonical)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project)
+                  interloper (make-temp-file "agent-repl-interloper-" nil ".log"))
+            (make-symbolic-link interloper canonical t)
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical)))
+            (delete-file interloper))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-reuse-restores-a-deleted-canonical-link ()
+  "A reuse of the owned target re-creates a canonical link that was removed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-deleted-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target canonical)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project))
+            (delete-file canonical)
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-reuse-keeps-an-intact-canonical-link-untouched ()
+  "A reuse leaves an already-correct canonical link exactly as it stands."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-intact-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target canonical attrs)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project)
+                  attrs (file-attributes canonical))
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical)))
+            (should (equal (file-attribute-inode-number attrs)
+                           (file-attribute-inode-number
+                            (file-attributes canonical)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-link-current-p-rejects-a-plain-file ()
+  "A canonical path that is a regular file is not a current link."
+  ;; Arrange
+  (let ((plain (make-temp-file "agent-repl-plain-canonical-" nil ".log")))
+    (unwind-protect
+        ;; Act / Assert
+        (should-not (agent-repl--workspace-log-link-current-p plain plain))
+      (delete-file plain))))
+
 (ert-deftest agent-repl-test-a-different-directory-gets-its-own-target ()
   "The sharing is scoped to one identity; two directories stay independent."
   ;; Arrange
@@ -4379,3 +4455,147 @@ an orphan."
   ;; Arrange / Act / Assert
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--workspace-log-target-entry "never-registered"))))
+
+;;;; ---- Tests: wait-for-process-exit ----
+;;
+;; `agent-repl--capture-process-output' — the shared implementation behind
+;; every `agent-repl--git-*' / `--gh-*' wrapper — calls
+;; `agent-repl--wait-for-process-exit'.  That definition was deleted as
+;; collateral when worktree.el was slimmed, leaving every real capture path
+;; signalling `void-function'; the whole suite stayed green because every
+;; capture test stubs the wait.  The first test below pins the definition's
+;; existence so the seam cannot silently reopen.
+;;
+;; No real process is spawned anywhere here: the process primitives are
+;; stubbed, per AGENTS.md "No External Processes or External State in Tests".
+
+(ert-deftest agent-repl-test-wait-for-process-exit-is-defined ()
+  "`agent-repl--wait-for-process-exit' exists for its production callers."
+  ;; Arrange / Act / Assert
+  (should (fboundp 'agent-repl--wait-for-process-exit)))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-dispatches-to-main-on-main-thread ()
+  "On the main thread the wait routes to the `accept-process-output' path."
+  ;; Arrange
+  (let ((routed nil))
+    (cl-letf (((symbol-function 'agent-repl--wait-for-process-exit--main)
+               (lambda (&rest _) (setq routed 'main) 0))
+              ((symbol-function 'agent-repl--wait-for-process-exit--worker)
+               (lambda (&rest _) (setq routed 'worker) 0)))
+      ;; Act
+      (agent-repl--wait-for-process-exit nil 1 nil nil)
+      ;; Assert
+      (should (eq routed 'main)))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-dispatches-to-worker-off-main-thread ()
+  "Off the main thread the wait routes to the condition-variable path."
+  ;; Arrange
+  (let ((routed nil))
+    (cl-letf (((symbol-function 'current-thread) (lambda () 'some-worker))
+              ((symbol-function 'agent-repl--wait-for-process-exit--main)
+               (lambda (&rest _) (setq routed 'main) 0))
+              ((symbol-function 'agent-repl--wait-for-process-exit--worker)
+               (lambda (&rest _) (setq routed 'worker) 0)))
+      ;; Act
+      (agent-repl--wait-for-process-exit nil 1 nil nil)
+      ;; Assert
+      (should (eq routed 'worker)))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-returns-exit-status ()
+  "A process already exited yields its exit status, not `timeout'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+            ((symbol-function 'process-exit-status) (lambda (_) 7)))
+    ;; Act / Assert
+    (should (equal (agent-repl--wait-for-process-exit--main 'proc 1 nil nil) 7))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-returns-timeout-past-deadline ()
+  "A process still live past the deadline yields the symbol `timeout'."
+  ;; Arrange
+  (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+            ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--kill-process-safely) (lambda (_) t)))
+    ;; Act / Assert — a zero-second budget is already expired on first check
+    (should (eq (agent-repl--wait-for-process-exit--main 'proc 0 nil nil)
+                'timeout))))
+
+(ert-deftest agent-repl-test-wait-for-process-exit-main-kills-the-process-on-timeout ()
+  "The timeout path tears the overrunning process down."
+  ;; Arrange
+  (let ((killed nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'accept-process-output) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--kill-process-safely)
+               (lambda (p) (setq killed p) t)))
+      ;; Act
+      (agent-repl--wait-for-process-exit--main 'proc 0 nil nil)
+      ;; Assert
+      (should (eq killed 'proc)))))
+
+;;;; ---- Tests: thread-safe process teardown ----
+
+(ert-deftest agent-repl-test-kill-process-safely-deletes-on-the-main-thread ()
+  "On the main thread the live process is deleted directly."
+  ;; Arrange
+  (let ((deleted nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p))))
+      ;; Act
+      (should (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should (eq deleted 'proc)))))
+
+(ert-deftest agent-repl-test-kill-process-safely-is-a-no-op-for-a-dead-process ()
+  "A process that is no longer live is not deleted again."
+  ;; Arrange
+  (let ((deleted nil))
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_) nil))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p))))
+      ;; Act
+      (should-not (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should-not deleted))))
+
+(ert-deftest agent-repl-test-kill-process-safely-defers-off-the-main-thread ()
+  "Off the main thread the delete is handed to the main thread, not run here."
+  ;; Arrange
+  (let ((deleted nil)
+        (deferred nil))
+    (cl-letf (((symbol-function 'current-thread) (lambda () 'some-worker))
+              ((symbol-function 'process-live-p) (lambda (_) t))
+              ((symbol-function 'process-name) (lambda (_) "proc"))
+              ((symbol-function 'delete-process) (lambda (p) (setq deleted p)))
+              ((symbol-function 'agent-repl--defer-to-main-thread)
+               (lambda (thunk) (setq deferred thunk))))
+      ;; Act
+      (should (agent-repl--kill-process-safely 'proc))
+      ;; Assert
+      (should (functionp deferred))
+      (should-not deleted))))
+
+(ert-deftest agent-repl-test-defer-to-main-thread-schedules-on-the-timer-queue ()
+  "The deferral hands the thunk to `run-at-time' rather than calling it.
+The harness overrides `agent-repl--defer-to-main-thread' to run its thunk
+synchronously (see test-helpers.el), so this test lifts every advice off
+the symbol for its duration to reach the production body underneath, and
+restores them afterwards."
+  ;; Arrange
+  (let ((scheduled nil)
+        (called nil)
+        (advices nil))
+    (advice-mapc (lambda (fn props) (push (cons fn props) advices))
+                 'agent-repl--defer-to-main-thread)
+    (dolist (entry advices)
+      (advice-remove 'agent-repl--defer-to-main-thread (car entry)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (secs repeat thunk)
+                     (setq scheduled (list secs repeat thunk)))))
+          ;; Act
+          (agent-repl--defer-to-main-thread (lambda () (setq called t))))
+      (dolist (entry (reverse advices))
+        (advice-add 'agent-repl--defer-to-main-thread :override (car entry)
+                    (cdr entry))))
+    ;; Assert
+    (should (equal (list (nth 0 scheduled) (nth 1 scheduled)) '(0 nil)))
+    (should-not called)))

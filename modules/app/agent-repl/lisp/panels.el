@@ -2,6 +2,76 @@
 
 ;;; Code:
 
+;; evil is an external package, absent under `emacs -Q'.
+(declare-function evil-window-left "evil-commands")
+
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--agent-panel-buffer-p "core")
+(declare-function agent-repl--align-buffer-to-ws-dir "status")
+(declare-function agent-repl--buffer-name "core")
+(declare-function agent-repl--buffer-owner "core")
+(declare-function agent-repl--create-buffer "core")
+(declare-function agent-repl--foreign-owned-buffer-p "core")
+(declare-function agent-repl--frontend-dispatch-hide "frontends")
+(declare-function agent-repl--frontend-dispatch-show "frontends")
+(declare-function agent-repl--frontend-webview-buffer-name "frontend")
+(declare-function agent-repl--history-restore "history")
+(declare-function agent-repl--info "core")
+(declare-function agent-repl--kill-cause-str "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--magit-status-same-window "magit")
+(declare-function agent-repl--open-initial-buffers "worktree")
+(declare-function agent-repl--pseudo-workspace-name-p "core")
+(declare-function agent-repl--remove-doom-dashboard "worktree")
+(declare-function agent-repl--safe-buffer-name "window")
+(declare-function agent-repl--sanitize-ws-name "core")
+(declare-function agent-repl--send-to-agent "commands")
+(declare-function agent-repl--state-save "history")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-buffers "workspace")
+(declare-function agent-repl--ws-current-log-name "workspace")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-frame-ordered-names "workspace")
+(declare-function agent-repl--ws-frame-save-state "workspace")
+(declare-function agent-repl--ws-frontend "frontends")
+(declare-function agent-repl--ws-frontend-name "frontends")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-gui-frontend-p "frontends")
+(declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-log-name "workspace")
+(declare-function agent-repl--ws-names-cache "workspace")
+(declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl--ws-remove-buffer "workspace")
+(declare-function agent-repl--ws-resolve-persp "workspace")
+(declare-function agent-repl--ws-switch "workspace")
+(declare-function agent-repl--ws-system-available-p "workspace")
+(declare-function agent-repl--ws-update-names-cache "workspace")
+(declare-function agent-repl-frontend-kill-fn "frontends")
+(declare-function agent-repl-frontend-open-fn "frontends")
+(declare-function agent-repl-frontend-restart-fn "frontends")
+(declare-function agent-repl-frontend-running-p-fn "frontends")
+(declare-function agent-repl-frontend-show-fn "frontends")
+(declare-function agent-repl-input-mode "input")
+(declare-function agent-repl-window--delete-buffer-windows "window")
+(declare-function agent-repl-window--delete-or-neutralize "window")
+(declare-function agent-repl-window--delete-where "window")
+(declare-function agent-repl-window--ensure-layout "window")
+(declare-function agent-repl-window--panel-window "window")
+(declare-function agent-repl-window--panels-restorable-p "window")
+(declare-function agent-repl-window--side-window-p "window")
+
+;; Special variables owned by other sources in this module, declared here
+;; so the byte-compiler binds and reads them dynamically rather than
+;; lexically.
+(defvar agent-repl--eager-open-in-progress)
+(defvar agent-repl--frontend-buffer-re)
+(defvar agent-repl--input-buffer-re)
+(defvar agent-repl--kill-cause)
+
 ;; open-progress.el loads AFTER this file (it needs frontend.el's main-area
 ;; host resolution, which this file's layout helpers sit beside), so the
 ;; entry point's placeholder calls are declared rather than resolved at
@@ -10,6 +80,16 @@
 (declare-function agent-repl--open-progress-start "agent-repl-open-progress" (ws))
 (declare-function agent-repl--open-progress-finish "agent-repl-open-progress" (ws))
 (declare-function agent-repl--preregistration-log-workspace-p "core" (ws))
+
+(declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl-host-conn "host" (ws))
+(declare-function agent-repl-host-state "host" (ws))
+(declare-function agent-repl-host-subscribe "host" (conn ws ref))
+(declare-function agent-repl-host--apply-naming "host" (ws))
+(declare-function agent-repl-link-primary "daemon-link" ())
+(declare-function agent-repl--force-tab-bar-redraw "status" ())
+(declare-function agent-repl-roster-tab-order "roster" ())
+(declare-function agent-repl-roster-move-tab-to-back "roster" (ws))
 
 (defun agent-repl--foreign-perspective-p (ws)
   "Return non-nil when WS is a persp-mode perspective agent-repl never touched.
@@ -20,7 +100,8 @@ kill/merge whose bookkeeping never reached persp-mode's own saved
 perspective list) — and fires `persp-activated-functions' for each one
 exactly as it would for a live switch.
 
-Such a WS is neither a pseudo perspective (`agent-repl--pseudo-workspace-name-p',
+Such a WS is neither a pseudo perspective
+(`agent-repl--pseudo-workspace-name-p',
 persp-mode's own \"none\"/\"main\") nor a workspace agent-repl has ever
 registered (`agent-repl--ws-known-p' — live, tombstoned, or mid-creation
 via `agent-repl--preregistration-log-workspace-p'): it is simply not ours.
@@ -158,11 +239,20 @@ buffer that was created (or session-restored) against the wrong dir."
     buf))
 
 (defun agent-repl--drain-pending-show-panels (ws)
-  "Show WS's session if a preemptive prompt queued a :pending-show-panels flag.
+  "Show WS's session if something armed the :pending-show-panels flag.
 Clears the flag and shows the session through WS's frontend (the
-webview).  A generated workspace is born with this flag set and its
-session booted headlessly (`agent-repl--frontend-boot-session'), so
-this drain is where a gui workspace first becomes visible."
+webview).  The gui pre-creates a workspace's page WITHOUT displaying it
+\(`agent-repl--gui-boot'), so this drain is where a gui workspace first
+becomes visible.
+
+WHO ARMS IT: `agent-repl-switch-to-project' for the workspace a
+projectile switch is about to stand on -- which is how a workspace you
+just created comes up showing itself -- and
+`agent-repl--land-after-teardown' for the workspace a teardown moves the
+user to.  Both go through `agent-repl--arm-landing-panels' and both arm
+BEFORE the switch, so the flag is set by the time the persp activation
+hook drains it.  (The old headless birth path armed it too; it went with
+`agent-repl--frontend-boot-session', which no longer exists.)"
   (if (not (agent-repl--ws-get ws :pending-show-panels))
       ;; The no-op branch is the one a persp placeholder reaches (it owns no
       ;; pending flags), so its record is screened for routability.
@@ -411,9 +501,9 @@ to, even if another switch raced ahead before the timer fired.
 Also opens panels for workspaces that were created with a preemptive
 prompt, and auto-selects the input window if visible.
 
-Snaps the agent's webview feed to its last message
-\(`agent-repl--frontend-snap-webview-to-tail'), so a switched-to
-workspace never shows stale middle-of-history output.
+The webview is left ALONE: it is bound to its buffer for life and draws
+whatever the daemon's own pushes say, so there is nothing for the switch
+to tell it.
 
 never causes a silent decay.
 
@@ -431,42 +521,31 @@ not be routed at all.
     ;; panels if they were visible before this workspace was deactivated.
     ;; Must run BEFORE autoselect so it sees the correct panel windows.
     (agent-repl--ensure-own-panels-on-persp-switch ws)
-    ;; Event-driven (workspace just activated) → kick a fresh pass via
-    ;; the unguarded entrypoint so the in-flight reentry guard from the
-    ;; 1Hz timer doesn't swallow the switch's refresh.
-    (agent-repl--update-all-workspace-states-now)
+    ;; Repaint: the switch changed which tab is SELECTED, and selection is
+    ;; the one part of a tab's appearance the roster does not carry.  There
+    ;; is nothing to refresh beyond that — every workspace's state arrived on
+    ;; the roster stream.
+    (agent-repl--force-tab-bar-redraw)
     (agent-repl--drain-pending-magit ws)
     (agent-repl--drain-pending-initial-buffers ws)
     (agent-repl--drain-pending-show-panels ws)
     (agent-repl--maybe-autoselect-input ws)
-    ;; The workspace comes back showing its agent's newest output, never
-    ;; the middle of the history the feed was left scrolled up to.  Runs
-    ;; after the show drain, so a webview that just became visible is
-    ;; snapped too.
-    (agent-repl--frontend-snap-webview-to-tail ws)
-    ;; NEVER-BLUE, switch half: tell the daemon this workspace was switched
-    ;; to, so it discovers + binds any on-disk transcript and brings the shim
-    ;; up.  A workspace the user merely LOOKS at must render its history
-    ;; rather than sitting blue until they type.  Heavily skipped (live
-    ;; session, cooldown, give-up) inside the notifier, and fire-and-forget
-    ;; here — a daemon that cannot open the workspace must never stall the
-    ;; switch, which is why the failure path is an ack callback and not a
-    ;; signal.
-    (agent-repl--frontend-ensure-workspace ws)
-    ;; Flip the emacs-side bit on the fully-loaded latch.  If
-    ;; --on-session-start-event has also fired, this fires the
-    ;; ws-fully-loaded hook; otherwise we just record the bit and wait
-    ;; for agent-ready.  Guarded on ws non-nil so the nil-ws fallback
-    ;; (test envs, persp init) doesn't poison the hash table.
+    ;; The workspace is SELECTED: SelectWorkspace is Emacs's own second
+    ;; and last contribution to the roster, and host.el sends it from the
+    ;; perspective-activated hook.  Nothing else about the switch reaches
+    ;; the daemon, and nothing about it is asked of the page.
+    ;; THE FULLY-LOADED LATCH IS GONE with the session events that armed
+    ;; its other half: readiness is the daemon's, and a workspace's state
+    ;; arrives on the roster rather than being latched together here out of
+    ;; two local observations.
     (when ws
-      (agent-repl--latch-and-maybe-fire-loaded ws :ws-loaded))))
+      ;; Screened through `--ws-log-name' like every other record on this
+      ;; path: persp-mode hands it its own placeholders too, and those own
+      ;; no durable sink to route a workspace-attributed record to.
+      (agent-repl--log log-ws "elisp.panels.switch: complete ws=%s" ws))))
 
 ;; Save window state for current workspace before switching away,
-;; so update-all-workspace-states can inspect the saved config.
-
-(defun agent-repl--non-agent-panel-window-p (w)
-  "Return non-nil if window W does not display a agent panel buffer."
-  (not (agent-repl--agent-panel-buffer-p (window-buffer w))))
+;; so the panel-visibility paint can inspect the saved config.
 
 (defun agent-repl--save-target-window-p (w)
   "Return non-nil when W is a safe selected-window for persp save.
@@ -624,7 +703,7 @@ a frontend that cannot be resolved."
 
 (defun agent-repl--on-simple-close (&optional ws)
   "Bookkeep + hide the view; do NOT touch tab-bar order.
-Sets `:repl-state :inactive' on WS (`:agent-state' untouched so an
+Writes no state on WS (its lifecycle is the roster's, and an
 in-flight :thinking / :permission survives the close), then puts the view
 away through WS's own frontend.  No save-tab-index, no push-to-back, no
 this is the simple-close audit point that `SPC o c' is bound to.
@@ -636,21 +715,63 @@ did."
     (agent-repl--log ws "on-simple-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      (agent-repl--log ws "on-simple-close ws=%s agent-state=%s -> repl-state=:inactive"
-                        ws (agent-repl--ws-agent-state ws))
-      (agent-repl--ws-set-repl-state ws :inactive))
+      ;; NO STATE IS WRITTEN.  Panel visibility is a LOCAL presentation
+      ;; fact, and it reaches the tab through the bracket-only paint that
+      ;; reads the live window layout; the workspace's lifecycle is the
+      ;; roster's and closing a panel says nothing about it.
+      (agent-repl--log ws "elisp.panels.simple-close: ws=%s panels=hidden" ws))
     (agent-repl--close-view ws (lambda ()
                                   (agent-repl--restore-fullscreen-config ws)
                                   (agent-repl--hide-panels)))))
 
+(defun agent-repl-workspace-push-to-back (&optional keep-focus)
+  "Push the current workspace's tab to the BACK of the tab order.
+The back is the LAST slot: a deprioritized workspace must stop being the
+next tab the user lands on, and any slot short of last would leave it
+ahead of some other workspace it was just ranked below.
+
+The roster owns the order, so the shuffle goes through
+`agent-repl-roster-move-tab-to-back' and the persp-mode names cache is
+then set to the SAME list — the two must agree, or the tab bar renders
+one order while every roster-driven lookup uses another.
+
+By default focus moves to the workspace that now occupies the vacated
+slot, which is the point of the deprio gesture: the user said they are done
+here and want to move on.  With KEEP-FOCUS non-nil focus stays on the moved
+workspace.
+
+No-op when there is no current workspace, or when it holds no tab."
+  (interactive)
+  (let* ((current (agent-repl--ws-current-name))
+         (order (agent-repl-roster-tab-order))
+         (old-index (and current (cl-position current order :test #'string=))))
+    (if (null old-index)
+        (agent-repl--log current
+                         "workspace-push-to-back: ws=%s branch=no-tab" current)
+      (let* ((without (remove current order))
+             (reordered (agent-repl-roster-move-tab-to-back current))
+             (next (and without
+                        (nth (min old-index (1- (length without))) without))))
+        (agent-repl--log current
+                         "workspace-push-to-back: ws=%s old-index=%s next=%s keep-focus=%s"
+                         current old-index next keep-focus)
+        (agent-repl--ws-update-names-cache reordered)
+        (agent-repl--force-tab-bar-redraw)
+        (if (and next (not keep-focus))
+            (progn
+              (agent-repl--ws-switch next)
+              (message "Pushed '%s' to the back; switched to '%s'." current next))
+          (message "Pushed '%s' to the back." current))))))
+
 (defun agent-repl--on-close (&optional ws)
-  "Full close: bookkeep, restore pre-panel layout, hide, deprio, save tab index.
-Sets WS's `:repl-state' to `:inactive', exactly like the simple-close
-path — a closed workspace stays listed, and only repo folding takes a
-workspace off the tab-bar.  Restores the pre-panel layout via
+  "Full close: restore the pre-panel layout, hide panels, save the tab index.
+Writes no state, exactly like the simple-close path — a closed workspace
+stays listed, and only the roster takes a workspace off the tab bar.
+Restores the pre-panel layout via
 `agent-repl--restore-fullscreen-config' before hiding so the
 frame-filling panels go away cleanly (same contract as
-`agent-repl--on-simple-close').  Then hides panels and pushes WS to the second-to-last tab position via
+`agent-repl--on-simple-close').  Then hides panels and pushes WS to the
+LAST tab position via
 `agent-repl-workspace-push-to-back', snapshotting the tab index
 first via `agent-repl--save-tab-index' so a future reopen can
 restore the position.
@@ -665,9 +786,8 @@ hides panels but skips the bookkeeping write and the tab shuffle."
     (agent-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      (agent-repl--log ws "on-close ws=%s agent-state=%s -> repl-state=:inactive"
-                        ws (agent-repl--ws-agent-state ws))
-      (agent-repl--ws-set-repl-state ws :inactive))
+      ;; NO STATE IS WRITTEN — see `agent-repl--on-simple-close'.
+      (agent-repl--log ws "elisp.panels.close: ws=%s panels=hidden" ws))
     (agent-repl--close-view
      ws
      (lambda ()
@@ -675,7 +795,7 @@ hides panels but skips the bookkeeping write and the tab shuffle."
        (agent-repl--hide-panels)))
     (when (and ws (equal ws (agent-repl--ws-current-name)))
       (agent-repl--save-tab-index ws)
-      (agent-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
+      (agent-repl--log ws "on-close: pushing ws=%s to the back" ws)
       (agent-repl-workspace-push-to-back))))
 
 ;;;; Window synchronization
@@ -691,9 +811,27 @@ frontend webview buffer (*agent-frontend-WS*) — the two buffers a
 workspace has."
   (cond
    ((string-match-p agent-repl--input-buffer-re name)
-    (substring name (length "*agent-panel-input-") (- (length name) (length "*"))))
+    ;; The identity segment ends at the space that introduces the optional
+    ;; display title, or at the closing star when there is no title.
+    (let* ((body (substring name (length "*agent-panel-input-")
+                            (- (length name) (length "*"))))
+           (space (string-search " " body)))
+      (if space (substring body 0 space) body)))
    ((string-match-p agent-repl--frontend-buffer-re name)
     (substring name (length "*agent-frontend-") (- (length name) (length "*"))))))
+
+(defun agent-repl--input-buffer-name-for-id (id)
+  "Return the name of the live input buffer whose identity segment is ID.
+The input buffer's name carries an optional display title, so it cannot
+be reconstructed from ID alone; the live buffers are the only place the
+current title is written down.  Answers nil when no such buffer lives."
+  (seq-some (lambda (buf)
+              (let ((name (buffer-name buf)))
+                (and name
+                     (string-match-p agent-repl--input-buffer-re name)
+                     (equal (agent-repl--extract-panel-id name) id)
+                     name)))
+            (buffer-list)))
 
 (defun agent-repl--partner-buffer-name (name id)
   "Return the partner buffer name for agent panel NAME with identifier ID.
@@ -701,7 +839,12 @@ For the input buffer, the partner is the frontend webview buffer, and
 vice versa."
   (if (string-match-p agent-repl--input-buffer-re name)
       (format "*agent-frontend-%s*" id)
-    (format "*agent-panel-input-%s*" id)))
+    ;; The partner input buffer may carry a display title, so its name is
+    ;; READ off the live buffer rather than rebuilt; the canonical name is
+    ;; the answer only while no such buffer lives, which is exactly the
+    ;; case the orphan check is about.
+    (or (agent-repl--input-buffer-name-for-id id)
+        (format "*agent-panel-input-%s*" id))))
 
 (defun agent-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a agent panel buffer whose partner is not visible.
@@ -864,6 +1007,14 @@ Errors if the buffer is already initialized (already in
                       ws project-dir)
     (let ((input-buf (agent-repl--create-buffer ws "-input")))
       (agent-repl--ws-put ws :input-buffer input-buf)
+      ;; TITLES NAME THE BUFFERS (fanout §7), and the daemon may already
+      ;; have pushed `naming' before the composer existed -- host.el's
+      ;; rename runs on a PUSH, so a buffer born after the last one would
+      ;; otherwise wear the bare canonical name forever.  Creation goes
+      ;; through the very function the push uses, so the two cannot
+      ;; disagree about what this buffer is called.  Inert when no title
+      ;; has arrived.
+      (agent-repl-host--apply-naming ws)
       (with-current-buffer input-buf
         (when (eq major-mode 'agent-repl-input-mode)
           (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s branch=already-initialized"
@@ -899,10 +1050,8 @@ side-window skip explicit and parameter-independent."
 Runs `agent-repl--on-close' (restore layout, hide, deprio bookkeeping)
 and then KILLS the session through the workspace's frontend registry —
 `SPC o C' means \"done with this session\", unlike the plain-close
-`SPC o c' which only puts the view away.  The `:repl-state :inactive'
-marker is re-asserted after the kill so a frontend's kill capability
-resetting the state axes cannot leave the workspace claiming an open
-REPL.
+`SPC o c' which only puts the view away.  No state is written: the
+workspace's lifecycle is the roster's.
 
 Deliberately NOT folded into `agent-repl--on-close': its other callers
 (e.g. `agent-repl-send-and-hide') hide a session that must keep
@@ -910,8 +1059,7 @@ running."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--hide-and-preserve-status: no active workspace"))
     (agent-repl--on-close ws)
-    (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
-    (agent-repl--ws-put ws :repl-state :inactive)))
+    (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)))
 
 (defun agent-repl--simple-hide-and-preserve-status ()
   "Hide agent panels with NO tab-bar update (the `SPC o c' path).
@@ -924,6 +1072,38 @@ bound to `SPC o C'."
     (agent-repl--on-simple-close ws)))
 
 ;;;; Entry point
+
+(defun agent-repl--panels-ensure-host-subscription (ws)
+  "Ensure WS's `WatchHostWorkspace' subscription exists, returning non-nil.
+
+THE PANELS ENTRY IS WHERE A WORKSPACE BECOMES OBSERVED: opening the
+panels is Emacs saying it is looking at this workspace, and the host
+stream is what it looks at it through.  Idempotent — host.el keeps one
+subscription per open workspace, so re-entering the panels re-uses it.
+
+Answers nil when WS has no `WorkspaceRef' yet.  That is not a failure:
+the roster is what brings a ref, and until it does there is no identity
+to subscribe with and no URL to mount a webview at.  The caller shows
+the panels anyway, without a webview, rather than refusing the whole
+gesture over a fact that is seconds away."
+  (let ((ref (and (fboundp 'agent-repl-host-ref) (agent-repl-host-ref ws))))
+    (cond
+     ((null ref)
+      (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws=%s reason=no-ref-yet" ws)
+      nil)
+     ((and (fboundp 'agent-repl-host-state) (agent-repl-host-state ws))
+      (agent-repl--log ws "elisp.panels.host-subscribe: ws=%s already-subscribed" ws)
+      t)
+     (t
+      (let ((conn (or (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))
+                      (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary)))))
+        (if (null conn)
+            (progn
+              (agent-repl--info ws "elisp.panels.host-subscribe: skipped ws=%s reason=no-link" ws)
+              nil)
+          (agent-repl-host-subscribe conn ws ref)
+          (agent-repl--info ws "elisp.panels.host-subscribe: subscribed ws=%s" ws)
+          t))))))
 
 (cl-defun agent-repl--toggle (close-fn &key always-close)
   "Generic toggle for a workspace's gui view.  CLOSE-FN handles the
@@ -947,7 +1127,13 @@ push it to the back, not re-show or launch the agent."
      (selection
       (agent-repl--log ws "toggle: branch=send-selection")
       (deactivate-mark)
-      (agent-repl--send-to-agent selection "PROMPT_ORIGIN_PANEL_SELECTION"))
+      ;; The region IS the user's own words, sent by the user, so it
+      ;; travels under the origin every other user send uses.  There is no
+      ;; `PromptOrigin' for a panel selection, and naming one Emacs never
+      ;; spells is refused before a request is built
+      ;; (`agent-repl--input-origins').  Being explicit TEXT, the send
+      ;; leaves any unrelated composer draft alone (audit-3 #51).
+      (agent-repl--send-to-agent selection :user-sent))
      ;; `SPC o C' means "done with this workspace" whether or not its
      ;; view happens to be on screen.
      (always-close
@@ -976,8 +1162,15 @@ push it to the back, not re-show or launch the agent."
       ;; the first redisplay after `SPC o c' must already carry the
       ;; workspace's name, not the frame the user pressed it on.
       (agent-repl--open-progress-start ws)
-      (agent-repl--settle-placeholder
-       ws (funcall (agent-repl-frontend-open-fn fe) ws))))))
+      (if (agent-repl--panels-ensure-host-subscription ws)
+          (agent-repl--settle-placeholder
+           ws (funcall (agent-repl-frontend-open-fn fe) ws))
+        ;; NO REF YET, so no webview: show the input buffer and let the
+        ;; roster bring the identity the mount needs.  Refusing the whole
+        ;; gesture would be worse — the user asked for the workspace's
+        ;; panels, and the composer half of them is available now.
+        (agent-repl--ensure-input-buffer ws)
+        (agent-repl--settle-placeholder ws :no-webview))))))
 
 (defun agent-repl--settle-placeholder (ws outcome)
   "Tear WS's placeholder down unless OUTCOME says the open is still in flight.
@@ -1000,7 +1193,7 @@ paint a warning over a workspace that opened perfectly."
 (defun agent-repl ()
   "Hide Agent REPL panels and deprio the workspace.
 If text is selected: send it directly to the agent (orthogonal to hide).
-Otherwise: mark the workspace `:repl-state :inactive', hide both panels
+Otherwise: hide both panels
 \(no-op if already hidden), and push the workspace tab to the back.
 Always hides, regardless of whether the agent is running or panels are
 currently visible.  The workspace stays listed on the tab-bar.
@@ -1011,7 +1204,7 @@ Bound to `SPC o C'.  See `agent-repl-simple' for the no-tab-bar variant."
 (defun agent-repl-simple ()
   "Toggle Agent REPL panels with a plain close (no tab-bar update).
 Same dispatch as `agent-repl' except the close branch only hides the
-panels and sets `:repl-state :inactive' — no save-tab-index, no
+panels — no save-tab-index, no
 push-to-back.  Bound to `SPC o c'."
   (interactive)
   (agent-repl--toggle #'agent-repl--simple-hide-and-preserve-status))
@@ -1039,7 +1232,7 @@ exist, or the persp slot holds a symbol sentinel rather than a real
 perspective.  Each buffer is killed inside its own `condition-case' so
 one bad buffer cannot block the rest.  File-visiting buffers are
 marked unmodified before killing so `kill-buffer' does not prompt —
-the user has already confirmed the destructive nuke.
+the user has already confirmed the destructive kill.
 
 Agent buffers owned by a different workspace (see
 `agent-repl--foreign-owned-buffer-p') are skipped, not killed: persp-mode
@@ -1111,9 +1304,12 @@ If the agent isn't running, start it (same as `agent-repl')."
      ((eq (current-buffer) (agent-repl--ws-get ws :input-buffer))
       (agent-repl--log ws "focus-input branch=jump-back")
       (evil-window-left 1))
-     ;; Not running — start fresh
-     ((not (agent-repl--agent-running-p))
-      (agent-repl--log ws "focus-input branch=initialize-agent")
+     ;; No composer buffer yet — bring the workspace's panels up.  The
+     ;; question here is editor-local ("are this workspace's panels
+     ;; mounted?"), not "is a session running": session liveness is the
+     ;; daemon's and reaches Emacs as host state, never as a local probe.
+     ((not (agent-repl--ws-get ws :input-buffer))
+      (agent-repl--log ws "focus-input branch=mount-panels")
       (agent-repl))
      ;; Running but panels hidden — show them
      (t

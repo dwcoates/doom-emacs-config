@@ -1,0 +1,412 @@
+/**
+ * store/persistence.ts — THE seam between the record plane and the engine.
+ *
+ * # What this file is
+ *
+ * The engine never speaks store.v1. It hands the fold's output here and reads
+ * history back here, and everything between — batching, the retry buffer, the
+ * upsert and write-id minting, the open/watch bifurcation, the reconciliation
+ * of open obligations — lives behind {@link Persistence}. That is the whole
+ * reason the seam is a declaration file of its own: the engine's tests
+ * substitute an object literal, and the record plane's tests substitute a store,
+ * and neither has to impersonate the other.
+ *
+ * # Why a PersistEntry rather than a bare frame
+ *
+ * A store row needs three things a `conversation.v1` frame does not carry:
+ * WHICH BOOK it belongs to, WHICH ROW it replaces (the upsert key), and WHERE
+ * IN THE VENDOR'S RECORD it came from (the write-id coordinates). Those are the
+ * producer's facts, not the conversation model's, so they ride the envelope.
+ * The fold mints all three — it is the only thing that has seen the vendor
+ * record — and the writer never re-derives one.
+ *
+ * OWNER: the record-plane agent. The declarations here are STABLE: the engine
+ * codes against these names.
+ */
+import type { conversationv1, storev1 } from "../proto.js";
+import type { SourceCoordinates } from "./keys.js";
+import type { StoreClient } from "./client.js";
+import type { BashRunStanding } from "./reader.js";
+
+// ---------------------------------------------------------------------------
+// What one write is
+// ---------------------------------------------------------------------------
+
+/**
+ * WHERE a frame came from in the vendor's own record, plus what it says.
+ *
+ * DECLARED ONCE, in `store/keys.ts`, and re-exported here so the engine keeps
+ * coding against this module's names. The three fields together are the write's
+ * identity: `sha256("<producer>|<vendorUuid[:blockIndex]>|<discriminator>")` —
+ * which is why the hashing module owns the declaration and nothing translates
+ * between two shapes of one fact.
+ */
+export type { SourceCoordinates } from "./keys.js";
+
+/**
+ * One row to write: what it is, which book it belongs to, and which row it
+ * replaces.
+ */
+export interface PersistEntry {
+  /**
+   * THE BOOK: the agent whose page this row renders in — the main agent, or a
+   * subagent for its own frames. A session update is a fact about the session
+   * rather than about any agent, so it carries the MAIN agent here; it lands as
+   * a session row and never as a page line either way.
+   */
+  readonly agentId: conversationv1.AgentId;
+  /**
+   * The row this write REPLACES, minted by `store/keys.ts`. Every frame of one
+   * unit carries the same key, which is what makes a unit that starts, streams
+   * and terminates appear ONCE in the record.
+   */
+  readonly upsertKey: string;
+  /** Where in the vendor's record this came from, and which arm it is. */
+  readonly source: SourceCoordinates;
+  /**
+   * Whether this belongs to a KEEP-ALIVE turn. A keep-alive is real vendor
+   * traffic with real cost, so it is recorded — but it has no book, so it lands
+   * as `unserved_item.keepalive` and no page ever returns it.
+   */
+  readonly keepalive: boolean;
+  /** What this row says. The arm decides the store arm it lands in. */
+  readonly item:
+    | { readonly kind: "prompt"; readonly prompt: conversationv1.AgentPrompt }
+    | { readonly kind: "frame"; readonly frame: conversationv1.AgentFrame }
+    | { readonly kind: "session_update"; readonly update: conversationv1.SessionUpdate }
+    | {
+        readonly kind: "bash_run";
+        readonly run: conversationv1.AgentActivityId;
+        readonly frame: conversationv1.AgentBash;
+      }
+    | { readonly kind: "residue"; readonly residue: storev1.StoreUnservedItem };
+}
+
+// ---------------------------------------------------------------------------
+// Reading a book back
+// ---------------------------------------------------------------------------
+
+/**
+ * One agent's book, opened: the page the caller repaints from, and the tail
+ * that continues exactly after it.
+ *
+ * THE TWO ARE ONE ACT, deliberately. The store pins the tail at the instant of
+ * the open, so nothing is missed or doubled between page and stream — which is
+ * only true if the caller never opens the two separately. `close()` releases
+ * the tail; it ends nothing on the agent's side.
+ */
+export interface AgentPageSession {
+  /** The opening page, newest first. */
+  readonly page: conversationv1.HistoryPage;
+  /** Every entry written after the page, in order, each with its pointer. */
+  readonly tail: AsyncIterable<conversationv1.HistoryEntryAt>;
+  /**
+   * Serve everything up to `through`, then END the tail rather than standing.
+   *
+   * The session teardown needs this: a `WatchAgent` tail is a STANDING stream
+   * by contract, so cutting it at the exit would reach the consumer as a
+   * transport failure exactly when it is waiting for the interrupted terminal
+   * the teardown just wrote. Concluding it through the book's head at that
+   * moment delivers the terminal and then ends the stream honestly.
+   *
+   * `through` unset — or a pointer already served — ends the tail at once.
+   * Idempotent.
+   */
+  concludeThrough(through?: conversationv1.HistoryPointer): void;
+  /** Stop following. Idempotent. */
+  close(): void;
+}
+
+// ---------------------------------------------------------------------------
+// Failures
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY a persistence call could not be served.
+ *
+ * A closed set rather than prose, because each leads somewhere different: an
+ * unreachable store is waited out, an unknown agent is a caller error, a stale
+ * pointer is a re-open, and unknown work is a refusal the caller reports.
+ */
+type PersistenceFailureKind =
+  | "store_unavailable"
+  | "unknown_agent"
+  | "stale_pointer"
+  | "unknown_work";
+
+/** A refusal from the record plane, carrying the kind a caller switches on. */
+export class PersistenceError extends Error {
+  constructor(
+    public readonly kind: PersistenceFailureKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PersistenceError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The seam
+// ---------------------------------------------------------------------------
+
+/**
+ * The record plane, as the engine uses it.
+ *
+ * # Two write verbs, on purpose
+ *
+ * {@link Persistence.writeDurable} resolves on the store's DURABLE ack, and
+ * exists for the one write whose ordering is load-bearing: R15 says the turn's
+ * `AgentPrompt` row is acked BEFORE the turn's first activity frame is written,
+ * so a reader can never see a turn's work before the prompt that caused it.
+ * Everything else uses {@link Persistence.write}, which enqueues and returns —
+ * a fold that had to await the store per frame would make the shim's throughput
+ * the store's latency.
+ */
+export interface FlushOutcome {
+  /**
+   * How many rows this flush watched being dropped, loudly.
+   *
+   * Scoped to the flush and not to the writer's life: the stand-down's exit
+   * code answers "did the writes this flush waited for actually land", and an
+   * outage the session already recovered from is not a dirty exit.
+   */
+  readonly lostRows: number;
+}
+
+export interface Persistence {
+  /**
+   * Name this writer, once the vendor has named the conversation.
+   *
+   * THE PRODUCER IS KEYED BY THE ORIGINAL VENDOR SESSION ID (`claude-shim:<id>`)
+   * and by nothing else. Write ids are `sha256(producer | coordinates | arm)`,
+   * so the name decides which namespace a conversation's deterministic ids live
+   * in — and a name that rotated with the vendor's current session id would make
+   * one writer look like two, splitting a conversation's replay absorption in
+   * half at the rotation.
+   *
+   * Called once, from StartSession, before any write happens. A write attempted
+   * before it raises loudly rather than landing rows under a placeholder name
+   * that nothing could ever absorb a replay against.
+   */
+  setProducer(originalVendorSessionId: string): void;
+  /**
+   * Un-name the writer, so a caller that named it and then FAILED can leave the
+   * plane exactly as it found it.
+   *
+   * StartSession names the producer from the identity it just settled and then
+   * starts the vendor query; when the query cannot be started, the whole attempt
+   * is abandoned and the next `fresh` StartSession settles a DIFFERENT identity.
+   * Without this the writer stayed named after the abandoned attempt and the
+   * retry hit {@link Persistence.setProducer}'s re-key guard — a correct guard
+   * answering a question nobody meant to ask, surfacing as an unhandled
+   * `Internal` on a verb that has a typed refusal for every real condition.
+   *
+   * THE GUARD ITSELF IS UNTOUCHED, and this is not a way around it: clearing is
+   * legal ONLY while nothing has been written under the current name. Once a row
+   * exists the name is load-bearing — its write ids are derived from it — and
+   * clearing THROWS rather than quietly splitting one conversation's namespace.
+   */
+  clearProducer(): void;
+  /**
+   * Write these rows and resolve when the store says they are DURABLE.
+   *
+   * Rejects with a {@link PersistenceError} when the batch could not be landed
+   * after the retry schedule. Nothing is committed on a failure, so a caller
+   * that retries duplicates nothing.
+   */
+  writeDurable(entries: PersistEntry[]): Promise<void>;
+  /**
+   * Enqueue these rows. Returns at once.
+   *
+   * Transient store failures replay silently from the BOUNDED in-memory retry
+   * buffer; an exhausted retry is a LOUD logged drop naming every lost upsert
+   * key, a degraded window, and a `store_unreachable` fault. There is NO spill
+   * to disk, ever.
+   */
+  write(entries: PersistEntry[]): void;
+  /**
+   * Resolve once every buffered write has been acked or loudly dropped.
+   *
+   * The outcome carries the LIFETIME lost-row count, because the graceful
+   * stand-down's exit code is decided by it: a stand-down that flushed with
+   * rows still lost has not stood down cleanly, and reporting 0 there would
+   * tell the daemon the session ended in good order when part of the record
+   * never landed.
+   */
+  flush(): Promise<FlushOutcome>;
+  /**
+   * Open one agent's book: a page plus the tail pinned after it.
+   *
+   * `knownThrough` is the CALLER'S own high-water mark: unset repaints, set
+   * returns only entries newer than it.
+   *
+   * `known` is the CALLER'S belief that the agent exists — the producer's own
+   * answer. The store refuses `unknown_agent` for a book it holds no row for,
+   * and the row is created by the agent's FIRST WRITE, so a watcher opened on a
+   * fresh agent beats it there. With this predicate holding, that refusal is
+   * waited out: the opening page comes back EMPTY and its tail stands until the
+   * first row lands. Without it — or once it stops holding — the store's
+   * refusal is surfaced as it stands.
+   */
+  openAgentPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
+    known?: () => boolean,
+  ): Promise<AgentPageSession>;
+  /**
+   * Declare that this shim MINTED an agent id, so no book exists for it yet.
+   *
+   * THE REGISTRATION ORDER, DECLARED RATHER THAN DISCOVERED. A book comes into
+   * existence when the first write names its agent; until then the store has
+   * never heard of the id and refuses `OpenAgentSession` for it. A fresh
+   * conversation's AgentId is minted here, so this session is the one authority
+   * that can state the absence — and stating it is what keeps a contract-abiding
+   * cold bring-up from probing the store for an answer it already has.
+   */
+  noteAgentMinted(agentValue: string): void;
+  /**
+   * The NEWEST page of one book, for a read that stands no tail.
+   *
+   * THE STORE IS ALWAYS ASKED. {@link Persistence.openAgentPage} may serve a
+   * minted-but-unwritten book WITHOUT asking, because what the open is worth is
+   * the tail it stands and the absence is this session's own fact. A one-shot
+   * read stands no tail, so the store's answer is the whole of what it has to
+   * say: asking is what separates the three outcomes such a read must tell
+   * apart — a page, an announced book with nothing in it yet, and a store that
+   * could not be reached or failed the read.
+   *
+   * `known` is the producer's own vouching, exactly as on `openAgentPage`: with
+   * it holding, the store's `unknown_agent` becomes the EMPTY page that a fresh
+   * session's book legitimately is. Every other refusal is surfaced as it
+   * stands, so an unreachable store is never served as an empty history.
+   */
+  readFirstPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    knownThrough?: conversationv1.HistoryPointer,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage>;
+  /** An OLDER page of one book, walking down from a pointer already served. */
+  readAgentPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    after: conversationv1.HistoryPointer,
+  ): Promise<conversationv1.HistoryPage>;
+  /** Everything the record holds a start for and no terminal. */
+  liveWork(): Promise<storev1.GetLiveWorkSuccess>;
+  /**
+   * One detached shell run's lifecycle frames: the announced start, then the tail.
+   *
+   * `announcement` is the CALLER'S standing belief about the run — the live
+   * table's own answer, `live` / `concluded` / `unknown`. The store refuses a
+   * run it holds no row for, and an eager watcher routinely beats the first row
+   * there, so that refusal is waited out while the run is live AND through the
+   * concluded-but-unwritten window that follows, and surfaced as `unknown_work`
+   * only for a handle nothing was ever announced under.
+   */
+  openBashRun(
+    work: conversationv1.DetachedWorkId,
+    announcement?: () => BashRunStanding,
+  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  /** Observe faults the record plane raises. Returns an unsubscribe. */
+  onFault(listener: (fault: conversationv1.SessionFault) => void): () => void;
+  /** Observe degraded windows the record plane opens and closes. */
+  onDegradedWindow(listener: (window: conversationv1.SessionDegradedWindow) => void): () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
+
+/**
+ * The retry schedule, as constants rather than as behavior buried in a loop.
+ *
+ * IMPLEMENTATION DETAIL, deliberately overridable: what is contractual is that
+ * the buffer is BOUNDED and that exhaustion is loud. The numbers are a shape
+ * that absorbs a store restart without absorbing a store that is simply gone.
+ */
+export interface PersistenceRetryPolicy {
+  /** How many batches may wait at once before the oldest is dropped LOUDLY. */
+  readonly bufferCapacity: number;
+  /** The delay before each attempt after the first, in milliseconds. */
+  readonly backoffMs: readonly number[];
+  /** How many attempts one batch gets in total, the first included. */
+  readonly maxAttempts: number;
+}
+
+/** The default schedule: five attempts over roughly six seconds, 256 batches deep. */
+export const DEFAULT_RETRY_POLICY: PersistenceRetryPolicy = {
+  bufferCapacity: 256,
+  backoffMs: [50, 200, 800, 3000],
+  maxAttempts: 5,
+};
+
+/** What {@link createPersistence} needs to exist. */
+export interface PersistenceOptions {
+  /** The store, already dialed. */
+  readonly client: StoreClient;
+  /**
+   * This writer's name, when it is already known.
+   *
+   * UNSET at construction is the ordinary case: the shim is built before
+   * StartSession, and only StartSession learns the conversation's original
+   * vendor session id. {@link Persistence.setProducer} supplies it then.
+   */
+  readonly producer?: string;
+  /** The retry schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. */
+  readonly retry?: PersistenceRetryPolicy;
+  /** The clock, injected so a test does not wait in real time. */
+  readonly nowMs: () => number;
+  /**
+   * How a delay is taken between retry attempts. Injected for the same reason
+   * as the clock: a suite that slept the real backoff would take minutes.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
+}
+
+export type { StoreClient };
+
+/**
+ * Build the record plane over a store client.
+ *
+ * Implemented in `store/writer.ts` (the write half), `store/reader.ts` (the
+ * read half) and `store/reconcile.ts` (the open obligations); this file
+ * declares the seam and re-exports the constructor so a caller has one import.
+ */
+export { createPersistence } from "./writer.js";
+
+/**
+ * The persistence before there is a store to reach.
+ *
+ * KEPT FROM THE ENGINE'S SCAFFOLD because it is still the honest answer for a
+ * build with no store socket: it REFUSES rather than pretending. A placeholder
+ * that answered with an empty page would make a history read look like an empty
+ * conversation, and one that swallowed writes would make a lost record look
+ * like a written one. Every verb answers `store_unavailable`, which the engine
+ * already maps onto a loud `SessionFault` and a `ReadHistoryStoreUnavailable`.
+ */
+export function unavailablePersistence(): Persistence {
+  const refuse = (verb: string): PersistenceError =>
+    new PersistenceError(
+      "store_unavailable",
+      `shim persistence: ${verb} has no store to reach in this build`,
+    );
+  return {
+    setProducer: () => undefined,
+    clearProducer: () => undefined,
+    writeDurable: () => Promise.reject(refuse("writeDurable")),
+    write: () => {
+      throw refuse("write");
+    },
+    flush: () => Promise.resolve({ lostRows: 0 }),
+    openAgentPage: () => Promise.reject(refuse("openAgentPage")),
+    noteAgentMinted: () => undefined,
+    readFirstPage: () => Promise.reject(refuse("readFirstPage")),
+    readAgentPage: () => Promise.reject(refuse("readAgentPage")),
+    liveWork: () => Promise.reject(refuse("liveWork")),
+    openBashRun: () => Promise.reject(refuse("openBashRun")),
+    onFault: () => () => undefined,
+    onDegradedWindow: () => () => undefined,
+  };
+}

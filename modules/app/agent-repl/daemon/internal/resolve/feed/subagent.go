@@ -1,0 +1,756 @@
+package feed
+
+import (
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
+)
+
+// THE SUBAGENT BUBBLE — sync or detached, ONE component. The bubble IS a feed:
+// its rows never ride this row. This is the COLLAPSED HEAD, carried on the
+// parent feed so every bubble paints from the parent's one connection; the
+// child's own connection exists only while expanded.
+
+// drawSubagent draws a spawn's bubble head. detached selects the placement
+// wrapper — sync-vs-detached is PLACEMENT, never a second drawing.
+//
+// A FRAME THAT NAMES NO CREATED AGENT, BEFORE ANY FRAME HAS, DRAWS NOTHING YET.
+// See subagentState.held: the row's identity carries the created agent. The
+// start always states it, and a success MAY (AgentSubagentSuccess.created_agent_id),
+// which is what lets a settled-only delivery — a replayed history, a transcript
+// read with no live producer watching — draw an addressable row with no start
+// ever arriving.
+func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.AgentActivity, spawn *conversationv1.AgentSubagent, detached bool) (*frontendv1.FeedRow, error) {
+	unitID := act.GetActivityId().GetValue()
+	state, ok := s.subagents[unitID]
+	if !ok {
+		state = &subagentState{}
+		s.subagents[unitID] = state
+	}
+	// THE MARK IS CLAIMED UNCONDITIONALLY, never behind the flag: a detachment
+	// announced before this unit drew is exactly the case the flag cannot
+	// carry, and leaving the mark standing would report the unit as one
+	// nothing ever drew.
+	_, announcedDetached := s.claimDetached(unitID)
+	if detached || announcedDetached {
+		state.detached = true
+	}
+	if state.bubble == nil {
+		state.bubble = &frontendv1.FeedSubagent{}
+	}
+
+	_, isStart := spawn.GetResult().(*conversationv1.AgentSubagent_Start)
+	// A START IS TAKEN AS NAMING THE AGENT WHATEVER IT CARRIES: created_agent_id
+	// is not optional there, so a start with an empty one is a producer fault
+	// that still retires the hold rather than joining it — a start held against
+	// itself would wait for a frame that has already arrived.
+	namesAgent := isStart || namedCreatedAgent(spawn).GetValue() != ""
+	if !namesAgent && state.created.GetValue() == "" {
+		if !subagentArmDraws(spawn) {
+			return nil, errNotARow
+		}
+		// THE PLACEMENT IS RECORDED WITH THE HOLD: the frames were carried on
+		// this feed, and the retirement that draws them has no frame of its
+		// own to place them from.
+		state.feed = at
+		state.held = append(state.held, spawn)
+		r.logger(s.id).Debug("daemon.feed.subagent_held",
+			"a spawn's frame arrived before any frame named the created agent; it is held until one does",
+			dlog.Context{"unit": unitID, "held": len(state.held)})
+		return nil, nil
+	}
+
+	// THE NAMING FRAME RETIRES THE HOLD, and the frames are folded in the order
+	// THE RUN happened rather than the order they arrived: a start is the run's
+	// first frame however late it lands, so it folds before what was held; any
+	// other naming frame is later than everything held, so it folds after. Fold
+	// a settled terminal before a held update and the update would draw the
+	// finished bubble live again.
+	held := state.held
+	state.held = nil
+	if !isStart {
+		r.foldHeldSubagentFrames(s, unitID, state, held, "when a later frame named the created agent")
+		held = nil
+	}
+	if err := r.foldSubagentFrame(s, unitID, state, spawn); err != nil {
+		// THE HOLD IS PUT BACK rather than lost with the frame that failed:
+		// this frame drew nothing, so nothing has named the created agent yet
+		// and what was waiting is still waiting.
+		state.held = held
+		return nil, err
+	}
+	r.foldHeldSubagentFrames(s, unitID, state, held, "once its start landed")
+
+	return r.composeSubagent(s, at, unitID, state, commissionOf(spawn)), nil
+}
+
+// namedCreatedAgent answers the created agent this frame states, if its arm
+// states one at all. The start always does; a success does when its producer
+// knew the id, which is what makes a settled-only delivery addressable.
+func namedCreatedAgent(spawn *conversationv1.AgentSubagent) *conversationv1.AgentId {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		return frame.Start.GetCreatedAgentId()
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetCreatedAgentId()
+	}
+	return nil
+}
+
+// foldHeldSubagentFrames folds frames released from the hold, reporting any
+// that cannot be folded rather than dropping them silently.
+func (r *resolver) foldHeldSubagentFrames(s *wsState, unitID string, state *subagentState, held []*conversationv1.AgentSubagent, occasion string) {
+	for _, frame := range held {
+		if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+			r.logger(s.id).Error("daemon.feed.subagent_held_frame_undrawable",
+				"a held spawn frame could not be folded "+occasion,
+				dlog.Context{"unit": unitID, "cause": err.Error()})
+		}
+	}
+}
+
+// subagentArmDraws reports whether a spawn frame carries an arm this family
+// draws. An unset or unknown arm is never held: a hold exists to be folded,
+// and a frame nothing can fold would sit until the turn's terminal reported it.
+func subagentArmDraws(spawn *conversationv1.AgentSubagent) bool {
+	switch spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start,
+		*conversationv1.AgentSubagent_Update,
+		*conversationv1.AgentSubagent_Success,
+		*conversationv1.AgentSubagent_Failure:
+		return true
+	}
+	return false
+}
+
+// foldSubagentFrame folds ONE frame onto the bubble the state carries. It is
+// the whole of a frame's effect on the head, so a held frame folded later is
+// folded exactly as a live one would have been.
+func (r *resolver) foldSubagentFrame(s *wsState, unitID string, state *subagentState, spawn *conversationv1.AgentSubagent) error {
+	bubble := state.bubble
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		state.created = frame.Start.GetCreatedAgentId()
+		applyPrompt(bubble, frame.Start.GetPrompt())
+		// The ORIGINAL instant: a start is re-announced on the work's own
+		// stream when the spawn detaches, and it repeats the same instant, so
+		// the clock never resets when work moves.
+		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: frame.Start.GetStartedAt().GetAtMs()}
+		// A START AFTER A TERMINAL DOES NOT REOPEN. The same re-announcement
+		// the instant above is guarded against also replays the start of work
+		// that has ALREADY SETTLED, and taking it as live would un-settle a
+		// finished bubble that nothing will ever settle again.
+		if _, settled := bubble.GetState().(*frontendv1.FeedSubagent_Settled); !settled {
+			bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
+		}
+	case *conversationv1.AgentSubagent_Update:
+		applyPrompt(bubble, frame.Update.GetPrompt())
+		progress := frame.Update.GetProgress()
+		if progress.GetTotalTokens() > 0 {
+			bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(progress.GetTotalTokens()) + " tok"}
+		}
+		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{
+			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
+		}}
+	case *conversationv1.AgentSubagent_Success:
+		// A SETTLED FRAME MAY NAME THE CREATED AGENT, and when it does this is
+		// the only place the row's identity can come from — no start is coming
+		// on a settled-only delivery. It never OVERWRITES with nothing: a
+		// producer that did not know the id leaves it unset, and whatever the
+		// start already told us stands.
+		if created := frame.Success.GetCreatedAgentId(); created.GetValue() != "" {
+			state.created = created
+		}
+		applyPrompt(bubble, frame.Success.GetPrompt())
+		applyTotals(bubble, frame.Success.GetTotals())
+		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: &frontendv1.FeedSubagentSettled{
+			EndedAtMs: frame.Success.GetSettledAt().GetAtMs(),
+			Outcome:   &frontendv1.FeedSubagentSettled_Succeeded{Succeeded: &frontendv1.FeedSubagentSucceeded{}},
+		}}
+	case *conversationv1.AgentSubagent_Failure:
+		settled := &frontendv1.FeedSubagentSettled{EndedAtMs: failureSettledMs(frame.Failure.GetError())}
+		subagentFailureOutcome(r.logger(s.id), unitID, frame.Failure)(settled)
+		bubble.State = &frontendv1.FeedSubagent_Settled{Settled: settled}
+	default:
+		return errNotARow
+	}
+	return nil
+}
+
+// composeSubagent renders the bubble the state now holds into its row, mints
+// the sub-feed the row addresses, and draws the commission on it.
+func (r *resolver) composeSubagent(s *wsState, at placement, unitID string, state *subagentState, commission *conversationv1.AgentSubagentPrompt) *frontendv1.FeedRow {
+	bubble := state.bubble
+	if bubble.Runtime == nil {
+		bubble.Runtime = &frontendv1.FeedSubagentRuntime{StartedAtMs: 0}
+	}
+	if bubble.Label == nil {
+		bubble.Label = &frontendv1.FeedSubagentLabel{Text: "Agent"}
+	}
+
+	id := r.rowID(s.id, at.feed, feedid.RowKey{
+		Kind: feedid.KindActivity, ID: unitID, Sub: state.created.GetValue(),
+	})
+	state.row = id
+	state.feed = at
+
+	// The bubble's own FeedId IS the sub-feed's address; recording it is what
+	// makes an expand's OpenFeed resolve and a page's crumbs draw.
+	if state.created.GetValue() != "" {
+		r.mintSubFeed(s, id, feedid.Feed{Agent: state.created}, bubbleLabel(bubble))
+		r.drawCommission(s, at, unitID, state, commission)
+	}
+
+	row := &frontendv1.FeedRow{Id: id}
+	if state.detached {
+		row.Row = &frontendv1.FeedRow_DetachedSubagent{DetachedSubagent: &frontendv1.FeedDetachedSubagent{
+			Subagent: bubble,
+		}}
+	} else {
+		row.Row = &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Subagent{Subagent: bubble},
+		}}
+	}
+	return row
+}
+
+// retireHeldSpawns draws every spawn whose frames are still waiting for one
+// that names the created agent, and empties the hold.
+//
+// AN IDENTITY THAT NEVER CAME IS A PRODUCER FAULT, not a reason to lose the
+// spawn. A settled-only delivery is no longer such a fault — the success arm
+// can name the agent itself — so what reaches here is a spawn where neither a
+// start nor a naming terminal ever arrived:
+// the bubble is drawn from what did arrive, and it is warned, because its row
+// carries no created agent and so addresses no sub-feed. Nothing is left held
+// afterwards — a hold that outlived the delivery it was waiting on would sit
+// in this workspace's state for the rest of the daemon's life.
+func (r *resolver) retireHeldSpawns(s *wsState, occasion string) {
+	log := r.logger(s.id)
+	for unitID, state := range s.subagents {
+		if len(state.held) == 0 {
+			continue
+		}
+		held := state.held
+		state.held = nil
+		log.Warn("daemon.feed.subagent_without_start",
+			"a spawn's frames arrived with none of them naming the created agent; its bubble is drawn but addresses no sub-feed",
+			dlog.Context{"unit": unitID, "frames": len(held), "occasion": occasion})
+		var commission *conversationv1.AgentSubagentPrompt
+		for _, frame := range held {
+			if err := r.foldSubagentFrame(s, unitID, state, frame); err != nil {
+				log.Error("daemon.feed.subagent_held_frame_undrawable",
+					"a held spawn frame could not be folded at its retirement",
+					dlog.Context{"unit": unitID, "cause": err.Error()})
+				continue
+			}
+			if p := commissionOf(frame); p != nil {
+				commission = p
+			}
+		}
+		row := r.composeSubagent(s, state.feed, unitID, state, commission)
+		r.stampTurn(s, row, nil)
+		r.upsert(s, state.feed, row, true)
+	}
+}
+
+// applyPrompt folds the commission's label and description onto the head. The
+// description is UNSET when the spawn carried none: the head then draws the
+// label alone, never a synthesized description.
+func applyPrompt(bubble *frontendv1.FeedSubagent, prompt *conversationv1.AgentSubagentPrompt) {
+	if prompt == nil {
+		return
+	}
+	if t := prompt.GetSubagentType(); t != "" {
+		bubble.Label = &frontendv1.FeedSubagentLabel{Text: t}
+	}
+	if prompt.Description != nil && prompt.GetDescription() != "" {
+		bubble.Description = &frontendv1.FeedSubagentDescription{Text: prompt.GetDescription()}
+	}
+}
+
+// commissionOf answers the commission carried on whichever arm this frame is.
+// EVERY frame of a spawn restates it (agent_activity.proto: "Carried on every
+// frame of the spawn, so each frame stands alone"), so the body redraws from
+// the frame in hand rather than from a remembered one.
+func commissionOf(spawn *conversationv1.AgentSubagent) *conversationv1.AgentSubagentPrompt {
+	switch frame := spawn.GetResult().(type) {
+	case *conversationv1.AgentSubagent_Start:
+		return frame.Start.GetPrompt()
+	case *conversationv1.AgentSubagent_Update:
+		return frame.Update.GetPrompt()
+	case *conversationv1.AgentSubagent_Success:
+		return frame.Success.GetPrompt()
+	}
+	return nil
+}
+
+// drawCommission draws THE INSTRUCTION the subagent was given, on the
+// subagent's OWN feed.
+//
+// WHERE THE PROTO PUTS IT. AgentSubagentPrompt.text is "the full instruction
+// the subagent was given. Drawn only where there is room for it — A BUBBLE'S
+// BODY, NOT ITS HEAD" (conversation/v1/agent_activity.proto), and a bubble's
+// body IS its sub-feed (frontend/v1/feed.proto: "THE BUBBLE IS A FEED: its
+// rows are never carried here"). So the commission is a row on the created
+// agent's feed, drawn with the ONE kind the contract has for what an agent
+// addressed to another agent — FeedAgentPrompt, on the recipient's end, whose
+// address line is "from <sender>".
+//
+// The SENDER'S END IS THE BUBBLE ITSELF, which is why no second row is drawn
+// on the caller's feed: the head already carries the label and the
+// description, and the contract reserves the head for exactly those.
+func (r *resolver) drawCommission(s *wsState, at placement, unitID string, state *subagentState, prompt *conversationv1.AgentSubagentPrompt) {
+	if prompt.GetText() == "" {
+		// A COMMISSION WITH NO INSTRUCTION DRAWS NOTHING rather than an empty
+		// bubble body: the field is the whole row, and a blank one would say
+		// the caller asked for nothing.
+		return
+	}
+	sub := feedid.Feed{Agent: state.created}
+	row := &frontendv1.FeedRow{
+		Id: r.rowID(s.id, sub, feedid.RowKey{
+			Kind: feedid.KindPrompt, ID: unitID, Sub: "commission",
+		}),
+		Row: &frontendv1.FeedRow_AgentPrompt{AgentPrompt: &frontendv1.FeedAgentPrompt{
+			Address: &frontendv1.FeedAgentPromptAddress{
+				Text: "from " + feedLabel(s, r.feedKey(s.id, at.feed)),
+			},
+			Body: &frontendv1.FeedAgentPromptBody{Blocks: []*frontendv1.FeedAgentPromptBlock{{
+				Block: &frontendv1.FeedAgentPromptBlock_Text{
+					Text: &frontendv1.FeedTextBlock{Text: prompt.GetText()},
+				},
+			}}},
+		}},
+	}
+	r.stampTurn(s, row, nil)
+	r.logger(s.id).Debug("daemon.feed.subagent_commission",
+		"a spawn's commission was drawn on the subagent's own feed",
+		dlog.Context{"unit": unitID, "agent": state.created.GetValue()})
+	r.upsert(s, placement{feed: sub}, row, true)
+}
+
+// applyTotals folds a settled run's token sum onto the head. The two usage
+// arms are the spawn path's honesty: a sync run states the full breakdown, an
+// async one at most a total.
+func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSubagentTotals) {
+	if totals == nil {
+		return
+	}
+	switch usage := totals.GetUsage().(type) {
+	case *conversationv1.AgentSubagentTotals_Full:
+		misses := usage.Full.GetInputMisses()
+		sum := misses.GetWritten() + misses.GetUnwritten() + usage.Full.GetOutputTokens()
+		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(sum) + " tok"}
+	case *conversationv1.AgentSubagentTotals_TotalOnly:
+		if usage.TotalOnly.TotalTokens == nil {
+			return
+		}
+		bubble.Tokens = &frontendv1.FeedSubagentTokens{
+			Text: figures.Tokens(usage.TotalOnly.GetTotalTokens()) + " tok",
+		}
+	}
+}
+
+// subagentFailureOutcome picks the settled treatment. A person's stop is NOT a
+// fault, and work we merely stopped being able to see is LOST rather than
+// failed — the word carries the distinction so it never draws as a plain
+// failure.
+func subagentFailureOutcome(log dlog.Logger, unitID string, failure *conversationv1.AgentSubagentFailure) subagentOutcome {
+	if cause := lostCauseOfSubagent(failure); cause != lostNone {
+		return func(settled *frontendv1.FeedSubagentSettled) {
+			lost := &frontendv1.FeedSubagentLost{}
+			if !applySubagentLostHow(lost, cause) {
+				log.Warn("daemon.feed.subagent_lost_unlanded_arm",
+					"a spawn was lost in a way this build does not draw; the bubble carries no cause",
+					dlog.Context{"unit": unitID, "cause": cause.String()})
+			}
+			settled.Outcome = &frontendv1.FeedSubagentSettled_Lost{Lost: lost}
+		}
+	}
+	if _, stopped := failure.GetCause().(*conversationv1.AgentSubagentFailure_StoppedByUser); stopped {
+		return func(settled *frontendv1.FeedSubagentSettled) {
+			settled.Outcome = &frontendv1.FeedSubagentSettled_Cancelled{Cancelled: &frontendv1.FeedSubagentCancelled{}}
+		}
+	}
+	return func(settled *frontendv1.FeedSubagentSettled) {
+		settled.Outcome = &frontendv1.FeedSubagentSettled_Failed{Failed: &frontendv1.FeedSubagentFailed{}}
+	}
+}
+
+// subagentOutcome sets a settled bubble's outcome arm. A setter rather than the
+// generated oneof interface, whose method is unexported and unimplementable
+// from here.
+type subagentOutcome func(*frontendv1.FeedSubagentSettled)
+
+// bubbleLabel composes the crumb a page inside the bubble draws: the
+// commission's description when there is one, the type otherwise.
+func bubbleLabel(bubble *frontendv1.FeedSubagent) string {
+	if d := bubble.GetDescription().GetText(); d != "" {
+		return d
+	}
+	return bubble.GetLabel().GetText()
+}
+
+// ---- DETACHED WORK: the announcement, and the shell's own bubble ----
+
+// drawDetachedWork draws work that left the stream. It is announced HERE and
+// nowhere else, so this is where a bubble first becomes a detached one.
+func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+	log := r.logger(s.id)
+	at := r.place(s, agent)
+	workID := work.GetWork().GetValue()
+
+	switch origin := work.GetOrigin().(type) {
+	case *conversationv1.AgentDetachedWork_Detached:
+		// ONE IDENTITY SPANS THE MOVE: the element already on screen continues
+		// as a detached one rather than being replaced by a second drawing.
+		unitID := origin.Detached.GetDetachedFromId().GetValue()
+		if state, ok := s.subagents[unitID]; ok {
+			state.detached = true
+			r.republishSubagent(s, unitID, state)
+			log.Debug("daemon.feed.detached_subagent",
+				"a subagent bubble moved to its detached placement",
+				dlog.Context{"unit": unitID, "work": workID})
+			return
+		}
+		if r.detachForegroundShell(s, at, unitID, workID) {
+			return
+		}
+		// A UNIT WHOSE KIND DRAWS NOTHING is not a unit that has yet to draw.
+		// A monitor is footer-only and always detached, so its announcement
+		// has no row to continue and never will; holding it would report the
+		// footer's own bookkeeping as a producer fault at the turn's
+		// terminal.
+		if s.undrawable(unitID) {
+			log.Debug("daemon.feed.detachment_draws_nothing",
+				"a detachment named a unit whose kind draws no feed row; the footer carries the work",
+				dlog.Context{"unit": unitID, "work": workID})
+			return
+		}
+		// THE UNIT MAY SIMPLY NOT HAVE DRAWN YET. The announcement is held
+		// against its identity so the unit lands through the detached
+		// placement when it does draw; a mark still standing when the turn
+		// ends is what earns the warning, in drawTerminal.
+		s.markDetached(unitID, workID)
+		log.Debug("daemon.feed.detachment_held",
+			"a detachment named a unit this resolver has not drawn yet; it is held until the unit draws",
+			dlog.Context{"unit": unitID, "work": workID})
+	case *conversationv1.AgentDetachedWork_Created:
+		switch created := origin.Created.GetWorkCreated().GetWork().(type) {
+		case *conversationv1.DetachableWork_Subagent:
+			act := &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: workID},
+				Item:       &conversationv1.AgentActivity_Subagent{Subagent: created.Subagent},
+			}
+			row, err := r.drawSubagent(s, at, act, created.Subagent, true)
+			if err != nil {
+				return
+			}
+			if row == nil {
+				// HELD: the announcement carried a frame that is not the
+				// spawn's start, so nothing names the created agent yet.
+				return
+			}
+			r.stampTurn(s, row, nil)
+			r.upsert(s, at, row, true)
+		case *conversationv1.DetachableWork_Bash:
+			sh := s.shell(workID)
+			sh.feed = at
+			r.drawDetachedShell(s, work.GetWork(), created.Bash)
+		default:
+			// A workflow is kicked this wave, and a monitor is FOOTER-ONLY:
+			// neither has a feed row.
+			log.Debug("daemon.feed.detached_draws_nothing",
+				"a detached-work kind draws no feed row", dlog.Context{"work": workID})
+		}
+	}
+}
+
+// detachForegroundShell turns an already-drawn foreground shell into its
+// detached bubble, answering whether there was one to turn.
+func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workID string) bool {
+	u, ok := s.units[unitID]
+	if !ok || u.input == "" {
+		return false
+	}
+	sh := s.shell(workID)
+	sh.command = u.input
+	sh.startedAtMs = u.startedAtMs
+	sh.feed = at
+	r.publishShell(s, workID, sh, nil)
+	r.moveToolCard(s, at, unitID, u)
+	r.logger(s.id).Debug("daemon.feed.detached_shell",
+		"a foreground shell became a detached shell bubble",
+		dlog.Context{"unit": unitID, "work": workID})
+	return true
+}
+
+// moveToolCard restates the card of a call whose WORK MOVED to the background,
+// on the `moved` arm.
+//
+// TWO ROWS, ONE RUN, AND ONLY ONE OF THEM SETTLES. The detached shell bubble
+// published just above is where the command reports from here on; the card
+// above it is the record that the agent made the call, and it has no ending of
+// its own to state. Left alone it kept the `running` arm it drew with and never
+// left it -- no later frame of the unit says the work moved, and the detached
+// run's terminal is addressed to the shell row -- so a backgrounded command drew
+// a card spinning forever above a row already reporting `exit 0` (playtest F43,
+// 2026-09-09).
+func (r *resolver) moveToolCard(s *wsState, at placement, unitID string, u *unitState) {
+	u.moved = true
+	if u.name == "" {
+		// NOTHING HAS DRAWN THIS UNIT'S CARD, so there is none to restate. The
+		// mark still stands, so the card draws moved the moment it does draw.
+		r.logger(s.id).Debug("daemon.feed.moved_card_undrawn",
+			"a detachment named a unit with no drawn card; the move is remembered for when it draws",
+			dlog.Context{"unit": unitID})
+		return
+	}
+	row := r.toolRow(s, at, unitID, u.name, movedOutcome())
+	r.stampTurn(s, row, nil)
+	r.upsert(s, at, row, true)
+}
+
+// applyHeldDetachment completes a detachment that was announced BEFORE the
+// unit it named had drawn. A subagent claims its own mark while composing its
+// bubble, because the mark decides which wrapper the bubble rides; a shell has
+// no such choice, so its held detachment is applied once its foreground row
+// exists.
+func (r *resolver) applyHeldDetachment(s *wsState, at placement, unitID string) {
+	work, held := s.claimDetached(unitID)
+	if !held {
+		return
+	}
+	if r.detachForegroundShell(s, at, unitID, work) {
+		return
+	}
+	// NOT DRAWABLE AS A SHELL AND NOT A SPAWN: the mark goes back, so the
+	// turn's terminal still reports a detachment that never found its unit.
+	s.markDetached(unitID, work)
+}
+
+// retireDetachment drops a detachment held against a unit whose kind draws no
+// feed row. The mark exists so a row can ride the detached wrapper when it
+// draws; a unit that will never draw one has nothing to hand it to, and a mark
+// left standing is reported at the turn's terminal as a producer fault.
+func (r *resolver) retireDetachment(s *wsState, unitID string) {
+	work, held := s.claimDetached(unitID)
+	if !held {
+		return
+	}
+	r.logger(s.id).Debug("daemon.feed.detachment_retired",
+		"a held detachment named a unit whose kind draws no feed row; the mark is retired",
+		dlog.Context{"unit": unitID, "work": work})
+}
+
+// republishSubagent re-pushes a bubble whose placement wrapper changed.
+func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentState) {
+	row := &frontendv1.FeedRow{Id: state.row}
+	if state.detached {
+		row.Row = &frontendv1.FeedRow_DetachedSubagent{DetachedSubagent: &frontendv1.FeedDetachedSubagent{
+			Subagent: state.bubble,
+		}}
+	} else {
+		row.Row = &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Subagent{Subagent: state.bubble},
+		}}
+	}
+	r.stampTurn(s, row, nil)
+	r.upsert(s, state.feed, row, true)
+}
+
+// drawDetachedShell draws one detached shell's bubble: the command head and
+// the spool's TAIL, capped by the daemon and replaced whole on every push.
+func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash) {
+	log := r.logger(s.id)
+	workID := work.GetValue()
+	sh := s.shell(workID)
+	if sh.feed.feed == (feedid.Feed{}) {
+		sh.feed = placement{feed: feedid.Feed{Root: true}}
+	}
+
+	var settled *frontendv1.FeedShellSettled
+	switch frame := bash.GetResult().(type) {
+	case *conversationv1.AgentBash_Start:
+		sh.stateCommand(frame.Start.GetCommand().GetLine())
+		if sh.startedAtMs == 0 {
+			sh.startedAtMs = frame.Start.GetStartedAt().GetAtMs()
+		}
+	case *conversationv1.AgentBash_Update:
+		// The offset is a GAP DETECTOR: bytes must arrive contiguously, and a
+		// frame that does not continue the spool is REFUSED rather than
+		// concatenated across a hole.
+		//
+		// A RE-DELIVERY IS NOT A HOLE. Two producers write this run's frames
+		// under one upsert key — the shim from the live stream, the sidecar
+		// from the spool file — so the consumer legitimately sees bytes it has
+		// already accumulated a second time. Those are dropped as a replay
+		// once they are shown to AGREE with what is held; a frame that starts
+		// past the spool's end, or that restates already-held bytes
+		// DIFFERENTLY, is real loss and stays an error.
+		from, out := frame.Update.GetFromOffset(), frame.Update.GetNewOutput()
+		if from > sh.nextOffset {
+			log.Error("daemon.feed.spool_gap",
+				"a detached shell's output frame did not continue the spool; the frame was refused",
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
+			return
+		}
+		if from < sh.nextOffset {
+			overlap := sh.nextOffset - from
+			if overlap > uint64(len(out)) {
+				overlap = uint64(len(out))
+			}
+			if sh.spool[from:from+overlap] != out[:overlap] {
+				log.Error("daemon.feed.spool_gap",
+					"a detached shell's output frame restated held bytes differently; the frame was refused",
+					dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from})
+				return
+			}
+			log.Debug("daemon.feed.spool_replay",
+				"a detached shell's output frame re-delivered bytes the spool already holds",
+				dlog.Context{"work": workID, "expected_offset": sh.nextOffset, "got_offset": from, "replayed": overlap})
+			out = out[overlap:]
+		}
+		sh.spool += out
+		sh.nextOffset += uint64(len(out))
+		// SPOOL GROWTH IS THE BEAT, and the daemon stamps it on the append it
+		// just observed. FeedShellLive says so in the contract: the drawn
+		// instant is "the last output the daemon observed", so this ONE
+		// observer at this ONE point is the whole of it.
+		sh.lastProgressMs = r.deps.Now().UnixMilli()
+	case *conversationv1.AgentBash_Progress:
+		// A BEAT MOVES NOTHING HERE, deliberately.
+		//
+		// This used to overwrite lastProgressMs with
+		// AgentToolCallProgress.last_progress_at_ms, which is not a value that
+		// belongs in this field. That instant is the PRODUCER's — when the shim
+		// or the sidecar observed the vendor report the call alive — while the
+		// appends above are stamped by the DAEMON on receipt. Two observers
+		// stamping at two points in the pipeline are not one timeline, so
+		// last-write-wins between them made the drawn instant jump, and jump
+		// BACKWARDS whenever a beat carrying an older producer instant arrived
+		// after an append the daemon had already stamped. The client ticks
+		// "quiet for N" off that instant, so the row's age ran backwards.
+		//
+		// The contract settles which of the two the field means: FeedShellLive
+		// is "spool growth IS the beat — the daemon stamps it on each append it
+		// observes", and AgentBash.progress is explicitly "NOT an update — no
+		// growth is reported". A frame that reports no growth therefore has
+		// nothing to say about the last growth, and the beat is still what
+		// re-pushes the row.
+		//
+		// This is NOT the tool-call rule: FeedToolCallLastProgress is "when the
+		// vendor last reported this call alive", so toolcall.go rightly carries
+		// the producer's instant through. Two fields, two meanings, one
+		// observer each.
+	case *conversationv1.AgentBash_Success:
+		sh.stateCommand(frame.Success.GetCommand().GetLine())
+		settled = shellSettled(log, workID, frame.Success)
+	case *conversationv1.AgentBash_Failure:
+		settled = &frontendv1.FeedShellSettled{
+			EndedAtMs: failureSettledMs(frame.Failure.GetError()),
+			Outcome:   &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}},
+		}
+	}
+
+	r.publishShell(s, workID, sh, settled)
+	log.Debug("daemon.feed.detached_shell_row",
+		"a detached shell's bubble was upserted",
+		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
+}
+
+// spoolCap is how much of a spool's tail the daemon carries. The body is a
+// SNAPSHOT replaced whole on every push, so a cap here is what keeps watching
+// a long command from costing more than running it.
+const spoolCap = 16 * 1024
+
+// publishShell renders and upserts a shell bubble.
+func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settled *frontendv1.FeedShellSettled) {
+	shell := &frontendv1.FeedShell{
+		Command: &frontendv1.FeedShellCommand{Text: sh.command},
+		Runtime: &frontendv1.FeedShellRuntime{StartedAtMs: sh.startedAtMs},
+	}
+	if sh.spool != "" {
+		tail, omittedLines := capSpool(sh.spool)
+		spool := &frontendv1.FeedShellSpool{Text: tail}
+		if omittedLines > 0 {
+			spool.Omitted = &frontendv1.FeedShellOmitted{Text: formatEarlierLines(omittedLines)}
+		}
+		shell.Spool = spool
+	}
+	// A SETTLED RUN STAYS SETTLED. The ending is remembered on the run rather
+	// than read off the frame in hand, because every push after the terminal —
+	// a replayed announcement, the other plane's spool replay, a beat — carries
+	// no ending at all and would otherwise draw the finished run live again.
+	if settled != nil {
+		sh.settled = settled
+	}
+	if sh.settled != nil {
+		shell.State = &frontendv1.FeedShell_Settled{Settled: sh.settled}
+	} else {
+		live := &frontendv1.FeedShellLive{}
+		if sh.lastProgressMs > 0 {
+			live.LastProgress = &frontendv1.FeedShellLastProgress{AtMs: sh.lastProgressMs}
+		}
+		shell.State = &frontendv1.FeedShell_Live{Live: live}
+	}
+
+	id := r.rowID(s.id, sh.feed.feed, feedid.RowKey{Kind: feedid.KindDetachedShell, ID: workID})
+	sh.row = id
+	row := &frontendv1.FeedRow{
+		Id:  id,
+		Row: &frontendv1.FeedRow_DetachedShell{DetachedShell: &frontendv1.FeedDetachedShell{Shell: shell}},
+	}
+	r.stampTurn(s, row, nil)
+	r.upsert(s, sh.feed, row, true)
+}
+
+// capSpool keeps the spool's TAIL and reports how many earlier lines it drops.
+func capSpool(spool string) (string, uint64) {
+	if len(spool) <= spoolCap {
+		return spool, 0
+	}
+	dropped := spool[:len(spool)-spoolCap]
+	tail := spool[len(spool)-spoolCap:]
+	// Cut on a line boundary so the tail never begins mid-line.
+	for i := 0; i < len(tail); i++ {
+		if tail[i] == '\n' {
+			dropped = spool[:len(spool)-spoolCap+i+1]
+			tail = tail[i+1:]
+			break
+		}
+	}
+	return tail, countLines(dropped)
+}
+
+// shellSettled renders a settled shell. A non-zero exit still COMPLETED —
+// "failure" is the reader's judgment of the code, never an arm.
+func shellSettled(log dlog.Logger, workID string, success *conversationv1.AgentBashSuccess) *frontendv1.FeedShellSettled {
+	settled := &frontendv1.FeedShellSettled{EndedAtMs: success.GetSettledAt().GetAtMs()}
+	switch outcome := success.GetOutcome().(type) {
+	case *conversationv1.AgentBashSuccess_Completed:
+		if exited, ok := outcome.Completed.GetTermination().GetHow().(*conversationv1.AgentBashTermination_Exited); ok {
+			settled.Exit = &frontendv1.FeedShellExit{Code: exited.Exited.GetCode()}
+		}
+		settled.Outcome = &frontendv1.FeedShellSettled_Completed{Completed: &frontendv1.FeedShellCompleted{}}
+	case *conversationv1.AgentBashSuccess_Interrupted:
+		if cause := lostCauseOfBash(outcome.Interrupted); cause != lostNone {
+			lost := &frontendv1.FeedShellLost{}
+			if !applyShellLostHow(lost, cause) {
+				log.Warn("daemon.feed.shell_lost_unlanded_arm",
+					"a shell was lost in a way this build does not draw; the bubble carries no cause",
+					dlog.Context{"work": workID, "cause": cause.String()})
+			}
+			settled.Outcome = &frontendv1.FeedShellSettled_Lost{Lost: lost}
+			break
+		}
+		settled.Outcome = &frontendv1.FeedShellSettled_Cancelled{Cancelled: &frontendv1.FeedShellCancelled{}}
+	default:
+		settled.Outcome = &frontendv1.FeedShellSettled_Completed{Completed: &frontendv1.FeedShellCompleted{}}
+	}
+	return settled
+}

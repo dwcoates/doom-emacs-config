@@ -423,35 +423,6 @@ transcripts."
   (let ((inst (make-agent-repl-instantiation)))
     (should-not (agent-repl--instantiation-to-plist inst))))
 
-(ert-deftest agent-repl-test-make-instantiation-from-plist-ignores-a-persisted-uuid ()
-  "A uuid left in an OLD state.el on disk is read and discarded.
-Honoring it would resurrect the very pointer this change removed, on every
-machine that still has a pre-migration state file."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "xyz-789"))))
-    (should (agent-repl-instantiation-p inst))
-    (should-not (agent-repl-instantiation-session-id inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-nil ()
-  "make-instantiation-from-plist with nil creates a fresh empty struct."
-  (let ((inst (agent-repl--make-instantiation-from-plist nil)))
-    (should (agent-repl-instantiation-p inst))
-    (should-not (agent-repl-instantiation-session-id inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-extra-keys ()
-  "make-instantiation-from-plist tolerates unknown keys in a saved plist."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "xyz" :unknown-key "val"))))
-    (should (agent-repl-instantiation-p inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-legacy-had-session ()
-  "make-instantiation-from-plist ignores the legacy :had-session key in old state files."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "legacy" :had-session t))))
-    (should (agent-repl-instantiation-p inst))))
-
-;;;; ---- Tests: state-file ----
-
 (ert-deftest agent-repl-test-state-file-with-root ()
   "state-file returns path under the given root."
   (should (equal (agent-repl--state-file "/my/project")
@@ -908,30 +879,6 @@ user's own choice was silently overwritten on the next save."
               (should (null (plist-get data :model)))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-state-save-piggybacks-snapshot ()
-  "state-save also rewrites the workspace snapshot file so the roster
-survives a crash that beats kill-emacs-hook.  Roster carries only
-`:project-dir' — `:priority' lives in the per-project state file."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t))
-          (snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          ;; Delay 0 makes the debounced roster request write synchronously,
-          ;; so the piggyback is asserted without waiting on an idle timer.
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl-snapshot-save-idle-delay 0))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :bare-metal)
-            (agent-repl--ws-put "ws" :priority "p3")
-            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--state-save "ws")
-            (let ((data (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
-                                   :workspaces)))
-              (should (equal (plist-get (cdr (assoc "ws" data)) :project-dir) tmpdir))
-              (should-not (plist-member (cdr (assoc "ws" data)) :priority))))
-        (delete-file snapshot-file)
-        (delete-directory tmpdir t)))))
-
 (ert-deftest agent-repl-test-state-save-snapshot-error-does-not-block-state ()
   "A snapshot-save failure must not propagate out of state-save (state file
 write is the primary obligation; snapshot is the piggyback)."
@@ -996,145 +943,6 @@ write is the primary obligation; snapshot is the piggyback)."
     (should-error (agent-repl--validate-ws-env "ws"))))
 
 ;;;; ---- Tests: initialize-ws-env integration ----
-
-(ert-deftest agent-repl-test-initialize-ws-env-restores-from-file ()
-  "initialize-ws-env restores full state from disk including :active-env."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             '(:project-dir "/restored/root"
-               :active-env :bare-metal
-               :bare-metal (:session-id "bm-id")))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (equal (agent-repl--ws-get "ws" :project-dir) "/restored/root"))
-            ;; A uuid in an OLD state file on disk is read and DISCARDED. It
-            ;; was the resume pointer; the daemon owns that now.
-            (should-not (agent-repl-instantiation-session-id
-                         (agent-repl--ws-get "ws" :bare-metal))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-migrates-retired-sandbox-env ()
-  "A state file left behind by the retired :sandbox env hydrates as :bare-metal.
-The hydration runs the saved plist through `agent-repl--migrate-saved-state',
-so a saved `:sandbox' stops being one instead of failing validation
-\(`:sandbox' is no longer a legal `:active-env')."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-migrate-" t)))
-      (unwind-protect
-          (progn
-            ;; Arrange — the shape a pre-retirement Emacs wrote to disk.
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             '(:project-dir "/restored/root"
-               :active-env :sandbox
-               :bare-metal (:session-id nil)
-               :sandbox (:session-id "sb-id")))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            ;; Act
-            (agent-repl--initialize-ws-env "ws")
-            ;; Assert
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (agent-repl-instantiation-p
-                     (agent-repl--ws-get "ws" :bare-metal))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-fresh-when-no-file ()
-  "initialize-ws-env creates fresh defaults when no state file exists."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (agent-repl-instantiation-p (agent-repl--ws-get "ws" :bare-metal)))
-            (should-not (agent-repl-instantiation-session-id
-                         (agent-repl--ws-get "ws" :bare-metal))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-save-restore-round-trip ()
-  "state-save followed by initialize-ws-env restores :active-env across restart."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-env-" t)))
-      (unwind-protect
-          (progn
-            ;; Simulate pre-restart state
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :bare-metal)
-            (agent-repl--ws-put "ws" :bare-metal
-                                 (make-agent-repl-instantiation :session-id "bm1"))
-            (agent-repl--state-save "ws")
-            ;; Simulate post-restart: clear in-memory state
-            (clrhash agent-repl--workspaces)
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            ;; :active-env survives the restart; the vendor uuid deliberately
-            ;; does NOT — Emacs asks the daemon to CONTINUE and the daemon
-            ;; decides which conversation that is.
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should-not (agent-repl-instantiation-session-id
-                         (agent-repl--ws-get "ws" :bare-metal))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-restores-source-ws-dir ()
-  "initialize-ws-env restores `:source-ws-dir' from the saved state file."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-src-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             '(:project-dir "/restored/root"
-               :active-env :bare-metal
-               :source-ws-dir "/tmp/recorded-source/"
-               :bare-metal (:session-id nil)))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (equal (agent-repl--ws-get "ws" :source-ws-dir)
-                           "/tmp/recorded-source/")))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-old-state-file-no-source-ws-dir ()
-  "Old state files (no `:source-ws-dir' key) leave the value as nil — no error."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-old-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             '(:project-dir "/restored/root"
-               :active-env :bare-metal
-               :bare-metal (:session-id nil)))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (null (agent-repl--ws-get "ws" :source-ws-dir))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-source-ws-dir-round-trip ()
-  "state-save followed by initialize-ws-env restores `:source-ws-dir' across restart."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-src-rt-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :bare-metal)
-            (agent-repl--ws-put "ws" :source-ws-dir "/tmp/source-roundtrip/")
-            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--state-save "ws")
-            ;; Simulate restart
-            (clrhash agent-repl--workspaces)
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (equal (agent-repl--ws-get "ws" :source-ws-dir)
-                           "/tmp/source-roundtrip/")))
-        (delete-directory tmpdir t)))))
-
-;;;; ---- Tests: history-save / history-restore round-trip ----
 
 (ert-deftest agent-repl-test-history-save-and-restore-round-trip ()
   "history-save writes and history-restore reads back the same data."
@@ -1404,71 +1212,6 @@ whatever the workspace plist happens to carry."
 
 ;;;; ---- Tests: initialize-ws-env with missing/corrupt state files ----
 
-(ert-deftest agent-repl-test-initialize-ws-env-empty-file-signals-and-preserves-file ()
-  "initialize-ws-env rejects an empty state file without rewriting it."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-empty-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl-test--seed-file (agent-repl--state-file tmpdir) "")
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (let (logs)
-              (cl-letf (((symbol-function 'agent-repl--log)
-                         (lambda (_ws format-string &rest args)
-                           (push (apply #'format format-string args) logs))))
-                (should-error (agent-repl--initialize-ws-env "ws")))
-              (should (cl-find-if (lambda (line)
-                                    (string-match-p "initialize-ws-env: state-file-read-failed" line))
-                                  logs)))
-            (should (string-empty-p
-                     (with-temp-buffer
-                       (insert-file-contents (agent-repl--state-file tmpdir))
-                       (buffer-string)))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-invalid-elisp-signals-and-preserves-file ()
-  "initialize-ws-env rejects unreadable state without rewriting it."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
-      (unwind-protect
-          (progn
-            ;; Unclosed paren triggers end-of-file error in (read ...)
-            (agent-repl-test--seed-file (agent-repl--state-file tmpdir) "(unclosed paren")
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (let (logs)
-              (cl-letf (((symbol-function 'agent-repl--log)
-                         (lambda (_ws format-string &rest args)
-                           (push (apply #'format format-string args) logs))))
-                (should-error (agent-repl--initialize-ws-env "ws")))
-              (should (cl-find-if (lambda (line)
-                                    (string-match-p "initialize-ws-env: state-file-read-failed" line))
-                                  logs)))
-            (should (string=
-                     "(unclosed paren"
-                     (with-temp-buffer
-                       (insert-file-contents (agent-repl--state-file tmpdir))
-                       (buffer-string)))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-missing-file-writes-state ()
-  "initialize-ws-env creates state file on disk when it was missing."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-write-" t)))
-      (unwind-protect
-          (let ((state-path (agent-repl--state-file (agent-repl--path-canonical tmpdir))))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (should-not (file-exists-p state-path))
-            (agent-repl--initialize-ws-env "ws")
-            (should (file-exists-p state-path))
-            ;; Verify the written file is valid and round-trips
-            (let ((data (agent-repl--read-sexp-file state-path)))
-              (should (eq (plist-get data :active-env) :bare-metal))
-              (should (equal (plist-get data :project-dir)
-                             (agent-repl--path-canonical tmpdir)))))
-        (delete-directory tmpdir t)))))
-
-;;;; ---- Tests: history-push edge cases ----
-
 (ert-deftest agent-repl-test-history-push-internal-whitespace-differs ()
   "history-push adds entry that differs from head only in internal whitespace."
   (agent-repl-test--with-temp-buffer " *test-hist-push-internal-ws*"
@@ -1703,7 +1446,7 @@ of stamping a fresh timestamp on every write."
 
 (ert-deftest agent-repl-test-state-save-includes-last-killed-at ()
   "state-save serializes `:last-killed-at' when the ws plist carries it
-\(populated by `agent-repl--nuke-one-workspace')."
+\(populated by `agent-repl--kill-one-workspace')."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-killed-" t))
           (killed '(23000 0 0 0)))
@@ -1755,6 +1498,17 @@ been killed (both the ws plist and the existing file lack the field)."
               (should (null (plist-get data :last-killed-at)))))
         (delete-directory tmpdir t)))))
 
+;; THE INITIALIZE-WS-ENV TESTS ARE GONE with the function they covered.
+;; Hydrating a workspace's environment from a state file on disk was part of
+;; Emacs owning session lifecycle.  It does not: session facts travel in
+;; StartSession, the daemon owns them, and they reach Emacs as pushed host
+;; state.  The per-workspace state file that survives holds only local
+;; display preferences, which the tests above cover.
+;; THE SNAPSHOT-PIGGYBACK TEST IS GONE.  `agent-repl--state-save' used to
+;; request a workspace-roster snapshot write alongside each per-workspace
+;; save, so a crash before quit would not lose the roster.  The durable
+;; Emacs roster is gone -- the daemon is the source of which workspaces
+;; exist -- so there is no second write to piggyback and nothing to assert.
 (provide 'test-history)
 
 ;;; test-history.el ends here
@@ -1794,29 +1548,3 @@ been killed (both the ws plist and the existing file lack the field)."
               (should-not (search-forward "e6cb9929-c4bd-4164-b5d1-7fd3bc743bc7" nil t))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-state-save-cannot-clobber-a-persisted-uuid ()
-  "A save over an OLD state file drops its uuid rather than rewriting one.
-The pre-migration file on disk still names a conversation; the point is that
-after this save nothing does, so no stale pointer can outlive the change."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-migrate-uuid-" t)))
-      (unwind-protect
-          (progn
-            ;; Arrange — the shape a pre-migration Emacs left behind.
-            ;; :project-dir must be tmpdir: initialize-ws-env restores it from
-            ;; the file, and a different value would send the save elsewhere
-            ;; and leave this assertion reading the untouched original.
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             `(:project-dir ,tmpdir
-               :active-env :bare-metal
-               :bare-metal (:session-id "35af6729-a618-4a00-8af0-2618381812e4")))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            ;; Act
-            (agent-repl--state-save "ws")
-            ;; Assert
-            (with-temp-buffer
-              (insert-file-contents (agent-repl--state-file tmpdir))
-              (should-not (search-forward "35af6729-a618-4a00-8af0-2618381812e4" nil t))))
-        (delete-directory tmpdir t)))))

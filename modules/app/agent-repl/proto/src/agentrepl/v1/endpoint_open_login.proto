@@ -1,0 +1,66 @@
+// endpoint_open_login.proto — OpenLogin: begin (or join) the account login
+// flow for a workspace's account root. WEB LINK section. THE PTY PATH IS
+// THE MECHANISM: the daemon spawns `claude /login` on a daemon-owned pty
+// (one per account root; a second open JOINS the running session — the
+// open is per-account idempotent) and the client renders the raw bytes in
+// a terminal overlay via WatchLoginTerminal. The daemon owns the default
+// geometry (wide enough that the OAuth URL never hard-wraps); resize
+// layers on top.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenLoginRequest {
+  // The workspace whose session's account root logs in.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenLoginResponse {
+  oneof result {
+    OpenLoginSuccess success = 1;
+    OpenLoginError error = 2;
+  }
+}
+
+// The login session is up (fresh or joined); attach WatchLoginTerminal.
+message OpenLoginSuccess {
+  // The account root the terminal logs in — the overlay header draws it.
+  string config_dir = 1;
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message OpenLoginError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenLoginUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenLoginWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenLoginTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenLoginNotYetAdopted not_yet_adopted = 4;
+    // Spawning the login terminal failed.
+    OpenLoginSpawnFailed spawn_failed = 5;
+  }
+}
+message OpenLoginUnknownWorkspace {}
+message OpenLoginWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenLoginTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenLoginNotYetAdopted {}
+message OpenLoginSpawnFailed {
+  // The spawn's own account of the failure.
+  string detail = 1;
+}

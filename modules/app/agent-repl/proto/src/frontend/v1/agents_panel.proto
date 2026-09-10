@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /agents PANEL: the configured agent types, from the vendor's
+// structured catalog answer. Daemon-resolved; the WEBAPP owns the rendering.
+message AgentsPanelView {
+  // In the daemon's order.
+  repeated AgentsPanelRow rows = 1;
+}
+// One agent type's line.
+message AgentsPanelRow {
+  // The agent type's name ("Explore").
+  string name = 1;
+  // Its one-line description. UNSET when the catalog carries none.
+  optional AgentsPanelDescription description = 2;
+}
+// The description element.
+message AgentsPanelDescription {
+  // The line, drawn verbatim.
+  string text = 1;
+}

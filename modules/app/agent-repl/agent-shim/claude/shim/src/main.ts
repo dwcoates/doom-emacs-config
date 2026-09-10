@@ -1,729 +1,817 @@
 /**
- * claude-repl shim entrypoint.
+ * claude-shim — the entrypoint for one daemon-owned Claude session.
  *
- * UDS-only process entrypoint for one daemon-owned Claude session.
+ * # The spawn contract, whole
  *
- * Flags:
- *   --fake                    use the offline scripted query (no API key)
- *   --session-id <id>         override the shim-assigned session id
- *   --permission-mode <mode>  initial permission mode (default: "default")
- *   --cwd <dir>               working directory for the SDK session
- *   --model <model>           model override passed to the SDK
- *   --resume <session>        resume an on-disk claude session
- *   --rewound-from <uuid>     vendor session this resume's transcript was
- *                             truncated FROM (rewind lineage; requires the
- *                             two flags below and --resume)
- *   --rewind-retained-leaf <uuid>
- *                             vendor uuid of the last transcript record the
- *                             truncation retained
- *   --rewind-dropped-turns <ids>
- *                             comma-separated turn ids the truncation dropped,
- *                             in submission order
- *   --claude-bin <path>       claude CLI for the SDK to drive (system
- *                             binary for vterm parity; default: bundled)
- *   --daemon-socket <path>    required UDS endpoint to reach the daemon
- *   --log-fd 3                inherited, already-open durable shim.log sink
- *   --store-socket <path>     shim-store socket (UDS mode; default
- *                             ~/.cache/agent-repl/sock/store.sock)
- *   --version                 print the shim version and exit
+ *   node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--fake]
+ *   node dist/main.js --version
+ *
+ * NOTHING ELSE. Every legacy flag is gone, and an unrecognized one is a startup
+ * FAILURE rather than a warning: a daemon that spawns a shim with a flag this
+ * build does not understand is a version mismatch, and a shim that shrugged and
+ * started anyway would run with the caller's intent silently discarded.
+ *
+ * Notably absent: `--session-id`, `--cwd`, `--model`, `--permission-mode`,
+ * `--resume` and the rewind trio. SESSION FACTS TRAVEL ONLY IN `StartSession`
+ * (cross-system contract), so a session's model, mode and vendor binding are
+ * rpc arguments now, not spawn arguments. cwd is the process's own working
+ * directory, which the daemon sets when it spawns us — passing it as a flag as
+ * well gave two sources for one fact, able to disagree. `--claude-bin` is gone
+ * with R12: the SDK's own bundled, pinned binary is the engine.
+ *
+ * # Startup order, and why it is this order
+ *
+ *   1. parse argv — cheapest, and `--version` must not touch anything;
+ *   2. resolve and validate the environment;
+ *   3. configure the log on fd 3, so everything after this point is recorded;
+ *   4. take the WORKSPACE lock, keyed by cwd;
+ *   5. bind the UDS and serve.
+ *
+ * The workspace lock comes BEFORE the socket because it is the claim that
+ * matters: two shims over one workspace means two writers on one transcript, and
+ * binding first would leave a window in which a duplicate is reachable. The
+ * SESSION lock is NOT taken here — it is keyed by the vendor session id, which
+ * does not exist until `StartSession` pre-mints it (fresh) or is handed it
+ * (resume) — so `engine/session.ts` takes it, before the SDK is touched.
+ *
+ * # Signals
+ *
+ * SIGTERM is the ONE authorized process-level shutdown, and it takes the same
+ * graceful path as `KillSession{force:true}`: the engine stands down (every
+ * pending permission callback resolved, the query ended, every store write
+ * acked) and then the process exits 0. It cannot be an rpc-only path because
+ * the daemon may already be dead.
+ *
+ * SIGINT is REFUSED and logged at error. A shim may be spawned under an
+ * attached terminal, and a Ctrl-C there must not end a turn the user is
+ * watching.
  */
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { bindLog, configureLog, emergencyStderr } from "./uds/log.js";
+import { configureLog } from "./log.js";
+import { logMainLifecycle, reportFatal } from "./fatal.js";
+import { lockBinaryPath, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
+import { runtimeIdentity } from "./build-identity.js";
+import { type Engine } from "./engine/engine.js";
+import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
+import { createFold } from "./convert/fold.js";
+import { createStoreClient } from "./store/client.js";
 import {
-  UdsSession,
-  isQueryTerminationCleanupError,
-  isQueryTerminationPersistenceError,
-  isUnexpectedSdkStreamTerminationError,
-  type UdsQuery,
-} from "./uds/uds-session.js";
-import { acquireSessionLock, acquireWorkspaceLock } from "./uds/session-lock.js";
-import { SessionSource } from "./uds/proto.js";
-import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
-import { importRealSDK } from "./vendor-guard.js";
-import { normalizeOptionalModel } from "./model.js";
-import { systemPromptOption } from "./metaprompt.js";
-import type {
-  SubscriptionUsageQuery,
-  SubscriptionUsageResponse,
-} from "./subscription-usage.js";
-import {
-  ModelInfo,
-  PermissionMode,
-  SlashCommand,
-  isPermissionMode,
-} from "./protocol.js";
-import {
-  CanUseToolLike,
-  InterruptReceipt,
-  QueryLike,
-  SdkUserMessageLike,
-  SessionDeps,
-} from "./session.js";
+  createPersistence,
+  DEFAULT_RETRY_POLICY,
+  type PersistenceRetryPolicy,
+} from "./store/persistence.js";
+import { createRealQuery } from "./sdk/real-query.js";
+import { createFakeQuery } from "./fake/index.js";
+import { randomUUID } from "node:crypto";
+import { shimRoutes } from "./service/routes.js";
+import { serve, type ShimServer } from "./service/server.js";
 
-/** Stable operation labels for shim-entrypoint telemetry queries and tests. */
-export const MAIN_LIFECYCLE_OPERATION = "shim.main.lifecycle";
-export const MAIN_FATAL_OPERATION = "shim.main.fatal";
+export {
+  MAIN_LIFECYCLE_OPERATION,
+  MAIN_FATAL_OPERATION,
+  logMainLifecycle,
+  reportFatal,
+} from "./fatal.js";
 
-/** Normal lifecycle telemetry for the shim entrypoint and owned SDK session. */
-const LIFECYCLE_LOGGER = bindLog({ component: "shim-main", operation: MAIN_LIFECYCLE_OPERATION });
+// ---------------------------------------------------------------------------
+// argv
+// ---------------------------------------------------------------------------
 
-/** Unrecoverable process-termination telemetry for the shim entrypoint only. */
-const FATAL_LOGGER = bindLog({ component: "shim-main", operation: MAIN_FATAL_OPERATION });
-
-/** Emit a main lifecycle record at info unless the caller identifies an error. */
-export function logMainLifecycle(fields: Record<string, unknown>, message: string): void {
-  LIFECYCLE_LOGGER.log({ level: "info", ...fields }, message);
+/** The whole command line. */
+export interface CliArgs {
+  /** The unix socket to serve shim.v1 on. */
+  readonly listen?: string;
+  /** The store's unix socket. Falls back to AGENT_REPL_STORE_SOCKET. */
+  readonly storeSocket?: string;
+  /** The inherited, already-open durable log descriptor. Always 3. */
+  readonly logFd?: 3;
+  /** Drive the mocked vendor instead of the real SDK. */
+  readonly fake: boolean;
+  /** Print the version and exit, touching nothing. */
+  readonly version: boolean;
 }
 
-function fatalCause(err: unknown): string {
-  if (err instanceof Error) {
-    return err.name.length === 0 ? "Error" : err.name;
-  }
-  return typeof err;
-}
+/** The four accepted flags, plus --version. Anything else is a failure. */
+export function parseArgs(argv: readonly string[]): CliArgs {
+  let listen: string | undefined;
+  let storeSocket: string | undefined;
+  let logFd: 3 | undefined;
+  let fake = false;
+  let version = false;
 
-/** Log an unrecoverable entrypoint failure before ending the shim process. */
-export function reportFatal(err: unknown): void {
-  const message = `fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
-  try {
-    FATAL_LOGGER.log({
-      level: "error",
-      cause: err,
-      cause_class: "unrecoverable_entrypoint_failure",
-      cause_type: fatalCause(err),
-      exit_outcome: "process_exit_1",
-    }, message);
-  } catch (logErr) {
-    // The logger is not configured only during CLI/bootstrap failure, or its sink failed.
-    emergencyStderr(`${message}; logger failure: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
-  }
-}
-
-interface CliArgs {
-  fake: boolean;
-  sessionId: string;
-  permissionMode: PermissionMode;
-  cwd?: string;
-  model?: string;
-  resume?: string;
-  /**
-   * Rewind lineage: the daemon truncated a transcript under a NEW vendor uuid
-   * and respawned this shim with `--resume <new uuid>` plus these three flags.
-   *
-   * All three arrive together or none do (`validateRewindLineage`), because
-   * each alone is an unusable fragment: a previous id with no retained leaf
-   * cannot say WHERE the cut fell, and dropped turn ids with no lineage cannot
-   * say which seq space they were dropped from. The trio is also meaningless
-   * without `--resume`, which names the truncated copy being continued.
-   */
-  rewoundFrom?: string;
-  rewindRetainedLeaf?: string;
-  /** Dropped keep-alive turn ids in submission order; order is contractual. */
-  rewindDroppedTurns?: string[];
-  /** Path to the claude CLI the SDK should drive.
-   *
-   *  Kept for VERSION PARITY with vterm sessions: the user upgrades their
-   *  `claude` independently of our lockfile, so the system binary can lead
-   *  the SDK's bundled one. It no longer exists to work around a stale
-   *  bundle — since SDK 0.2.113 the SDK spawns a per-platform NATIVE
-   *  Claude Code binary (0.3.220 bundles 2.1.220), not a JS `cli.js`, and
-   *  that bundle is current enough to resolve the same command set. */
-  claudeBin?: string;
-  /** UDS-mode listener path (session-<id>.sock). Present => UDS mode. */
-  daemonSocket?: string;
-  /** Already-open durable shim.log descriptor inherited from the daemon. */
-  logFd?: number;
-  /** shim-store socket path (UDS mode only). Defaults under ~/.cache. */
-  storeSocket?: string;
-  /** Print the version and exit (a node-runnable smoke of the bundle). */
-  version?: boolean;
-}
-
-/** The default shim-store socket, honoring XDG_CACHE_HOME (design §3). */
-export function defaultStoreSocket(): string {
-  const cache = process.env.XDG_CACHE_HOME ?? path.join(os.homedir(), ".cache");
-  return path.join(cache, "agent-repl", "sock", "store.sock");
-}
-
-export function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
-    fake: false,
-    sessionId: randomUUID(),
-    permissionMode: "default",
-  };
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
     const next = (): string => {
-      const v = argv[++i];
-      if (v === undefined) throw new Error(`missing value for ${arg}`);
-      return v;
+      const value = argv[++index];
+      if (value === undefined) throw new Error(`shim: missing value for ${String(arg)}`);
+      return value;
     };
     switch (arg) {
-      case "--fake":
-        args.fake = true;
+      case "--listen":
+        listen = next();
         break;
-      case "--session-id":
-        args.sessionId = next();
-        break;
-      case "--permission-mode": {
-        const mode = next();
-        if (!isPermissionMode(mode)) {
-          throw new Error(`invalid --permission-mode: ${mode}`);
-        }
-        args.permissionMode = mode;
-        break;
-      }
-      case "--cwd":
-        args.cwd = next();
-        break;
-      case "--model":
-        args.model = next();
-        break;
-      case "--resume":
-        args.resume = next();
-        break;
-      case "--rewound-from":
-        args.rewoundFrom = next();
-        break;
-      case "--rewind-retained-leaf":
-        args.rewindRetainedLeaf = next();
-        break;
-      case "--rewind-dropped-turns":
-        args.rewindDroppedTurns = parseDroppedTurns(next());
-        break;
-      case "--claude-bin":
-        args.claudeBin = next();
-        break;
-      case "--daemon-socket":
-        args.daemonSocket = next();
+      case "--store-socket":
+        storeSocket = next();
         break;
       case "--log-fd": {
         const value = next();
-        if (!/^\d+$/.test(value) || Number(value) !== 3) throw new Error(`invalid --log-fd: ${value}; UDS mode requires inherited fd 3`);
-        args.logFd = 3;
+        // Only fd 3. The daemon inherits exactly one descriptor for the durable
+        // sink, and accepting another number would let a caller point the record
+        // at whatever happened to be open — including the stderr pipe whose
+        // death this design exists to survive.
+        if (value !== "3") {
+          throw new Error(`shim: invalid --log-fd ${JSON.stringify(value)}; the durable sink is inherited fd 3`);
+        }
+        logFd = 3;
         break;
       }
-      case "--store-socket":
-        args.storeSocket = next();
+      case "--fake":
+        fake = true;
         break;
       case "--version":
-        args.version = true;
+        version = true;
         break;
       default:
-        throw new Error(`unknown argument: ${arg}`);
+        throw new Error(
+          `shim: unknown argument ${JSON.stringify(String(arg))}; the spawn contract is ` +
+            "--listen <uds> --store-socket <uds> --log-fd 3 [--fake] [--version]",
+        );
     }
   }
-  validateRewindLineage(args);
-  return args;
+
+  return {
+    ...(listen === undefined ? {} : { listen }),
+    ...(storeSocket === undefined ? {} : { storeSocket }),
+    ...(logFd === undefined ? {} : { logFd }),
+    fake,
+    version,
+  };
+}
+
+/** The flags a serving shim cannot start without. */
+export function requireServingArgs(
+  args: CliArgs,
+): asserts args is CliArgs & { listen: string; logFd: 3 } {
+  if (args.listen === undefined) throw new Error("shim: --listen <uds> is required");
+  if (args.logFd === undefined) throw new Error("shim: --log-fd 3 is required");
+}
+
+// ---------------------------------------------------------------------------
+// environment
+// ---------------------------------------------------------------------------
+
+/** The default state root, shared with every other agent-repl process. */
+export const DEFAULT_STATE_DIR_NAME = ".claude-emacs";
+
+/** The env var naming the store socket when `--store-socket` is absent. */
+export const STORE_SOCKET_ENV = "AGENT_REPL_STORE_SOCKET";
+
+/** The env var the daemon sets to prove it spawned us. */
+export const OWNED_ENV = "AGENT_REPL_OWNED";
+
+/**
+ * The daemon's own correlation id for this shim, for LOGGING ONLY.
+ *
+ * It is never a session fact: `StartSession` remains the one carrier of those.
+ * It exists so a daemon log line and a shim log line about the same host
+ * session can be joined without either side inferring the other's identity.
+ */
+export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
+
+/**
+ * The keep-alive interval override, honored ONLY under `--fake`.
+ *
+ * The cadence is four minutes against the vendor's five-minute cache tier, and
+ * from outside the process there was no way to make one fire — so the two
+ * keep-alive obligations could only be declared, never tested. The override
+ * exists for that and nothing else, which is why it is refused for a real
+ * session: a production shim that took its cadence from the environment could
+ * be told to hammer the vendor or to never beat at all.
+ */
+export const FAKE_KEEPALIVE_INTERVAL_ENV = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS";
+
+/**
+ * Resolve one `--fake`-only millisecond override.
+ *
+ * The three overrides in this file differ only in which variable they read and
+ * what they are called in the log, so the reading, the refusal and the
+ * validation live here ONCE rather than drifting across three near-identical
+ * copies.
+ *
+ * Answers `undefined` for "use the module constant" in every rejecting case.
+ * An override outside `--fake`, or one that is not a positive whole number of
+ * milliseconds, is IGNORED AND REPORTED rather than silently applied or
+ * silently dropped.
+ */
+function resolveFakeMsOverride(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+  variable: string,
+  outcomePrefix: string,
+  subject: string,
+): number | undefined {
+  const raw = env[variable];
+  if (raw === undefined || raw === "") return undefined;
+  if (!fake) {
+    logMainLifecycle(
+      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
+      `the ${subject} override is honored only under --fake; ignoring it for this real session`,
+    );
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    logMainLifecycle(
+      { level: "warn", env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
+      `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
+    );
+    return undefined;
+  }
+  logMainLifecycle(
+    { level: "info", env: variable, value_ms: parsed, outcome: `${outcomePrefix}_applied` },
+    `a fake session took its ${subject} from the environment`,
+  );
+  return parsed;
 }
 
 /**
- * Split `--rewind-dropped-turns` into its ordered turn ids.
+ * Resolve the keep-alive interval for this process.
  *
- * Order is the CONTRACT (KeepAliveDiscard.dropped_turn_ids is "in submission
- * order"), so the list is never sorted or deduplicated here. An empty element
- * or an empty list is rejected rather than silently dropped: a rewind that
- * dropped no turn is not a rewind, and a blank id would reach the store as an
- * unresolvable reference.
+ * Answers `undefined` for "use the module constant".
  */
-function parseDroppedTurns(value: string): string[] {
-  const ids = value.split(",");
-  if (ids.some((id) => id.trim() === "")) {
-    throw new Error(`invalid --rewind-dropped-turns: ${JSON.stringify(value)}; every comma-separated turn id must be non-empty`);
-  }
-  return ids;
+export function resolveKeepaliveIntervalMs(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_KEEPALIVE_INTERVAL_ENV,
+    "keepalive_override",
+    "keep-alive interval",
+  );
 }
 
 /**
- * Enforce the daemon's rewind-lineage spawn contract before startup proceeds.
+ * The WATCHER CONCLUSION budget override, honored ONLY under `--fake`.
  *
- * A PARTIAL set is a loud startup failure, never a silent degrade to "no
- * rewind": the daemon has already retired the previous vendor session by the
- * time it spawns us, so a shim that quietly skipped SessionRewound would leave
- * the lineage unreconstructable from the store forever. Failing here costs one
- * respawn; swallowing it costs the durable record.
+ * The budget bounds how long a kill's teardown waits for one already-concluded
+ * tail to actually end, and it is only ever SPENT by a consumer that stopped
+ * pulling — which is exactly the shape of the forced-kill scenarios, and why
+ * they were the two slowest tests in the suite. What they assert is that the
+ * tail's terminal reaches the consumer BEFORE the process goes, which is an
+ * ordering, not a duration.
+ *
+ * Refused for a real session: a production shim told to give up on a tail
+ * immediately would cut streams exactly where a terminal was owed.
  */
-export function validateRewindLineage(args: CliArgs): void {
-  const present = [
-    ["--rewound-from", args.rewoundFrom],
-    ["--rewind-retained-leaf", args.rewindRetainedLeaf],
-    ["--rewind-dropped-turns", args.rewindDroppedTurns],
-  ] as const;
-  const supplied = present.filter(([, value]) => value !== undefined);
-  if (supplied.length === 0) return;
-  if (supplied.length !== present.length) {
-    const missing = present.filter(([, value]) => value === undefined).map(([flag]) => flag);
-    throw new Error(`incomplete rewind lineage: ${supplied.map(([flag]) => flag).join(", ")} supplied without ${missing.join(", ")}; all three must be present together or all absent`);
-  }
-  if (args.resume === undefined) {
-    throw new Error("rewind lineage requires --resume: the rewound-to vendor session id names the truncated transcript being continued");
-  }
-  if (args.rewoundFrom === args.resume) {
-    throw new Error(`invalid rewind lineage: --rewound-from equals --resume (${args.resume}); a rewind always produces a NEW vendor session id`);
-  }
+export const FAKE_WATCHER_CONCLUSION_BUDGET_ENV = "AGENT_REPL_FAKE_WATCHER_CONCLUSION_BUDGET_MS";
+
+/**
+ * Resolve the watcher-conclusion budget for this process.
+ *
+ * Answers `undefined` for "use the engine's own module constant".
+ */
+export function resolveWatcherConclusionBudgetMs(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): number | undefined {
+  return resolveFakeMsOverride(
+    env,
+    fake,
+    FAKE_WATCHER_CONCLUSION_BUDGET_ENV,
+    "watcher_conclusion_budget_override",
+    "watcher-conclusion budget",
+  );
 }
 
-/** Validate the daemon's UDS primary-writer spawn contract before startup mutates state. */
-export function validateUdsLoggingArgs(args: CliArgs): asserts args is CliArgs & { daemonSocket: string; cwd: string; logFd: 3 } {
-  if (args.daemonSocket === undefined) throw new Error("UDS logging validation requires --daemon-socket");
-  if (args.cwd === undefined) throw new Error("UDS mode requires --cwd");
-  if (args.logFd === undefined) throw new Error("UDS mode requires --log-fd 3");
+/**
+ * The store retry BACKOFF SCHEDULE override, honored ONLY under `--fake`.
+ *
+ * Only the delays are overridable, and deliberately so. The contractual facts
+ * about a store outage are the ones the outage scenarios assert: how many
+ * attempts a batch gets, that the buffer is bounded, that exhaustion drops
+ * LOUDLY and names the lost keys, and that order survives. None of those is a
+ * function of how long the process idles between attempts, so `bufferCapacity`
+ * and `maxAttempts` stay fixed at {@link DEFAULT_RETRY_POLICY} and cannot be
+ * reached from the environment at all — an override able to shorten the
+ * attempt count would weaken exactly the assertions this exists to keep.
+ *
+ * Refused for a real session: a production shim told to retry with no backoff
+ * would hammer a store that is merely restarting.
+ */
+export const FAKE_STORE_BACKOFF_ENV = "AGENT_REPL_FAKE_STORE_BACKOFF_MS";
+
+/**
+ * Resolve the store retry policy for this process.
+ *
+ * Answers {@link DEFAULT_RETRY_POLICY} unless a `--fake` session supplied a
+ * backoff schedule, given as a comma-separated list of non-negative whole
+ * milliseconds. This one does NOT go through {@link resolveFakeMsOverride}: it
+ * is list-valued, and zero is a legitimate delay here where it is a rejection
+ * for every scalar budget.
+ */
+export function resolveRetryPolicy(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): PersistenceRetryPolicy {
+  const raw = env[FAKE_STORE_BACKOFF_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_RETRY_POLICY;
+  if (!fake) {
+    logMainLifecycle(
+      {
+        level: "warn",
+        env: FAKE_STORE_BACKOFF_ENV,
+        value: raw,
+        outcome: "store_backoff_override_refused",
+      },
+      "the store backoff override is honored only under --fake; ignoring it for this real session",
+    );
+    return DEFAULT_RETRY_POLICY;
+  }
+  const parts = raw.split(",").map((part) => part.trim());
+  const parsed = parts.map(Number);
+  // An empty slot is checked SEPARATELY because `Number("")` is 0, so a
+  // malformed "1,,2" would otherwise be read silently as a valid "1,0,2".
+  if (parts.some((part) => part === "") || parsed.some((ms) => !Number.isInteger(ms) || ms < 0)) {
+    logMainLifecycle(
+      {
+        level: "warn",
+        env: FAKE_STORE_BACKOFF_ENV,
+        value: raw,
+        outcome: "store_backoff_override_invalid",
+      },
+      "the store backoff override is not a comma-separated list of non-negative whole milliseconds; ignoring it",
+    );
+    return DEFAULT_RETRY_POLICY;
+  }
+  logMainLifecycle(
+    {
+      level: "info",
+      env: FAKE_STORE_BACKOFF_ENV,
+      backoff_ms: parsed,
+      outcome: "store_backoff_override_applied",
+    },
+    "a fake session took its store retry backoff from the environment",
+  );
+  // The attempt count and buffer depth are NOT overridable; only the waiting is.
+  return { ...DEFAULT_RETRY_POLICY, backoffMs: parsed };
 }
 
-function packageVersion(spec: string): string {
+/** Everything the process reads from its environment, resolved and checked. */
+export interface ShimEnvironment {
+  /** The vendor account root the agent binary must read. */
+  readonly claudeConfigDir: string;
+  /** The one state root every agent-repl process shares. */
+  readonly stateDir: string;
+  /** The build identity the daemon compares against its deploy stamp. */
+  readonly shimBuildSha: string;
+  /** Where the store is listening. */
+  readonly storeSocket: string;
+  /** The daemon's correlation id, when it exported one. Logging only. */
+  readonly agentReplSessionId?: string;
+}
+
+/**
+ * Resolve and validate the environment.
+ *
+ * EVERY REQUIRED VARIABLE IS A REFUSAL, not a default. `CLAUDE_CONFIG_DIR`
+ * names which ACCOUNT the session runs as, and guessing it could run a
+ * workspace's conversation under the wrong identity. `SHIM_BUILD_SHA` is what
+ * the daemon compares against its deploy stamp to bounce a stale survivor;
+ * defaulting it would make every shim look current. `AGENT_REPL_OWNED=1` is the
+ * daemon's own mark — a shim started by hand has no daemon to serve, no session
+ * facts coming, and no business taking the workspace lock a real one needs.
+ */
+export function resolveEnvironment(
+  env: NodeJS.ProcessEnv,
+  args: CliArgs,
+  home: string = os.homedir(),
+): ShimEnvironment {
+  const claudeConfigDir = env.CLAUDE_CONFIG_DIR;
+  if (claudeConfigDir === undefined || claudeConfigDir === "") {
+    throw new Error("shim: CLAUDE_CONFIG_DIR is required; it names the account this session runs as");
+  }
+  const owned = env[OWNED_ENV];
+  if (owned !== "1") {
+    throw new Error(
+      `shim: ${OWNED_ENV}=1 is required (got ${JSON.stringify(owned ?? "")}); ` +
+        "a shim serves a daemon that spawned it and refuses to run unowned",
+    );
+  }
+  const buildSha = env.SHIM_BUILD_SHA;
+  if (buildSha === undefined || buildSha === "") {
+    throw new Error(
+      "shim: SHIM_BUILD_SHA is required; the daemon compares it against the deploy stamp to bounce a stale survivor",
+    );
+  }
+  // THE FLAG BEATS THE ENV. A caller that stated the socket explicitly meant
+  // it; the env exists so a test harness can redirect every process it starts
+  // without rewriting each spawn.
+  const storeSocket = args.storeSocket ?? env[STORE_SOCKET_ENV] ?? "";
+  if (storeSocket === "") {
+    throw new Error(
+      `shim: the store socket is required; pass --store-socket <uds> or set ${STORE_SOCKET_ENV}`,
+    );
+  }
+  const stateDir =
+    env.AGENT_REPL_STATE_DIR === undefined || env.AGENT_REPL_STATE_DIR === ""
+      ? path.join(home, DEFAULT_STATE_DIR_NAME)
+      : env.AGENT_REPL_STATE_DIR;
+  const agentReplSessionId = env[SESSION_ID_ENV];
+  return {
+    claudeConfigDir,
+    stateDir,
+    shimBuildSha: buildSha,
+    storeSocket,
+    ...(agentReplSessionId === undefined || agentReplSessionId === ""
+      ? {}
+      : { agentReplSessionId }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// --version
+// ---------------------------------------------------------------------------
+
+/** This package's version, read from its own package.json. */
+export function packageVersion(): string {
   try {
     const require = createRequire(import.meta.url);
-    return (require(spec) as { version: string }).version;
+    return (require("../package.json") as { version: string }).version;
   } catch {
+    // A bundle relocated away from its package.json still answers, honestly.
     return "unknown";
   }
 }
 
+/** The `--version` line. */
+export function versionLine(): string {
+  return `claude-shim ${packageVersion()}`;
+}
+
+// ---------------------------------------------------------------------------
+// signals
+// ---------------------------------------------------------------------------
+
 /**
- * Assemble the SDK query options for a real (non-fake) session.
- * Exported for unit testing (the factory itself needs the live SDK).
+ * How long the exit after `KillSession` waits for the wire to go quiet.
  *
- * Interactive-CLI parity is deliberate, NOT the SDK's isolation-mode
- * default:
- * - The `claude_code` system-prompt preset carries the environment
- *   block (cwd, platform, home). Without it the model has no idea what
- *   `~` is and invents paths like /Users/user/... for tilde-phrased
- *   instructions.
- * - settingSources loads the user's settings.json (permission
- *   allowlists, hooks), project settings, and CLAUDE.md — the posture
- *   every vterm-era workflow assumes.
- *
- * The preset additionally carries the canonical metaprompt as an
- * `append` (metaprompt.ts), which is how the harness's guidelines reach
- * the agent at all: they are part of the system prompt the SDK re-sends
- * on every request, not a directive injected into the conversation.
+ * A LAST RESORT, never the mechanism: the responses' own close events settle
+ * the wait in microseconds. This only bounds the pathological case — a stream
+ * the teardown somehow failed to conclude — so that a killed shim cannot be
+ * kept alive by one wedged consumer.
  */
-export function realQueryOptions(
-  args: CliArgs,
-  canUseTool: CanUseToolLike,
-  abortController?: AbortController,
-): Record<string, unknown> {
-  const model = normalizeOptionalModel(args.model);
+export const EXIT_QUIET_BUDGET_MS = 5_000;
+
+/**
+ * The quiet-drain budget override, honored ONLY under `--fake`.
+ *
+ * A LAST RESORT bound like the watcher budget above, and overridable for the
+ * same reason: what a kill scenario asserts is that the exit WAITS for the wire
+ * and then ends anyway, not the particular number of milliseconds it waits for.
+ *
+ * Refused for a real session: a production shim told to exit instantly would
+ * destroy the socket out from under a response still on it.
+ */
+export const FAKE_EXIT_QUIET_BUDGET_ENV = "AGENT_REPL_FAKE_EXIT_QUIET_BUDGET_MS";
+
+/**
+ * Resolve the quiet-drain budget for this process.
+ *
+ * Answers {@link EXIT_QUIET_BUDGET_MS} unless a `--fake` session overrode it.
+ */
+export function resolveExitQuietBudgetMs(env: NodeJS.ProcessEnv, fake: boolean): number {
+  return (
+    resolveFakeMsOverride(
+      env,
+      fake,
+      FAKE_EXIT_QUIET_BUDGET_ENV,
+      "exit_quiet_budget_override",
+      "quiet-drain budget",
+    ) ?? EXIT_QUIET_BUDGET_MS
+  );
+}
+
+/** What a signal handler set needs to reach. */
+export interface SignalTargets {
+  /** The session, stood down before the process ends. */
+  readonly engine: Engine;
+  /** The listener, closed so the socket file does not outlive us. */
+  readonly server: Pick<ShimServer, "close">;
+  /** How the process ends. Injected so a test observes the code. */
+  readonly exit: (code: number) => void;
+}
+
+/** The handler set, exposed so a test can invoke it without raising a signal. */
+export interface SignalHandlers {
+  readonly onSigterm: () => void;
+  readonly onSigint: () => void;
+  /** The in-progress stand-down, or null while none has begun. */
+  standingDown(): Promise<void> | null;
+}
+
+/**
+ * Own the process-signal boundary.
+ *
+ * SIGTERM is idempotent: a second one while the first stand-down is in flight is
+ * ignored rather than starting a second teardown, because two concurrent
+ * teardowns race over the same pending callbacks and store acks.
+ */
+export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
+  let standDown: Promise<void> | null = null;
   return {
-    canUseTool: canUseTool as never,
-    includePartialMessages: true,
-    permissionMode: args.permissionMode,
-    systemPrompt: systemPromptOption(),
-    settingSources: ["user", "project", "local"],
-    ...(args.claudeBin !== undefined
-      ? { pathToClaudeCodeExecutable: args.claudeBin }
-      : {}),
-    ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
-    ...(model !== undefined ? { model } : {}),
-    ...(args.resume !== undefined ? { resume: args.resume } : {}),
-    ...(abortController !== undefined ? { abortController } : {}),
-  };
-}
-
-async function realQueryFactory(
-  args: CliArgs,
-  prompt: AsyncIterable<SdkUserMessageLike>,
-  canUseTool: CanUseToolLike,
-  abortController?: AbortController,
-): Promise<QueryLike> {
-  const sdk = await importRealSDK("realQueryFactory");
-  return sdk.query({
-    prompt: prompt as never,
-    options: realQueryOptions(args, canUseTool, abortController) as never,
-  }) as unknown as QueryLike;
-}
-
-/**
- * The probe never yields a prompt, so no tool can ever be requested of it.
- * A call here is therefore a broken invariant rather than a permission
- * question, and inventing an answer would only hide that.
- */
-const probeCanUseTool: CanUseToolLike = () => {
-  throw new Error("shim: the command probe was asked to permit a tool, but it runs no turn");
-};
-
-/**
- * Stand-in permission callback for the options object built solely to be
- * FINGERPRINTED. Nothing drives a turn with it, so a call is a broken
- * invariant rather than a permission question.
- */
-const fingerprintCanUseTool: CanUseToolLike = () => {
-  throw new Error("shim: the runtime-identity fingerprint options were asked to permit a tool, but they run no turn");
-};
-
-/**
- * SDK options for the throwaway command probe.
- *
- * Derived from {@link realQueryOptions} rather than hand-rolled, because a
- * probe that resolved commands under options the session does not share
- * would offer commands the session cannot invoke. `settingSources` is the
- * sharpest example: without it the CLI resolves the 8 built-ins and none of
- * the user's or project's skills.
- *
- * `resume` is the one option deliberately dropped. Command resolution reads
- * the skill directories and settings, never the transcript, so resuming buys
- * the probe nothing and only points a second process at the live session's
- * transcript.
- */
-export function probeQueryOptions(
-  args: CliArgs,
-  abortController: AbortController,
-): Record<string, unknown> {
-  const opts = realQueryOptions(args, probeCanUseTool);
-  delete opts.resume;
-  // The probe's only exit is this controller: aborting it is what SIGTERMs
-  // the `claude` child the query spawned. A Query exposes no close() of its
-  // own, so without this the shim would leak a process per refresh.
-  opts.abortController = abortController;
-  return opts;
-}
-
-/**
- * Re-resolve the slash-command list by standing up a throwaway query.
- *
- * The prompt iterable never yields, so the CLI completes the init handshake
- * that carries the command list and then simply idles: the probe costs one
- * process spawn and zero model tokens.
- */
-async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
-  const sdk = await importRealSDK("realProbeCommands");
-  const idle = (async function* (): AsyncGenerator<SdkUserMessageLike> {
-    await new Promise<never>(() => {});
-  })();
-  const abortController = new AbortController();
-  const probe = sdk.query({
-    prompt: idle as never,
-    options: probeQueryOptions(args, abortController) as never,
-  });
-  try {
-    return (await probe.supportedCommands()) as SlashCommand[];
-  } finally {
-    abortController.abort();
-  }
-}
-
-/**
- * Build the SDK-query factory shared by both transports: a fake scripted query
- * under `--fake`, else the lazily-resolved real SDK query. The factory surface
- * ({@link SessionDeps.createQuery}) is identical to
- * {@link import("./uds/uds-session.js").UdsSessionDeps.createQuery}, so both
- * modes drive the SDK the same way.
- */
-export function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
-  return (prompt, canUseTool): QueryLike => {
-    if (args.fake) {
-      return createFakeQuery(prompt, canUseTool, {
-        sessionId: args.sessionId,
-        newUuid: randomUUID,
-        ...(args.resume !== undefined ? { resume: args.resume } : {}),
-      });
-    }
-    return lazyQuery(realQueryFactory(args, prompt, canUseTool));
-  };
-}
-
-/**
- * Construct the one query owned by a UDS shim session.
- *
- * The streaming SDK has no Query.close() method. Its AbortController is the
- * query's sole lifecycle capability, so only UdsSession receives the abort
- * function and only its intentional shutdown path can invoke it.
- */
-export function makeUdsQueryFactory(args: CliArgs): (
-  prompt: AsyncIterable<SdkUserMessageLike>,
-  canUseTool: CanUseToolLike,
-) => UdsQuery {
-  let fakeUsageSamples = 0;
-  return (prompt, canUseTool): UdsQuery => {
-    const abortController = new AbortController();
-    if (args.fake) {
-      let failDuringBringUp: (() => void) | undefined;
-      const query = createFakeQuery(prompt, canUseTool, {
-        sessionId: args.sessionId,
-        newUuid: randomUUID,
-        ...(args.resume !== undefined ? { resume: args.resume } : {}),
-        abortSignal: abortController.signal,
-        ...(args.resume !== undefined && process.env.AGENT_REPL_E2E_FAIL_RESUMED_FAKE_QUERY === "1"
-          ? { onBringUpFailureInjector: (fail: () => void) => { failDuringBringUp = fail; } }
-          : {}),
-      });
-      return {
-        query,
-        subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => {
-          fakeUsageSamples++;
-          return {
-            subscription_type: "fake-max",
-            rate_limits_available: true,
-            rate_limits: {
-              five_hour: {
-                utilization: 10 + fakeUsageSamples / 4,
-                resets_at: "2030-01-01T05:00:00.000Z",
-              },
+    onSigterm(): void {
+      if (standDown !== null) {
+        logMainLifecycle(
+          { signal: "SIGTERM", outcome: "shutdown_already_in_flight" },
+          "ignored a second SIGTERM: the graceful stand-down is already running",
+        );
+        return;
+      }
+      logMainLifecycle(
+        { signal: "SIGTERM", outcome: "graceful_stand_down_started" },
+        "received the authorized shutdown signal; standing the session down",
+      );
+      standDown = (async (): Promise<void> => {
+        try {
+          const code = await targets.engine.standDown("SIGTERM");
+          await targets.server.close();
+          logMainLifecycle(
+            {
+              ...(code === 0 ? {} : { level: "error" as const }),
+              signal: "SIGTERM",
+              outcome:
+                code === 0 ? "graceful_stand_down_complete" : "stand_down_with_lost_writes",
+              exit_code: code,
             },
-          };
+            code === 0
+              ? "stood down cleanly"
+              : "stood down with writes the store never acked; exiting nonzero",
+          );
+          targets.exit(code);
+        } catch (err) {
+          // A failed stand-down is still an exit, but NOT a clean one: reporting
+          // 0 here would tell the daemon the session ended in good order when
+          // writes may have been lost.
+          reportFatal(err);
+          targets.exit(1);
+        }
+      })();
+    },
+    onSigint(): void {
+      logMainLifecycle(
+        {
+          level: "error",
+          signal: "SIGINT",
+          outcome: "refused_shutdown",
+          query_preserved: true,
         },
-        abort: () => abortController.abort(),
-        ...(failDuringBringUp !== undefined ? { failDuringBringUp } : {}),
-      };
-    }
-    const queryPromise = realQueryFactory(args, prompt, canUseTool, abortController);
-    return {
-      query: lazyQuery(queryPromise),
-      subscriptionUsage: async (): Promise<SubscriptionUsageResponse> => {
-        const query = await queryPromise as QueryLike & SubscriptionUsageQuery;
-        return query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET();
-      },
-      abort: () => abortController.abort(),
-    };
+        "REFUSED SIGINT as a shutdown condition: an attached terminal's Ctrl-C must not end a live turn",
+      );
+    },
+    standingDown: () => standDown,
   };
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+
+/**
+ * The shim's own identity in its log records, before a session exists.
+ *
+ * `agent_repl_session_id` normally names the daemon's session, but no spawn
+ * argument carries one any more (session facts travel only in `StartSession`,
+ * which is an rpc that has not arrived yet). So the process names itself, in a
+ * form that CORRELATES: the workspace key is the same md5 prefix the workspace
+ * lock file and every log record use, so a log line, a lock file and a process
+ * can be matched without a session id. The vendor's own id is attached later,
+ * through `setClaudeSessionId`, once the SDK reveals it.
+ */
+export function processIdentity(cwd: string): string {
+  return `shim-${workspaceLockKey(cwd)}-${process.pid}`;
+}
+
+/** Where the log's correlation id came from, so the record says which it used. */
+export interface LogCorrelation {
+  readonly agentReplSessionId: string;
+  readonly source: "daemon_env" | "self_named";
+}
+
+/**
+ * The correlation id every log record carries.
+ *
+ * The daemon's exported id WINS when it exported one, because a joinable record
+ * across two processes is worth more than a locally-derived name. Absent it the
+ * shim names itself — no daemon id reaches a shim at spawn in every deployment,
+ * and a record with no correlation id at all is the one outcome neither side
+ * can recover from.
+ */
+export function logCorrelation(environment: ShimEnvironment, cwd: string): LogCorrelation {
+  const exported = environment.agentReplSessionId;
+  return exported === undefined || exported === ""
+    ? { agentReplSessionId: processIdentity(cwd), source: "self_named" }
+    : { agentReplSessionId: exported, source: "daemon_env" };
+}
+
+/**
+ * The query factory the engine calls, real or mocked.
+ *
+ * `--fake` swaps THIS and nothing else: the real shim runs unchanged over the
+ * mocked vendor, which is what makes an offline test a test of the shim rather
+ * than of a second implementation of it.
+ */
+export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: string): CreateQuery {
+  if (!fake) {
+    return (spec: QuerySpec) =>
+      createRealQuery(
+        {
+          cwd,
+          claudeConfigDir: environment.claudeConfigDir,
+          binding: spec.binding,
+          permissionMode: spec.permissionMode,
+          canUseTool: spec.canUseTool,
+          abortController: spec.abortController,
+          ...(spec.model === undefined ? {} : { model: spec.model }),
+          ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+        },
+        spec.prompt,
+      );
+  }
+  return (spec: QuerySpec) =>
+    Promise.resolve(
+      createFakeQuery(spec.prompt, spec.canUseTool, {
+        cwd,
+        configDir: environment.claudeConfigDir,
+        sessionId:
+          spec.binding.kind === "fresh" ? spec.binding.sessionId : spec.binding.resumeSessionId,
+        newUuid: () => randomUUID(),
+        abortSignal: spec.abortController.signal,
+        permissionMode: spec.permissionMode,
+        ...(spec.model === undefined ? {} : { model: spec.model }),
+        ...(spec.binding.kind === "resume" ? { resume: spec.binding.resumeSessionId } : {}),
+        // THE REWIND TARGET REACHES THE MOCK TOO. It was dropped here, so the
+        // keep-alive rewind was unobservable on the vendor side: the shim's own
+        // log said what it intended, which is not evidence the value arrived.
+        ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+      }),
+    );
 }
 
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  // `--version` is a node-runnable smoke of the bundle: it loads every static
-  // import (including the proto stubs and their bundled @bufbuild/protobuf) and
-  // exits before touching a socket or the SDK. It must stay dependency-free.
+  // `--version` is a dependency-free smoke of the bundle: it loads every static
+  // import (the proto stubs, the Connect runtime, @bufbuild/protobuf) and exits
+  // before touching a socket, a lock, the log fd, or the SDK.
   if (args.version) {
-    process.stdout.write(`claude-shim ${packageVersion("../package.json")}\n`);
+    process.stdout.write(`${versionLine()}\n`);
     return;
   }
 
-  if (args.daemonSocket === undefined) throw new Error("shim requires --daemon-socket");
-  validateUdsLoggingArgs(args);
-  configureLog({ fd: args.logFd, cwd: args.cwd, agentReplSessionId: args.sessionId });
-  const requestedModel = args.model;
-  const normalizedModel = normalizeOptionalModel(requestedModel);
-  if (normalizedModel === undefined) {
-    delete args.model;
-  } else {
-    args.model = normalizedModel;
-  }
-  if (requestedModel !== undefined && normalizedModel !== requestedModel) {
-    logMainLifecycle(
-      {
-        agent_repl_session_id: args.sessionId,
-        requested_model: requestedModel,
-        effective_model: normalizedModel ?? "",
-        outcome: "launch_model_normalized",
-      },
-      "normalized empty-equivalent launch model before constructing SDK options",
-    );
-  }
-  logMainLifecycle({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined, rewound_from: args.rewoundFrom ?? "", rewind_retained_leaf: args.rewindRetainedLeaf ?? "", rewind_dropped_turn_count: args.rewindDroppedTurns?.length ?? 0, outcome: "startup_arguments_validated" }, "validated shim startup arguments and configured durable logging");
+  requireServingArgs(args);
+  const environment = resolveEnvironment(process.env, args);
+  const cwd = process.cwd();
 
-  // The query factory is synchronous per SessionDeps; pre-resolve the SDK
-  // module (dynamic import) before constructing the session. Under
-  // AGENT_REPL_FORBID_VENDOR_CALLS this is where a non-fake shim dies: the
-  // guard throws, `main()`'s caller prints it and exits nonzero. `--fake`
-  // short-circuits before the chokepoint and stays fully offline.
-  const sdkModulePromise = args.fake ? null : importRealSDK("main:preresolve");
-  logMainLifecycle({ agent_repl_session_id: args.sessionId, query_source: args.fake ? "fake" : "vendor-sdk", outcome: "query_implementation_selected" }, "selecting shim query implementation");
-  if (sdkModulePromise) await sdkModulePromise;
+  const correlation = logCorrelation(environment, cwd);
+  configureLog({ fd: args.logFd, cwd, agentReplSessionId: correlation.agentReplSessionId });
 
-  const createQuery = makeUdsQueryFactory(args);
-
-  await runUdsMode(args, createQuery);
-}
-
-/**
- * Drive one UDS-mode session (design §8). The UDS server owns lifetime: a
- * daemon disconnect does NOT stop the session or the in-flight turn (reattach,
- * §4.4), and there is no stdin, so stdin-EOF is not a stop path. The explicit
- * stop path is SIGTERM, which cleanly shuts the session down. SIGINT is
- * refused because it is not an authorized reason to end the owned SDK query.
- */
-export async function runUdsMode(
-  args: CliArgs,
-  createQuery: (
-    prompt: AsyncIterable<SdkUserMessageLike>,
-    canUseTool: CanUseToolLike,
-  ) => UdsQuery,
-): Promise<void> {
-  // Claim the session and its workspace BEFORE anything else. Uniqueness came
-  // free from binding session-<id>.sock — a second shim could not exist.
-  // Dialling out removes that, and two shims on one conversation means two
-  // writers on one transcript, so the claim is explicit. Holding it is what
-  // tells the daemon this session is alive even before we have dialled in.
-  //
-  // BOTH CLAIMS, SESSION FIRST THEN WORKSPACE, always in that order so two
-  // shims racing for the same pair cannot take them in opposite orders. The
-  // session id alone does not carry the invariant: a workspace and each resumed
-  // transcript keep exactly one live session at a time, and two daemon session
-  // ids can name one workspace over one transcript, so two shims would take two
-  // different session locks and exclude nothing.
-  //
-  // Failure to take either is a refusal to start.
-  const releaseSessionLock = acquireSessionLock(args.sessionId);
-  process.on("exit", releaseSessionLock);
-  logMainLifecycle({ agent_repl_session_id: args.sessionId, outcome: "session_lock_acquired" }, "exclusive session lock acquired");
-  if (args.cwd === undefined || args.cwd === "") {
-    throw new Error(
-      "shim: UDS mode requires --cwd; with no workspace directory the shim cannot claim its workspace exclusively and must not start",
-    );
-  }
-  const releaseWorkspaceLock = acquireWorkspaceLock(args.cwd);
-  process.on("exit", releaseWorkspaceLock);
+  const identity = runtimeIdentity();
   logMainLifecycle(
-    { agent_repl_session_id: args.sessionId, workspace_dir: args.cwd, outcome: "workspace_lock_acquired" },
-    "exclusive workspace lock acquired",
+    {
+      workspace_dir: cwd,
+      listen_socket: args.listen,
+      store_socket: environment.storeSocket,
+      state_dir: environment.stateDir,
+      claude_config_dir: environment.claudeConfigDir,
+      lock_dir: lockDir(),
+      lock_dir_overridden: (process.env[LOCK_DIR_ENV] ?? "") !== "",
+      // WHICH HOLDER WILL TAKE THE CLAIM. The kernel lock lives in a child
+      // process (agent-shim/shim-lock), and a shim pointed at a binary that is
+      // not there refuses every session — so the path is stated at startup,
+      // where it is readable before the first StartSession rather than only in
+      // the failure.
+      lock_binary: lockBinaryPath(),
+      shim_build_sha: identity.shimBuildSha,
+      sdk_version: identity.sdkVersion,
+      agent_binary_version: identity.agentBinaryVersion ?? "",
+      fake: args.fake,
+      agent_repl_session_id_source: correlation.source,
+      outcome: "startup_arguments_validated",
+    },
+    "validated the spawn contract and configured durable logging",
   );
 
-  const session = new UdsSession({
-    sessionId: args.sessionId,
-    shimVersion: packageVersion("../package.json"),
-    protocolVersion: "1",
-    udsSocketPath: args.daemonSocket!,
-    storeSocketPath: args.storeSocket ?? defaultStoreSocket(),
-    // Validated non-empty immediately above, and the same directory the
-    // workspace lock was taken on: the store client's durable write spill
-    // journal is workspace-scoped precisely because that lock makes it
-    // exclusive.
-    workspaceDir: args.cwd,
-    // SessionStarted.source: RESUME when respawned to resume an on-disk
-    // session, FRESH for a brand-new one (design §5.2 SessionSource).
-    sessionSource: args.resume !== undefined ? SessionSource.RESUME : SessionSource.FRESH,
-    // The argv posture the query is CONSTRUCTED with. The daemon's
-    // DaemonHello.permission_mode overrides it inside the bring-up gate; this
-    // is passed so the override is a comparison rather than a guess.
-    permissionMode: args.permissionMode,
-    queryInstanceId: randomUUID(),
-    requestedModel: args.model,
-    sdkVersion: packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
-    shimBuildSha: process.env.SHIM_BUILD_SHA ?? "",
-    // The query's runtime-identity evidence. Both are read straight off the
-    // builders the real query uses, so the fingerprints the daemon reconciles
-    // against describe the configuration the turn actually ran under. The
-    // canUseTool passed here exists only to satisfy the builder's signature and
-    // is never invoked: fingerprinting an options object does not run a turn.
-    effectiveQueryOptions: realQueryOptions(args, fingerprintCanUseTool),
-    contextPrefix: systemPromptOption(),
-    // `--resume <uuid>` IS the vendor session id the store keys events by, so
-    // a resumed session can subscribe correctly from its very first Subscribe
-    // instead of waiting for the SDK to reveal the uuid.
-    ...(args.resume !== undefined ? { storeSessionId: args.resume } : {}),
-    // The lineage is validated as a complete trio by parseArgs, so presence of
-    // the first field is presence of all three.
-    ...(args.rewoundFrom !== undefined
-      ? {
-        rewindLineage: {
-          previousVendorSessionId: args.rewoundFrom,
-          retainedLeafUuid: args.rewindRetainedLeaf!,
-          droppedTurnIds: args.rewindDroppedTurns!,
-        },
-      }
-      : {}),
-    createQuery,
-    newRequestId: randomUUID,
+  // NO LOCK IS TAKEN HERE. Startup is parse argv -> configure the log -> bind
+  // the socket -> serve, and a shim that has served but has no session is
+  // INERT: it holds neither kernel lock. Both claims are made inside
+  // StartSession, before the SDK is touched, and held for the process lifetime
+  // — so a prelaunched inert shim can sit beside the live shim it is about to
+  // replace instead of blocking forever on the live shim's workspace lock,
+  // while the daemon's probe still reads a held lock as "a live shim owns this
+  // conversation".
+
+  const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
+  const exitQuietBudgetMs = resolveExitQuietBudgetMs(process.env, args.fake);
+  const watcherConclusionBudgetMs = resolveWatcherConclusionBudgetMs(process.env, args.fake);
+  const retry = resolveRetryPolicy(process.env, args.fake);
+
+  // THE SESSION ENGINE, with the real record plane behind it.
+  //
+  // The record plane is UNNAMED here on purpose: a writer is keyed by the
+  // conversation's ORIGINAL vendor session id, which only StartSession learns,
+  // and it names itself then (`Persistence.setProducer`). Nothing writes before
+  // that, and a write that tried would raise rather than land rows under a
+  // placeholder name no replay could absorb against.
+  // Filled the moment the listener exists; `KillSession` cannot fire before
+  // then, because it arrives over that listener.
+  let endProcess: (code: number) => void = (code) => {
+    logMainLifecycle(
+      { level: "error", outcome: "exit_before_serving", exit_code: code },
+      "a session end was requested before the listener existed; exiting immediately",
+    );
+    process.exit(code);
+  };
+
+  const engine: Engine = createEngine({
+    endProcess: (code) => {
+      endProcess(code);
+    },
+    persistence: createPersistence({
+      client: createStoreClient(environment.storeSocket),
+      nowMs: () => Date.now(),
+      retry,
+    }),
+    fold: createFold(),
+    createQuery: queryFactory(args.fake, environment, cwd),
+    runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
+    env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
+    nowMs: () => Date.now(),
+    ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
+    ...(watcherConclusionBudgetMs === undefined ? {} : { watcherConclusionBudgetMs }),
   });
-  const signals = udsShutdownSignalHandlers(args.sessionId, (reason) => session.shutdown(reason));
-  const onSigterm = signals.onSigterm;
-  const onSigint = signals.onSigint;
-  process.on("SIGTERM", onSigterm);
-  process.on("SIGINT", onSigint);
-  // exitError, set only on the rethrow path below, is what the `finally` trace
-  // reports the process exiting for: a signal-driven shutdown (including one
-  // that raced session.start() into throwing) is reported clean, since
-  // `signals.stopping()` had already resolved it as intentional.
-  let exitError: unknown;
-  try {
-    await session.start();
-    if (signals.stopping() === null) {
-      throw new Error("UDS session completed without an intentional shutdown signal");
-    }
-    await signals.stopping();
-  } catch (err) {
-    if (signals.stopping() !== null) {
-      await signals.stopping();
-      return;
-    }
-    exitError = err;
-    throw err;
-  } finally {
-    logMainLifecycle({
-      agent_repl_session_id: args.sessionId,
-      ...(exitError === undefined
-        ? { outcome: "uds_main_exit_clean" }
-        : {
-          level: "error",
-          outcome: "uds_main_exit_error",
-          error: exitError instanceof Error ? exitError.message : String(exitError),
-        }),
-    }, "runUdsMode exiting");
-    process.off("SIGTERM", onSigterm);
-    process.off("SIGINT", onSigint);
-    // Released in reverse acquisition order, the mirror of the fixed
-    // session-then-workspace order they were taken in.
-    releaseWorkspaceLock();
-    releaseSessionLock();
-  }
-}
 
-/**
- * Own the process-signal boundary for the one live SDK query.
- *
- * SIGTERM is the process-level lifecycle capability used by deliberate shim
- * teardown and hibernation. SIGINT is explicitly refused so an attached
- * terminal cannot turn an interrupt into a second query-ending capability.
- */
-export function udsShutdownSignalHandlers(
-  sessionId: string,
-  shutdown: (reason: "SIGTERM") => Promise<void>,
-): {
-  onSigterm(): void;
-  onSigint(): void;
-  stopping(): Promise<void> | null;
-} {
-  let stopping: Promise<void> | null = null;
-  return {
-    onSigterm(): void {
-      if (stopping !== null) return;
-      logMainLifecycle({ agent_repl_session_id: sessionId, signal: "SIGTERM", outcome: "intentional_query_shutdown" }, "received authorized shim shutdown signal");
-      stopping = shutdown("SIGTERM");
-    },
-    onSigint(): void {
-      logMainLifecycle({
-        level: "error",
-        agent_repl_session_id: sessionId,
-        signal: "SIGINT",
-        outcome: "refused_query_termination",
-        query_preserved: true,
-      }, "refused unauthorized signal as an SDK query shutdown condition");
-    },
-    stopping: () => stopping,
-  };
-}
+  const server = await serve(args.listen, shimRoutes(engine));
 
-/** Adapt a Promise<QueryLike> to the synchronous QueryLike surface. */
-function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
-  return {
-    [Symbol.asyncIterator](): AsyncIterator<never> {
-      let inner: AsyncIterator<unknown> | null = null;
-      return {
-        next: async (): Promise<IteratorResult<never>> => {
-          if (inner === null) {
-            inner = (await queryPromise)[Symbol.asyncIterator]();
-          }
-          return (await inner.next()) as IteratorResult<never>;
-        },
-      };
-    },
-    interrupt: async (): Promise<InterruptReceipt | undefined> =>
-      (await queryPromise).interrupt(),
-    stopTask: async (taskId): Promise<void> => (await queryPromise).stopTask(taskId),
-    setPermissionMode: async (mode): Promise<void> =>
-      (await queryPromise).setPermissionMode(mode),
-    setModel: async (model): Promise<void> => (await queryPromise).setModel(model),
-    supportedModels: async (): Promise<ModelInfo[]> =>
-      (await queryPromise).supportedModels(),
-    supportedCommands: async (): Promise<SlashCommand[]> =>
-      (await queryPromise).supportedCommands(),
+  // KillSession's own exit. The engine has already torn the session down and
+  // built its response; the process may only end once that response — and every
+  // stream terminal the teardown produced — is off the wire, which is what
+  // `quiet` waits for. Closing first would destroy the socket carrying it.
+  let ending = false;
+  endProcess = (code): void => {
+    if (ending) return;
+    ending = true;
+    void (async (): Promise<void> => {
+      try {
+        await server.quiet(exitQuietBudgetMs);
+        await server.close();
+        logMainLifecycle(
+          {
+            ...(code === 0 ? {} : { level: "error" as const }),
+            outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",
+            exit_code: code,
+          },
+          code === 0
+            ? "the session was killed over the wire; the process is ending"
+            : "the session was killed with writes the store never acked; exiting nonzero",
+        );
+      } catch (err) {
+        reportFatal(err);
+        process.exit(1);
+      }
+      process.exit(code);
+    })();
   };
+
+  // THE SIGNAL HANDLERS GO ON BEFORE THE "SERVING" RECORD, NOT AFTER IT. The
+  // record is the shim's announcement that it is ready, and every supervisor
+  // waits on it before doing anything to the process — so a shim that
+  // announced readiness while node's DEFAULT signal dispositions were still in
+  // force could be killed by the very SIGINT it exists to refuse, in the gap
+  // between the two statements. Observed as a flake in the SIGINT integration
+  // test, which is the only place the gap is reachable at all.
+  const handlers = shutdownSignalHandlers({
+    engine,
+    server,
+    exit: (code) => process.exit(code),
+  });
+  process.on("SIGTERM", handlers.onSigterm);
+  process.on("SIGINT", handlers.onSigint);
+
+  logMainLifecycle(
+    { listen_socket: args.listen, outcome: "serving" },
+    "shim.v1 is being served; the daemon may dial",
+  );
+
+  // Nothing else to do: the listener holds the process open, and it is closed
+  // only by the stand-down. A shim outlives its daemon by design, so there is
+  // deliberately no idle timeout and no stdin to reach EOF.
+  await new Promise<never>(() => {});
 }
 
 /**
@@ -732,11 +820,8 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
  * `import.meta.url` is ALREADY symlink-resolved by the ESM loader, while
  * `process.argv[1]` is whatever the spawner typed. Comparing them raw made a
  * spawn through any symlinked directory (`/var/folders/...` on macOS, which is
- * really `/private/var/folders/...`) compare unequal, and the shim then exited
- * 0 having done NOTHING — the worst possible failure, silent and successful.
- * Resolving argv[1] the same way the loader does is what makes the two
- * comparable. realpath is best-effort: an unresolvable argv[1] falls back to
- * the literal path rather than throwing before the fatal handler exists.
+ * really `/private/var/folders/...`) compare unequal, and the shim then exited 0
+ * having done NOTHING — the worst possible failure, silent and successful.
  */
 function invokedAs(argvPath: string): string {
   try {
@@ -750,11 +835,7 @@ const isDirectRun =
   process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
-    if (
-      !isUnexpectedSdkStreamTerminationError(err) &&
-      !isQueryTerminationPersistenceError(err) &&
-      !isQueryTerminationCleanupError(err)
-    ) reportFatal(err);
+    reportFatal(err);
     process.exit(1);
   });
 }

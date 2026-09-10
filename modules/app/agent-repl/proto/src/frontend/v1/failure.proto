@@ -1,0 +1,533 @@
+// failure.proto — THE FAILURE VOCABULARY A SURFACE DRAWS, and the typed
+// evidence every failure carries.
+//
+// One closed oneof naming every way work can fail ON ITS OWN WITHOUT
+// IMPLICATING A FEED ENTRY, plus the typed evidence every failure carries —
+// including the evidence for entry-correlated failures, which the feed's own
+// per-kind `error` arms import from here. It is a VOCABULARY FILE, not a
+// component file: nothing here describes a card, a row or a cell. Surfaces
+// embed the evidence in their own resolved props and render it their own way.
+//
+// WHY IT IS frontend.v1 AND NOT agentrepl.v1. This vocabulary used to live in
+// `agentrepl/v1/shared.proto` and serve two jobs at once: the account a command
+// refusal carried back, and the account a spontaneous failure was drawn from.
+// Serving both meant `frontend/v1/feed.proto` had to IMPORT `agentrepl/v1` so
+// that FailureCardView could name a kind — a MODEL package importing a BOUNDARY
+// package, backwards under the ownership scheme in
+// DESIGN-protobuf-surfaces.md. The two jobs are now two vocabularies. What
+// ANSWERS a call is an arm of that call's own `<Method>Error` in agentrepl.v1.
+// What HAPPENS ON ITS OWN — a session dying mid-turn, a rate limit, a shim
+// crash — is not an answer to anything, arrives on the push stream, and is
+// named here.
+//
+// THE EVIDENCE MESSAGES ARE DECLARED ONCE, HERE, AND BOTH SIDES NAME THEM.
+// Several failures can genuinely be either an event or an answer — an SDK query
+// that terminated, a conversation that would not resume, a machinery failure
+// nothing could classify. Nothing is duplicated for them: there is ONE
+// SessionResumeFailure on the wire, named by a drawn arm below and by a called
+// arm in agentrepl.v1, and the ARM is what says whether this instance is an
+// answer or an event. agentrepl.v1 may import frontend.v1; the reverse is the
+// import this file exists to remove.
+//
+// WHY KINDS AND NOT A CLASS PLUS A STRING. A failure is a CONDITION, and a
+// condition is what a oneof is for. Naming the kind on the wire means a
+// consumer that meets an unfamiliar failure fails to match it instead of
+// silently rendering it as something else, and it means each kind carries the
+// evidence that kind actually has rather than a shared free-text field that
+// every producer packs differently and every consumer parses differently.
+//
+// THE MACHINERY/VENDOR DISTINCTION IS CARRIED BY THE ARM, not by a second
+// field. Every kind belongs to exactly one side — agent-repl's own machinery
+// failing, or the vendor refusing or concluding the work — and each arm's
+// comment states its side and the workspace color that side resolves to. A
+// separate class field would be a fact derivable from the arm, which is a fact
+// that can disagree with the arm.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The vendor conversation and request a vendor-side failure pertains to.
+//
+// This is CONTENT, not addressing: it is a set of facts a card may show so the
+// user can find the conversation or quote the request when asking for help.
+// Nothing routes on it and nothing compares it.
+message VendorFailureContext {
+  // The vendor conversation, verbatim. Empty when the failure happened before
+  // one existed.
+  string claude_session_id = 1;
+  // The vendor's request correlation id, for quoting in a support report.
+  // Empty when the request never got one.
+  string api_request_id = 2;
+  // The vendor's message id, when the failure names a specific response.
+  string api_message_id = 3;
+}
+
+// WHAT failed, WHEN NOTHING ASKED AND NO ENTRY IS IMPLICATED. Exactly one arm
+// is always set; an unset FailureKind is a malformed frame and must be
+// rejected rather than rendered as a generic error.
+//
+// EVERY ARM HERE IS AN EVENT, NEVER AN ANSWER, AND NEVER A ROW. A failure that
+// answers a request travels in that request's own
+// `agentrepl.v1.<Method>Response.error`. A failure that CORRELATES TO A FEED
+// ENTRY — a response that never settled, a tool that failed, a bubble that was
+// lost, a merge that did not land, a page that could not be completed — is
+// that entry's OWN `error` arm in feed.proto, which imports the evidence
+// message directly (FailureQueryTermination, FailureVendor*, FailureTurnUndriven,
+// FailureKeepAliveWindow*, FailureHistoryReplayTruncated,
+// FailureCompactionColdRead are declared below for exactly that). What is left
+// HERE is the residue that is inherently entry-less: the session dying, the
+// shim degrading, the daemon's own unclassifiable fault, the client's own
+// machinery. None of it is a conversation fact; it is footer/topbar/gate state,
+// and the arms exist so agentrepl.v1 error responses and the host surface can
+// name them.
+//
+// TWO PRODUCERS. The daemon mints the machinery arms — it is the only thing
+// that can see the shim, the store or the vendor. A frontend mints the
+// client-local arms, and ONLY those: they are the failures of the frontend's
+// own machinery, which the daemon cannot observe. Neither producer may set the
+// other's arms.
+message FailureKind {
+  oneof kind {
+
+    // ---- MACHINERY failures: agent-repl's own plumbing did not work. Nothing about
+    // the account is implicated and no amount of waiting or re-authenticating
+    // helps. This side of the vocabulary resolves the workspace BLUE. ----
+    // The agent process speaks a different protocol version than the daemon.
+    FailureShimVersionMismatch shim_version_mismatch = 1;
+    // The agent process's event stream went backwards.
+    FailureShimSeqRegression shim_seq_regression = 2;
+    // No traffic is arriving from the agent process.
+    FailureShimDegraded shim_degraded = 3;
+    // The agent process could not write to the store, so conversation is being dropped rather than persisted.
+    FailureShimStoreWriteRejected shim_store_write_rejected = 4;
+    // The workspace's session was deleted deliberately.
+    FailureSessionDeleted session_deleted = 5;
+    // A new session took over this workspace, so the previous one was stopped.
+    FailureSessionSuperseded session_superseded = 6;
+    // The agent process exited.
+    FailureSessionShimDied session_shim_died = 7;
+    // The session could not be started at all.
+    FailureSessionStartFailed session_start_failed = 8;
+    // The vendor conversation could not be resumed without breaking continuity.
+    FailureSessionResumeFailed session_resume_failed = 9;
+    // The session ended for a reason the daemon could not classify.
+    FailureSessionEndedUnclassified session_ended_unclassified = 10;
+    // Agent-repl's own machinery failed in a way it could not classify.
+    FailureInternalUnclassified internal_unclassified = 11;
+
+    // ---- CLIENT-LOCAL failures: the one part of this vocabulary a frontend
+    // mints itself. All resolve BLUE, because a frontend can only ever
+    // observe its own machinery failing. The daemon never sets one of these.
+    FailureDaemonUnreachable daemon_unreachable = 12;
+    FailureWorkspaceGone workspace_gone = 13;
+    FailureBootFailed boot_failed = 14;
+    FailureControlPlaneFailed control_plane_failed = 15;
+    FailureFrameUndecodable frame_undecodable = 16;
+    FailureStaleBundle stale_bundle = 17;
+  }
+}
+
+// The agent process speaks a different protocol version than the daemon. Both versions are named because the fix is to align them and the user needs to know which way.
+//
+// Resolves the workspace BLUE.
+message FailureShimVersionMismatch {
+  string shim_version = 1;
+  string daemon_version = 2;
+}
+
+// The agent process's event stream went backwards. A sequence that regresses means events were replayed or lost, so the conversation on screen may not be the conversation that happened.
+//
+// Resolves the workspace BLUE.
+message FailureShimSeqRegression {
+  // The sequence number that arrived.
+  uint64 seq = 1;
+  // The highest sequence already seen, which it should have exceeded.
+  uint64 last_seen_seq = 2;
+}
+
+// No traffic is arriving from the agent process. WINDOW-SHAPED: it opens when the silence starts and resolves when traffic returns.
+//
+// Resolves the workspace BLUE.
+message FailureShimDegraded {
+  // Which part of the connection went quiet.
+  string component = 1;
+}
+
+// The agent process could not write to the store, so conversation is being dropped rather than persisted.
+//
+// Resolves the workspace BLUE.
+message FailureShimStoreWriteRejected {
+  // Which writer was rejected.
+  string component = 1;
+  // The store's stated reason, verbatim.
+  string reason = 2;
+  // How many records were dropped while this was open. The count is the
+  // severity: one is a hiccup, thousands is a lost conversation.
+  int64 dropped_count = 3;
+}
+
+// The agent SDK query ended unexpectedly — the session is alive but the thing that drives it stopped.
+//
+// Resolves the workspace BLUE.
+message FailureQueryTermination {
+  // Exact query-lifecycle evidence.
+  QueryTerminationFailure detail = 1;
+}
+
+// The workspace's session was deleted deliberately. Not a fault — an account of why the conversation stopped.
+//
+// Resolves the workspace BLUE.
+message FailureSessionDeleted {}
+
+// A new session took over this workspace, so the previous one was stopped. A workspace keeps exactly one live session at a time.
+//
+// Resolves the workspace BLUE.
+message FailureSessionSuperseded {}
+
+// The agent process exited.
+//
+// Resolves the workspace BLUE.
+message FailureSessionShimDied {}
+
+// The session could not be started at all.
+//
+// Resolves the workspace BLUE.
+message FailureSessionStartFailed {
+  // The bring-up failure, verbatim.
+  string cause = 1;
+}
+
+// The vendor conversation could not be resumed without breaking continuity.
+//
+// Resolves the workspace BLUE.
+message FailureSessionResumeFailed {
+  // Exact resume-continuity evidence.
+  SessionResumeFailure detail = 1;
+}
+
+// The session ended for a reason the daemon could not classify. Its own inability to explain is the fact, and it is stated rather than dressed as one of the known endings.
+//
+// Resolves the workspace BLUE.
+message FailureSessionEndedUnclassified {
+  // The raw reason as recorded, so the account is not lost just because it
+  // was not understood.
+  string raw_reason = 1;
+}
+
+// The history re-pull ended before it reached the live window, so what is on screen has a gap in it.
+//
+// Resolves the workspace BLUE.
+message FailureHistoryReplayTruncated {
+  // Where the replay started.
+  uint64 from_seq = 1;
+  // Where it was meant to reach.
+  uint64 stop_at_seq = 2;
+  // How many records it actually delivered.
+  int64 delivered = 3;
+  // Why it stopped short, verbatim.
+  string reason = 4;
+}
+
+// A cache keep-alive window could not be closed, so new conversation is withheld until it is repaired.
+//
+// Resolves the workspace BLUE.
+message FailureKeepAliveWindowUnclosed {
+  // The repair-relevant detail, verbatim.
+  string reason = 1;
+}
+
+// A cache keep-alive window ended before it began, so the daemon's own keep-alive turn may appear in the conversation.
+//
+// Resolves the workspace BLUE.
+message FailureKeepAliveWindowInverted {
+  string reason = 1;
+}
+
+// A compaction re-read the whole conversation at the uncached rate instead of from the prompt cache — the exact cost compaction exists to avoid.
+//
+// Resolves the workspace BLUE.
+message FailureCompactionColdRead {
+  // What it cost, so the card states the waste rather than alluding to it.
+  int64 uncached_input_tokens = 1;
+}
+
+// A turn stood bound with nothing driving it, so the daemon closed it rather
+// than leaving the workspace thinking forever.
+//
+// Resolves the workspace BLUE.
+message FailureTurnUndriven {
+  // Which turn, and how long it stood undriven, verbatim.
+  string reason = 1;
+}
+
+// Agent-repl's own machinery failed in a way it could not classify. Stated as unclassified rather than filed under a neighbouring kind, because a wrong name is worse than an honest absence.
+//
+// SHARED EVIDENCE. The daemon runs ONE classifier over both the failure it
+// pushes and the refusal it returns, so an unclassifiable failure is genuinely
+// either. It is declared once here and named by the drawn arm above and by
+// every `agentrepl.v1.<Method>Error`'s unclassified arm; the arm is what says
+// which this instance is.
+//
+// Resolves the workspace BLUE.
+message FailureInternalUnclassified {
+  // The failure, verbatim.
+  string cause = 1;
+}
+
+// The network never reached the vendor. Classed with the vendor rather than with the machinery: nothing local is broken, and the work did not happen.
+//
+// Resolves the workspace PURPLE.
+message FailureVendorNetworkDown {
+  // The vendor conversation and request this failure pertains to.
+  VendorFailureContext vendor = 1;
+}
+
+// The turn hit its maximum-turns limit. A limit the user set, reached — not a fault.
+//
+// Resolves the workspace PURPLE.
+message FailureVendorMaxTurns {
+  // The vendor conversation and request this failure pertains to.
+  VendorFailureContext vendor = 1;
+}
+
+// The turn hit its budget limit. Also a chosen limit, reached.
+//
+// Resolves the workspace PURPLE.
+message FailureVendorMaxBudget {
+  // The vendor conversation and request this failure pertains to.
+  VendorFailureContext vendor = 1;
+}
+
+// The turn aborted during execution.
+//
+// Resolves the workspace PURPLE.
+message FailureVendorExecutionError {
+  // The vendor conversation and request this failure pertains to.
+  VendorFailureContext vendor = 1;
+}
+
+// The turn ended abnormally for a reason with no more specific kind.
+//
+// Resolves the workspace PURPLE.
+message FailureVendorTurnFailed {
+  // The vendor conversation and request this failure pertains to.
+  VendorFailureContext vendor = 1;
+  // The vendor's own stop reason, verbatim, since this kind is exactly the
+  // case where it did not map to a named one.
+  string stop_reason = 2;
+}
+
+// The connection to the daemon dropped and the frontend is reconnecting.
+// WINDOW-SHAPED and RETRACTED rather than resolved: when the connection comes
+// back the card is removed outright, because a settled "we were disconnected"
+// notice is noise about something the user can already see ended.
+//
+// Resolves the workspace BLUE.
+message FailureDaemonUnreachable {
+  // The socket close code, so the card distinguishes a deliberate close from
+  // a dropped one.
+  int32 close_code = 1;
+  // The close reason as the transport gave it. Empty when it gave none.
+  string close_reason = 2;
+}
+
+// The workspace this page is addressed to no longer exists on the daemon.
+// Never resolves: unlike a dropped connection, there is nothing to come back.
+//
+// Resolves the workspace BLUE.
+message FailureWorkspaceGone {}
+
+// The frontend could not start at all.
+//
+// It is the one failure that cannot be carried the way the others are — the
+// machinery that would carry it is the machinery that failed to build. A
+// frontend renders it from whatever it has, before any state exists.
+//
+// Resolves the workspace BLUE.
+message FailureBootFailed {
+  // Whatever the frontend caught, verbatim.
+  string cause = 1;
+}
+
+// A control-plane request the frontend issued outside the command stream (a
+// login, an account switch) failed.
+//
+// Resolves the workspace BLUE.
+message FailureControlPlaneFailed {
+  // Which request, in the frontend's own words, so repeats of DIFFERENT
+  // requests do not reconcile onto one card.
+  string what = 1;
+  // The failure, verbatim.
+  string cause = 2;
+}
+
+// A frame from the daemon could not be read and was skipped. Conversation may
+// be missing as a result, which is why it is a card rather than a log line.
+//
+// Resolves the workspace BLUE.
+message FailureFrameUndecodable {
+  // The decode failure, verbatim.
+  string cause = 1;
+  // The head of the frame that would not decode, for whoever debugs it.
+  string frame_head = 2;
+}
+
+// This page cannot read the daemon's state and reloading did not fix it.
+// Deliberately loud and DELIBERATELY UNRESOLVABLE: the only exit is restarting
+// the view, and offering a self-clearing version of this would hide a page
+// that is silently wrong.
+//
+// Resolves the workspace BLUE.
+message FailureStaleBundle {
+  // What did not line up, verbatim.
+  string detail = 1;
+}
+
+// Machine-readable evidence that an SDK query terminated unexpectedly.
+//
+// This message repeats the durable lifecycle record's identity and uses the
+// same typed reason messages, allowing a frontend to diagnose the termination
+// without reconstructing evidence from generic failure prose.
+//
+// THE ONLY IDENTITIES ON THIS RECORD ARE ONES A CARD CAN SHOW: the query
+// invocation that died, and the VENDOR conversation it was driving. An
+// agent-repl session identity is deliberately absent — a rendering frontend
+// has no vocabulary for one, so it could only carry it, never use it.
+message QueryTerminationFailure {
+  // The unique query() invocation that terminated.
+  string query_instance_id = 1;
+
+  // Identifies the vendor conversation when query initialization exposed it,
+  // or states explicitly that termination preceded vendor identity discovery.
+  oneof vendor_identity {
+    // The non-empty authoritative Claude conversation UUID for the query.
+    string vendor_session_id = 2;
+
+    // Records that the query ended before the SDK exposed a vendor session.
+    QueryTerminationVendorIdentityUnavailable vendor_session_identity_unavailable = 3;
+  }
+
+  // The Unix epoch time at which the termination was observed.
+  int64 observed_at_ms = 4;
+
+  // Identifies the unexpected termination condition without a status enum.
+  oneof reason {
+    // The SDK iterator ended without an intentional shim shutdown.
+    QueryTerminationUnexpectedEof unexpected_eof = 5;
+
+    // The SDK iterator threw an error, including its complete cause.
+    QueryTerminationIteratorFailure iterator_failure = 6;
+
+    // Query initialization failed, including its complete cause.
+    QueryTerminationStartupFailure startup_failure = 7;
+  }
+}
+
+// The termination reasons and the identity marker, PROJECTED from the shim's
+// own observations into this surface's vocabulary — the daemon resolves them;
+// a rendering frontend never names shim.v1.
+
+// The query ended before the SDK exposed a vendor session.
+message QueryTerminationVendorIdentityUnavailable {}
+
+// The SDK iterator ended without an intentional shim shutdown.
+message QueryTerminationUnexpectedEof {}
+
+// The SDK iterator threw an error.
+message QueryTerminationIteratorFailure {
+  // The complete cause, as the SDK reported it.
+  string cause = 1;
+}
+
+// Query initialization failed.
+message QueryTerminationStartupFailure {
+  // The complete cause, as the SDK reported it.
+  string cause = 1;
+}
+
+// Machine-readable evidence that a requested Claude conversation could not
+// be resumed without violating conversation continuity.
+//
+// It names the VENDOR conversation and nothing else, for the same reason
+// QueryTerminationFailure does: the vendor conversation is what the card
+// shows, and an agent-repl session identity is a vocabulary a rendering
+// frontend does not have.
+//
+// SHARED EVIDENCE, and the `attempt` oneof below is exactly why. A `create`
+// attempt is a CreateSession that was refused and travels in that call's
+// error; an `automatic_restore` attempt answers nobody and is drawn. One
+// message, two arms naming it, and the arm says which.
+message SessionResumeFailure {
+  // The exact Claude conversation UUID that must remain authoritative.
+  string claude_session_id = 1;
+  // The working directory used to locate the Claude transcript.
+  string cwd = 2;
+  // The configured Claude account root. Empty means the daemon's inherited
+  // Claude configuration root supplies the value.
+  string config_dir = 3;
+  // The absolute Claude configuration root used for transcript lookup.
+  string resolved_config_dir = 4;
+  // Identifies the operation whose continuity requirement could not be met.
+  oneof attempt {
+    // A frontend requested a session that continues a durable conversation.
+    SessionResumeFailureCreate create = 5;
+    // A durable agent-repl session required shim reconstruction.
+    SessionResumeFailureAutomaticRestore automatic_restore = 6;
+  }
+  // Identifies the concrete continuity invariant that prevented restoration.
+  oneof cause {
+    // No readable transcript exists for the authoritative Claude UUID.
+    SessionResumeFailureTranscriptUnavailable transcript_unavailable = 7;
+    // A recovery attempt proposed a different Claude UUID or a fresh session.
+    SessionResumeFailureIdentityMismatch identity_mismatch = 8;
+    // The exact resumed SDK query terminated before becoming driveable.
+    QueryTerminationFailure query_termination = 9;
+    // Bring-up failed before exact query-termination evidence was available.
+    SessionResumeFailureBringUpFailure bring_up_failure = 10;
+  }
+}
+
+// Marks a resume failure encountered while creating an agent-repl session.
+message SessionResumeFailureCreate {}
+
+// Marks a resume failure encountered while restoring an allocated agent-repl
+// session.
+message SessionResumeFailureAutomaticRestore {}
+
+// Records every transcript location examined for the authoritative Claude
+// conversation UUID.
+message SessionResumeFailureTranscriptUnavailable {
+  // Absolute transcript paths that were checked and found unavailable.
+  repeated string searched_paths = 1;
+}
+
+// Records a rejected recovery attempt that would have resumed another Claude
+// conversation.
+message SessionResumeFailureIdentityMismatch {
+  // The replacement Claude UUID proposed by recovery. Empty means recovery
+  // would have started a fresh conversation.
+  string replacement_claude_session_id = 1;
+}
+
+// Records an exact-resume bring-up failure that has no typed query lifecycle
+// record. The original nonblank cause is retained without classifying the
+// command as an unrelated internal failure.
+message SessionResumeFailureBringUpFailure {
+  // The complete cause returned by the driveability gate.
+  string cause = 1;
+}
+
+// A failure card that a surface OUTSIDE the feed needs to point at.
+//
+// It exists because a footer row and a command refusal both want to say "see
+// the card", and the card's address is the only thing they need in order to.
+message FailureCardRef {
+  // The Message.uuid of the card to reveal. Empty when the failure
+  // produced no card, and then the referring surface offers no way to reach
+  // one rather than scrolling somewhere arbitrary.
+  string card_uuid = 1;
+}

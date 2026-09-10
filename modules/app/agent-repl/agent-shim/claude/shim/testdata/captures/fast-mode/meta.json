@@ -1,0 +1,27 @@
+{
+  "scenario": "fast-mode",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello quickly.",
+  "prompts": [
+    {
+      "text": "Say hello quickly.",
+      "resume": false
+    }
+  ],
+  "world": "fast-mode",
+  "cwd_init": null,
+  "vendor_session_id": "1d86a8fd-9c4a-4b95-815a-7f6f8b42aee3",
+  "manual": "Fast mode is an account/serving-side state. Capture on an account where fast mode engages, or capture the `fast_mode_state` field the result message already carries (see testdata/corpus/stream/result_success.jsonl) and treat that as the golden.",
+  "expect": [
+    "result carrying fast_mode_state",
+    "session_state_changed with the fast-mode fact"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-fast-mode-yVajGD-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:44:49.996Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

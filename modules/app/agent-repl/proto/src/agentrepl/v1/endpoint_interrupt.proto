@@ -1,0 +1,111 @@
+// endpoint_interrupt.proto — Interrupt: "stop that". FEED section. One user
+// intent, three targets; THE ARM IS THE TARGET. (CancelDetachedAgents does
+// not return as a verb; the all_agents target is its fan-wide successor.)
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message InterruptRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  oneof target {
+    // The running turn (the vendor query interrupt).
+    InterruptTurn turn = 2;
+    // A detached bubble's work, by the bubble row's FeedId exactly as the
+    // feed served it (the daemon decodes it and issues the task stop).
+    frontend.v1.FeedId detached = 3;
+    // EVERY live detached agent at once — the fan-wide stop.
+    InterruptAllAgents all_agents = 4;
+  }
+  // Answers the confirm_required challenge: interrupting a TURN while
+  // detached agents are live is refused once, naming the count; resending
+  // with this set also stops those agents. Meaningless on the other
+  // targets. Default false.
+  bool confirm_agents = 5;
+}
+message InterruptTurn {}
+message InterruptAllAgents {}
+
+// THE ARM IS THE OUTCOME.
+message InterruptResponse {
+  oneof result {
+    InterruptSuccess success = 1;
+    InterruptError error = 2;
+  }
+}
+
+// THE ARM IS WHAT THE STOP DID — a frontend renders these differently, so a
+// bool cannot carry it. `nothing_running` is an ANSWER, never a failure: the
+// stop found the session already quiet, which is a legitimate reply to a
+// legitimate ask ("a stop that missed" is distinguishable BY THE ARM, not by
+// mis-classing it as an error).
+message InterruptSuccess {
+  oneof outcome {
+    // The turn was interrupted.
+    InterruptedTurn interrupted_turn = 1;
+    // The detached work was stopped.
+    InterruptedDetached interrupted_detached = 2;
+    // Nothing was running.
+    InterruptNothingRunning nothing_running = 3;
+  }
+}
+message InterruptedTurn {}
+message InterruptedDetached {
+  // How many detached agents the stop reached ("cancelled 3 agents"). The
+  // shim's task ids stay on the shim wire — daemon bookkeeping a frontend
+  // has no vocabulary for.
+  int64 count = 1;
+}
+message InterruptNothingRunning {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message InterruptError {
+  oneof kind {
+    // A turn interrupt while detached agents are live: the challenge.
+    // Resend with confirm_agents to also stop them, or stop them first
+    // via the all_agents target.
+    InterruptConfirmRequired confirm_required = 1;
+    // The workspace id is not in the daemon's registry.
+    InterruptUnknownWorkspace unknown_workspace = 2;
+    // The echoed dir disagrees with the registry's dir for this id.
+    InterruptWorkspaceRefMismatch workspace_ref_mismatch = 3;
+    // This daemon released the workspace to a successor; dial `address`.
+    InterruptTransferringAway transferring_away = 4;
+    // A joining daemon has not finished adopting this workspace yet.
+    InterruptNotYetAdopted not_yet_adopted = 5;
+    // The FeedId names no detached item.
+    InterruptNotDetachedWork not_detached_work = 6;
+    // The workspace has no session to interrupt.
+    InterruptNoSession no_session = 7;
+    // A typed shim refusal relayed (e.g. UpdateAgent nothing_running).
+    InterruptShimRefused shim_refused = 8;
+  }
+}
+
+// The are-you-sure challenge for a turn stop with live agents.
+message InterruptConfirmRequired {
+  // How many live detached agents the stop would also end.
+  int64 live_agent_count = 1;
+}
+message InterruptUnknownWorkspace {}
+message InterruptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message InterruptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message InterruptNotYetAdopted {}
+message InterruptNotDetachedWork {}
+message InterruptNoSession {}
+message InterruptShimRefused {
+  // The shim's own account of the refusal.
+  string detail = 1;
+}

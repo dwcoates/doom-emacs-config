@@ -1,0 +1,81 @@
+// endpoint_start_turn.proto — StartTurn: SPAWN the session's turn. THE MAIN
+// AGENT'S VERB ONLY — an existing agent is prompted with UpdateAgent. Unary:
+// returns once the prompt is ACCEPTED, with the first page, never waiting
+// for the turn; the response's `prompt.agent` is the WatchAgent address.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/history.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+import "conversation/v1/prompt_origin.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The prompt the daemon is handing over NOW. Nothing here is a queue entry:
+// by the time this is sent the daemon has already decided no turn is in
+// flight, and the shim submits it to the agent binary immediately.
+message StartTurnRequest {
+  // The turn's identity, MINTED BY THE DAEMON and adopted by the shim: every
+  // durable record the turn produces is stamped with it, and the open turn is
+  // addressed by it. The shim never mints one of its own.
+  conversation.v1.TurnId turn = 1;
+  // The prompt, in the one canonical form that travels client → daemon →
+  // tray → here → record.
+  conversation.v1.UserSaid said = 2;
+  // WHO CAUSED this prompt — a human send site, a daemon-driven merge step.
+  // Closed attribution copied onto the turn's durable record so a stored turn
+  // can be traced to the exact situation that caused it.
+  conversation.v1.PromptOrigin origin = 3;
+  // The opening page's budget.
+  uint32 page_size = 4;
+  // The newest entry the caller already holds. UNSET = repaint: a full first
+  // page rides the response. SET = catch-up: only entries newer than this.
+  optional conversation.v1.HistoryPointer known_through = 5;
+}
+
+// THE ARM IS THE OUTCOME OF THE CALL — whether the prompt was ACCEPTED.
+// Nothing about the turn itself returns here: the turn is WatchAgent's.
+message StartTurnResponse {
+  oneof result {
+    StartTurnSuccess success = 1;
+    StartTurnFailure failure = 2;
+  }
+}
+
+// The prompt was accepted and the turn is open. The turn's frames are
+// WatchAgent's; what returns here is the prompt as delivered and the OPENING
+// PAGE the request's `page_size` / `known_through` asked for.
+message StartTurnSuccess {
+  // The prompt as delivered: the daemon's id adopted, the recipient resolved,
+  // the text as accepted. `prompt.agent` is the address for WatchAgent. The same message history replays.
+  conversation.v1.AgentPrompt prompt = 1;
+  // The opening page: a full first page of `page_size` entries when
+  // `known_through` was UNSET, else only the entries newer than it. Always
+  // set on success; an empty page is a page with no entries, never an
+  // absent one.
+  conversation.v1.HistoryPage page = 2;
+}
+
+// Not accepted. THE ARM IS WHY.
+message StartTurnFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // A turn is already open — the DAEMON's fault (it is the only queue).
+    StartTurnTurnAlreadyOpen turn_already_open = 2;
+    // No session is open on this shim.
+    StartTurnNoSession no_session = 3;
+    // The agent binary refused the prompt; `detail` carries its wording.
+    StartTurnVendorRefused vendor_refused = 4;
+    // The vendor query is dead; nothing can accept a prompt until the
+    // session is restarted.
+    StartTurnQueryDead query_dead = 5;
+  }
+}
+message StartTurnTurnAlreadyOpen {}
+message StartTurnNoSession {}
+message StartTurnVendorRefused {}
+message StartTurnQueryDead {}

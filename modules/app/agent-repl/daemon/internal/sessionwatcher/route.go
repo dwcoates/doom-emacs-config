@@ -1,0 +1,1140 @@
+package sessionwatcher
+
+import (
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// ---- the session's standing stream ----
+
+// routeSessionUpdateLocked routes one SessionUpdate arm to the views that
+// resolve from it. The split is per arm and stated once here: session identity
+// and health are the topbar's, accounting and the rate-limit status are the
+// footer's, and the session's death is everyone's.
+func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
+	switch u := update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_Diagnostics:
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the health reporter, the topbar and the roster", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		// THE RECORD IS WRITTEN BEFORE THE VIEW IS DRAWN, and that order is
+		// the whole point of this arm. The topbar's warning strip and the
+		// roster's degraded dot are drawn from the push itself, while
+		// SessionHealth answers from the health reporter's recorded faults —
+		// so a client that saw the warning and then asked SessionHealth was
+		// told "healthy" for as long as the fault took to land, and a client
+		// that saw the warning retracted could still be told "unhealthy".
+		// MEASURED: a topbar republish at 17:36:05.586423 and the matching
+		// `daemon.health.open_fault` at 17:36:05.588491, a 2.1ms window that
+		// an integration run at -parallel 16 lost a test to. Recording first
+		// closes it in BOTH directions: the published view is never ahead of
+		// the health the daemon will answer with.
+		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		// THE ROSTER READS THE SAME PUSH. An open degraded window is what the
+		// row's `degraded` arm is made of, and without this route that arm has
+		// no producer at all: the dot would read `ready` for a session the
+		// topbar is drawing as degraded, and the two surfaces would disagree
+		// about one fact.
+		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+
+	case *conversationv1.SessionUpdate_ContextUsage,
+		*conversationv1.SessionUpdate_FastMode,
+		*conversationv1.SessionUpdate_McpServer,
+		*conversationv1.SessionUpdate_IdentityRotated:
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+
+	case *conversationv1.SessionUpdate_ModelChanged,
+		*conversationv1.SessionUpdate_PermissionModeChanged:
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and roster", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+
+	case *conversationv1.SessionUpdate_AccountUsage,
+		*conversationv1.SessionUpdate_RateLimitStatus,
+		*conversationv1.SessionUpdate_Compacting:
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Footer.OnSessionUpdate(w.ws, update)
+
+	case *conversationv1.SessionUpdate_QueryDied:
+		w.routeQueryDiedLocked(update)
+
+	default:
+		w.log.Warn("daemon.sessionwatcher.session_update_unrouted", "a SessionUpdate arm has no route", dlog.Context{
+			"arm": sessionArm(update),
+		})
+	}
+}
+
+// routeQueryDiedLocked handles the session's death: every view reflects it,
+// and the daemon's own machinery is told, because an open turn will never get
+// a terminal now and a lease holder waiting on freeness would wait forever.
+func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
+	w.log.Error("daemon.sessionwatcher.query_died", "the session's query died", nil)
+	w.sessionEnded = true
+	// A TERMINAL HELD FOR A NAME THAT WILL NEVER COME. The query is dead, so
+	// StartTurn's answer — the only thing that names the main agent — is not
+	// arriving; the views take the terminal now rather than lose it.
+	w.flushHeldTerminalLocked()
+
+	w.sinks.Footer.OnSessionUpdate(w.ws, update)
+	// THE FEED MAY NOT KNOW THE TURN YET. OnTurnOpening records the turn
+	// BEFORE StartTurn is called, and a query that dies while that call is
+	// still in flight beats Feed.OnTurnOpened -- the feed's only other source
+	// for which turn is running. Handing it over here is what makes the
+	// death's terminal reach the turn it killed; without it the feed drew
+	// nothing and the shim's own execution_error stand-in became the account.
+	if w.turn != nil {
+		w.sinks.Feed.OnTurnOpened(w.ws, *w.turn)
+	}
+	w.sinks.Feed.OnSessionUpdate(w.ws, update)
+	w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
+
+	if w.turn != nil {
+		w.turnEndedLocked(*w.turn, wsm.CloseFailed)
+	}
+	if changed := w.dropAllLiveWorkLocked(); changed {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// dropAllLiveWorkLocked empties the live set, because nothing survives the
+// session's query. It reports whether anything was live.
+func (w *watcher) dropAllLiveWorkLocked() bool {
+	changed := len(w.agents) > 0 || len(w.shells) > 0 || len(w.monitors) > 0
+	for key := range w.agents {
+		w.reapAgentLocked(key)
+	}
+	for key := range w.shells {
+		w.reapShellLocked(key)
+	}
+	w.monitors = map[string]*conversationv1.DetachedWorkId{}
+	return changed
+}
+
+// sessionArm names a SessionUpdate's set arm for a log record.
+func sessionArm(update *conversationv1.SessionUpdate) string {
+	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_Diagnostics:
+		return "diagnostics"
+	case *conversationv1.SessionUpdate_ContextUsage:
+		return "context_usage"
+	case *conversationv1.SessionUpdate_ModelChanged:
+		return "model_changed"
+	case *conversationv1.SessionUpdate_PermissionModeChanged:
+		return "permission_mode_changed"
+	case *conversationv1.SessionUpdate_FastMode:
+		return "fast_mode"
+	case *conversationv1.SessionUpdate_McpServer:
+		return "mcp_server"
+	case *conversationv1.SessionUpdate_IdentityRotated:
+		return "identity_rotated"
+	case *conversationv1.SessionUpdate_AccountUsage:
+		return "account_usage"
+	case *conversationv1.SessionUpdate_RateLimitStatus:
+		return "rate_limit_status"
+	case *conversationv1.SessionUpdate_Compacting:
+		return "compacting"
+	case *conversationv1.SessionUpdate_QueryDied:
+		return "query_died"
+	default:
+		return "unset"
+	}
+}
+
+// ---- an agent's stream ----
+
+// routeAgentResponseLocked routes one WatchAgent frame: the opening catch-up
+// page, or one entry as written.
+func (w *watcher) routeAgentResponseLocked(a *agentWatch, resp *shimv1.WatchAgentResponse) {
+	if page := resp.GetPage(); page != nil {
+		w.routeOpeningPageLocked(a, page)
+		return
+	}
+	if at := resp.GetEntry(); at != nil {
+		w.routeEntryLocked(a, at)
+		return
+	}
+	w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "a WatchAgentResponse carried no frame", dlog.Context{
+		"agent_id": a.id.GetValue(),
+	})
+}
+
+// routeOpeningPageLocked hands an OPENING PAGE to the feed whole — a watch's
+// own first frame, or the page StartTurnSuccess carried.
+//
+// THE PAGE IS NOT REPLAYED AS LIVE FRAMES. Its entries are NEWEST FIRST, so
+// walking them would see a turn's terminal before its prompt and leave a
+// finished turn recorded as in flight. The only thing read out of a page is
+// the MAIN agent's identity, which an adopted session has no other source for
+// until its next StartTurn.
+func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.HistoryPage) {
+	if entries := page.GetEntries(); len(entries) > 0 {
+		if ptr := entries[0].GetAt(); ptr != nil {
+			w.known[watchKey(a.id)] = ptr
+		}
+	}
+	if a.id == nil {
+		for _, entry := range page.GetEntries() {
+			if prompt := entry.GetEntry().GetUserPrompt(); prompt != nil {
+				w.adoptMainAgentLocked(prompt.GetAgent(), "history_page")
+				// A PAGE OWES THE VIEWS NO TURN-OPEN EDGE — it is newest
+				// first and opens nothing — so the naming is the whole
+				// precondition and the held terminal goes now.
+				w.releaseHeldTerminalLocked()
+				break
+			}
+		}
+	}
+	w.log.Debug("daemon.sessionwatcher.history_page", "opening page routed to the feed", dlog.Context{
+		"agent_id": a.id.GetValue(), "entries": len(page.GetEntries()),
+	})
+	agent := w.watchAgentLocked(a)
+	w.sinks.Feed.OnHistoryPage(w.ws, agent, page, w.addr)
+	// THE FOOTER SEES THE PAGE TOO, and for one reason only: a resumed
+	// session's prior turns are facts no edge on this daemon's streams will
+	// ever restate, so without the page the strip reports a rehydrated
+	// conversation as one that has never run.
+	w.sinks.Footer.OnHistoryPage(w.ws, agent, page)
+}
+
+// routeEntryLocked routes one live history entry.
+func (w *watcher) routeEntryLocked(a *agentWatch, at *conversationv1.HistoryEntryAt) {
+	if ptr := at.GetAt(); ptr != nil {
+		w.known[watchKey(a.id)] = ptr
+	}
+	entry := at.GetEntry()
+	if prompt := entry.GetUserPrompt(); prompt != nil {
+		w.routePromptLocked(a, prompt)
+		return
+	}
+	if frame := entry.GetAgentFrame(); frame != nil {
+		w.routeAgentFrameLocked(a, frame, at.GetAt())
+		return
+	}
+	w.log.Warn("daemon.sessionwatcher.entry_unrouted", "a history entry carried no arm", dlog.Context{
+		"agent_id": a.id.GetValue(),
+	})
+}
+
+// routePromptLocked routes a prompt delivered to the watched agent. On the
+// MAIN watch a live prompt is also the turn opening: the prompt carries the
+// daemon's minted TurnId and names its recipient, which is the main agent.
+func (w *watcher) routePromptLocked(a *agentWatch, prompt *conversationv1.AgentPrompt) {
+	if a.id == nil {
+		w.adoptMainAgentLocked(prompt.GetAgent(), "live_prompt")
+		if w.isMainAgent(prompt.GetAgent()) && prompt.GetId().GetValue() != "" {
+			turn := ids.TurnID(prompt.GetId().GetValue())
+			w.turn = &turn
+			w.log.Debug("daemon.sessionwatcher.turn_opened", "a turn is in flight", dlog.Context{
+				"turn_id": string(turn), "agent_id": prompt.GetAgent().GetValue(),
+			})
+		}
+		// The turn this prompt opened is recorded, so a terminal held for the
+		// naming can be replayed against it.
+		w.releaseHeldTerminalLocked()
+	}
+	w.log.Debug("daemon.sessionwatcher.prompt", "prompt routed to the feed", dlog.Context{
+		"agent_id": prompt.GetAgent().GetValue(), "turn_id": prompt.GetId().GetValue(),
+	})
+	w.sinks.Feed.OnPrompt(w.ws, prompt.GetAgent(), prompt, w.addr)
+}
+
+// routeAgentFrameLocked routes one AgentFrame by its arm. THE UNIT UPSERTED IS
+// THE FRAME'S OWN agent_id, whichever stream carried it: frames are flat and
+// nothing here reconstructs ancestry.
+func (w *watcher) routeAgentFrameLocked(a *agentWatch, frame *conversationv1.AgentFrame, at *conversationv1.HistoryPointer) {
+	agent := frame.GetAgentId()
+
+	switch {
+	case frame.GetUpdate() != nil:
+		w.routeUpdateLocked(agent, frame.GetUpdate(), at)
+	case frame.GetSuccess() != nil:
+		w.routeTerminalLocked(a, agent, frame.GetSuccess(), nil)
+	case frame.GetFailure() != nil:
+		w.routeTerminalLocked(a, agent, nil, frame.GetFailure())
+	case frame.GetDetachedWork() != nil:
+		w.routeDetachedWorkLocked(agent, frame.GetDetachedWork())
+	default:
+		w.log.Warn("daemon.sessionwatcher.agent_frame_unrouted", "an AgentFrame carried no result arm", dlog.Context{
+			"agent_id": agent.GetValue(),
+		})
+	}
+}
+
+// routeUpdateLocked routes one AgentUpdate arm.
+func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conversationv1.AgentUpdate, at *conversationv1.HistoryPointer) {
+	switch {
+	case update.GetActivity() != nil:
+		w.routeActivityLocked(agent, update.GetActivity())
+
+	case update.GetQuestion() != nil:
+		question := update.GetQuestion()
+		w.log.Debug("daemon.sessionwatcher.question", "the agent is blocked on a choice", dlog.Context{
+			"agent_id": agent.GetValue(), "question_id": question.GetId().GetValue(),
+		})
+		w.sinks.Feed.OnQuestion(w.ws, agent, question, w.addr)
+		w.sinks.Footer.OnQuestion(w.ws, agent, question)
+		w.notifyQuestionLocked(question)
+
+	case update.GetPermission() != nil:
+		permission := update.GetPermission()
+		w.log.Debug("daemon.sessionwatcher.permission", "the agent is blocked on consent", dlog.Context{
+			"agent_id": agent.GetValue(), "permission_id": permission.GetId().GetValue(),
+		})
+		w.sinks.Feed.OnPermission(w.ws, agent, permission, w.addr)
+		w.sinks.Footer.OnPermission(w.ws, agent, permission)
+		w.sinks.Sidebar.OnPermission(w.ws, agent, permission)
+		w.notifyPermissionLocked(permission)
+
+	case update.GetContextCut() != nil:
+		w.log.Debug("daemon.sessionwatcher.context_cut", "the conversation was cut; the footer clears its cut states", dlog.Context{
+			"agent_id": agent.GetValue(),
+		})
+		w.sinks.Feed.OnContextCut(w.ws, agent, update.GetContextCut(), at, w.addr)
+		w.sinks.Footer.OnContextCut(w.ws, agent, update.GetContextCut())
+
+	case update.GetApiError() != nil:
+		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
+			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
+		})
+		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), w.addr)
+		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
+
+	case update.GetContextBudgetWarning() != nil:
+		// THE AGENT PLANE owns the budget warning: it is a transcript
+		// attachment the sidecar produces, and the footer's activity line is
+		// its only consumer.
+		w.log.Debug("daemon.sessionwatcher.context_budget_warning", "the vendor warned the context window is filling", dlog.Context{
+			"agent_id": agent.GetValue(),
+		})
+		w.sinks.Footer.OnContextBudgetWarning(w.ws, agent, update.GetContextBudgetWarning())
+
+	default:
+		w.log.Warn("daemon.sessionwatcher.update_unrouted", "an AgentUpdate arm has no route", dlog.Context{
+			"agent_id": agent.GetValue(),
+		})
+	}
+}
+
+// routeActivityLocked routes one unit of a turn's synchronous progress, and
+// records what the unit taught the watcher on the way through.
+func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	w.recordActivityLocked(act)
+
+	w.sinks.Feed.OnActivity(w.ws, agent, act, w.addr)
+	w.sinks.Footer.OnActivity(w.ws, agent, act)
+	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
+	// but it also accumulates the SESSION's token spend from the usage every
+	// activity carries (internal/resolve/topbar's observeUsage), and a sink
+	// handed only the unmodeled frames would count nothing at all.
+	w.sinks.Topbar.OnActivity(w.ws, agent, act)
+	if act.GetUnmodeled() != nil {
+		w.log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", dlog.Context{
+			"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(act.GetUnmodeled()),
+		})
+	}
+	w.reapEndedMonitorLocked(act)
+	w.routeDetachedSubagentLocked(agent, act)
+	w.watchSpawnedSubagentLocked(act)
+	w.notifyPushLocked(act)
+}
+
+// routeDetachedSubagentLocked routes a subagent frame that belongs to work
+// which has ALREADY LEFT THE TURN, addressed by its handle.
+//
+// WHY THE HANDLE AND NOT THE STREAM. A detached run's frames reach this daemon
+// on either book: the spawning agent's, when the producer settles the unit
+// there (a task notification does exactly that), or the run's own, which the
+// watcher opened at the announcement. The footer's chip counts LIVE runs, so it
+// must retire one at its terminal WHEREVER the terminal arrived — and the only
+// thing common to both deliveries is the work handle, which is why this routes
+// by identity rather than by which stream carried the frame.
+//
+// The handle is recovered two ways, and both are facts this watcher already
+// holds: the unit's own detachment (`facts[unit].work`, remembered when the
+// announcement resolved), and the watch the frame arrived on (`entry.work`,
+// set when the subagent's stream became detached work).
+func (w *watcher) routeDetachedSubagentLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
+	sub := act.GetSubagent()
+	if sub == nil {
+		return
+	}
+	work := w.detachedHandleForLocked(agent, act)
+	if work == nil {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.detached_subagent_frame", "a detached subagent frame was routed by its handle", dlog.Context{
+		"work_id": work.GetValue(), "agent_id": agent.GetValue(),
+		"activity_id": act.GetActivityId().GetValue(),
+	})
+	w.sinks.Footer.OnSubagent(w.ws, work, sub)
+	w.reapSettledDetachedSubagentLocked(work, sub)
+}
+
+// reapSettledDetachedSubagentLocked drops a detached subagent from the LIVE-WORK
+// SET at its own terminal arm.
+//
+// THE UNIT'S TERMINAL IS THE ONLY SETTLE THE CONTRACT PROMISES. A detached run's
+// own stream carries its response frames and no agent terminal: the producer
+// settles the run as the SUBAGENT UNIT's terminal arm ("exactly one terminal
+// arm ... on whichever stream is carrying the unit"), and the minting rule makes
+// that frame retire the handle by equality — "a subagent's end retires the
+// handle ... without any join table". So the live set, exactly like the footer's
+// chip, retires the run HERE rather than waiting for a stream terminal that is
+// never owed. Waiting for one left every settled detached subagent live for the
+// rest of the session, which is what AwaitFree, turn liveness and the shutdown
+// drain all read.
+func (w *watcher) reapSettledDetachedSubagentLocked(work *conversationv1.DetachedWorkId, sub *conversationv1.AgentSubagent) {
+	if sub.GetSuccess() == nil && sub.GetFailure() == nil {
+		return
+	}
+	key, ok := w.detachedAgentKeyLocked(work)
+	if !ok {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.detached_subagent_settled", "a detached subagent settled at its own terminal", dlog.Context{
+		"work_id": work.GetValue(), "agent_id": key, "failed": sub.GetFailure() != nil,
+	})
+	if w.reapAgentLocked(key) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// detachedAgentKeyLocked answers which watched agent reports this handle, by
+// EQUALITY on the handle and nothing else — the live set is keyed by agent id
+// while detached work is addressed by its handle, and the watch's own `work` is
+// the one place the two are already tied together.
+func (w *watcher) detachedAgentKeyLocked(work *conversationv1.DetachedWorkId) (string, bool) {
+	if work.GetValue() == "" {
+		return "", false
+	}
+	for key, entry := range w.agents {
+		if entry.work.GetValue() == work.GetValue() {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+// detachedHandleForLocked answers the handle a subagent frame belongs to, or
+// nil when the run it names has not detached.
+func (w *watcher) detachedHandleForLocked(agent *conversationv1.AgentId, act *conversationv1.AgentActivity) *conversationv1.DetachedWorkId {
+	if fact, ok := w.facts[act.GetActivityId().GetValue()]; ok && fact.work != nil {
+		return fact.work
+	}
+	if entry, ok := w.agents[agent.GetValue()]; ok && entry.work != nil {
+		return entry.work
+	}
+	return nil
+}
+
+// notifyPushLocked raises the host notification a PushNotification send earns.
+//
+// The agent reaching an ABSENT user is the attention marker's whole reason for
+// existing (agent_activity.proto: "the LOCAL attention presentation ... is this
+// system's own fan-out of the fact"), and nothing else in the daemon fans it
+// out. The kind is agent_addressed: the agent addressed the user directly, and
+// the pushed message IS the notification line.
+//
+// Only the START is a notification. The vendor's success and failure states
+// report on a send already announced, and re-raising attention for them would
+// mark the workspace twice for one message.
+func (w *watcher) notifyPushLocked(act *conversationv1.AgentActivity) {
+	push, ok := act.GetItem().(*conversationv1.AgentActivity_PushNotification)
+	if !ok {
+		return
+	}
+	start := push.PushNotification.GetStart()
+	if start == nil {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "push notification raised", dlog.Context{
+		"activity_id": act.GetActivityId().GetValue(),
+	})
+	w.sinks.Lifecycle.OnNotification(w.ws, HostNotification{
+		Text: start.GetMessage(),
+		At:   instantOf(start.GetStartedAt().GetAtMs()),
+		Kind: NotificationAgentAddressed,
+	})
+}
+
+// watchSpawnedSubagentLocked opens the WatchAgent stream a SYNC subagent's own
+// work arrives on. A subagent's frames are addressed to the created agent and
+// draw on that agent's sub-feed, and the only way they ever reach the daemon
+// is a watch opened for it — so the spawn's start frame opens one eagerly,
+// exactly as a detached announcement does. The watch is NOT live work: an
+// in-turn subagent is the turn's own progress, and counting it would make the
+// workspace unfree for the whole spawn.
+func (w *watcher) watchSpawnedSubagentLocked(act *conversationv1.AgentActivity) {
+	start := act.GetSubagent().GetStart()
+	if start == nil {
+		return
+	}
+	created := start.GetCreatedAgentId()
+	if created.GetValue() == "" {
+		w.log.Error("daemon.sessionwatcher.subagent_unaddressable", "a subagent spawn named no created agent to watch", dlog.Context{
+			"activity_id": act.GetActivityId().GetValue(),
+		})
+		return
+	}
+	if _, ok := w.agents[created.GetValue()]; ok {
+		w.log.Debug("daemon.sessionwatcher.subagent_watch_repeat", "the spawned subagent is already watched", dlog.Context{
+			"agent_id": created.GetValue(),
+		})
+		return
+	}
+	entry := &agentWatch{id: created}
+	w.agents[created.GetValue()] = entry
+	w.log.Debug("daemon.sessionwatcher.subagent_watch", "watching a spawned subagent's own stream", dlog.Context{
+		"agent_id": created.GetValue(), "activity_id": act.GetActivityId().GetValue(),
+	})
+	w.openAgentStreamLocked(entry)
+}
+
+// routeTerminalLocked routes how one agent's stream ended, and reaps the watch
+// it was carried on. Exactly one of success and failure is set.
+func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	if a.id == nil && w.mainAgent == nil {
+		// THE MAIN AGENT HAS NOT BEEN NAMED YET, so this terminal cannot be
+		// attributed to the turn. It arrived on the SHIM'S STREAM plane while
+		// the naming rides StartTurn's answer, and the two planes carry no
+		// ordering between them — so under load the end outruns the name.
+		//
+		// IT IS HELD, NOT DROPPED. Routing it unattributed would leave the
+		// turn standing in flight with no edge left to end it: the footer
+		// never comes back to idle and every freeness waiter hangs. Guessing
+		// the attribution is equally wrong — it would drain the prompt queue
+		// on a subagent's terminal. So the WHOLE terminal waits here, views
+		// included, and is replayed in full the moment the name lands
+		// (adoptMainAgentLocked) or the turn is known to be unattributable
+		// (flushHeldTerminalLocked).
+		//
+		// DEBUG, NOT WARN: the hold is the design, and the race is an
+		// ordinary consequence of two planes with no ordering between them.
+		w.log.Debug("daemon.sessionwatcher.turn_end_withheld", "a terminal arrived before the main agent was named", dlog.Context{
+			"agent_id": agent.GetValue(), "turn_id": turnValue(w.turn),
+		})
+		if w.held != nil {
+			// ONE SLOT, and a second occupant means the main watch produced
+			// two terminals with no naming in between. That is not a thing the
+			// contract allows, and the first one would be silently lost.
+			w.log.Error("daemon.sessionwatcher.turn_end_withheld_twice", "a second terminal arrived while one was already held", dlog.Context{
+				"held_agent_id": w.held.agent.GetValue(), "agent_id": agent.GetValue(),
+			})
+		}
+		w.held = &heldTerminal{agent: agent, success: success, failure: failure}
+		return
+	}
+
+	isMain := w.isMainAgent(agent)
+
+	var turn *ids.TurnID
+	if isMain && w.turn != nil {
+		open := *w.turn
+		turn = &open
+	}
+
+	w.log.Debug("daemon.sessionwatcher.agent_terminal", "an agent's stream ended", dlog.Context{
+		"agent_id": agent.GetValue(), "main": isMain, "failed": failure != nil,
+	})
+	w.sinks.Feed.OnAgentTerminal(w.ws, agent, turn, success, failure, w.addr)
+	w.sinks.Footer.OnAgentTerminal(w.ws, agent, turn, success, failure)
+	w.sinks.Sidebar.OnAgentTerminal(w.ws, agent, turn, success, failure)
+
+	switch {
+	case isMain && turn != nil:
+		how := turnCloseOf(success, failure)
+		w.log.Debug("daemon.sessionwatcher.turn_ended", "the turn closed", dlog.Context{
+			"turn_id": string(*turn), "close": int(how),
+		})
+		w.turnEndedLocked(*turn, how)
+	}
+
+	if w.reapAgentLocked(agent.GetValue()) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// heldTerminal is a main-watch terminal that arrived before the main agent was
+// named. It is the whole terminal, so its replay is indistinguishable from the
+// routing it would have had if the name had come first.
+type heldTerminal struct {
+	agent   *conversationv1.AgentId
+	success *conversationv1.AgentSuccess
+	failure *conversationv1.AgentFailure
+}
+
+// releaseHeldTerminalLocked replays a held terminal now that the main agent has
+// a name. It is called from the ONE place the name is latched, so the replay
+// cannot re-hold: w.mainAgent is non-nil by the time it runs.
+func (w *watcher) releaseHeldTerminalLocked() {
+	held := w.held
+	if held == nil || w.mainAgent == nil {
+		return
+	}
+	w.held = nil
+	w.log.Debug("daemon.sessionwatcher.turn_end_released", "the held terminal was routed once the main agent was named", dlog.Context{
+		"agent_id": held.agent.GetValue(), "turn_id": turnValue(w.turn),
+	})
+	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.success, held.failure)
+	// OFF THE CALLER'S GOROUTINE. See flushTurnEndsAsync: the naming arrives on
+	// the prompt queue's own call, and the turn end goes back to that queue.
+	w.flushTurnEndsAsync()
+}
+
+// flushHeldTerminalLocked routes a still-held terminal on the edges that settle
+// the turn WITHOUT ever naming a main agent — the shim's refusal of the turn,
+// and the session's own death. The attribution will never arrive, so the views
+// take it unattributed rather than the terminal being lost.
+func (w *watcher) flushHeldTerminalLocked() {
+	held := w.held
+	if held == nil {
+		return
+	}
+	w.held = nil
+	w.log.Info("daemon.sessionwatcher.turn_end_unattributed", "a held terminal was routed unattributed; the main agent was never named", dlog.Context{
+		"agent_id": held.agent.GetValue(),
+	})
+	w.sinks.Feed.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure, w.addr)
+	w.sinks.Footer.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
+	w.sinks.Sidebar.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
+	if w.reapAgentLocked(held.agent.GetValue()) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// mainWatchLocked is the main agent's watch, which a replayed terminal is
+// routed against. The watch is opened at bring-up; the empty stand-in keeps a
+// replay from depending on that ordering.
+func (w *watcher) mainWatchLocked() *agentWatch {
+	if w.main != nil {
+		return w.main
+	}
+	return &agentWatch{}
+}
+
+// turnCloseOf derives how a turn ended from the terminal arm that ended it.
+// AgentSuccess.backgrounded closes the turn as COMPLETED: the stream ended
+// because what was asked for happened, and the work's own stream carries it
+// from there.
+func turnCloseOf(success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) TurnClose {
+	if failure != nil {
+		return wsm.CloseFailed
+	}
+	if success.GetInterrupted() != nil {
+		return wsm.CloseKilled
+	}
+	return wsm.CloseCompleted
+}
+
+// turnValue renders a turn id for a log record.
+func turnValue(turn *ids.TurnID) string {
+	if turn == nil {
+		return ""
+	}
+	return string(*turn)
+}
+
+// ---- detached work ----
+
+// routeDetachedWorkLocked routes an announcement that work has left a stream,
+// and opens the watch it names. The OPEN SET IS THE LIVE SET: opening the
+// watch is what makes the item live, and no start/end edges are ever paired to
+// reconstruct membership.
+func (w *watcher) routeDetachedWorkLocked(announcer *conversationv1.AgentId, work *conversationv1.AgentDetachedWork) {
+	w.sinks.Feed.OnDetachedWork(w.ws, announcer, work, w.addr)
+	w.sinks.Footer.OnDetachedWork(w.ws, announcer, work)
+	w.sinks.Sidebar.OnDetachedWork(w.ws, announcer, work)
+
+	kind, agent := w.resolveDetachedLocked(work)
+	handle := work.GetWork()
+	w.log.Debug("daemon.sessionwatcher.detached_work", "work left its stream", dlog.Context{
+		"work_id": handle.GetValue(), "kind": kind.String(), "agent_id": agent.GetValue(),
+	})
+
+	switch kind {
+	case kindSubagent:
+		if agent.GetValue() == "" {
+			w.log.Error("daemon.sessionwatcher.detached_subagent_unaddressable", "a detached subagent named no agent to watch", dlog.Context{
+				"work_id": handle.GetValue(),
+			})
+			return
+		}
+		if entry, ok := w.agents[agent.GetValue()]; ok {
+			// THE SYNC WATCH BECOMES THE DETACHED ONE. A spawn watched as the
+			// turn's own progress carries NO handle, and the handle is what
+			// the live set reports -- so returning here without promoting the
+			// entry leaves the live set stating no agents, and an interrupt
+			// addressed at all of them answering that nothing is running.
+			if entry.work == nil {
+				entry.work = handle
+				w.log.Debug("daemon.sessionwatcher.detached_work_promoted", "a watched subagent became detached work", dlog.Context{
+					"agent_id": agent.GetValue(), "work_id": handle.GetValue(),
+				})
+				w.publishLiveWorkLocked()
+				// The promotion is not an excuse to leave a refused watch
+				// dark: a spawn whose open the shim refused has no stream,
+				// and this announcement is an occasion to open one.
+				if entry.stream == nil {
+					w.openAgentStreamLocked(entry)
+				}
+				return
+			}
+			// A REPEAT IS ALSO A RETRY, exactly as it is for a shell: the
+			// shim refuses WatchAgent for a book it has not registered yet,
+			// so an entry can be carrying no stream, and the repeated
+			// announcement is the occasion to open one.
+			if entry.stream == nil {
+				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached subagent's watch", dlog.Context{
+					"agent_id": agent.GetValue(),
+				})
+				w.openAgentStreamLocked(entry)
+				return
+			}
+			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the subagent is already watched", dlog.Context{
+				"agent_id": agent.GetValue(),
+			})
+			return
+		}
+		entry := &agentWatch{id: agent, work: handle}
+		w.agents[agent.GetValue()] = entry
+		w.openAgentStreamLocked(entry)
+		w.publishLiveWorkLocked()
+
+	case kindBash:
+		if handle.GetValue() == "" {
+			w.log.Error("daemon.sessionwatcher.detached_shell_unaddressable", "a detached shell named no handle to watch", nil)
+			return
+		}
+		if entry, ok := w.shells[handle.GetValue()]; ok {
+			// A REPEAT IS ALSO A RETRY. The shim refuses WatchBash while its
+			// store holds no rows for the handle yet, so an entry can be
+			// carrying no stream; the repeated announcement is the occasion
+			// to open one, and answering it "already watched" would leave the
+			// shell dark for the rest of the session.
+			if entry.stream == nil {
+				w.log.Info("daemon.sessionwatcher.detached_work_reopen", "a repeated announcement re-opened a detached shell's watch", dlog.Context{
+					"work_id": handle.GetValue(),
+				})
+				if !w.openShellStreamLocked(entry) {
+					delete(w.shells, handle.GetValue())
+					w.publishLiveWorkLocked()
+				}
+				return
+			}
+			w.log.Debug("daemon.sessionwatcher.detached_work_repeat", "the shell is already watched", dlog.Context{
+				"work_id": handle.GetValue(),
+			})
+			return
+		}
+		entry := &shellWatch{work: handle}
+		w.shells[handle.GetValue()] = entry
+		if !w.openShellStreamLocked(entry) {
+			// A NIL-STREAM ENTRY NEVER PERSISTS: while one sits in the map
+			// every repeated announcement is answered "already watched", so
+			// the refusal would be permanent. Forgetting it makes the next
+			// announcement open the watch afresh.
+			delete(w.shells, handle.GetValue())
+			return
+		}
+		w.publishLiveWorkLocked()
+
+	case kindMonitor:
+		// FOOTER-ONLY: the contract gives a monitor no stream, so liveness is
+		// tracked from this announcement and dropped at the monitor
+		// activity's own terminal.
+		if _, ok := w.monitors[handle.GetValue()]; ok {
+			return
+		}
+		w.monitors[handle.GetValue()] = handle
+		w.publishLiveWorkLocked()
+
+	case kindWorkflow:
+		// A workflow is KICKED: no watch is ever opened for one, and the shim
+		// client deliberately exposes no workflow verbs.
+		w.log.Info("daemon.sessionwatcher.workflow_kicked", "a workflow run is not watched", dlog.Context{
+			"work_id": handle.GetValue(),
+		})
+
+	default:
+		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named no kind this daemon could resolve", dlog.Context{
+			"work_id": handle.GetValue(),
+		})
+	}
+}
+
+// resolveDetachedLocked answers what KIND of work an announcement names, and
+// for a subagent the agent id its watch is addressed by.
+//
+// The `created` origin states the kind outright. The `detached` origin does
+// NOT: it names only the in-turn unit the work used to be, so the kind is
+// recovered from what that unit's own activity already taught the watcher.
+// That lookup is a unit-to-kind fact, never a placement: nothing here derives
+// who spawned whom.
+func (w *watcher) resolveDetachedLocked(work *conversationv1.AgentDetachedWork) (detachedKind, *conversationv1.AgentId) {
+	if created := work.GetCreated(); created != nil {
+		switch item := created.GetWorkCreated(); {
+		case item.GetSubagent() != nil:
+			return kindSubagent, item.GetSubagent().GetStart().GetCreatedAgentId()
+		case item.GetBash() != nil:
+			return kindBash, nil
+		case item.GetMonitor() != nil:
+			return kindMonitor, nil
+		case item.GetWorkflow() != nil:
+			return kindWorkflow, nil
+		default:
+			return kindUnknown, nil
+		}
+	}
+	if detached := work.GetDetached(); detached != nil {
+		id := detached.GetDetachedFromId().GetValue()
+		if fact, ok := w.facts[id]; ok {
+			w.rememberWorkLocked(id, work.GetWork())
+			return fact.kind, fact.agent
+		}
+		w.log.Error("daemon.sessionwatcher.detached_kind_unknown", "a detached announcement named a unit this daemon never saw", dlog.Context{
+			"activity_id": id, "work_id": work.GetWork().GetValue(),
+		})
+	}
+	return kindUnknown, nil
+}
+
+// rememberWorkLocked records the handle a unit detached under, so the unit's
+// own terminal can drop the right item from the live set.
+func (w *watcher) rememberWorkLocked(activityID string, handle *conversationv1.DetachedWorkId) {
+	if fact, ok := w.facts[activityID]; ok {
+		fact.work = handle
+	}
+}
+
+// ---- one detached shell's stream ----
+
+// routeBashLocked routes one detached shell frame, and reaps the watch at the
+// command's terminal.
+func (w *watcher) routeBashLocked(s *shellWatch, bash *conversationv1.AgentBash) {
+	w.sinks.Feed.OnBash(w.ws, s.work, bash, w.addr)
+	w.sinks.Footer.OnBash(w.ws, s.work, bash)
+
+	if bash.GetSuccess() == nil && bash.GetFailure() == nil {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.bash_terminal", "a detached shell ended", dlog.Context{
+		"work_id": s.work.GetValue(), "failed": bash.GetFailure() != nil,
+	})
+	if w.reapShellLocked(s.work.GetValue()) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// ---- reaping ----
+
+// reapAgentLocked closes and forgets one detached subagent's watch, reporting
+// whether it was live. The stream is closed OFF the mutex: its own goroutine
+// takes the mutex to report the end, and waiting for it here would deadlock.
+func (w *watcher) reapAgentLocked(key string) bool {
+	entry, ok := w.agents[key]
+	if !ok {
+		return false
+	}
+	entry.done = true
+	delete(w.agents, key)
+	if entry.stream != nil {
+		stream := entry.stream
+		entry.stream = nil
+		go stream.Close()
+	}
+	w.log.Debug("daemon.sessionwatcher.reap", "a subagent watch was reaped", dlog.Context{"agent_id": key})
+	return true
+}
+
+// reapShellLocked closes and forgets one detached shell's watch.
+func (w *watcher) reapShellLocked(key string) bool {
+	entry, ok := w.shells[key]
+	if !ok {
+		return false
+	}
+	entry.done = true
+	delete(w.shells, key)
+	if entry.stream != nil {
+		stream := entry.stream
+		entry.stream = nil
+		go stream.Close()
+	}
+	w.log.Debug("daemon.sessionwatcher.reap", "a shell watch was reaped", dlog.Context{"work_id": key})
+	return true
+}
+
+// reapEndedMonitorLocked drops a monitor from the live set at its own
+// terminal. A monitor has no stream, so its activity's terminal arm is the
+// only thing that can retire it.
+func (w *watcher) reapEndedMonitorLocked(act *conversationv1.AgentActivity) {
+	monitor := act.GetMonitor()
+	if monitor == nil || (monitor.GetEnded() == nil && monitor.GetFailure() == nil) {
+		return
+	}
+	// THE HANDLE IS THE ACTIVITY ID for a `created`-origin monitor:
+	// DetachedWorkId.value == the unit's AgentActivityId.value (same bytes),
+	// so a re-adopted monitor — which was never announced on this watch and
+	// therefore has no recorded fact — is retired by its own terminal. A
+	// `detached`-origin monitor keeps resolving through the recorded fact.
+	key := act.GetActivityId().GetValue()
+	if fact, ok := w.facts[key]; ok && fact.work != nil {
+		key = fact.work.GetValue()
+	}
+	if key == "" {
+		return
+	}
+	if _, live := w.monitors[key]; !live {
+		return
+	}
+	delete(w.monitors, key)
+	w.log.Debug("daemon.sessionwatcher.reap", "a monitor was retired", dlog.Context{
+		"work_id": key,
+	})
+	w.publishLiveWorkLocked()
+}
+
+// ---- what an activity teaches the watcher ----
+
+// recordActivityLocked keeps the two facts about a unit that later frames
+// need: the DETACHABLE KIND (and a subagent's created agent id), which is how
+// a `detached`-origin announcement resolves to a watch, and the TOOL NAME,
+// which is what a permission notification names.
+func (w *watcher) recordActivityLocked(act *conversationv1.AgentActivity) {
+	id := act.GetActivityId().GetValue()
+	if id == "" {
+		return
+	}
+	fact, ok := w.facts[id]
+	if !ok {
+		fact = &activityFact{}
+		w.facts[id] = fact
+	}
+	fact.tool = activityToolName(act)
+	switch {
+	case act.GetSubagent() != nil:
+		fact.kind = kindSubagent
+		if start := act.GetSubagent().GetStart(); start != nil {
+			fact.agent = start.GetCreatedAgentId()
+		}
+	case act.GetBash() != nil:
+		fact.kind = kindBash
+	case act.GetMonitor() != nil:
+		fact.kind = kindMonitor
+	}
+}
+
+// activityToolName names the tool a unit called, empty for units that are not
+// tool calls (prose, thinking, injected context). ONE PLACE: every consumer of
+// a tool name in this package reads it from here, and an arm added to the
+// contract without a name here is warned about at the call that needs one.
+func activityToolName(act *conversationv1.AgentActivity) string {
+	switch item := act.GetItem().(type) {
+	case *conversationv1.AgentActivity_Read:
+		return "Read"
+	case *conversationv1.AgentActivity_Write:
+		return "Write"
+	case *conversationv1.AgentActivity_Edit:
+		return "Edit"
+	case *conversationv1.AgentActivity_Grep:
+		return "Grep"
+	case *conversationv1.AgentActivity_Glob:
+		return "Glob"
+	case *conversationv1.AgentActivity_Bash:
+		return "Bash"
+	case *conversationv1.AgentActivity_Subagent:
+		return "Agent"
+	case *conversationv1.AgentActivity_SkillUse:
+		return "Skill"
+	case *conversationv1.AgentActivity_SendMessage:
+		return "SendMessage"
+	case *conversationv1.AgentActivity_TaskAct:
+		return "TaskAct"
+	case *conversationv1.AgentActivity_Hook:
+		return "Hook"
+	case *conversationv1.AgentActivity_WebFetch:
+		return "WebFetch"
+	case *conversationv1.AgentActivity_WebSearch:
+		return "WebSearch"
+	case *conversationv1.AgentActivity_Monitor:
+		return "Monitor"
+	case *conversationv1.AgentActivity_ScheduleWakeup:
+		return "ScheduleWakeup"
+	case *conversationv1.AgentActivity_Artifact:
+		return "Artifact"
+	case *conversationv1.AgentActivity_PlanMode:
+		return "ExitPlanMode"
+	case *conversationv1.AgentActivity_ReportFindings:
+		return "ReportFindings"
+	case *conversationv1.AgentActivity_Worktree:
+		return "Worktree"
+	case *conversationv1.AgentActivity_Cron:
+		return "Cron"
+	case *conversationv1.AgentActivity_PushNotification:
+		return "PushNotification"
+	case *conversationv1.AgentActivity_Unmodeled:
+		return unmodeledToolName(item.Unmodeled)
+	default:
+		return ""
+	}
+}
+
+// unmodeledToolName is the tool an unmodeled call named, from whichever of its
+// frames carried it.
+func unmodeledToolName(unmodeled *conversationv1.AgentUnmodeled) string {
+	if start := unmodeled.GetStart(); start != nil {
+		return start.GetToolName()
+	}
+	if success := unmodeled.GetSuccess(); success != nil {
+		return success.GetToolName()
+	}
+	return unmodeled.GetFailure().GetToolName()
+}
+
+// ---- notifications ----
+
+// notifyPermissionLocked raises the host notification a blocked permission
+// deserves, naming the TOOL the consent gates — and RETIRES that notification
+// when the ask settles, because a decided gate is nothing left to see.
+func (w *watcher) notifyPermissionLocked(permission *conversationv1.AgentPermission) {
+	key := askKey("permission", permission.GetId().GetValue())
+	start := permission.GetStart()
+	if start == nil {
+		// SETTLED, however it settled: the user's answer, a policy denial, or a
+		// failure to put the ask at all. Each of them ends the ask, and the
+		// marker names asks that have not ended.
+		w.askSettledLocked(key)
+		return
+	}
+	w.unseenAsks[key] = struct{}{}
+	note := HostNotification{
+		Text:     start.GetPrompt().GetTitle(),
+		At:       instantOf(start.GetStartedAt().GetAtMs()),
+		Kind:     NotificationPermissionRequested,
+		ToolName: w.permissionToolNameLocked(permission),
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "permission notification raised", dlog.Context{
+		"tool_name": note.ToolName,
+	})
+	w.sinks.Lifecycle.OnNotification(w.ws, note)
+}
+
+// permissionToolNameLocked names the gated call's tool. The gated call is an
+// activity id, so the unit's own recorded name is the first and best source;
+// an ask rule names a tool when the vendor said one; the vendor's short
+// display name is the last resort, because it is a phrase rather than a tool.
+func (w *watcher) permissionToolNameLocked(permission *conversationv1.AgentPermission) string {
+	if fact, ok := w.facts[permission.GetGatedCall().GetValue()]; ok && fact.tool != "" {
+		return fact.tool
+	}
+	if rule := permission.GetStart().GetTrigger().GetAskRule(); rule.GetToolName() != "" {
+		return rule.GetToolName()
+	}
+	return permission.GetStart().GetPrompt().GetDisplayName()
+}
+
+// notifyQuestionLocked raises the host notification a blocked question
+// deserves: HostNotificationKind.question_asked, which gets a permission ask's
+// attention treatment and carries the first question's chip label.
+func (w *watcher) notifyQuestionLocked(question *conversationv1.AgentQuestion) {
+	key := askKey("question", question.GetId().GetValue())
+	start := question.GetStart()
+	if start == nil {
+		// SETTLED: answered, or concluded with nobody answering. Either way the
+		// ask is over and its marker has nothing left to point at.
+		w.askSettledLocked(key)
+		return
+	}
+	asked := start.GetBatch().GetQuestions()
+	if len(asked) == 0 {
+		return
+	}
+	w.unseenAsks[key] = struct{}{}
+	text := asked[0].GetHeader()
+	if text == "" {
+		text = asked[0].GetQuestion().GetText()
+	}
+	note := HostNotification{
+		Text:   text,
+		At:     instantOf(start.GetStartedAt().GetAtMs()),
+		Kind:   NotificationQuestionAsked,
+		Header: asked[0].GetHeader(),
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "question notification raised", dlog.Context{
+		"question_id": question.GetId().GetValue(),
+	})
+	w.sinks.Lifecycle.OnNotification(w.ws, note)
+}
+
+// askKey names one ask inside the unseen set. The two ask kinds have their own
+// identity spaces — a question joins to no unit of work, where a permission's
+// identity is the tool unit it gates — so the kind is part of the key rather
+// than trusted not to collide.
+func askKey(kind, id string) string {
+	return kind + ":" + id
+}
+
+// askSettledLocked retires one ask's unseen notification, and reports the
+// workspace SEEN once the last of them is gone.
+//
+// ONLY THE LAST ONE CLEARS. Four permission cards answered one after another
+// leave the marker standing until the fourth is answered — while any ask is
+// still open there is still something unseen. An ask this watcher never
+// announced (a policy denial that never opened) retires nothing: it never
+// raised a marker, so its settle must not clear another ask's.
+func (w *watcher) askSettledLocked(key string) {
+	if _, ok := w.unseenAsks[key]; !ok {
+		return
+	}
+	delete(w.unseenAsks, key)
+	if len(w.unseenAsks) > 0 {
+		w.log.Debug("daemon.sessionwatcher.notify", "an ask settled with others still open", dlog.Context{
+			"ask": key, "open": len(w.unseenAsks),
+		})
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.notify", "the last open ask settled; the attention marker is cleared", dlog.Context{
+		"ask": key,
+	})
+	w.sinks.Lifecycle.OnAsksSettled(w.ws)
+}
+
+// instantOf reads a producer's unix-millis instant; an unstated instant is
+// now, because a notification always happened at some time.
+func instantOf(atMS int64) time.Time {
+	if atMS == 0 {
+		return time.Now()
+	}
+	return time.UnixMilli(atMS)
+}
+
+// ---- small helpers ----
+
+// isMainAgent reports whether a frame's agent is the session's main agent. It
+// is false while the main agent is unnamed: attribution is never guessed.
+func (w *watcher) isMainAgent(agent *conversationv1.AgentId) bool {
+	return w.mainAgent != nil && agent.GetValue() != "" && agent.GetValue() == w.mainAgent.GetValue()
+}
+
+// watchAgentLocked is the identity a watch's frames belong to: its target, or
+// the main agent once named.
+func (w *watcher) watchAgentLocked(a *agentWatch) *conversationv1.AgentId {
+	if a.id != nil {
+		return a.id
+	}
+	return w.mainAgent
+}

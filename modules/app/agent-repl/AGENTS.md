@@ -31,6 +31,274 @@ emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exi
 emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
 
+### One suite at a time: `bin/suite-slot.sh`
+
+Every suite here is already internally parallel — vitest takes one worker per
+CPU by default, `go test` takes GOMAXPROCS, and the Go e2e suite runs
+`-parallel 8` with each test booting a real daemon/shim/store/sidecar quartet.
+A single run is sized to fill the machine ON PURPOSE, so two runs do not go
+twice as fast: they go slower, and one of them reports a bound as missed that
+a quiet box meets.
+
+That is not hypothetical. Several agents each running their own suites at once
+took this box to a load average of 253, and the Emacs layer then failed 37 of
+45 scenarios on Doom's boot bound alone — a whole run's evidence thrown away,
+with nothing wrong with the product. So:
+
+```bash
+bin/suite-slot.sh npm test          # from the package dir; wraps, never relocates
+bin/suite-slot.sh go test ./... -count=1
+```
+
+The gate counts what is actually running, claiming slots as directories via
+`mkdir` (atomic, fails if the name exists), and reclaims a slot whose recorded
+pid is gone. It is the same mechanism as the sandbox's container gate in
+`e2e/sandbox/bin/e2e-sandbox.sh`, for the same reason.
+
+Do NOT gate on the load average instead. It is a decaying mean, so it keeps
+climbing for a minute after the work stops, and every waiter reads the same
+number and starts at the same instant — a thundering herd that recreates the
+overload. This was tried; it is what produced the 253.
+
+Two standing rules follow from the same measurement:
+
+- The vitest configs cap `maxWorkers` at 50%. A suite may not claim every CPU
+  even when it does hold the slot.
+- A test that starts a child process group must kill the GROUP. `npm run` is a
+  wrapper: signalling the npm pid alone leaves vitest's worker pool reparented
+  to init and burning CPU for the rest of the run.
+
+### Test wait/timeout bounds are measured, not guessed
+
+Every synchronization wait in `test-integration-*.el` funnels through
+`agent-repl-itest--wait-until` (`lisp/test-integration-helpers.el`), which
+polls via `accept-process-output` — never `sleep-for`/`sit-for`, which would
+block the very process I/O a predicate is waiting on. Its bounds were sized
+by running all seven `test-integration-*.el` suites plus the full
+`test-agent-repl.el` unit run once, recording each test's own ERT-reported
+duration, and setting each bound to roughly 3x the slowest HEALTHY case it
+has to cover (never to fix a flake — a bound that only just barely passes on
+a slow run is a race, not a bound, and gets a code fix instead of a bigger
+number).
+
+| bound | site | old | new | basis |
+|---|---|---|---|---|
+| `agent-repl-itest-default-timeout` | shared default for every unadorned `wait-until`/`await-*` call | 15s | 14s | slowest healthy wait observed anywhere in the suite run was the link suite's own handover/reconnect scenarios (~4.7s); 3x ≈ 14s |
+| boot-timeout logged/surfaced (3 sites, `test-integration-daemon.el`) | `agent-repl-itest--wait-until` after `agent-repl-daemon-boot-timeout-seconds` fires | 5s | 4s | those scenarios' own boot-timeout fixtures run 1.0–2.0s; observed wait tops out at ~1.4s; 3x ≈ 4.2s |
+| restart's own ensure build/start-ran (4 sites, `test-integration-daemon.el`) | file-flag checks after a restart's cold-start ensure | 5s | 3s | the flag file is touched synchronously once `agent-repl-daemon-ensure` proceeds; no observed case needs more than a fraction of a second |
+| restart-abandonment message (`test-integration-daemon.el`) | echo-area message after a refused stop | 5s | 3s | same shape as the build/start-ran checks above |
+| indicator-names-the-cause loop (`test-integration-link.el`) | per-case wait inside a `dolist` whose whole multi-case test runs in ~0.2s | 2s | 1s | still >3x any single case's real share of that 0.2s |
+| fake-daemon exit on teardown (`test-integration-helpers.el`) | `agent-repl-itest--stop-daemon`, runs after EVERY scenario in every suite | 5s | 5s (unchanged) | genuinely needs longer: this reclaims a REAL OS process via its own graceful-shutdown path after every single test, and a slow CI host is exactly the case a bound exists to tolerate — a spurious failure here still falls through to `delete-process` |
+| fake daemon's own HTTP graceful-shutdown grace (`lisp/testsupport/fakedaemon/main.go`) | `context.WithTimeout` around `httpServer.Shutdown` | 2s | 2s (never reached) | the exit path now aborts every standing stream first (`abortAllStreams`), so `Shutdown` returns on its own rather than waiting this out; the bound survives as the backstop it was always meant to be |
+
+Re-measure before loosening any of these: `git log -p` on this section names
+the run that produced each number, and a bound that creeps back up without a
+new measurement behind it is exactly the kind of unexamined slack this table
+exists to prevent.
+
+### The scenario coverage matrix is generated, never hand-edited
+
+`e2e/SCENARIO-MATRIX.md` is the inventory of which mocked-vendor scenarios
+have e2e coverage, and people plan work from it. It was hand-maintained until
+it was caught lying in both directions on one day — twelve `!api-*` rows
+reading `uncovered` while a single file drove every one of them, twenty
+session and tool rows reading `uncovered` with strong tests already behind
+nineteen, its own summary counts disagreeing with its own table, and section
+(c) disagreeing with section (a). Two agents nearly wrote duplicate tests off
+it.
+
+So it is now derived and enforced by `e2e/scenariomatrix_test.go`
+(`TestScenarioMatrixMatchesReality`), which runs with the e2e package, spawns
+nothing and drives no scenario:
+
+```bash
+AGENT_REPL_MATRIX_WRITE=1 go test ./e2e -run TestScenarioMatrixMatchesReality
+```
+
+- The canonical scenario list comes from `src/fake/scenarios/*.ts`,
+  cross-checked against the registry-generated prompt table in the shim's
+  AGENTS.md. Add or rename a scenario and the check fails until the matrix
+  follows.
+- Which test drives which scenario comes from the tests, by the vendor's own
+  `selectScenario` rule over their string literals plus the bare-name drive
+  helpers. An argument shape the extractor cannot read FAILS rather than
+  counting as zero.
+- A `!name` literal in a counted layer that names no registered scenario is a
+  dead trigger and fails the check.
+- The counts and the uncovered/weak lists are computed from the table.
+
+What it deliberately does not decide: whether an assertion is STRONG or WEAK.
+That is a reading of the test body, so the `Grounded?` and
+`Strongest assertion` columns and the covered-vs-weak choice stay
+hand-written, and a newly-derived row defaults to `weak` with a TODO for a
+human to raise.
+
+### What a scenario is allowed to spend time on
+
+The bounds above are ceilings on failure. These are the rules about what a
+PASSING scenario costs, which is a different question and the one that decides
+what the suite costs to run.
+
+- **A wait samples at 2ms, and only when it has to.**
+  `agent-repl-itest--wait-until` passes `nil` to `accept-process-output`, which
+  returns the moment ANY process output arrives — so a predicate over Emacs's
+  own state is already woken by the event, and the interval is the floor under
+  a predicate whose fact lives on the DAEMON (a subscriber count, a recorded
+  call) and so cannot announce itself. It was 20ms, and at 20ms nearly every
+  wait in the suite slept a whole slot: 454 waits, 10.0s of an 11.5s host run.
+
+- **Nothing here spawns a process to speak HTTP, production included.**
+  `agent-repl-itest--control` speaks HTTP/1.1 over `make-network-process` to
+  127.0.0.1. It is called several times by every scenario — twice by the reset
+  alone, then once per turn of every `--await-*` poll — so a `curl` child per
+  call cost 471 spawns and 3.3s of a 9.4s roster run. Production's transport
+  dials the same way now, through `agent-repl-connect--open-socket`; that is
+  the one boundary these suites run for real on purpose, and it was the
+  largest remaining per-scenario cost (~270 spawns, ~3.7s, in a host run)
+  until it stopped being a spawn at all. Measured on one box, alternating
+  branch point and tip: a unary round trip 60.1ms -> 3.5ms, composer
+  3.1/3.1s -> 2.1/2.2s, host 3.8/3.9s -> 3.0/3.1s, verbs 3.8/4.3s ->
+  2.8/2.8s, connect 1.5/1.5s -> 0.90/0.90s.
+
+  ITS CONNECT BLOCKS, AND THAT IS NOT A TUNING CHOICE. The peer is a
+  loopback listener that answers in a fraction of a millisecond or refuses
+  on the spot. A `:nowait` dial would have to wait for the connection
+  before it could write, and every way of waiting -- an explicit
+  `accept-process-output`, or the 20ms retry Emacs performs on the write's
+  own EAGAIN -- runs the event loop. These dials happen INSIDE PROCESS
+  FILTERS (daemon-link attaches a successor from the `WatchDaemon` filter),
+  and running the event loop from inside a filter cost the e2e handover its
+  `transferred` pushes outright: sockets open, daemon pushing, Emacs
+  delivering nothing, no workspace adopted, no promotion.
+
+  THE RESPONSE DECODING IS SHARED, NOT COPIED. `agent-repl-connect--reader` —
+  status line, then a body under a `Content-Length`, `Transfer-Encoding:
+  chunked`, or the close — is production's, and the harness calls it rather
+  than keeping a second decoder of its own. curl used to do that decoding on
+  the transport's behalf; when it went, the harness's copy became the only
+  other one, and two HTTP readers for one daemon is exactly the drift this
+  rule exists to prevent.
+
+- **A duration a scenario WRITES is a fixture, not a contract.**
+  An announced `expected_outage_ms`, a rebound
+  `agent-repl-daemon-boot-timeout-seconds`, a rebound
+  `agent-repl-daemon-boot-poll-interval-seconds`: none of these is what any
+  scenario asserts. Size them by the tolerance the assertion actually allows
+  itself — an order of magnitude over it — never by what production ships.
+  Three link scenarios were spending 1.5s each and three daemon scenarios a
+  second each proving only that the client honors the window at all.
+
+- **A push needs a SUBSCRIBER, not a ref.**
+  `agent-repl-host-ref` is minted when `RegisterWorkspace` answers, strictly
+  before the `WatchHostWorkspace` subscription behind it is registered
+  daemon-side. A push in that window reaches nobody and the scenario waits out
+  its whole deadline for a state delivered to no one. Every push after a
+  subscribe goes through `agent-repl-itest--await-subscriber` first. Three
+  scenarios were relying on the old 20ms poll to hide the window.
+
+What those rules bought, measured by running each suite at the branch point
+and at the tip alternately on one host, so both sides met the same load
+(ERT's own reported suite time, seconds):
+
+| suite | before | after |
+|---|---|---|
+| `test-agent-repl.el` (everything, 3695 -> 3701 tests) | 209.7 | 58.8 |
+| `test-integration-link.el` | 64.3 | 5.7 |
+| `test-integration-host.el` | 33.7 | 7.9 |
+| `test-integration-composer.el` | 30.4 | 9.7 |
+| `test-integration-verbs.el` | 26.7 | 5.5 |
+| `test-integration-daemon.el` | 10.6 | 4.6 |
+| `test-integration-roster.el` | 9.8 | 3.4 |
+
+- **A sentinel outlives the scenario that armed it.**
+  Emacs runs a sentinel from the event loop, never at the moment the process
+  dies, so a stub build script's exit is delivered after `cl-letf` has put the
+  external-boundary guards back — and the continuation behind it reaches them
+  and errors out of a sentinel, aborting the whole batch run and naming
+  whichever test happened to be running.
+  `agent-repl-itest--reset-cold-start` therefore drops the sentinel whenever
+  the process OBJECT exists, not only while it is live, and cancels the
+  departure wait alongside the boot wait.
+
+### Integration suites restore a REGISTERED boundary, by name and per scenario
+
+The batch harness replaces every entry of
+`agent-repl--external-boundary-functions` with a guard that errors, and that
+stays true for `test-integration-*.el` too — with one sanctioned exception.
+An integration scenario exists precisely to drive one external boundary
+against a real, harmless, test-owned target: the transport's
+`agent-repl-connect--open-socket` against a fake daemon on loopback, and cold
+start's `agent-repl--frontend-run-build-script` /
+`agent-repl--frontend-spawn-daemon` / `agent-repl--frontend-artifact-exists-p`
+against stub scripts in the scenario's own temp dir. Those are restored
+through the harness's own restore path
+(`agent-repl-itest--real-boundary`, which signals unless the symbol is in
+`agent-repl--external-boundary-functions`), BY NAME and PER SCENARIO, while
+every other guard stays armed. This is the sanctioned way to write an
+integration scenario, not a bypass of the guard: an unregistered boundary
+cannot be restored at all, and a scenario that reaches for one fails loudly.
+
+### ONE fake daemon serves a whole suite run
+
+`agent-repl-itest--with-fake-daemon` hands every scenario the SAME fake-daemon
+process — started lazily on the first scenario, reaped on `kill-emacs-hook`.
+A process boot costs seconds and the integration suites run hundreds of
+scenarios, so a per-test spawn is the single largest cost in the run.
+
+The saving is only allowed to exist because the cleaning is TOTAL, and it
+happens on the way IN (`agent-repl-itest--begin-scenario`), never on the way
+out, so a scenario that dies mid-way cannot poison its successor:
+`/_fake/reset` clears the recording, the scripted table, the snapshots and
+every armed gate and ends every standing stream; the shared state root is
+swept back to nothing but `daemon.addr`; that address is re-published so a
+scenario which pointed it at a stub daemon cannot misdirect the next one; and
+a second reset after the subscribers drain closes the window in which the
+previous scenario's dying transport children can still land a request.
+
+A scenario may still stop the shared daemon — cold start's absent-address
+cases must — and the accessor respawns into the same state root next time.
+A scenario that needs TWO live daemons (a handover) still spawns its own
+successor through `agent-repl-itest--with-second-daemon`, which re-publishes
+the primary's address once the successor is reaped. Those two are the only
+sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
+isolation guarantee that makes the sharing safe.
+
+### A fixture workspace directory is process-private and swept per scenario
+
+Every `:project-dir` an integration scenario registers comes from
+`agent-repl-itest--fixture-dir`, under one pid-keyed root. Never write a
+literal `/tmp/itest-...` path into a suite again, and never let two scenarios
+inherit one directory's contents.
+
+Both rules exist because a REGISTERED WORKSPACE'S RECORDS ARE REACHABLE ONLY
+THROUGH THAT DIRECTORY'S CANONICAL `.claude/emacs/emacs.log` SYMLINK, and
+`agent-repl--workspace-emacs-log-target` re-points that link at its own
+runtime-owned target whenever it finds it naming someone else's:
+
+- **Across processes**, two suite runs sharing a fixed directory are two such
+  runtimes, each stealing the link back from the other, so every `--await-log`
+  reads a sink holding the other run's records and waits out its whole
+  deadline for a line that was written, findably, somewhere else.
+- **Across scenarios**, the log-target registry is scratch-bound per scenario,
+  so each scenario mints a fresh target — but the link still names the
+  previous scenario's target until this scenario writes its first
+  workspace-owned record. In that window `--await-log` is satisfied instantly
+  by the previous scenario's record for the same operation, and the assertion
+  behind it reads THAT record's arguments.
+
+`agent-repl-itest--begin-scenario` therefore sweeps the fixture root exactly
+as it sweeps the state root; production recreates the `.claude` tree the
+moment it routes a record.
+
+### A fixture that shortens the reconnect interval must cap its ceiling too
+
+`agent-repl-link--reconnect-tick` DOUBLES its interval on every poll that
+finds no daemon, up to `agent-repl-link-reconnect-max-interval-seconds`. A
+fixture that binds only `agent-repl-link-reconnect-interval-seconds` still
+pays the 5s production ceiling, so a scenario that stops a daemon and waits
+for a successor spends its deadline on backoff that has nothing to do with
+what it asserts. Bind both, at every site that binds either.
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller
@@ -321,6 +589,99 @@ so the fresh-input rate is a SHARE and the expensive share is fresh + write.
   it is never stored beside them, and the database is not migrated.
   - `TokenCacheRates` is the one surviving stored rate, kept and kept populated
     for exactly that reason, and read by no judgment. New code must not read it.
+
+## `conversation.v1` is what a producer saw, and the daemon only ever adds its own bookkeeping
+
+`conversation.v1` is designed to be rendered DIRECTLY by a frontend. A
+conversation record reaches the GUI as itself: `claude-repld` never synthesizes
+one, and never re-encodes one on its way out. The only thing the daemon
+contributes is its own bookkeeping — facts it worked out that no producer ever
+observed.
+
+**The daemon never synthesizes a conversation record.** A `conversation.v1`
+record states something a PRODUCER observed, and there are exactly two
+producers: `claude-shim`, per session, watching the vendor SDK live — the
+stream plane — and `shim-claude-sidecar`, reading the vendor's on-disk
+transcripts — the file plane. `claude-repld` produces nothing here; it consumes
+what those two wrote. A daemon-minted `conversation.v1` record asserts an
+observation nobody made.
+
+**The daemon never re-encodes one either.** `frontend.v1` CARRIES a
+conversation record and stamps its own bookkeeping alongside it; it adds
+nothing to the record. A `frontend.v1` message that restates a `conversation.v1`
+fact in its own words is a re-spelling, and the translation layer that produces
+it is work that should not exist.
+
+**The test for which side a fact belongs on is who came by it.** Did a producer
+OBSERVE it, or did the daemon WORK IT OUT?
+
+- Observed → `conversation.v1`, and it reaches the frontend unchanged.
+- Worked out → `frontend.v1`, where it is bookkeeping riding alongside.
+
+The worked example is a background shell, because it separates cleanly. Its
+EXIT CODE is observed — a producer watched the process exit 137 — so the code
+is a `conversation.v1` fact. The OUTCOME resolved from that code is the
+daemon's, because a killed process also exits nonzero, and reading the code as
+"it failed" reports a user's own interrupt back to them as an error. So the
+code rides in `conversation.v1`, the verdict rides in `frontend.v1`, and
+neither restates the other.
+
+THIS IS A TARGET, NOT A DESCRIPTION OF THE TREE. The first half holds today:
+`claude-repld` constructs `conversation.v1` messages at exactly three sites,
+all inside `claude-repld.internal.tokenusage.fromCounters()`, and both of its
+callers are converting the daemon's OWN durable records
+(`state.v1.VendorTokenUsage`, `state.v1.TokenUsageTotals`) into the canonical
+shape for display — the daemon reading its own bookkeeping, per the section
+above, not minting conversation. The second half does NOT hold: the webapp
+imports `conversation.v1` in exactly two files (`webapp/src/tokens.ts` and
+`webapp/src/agent-emission.ts`), and everything else arrives as `frontend.v1`
+re-encodings the daemon built from conversation records.
+`frontend.v1.Message`'s payload oneof has no arm that can carry a
+`conversation.v1.MessageEntry` at all, so today the re-encoding is forced by
+the schema rather than chosen.
+
+## The shim-store database is nuked, not migrated
+
+`shim-store`'s SQLite database is DISPOSABLE and is to be regarded as EMPTY. A
+schema change deletes the file and recreates it; there are no migrations and no
+backfills, and existing rows go away with the database.
+
+THIS IS A DEVELOPMENT-STAGE POSTURE, not a permanent property of the store.
+Nobody currently cares what is in that database, so migrating it is complexity
+bought for nothing. That stops being true the moment its contents matter to
+someone, and this section is what has to change first when that happens — it is
+not licence to treat stored data as expendable forever. This is the same posture
+the frozen durable shapes above take from the other end — `state.v1` replay is
+protected by never changing those messages, not by migrating what was written
+under them.
+
+**The absence of a migration is a DECISION, not an oversight to be helpfully
+corrected.** Two things go wrong when it is left unwritten:
+
+- An agent that assumes the database must be preserved invents migration and
+  backfill work nobody wants and nobody will review. It is worse than wasted
+  effort: migration code asserts a compatibility guarantee this module has never
+  made, and the next reader believes it.
+- A stale database is more expensive than an empty one. Rows written under a
+  retired schema, sitting on disk while new code reads them, produce
+  PLAUSIBLE-LOOKING wrong data rather than a clean failure — nothing announces
+  that the rows are stale, so everyone reading them reasons from data that was
+  never valid under the current contract.
+
+**Say this explicitly in the instructions of any agent that touches the store's
+schema.** An agent working from the code alone sees a `schema_meta(version
+INTEGER)` table and reasonably infers that migrations are expected. Nothing in
+the tree corrects that inference.
+
+The pending case is `shim-store`'s `entry` table gaining a `parent_message_id`
+column, extracted at ingest exactly as `top_level_message_id` already is, plus an
+index `entry(session_id, parent_message_id, seq)` mirroring the existing
+`entry_message_owner`. It exists so `frontend.v1.PageScopeInside` can page a
+nested container in one indexed pass instead of a scan:
+`conversation.v1.MessageEntry.parent` currently lives inside the opaque
+`payload` BLOB, and `top_level_message_id` cannot substitute because a subagent
+and a subagent inside IT share one value. That change ships with no migration and
+no backfill.
 
 ## Committing to master means bouncing what you changed
 

@@ -1,473 +1,373 @@
 package storeclient
 
 import (
-	"bytes"
 	"errors"
-	"io"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-claude-sidecar/internal/logging"
-	"agentrepl/wire"
+	storev1 "agentrepl/proto/store/v1"
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 )
 
-func testLog() *logging.Bound {
-	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
-}
+func TestCursorsReturnsRecoveredCursors(t *testing.T) {
+	// Arrange.
+	want := cursor("1:2", "/tmp/session.jsonl", 4096)
+	client := serve(t, &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{
+			Success: &storev1.GetSidecarCursorsSuccess{Cursors: []*storev1.CursorState{want}},
+		},
+	}})
 
-// shimStoreDir walks up from the test's working directory to the sibling
-// shim-store module (…/agent-shim/shim-store).
-func shimStoreDir(t *testing.T) string {
-	t.Helper()
-	dir, _ := os.Getwd()
-	for {
-		cand := filepath.Join(dir, "agent-shim", "shim-store")
-		if _, err := os.Stat(filepath.Join(cand, "main.go")); err == nil {
-			return cand
-		}
-		p := filepath.Dir(dir)
-		if p == dir {
-			t.Fatalf("shim-store module not found above %s", dir)
-		}
-		dir = p
-	}
-}
+	// Act.
+	got, err := client.Cursors(ctx(), "")
 
-// startRealStore builds and spawns the REAL shim-store binary on a temp socket
-// and returns the socket path. The store, db, and log all live under temp dirs
-// so nothing touches the real ~/.cache locations.
-func startRealStore(t *testing.T) string {
-	t.Helper()
-	srcDir := shimStoreDir(t)
-	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "shim-store")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = srcDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building shim-store: %v\n%s", err, out)
-	}
-	// macOS UDS sun_path is short; keep the socket path under /tmp.
-	sockDir, err := os.MkdirTemp("/tmp", "sidecarstore")
+	// Assert.
 	if err != nil {
-		t.Fatalf("mkdtemp: %v", err)
+		t.Fatalf("Cursors returned %v, want success", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(sockDir) })
-	sock := filepath.Join(sockDir, "s")
-
-	cmd := exec.Command(bin,
-		"-socket", sock,
-		"-db", filepath.Join(tmp, "events.db"),
-		"-log", filepath.Join(tmp, "store.log"),
-	)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting shim-store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	})
-
-	// Readiness poll: retry dialing until the store is listening. This waits on
-	// an EXTERNAL process's socket (no in-process channel can signal it); the
-	// small backoff is readiness polling, not goroutine synchronization.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", sock); err == nil {
-			c.Close()
-			return sock
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("shim-store did not start listening on %s", sock)
-	return ""
-}
-
-func TestIntegrationRecoverCursorsEmpty(t *testing.T) {
-	// Arrange
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	// Act
-	cursors, err := c.RecoverCursors("")
-	// Assert
-	if err != nil {
-		t.Fatalf("RecoverCursors: %v", err)
-	}
-	if len(cursors) != 0 {
-		t.Fatalf("cursors = %d, want 0 on a fresh store", len(cursors))
+	if len(got) != 1 || !proto.Equal(got[0], want) {
+		t.Fatalf("Cursors = %v, want %v", got, want)
 	}
 }
 
-func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
-	socketDir, err := os.MkdirTemp("/tmp", "sidecar-recovery")
-	if err != nil {
-		t.Fatalf("create short socket dir: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(socketDir) })
-	sock := filepath.Join(socketDir, "s")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	defer ln.Close()
-	served := make(chan error, 1)
-	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
-			served <- err
-			return
-		}
-		defer conn.Close()
-		if _, err := wire.ReadAny(conn); err != nil {
-			served <- err
-			return
-		}
-		served <- wire.WriteAny(conn, &corev1.CursorList{})
-	}()
+func TestCursorsEmptySuccessIsFreshStore(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{}},
+	}})
 
-	_, err = New(sock, testLog()).Recover("")
+	// Act.
+	got, err := client.Cursors(ctx(), "")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("an empty cursor set was reported as a failure: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Cursors = %v, want none", got)
+	}
+}
+
+func TestCursorsFailureArmIsRefusal(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Failure{
+			Failure: &storev1.GetSidecarCursorsFailure{Detail: "database is locked"},
+		},
+	}})
+
+	// Act.
+	_, err := client.Cursors(ctx(), "")
+
+	// Assert.
+	if !IsRefusal(err) {
+		t.Fatalf("Cursors error = %v, want a refusal", err)
+	}
+}
+
+func TestCursorsUnsetResultIsAnError(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{}})
+
+	// Act.
+	_, err := client.Cursors(ctx(), "")
+
+	// Assert.
 	if err == nil {
-		t.Fatal("Recover accepted a CursorList with no authoritative open-task attestation")
+		t.Fatal("a response carrying neither arm was read as an empty success")
 	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve recovery response: %v", serveErr)
-	}
-}
-
-func TestIntegrationWriteAckThenCursorRecovery(t *testing.T) {
-	// Arrange
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	ev := &corev1.Event{
-		SessionId: "s1",
-		Plane:     corev1.Plane_PLANE_FILE,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "done"}},
-		DedupKey:  "turn:s1:u1",
-	}
-	batch := &corev1.EventBatch{
-		Events:        []*corev1.Event{ev},
-		CursorAdvance: &corev1.CursorState{FileId: "7:7", Path: "/p/s1.jsonl", Offset: 99, Carry: []byte("z")},
-	}
-	// Act: write the batch.
-	ack, err := c.Write("shim-claude-sidecar", batch)
-	if err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	// Assert: one accepted event, a seq assigned.
-	if ack.GetAccepted() != 1 || ack.GetLastSeq() == 0 {
-		t.Fatalf("ack = %+v, want accepted=1 last_seq>0", ack)
-	}
-	// Act: recover the cursor committed atomically with the batch.
-	cursors, err := c.RecoverCursors("")
-	if err != nil {
-		t.Fatalf("RecoverCursors: %v", err)
-	}
-	// Assert
-	if len(cursors) != 1 || cursors[0].GetOffset() != 99 || cursors[0].GetFileId() != "7:7" {
-		t.Fatalf("recovered cursors = %+v", cursors)
+	if IsRefusal(err) {
+		t.Fatalf("an unset oneof was reported as a store refusal: %v", err)
 	}
 }
 
-func TestIntegrationDedupOnReplay(t *testing.T) {
-	// Arrange: the same producer-keyed batch written twice (a crash-replay).
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	mk := func() *corev1.EventBatch {
-		return &corev1.EventBatch{Events: []*corev1.Event{{
-			SessionId: "s1",
-			Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-			Plane:     corev1.Plane_PLANE_FILE,
-			Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{StopReason: "x"}},
-			DedupKey:  "turn:s1:same",
-		}}}
-	}
-	// Act
-	a1, err := c.Write("shim-claude-sidecar", mk())
-	if err != nil {
-		t.Fatalf("write1: %v", err)
-	}
-	a2, err := c.Write("shim-claude-sidecar", mk())
-	if err != nil {
-		t.Fatalf("write2: %v", err)
-	}
-	// Assert: first accepted, second fully deduped (exactly-once under replay).
-	if a1.GetAccepted() != 1 || a2.GetDeduped() != 1 || a2.GetAccepted() != 0 {
-		t.Fatalf("a1=%+v a2=%+v, want accept-then-dedup", a1, a2)
-	}
-}
+func TestCursorsTransportErrorIsNotARefusal(t *testing.T) {
+	// Arrange: a socket path nothing is listening on.
+	client := clientTo(t, filepath.Join(os.TempDir(), "ar-absent.sock"))
 
-func TestIntegrationHeartbeat(t *testing.T) {
-	// Arrange: an established producer connection before any file change has
-	// produced the StoreWrite that ordinarily declares its role.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+	// Act.
+	_, err := client.Cursors(ctx(), "")
 
-	// Act / Assert: heartbeat itself can open the producer preamble.
-	if err := c.Heartbeat(); err != nil {
-		t.Fatalf("Heartbeat: %v", err)
-	}
-	// The same connection must still accept its eventual first write.
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("first write after heartbeat: %v", err)
-	}
-}
-
-func TestIntegrationHealthCheck(t *testing.T) {
-	// Arrange: as with a heartbeat, health may be the first deliberate frame
-	// after the sidecar restores its producer connection.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-
-	// Act / Assert: a correlated store health response keeps the producer
-	// connection usable for the eventual first write.
-	if err := c.Health("sidecar-health-test"); err != nil {
-		t.Fatalf("Health: %v", err)
-	}
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("first write after health: %v", err)
-	}
-}
-
-func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
-	// Arrange: a client pointed at a socket with no server (honest sad path).
-	socket := filepath.Join(t.TempDir(), "nonexistent.sock")
-	var logs bytes.Buffer
-	c := New(socket, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	// Act
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-	// Assert: the failure is surfaced, never swallowed.
+	// Assert.
 	if err == nil {
-		t.Fatal("expected an error writing to a dead store")
+		t.Fatal("an unreachable store answered successfully")
 	}
-	if strings.Contains(logs.String(), `"level":"error"`) {
-		t.Fatalf("storeclient globally logged caller-owned write error: %q", logs.String())
-	}
-}
-
-func TestWriteNeverDialsImplicitly(t *testing.T) {
-	// Arrange: a LIVE store, but a client that was never connected. The dial
-	// would succeed, which is exactly why the write must not attempt one: a
-	// connection born under a write skipped cursor recovery.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-
-	// Act
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-
-	// Assert
-	if !errors.Is(err, ErrNotConnected) {
-		t.Fatalf("Write err = %v, want ErrNotConnected", err)
-	}
-	if c.Connected() {
-		t.Fatal("Write opened a producer connection; it must never dial")
+	if IsRefusal(err) {
+		t.Fatalf("a transport failure was reported as a store refusal: %v", err)
 	}
 }
 
-func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
-	// Arrange: never connected. A heartbeat exists to detect a dead link, so
-	// answering "fine" here would hide the very outage it is asked about.
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
+func TestCursorsPassesFileIDFilter(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{}},
+	}}
+	client := serve(t, store)
 
-	// Act / Assert
-	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
-		t.Fatalf("Heartbeat err = %v, want ErrNotConnected", err)
+	// Act.
+	if _, err := client.Cursors(ctx(), "7:9"); err != nil {
+		t.Fatalf("Cursors returned %v", err)
+	}
+
+	// Assert.
+	if got := store.lastCursorsReq.GetFileId(); got != "7:9" {
+		t.Fatalf("store received file_id %q, want %q", got, "7:9")
 	}
 }
 
-func TestHealthOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
-	// Arrange: a health assertion cannot treat an absent producer connection as
-	// healthy, because that would permit the shim to render a dead session.
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
+func TestCursorsOmitsFileIDWhenRecoveringAll(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{cursors: &storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{}},
+	}}
+	client := serve(t, store)
 
-	// Act / Assert
-	if err := c.Health("health-down"); !errors.Is(err, ErrNotConnected) {
-		t.Fatalf("Health err = %v, want ErrNotConnected", err)
+	// Act.
+	if _, err := client.Cursors(ctx(), ""); err != nil {
+		t.Fatalf("Cursors returned %v", err)
+	}
+
+	// Assert.
+	if store.lastCursorsReq.FileId != nil {
+		t.Fatalf("a full recovery sent a file_id filter %q", store.lastCursorsReq.GetFileId())
 	}
 }
 
-func TestHealthRequiresCorrelationID(t *testing.T) {
-	// Arrange: connect first so the request-id invariant, rather than a missing
-	// transport, is the error this test exercises.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
+func TestWriteBatchSuccessIsDurable(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}}
+	client := serve(t, store)
 
-	// Act / Assert
-	if err := c.Health(""); err == nil {
-		t.Fatal("Health accepted an empty request_id")
-	}
-}
-
-func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
-	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{
+		Entries:       []*storev1.StoreEntry{{WriteId: "w1", UpsertKey: "activity:a1"}},
+		CursorAdvance: cursor("1:2", "/tmp/session.jsonl", 128),
 	})
-	served := make(chan error, 1)
-	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
-			served <- err
-			return
-		}
-		if _, ok := msg.(*corev1.HealthCheck); !ok {
-			served <- errors.New("expected HealthCheck")
-			return
-		}
-		served <- wire.WriteAny(server, &corev1.HealthStatus{
-			RequestId: "wrong-request",
-			Healthy:   true,
-		})
-	}()
 
-	err := c.Health("expected-request")
-	if err == nil || !strings.Contains(err.Error(), "request_id") {
-		t.Fatalf("Health err = %v, want request_id mismatch", err)
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch returned %v, want success", err)
 	}
-	if c.Connected() {
-		t.Fatal("mismatched HealthStatus left the producer connection established")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve HealthStatus: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "wrong-request") {
-		t.Fatalf("storeclient globally logged caller-owned health mismatch: %q", logs.String())
+	if store.lastWrite.GetProducer() != Producer {
+		t.Fatalf("producer = %q, want %q", store.lastWrite.GetProducer(), Producer)
 	}
 }
 
-func TestHealthRejectsUnhealthyResponseAndLogsReason(t *testing.T) {
-	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
-	})
-	served := make(chan error, 1)
-	go func() {
-		if _, err := wire.ReadAny(server); err != nil {
-			served <- err
-			return
-		}
-		served <- wire.WriteAny(server, &corev1.HealthStatus{
-			RequestId: "health-unhealthy",
-			Healthy:   false,
-			Reason:    "database unavailable",
-		})
-	}()
+func TestWriteBatchCarriesCursorAdvance(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}}
+	client := serve(t, store)
+	want := cursor("1:2", "/tmp/session.jsonl", 512)
 
-	err := c.Health("health-unhealthy")
-	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
-		t.Fatalf("Health err = %v, want store health reason", err)
+	// Act.
+	if err := client.WriteBatch(ctx(), &storev1.EntryBatch{CursorAdvance: want}); err != nil {
+		t.Fatalf("WriteBatch returned %v", err)
 	}
-	if c.Connected() {
-		t.Fatal("unhealthy HealthStatus left the producer connection established")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve HealthStatus: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "database unavailable") {
-		t.Fatalf("storeclient globally logged caller-owned unhealthy response: %q", logs.String())
+
+	// Assert.
+	if got := store.lastWrite.GetBatch().GetCursorAdvance(); !proto.Equal(got, want) {
+		t.Fatalf("cursor advance = %v, want %v", got, want)
 	}
 }
 
-func TestWriteRejectionKeepsConnectionAndLogsStoreReason(t *testing.T) {
-	var logs bytes.Buffer
-	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
-	client, server := net.Pipe()
-	c.conn = client
-	t.Cleanup(func() {
-		_ = c.Close()
-		_ = server.Close()
-	})
-	served := make(chan error, 1)
-	go func() {
-		msg, err := wire.ReadAny(server)
-		if err != nil {
-			served <- err
-			return
-		}
-		if _, ok := msg.(*corev1.StoreWrite); !ok {
-			served <- errors.New("expected StoreWrite")
-			return
-		}
-		served <- wire.WriteAny(server, &corev1.StoreWriteAck{Error: "cursor conflict"})
-	}()
+func TestWriteBatchFailureArmIsRefusal(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{Detail: "transaction rolled back"},
+		},
+	}})
 
-	ack, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
-	if err == nil || !strings.Contains(err.Error(), "cursor conflict") {
-		t.Fatalf("Write err = %v, want store rejection", err)
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WriteBatch error = %v, want a refusal", err)
 	}
-	if ack.GetError() != "cursor conflict" {
-		t.Fatalf("ack error = %q, want cursor conflict", ack.GetError())
-	}
-	if !c.Connected() {
-		t.Fatal("store rejection dropped a healthy producer connection")
-	}
-	if serveErr := <-served; serveErr != nil {
-		t.Fatalf("serve StoreWriteAck: %v", serveErr)
-	}
-	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "cursor conflict") {
-		t.Fatalf("storeclient leaked session-owned rejection into global log: %q", logs.String())
+	if refusal.Detail != "transaction rolled back" {
+		t.Fatalf("refusal detail = %q, want the store's account", refusal.Detail)
 	}
 }
 
-func TestConnectedGoesFalseAfterTheStoreDies(t *testing.T) {
-	// Arrange: an established producer connection to a real store.
-	sock := startRealStore(t)
-	c := New(sock, testLog())
-	defer c.Close()
-	if err := c.Connect(); err != nil {
-		t.Fatalf("Connect: %v", err)
-	}
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("prime write: %v", err)
-	}
+func TestWriteBatchUnsetResultIsAnError(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{}})
 
-	// Act: break the socket underneath the client (same-package reach-in, so the
-	// connection stays non-nil and the failure has to come from the transport),
-	// then write.
-	c.conn.Close()
-	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
-	// Assert: the caller learns the LINK is gone, not merely that a write failed.
+	// Assert.
 	if err == nil {
-		t.Fatal("expected an error writing on a dropped connection")
+		t.Fatal("a response carrying neither arm was read as durable")
 	}
-	if c.Connected() {
-		t.Fatal("Connected() stayed true after the connection was dropped")
+}
+
+func TestWriteBatchConnectErrorIsNotARefusal(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{writeErr: connect.NewError(connect.CodeInternal, errors.New("boom"))})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a Connect error was read as durable")
+	}
+	if IsRefusal(err) {
+		t.Fatalf("a Connect error was reported as a store refusal: %v", err)
+	}
+}
+
+func TestWriteBatchRejectsNilBatch(t *testing.T) {
+	// Arrange.
+	client := serve(t, &fakeStore{})
+
+	// Act.
+	err := client.WriteBatch(ctx(), nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a nil batch was accepted")
+	}
+}
+
+func TestWriteBatchUnreachableStoreFails(t *testing.T) {
+	// Arrange.
+	client := clientTo(t, filepath.Join(os.TempDir(), "ar-absent.sock"))
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("an unreachable store accepted a batch")
+	}
+}
+
+// ---- ruling R-S2: the failure's KIND is what says whether a retry can help ----
+
+func TestAStorageFailureRefusalCarriesItsKind(t *testing.T) {
+	// Arrange. endpoint_write_batch.proto: the transaction failed in the
+	// database and a retry MAY succeed, which is the recoverable outage.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "database is locked",
+				Kind:   &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WriteBatch error = %v, want a refusal", err)
+	}
+	if refusal.Kind != RefusalStorageFailure {
+		t.Fatalf("refusal kind = %q, want %q", refusal.Kind, RefusalStorageFailure)
+	}
+}
+
+func TestAnInvalidRequestRefusalNamesTheOffendingField(t *testing.T) {
+	// Arrange. A retry of the same bytes cannot help, so the caller must be able
+	// to tell this apart from an outage WITHOUT parsing the detail text, which
+	// the proto documents as never switched on.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "entry 3 carries no upsert_key",
+				Kind: &storev1.WriteBatchFailure_InvalidRequest{
+					InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: "batch.entries[3].upsert_key"},
+				},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	field, invalid := InvalidRequest(err)
+	if !invalid {
+		t.Fatalf("WriteBatch error = %v, want an invalid_request refusal", err)
+	}
+	if field != "batch.entries[3].upsert_key" {
+		t.Fatalf("refused field = %q, want the field the store named", field)
+	}
+}
+
+func TestAStorageFailureIsNotAnInvalidRequest(t *testing.T) {
+	// Arrange. The two arms drive opposite reactions — suspend and recover
+	// versus park the file — so confusing them either loops on bytes that can
+	// never land or abandons a file over a transient database error.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "database is locked",
+				Kind:   &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if _, invalid := InvalidRequest(err); invalid {
+		t.Fatalf("a storage failure was read as an invalid request: %v", err)
+	}
+}
+
+func TestAKindLessFailureIsTreatedAsAStorageFailure(t *testing.T) {
+	// Arrange. An unset oneof is illegal on this contract — the kind is the arm
+	// that says whether a retry can help — so a store that omits it has told the
+	// producer nothing actionable. It is treated as the RECOVERABLE kind, so the
+	// sidecar keeps trying rather than parking a file on a verdict the store
+	// never actually gave.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{Detail: "something went wrong"},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WriteBatch error = %v, want a refusal", err)
+	}
+	if refusal.Kind != RefusalStorageFailure {
+		t.Fatalf("a kind-less failure resolved to %q, want %q", refusal.Kind, RefusalStorageFailure)
+	}
+}
+
+func TestAKindLessFailureIsNeverAnInvalidRequest(t *testing.T) {
+	// Arrange. Parking a file for the life of the process on a verdict the store
+	// did not give would abandon a file the store may well accept next time.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{Detail: "something went wrong"},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if _, invalid := InvalidRequest(err); invalid {
+		t.Fatalf("a kind-less failure was read as an invalid request: %v", err)
 	}
 }

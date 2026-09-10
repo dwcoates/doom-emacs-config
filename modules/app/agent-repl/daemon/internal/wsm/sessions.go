@@ -1,0 +1,184 @@
+package wsm
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"claude-repld/internal/dlog"
+)
+
+// scanSession decodes one session row all-or-nothing. The terminal is a whole:
+// a row with a terminal instant but no kind (or the reverse) is corrupt, and a
+// corrupt row fails the read rather than presenting a live session that died.
+func scanSession(row interface{ Scan(...any) error }) (Session, error) {
+	var (
+		s          Session
+		started    int64
+		engagement int64
+		pid        sql.NullInt64
+		kind       sql.NullString
+		detail     sql.NullString
+		at         sql.NullInt64
+	)
+	if err := row.Scan(&s.Workspace, &s.HostSessionID, &s.VendorSessionID, &s.ConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &kind, &detail, &at); err != nil {
+		return Session{}, err
+	}
+	s.StartedAt = fromNanos(started)
+	s.LastEngagementAt = fromNanos(engagement)
+	if pid.Valid {
+		if pid.Int64 <= 0 {
+			return Session{}, &DecodeError{Table: "sessions", Row: string(s.Workspace), Field: "shim_pid", Err: errors.New("a recorded shim pid is positive")}
+		}
+		recorded := int(pid.Int64)
+		s.ShimPID = &recorded
+	}
+	switch {
+	case !kind.Valid && !at.Valid && !detail.Valid:
+	case kind.Valid && at.Valid && detail.Valid:
+		s.Terminal = &SessionTerminal{Kind: kind.String, Detail: detail.String, At: fromNanos(at.Int64)}
+	default:
+		return Session{}, &DecodeError{Table: "sessions", Row: string(s.Workspace), Field: "terminal", Err: errors.New("a session terminal is stored whole or not at all")}
+	}
+	return s, nil
+}
+
+// terminalDeleted is the terminal kind that refuses resurrection.
+const terminalDeleted = "deleted"
+
+// PutSession records a workspace's session binding and spawn identity. A
+// workspace whose session was DELETED refuses a new binding: resurrection is
+// unrepresentable, not merely discouraged.
+func (s *store) PutSession(ctx context.Context, sess Session) error {
+	const op = "daemon.wsm.put_session"
+	fields := dlog.Context{"workspace": string(sess.Workspace), "vendor_session": sess.VendorSessionID, "config_dir": sess.ConfigDir}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var kind sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT terminal_kind FROM sessions WHERE workspace_id = ?`, sess.Workspace).Scan(&kind)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if kind.Valid && kind.String == terminalDeleted {
+			return fmt.Errorf("wsm: workspace %s: %w", sess.Workspace, ErrSessionDeleted)
+		}
+		var (
+			tKind, tDetail any
+			tAt            any
+			pid            any
+		)
+		if sess.Terminal != nil {
+			tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
+		}
+		if sess.ShimPID != nil {
+			if *sess.ShimPID <= 0 {
+				return fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", sess.Workspace, *sess.ShimPID)
+			}
+			pid = int64(*sess.ShimPID)
+		}
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO sessions (workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(workspace_id) DO UPDATE SET
+			   host_session_id = excluded.host_session_id,
+			   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir, model = excluded.model,
+			   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
+			   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
+			   terminal_kind = excluded.terminal_kind,
+			   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
+			sess.Workspace, sess.HostSessionID, sess.VendorSessionID, sess.ConfigDir, sess.Model, sess.PermissionMode,
+			nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
+		return err
+	})
+}
+
+// Session loads one workspace's session; the bool reports existence.
+func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, error) {
+	var (
+		out   Session
+		found bool
+	)
+	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
+		sess, err := scanSession(s.db().QueryRowContext(ctx,
+			`SELECT workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
+			 FROM sessions WHERE workspace_id = ?`, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			out, found = Session{}, false
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out, found = sess, true
+		return nil
+	})
+	if err != nil {
+		return Session{}, false, err
+	}
+	return out, found, nil
+}
+
+// SetSessionTerminal records a session's death with its cause. A session
+// already deleted takes no further terminal — its cause of death is final.
+func (s *store) SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error {
+	const op = "daemon.wsm.set_session_terminal"
+	fields := dlog.Context{"workspace": string(id), "terminal_kind": t.Kind, "terminal_at": t.At}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var kind sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT terminal_kind FROM sessions WHERE workspace_id = ?`, id).Scan(&kind)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("wsm: session for workspace %s: %w", id, ErrNotFound)
+		}
+		if err != nil {
+			return err
+		}
+		if kind.Valid && kind.String == terminalDeleted {
+			return fmt.Errorf("wsm: workspace %s: %w", id, ErrSessionDeleted)
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET terminal_kind = ?, terminal_detail = ?, terminal_at = ? WHERE workspace_id = ?`,
+			t.Kind, t.Detail, nanos(t.At), id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}
+
+// TouchEngagement records last engagement — the idle sweep's input.
+func (s *store) TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error {
+	return s.write(ctx, "daemon.wsm.touch_engagement", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET last_engagement_at = ? WHERE workspace_id = ?`, nanos(at), id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}
+
+// SetShimPID records (or clears, with nil) the pid of the shim process serving
+// a workspace's session. The stand-down INTENT MANIFEST names it per session
+// and the incoming daemon reconciles it against the shim-held kernel lock, so
+// a stale pid would make a dead session read as preserved: the pid is cleared
+// at every stand-down rather than left behind.
+func (s *store) SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error {
+	const op = "daemon.wsm.set_shim_pid"
+	fields := dlog.Context{"workspace": string(id)}
+	var stored any
+	if pid != nil {
+		if *pid <= 0 {
+			err := fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", id, *pid)
+			s.log.Error(op, "refused a non-positive shim pid", withError(fields, err))
+			return err
+		}
+		fields["shim_pid"] = *pid
+		stored = int64(*pid)
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET shim_pid = ? WHERE workspace_id = ?`, stored, id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}

@@ -1,0 +1,60 @@
+// endpoint_assign_workspace_task.proto — AssignWorkspaceTask: assign a
+// workspace to a task, or unassign it. SIDEBAR section. A workspace
+// belongs to at most one task; the roster's task view groups by the
+// assignment.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AssignWorkspaceTaskRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The task to assign to. UNSET = unassign (back to the repo grouping);
+  // presence, never a sentinel id.
+  optional TaskRef task = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message AssignWorkspaceTaskResponse {
+  oneof result {
+    AssignWorkspaceTaskSuccess success = 1;
+    AssignWorkspaceTaskError error = 2;
+  }
+}
+
+// Done; the roster push carries the new grouping.
+message AssignWorkspaceTaskSuccess {
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AssignWorkspaceTaskError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AssignWorkspaceTaskUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AssignWorkspaceTaskWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AssignWorkspaceTaskTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AssignWorkspaceTaskNotYetAdopted not_yet_adopted = 4;
+    // No task by that id.
+    AssignWorkspaceTaskUnknownTask unknown_task = 5;
+  }
+}
+message AssignWorkspaceTaskUnknownWorkspace {}
+message AssignWorkspaceTaskWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AssignWorkspaceTaskTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AssignWorkspaceTaskNotYetAdopted {}
+message AssignWorkspaceTaskUnknownTask {}

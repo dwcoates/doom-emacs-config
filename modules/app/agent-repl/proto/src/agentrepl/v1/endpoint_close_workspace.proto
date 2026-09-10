@@ -1,0 +1,83 @@
+// endpoint_close_workspace.proto — CloseWorkspace: the USER's close. SIDEBAR
+// section. Closing is a VIEW act: the workspace leaves the tab-bar and its
+// buffers close, but the daemon↔shim session is UNTOUCHED — keepalives and
+// everything else continue; the workspace is merely unviewed. The host
+// command is a thin wrapper: send, await the ack, then tear the tab down —
+// every piece of real machinery is the daemon's.
+//
+// A close REQUIRES QUIET: no turn in flight, no live async work, and NO
+// HELD PROMPTS — a held prompt is undelivered user intent, and a close may
+// never silently discard it; the user releases or drops it in the tray
+// first. A busy workspace refuses, and the refusal MANIFESTS IN THE FOOTER (status
+// `closing`, sub-status `close blocked`, the daemon's composed reasons as
+// the activity line) — pushed on the footer stream beside this response, so
+// this response never restates the reasons. The user waits or interrupts
+// the work the normal way, then closes again.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CloseWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME. Fast by design: the quiet check is an in-memory
+// answer, so the ack never waits on the shim.
+message CloseWorkspaceResponse {
+  oneof result {
+    // Quiet — closed; the host proceeds with its view teardown, and the
+    // roster's new state arrives on its stream.
+    CloseWorkspaceSuccess success = 1;
+    CloseWorkspaceError error = 2;
+  }
+}
+message CloseWorkspaceSuccess {}
+
+// THE ARM IS THE REFUSAL.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message CloseWorkspaceError {
+  oneof cause {
+    // Work is in flight; the footer's close-blocked state carries the
+    // reasons.
+    CloseWorkspaceBlocked blocked = 1;
+    // The workspace id is not in the daemon's registry.
+    CloseWorkspaceUnknownWorkspace unknown_workspace = 2;
+    // The echoed dir disagrees with the registry's dir for this id.
+    CloseWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 3;
+    // This daemon released the workspace to a successor; dial `address`.
+    CloseWorkspaceTransferringAway transferring_away = 4;
+    // A joining daemon has not finished adopting this workspace yet.
+    CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
+  }
+}
+// WHY the close is blocked — the same evidence the footer's close-blocked
+// state draws, so a caller with no footer (a test, a log line, the host's
+// own message) can still say why. (Landing 7, 2026-09-02.)
+message CloseWorkspaceBlocked {
+  // The main thread has a turn in flight.
+  bool turn_in_flight = 1;
+  // Detached items live now (subagents, runs, tasks).
+  uint32 live_work = 2;
+  // Held prompts in the tray — undelivered user intent.
+  uint32 held_prompts = 3;
+  // The workspace is queued for, or inside, a merge.
+  bool merge_queued = 4;
+  // The daemon's composed sentence over the fields above — the footer's
+  // activity line, verbatim.
+  string summary = 5;
+}
+message CloseWorkspaceUnknownWorkspace {}
+message CloseWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message CloseWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message CloseWorkspaceNotYetAdopted {}

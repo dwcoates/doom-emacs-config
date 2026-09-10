@@ -1,178 +1,339 @@
 package main
 
 import (
+	"io"
+	"path/filepath"
 	"testing"
+	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
-	"agentrepl/shim-claude-sidecar/internal/tail"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-func ownerTarget(path, taskID string) discover.Target {
-	return discover.Target{Path: path, Kind: tail.KindShellSpool, TaskID: taskID, Raw: true}
+func ownerIndexFor(t *testing.T) (*ownerIndex, *[]string) {
+	t.Helper()
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "owner-test"})
+	return newOwnerIndex(log), &logs
 }
 
-func TestOwnerResolutionPrefersExactNormalizedOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	if !s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch) {
-		t.Fatal("did not record live task owner")
-	}
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/./b1.output", "b1"))
-	if !got.Resolved() || got.Outcome != OwnerResolvedPath || got.SessionID != "S1" || got.OutputPath != path {
-		t.Fatalf("resolution = %+v, want exact path S1", got)
-	}
+func spoolTarget(path, taskID string) discover.Target {
+	return discover.Target{Path: path, TaskID: taskID}
 }
 
-func TestOwnerResolutionRejectsExactOutputPathTaskMismatch(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
+func TestOwnerResolvesByTaskID(t *testing.T) {
+	// Arrange.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", agentID: ""})
 
-	got := s.resolveOwnerResult(ownerTarget(path, "b2"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want retryable path-task conflict", got)
-	}
-}
+	// Act.
+	got, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
 
-func TestOwnerResolutionRejectsConflictingTaskIDWithoutMatchingPath(t *testing.T) {
-	s, read := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b1", "S2", "", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want retryable conflict", got)
-	}
-	if lines := linesContaining(read(), "conflicting task ownership"); len(lines) != 1 {
-		t.Fatalf("conflict resolution logs = %v, want one", lines)
+	// Assert.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawning call", got, ok)
 	}
 }
 
-func TestOwnerResolutionKeepsDistinctExactPathsWhenTaskAssociationConflicts(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	firstPath := "/tmp/claude-501/slug/one/tasks/b1.output"
-	secondPath := "/tmp/claude-501/slug/two/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", firstPath, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b1", "S2", secondPath, OwnerSourceLiveLaunch)
+func TestOwnerResolvesByExactOutputPath(t *testing.T) {
+	// Arrange: the vendor named this exact file, which needs no id comparison.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", outputPath: "/private/tmp/b1.output"})
 
-	for path, session := range map[string]string{firstPath: "S1", secondPath: "S2"} {
-		got := s.resolveOwnerResult(ownerTarget(path, "b1"))
-		if got.Outcome != OwnerResolvedPath || got.SessionID != session {
-			t.Fatalf("resolution for %s = %+v, want exact path %s", path, got, session)
+	// Act.
+	got, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawning call", got, ok)
+	}
+}
+
+func TestOwnerIsUnknownUntilASpawnIsObserved(t *testing.T) {
+	// Arrange.
+	index, _ := ownerIndexFor(t)
+
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if ok {
+		t.Fatal("a spool resolved to an owner nobody reported")
+	}
+}
+
+func TestConflictingSpawnsResolveToNothing(t *testing.T) {
+	// Arrange: two calls claim one task.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+	index.observe(observation{taskID: "b1", activityID: "call-2"})
+
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert: guessing between two claims is how one run's output lands in
+	// another run's card.
+	if ok {
+		t.Fatal("a conflicted task resolved to a guess")
+	}
+}
+
+func TestConflictingSpawnsAreLoggedAsAnError(t *testing.T) {
+	// Arrange.
+	index, logs := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+
+	// Act.
+	index.observe(observation{taskID: "b1", activityID: "call-2"})
+
+	// Assert: the conflict is its own operation at error, naming the task it
+	// made permanently unresolvable.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "record-spawn-conflict", "error")
+	if got := ctxString(t, rec, "task_id"); got != "b1" {
+		t.Fatalf("task_id = %q, want the conflicted task", got)
+	}
+}
+
+func TestASpawnRePortedByTheSameCallIsNotAConflict(t *testing.T) {
+	// Arrange: a re-read record reports the same spawn again.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+
+	// Act.
+	index.observe(observation{taskID: "b1", activityID: "call-1"})
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if !ok {
+		t.Fatal("a replayed spawn observation was treated as a conflict")
+	}
+}
+
+func TestAMismatchedOutputPathRefusesResolution(t *testing.T) {
+	// Arrange: the task's authoritative output is elsewhere.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "b1", activityID: "call-1", outputPath: "/private/tmp/elsewhere.output"})
+
+	// Act.
+	_, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1"))
+
+	// Assert.
+	if ok {
+		t.Fatal("a spool resolved against a task whose authoritative output is a different file")
+	}
+}
+
+func TestASpawnWithNoCallIsRejected(t *testing.T) {
+	// Arrange.
+	index, logs := ownerIndexFor(t)
+
+	// Act.
+	index.observe(observation{taskID: "b1"})
+
+	// Assert.
+	if _, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1")); ok {
+		t.Fatal("a spawn naming no call was recorded")
+	}
+	requireOnceIn(t, parseLogLines(t, *logs), "record-spawn", "error")
+}
+
+func TestMainAgentOfASessionTranscriptIsItsFileName(t *testing.T) {
+	// Arrange: the per-record sessionId diverges from the file's; the file wins.
+	index, _ := ownerIndexFor(t)
+
+	// Act.
+	got := index.mainAgentFor(discover.Target{Path: "/c/projects/p/sess-1.jsonl", SessionID: "sess-1"})
+
+	// Assert.
+	if got != "sess-1" {
+		t.Fatalf("main agent = %q, want the transcript file's own session uuid", got)
+	}
+}
+
+func TestObserverNormalizesTheOutputPath(t *testing.T) {
+	// Arrange: the converter reports the /tmp spelling of a /private/tmp file.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+
+	// Act.
+	h.sc.TaskSpawned("b1", "call-1", "", filepath.Join(h.base, "spool", "claude-501", "proj", "runtime-sess", "tasks", "b1.output"), false)
+	got, ok := h.sc.owners.resolve(spoolTarget(spool, "b1"))
+
+	// Assert: the same file must not read as two.
+	if !ok || got.activityID != "call-1" {
+		t.Fatalf("resolve = %+v ok=%t, want the spawn found under the resolved spelling", got, ok)
+	}
+}
+
+func TestAStopMintsTheCancelledTerminalThroughTheSpoolsReader(t *testing.T) {
+	// Arrange. The terminal owes the OUTPUT the run produced, and only the
+	// spool's handler holds those bytes — so the transcript's converter reports
+	// the stop and the reader mints the terminal here.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1stopped", "partial work\n")
+	h.sc.TaskSpawned("b1stopped", "toolu_stopped_run", "", spool, false)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Act.
+	h.sc.TaskStopped("b1stopped")
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_stopped_run")
+	if cut == nil {
+		t.Fatalf("no cancelled terminal was written for the stopped run: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+	if got := cut.GetOutput().GetText().GetStdout(); got != "partial work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the spool held", got)
+	}
+}
+
+func TestAStoppedRunIsNeverConcludedLost(t *testing.T) {
+	// Arrange. Deliberately-stopped work must resolve CANCELLED, never LOST:
+	// the sweep is what would restate it, so the subject is the sweep.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1stopswept", "partial work\n")
+	h.sc.TaskSpawned("b1stopswept", "toolu_stopswept_run", "", spool, false)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+	h.sc.TaskStopped("b1stopswept")
+
+	// Act.
+	h.advance(24 * time.Hour)
+	h.sc.sweep()
+
+	// Assert: the policy reached no LOST conclusion (its conclusions are the
+	// warn-level `lost-policy` records), so no terminal branch of the seam ran.
+	h.requireNone(t, "lost-policy", "warn")
+	for _, operation := range []string{"lost-terminal", "lost-terminal-unwatched", "lost-terminal-residue", "lost-terminal-unsupported"} {
+		h.requireNone(t, operation, "")
+	}
+}
+
+func TestAStopForAnUnclaimedSpoolIsHeldAndAppliedOnClaim(t *testing.T) {
+	// Arrange. A spool is frequently written before the transcript line naming
+	// it, so a stop arriving in that window has no reader to mint its terminal —
+	// and dropping it would leave the run to be concluded LOST instead.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	spool := h.spoolFile(t, "b1late", "work before the claim\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the stop arrives while the spool is still unowned, and only then does
+	// its launch appear.
+	h.sc.TaskStopped("b1late")
+	if cut := interruptedFor(store.writes, "toolu_late_run"); cut != nil {
+		t.Fatal("a terminal was minted for a spool that had no reader yet")
+	}
+	h.sc.TaskSpawned("b1late", "toolu_late_run", "", spool, false)
+	h.sc.rescan()
+	h.sc.pollAll()
+
+	// Assert.
+	cut := interruptedFor(store.writes, "toolu_late_run")
+	if cut == nil {
+		t.Fatalf("the held stop was never applied once the spool was claimed: %s", h.logText())
+	}
+	if cut.GetByUser() == nil {
+		t.Fatalf("the applied stop must still state by_user: %v", cut.GetCause())
+	}
+}
+
+func TestAStopWithNoTaskIsRefusedLoudly(t *testing.T) {
+	// Arrange. A stop that names no task names no run, and attributing it to
+	// anything would settle a row on a guess.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	h.sc.TaskStopped("")
+
+	// Assert.
+	h.requireOnce(t, "task-stopped", "error")
+}
+
+// interruptedFor answers the interrupted terminal a producer wrote for a run,
+// or nil when it wrote none.
+func interruptedFor(batches []*storev1.EntryBatch, run string) *conversationv1.AgentBashInterrupted {
+	var out *conversationv1.AgentBashInterrupted
+	for _, batch := range batches {
+		for _, e := range batch.GetEntries() {
+			bash := e.GetAgentUpdate().GetBash()
+			if bash.GetRun().GetValue() != run {
+				continue
+			}
+			if cut := bash.GetFrame().GetSuccess().GetInterrupted(); cut != nil {
+				out = cut
+			}
 		}
 	}
-	if got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/three/tasks/b1.output", "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("task-only resolution = %+v, want conflict", got)
+	return out
+}
+
+func TestABackgroundedSpawnIsKnownByItsTaskIdForTheSpool(t *testing.T) {
+	// Arrange. A task SPOOL is keyed by task id, which is the identity its
+	// discovery target carries.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a15", activityID: "toolu_spawn", backgrounded: true})
+
+	// Act.
+	got := index.backgroundedFor(spoolTarget("/private/tmp/a15.output", "a15"))
+
+	// Assert.
+	if !got {
+		t.Fatal("a backgrounded spawn is not reported for its own task spool")
 	}
 }
 
-func TestOwnerResolutionRejectsConflictingExactOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/b1.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b2", "S2", path, OwnerSourceLiveLaunch)
+func TestABackgroundedSpawnIsKnownByItsCallForTheSidechain(t *testing.T) {
+	// Arrange. THE SAME AGENT'S SIDECHAIN TRANSCRIPT NAMES NO TASK: its only
+	// identity is the spawning call its meta file states. A flag reachable only
+	// by task id answered false here, so the sidechain's frames named the
+	// session's main agent as top_level while the spool's named the subagent —
+	// one agent, two planes, two answers no consumer could reconcile.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a15", activityID: "toolu_spawn", backgrounded: true})
 
-	if got := s.resolveOwnerResult(ownerTarget(path, "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("resolution = %+v, want poisoned path conflict", got)
+	// Act.
+	got := index.backgroundedFor(discover.Target{
+		// A sidechain's discovery TaskID is its `agent-<id>` LOCATOR, which no
+		// launch ever names — so the task lookup MUST miss and the call-id
+		// index is what answers.
+		Path: "/p/s/subagents/agent-a15.jsonl", AgentID: "toolu_spawn", SessionID: "s", TaskID: "a15locator",
+	})
+
+	// Assert.
+	if !got {
+		t.Fatal("a backgrounded spawn is not reported for the same agent's sidechain transcript")
 	}
 }
 
-func TestOwnerResolutionRejectsExactOutputPathClaimedByDifferentTaskInSameSession(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	path := "/tmp/claude-501/slug/runtime/tasks/shared.output"
-	s.noteTaskOwner("b1", "S1", path, OwnerSourceLiveLaunch)
-	s.noteTaskOwner("b2", "S1", path, OwnerSourceLiveLaunch)
+func TestAForegroundSpawnIsNeverReportedAsBackgrounded(t *testing.T) {
+	// Arrange. A synchronous subagent's stream ends with the turn, so its work
+	// belongs to the session's main agent and marking it backgrounded would move
+	// every one of its frames into a top_level of its own.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a16", activityID: "toolu_sync", backgrounded: false})
 
-	if got := s.resolveOwnerResult(ownerTarget(path, "b1")); got.Outcome != OwnerUnresolvedConflict {
-		t.Fatalf("resolution = %+v, want poisoned path conflict", got)
-	}
-}
+	// Act.
+	got := index.backgroundedFor(discover.Target{
+		Path: "/p/s/subagents/agent-a16.jsonl", AgentID: "toolu_sync", SessionID: "s", TaskID: "a16locator",
+	})
 
-func TestOwnerResolutionRejectsTaskAssociationWithDifferentRecordedOutputPath(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "/tmp/claude-501/slug/runtime/tasks/b1.output", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/other-runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedConflict || got.Resolved() {
-		t.Fatalf("resolution = %+v, want task path conflict", got)
-	}
-}
-
-func TestResetOwnersDiscardsPriorConnectionMappings(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "/tmp/claude-501/slug/runtime/tasks/b1.output", OwnerSourceLiveLaunch)
-	s.resetOwners()
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerUnresolvedAwaitingOwner || !got.MayArrive() {
-		t.Fatalf("resolution = %+v, want cleared retryable mapping", got)
-	}
-}
-
-func TestOpenTaskIndexTracksAuthoritativeLifecycle(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	started := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-		TaskId: "b1", Kind: corev1.TaskKind_TASK_KIND_SHELL, OutputPath: "/tmp/b1.output",
-	}}}
-	s.applyLifecycle([]*corev1.Event{started}, 1000)
-	if !s.taskOpen("b1") {
-		t.Fatal("live TaskStarted did not mark task open")
-	}
-
-	ended := &corev1.Event{SessionId: "S1", Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
-		TaskId: "b1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
-	}}}
-	s.applyLifecycle([]*corev1.Event{ended}, 2000)
-	if s.taskOpen("b1") {
-		t.Fatal("terminal TaskEnded did not clear open task")
-	}
-}
-
-func TestOpenTaskIndexRejectsMissingLifecycleIdentity(t *testing.T) {
-	s, read := ownerSidecar(t)
-	s.markTaskOpen("", OwnerSourceLiveLaunch)
-	s.markTaskClosed("")
-	if len(s.openTasks) != 0 {
-		t.Fatalf("invalid lifecycle observation mutated open tasks: %v", s.openTasks)
-	}
-	if got := linesContaining(read(), "observation rejected missing task id"); len(got) != 2 {
-		t.Fatalf("invalid lifecycle logs = %v, want two errors", got)
-	}
-}
-
-func TestOwnerResolutionUsesUniqueTaskOnlyWhenNoContradictionExists(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1", "S1", "", OwnerSourceLiveLaunch)
-
-	got := s.resolveOwnerResult(ownerTarget("/tmp/claude-501/other-runtime/tasks/b1.output", "b1"))
-	if got.Outcome != OwnerResolvedTask || got.SessionID != "S1" || got.Source != OwnerSourceLiveLaunch {
-		t.Fatalf("resolution = %+v, want unique live task owner", got)
-	}
-}
-
-func TestOwnerResolutionAwaitingOwnerCanResolveAfterLiveObservation(t *testing.T) {
-	s, _ := ownerSidecar(t)
-	target := ownerTarget("/tmp/claude-501/slug/runtime/tasks/b1.output", "b1")
-
-	before := s.resolveOwnerResult(target)
-	if before.Outcome != OwnerUnresolvedAwaitingOwner || !before.MayArrive() {
-		t.Fatalf("before = %+v, want retryable unresolved", before)
-	}
-	s.noteTaskOwner("b1", "S1", target.Path, OwnerSourceLiveLaunch)
-	after := s.resolveOwnerResult(target)
-	if after.Outcome != OwnerResolvedPath || after.SessionID != "S1" {
-		t.Fatalf("after = %+v, want exact path S1", after)
-	}
-}
-
-func TestOwnerResolutionRejectsMalformedSpoolTarget(t *testing.T) {
-	s, read := ownerSidecar(t)
-	got := s.resolveOwnerResult(ownerTarget("", ""))
-	if got.Outcome != OwnerUnresolvedInvalid || got.MayArrive() {
-		t.Fatalf("resolution = %+v, want terminal invalid", got)
-	}
-	if lines := linesContaining(read(), "rejected invalid spool target"); len(lines) != 1 {
-		t.Fatalf("invalid resolution logs = %v, want one", lines)
+	// Assert.
+	if got {
+		t.Fatal("a foreground spawn is reported as backgrounded")
 	}
 }

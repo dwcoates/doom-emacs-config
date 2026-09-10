@@ -1,0 +1,21 @@
+// endpoint_watch_daemon_holds.proto — WatchDaemonHolds: the tray's stream.
+// DAEMON-HOLD TRAY section. Per-workspace; the response wraps the tray, whole.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/daemon_hold.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the stream.
+message WatchDaemonHoldsRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// One push: the tray, whole-replaced.
+message WatchDaemonHoldsResponse {
+  frontend.v1.DaemonHoldTray tray = 1;
+}

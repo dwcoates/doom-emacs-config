@@ -1,0 +1,345 @@
+// permission.proto — THE PERMISSION GATE: a tool call waiting on consent.
+//
+// ONE GATE EXISTS in the agent binary and every tool passes through it; a
+// question is the same gate used as a transport for an answer, which is why
+// it is its own kind. THIS is the gate used as CONSENT: "may this run?"
+//
+// The gate is NOT the tool's outcome. An allowed tool then runs as an ordinary
+// activity unit under the SAME identity; a denied tool never starts and has no
+// activity frames at all. So this unit concludes when the gate does.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A tool call waiting on, or decided by, the user's consent.
+message AgentPermission {
+  // Tag 1 is RETIRED: the asking agent is named by the carrying frame.
+  // WHICH ASK — the permission's OWN identity, as a question has its own.
+  AgentPermissionId id = 2;
+  // WHICH CALL it gates: the tool unit that will carry this identity if the
+  // gate opens. Consent joins to work by this explicit field, never by sharing
+  // an identity space with it.
+  AgentActivityId gated_call = 3;
+  // Where the gate stands. No update arm: asked once, decided once.
+  oneof result {
+    // This stream is now carrying this ask, and it is open.
+    AgentPermissionStart start = 4;
+    // The gate was decided — opened or closed — which is the ANSWER either way.
+    AgentPermissionSuccess success = 5;
+    // The ask could not be put to the user. Arms DERIVED at the wave.
+    AgentPermissionFailure failure = 6;
+  }
+}
+
+// The identity of one permission ask. Opaque; equality is the only question
+// asked of it.
+message AgentPermissionId {
+  // Minted by the shim when the gate opens, held for the ask's whole life so
+  // its frames upsert one element and a decision names exactly one ask.
+  string value = 1;
+}
+
+// The user's decision on one open ask — what a consumer WRITES BACK. The same
+// arms the success frame will restate, minus `abandoned` and `policy`, which
+// no user can say.
+message AgentPermissionDecision {
+  // WHICH ask, as its start frame named it.
+  AgentPermissionId ask = 1;
+  // The decision: allow once, allow with the vendor's echoed standing, or deny
+  // with a reason the model will read.
+  oneof decision {
+    AgentPermissionAllowed allowed = 2;
+    AgentPermissionDeniedByUser denied = 3;
+  }
+}
+
+// An open ask for consent.
+message AgentPermissionStart {
+  // The prompt the vendor composed for this call — "Claude wants to read
+  // foo.txt" — RESOLVED by the producer, so no consumer reconstructs a sentence
+  // from the tool and its arguments.
+  AgentPermissionPrompt prompt = 1;
+  // WHY the gate fired, when the vendor said: a path outside the allowed set,
+  // an ask rule the user configured. Unset when it was simply the default for
+  // this tool.
+  optional AgentPermissionTrigger trigger = 2;
+  // What "always allow" WOULD MEAN for this call — the permission changes the
+  // vendor proposes so it stops asking. A TYPED ECHO TOKEN: a consumer that
+  // grants standing consent hands this back verbatim and never composes one.
+  // Absent when the vendor offered no standing form (then only once/deny exist).
+  optional AgentPermissionStanding offered_standing = 3;
+  // When the ask was posed, so a consumer draws how long the user has been
+  // asked.
+  AgentActivityStartedAt started_at = 4;
+}
+
+// The vendor's rendered prompt for one gated call.
+message AgentPermissionPrompt {
+  // The full sentence ("Claude wants to read foo.txt").
+  string title = 1;
+  // A short noun phrase for the action ("Read file"), for buttons and compact
+  // surfaces.
+  string display_name = 2;
+  // A subtitle qualifying the sentence ("Claude will have read and write
+  // access to files in ~/Downloads"). Unset when the vendor gave none.
+  optional string description = 3;
+}
+
+// Why this particular call was gated rather than auto-decided. THREE
+// INDEPENDENT FACTS, not a choice: the vendor can report a blocked path AND
+// a forcing ask rule AND an unclassified note on one ask, and dropping any
+// would hide part of the reason from the user. Each is UNSET when the vendor
+// reported that fact not at all.
+message AgentPermissionTrigger {
+  // The call reached a path outside the allowed directories.
+  optional AgentPermissionBlockedPath blocked_path = 1;
+  // A user-configured ask rule forced the prompt; the user's stated intent
+  // is a human prompt, so hosts must not auto-approve it.
+  optional AgentPermissionAskRule ask_rule = 2;
+  // The vendor explained the trigger in a sentence it did not classify.
+  optional AgentPermissionTriggerNote note = 3;
+}
+
+// The path that fell outside the allowed directories.
+message AgentPermissionBlockedPath {
+  // The offending path, as the vendor reported it.
+  string path = 1;
+}
+
+// The user-configured ask rule that forced this prompt.
+message AgentPermissionAskRule {
+  // Where the rule came from (a settings scope, as the vendor names it).
+  string source = 1;
+  // The tool the rule matched.
+  string tool_name = 2;
+  // The rule's own content, when it has one beyond the tool name.
+  optional string rule_content = 3;
+}
+
+// An unclassified explanation from the vendor.
+message AgentPermissionTriggerNote {
+  // The vendor's sentence, verbatim.
+  string text = 1;
+}
+
+// A set of permission changes, as the vendor spells them. Echoed, never
+// authored: the vendor proposes it on the ask and a standing allow returns it.
+message AgentPermissionStanding {
+  // The changes, applied together.
+  repeated AgentPermissionChange changes = 1;
+}
+
+// One permission change.
+message AgentPermissionChange {
+  // Where the change is written — a settings file or the session alone.
+  AgentPermissionDestination destination = 1;
+  // What the change does. The set arm is the kind; each carries its own
+  // payload.
+  oneof change {
+    // Rules added to the destination.
+    AgentPermissionRulesAdded add_rules = 2;
+    // The destination's rules replaced wholesale.
+    AgentPermissionRulesReplaced replace_rules = 3;
+    // Rules removed from the destination.
+    AgentPermissionRulesRemoved remove_rules = 4;
+    // The permission mode set at the destination.
+    AgentPermissionModeSet set_mode = 5;
+    // Directories added to the allowed set.
+    AgentPermissionDirectoriesAdded add_directories = 6;
+    // Directories removed from the allowed set.
+    AgentPermissionDirectoriesRemoved remove_directories = 7;
+  }
+}
+
+// Rules added, each with the behavior they carry.
+message AgentPermissionRulesAdded {
+  // The rules.
+  repeated AgentPermissionRule rules = 1;
+  // What the rules decide for what they match.
+  AgentPermissionBehavior behavior = 2;
+}
+
+// Rules that replace the destination's existing ones.
+message AgentPermissionRulesReplaced {
+  // The rules.
+  repeated AgentPermissionRule rules = 1;
+  // What the rules decide for what they match.
+  AgentPermissionBehavior behavior = 2;
+}
+
+// Rules removed.
+message AgentPermissionRulesRemoved {
+  // The rules.
+  repeated AgentPermissionRule rules = 1;
+  // The behavior set they are removed from.
+  AgentPermissionBehavior behavior = 2;
+}
+
+// The permission mode set at the destination.
+message AgentPermissionModeSet {
+  // The mode.
+  AgentPermissionMode mode = 1;
+}
+
+// Directories added to the allowed set.
+message AgentPermissionDirectoriesAdded {
+  // The directories, as the vendor spells them.
+  repeated string directories = 1;
+}
+
+// Directories removed from the allowed set.
+message AgentPermissionDirectoriesRemoved {
+  // The directories, as the vendor spells them.
+  repeated string directories = 1;
+}
+
+// One permission rule: a tool, optionally narrowed by content.
+message AgentPermissionRule {
+  // The tool the rule applies to.
+  string tool_name = 1;
+  // The narrowing content (a command prefix, a path pattern), when any.
+  optional string rule_content = 2;
+}
+
+// Where a permission change is written. A closed set of non-state scalars the
+// vendor defines; no sibling field depends on the value.
+enum AgentPermissionDestination {
+  AGENT_PERMISSION_DESTINATION_UNSPECIFIED = 0;
+  AGENT_PERMISSION_DESTINATION_USER_SETTINGS = 1;
+  AGENT_PERMISSION_DESTINATION_PROJECT_SETTINGS = 2;
+  AGENT_PERMISSION_DESTINATION_LOCAL_SETTINGS = 3;
+  AGENT_PERMISSION_DESTINATION_SESSION = 4;
+  AGENT_PERMISSION_DESTINATION_CLI_ARG = 5;
+}
+
+// What a rule decides for what it matches. A closed set of non-state scalars
+// the vendor defines; no sibling field depends on the value.
+enum AgentPermissionBehavior {
+  AGENT_PERMISSION_BEHAVIOR_UNSPECIFIED = 0;
+  AGENT_PERMISSION_BEHAVIOR_ALLOW = 1;
+  AGENT_PERMISSION_BEHAVIOR_DENY = 2;
+  AGENT_PERMISSION_BEHAVIOR_ASK = 3;
+}
+
+// A permission mode. A mode IS a state, so a oneof of empty arms — the
+// vendor's six.
+message AgentPermissionMode {
+  // The set arm is the mode.
+  oneof mode {
+    // Prompts for dangerous operations.
+    AgentPermissionModeDefault default = 1;
+    // File edits are auto-accepted.
+    AgentPermissionModeAcceptEdits accept_edits = 2;
+    // Every check is bypassed.
+    AgentPermissionModeBypass bypass = 3;
+    // Planning only; no tool executes.
+    AgentPermissionModePlan plan = 4;
+    // Never prompts; denies whatever is not pre-approved.
+    AgentPermissionModeDontAsk dont_ask = 5;
+    // A model classifier decides each prompt.
+    AgentPermissionModeAuto auto = 6;
+  }
+}
+
+// Prompts for dangerous operations.
+message AgentPermissionModeDefault {}
+// File edits are auto-accepted.
+message AgentPermissionModeAcceptEdits {}
+// Every check is bypassed.
+message AgentPermissionModeBypass {}
+// Planning only; no tool executes.
+message AgentPermissionModePlan {}
+// Never prompts; denies whatever is not pre-approved.
+message AgentPermissionModeDontAsk {}
+// A model classifier decides each prompt.
+message AgentPermissionModeAuto {}
+
+// The gate was decided. A DENIAL IS AN ANSWER, not a failure.
+message AgentPermissionSuccess {
+  // The set arm is the decision.
+  oneof decision {
+    // The tool may run.
+    AgentPermissionAllowed allowed = 1;
+    // The tool may not run.
+    AgentPermissionDenied denied = 2;
+    // Tag 3 is RETIRED: the vendor declares permission prompts have NO park
+    // deadline (vetting item 1), so an expiry arm had no producer.
+  }
+}
+
+// Consent was given. The set arm is its scope.
+message AgentPermissionAllowed {
+  oneof scope {
+    // This call only; the next like it asks again.
+    AgentPermissionAllowedOnce once = 1;
+    // This call and, from now on, whatever the echoed standing describes.
+    AgentPermissionAllowedStanding standing = 2;
+  }
+}
+
+// Consent for this call only.
+message AgentPermissionAllowedOnce {}
+
+// Consent for this call and for what the standing describes from now on.
+message AgentPermissionAllowedStanding {
+  // The standing granted — the vendor's offer, echoed back unchanged.
+  AgentPermissionStanding standing = 1;
+}
+
+// Consent was refused. The set arm is WHO refused.
+message AgentPermissionDenied {
+  oneof by {
+    // The user refused, with the reason relayed to the model.
+    AgentPermissionDeniedByUser user = 1;
+    // POLICY refused without asking anyone — a deny rule, dontAsk mode, the
+    // auto-mode classifier. The only denial that never had an open ask: a
+    // consumer sees `start` and this in one frame, or this alone.
+    AgentPermissionDeniedByPolicy policy = 2;
+    // NOBODY REFUSED. The deciding machinery could not be reached — the
+    // auto-mode classifier's model was unavailable — so the call was denied
+    // for want of a decision.
+    //
+    // ITS OWN ARM BECAUSE IT IS NOT A JUDGEMENT. Drawn as a user refusal it
+    // accuses the user of something they did not do; drawn as policy it
+    // implies a rule that does not exist. It is also the only denial here that
+    // RETRYING may resolve.
+    AgentPermissionDeniedForWantOfDecider undecidable = 3;
+  }
+}
+
+// The deciding machinery was unavailable, so the call was denied by default.
+message AgentPermissionDeniedForWantOfDecider {
+  // What the producer said was unavailable, verbatim, when it said. UNSET when
+  // it gave no account.
+  optional string detail = 1;
+}
+
+// The user refused.
+message AgentPermissionDeniedByUser {
+  // The reason, as relayed to the model.
+  string message = 1;
+}
+
+// Policy refused without an ask.
+message AgentPermissionDeniedByPolicy {
+  // Which component decided (the vendor's discriminator: classifier, mode,
+  // rule, ...). UNSET when the vendor named none — absence is a legal answer,
+  // never an empty string.
+  optional string decider = 1;
+  // The deciding component's own reason, when it gave one.
+  optional string reason = 2;
+  // The rejection message returned to the model.
+  string message = 3;
+}
+
+
+// The ask could not be put to the user.
+message AgentPermissionFailure {
+  // What the gate said when it failed, and when it settled.
+  optional AgentToolFailure error = 1;
+}

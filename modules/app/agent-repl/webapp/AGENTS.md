@@ -1,111 +1,299 @@
 # Webapp
 
-## Building
+The webview claude-repld serves: a TypeScript SPA that speaks generated Connect
+clients to the daemon and renders server-resolved views. It derives nothing.
+Where the daemon composed a sentence, the webapp draws the sentence.
 
-- **Finish every webapp change by running `bin/build-frontend.sh webapp`.** Not
-  `npm run build`. The script builds the same artifact AND writes the two stamps
-  beside it that nothing else writes: `dist/.built-sha` (the source revision,
-  read by the deploy report) and `dist/.build-id` (the artifact's own identity,
-  taken from the entry bundle's content hash).
-- `dist/.build-id` is what the webview's URL carries as `&build=`. The URL is
-  otherwise fixed per workspace, so it is a stable cache key: a client can go on
-  answering out of its own cache with a bundle from an earlier build — including
-  one whose file has since been deleted — and no amount of rebuilding reaches
-  the screen. The build id makes every build a different address.
-- A missing `dist/.build-id` is a hard error at webview-mount time, not a
-  degraded mode. Building with `npm run build` alone leaves it stale or absent,
-  which is exactly that failure.
-- The daemon serves `index.html` with `Cache-Control: no-store` for the same
-  reason. That governs new responses only; it cannot evict what a client already
-  stored, which is why the identity lives in the URL as well.
+## Layout
 
-## Workspace-state freshness
+```
+index.html                the SHELL: mount points by id, nothing else
+src/main.ts               THE BOOT: builds the context, then mounts everything
+src/shell.ts              resolves the shell's ids once, fails loudly by name
+src/rpc/                  the contract layer, imported by every component
+  transport | client        Connect over binary protobuf
+  streams | unary           watchStream (standing streams) and callUnary
+  strict | malformed        assertNoUnknownFields, requireCase, MalformedView
+  context                   AppContext: client, workspace, ticker, failures
+  refusal | refuse          the ONE refusal hook (see "Standing rules")
+  guard                     guardMalformed: the ONE fire-and-forget click guard
+  moved                     the page-wide "workspace moved" signal registry
+  page-address | workspace-ref   ?workspace=<id>&dir=<dir>[&composer=1]
+src/format.ts             the ONE client-side token formatter
+src/clock.ts src/duration.ts   the shared ticker and its formatters
+src/vocab.ts              typed accessors over proto/vocab/*.json
+src/log.ts                the canonical logging API
+src/link.ts               renderExternalLink / renderEditorLink
+src/feed/                 the feed mechanism (feed, feed-view, bubble, rows)
+  renderers.ts              THE SEAM, plus createRowRenderers: the registry
+  cards/ asks/ merge/       the fifteen row renderers
+src/footer/ src/topbar/ src/sidebar/ src/tray/ src/composer/ src/panels/
+src/login/ src/lifecycle/ src/failure/      the remaining components
+test/                     one test file per source module, mirroring src/
+test/integration/         the whole app under jsdom against a fake daemon
+```
 
-- An open WebSocket is transport reachability, not current session state.
-  `WsClient` reports `awaiting_snapshot` until the first `StateSnapshot` is
-  decoded and atomically adopted by `ConversationStore`.
-- GUI streams receive a `StateSnapshot` every 15 seconds. The browser's
-  45-second lease expires after three missed snapshots, invalidates all active
-  state and progress projections, and forces a reconnect. No disconnected or
-  freshness-expired UI may retain `submitting`, `thinking`, `permission`, or
-  another active phase.
-- `WorkspaceState.at_ms` is the browser's monotonic revision. A regressing
-  revision, conflicting payload at an equal revision, or `already_complete`
-  beside an active phase is an ingestion invariant violation. Validate the
-  entire adapter-effect batch before mutating store state.
-- Emacs owns sidebar membership and non-current row status. The revisioned
-  `ConversationStore` state owns both the footer and the current row status, so
-  later roster pushes cannot overwrite the current session's phase.
+## Mount order (src/main.ts, mirrored by test/integration/harness.ts)
 
-## Logging
+1. `shellElements(document)` — a broken shell fails here, by id.
+2. the page address, then the transport, the client and the failure overlay.
+3. the logger, bound to this page's identity.
+4. `adoptAtBoot(ctx)` — BEFORE any view stream. A joining daemon refuses every
+   per-workspace rpc with `not_yet_adopted` until its rendezvous finishes, so
+   adopting first turns a race into a wait. A terminal refusal throws
+   `AdoptionFailed`, which the boot mints as `boot_failed`.
+5. the mounts, in index.html's own top-to-bottom order, with two forced
+   exceptions: the login overlay precedes the topbar (whose account control
+   opens it), and the feed precedes the footer (whose jump rows reveal rows).
+   sidebar, topbar, feed, hold tray, footer, composer (dev mode only), login
+   overlay, lifecycle.
 
-- The webapp owns one canonical logging API with normal and verbose emission
-  functions in `src/wslog.ts`. New or changed webapp code uses that API only.
-- Canonical workspace records are persisted by the daemon at
-  `<workspace>/.claude/emacs/webapp.log`. The webapp is always attached to a
-  session and workspace, so it has no global durable log. Missing workspace
-  association is an invariant violation.
-- Every record is JSON-shaped and carries a stable `operation`, `connection_id`,
-  and every known session, request, workspace directory, and workspace ID.
-  Never create human-formatted durable records or legacy logging identities.
-- Every new or materially changed nontrivial function logs its entry. Every
-  meaningful branch that selects a different nontrivial block, call, state
-  transition, or outcome logs its selection.
-- The normal helper persists through the daemon and emits to the browser
-  console. The verbose helper always persists and gates browser-console output
-  through the webapp verbose setting.
-- Each error is logged exactly once by its owning layer with session, workspace,
-  connection or request, operation, resolved inputs, branch outcome, and cause.
-  Error-path tests assert the canonical record and its context.
-- Log every critical state transition and branch that selects a materially
-  different outcome. Errors use explicit `error` severity.
-- Frequent or hot diagnostics use the verbose helper. Do not bypass logging.
-  Direct `console` calls or ad hoc logger aliases are forbidden except a
-  documented pre-logger bootstrap failure or logger-sink emergency path.
+## The seams
 
-- `npm run typecheck` type-checks and `npm run coverage` measures authored
-  `src/**/*.ts`, including branch data, excluding declarations and generated
-  sources.
-- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
-  every tracked suite across the module.
-- Maintain at least 90% statement coverage. Never reduce the measured baseline,
-  and add focused tests for every critical branch and every error path changed.
-- `modules/app/agent-repl/bin/test-all.sh --record` records suite timings to
-  the canonical `modules/app/agent-repl/test_time.csv` for spotting timing
-  regressions.
+- **`RowRenderers` (src/feed/renderers.ts).** The feed mechanism and the cards
+  meet here and nowhere else. `createRowRenderers(ctx)` is the ONE place the
+  fifteen keys are filled in; `main.ts` and the integration harness both call
+  exactly it. A key added to the interface and not to the assembler does not
+  compile.
+- **The composer gate.** `footer.onStatus` drives `ComposerGate`: closed on
+  `merging`, `closing` and `disconnected` (R7), and the reason shown is the
+  FOOTER's own status word, never a second vocabulary for the same three states.
+- **`workspaceMoved` (src/rpc/moved.ts).** `startLifecycle` registers the page's
+  move handler; the refusal hook raises the signal by name. The registry lives
+  in the rpc layer so a refusal can reach the mounted banner without the rpc
+  layer importing a component.
+- **The failure sink.** `mountFailureOverlay` IS the `FailureSink` every layer
+  reports through.
+- **The ticker.** One `Ticker` on the context; every clock subscribes to it.
 
-## Logging-density audit
+## DOM hooks
 
-`modules/app/agent-repl/bin/report-logging-density.sh webapp` reports
-source-line and canonical-call counts. This is a rough syntactic review aid,
-not semantic logging coverage. Directly audit every critical branch and error
-path even when the ratio rises.
+The stable attributes the integration suite targets are specified in
+`docs/overhaul/reports/webapp-briefs/WEBAPP-AGENT-PREAMBLE.md`, sections 5 and
+5b. That list is the contract: use exactly those names, add nothing, rename
+nothing. Values are generated oneof CASE names (lowerCamel) unless stated.
 
-## The async teal wash, and what it guarantees
+Attributes added by a LANDING after that list was written are recorded here,
+and are contract on the same terms:
 
-Teal is keyed on TOOL KIND, not on asyncness. `ASYNC_TEAL_TOOLS` in
-`src/render.ts` is the one list — `Skill` plus `SUBAGENT_TOOLS` (`Task`,
-`Agent`) — and `test/styles.test.ts` pins it to the stylesheet's
-`.tool-card.tool-skill, .tool-card.tool-agent, .tool-card.tool-task` selector
-list. A card can be async without being teal (a background `Bash` watcher is
-grey), and a teal card need not have detached anything.
+| attribute | on | values | landing |
+|---|---|---|---|
+| `data-delivery` | the marker on the SENDER's agent-prompt row | `queuedToLive` \| `resumedRecipient` \| `refused` (absent when `FeedAgentPrompt.delivery` is unset — every recipient copy) | 10, `refused` 14 |
+| `.refused` class + `.prompt-refusal-reason` | the same delivery marker, when the send was REFUSED; the reason element is absent when the producer gave no account | — | 14 |
+| `data-permission-verdict` | the answered permission card's `.perm-verdict` | the `FeedPermissionAnswered.answer` case, `deniedUndecidable` included | 10 |
+| `data-query-cause` | the line under a `queryDied` turn error | `unexpectedEof` \| `iteratorFailure` (absent when the cause is unset) | 10 |
+| `data-attention` | the cold gate row the model picker routed to | `coldGate` | 10 |
+| `data-footer-notice` | the footer notice drawn when no cold gate row is on the page | `coldGate` | 10 |
+| `data-wave` | the `.bubble.user` of a prompt row whose turn is IN FLIGHT | `working` (absent on every settled, failed, interrupted or turnless prompt) | int-fix-bubble-wave |
 
-A teal card's NESTED SECTION — the expanded area holding its constituent
-sub-bubbles: its activity fold, its stream fold, the `AsyncBubble` its call
-detached, and that bubble's own children — is not an aside to be opened. It is
-the card's content, so it carries three guarantees:
+## Commands
 
-- ALWAYS OPEN. It renders through `Fold`'s `fixed` arm: no
-  `data-panel-toggle`, no chevron, no click target, and no open state
-  consulted.
-- THE SHARED CAP. `.fold-fixed > .agent-panel` joins the shared N-line cap rule
-  and takes `--cap-lines: var(--feed-cap-lines)` — the very budget a response
-  or prompt bubble body stops at, stated once in `:root`.
-- SCROLLED, NOT CLIPPED. `overflow-y: auto` comes off that same shared rule,
-  and `max-height` (never `height`) lets a short body shrink to fit.
+```
+npm test                   the unit suites (vitest + jsdom)
+npm run typecheck          tsc over src/ AND test/, integration suite included
+npm run build              typecheck plus vite build
+npm run test:integration   the whole app against a loopback fake daemon
+```
 
-Adding a kind to the wash means inheriting all three. `test/render.test.ts`
-asserts them for every member of `ASYNC_TEAL_TOOLS`, so a kind that gains the
-teal without the guarantees fails the suite rather than shipping a card that
-looks teal and still folds. Grey (non-teal) cards fold exactly as they always
-have; nothing here changes them.
+`bin/build-frontend.sh webapp` is what actually SHIPS a build: it writes
+`dist/.built-sha` and `dist/.build-id` beside the artifact, and the build id is
+what the webview URL carries as `&build=`, which is the only thing that defeats
+a cached bundle. `npm run build` alone leaves those stamps stale, and a missing
+`dist/.build-id` is a hard error at webview-mount time, not a degraded mode.
+
+## Standing rules
+
+- **STATELESS RENDERER.** No phase-to-word tables, no state-to-color mapping
+  beyond a CSS class per arm, no counting rows to label chips, no token
+  arithmetic, no ANSI parsing, no per-tool knowledge. Whole-view pushes replace
+  their unit whole; feed rows upsert by `FeedId`; nothing accumulates across
+  pushes.
+- **TYPED ARMS, NO FALLBACKS.** Every oneof is switched exhaustively. An unset
+  oneof, an unset non-optional message field, or an unknown arm is a
+  `MalformedView` — never a default, never something else drawn instead. An
+  absent `optional` field means draw nothing.
+- **ONE REFUSAL HOOK.** `src/rpc/refuse.ts`. `refusalOf` for a call site that
+  words its own refusal, `drawTypedRefusal` for one that lets the hook draw it,
+  `crossCuttingSentence` for one that composes its own sentence — all three
+  share a single implementation, and all three raise the page-wide move notice
+  on `transferring_away`. The cross-cutting four are worded once in
+  `src/rpc/refusal.ts`; never call `refusalSentence` from outside `src/rpc/`.
+- **ONE CLICK GUARD.** `guardMalformed` (src/rpc/guard.ts). Every
+  fire-and-forget click handler goes through it, so a `MalformedView` is logged
+  once and filed as `frame_undecodable` instead of escaping as an unhandled
+  rejection.
+- **ONE TOKEN FORMATTER.** `formatTokens` (src/format.ts), mirroring the
+  daemon's `format.go`: below 1000 unscaled; at or above it, k or M with
+  exactly one fractional digit, a trailing ".0" trimmed, and the unit chosen by
+  the RENDERED value (999950 reads "1M").
+- **CLOCKS TICK CLIENT-SIDE.** The wire ships instants; subscribe to the shared
+  ticker and format with `src/duration.ts`. Never a `setInterval` of your own.
+- **STREAMS ARE STANDING.** A client ends a watch only by aborting it. A stream
+  ending on its own is a transport failure: report it and reopen. Stopping
+  anything is an `Interrupt` rpc, never a stream close. The webapp never
+  redials a successor daemon.
+- **THE PAGE HOLDS ONE CONNECTION, AND NOTHING BUT THE MUX MAY OPEN ONE.**
+  Every standing watch goes through `ctx.streams.watch(kind, request, signal)`
+  (`src/rpc/page-streams.ts`), which multiplexes it onto the page's single
+  `WatchPage` stream. NEVER call `client.watch*` for a server-streaming rpc from
+  anywhere else; `test/rpc/page-streams.test.ts` reads the whole `src` tree and
+  fails on any module that does.
+
+  This is not tidiness. A webview negotiates **http/1.1** — the daemon serves
+  h2c, but no browser negotiates cleartext HTTP/2 — and HTTP/1.1 caps a page at
+  **six** connections per host, measured exactly on this daemon in the e2e
+  sandbox: standing streams 1-6 reached it within 9ms and were logged as
+  accepted; streams 7, 8 and 9 produced NO daemon record at all, and a plain
+  same-origin `GET` taken while six were held timed out in the browser after 5s
+  while the same `GET` with five held returned 200 in under a millisecond.
+
+  The page used to open six dedicated watches — `WatchWorkspaceRoster`,
+  `WatchWebWorkspace`, `WatchDaemon`, `WatchTopbar`, `WatchFooter`,
+  `WatchDaemonHolds` — before its feed tail. `WatchFeed` was the seventh, and it
+  did not fail: it QUEUED, forever, with no request on the wire and therefore no
+  `daemon_unreachable` card, so the root feed never drew a row produced after
+  the page loaded. Every expanded subagent bubble opens another feed tail, so no
+  fixed budget could have contained the count — which is why the guarantee is
+  "one stream exists" rather than "few enough streams exist".
+- **EVERY CLICK IS AN RPC**, and its refusal renders AT the clicked control,
+  never as pushed state. Domain outcomes (deny, nothing-running, empty) are
+  SUCCESS arms.
+- **THE FOUR IDENTIFIER SPACES** — `FeedId`, `TurnId`, `WorkspaceRef.id`,
+  `FeedWatchToken` — are never interchangeable. Echo them verbatim.
+- **LOGGING** goes through `src/log.ts` only (`log`, `logVerbose`). Every
+  nontrivial function logs its entry at debug; every branch selecting a
+  materially different outcome logs its selection; every error is logged
+  exactly once by its owning layer with resolved inputs and cause. No direct
+  `console.*` outside the documented pre-logger bootstrap path in `main.ts`.
+- **SEMANTIC COLOR** comes from `proto/vocab/render-colors.json` and
+  `paint-classes.json` through `src/vocab.ts`, and every consumer asserts its
+  table row for row against the file, so a new arm without a color fails loudly.
+- **CSS** is appended in a delimited section headed
+  `/* ---- <component> (<file>) ---- */`. Existing classes are never renamed or
+  restyled.
+- **NEVER edit `proto/`.** The contract is frozen and the bindings are
+  committed; a schema gap is reported, never patched locally.
+
+## Verification
+
+```bash
+npm run lint             # eslint, type-aware, over src/, test/ and the root configs
+npm run typecheck        # tsc over src/ and test/
+npm test                 # the unit suite (un-isolated; see vitest.config.ts)
+npm run test:integration # the whole app under jsdom against the fake daemon
+npm run coverage         # istanbul, per file, isolated (see vitest.config.ts)
+npm run coverage:verify  # prove the per-file numbers are still a measurement
+```
+
+### Coverage is istanbul, and the per-file numbers moved when it became one
+
+The package reads **98.47% of lines, 97.95% of statements, 94.82% of branches
+and 98.31% of functions**, against 97.97 / 97.98 / 95.96 / 97.09 under the old
+provider. The AVERAGE barely moved, which is exactly why the defect went
+unnoticed for so long: the per-file numbers underneath it were wrong in both
+directions and roughly cancelled.
+
+`@vitest/coverage-v8@2.1.9` merges each test-file window's RAW V8 coverage with
+`mergeProcessCovs` BEFORE remapping it through the source maps, so a module
+compiled in more than one window keeps one contributor's ranges instead of the
+sum. `src/scroll.ts` read 100% of its statements with only `test/scroll.test.ts`
+running and 47.71% with `test/feed` added; `src/format.ts` 100% against 84.61%;
+`src/markdown.ts` 100% against 59.52%. Which contributor survives depends on
+which files shared a process, so the figures also moved run to run: two whole
+suite runs differing only in test-FILE order disagreed on 66 of 100 files, some
+of them about how many lines the same module even has. `--isolate`,
+`--pool=forks` and `coverage.all: false` were each tried and none of them
+touches it.
+
+Under istanbul the files that were losing counts to the merge came back up
+(`scroll.ts` 47.71 → 98.82, `markdown.ts` 59.52 → 100, `format.ts` 84.61 →
+100), and files v8 had been flattering came down. The largest single fall was
+`src/main.ts`, from a fictional 100% to 0%: it is the mount entry, and no unit
+test loaded it -- its only exercise was `test/integration/` and the webapp
+layer, neither of which counts here or can say which of its branches a
+regression hit. `test/main.test.ts` now runs the real boot under jsdom, with
+only the wire and the mounts substituted, and it reads 100% again -- honestly
+this time.
+Three type-only modules (`src/feed/cards/context.ts`, `src/topbar/context.ts`,
+`src/tray/context.ts`) left the report entirely, because a file of `interface`
+declarations has no statement to cover and v8 was scoring it 100% of nothing.
+
+`npm run coverage:verify` (`bin/coverage-honesty.mjs` at the module root) is
+what stops a later provider bump bringing any of that back: it runs this
+package's own `npm run coverage` three times — once naturally ordered, twice
+with the test FILES shuffled under fixed seeds — and fails if any file's
+covered or total count moves, then checks that a probe module reads no LESS in
+the full suite than it does with only its own test file running. Run it after
+any change to the provider, its version, or the isolation the coverage script
+buys. Under the v8 provider it fails on 66 of the 100 files.
+
+`npm run lint` is TYPE-AWARE and is not a style pass: it reads the same program
+`tsc` does, and the rules it adds on top are the ones that catch what `tsc`
+cannot see — a floating promise, a `switch` with neither a missing arm's case
+nor a default, an `any` that spreads through an object literal, a `||` that
+substitutes a default for a legitimately empty string. Several of the standing
+rules above are mechanized in it: logging goes through `src/log.ts` only, and
+`no-console` now says so everywhere but the two documented bootstrap sites.
+
+Its rule set and every deliberate omission are argued inline in
+`eslint.config.js` — including the measurement behind the exhaustiveness rule's
+setting. Disagree with a rule there, in one place, rather than with an inline
+disable. An inline disable is legitimate when it carries a `--` reason a
+reviewer would accept, and unused ones fail the run.
+
+## Tests
+
+- One test file per source module, mirroring the directory: `src/feed/feed.ts`
+  goes with `test/feed/feed.test.ts`. Table-driven, Arrange/Act/Assert, ONE edge
+  case per test.
+- Fixtures are built with `create(XSchema, {...})` from the generated code.
+  Verbs are scripted with `createRouterTransport` from `@connectrpc/connect`.
+- **NO REAL TIMERS.** `vi.useFakeTimers()`; never `await sleep(...)`.
+- **NO NETWORK AND NO VENDOR CALLS.** The integration config sets
+  `AGENT_REPL_FORBID_VENDOR_CALLS=1` as a standing tripwire; the only "real"
+  server is the loopback fake daemon the suite starts itself.
+- **NO REAL GIT.** Nothing here shells out to git.
+- Every branch has a test: every arm rendered, every malformed input rejected
+  (unset oneof, unset required field, unknown arm), every refusal arm drawn at
+  its call site, every tick and every format.
+
+### Wait/timeout bounds
+
+Every wait bound in both suites is set to roughly 3x the slowest healthy
+duration actually observed, never left at a tool default. Measured against
+97 unit files (3279 tests) and all 13 integration files (1601 assertions):
+
+| bound | old (default) | new | observed healthy max | why |
+|---|---|---|---|---|
+| unit `testTimeout`/`hookTimeout` (`vitest.config.ts`) | 5000ms / 10000ms | 850ms / 850ms | 272.8ms (`test/feed/cards/shell.test.ts`, re-measured; see below) | no real I/O, everything fake-timered |
+| integration `testTimeout`/`hookTimeout` (`vitest.integration.config.ts`) | 5000ms / 10000ms | 900ms / 900ms | 274.8ms (in `refusals.integration.test.ts`) | in-process loopback fake daemon, instant to start |
+| `SETTLE_ROUND_CAP` (`test/integration/harness.ts`) | 60 rounds | 60 rounds (unchanged) | 24 rounds (also in `refusals.integration.test.ts`) | already a ~2.5x margin; the 3x rule would ask for 72, which is looser than the current cap, so it stays — a bound is never loosened to fit a formula |
+
+No per-site exception was needed: nothing in either suite (xterm/login
+terminal included) took long enough to need its own raised `timeout`. If a
+future test genuinely needs more than these globals, give it its own
+`{ timeout: ... }` with a one-line comment naming why, rather than raising
+the shared bound.
+
+**Unit `testTimeout` re-derivation (300ms proved too tight).** The 300ms unit
+bound tripped three times under load on tests that pass alone —
+`test/feed/asks/question.test.ts`, `test/feed/cards/shell.test.ts`, and
+`test/feed/feed.test.ts` ("tails the token the reopen minted") — with no real
+timer or heavy fixture in any of them. Re-measured with
+`npx vitest run --reporter=json`, four passes: two quiet, two with the box
+pinned on all 16 cores (`yes > /dev/null &` x4, killed after). All 3359 tests
+passed every time; per-run slowest-test figures:
+
+| run | slowest test | duration |
+|---|---|---|
+| quiet 1 | `shell.test.ts`: "the stop control interrupts the detached target by this row's own id" | 272.8ms |
+| quiet 2 | `question.test.ts`: "answering sends the allowOnce arm from the allowOnce button" | 211.4ms |
+| loaded 1 (`yes` x4) | `shell.test.ts`: "the stop control clears the outcome once it has been readable long enough" | 197.9ms |
+| loaded 2 (`yes` x4) | `question.test.ts`: "the entry click is SelectWorkspace and nothing else (R8) echoes the ref the queue served, verbatim" | 174.7ms |
+
+The old 88.9ms baseline no longer holds: the healthy max across these four
+runs is 272.8ms, inside the old 300ms bound with essentially no margin —
+that gap, not a slow test, is the flake. Ruling: (b) — the bound was too
+tight for the suite's own variance, not any one test's arrangement.
+`testTimeout`/`hookTimeout` are re-set to 850ms (~3x the 272.8ms measured
+max).

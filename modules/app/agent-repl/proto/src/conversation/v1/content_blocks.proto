@@ -1,0 +1,91 @@
+// content_blocks.proto — BLOCKS COMMON TO EVERY AUTHOR: text, images, and the
+// unmodeled.
+//
+// THE CONTENT MODEL IS NEUTRAL BY DESIGN. The vendor's own content model has
+// seventeen block kinds named for its API surface — MCP tool use, server tool
+// use, web search result, code execution result, container upload. Those are
+// all the same two facts wearing different names: a tool was CALLED, and a
+// tool RETURNED. This models the facts and lets the tool's own name carry the
+// rest.
+//
+// THE BLOCK SET IS NARROWED PER SITE, and there is deliberately no shared
+// `Content`. One union with every arm would make a user message carrying
+// reasoning, or a tool result carrying a tool call, representable and
+// meaningless. Three unions — UserContent, AgentContent, ToolResultContent,
+// each in the file of the author it belongs to — hold only what can
+// legitimately appear where it appears, and make those unbuildable instead of
+// merely wrong. The cost is a duplicated arm list; the repo's rule is duplicate
+// over share, because mutual exclusivity is worth more than deduplication.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Words meant to be read as they are.
+message TextBlock {
+  // The text, verbatim. Markdown is a rendering choice a client makes; nothing
+  // here declares a format, because the producer does not know one.
+  string text = 1;
+}
+
+// An image, carried by REFERENCE rather than by value.
+//
+// A path or URL rather than bytes: a conversation record is replayed many
+// times, and inlining megabytes into something replayed is how a feed becomes
+// slow. WHICH kind of reference is stated by arm, not left for a consumer to
+// sniff from a string.
+message ImageBlock {
+  oneof location {
+    // A file on the host the producer runs on. Meaningful only to a reader on
+    // that host; a producer that spilled vendor-inlined bytes to disk uses
+    // this.
+    ImageBlockPath path = 1;
+    // A fetchable URL, as the vendor supplied it.
+    ImageBlockUrl url = 2;
+  }
+  // The MIME type, so a client knows what it is fetching before it fetches
+  // it. A plain string because the MIME set is open and is not a state.
+  string media_type = 3;
+}
+
+// A host-local file reference to an image.
+message ImageBlockPath {
+  // Absolute path on the producer's host.
+  string path = 1;
+}
+
+// A URL reference to an image.
+message ImageBlockUrl {
+  // The URL, verbatim.
+  string url = 1;
+}
+
+// A block whose kind this schema does not model, kept whole so the decision
+// to not model it stays reversible from stored data.
+//
+// THIS IS NOT A FALLBACK. A producer populates this arm ONLY for a block whose
+// shape is genuinely, realistically unknowable in schema — a kind the vendor
+// introduced that nothing here has seen, an opaque payload whose schema the
+// producer does not and cannot hold. It is NEVER the arm a producer reaches
+// for because modeling the block was inconvenient, because the shape varies,
+// or because "we'll type it later": every one of those is an unmodeled block
+// that gets an arm, and a producer that routes a knowable block here has
+// silently erased its type. A reader who finds a recognizable kind in here is
+// looking at a producer defect, not a schema feature.
+message UnsupportedBlock {
+  // What the vendor called it, so a later schema knows what to model.
+  string kind = 1;
+  // The block entire and verbatim, so nothing is lost by not understanding it.
+  //
+  // UNTYPED BY NECESSITY, and this is the one reason that qualifies: a block
+  // reaches this arm precisely when its kind is one the producer has no
+  // schema for. The vendor holds the schema; the producer holds the bytes.
+  // Nothing renders from this field — it exists so a later schema can be
+  // built from stored evidence, never so a client can dig into it. Accepted
+  // as a cost in the design record.
+  google.protobuf.Struct raw = 2;
+}

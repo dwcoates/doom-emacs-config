@@ -1,0 +1,10 @@
+{
+  "assertion": "select-workspace-ack",
+  "n": 20,
+  "p50_ms": 0.421042,
+  "p95_ms": 0.755375,
+  "cores": 16,
+  "tip": "c70c0646d",
+  "measured": "2026-09-04",
+  "note": "the high-water p50/p95 across the baseline run's repetitions"
+}

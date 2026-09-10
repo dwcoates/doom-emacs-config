@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { containing } from "./expect-shapes.js";
 import { writeSync } from "node:fs";
 
 const priorVerbose = process.env.AGENT_REPL_LOG_VERBOSE;
@@ -6,7 +7,12 @@ const mockedWriteSync = vi.mocked(writeSync);
 
 async function freshLog() {
   vi.resetModules();
-  return import("../src/uds/log.js");
+  return import("../src/log.js");
+}
+
+/** One emergency-stderr line, parsed as the record it is. */
+function record(line: string): { message?: string } {
+  return JSON.parse(line) as { message?: string };
 }
 
 function persisted(): Record<string, unknown>[] {
@@ -19,7 +25,7 @@ function persisted(): Record<string, unknown>[] {
 describe("shim runtime logging", () => {
   beforeEach(() => {
     mockedWriteSync.mockReset();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => args[3] as number) as typeof writeSync);
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => args[3] as number));
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -48,6 +54,11 @@ describe("shim runtime logging", () => {
     expect(persisted()[0]).toMatchObject({ workspace_dir: "/canonical/workspace", workspace_id: "cdb4ebd1", agent_repl_session_id: "agent-session-1", request_id: "request-1" });
   });
 
+  it("refuses an empty request id rather than stamping a blank field", async () => {
+    const log = await configured();
+    expect(() => log.setRequestId("")).toThrow(/request id is required/);
+  });
+
   it("derives identity without resolving cwd and propagates learned Claude identity", async () => {
     const log = await freshLog();
     log.configureLog({ fd: 3, cwd: "/workspace/link-is-intentional", agentReplSessionId: "a" });
@@ -72,7 +83,7 @@ describe("shim runtime logging", () => {
 
   it("writes multibyte JSONL with byte-accurate short-write offsets", async () => {
     const log = await configured();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => Math.min(5, args[3] as number)) as typeof writeSync);
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => Math.min(5, args[3] as number)));
     log.bindLog({ operation: "shim.test.unicode" }).log({}, "snowman ☃ and rocket 🚀");
     const calls = mockedWriteSync.mock.calls as unknown as Array<[number, Buffer, number, number]>;
     expect(calls.length).toBeGreaterThan(1);
@@ -109,6 +120,16 @@ describe("shim runtime logging", () => {
     expect(terminal).toEqual([]);
   });
 
+  it("names an object level by its shape rather than as [object Object]", async () => {
+    // A level is `unknown` on the way in, and the refusal exists to say WHICH
+    // value was refused. `String()` renders every object identically, which is
+    // the one answer that tells the reader nothing.
+    const log = await configured();
+    expect(() => log.bindLog({ operation: "shim.test.shaped" }).log({ level: { want: "trace" } }, "nope")).toThrow(
+      '{"want":"trace"}',
+    );
+  });
+
   it("serializes Error and circular evidence in one valid JSONL record", async () => {
     const log = await configured();
     const circular: Record<string, unknown> = { count: 9n };
@@ -130,54 +151,62 @@ describe("shim runtime logging", () => {
   it("uses emergency stderr when the sink errors or makes zero progress", async () => {
     const log = await configured();
     const terminal = stderr();
+    // NOT FATAL (the EPIPE incident, 2026-08-10): a shim outlives its daemon by
+    // design, so a process that died because its log line could not be written
+    // would take a live turn with it. The loss is announced ONCE on the
+    // emergency path and then stated as a standing degraded window; repeating
+    // it per record would only bury the announcement.
     mockedWriteSync.mockImplementation(() => 0);
-    expect(() => log.bindLog({ operation: "shim.test.zero" }).log({}, "nope")).toThrow("made no progress");
-    expect(JSON.parse(terminal[0]!)).toMatchObject({
+    log.bindLog({ operation: "shim.test.zero" }).log({}, "nope");
+    expect(JSON.parse(terminal[0])).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
       workspace_dir: "/canonical/workspace",
     });
     const writesAfterFailure = mockedWriteSync.mock.calls.length;
-    expect(() => log.bindLog({ operation: "shim.test.poisoned" }).log({}, "again")).toThrow("made no progress");
+    log.bindLog({ operation: "shim.test.poisoned" }).log({}, "again");
     expect(mockedWriteSync).toHaveBeenCalledTimes(writesAfterFailure);
-    expect(JSON.parse(terminal[1]!)).toMatchObject({ operation: "shim.logging.emergency" });
+    expect(terminal).toHaveLength(1);
   });
 
   it("uses emergency stderr when the sink throws or over-reports bytes", async () => {
     const log = await configured();
     const terminal = stderr();
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
-    expect(() => log.bindLog({ operation: "shim.test.throw" }).log({}, "nope")).toThrow("bad fd");
-    expect(JSON.parse(terminal[0]!).message).toContain("bad fd");
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
+    log.bindLog({ operation: "shim.test.throw" }).log({}, "nope");
+    expect(record(terminal[0]).message).toContain("bad fd");
     vi.clearAllMocks();
     const overLog = await configured();
     const overTerminal = stderr();
-    mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1) as typeof writeSync);
-    expect(() => overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope")).toThrow("invalid write length");
-    expect(JSON.parse(overTerminal[0]!).message).toContain("invalid write length");
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1));
+    overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope");
+    expect(record(overTerminal[0]).message).toContain("invalid write length");
   });
 
   it("reports fatal errors canonically after configuration and through bootstrap stderr before it", async () => {
     const bootstrapLog = await freshLog();
-    const { reportFatal: bootstrapFatal } = await import("../src/main.js");
+    // src/fatal.js, NOT src/main.js: the fatal reporter is deliberately off the
+    // wiring graph, so this test pulls in one small module rather than the whole
+    // shim (engine, store, service, sdk) on every fresh module registry.
+    const { reportFatal: bootstrapFatal } = await import("../src/fatal.js");
     const bootstrapTerminal = stderr();
     bootstrapFatal(new Error("bootstrap"));
     expect(mockedWriteSync).not.toHaveBeenCalled();
-    expect(JSON.parse(bootstrapTerminal[0]!)).toMatchObject({
+    expect(JSON.parse(bootstrapTerminal[0])).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
     });
-    expect(JSON.parse(bootstrapTerminal[0]!).message).toContain("bootstrap");
+    expect(record(bootstrapTerminal[0]).message).toContain("bootstrap");
     vi.clearAllMocks();
-    await bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
+    bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
     bootstrapFatal(new Error("configured"));
     expect(persisted()[0]).toMatchObject({
       level: "error",
       operation: "shim.main.fatal",
-      context: expect.objectContaining({
+      context: containing({
         cause_class: "unrecoverable_entrypoint_failure",
         cause_type: "Error",
         exit_outcome: "process_exit_1",
-        cause: expect.objectContaining({ name: "Error", message: "configured" }),
+        cause: containing({ name: "Error", message: "configured" }),
       }),
     });
     expect(configuredTerminal).toHaveLength(1);
@@ -218,7 +247,192 @@ describe("shim runtime logging", () => {
     const log = await configured();
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
     log.bindLog({ operation: "shim.test.epipe" }).log({}, "retire the mirror");
-    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
-    expect(() => log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure")).toThrow("bad fd");
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
+    const terminal = stderr();
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure");
+
+    // The mirror is gone and the durable sink has just died, so the emergency
+    // path is the only channel left -- and it still carries the cause.
+    expect(record(terminal[0]).message).toContain("bad fd");
+  });
+
+  it("tells a registered observer that the sink is poisoned", async () => {
+    // WatchSession is where a lost log becomes visible to anyone outside the
+    // process; without an observer the loss stayed inside the dead logger.
+    const log = await configured();
+    stderr();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
+
+    log.bindLog({ operation: "shim.test.observed" }).log({}, "durable failure");
+
+    expect(causes).toEqual(["bad fd"]);
+  });
+
+  it("tells an observer that registers AFTER the poisoning, since it is a standing condition", async () => {
+    const log = await configured();
+    stderr();
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
+    log.bindLog({ operation: "shim.test.late" }).log({}, "durable failure");
+
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+
+    expect(causes).toEqual(["bad fd"]);
+  });
+
+  it("announces the poisoning exactly once, however many records are lost after it", async () => {
+    const log = await configured();
+    stderr();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }));
+
+    log.bindLog({ operation: "shim.test.once" }).log({}, "one");
+    log.bindLog({ operation: "shim.test.once" }).log({}, "two");
+
+    expect(causes).toHaveLength(1);
+  });
+
+  it("refuses an empty Claude session id rather than stamping a blank identity", async () => {
+    const log = await configured();
+    expect(() => log.setClaudeSessionId("")).toThrow(/claude session id is required/);
+  });
+
+  it("refuses a Claude session id that is not a string at all", async () => {
+    const log = await configured();
+    expect(() => log.setClaudeSessionId(7 as unknown as string)).toThrow(/claude session id is required/);
+  });
+
+  it("refuses a request id that is not a string at all", async () => {
+    const log = await configured();
+    expect(() => log.setRequestId(7 as unknown as string)).toThrow(/request id is required/);
+  });
+
+  it("clearing the request id before the logger is configured is a no-op, not a crash", async () => {
+    // The turn's teardown must not be the thing that kills a shim whose
+    // logger never came up.
+    const log = await freshLog();
+    expect(() => log.clearRequestId()).not.toThrow();
+  });
+
+  it("carries a non-finite number as its stringified form rather than dropping the field", async () => {
+    const log = await configured();
+    log.bindLog({ operation: "shim.test.jsonsafe" }).log({ ratio: Number.POSITIVE_INFINITY }, "budget");
+    expect(persisted()[0].context).toEqual({ ratio: "Infinity" });
+  });
+
+  it("carries a bigint as a decimal string, which JSON has no other way to hold", async () => {
+    const log = await configured();
+    log.bindLog({ operation: "shim.test.jsonsafe" }).log({ offset: 9007199254740993n }, "offset");
+    expect(persisted()[0].context).toEqual({ offset: "9007199254740993" });
+  });
+
+  it("carries a function-valued field as its stringified form", async () => {
+    const log = await configured();
+    log.bindLog({ operation: "shim.test.jsonsafe" }).log({ hook: function named() {} }, "hook");
+    expect(String((persisted()[0].context as Record<string, unknown>).hook)).toContain("named");
+  });
+
+  it("carries a symbol-valued field as its stringified form", async () => {
+    const log = await configured();
+    log.bindLog({ operation: "shim.test.jsonsafe" }).log({ tag: Symbol("marker") }, "tag");
+    expect(persisted()[0].context).toEqual({ tag: "Symbol(marker)" });
+  });
+
+  it("poisons the sink when the durable write fails WHILE recording the mirror's retirement", async () => {
+    // The retirement record is itself a durable write, and its failure is the
+    // one case that cannot be reported through the channel it is about.
+    const log = await configured();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    const terminal = stderr();
+    terminal.length = 0;
+    vi.spyOn(process.stderr, "write").mockImplementation((record) => {
+      terminal.push(String(record));
+      throw new Error("write EPIPE");
+    });
+    let durableWrites = 0;
+    mockedWriteSync.mockImplementation(((...args: unknown[]) => {
+      durableWrites += 1;
+      if (durableWrites > 1) throw new Error("bad fd");
+      return args[3] as number;
+    }));
+
+    log.bindLog({ operation: "shim.test.retire-poison" }).log({}, "the record that retires the mirror");
+
+    expect(causes).toEqual(["bad fd"]);
+  });
+
+  it("poisons the sink with a stringified cause when the durable write throws a non-Error", async () => {
+    const log = await configured();
+    stderr();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    mockedWriteSync.mockImplementation(() => { throw "EBADF"; });
+
+    log.bindLog({ operation: "shim.test.nonerror" }).log({}, "durable failure");
+
+    expect(causes).toEqual(["EBADF"]);
+  });
+
+  it("retires the mirror when the stderr write throws a non-Error", async () => {
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw "EPIPE"; });
+    log.bindLog({ operation: "shim.test.nonerror-mirror" }).log({}, "retire me");
+    expect(persisted().map((record) => record.operation)).toContain("shim.logging.stderr-mirror");
+  });
+
+  it("stamps the emergency record with the Claude identity once the SDK has revealed it", async () => {
+    const log = await configured();
+    log.setClaudeSessionId("claude-77");
+    const terminal = stderr();
+    log.emergencyStderr("the sink is gone");
+    expect(JSON.parse(terminal[0])).toMatchObject({
+      operation: "shim.logging.emergency",
+      claude_session_id: "claude-77",
+    });
+  });
+
+  it("POISONS the sink when the retirement record's own write throws a non-Error", async () => {
+    // Arrange: the mirror dies, and the durable write that records its death
+    // fails with a bare string rather than an Error.
+    const log = await configured();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    mockedWriteSync
+      .mockImplementationOnce(((...args: unknown[]) => args[3] as number))
+      .mockImplementation(() => { throw "the inherited fd is gone"; });
+
+    // Act.
+    log.bindLog({ operation: "shim.test.retire-nonerror" }).log({}, "a record");
+
+    // Assert. The bare string is surfaced as the poisoning's cause, not lost.
+    expect(causes).toEqual(["the inherited fd is gone"]);
+  });
+
+  it("retires the mirror when the emergency channel itself throws a non-Error", async () => {
+    // Arrange.
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw "the terminal is gone"; });
+
+    // Act.
+    log.emergencyStderr("the sink is gone");
+
+    // Assert. The mirror is retired, so ordinary records no longer echo there.
+    const terminal = stderr();
+    log.bindLog({ operation: "shim.test.after-emergency" }).log({}, "after");
+    expect(terminal).toEqual([]);
+  });
+
+  it("does not let the emergency channel's own failure escape the caller", async () => {
+    // This is the escape hatch used while the real error is on its way out;
+    // letting a dead pipe throw over it would replace a surfaced error with a
+    // process death.
+    const log = await configured();
+    vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
+    expect(() => log.emergencyStderr("the sink is gone")).not.toThrow();
   });
 });

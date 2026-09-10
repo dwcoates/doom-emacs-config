@@ -4,453 +4,632 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
-	"agentrepl/shim-claude-sidecar/internal/tail"
+	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
-type captureWriter struct {
-	mu    sync.Mutex
-	lines []string
-}
+func TestDefaultStoreSocketPrefersTheSharedEnv(t *testing.T) {
+	// Arrange: the env var is how a private test store is reached without
+	// either side hard-coding a path.
+	t.Setenv(StoreSocketEnv, "/private/tmp/ar-test.sock")
 
-func (w *captureWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.lines = append(w.lines, string(p))
-	return len(p), nil
-}
+	// Act.
+	got := defaultStoreSocket("/cache/agent-repl")
 
-// capturingLog returns a logger that records every JSON line, plus a reader
-// for what it has seen. It is mutex-guarded because the sidecar's logger is.
-func capturingLog() (*logging.Bound, func() []string) {
-	writer := &captureWriter{}
-	logf := logging.New(writer, io.Discard).With(logging.Context{Component: "test"})
-	logf.SetDiagnosticSink(func(d logging.Diagnostic) {
-		writer.Write([]byte(d.Message))
-	})
-	return logf, func() []string {
-		writer.mu.Lock()
-		defer writer.mu.Unlock()
-		return append([]string(nil), writer.lines...)
+	// Assert.
+	if got != "/private/tmp/ar-test.sock" {
+		t.Fatalf("default store socket = %q, want the env value", got)
 	}
 }
 
-// linesContaining filters captured log lines by substring.
-func linesContaining(lines []string, sub string) []string {
-	var out []string
-	for _, l := range lines {
-		if strings.Contains(l, sub) {
-			out = append(out, l)
-		}
-	}
-	return out
-}
+func TestDefaultStoreSocketFallsBackToTheCacheDir(t *testing.T) {
+	// Arrange.
+	t.Setenv(StoreSocketEnv, "")
 
-// pickupSidecar wires a live store, a 5-line transcript, and a log-capturing
-// sidecar with its link established — the arrangement both pickup tests share.
-func pickupSidecar(t *testing.T) (*sidecar, string, func() []string) {
-	t.Helper()
-	h := newStoreHarness(t)
-	h.start()
-	root, path := writeHistory(t, 5)
-	logf, read := capturingLog()
-	s := newSidecar(h.sock, []string{root}, t.TempDir(), logf)
-	t.Cleanup(func() { s.store.Close() })
-	if err := s.establish(); err != nil {
-		t.Fatalf("establish: %v", err)
-	}
-	return s, path, read
-}
+	// Act.
+	got := defaultStoreSocket("/cache/agent-repl")
 
-func TestPollLogsOnePickupLinePerChangedFile(t *testing.T) {
-	// Arrange
-	s, path, read := pickupSidecar(t)
-
-	// Act
-	s.pollAll()
-
-	// Assert — exactly one line, carrying path, count, kind and write latency.
-	got := linesContaining(read(), "picked up")
-	if len(got) != 1 {
-		t.Fatalf("pickup lines = %v, want exactly 1", got)
-	}
-	for _, want := range []string{path, "5 event(s)", "kind=session", "store_write_ms="} {
-		if !strings.Contains(got[0], want) {
-			t.Fatalf("pickup line %q missing %q", got[0], want)
-		}
+	// Assert.
+	if got != filepath.Join("/cache/agent-repl", "sock", "store.sock") {
+		t.Fatalf("default store socket = %q, want the cache-dir path", got)
 	}
 }
 
-func TestPollLogsNothingWhenNothingChanged(t *testing.T) {
-	// Arrange — the file's events are already picked up and cursored.
-	s, _, read := pickupSidecar(t)
-	s.pollAll()
-	before := len(read())
+func TestAnExplicitSocketBeatsTheEnv(t *testing.T) {
+	// Arrange: the flag's default is the env value, so an explicitly parsed
+	// flag is what beats it. This asserts the resolution order the ruling names.
+	t.Setenv(StoreSocketEnv, "/private/tmp/ar-env.sock")
+	options := Options{StoreSocket: "/private/tmp/ar-flag.sock"}
 
-	// Act — a second pass over an unchanged file.
-	s.pollAll()
+	// Act.
+	got := options.StoreSocket
 
-	// Assert — steady state is silent.
-	if after := read(); len(after) != before {
-		t.Fatalf("unchanged poll logged %v", after[before:])
+	// Assert.
+	if got != "/private/tmp/ar-flag.sock" {
+		t.Fatalf("store socket = %q, want the explicit flag to win", got)
 	}
 }
 
-// --- spool ownership: one identifier, resolved by task id --------------------
-//
-// A /tmp spool path carries a session-SHAPED segment that is the harness's
-// runtime id, NOT the transcript's. These pin the replacement: a spool is
-// attributed from the launching session recorded against its task id, and an
-// unattributed spool is held and reported rather than guessed.
-
-// spoolTarget builds an unattributed spool target, exactly as discover now
-// classifies one (no SessionID).
-func spoolTarget(taskID string) discover.Target {
-	return discover.Target{
-		Path:   "/tmp/claude-501/slug/runtime-id/tasks/" + taskID + ".output",
-		Kind:   tail.KindShellSpool,
-		TaskID: taskID,
-		Raw:    true,
-	}
-}
-
-// ownerSidecar is a sidecar with no store, sufficient for the pure attribution
-// logic (resolveOwnerResult/noteTaskOwner/seedOwners touch no connection).
-func ownerSidecar(t *testing.T) (*sidecar, func() []string) {
-	t.Helper()
-	logf, read := capturingLog()
-	return newSidecar("/nonexistent.sock", nil, t.TempDir(), logf), read
-}
-
-func TestResolveOwnerAnswersConfigTargetFromItsOwnPath(t *testing.T) {
-	// Arrange — a transcript names its own session; nothing to look up.
-	s, _ := ownerSidecar(t)
-	tgt := discover.Target{Path: "/x/S1.jsonl", Kind: tail.KindSessionTranscript, SessionID: "S1"}
-
-	// Act
-	got := s.resolveOwnerResult(tgt)
-
-	// Assert
-	if !got.Resolved() || got.SessionID != "S1" {
-		t.Fatalf("resolveOwnerResult = %+v, want resolved S1", got)
-	}
-}
-
-func TestResolveOwnerAttributesSpoolToItsLaunchingSession(t *testing.T) {
-	// Arrange — the transcript's TaskStarted established the mapping.
-	s, _ := ownerSidecar(t)
-	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d-transcript-id", "", OwnerSourceLiveLaunch)
-
-	// Act
-	got := s.resolveOwnerResult(spoolTarget("b1pi0nmip"))
-
-	// Assert — the TRANSCRIPT id, never the path's runtime id.
-	if !got.Resolved() || got.SessionID != "9b6a4f2d-transcript-id" {
-		t.Fatalf("resolveOwnerResult = %+v, want transcript owner", got)
-	}
-}
-
-func TestNoteOwnerKeepsTheFirstSessionAndReportsAConflict(t *testing.T) {
-	// Arrange — the corruption this change removes upstream, seen again.
-	s, read := ownerSidecar(t)
-	s.noteTaskOwner("b1pi0nmip", "9b6a4f2d", "", OwnerSourceLiveLaunch)
-
-	// Act
-	s.noteTaskOwner("b1pi0nmip", "a4f52dc5", "", OwnerSourceLiveLaunch)
-
-	// Assert — first wins (no flapping), and it is loud.
-	if got := s.owners["b1pi0nmip"]; got != "9b6a4f2d" {
-		t.Fatalf("owner = %q, want the first-recorded 9b6a4f2d", got)
-	}
-	if got := linesContaining(read(), "CONFLICTING owner"); len(got) != 1 {
-		t.Fatalf("conflict lines = %v, want exactly 1", got)
-	}
-}
-
-func TestSeedOwnersRestoresAttributionFromPersistedOpenTasks(t *testing.T) {
-	// Arrange — what the store hands back on every connection.
-	s, _ := ownerSidecar(t)
-	states := []*corev1.OpenTaskState{{
-		Started: &corev1.Event{
-			SessionId: "9b6a4f2d",
-			Payload:   &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1pi0nmip"}},
-		},
-		LastActivityAtMs: 1,
-	}}
-
-	// Act
-	n := s.seedOwners(states)
-
-	// Assert — a restart can attribute a spool whose launch line sits behind
-	// the resumed cursor and will never be re-read.
-	if n != 1 || s.owners["b1pi0nmip"] != "9b6a4f2d" {
-		t.Fatalf("seeded %d, owners = %v", n, s.owners)
-	}
-}
-
-func TestSeedOwnersIgnoresAStateCarryingNoTaskStarted(t *testing.T) {
-	// Arrange
-	s, _ := ownerSidecar(t)
-	states := []*corev1.OpenTaskState{{Started: &corev1.Event{SessionId: "S1"}}}
-
-	// Act
-	n := s.seedOwners(states)
-
-	// Assert
-	if n != 0 || len(s.owners) != 0 {
-		t.Fatalf("seeded %d, owners = %v, want none", n, s.owners)
-	}
-}
-
-func TestKindLabel(t *testing.T) {
-	cases := []struct {
-		in   tail.Kind
-		want string
+func TestPollAndRescanDefaults(t *testing.T) {
+	tests := []struct {
+		name string
+		got  time.Duration
+		want time.Duration
 	}{
-		{tail.KindSessionTranscript, "session"},
-		{tail.KindAgentTranscript, "agent"},
-		{tail.KindWorkflowJournal, "workflow"},
-		{tail.KindShellSpool, "shell"},
-		{tail.Kind(42), "kind(42)"},
+		{name: "poll", got: DefaultPollInterval, want: time.Second},
+		{name: "rescan", got: DefaultRescanInterval, want: 30 * time.Second},
 	}
-	for _, tc := range cases {
-		if got := kindLabel(tc.in); got != tc.want {
-			t.Fatalf("kindLabel(%d) = %q, want %q", int(tc.in), got, tc.want)
-		}
-	}
-}
-
-func TestParseRootsSplitsAndExpandsHome(t *testing.T) {
-	// Arrange
-	home, _ := os.UserHomeDir()
-	// Act
-	got := parseRoots(" ~/.claude , ~/.claude-chesscom ,, /abs/root ")
-	// Assert: trimmed, blanks dropped, ~ expanded, absolute preserved.
-	want := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".claude-chesscom"), "/abs/root"}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("root[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestParseRootsEmpty(t *testing.T) {
-	// Arrange / Act / Assert
-	if got := parseRoots("   "); len(got) != 0 {
-		t.Fatalf("got %v, want empty", got)
-	}
-}
-
-func TestIndexCursorsByPath(t *testing.T) {
-	// Arrange
-	cs := []*corev1.CursorState{
-		{FileId: "1:1", Path: "/a.jsonl", Offset: 10},
-		{FileId: "2:2", Path: "/b.jsonl", Offset: 20},
-		{FileId: "3:3", Path: ""}, // no path → dropped
-	}
-	// Act
-	m := indexCursorsByPath(cs)
-	// Assert
-	if len(m) != 2 {
-		t.Fatalf("index size = %d, want 2", len(m))
-	}
-	if m["/a.jsonl"].GetOffset() != 10 || m["/b.jsonl"].GetOffset() != 20 {
-		t.Fatalf("index = %+v", m)
-	}
-}
-
-func TestTaskKindToTail(t *testing.T) {
-	cases := []struct {
-		in   corev1.TaskKind
-		want tail.Kind
-	}{
-		{corev1.TaskKind_TASK_KIND_SHELL, tail.KindShellSpool},
-		{corev1.TaskKind_TASK_KIND_WORKFLOW, tail.KindWorkflowJournal},
-		{corev1.TaskKind_TASK_KIND_AGENT, tail.KindAgentTranscript},
-		{corev1.TaskKind_TASK_KIND_UNSPECIFIED, tail.KindAgentTranscript},
-	}
-	for _, tc := range cases {
-		if got := taskKindToTail(tc.in); got != tc.want {
-			t.Fatalf("taskKindToTail(%v) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestBootTimeMillisIsPast(t *testing.T) {
-	// Act
-	boot := bootTimeMillis()
-	// Assert: either unavailable (0) or a plausible past instant.
-	if boot != 0 && boot > time.Now().UnixMilli() {
-		t.Fatalf("boot time %d is in the future", boot)
-	}
-}
-
-func TestExpandHomeLeavesAbsolute(t *testing.T) {
-	if got := expandHome("/absolute/path"); got != "/absolute/path" {
-		t.Fatalf("expandHome mangled an absolute path: %q", got)
-	}
-}
-
-func TestOpenLoggerReturnsBootstrapErrorBeforePersistentSinkExists(t *testing.T) {
-	parent := t.TempDir()
-	blocked := filepath.Join(parent, "blocked")
-	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, err := openLogger("/tmp/store.sock", filepath.Join(blocked, "sidecar.log"))
-	if err == nil {
-		t.Fatal("openLogger succeeded with a non-directory parent")
-	}
-	if !isBootstrapError(err) {
-		t.Fatalf("error %T = %v, want bootstrap error", err, err)
-	}
-	var stderr bytes.Buffer
-	reportFatal(err, &stderr)
-	var record map[string]any
-	if decodeErr := json.Unmarshal(stderr.Bytes(), &record); decodeErr != nil {
-		t.Fatalf("bootstrap failure is not JSON: %v: %q", decodeErr, stderr.String())
-	}
-	if record["operation"] != "sidecar.bootstrap" || record["level"] != "error" {
-		t.Fatalf("bootstrap failure record = %#v", record)
-	}
-	stderr.Reset()
-	reportFatal(errors.New("runtime failure"), &stderr)
-	if stderr.Len() != 0 {
-		t.Fatalf("post-bootstrap failure bypassed canonical logger: %q", stderr.String())
-	}
-}
-
-func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
-	var stderr, file bytes.Buffer
-	log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar", StoreSocket: "/tmp/store.sock"})
-	want := errors.New("close failed")
-
-	err := runLogged(log, func() error { return want })
-	if !errors.Is(err, want) {
-		t.Fatalf("runLogged error = %v, want %v", err, want)
-	}
-	for sink, got := range map[string]string{"stderr": stderr.String(), "file": file.String()} {
-		if count := strings.Count(got, "sidecar stopped with error: close failed"); count != 1 {
-			t.Fatalf("%s error record count = %d, output=%q", sink, count, got)
-		}
-		var record struct {
-			Operation string         `json:"operation"`
-			Context   map[string]any `json:"context"`
-		}
-		if err := json.Unmarshal([]byte(got), &record); err != nil {
-			t.Fatalf("%s record is not JSON: %v", sink, err)
-		}
-		if record.Operation != "run" || record.Context["store_socket"] != "/tmp/store.sock" {
-			t.Fatalf("%s missing canonical runtime context: %#v", sink, record)
-		}
-	}
-}
-
-func TestLogProcessExitNamesCleanOrErrorExit(t *testing.T) {
-	// Arrange
-	for _, tc := range []struct {
-		name        string
-		err         error
-		wantLevel   string
-		wantMessage string
-	}{
-		{name: "clean", err: nil, wantLevel: "info", wantMessage: "sidecar exiting cleanly"},
-		{name: "error", err: errors.New("run failed"), wantLevel: "error", wantMessage: "sidecar exiting: run failed"},
-	} {
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var stderr, file bytes.Buffer
-			log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar"})
-
-			// Act
-			logProcessExit(log, &tc.err)
-
-			// Assert
-			var record struct {
-				Level     string `json:"level"`
-				Operation string `json:"operation"`
-				Message   string `json:"message"`
-			}
-			if err := json.Unmarshal(file.Bytes(), &record); err != nil {
-				t.Fatalf("exit trace is not JSON: %v: %q", err, file.String())
-			}
-			if record.Operation != "exit" || record.Level != tc.wantLevel || record.Message != tc.wantMessage {
-				t.Fatalf("exit trace = %#v, want operation=exit level=%q message=%q", record, tc.wantLevel, tc.wantMessage)
+			// Arrange, Act, Assert.
+			if tc.got != tc.want {
+				t.Fatalf("%s interval = %s, want %s", tc.name, tc.got, tc.want)
 			}
 		})
 	}
 }
 
-// TestLogProcessExitLogsThenRepanics proves the exit trace narrates a panic
-// without recovering it: logProcessExit must remain deferred directly (not
-// wrapped) for its own recover() to observe the panic, so this drives it
-// through a real deferred panic rather than calling it as a plain function.
-func TestLogProcessExitLogsThenRepanics(t *testing.T) {
-	// Arrange
-	var stderr, file bytes.Buffer
-	log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar"})
-	var recovered any
+func TestParseRootsSplitsBothConfigRoots(t *testing.T) {
+	// Arrange: the second account's transcripts are invisible without its root.
+	t.Setenv("HOME", "/home/tester")
 
-	// Act
-	func() {
-		defer func() { recovered = recover() }()
-		func() {
-			var err error
-			defer logProcessExit(log, &err)
-			panic("invariant violated")
-		}()
-	}()
+	// Act.
+	got := parseRoots("~/.claude,~/.claude-chesscom")
 
-	// Assert
-	if recovered != "invariant violated" {
-		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
-	}
-	var record struct {
-		Level   string `json:"level"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(file.Bytes(), &record); err != nil {
-		t.Fatalf("panic exit trace is not JSON: %v: %q", err, file.String())
-	}
-	if record.Level != "error" || record.Message != "sidecar exiting: panic: invariant violated" {
-		t.Fatalf("panic exit trace = %#v", record)
+	// Assert.
+	want := []string{"/home/tester/.claude", "/home/tester/.claude-chesscom"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("parseRoots = %v, want %v", got, want)
 	}
 }
 
-// TestRunReturnsOnSignalAndNamesWhichOne drives Run's stop branch with a real
-// (never-dialed) storeclient — Close() on one is a documented no-op success —
-// to prove the shutdown cause and the received signal both reach the log
-// before the one teardown step (the store connection) runs.
-func TestRunReturnsOnSignalAndNamesWhichOne(t *testing.T) {
-	// Arrange
-	logf, lines := capturingLog()
-	sc := newSidecar("/tmp/agent-repl-test-nonexistent.sock", nil, t.TempDir(), logf)
-	stop := make(chan os.Signal, 1)
-	stop <- syscall.SIGTERM
+func TestParseRootsTrimsWhitespace(t *testing.T) {
+	// Arrange, Act.
+	got := parseRoots(" /a , /b ")
 
-	// Act
-	err := sc.Run(stop)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil (a never-dialed store close succeeds)", err)
+	// Assert.
+	if len(got) != 2 || got[0] != "/a" || got[1] != "/b" {
+		t.Fatalf("parseRoots = %v, want the roots trimmed", got)
 	}
-	want := "received signal=" + syscall.SIGTERM.String() + "; beginning sidecar shutdown"
-	if got := linesContaining(lines(), want); len(got) != 1 {
-		t.Fatalf("shutdown-cause line count = %d, want 1 containing %q; lines=%v", len(got), want, lines())
+}
+
+func TestParseRootsDropsEmptyEntries(t *testing.T) {
+	// Arrange, Act.
+	got := parseRoots("/a,,/b,")
+
+	// Assert.
+	if len(got) != 2 {
+		t.Fatalf("parseRoots = %v, want the empty entries dropped", got)
+	}
+}
+
+func TestParseRootsOnAnEmptyList(t *testing.T) {
+	// Arrange, Act.
+	got := parseRoots("")
+
+	// Assert.
+	if len(got) != 0 {
+		t.Fatalf("parseRoots = %v, want no roots", got)
+	}
+}
+
+func TestExpandHomeLeavesAnAbsolutePathAlone(t *testing.T) {
+	// Arrange, Act.
+	got := expandHome("/absolute/path")
+
+	// Assert.
+	if got != "/absolute/path" {
+		t.Fatalf("expandHome = %q, want the path unchanged", got)
+	}
+}
+
+func TestExpandHomeExpandsABareTilde(t *testing.T) {
+	// Arrange.
+	t.Setenv("HOME", "/home/tester")
+
+	// Act.
+	got := expandHome("~")
+
+	// Assert.
+	if got != "/home/tester" {
+		t.Fatalf("expandHome = %q, want the home dir", got)
+	}
+}
+
+func TestExpandHomeDoesNotExpandAMidPathTilde(t *testing.T) {
+	// Arrange.
+	t.Setenv("HOME", "/home/tester")
+
+	// Act.
+	got := expandHome("/opt/~/claude")
+
+	// Assert.
+	if got != "/opt/~/claude" {
+		t.Fatalf("expandHome = %q, want the path unchanged", got)
+	}
+}
+
+func TestDefaultCacheDirHonorsXDG(t *testing.T) {
+	// Arrange.
+	t.Setenv("XDG_CACHE_HOME", "/xdg/cache")
+
+	// Act.
+	got := defaultCacheDir()
+
+	// Assert.
+	if got != filepath.Join("/xdg/cache", "agent-repl") {
+		t.Fatalf("cache dir = %q, want the XDG path", got)
+	}
+}
+
+func TestDefaultCacheDirFallsBackToHome(t *testing.T) {
+	// Arrange.
+	t.Setenv("XDG_CACHE_HOME", "")
+	t.Setenv("HOME", "/home/tester")
+
+	// Act.
+	got := defaultCacheDir()
+
+	// Assert.
+	if got != filepath.Join("/home/tester", ".cache", "agent-repl") {
+		t.Fatalf("cache dir = %q, want the home cache path", got)
+	}
+}
+
+func TestBootstrapFailureIsReportedToStderr(t *testing.T) {
+	// Arrange: no canonical logger can exist yet, so this is the one path that
+	// may write diagnostics itself.
+	stderr := &bytes.Buffer{}
+
+	// Act.
+	reportFatal(bootstrapError{errors.New("opening log: permission denied")}, stderr)
+
+	// Assert.
+	var record map[string]any
+	if err := json.Unmarshal(stderr.Bytes(), &record); err != nil {
+		t.Fatalf("decoding %q: %v", stderr.String(), err)
+	}
+	if record["operation"] != "sidecar.bootstrap" {
+		t.Fatalf("record = %v, want the bootstrap operation", record)
+	}
+}
+
+func TestAPostBootstrapFailureIsNotReReported(t *testing.T) {
+	// Arrange: every post-bootstrap error has already reached the logger.
+	stderr := &bytes.Buffer{}
+
+	// Act.
+	reportFatal(errors.New("cursor recovery failed"), stderr)
+
+	// Assert.
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want the error left to its owning layer", stderr.String())
+	}
+}
+
+func TestOpenLoggerCreatesItsDirectory(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
+
+	// Act.
+	logf, closeLog, err := openLogger("/private/tmp/store.sock", path)
+	if err != nil {
+		t.Fatalf("openLogger: %v", err)
+	}
+	defer closeLog()
+	logf.With(logging.Context{Operation: "test"}).Log("hello")
+
+	// Assert.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), "hello") {
+		t.Fatalf("log = %q, want the record persisted", raw)
+	}
+}
+
+func TestOpenLoggerFailureIsABootstrapError(t *testing.T) {
+	// Arrange: a log path under a regular file cannot be created.
+	base := t.TempDir()
+	blocker := filepath.Join(base, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", blocker, err)
+	}
+
+	// Act.
+	_, _, err := openLogger("/private/tmp/store.sock", filepath.Join(blocker, "sidecar.log"))
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("openLogger error = %v, want a bootstrap error", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The LOST policy's windows: flag, env, refusal.
+// ---------------------------------------------------------------------------
+
+func TestAStaleWindowFallsBackToItsEnvVar(t *testing.T) {
+	// Arrange: the operator set only the env var, which is how the integration
+	// suite shrinks a production window without editing a launchd plist.
+	t.Setenv(StaleShellSilenceEnv, "250ms")
+	source := durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: ""}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != 250*time.Millisecond {
+		t.Fatalf("shell silence = %s, want the env value 250ms", got)
+	}
+}
+
+func TestAnExplicitStaleWindowBeatsItsEnvVar(t *testing.T) {
+	// Arrange.
+	t.Setenv(StaleGraceEnv, "9s")
+	source := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "40ms"}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert.
+	if got != 40*time.Millisecond || err != nil {
+		t.Fatalf("grace = %s (err %v), want the flag value 40ms to beat the env", got, err)
+	}
+}
+
+func TestAnUnsetStaleWindowResolvesToZeroSoThePackageDefaultStands(t *testing.T) {
+	// Arrange: neither spelling is present.
+	t.Setenv(StaleAgentSilenceEnv, "")
+	source := durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: ""}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert: zero is the ONLY meaning of "unset" here — internal/stale fills it.
+	if got != 0 || err != nil {
+		t.Fatalf("agent silence = %s (err %v), want 0 so internal/stale's default stands", got, err)
+	}
+}
+
+func TestAMalformedStaleWindowIsABootstrapErrorRatherThanADefault(t *testing.T) {
+	// Arrange: a value the operator meant, spelled wrongly.
+	source := durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: "30 minutes"}
+
+	// Act.
+	_, err := source.resolve()
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("a malformed window was accepted; it must refuse rather than start on a window nobody chose")
+	}
+	if !isBootstrapError(err) {
+		t.Fatalf("refusal %v is not a bootstrap error, so the process would not state it once and exit non-zero", err)
+	}
+}
+
+func TestANegativeStaleWindowIsRefused(t *testing.T) {
+	// Arrange: a negative silence window concludes every tracked run LOST at once.
+	source := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "-1s"}
+
+	// Act.
+	_, err := source.resolve()
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a negative window resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+func TestTheFirstUnusableWindowStopsBootstrap(t *testing.T) {
+	// Arrange: the third of four windows is unusable.
+	good := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "10ms"}
+	bad := durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: "nonsense"}
+
+	// Act.
+	got, err := resolveStaleOptions(good, good, bad, good)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveStaleOptions returned %v, want a bootstrap refusal", err)
+	}
+	if got != (stale.Options{}) {
+		t.Fatalf("resolveStaleOptions returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestEveryResolvedWindowLandsOnItsOwnField(t *testing.T) {
+	// Arrange: four distinct values, so a crossed wire is visible.
+	source := func(name, env, raw string) durationSource {
+		return durationSource{flagName: name, envName: env, raw: raw}
+	}
+
+	// Act.
+	got, err := resolveStaleOptions(
+		source("stale-grace", StaleGraceEnv, "1ms"),
+		source("stale-shell-silence", StaleShellSilenceEnv, "2ms"),
+		source("stale-agent-silence", StaleAgentSilenceEnv, "3ms"),
+		source("stale-workflow-silence", StaleWorkflowSilenceEnv, "4ms"),
+	)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveStaleOptions: %v", err)
+	}
+	want := stale.Options{
+		Grace:           time.Millisecond,
+		ShellSilence:    2 * time.Millisecond,
+		AgentSilence:    3 * time.Millisecond,
+		WorkflowSilence: 4 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("resolved windows = %+v, want %+v", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The store-recovery ladder's two rungs.
+// ---------------------------------------------------------------------------
+
+// backoffSources spells the ladder's two options the way main does.
+func backoffSources(min, max string) (durationSource, durationSource) {
+	return durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: min},
+		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: max}
+}
+
+func TestAnUnsetRecoveryLadderResolvesToZeroSoThePackageDefaultStands(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("", "")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert: zero is how "unset" reaches Options; cycle.go fills the default.
+	if err != nil {
+		t.Fatalf("resolveBackoffOptions: %v", err)
+	}
+	if gotMin != 0 || gotMax != 0 {
+		t.Fatalf("resolveBackoffOptions with nothing set = (%s, %s), want (0s, 0s)", gotMin, gotMax)
+	}
+}
+
+func TestEachRecoveryRungLandsOnItsOwnField(t *testing.T) {
+	// Arrange: two distinct values, so a crossed wire is visible.
+	min, max := backoffSources("5ms", "40ms")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveBackoffOptions: %v", err)
+	}
+	if gotMin != 5*time.Millisecond || gotMax != 40*time.Millisecond {
+		t.Fatalf("resolveBackoffOptions = (%s, %s), want (5ms, 40ms)", gotMin, gotMax)
+	}
+}
+
+func TestAMalformedRecoveryFloorStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("nonsense", "40ms")
+
+	// Act.
+	gotMin, gotMax, err := resolveBackoffOptions(min, max)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("a malformed recovery floor resolved to %v, want a bootstrap refusal", err)
+	}
+	if gotMin != 0 || gotMax != 0 {
+		t.Fatalf("a refused bootstrap returned (%s, %s); it must configure nothing", gotMin, gotMax)
+	}
+}
+
+func TestAMalformedRecoveryCeilingStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("5ms", "nonsense")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a malformed recovery ceiling resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+func TestARecoveryCeilingBelowItsFloorStopsBootstrap(t *testing.T) {
+	// Arrange: a ladder that cannot climb.
+	min, max := backoffSources("40ms", "5ms")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a ceiling below its floor resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+// TestARecoveryFloorAboveTheDEFAULTCeilingStopsBootstrap asserts the conflict is
+// judged against the EFFECTIVE ladder, not only against two values the operator
+// happened to spell together: a floor of a minute with the ceiling left unset
+// is still a ladder whose ceiling is below its floor.
+func TestARecoveryFloorAboveTheDefaultCeilingStopsBootstrap(t *testing.T) {
+	// Arrange.
+	min, max := backoffSources("60s", "")
+
+	// Act.
+	_, _, err := resolveBackoffOptions(min, max)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a floor above the default ceiling resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Resolving every window at once.
+// ---------------------------------------------------------------------------
+
+// allWindows spells the seven sources the way main does, from raw values.
+func allWindows(unowned, grace, shell, agent, workflow, min, max string) (durationSource, durationSource, durationSource, durationSource, durationSource, durationSource, durationSource) {
+	backoffMin, backoffMax := backoffSources(min, max)
+	return durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: unowned},
+		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: grace},
+		durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: shell},
+		durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: agent},
+		durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: workflow},
+		backoffMin, backoffMax
+}
+
+func TestEveryResolvedWindowLandsOnItsOwnFieldOfTheWholeSet(t *testing.T) {
+	// Arrange: seven distinct values, so a crossed wire is visible.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "3ms", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveWindows: %v", err)
+	}
+	want := windows{
+		Stale: stale.Options{
+			Grace:           2 * time.Millisecond,
+			ShellSilence:    3 * time.Millisecond,
+			AgentSilence:    4 * time.Millisecond,
+			WorkflowSilence: 5 * time.Millisecond,
+		},
+		UnownedSpool:      time.Millisecond,
+		RecoverBackoffMin: 6 * time.Millisecond,
+		RecoverBackoffMax: 7 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("resolveWindows = %+v, want %+v", got, want)
+	}
+}
+
+func TestAnUnusableUnownedSpoolWindowStopsTheWholeResolution(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("nonsense", "2ms", "3ms", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnusableStaleWindowStopsTheWholeResolution(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "nonsense", "4ms", "5ms", "6ms", "7ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnusableRecoveryLadderStopsTheWholeResolution(t *testing.T) {
+	// Arrange: a ceiling below its floor.
+	a, b, c, d, e, f, g := allWindows("1ms", "2ms", "3ms", "4ms", "5ms", "40ms", "6ms")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveWindows returned %v, want a bootstrap refusal", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestAnUnsetWholeSetResolvesToZerosSoEveryPackageDefaultStands(t *testing.T) {
+	// Arrange.
+	a, b, c, d, e, f, g := allWindows("", "", "", "", "", "", "")
+
+	// Act.
+	got, err := resolveWindows(a, b, c, d, e, f, g)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveWindows: %v", err)
+	}
+	if got != (windows{}) {
+		t.Fatalf("resolveWindows with nothing set = %+v, want every field zero", got)
+	}
+}
+
+// TestResolveStateDirPrecedence pins the three spellings of the state root, in
+// the order the daemon's own stateroot.Root applies them. The root is where the
+// shim's identity records live, so a process that resolved a DIFFERENT one from
+// the daemon would silently book every rotated transcript under the wrong id.
+func TestResolveStateDirPrecedence(t *testing.T) {
+	home := t.TempDir()
+	tests := []struct {
+		name string
+		flag string
+		env  string
+		want string
+	}{
+		{
+			name: "an explicit flag beats the environment",
+			flag: "/state/from-flag", env: "/state/from-env", want: "/state/from-flag",
+		},
+		{
+			name: "the environment answers when no flag was passed",
+			flag: "", env: "/state/from-env", want: "/state/from-env",
+		},
+		{
+			name: "neither one leaves the home-directory default",
+			flag: "", env: "", want: filepath.Join(home, DefaultStateDirName),
+		},
+		{
+			name: "a whitespace-only flag is no flag at all",
+			flag: "   ", env: "/state/from-env", want: "/state/from-env",
+		},
+		{
+			name: "a leading tilde is expanded, exactly as a config root's is",
+			flag: "~/state-here", env: "", want: filepath.Join(home, "state-here"),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			t.Setenv("HOME", home)
+			t.Setenv(StateDirEnv, tc.env)
+
+			// Act.
+			got := resolveStateDir(tc.flag)
+
+			// Assert.
+			if got != tc.want {
+				t.Errorf("resolveStateDir(%q) with $%s=%q = %q, want %q", tc.flag, StateDirEnv, tc.env, got, tc.want)
+			}
+		})
 	}
 }

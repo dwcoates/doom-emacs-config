@@ -1,0 +1,30 @@
+// endpoint_watch_session.proto — WatchSession: the standing stream of
+// session-level facts as they manifest upstream.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Nothing to say: the session is the connection's.
+message WatchSessionRequest {}
+
+// One frame. STANDING — no terminal arm; the stream ends only with the
+// session, and a stream ending otherwise is a transport failure.
+message WatchSessionResponse {
+  oneof frame {
+    // A session-level fact as it manifests upstream.
+    conversation.v1.SessionUpdate update = 1;
+    // RE-ANNOUNCEMENT: the session's original SessionStarted, recovered from
+    // the shim's own state, sent ONCE per watch right after the opening
+    // diagnostics — on EVERY new watch, not only the first. A daemon that
+    // adopts an already-started shim (crash boot, handover) attaches purely
+    // and still learns the identity, runtime, model, catalog and the live
+    // membership from the shim rather than from a durable record. (Landing
+    // 7, 2026-09-02.)
+    conversation.v1.SessionStarted session_started = 2;
+  }
+}

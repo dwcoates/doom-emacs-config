@@ -1,0 +1,66 @@
+// endpoint_open_in_editor.proto — OpenInEditor: a HOST-RAISED click. WEB LINK
+// section. The webview's shared link component calls this for the three
+// affordances that open something in the editor — the plan bubble's edit
+// button, a findings row's location, a worktree divider's path — and the
+// daemon RELAYS the click as the workspace's WatchHostWorkspace push arm
+// `open_in_editor`, which Emacs answers with its ONE shared editor-popup
+// subroutine (a file at a line, or dired for a directory). No daemon→Emacs
+// command loop exists: the push is a fact ("the user clicked this"), Emacs
+// reacts, and nothing acks. The daemon validates the workspace and relays
+// the path VERBATIM; it never opens anything itself.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenInEditorRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The path on the daemon's host, exactly as the feed row carried it
+  // (FeedPlanEditTarget.path, FeedFindingsLocation.path, FeedWorktreePath).
+  string path = 2;
+  // The 1-indexed line to land on. UNSET = the file's top (or a directory).
+  optional uint32 line = 3;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenInEditorResponse {
+  oneof result {
+    OpenInEditorSuccess success = 1;
+    OpenInEditorError error = 2;
+  }
+}
+
+// Relayed to the workspace's host stream. Empty: nothing else is owed.
+message OpenInEditorSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message OpenInEditorError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenInEditorUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenInEditorWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenInEditorTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenInEditorNotYetAdopted not_yet_adopted = 4;
+    // The path resolves outside the workspace's worktree.
+    OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
+  }
+}
+message OpenInEditorUnknownWorkspace {}
+message OpenInEditorWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenInEditorTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenInEditorNotYetAdopted {}
+message OpenInEditorPathEscapesWorkspace {}

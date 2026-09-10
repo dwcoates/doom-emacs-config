@@ -1,0 +1,54 @@
+// endpoint_detach_foreground.proto — DetachForeground: move in-flight turn
+// work onto its own stream (the user's Ctrl-B).
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// What to background.
+message DetachForegroundRequest {
+  // The in-flight turn unit: a bash or a subagent the turn's stream announced
+  // and has not concluded. Any other unit is a refusal.
+  conversation.v1.AgentActivityId unit = 1;
+}
+
+// THE ARM IS THE OUTCOME OF THE CALL — never of the work.
+message DetachForegroundResponse {
+  oneof result {
+    DetachForegroundSuccess success = 1;
+    DetachForegroundFailure failure = 2;
+  }
+}
+
+// Detached. The turn's stream announces `detached_work.detached` naming the new handle; the consumer opens the matching Watch.
+message DetachForegroundSuccess {}
+
+// Not detached. THE ARM IS WHY.
+message DetachForegroundFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // No in-flight unit carries this identity.
+    DetachForegroundUnknownUnit unknown_unit = 2;
+    // The unit already concluded.
+    DetachForegroundAlreadyConcluded already_concluded = 3;
+    // The unit's kind cannot detach (only a bash or a subagent can).
+    DetachForegroundNotDetachable not_detachable = 4;
+    // No session is open on this shim.
+    DetachForegroundNoSession no_session = 5;
+    // The unit is detachable in kind and still in flight, but the vendor
+    // offers NO VERB to initiate a detachment on the pinned SDK: the shim can
+    // only observe detachments the vendor made on its own (announced on the
+    // turn's stream as `detached_work.detached`), never cause one.
+    DetachForegroundUnsupported unsupported = 6;
+  }
+}
+message DetachForegroundUnknownUnit {}
+message DetachForegroundAlreadyConcluded {}
+message DetachForegroundNotDetachable {}
+message DetachForegroundNoSession {}
+message DetachForegroundUnsupported {}

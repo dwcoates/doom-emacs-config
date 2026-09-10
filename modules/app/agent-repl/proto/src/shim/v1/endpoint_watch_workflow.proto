@@ -1,0 +1,30 @@
+// endpoint_watch_workflow.proto — WatchWorkflow: the tail of one gotten run.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "shim/v1/endpoint_get_workflow.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Follow one run.
+message WatchWorkflowRequest {
+  // The token GetWorkflow served, echoed verbatim.
+  WorkflowWatchToken watch = 1;
+}
+
+// A BOUNDED stream: subagent levels while the run lives, then exactly one
+// terminal frame. No start arm — the get already answered the description.
+// A stream ending without a terminal frame is a transport failure.
+message WatchWorkflowResponse {
+  oneof result {
+    // The current level, whole. Replace semantics.
+    conversation.v1.AgentWorkflowUpdate update = 1;
+    // The run ended on terms the consumer asked for.
+    conversation.v1.AgentWorkflowSuccess success = 2;
+    // The run could not be launched, or ended without finishing.
+    conversation.v1.AgentWorkflowFailure failure = 3;
+  }
+}

@@ -1,0 +1,175 @@
+// detached_work.proto — WORK THAT LEFT ITS AGENT'S STREAM: the announcement
+// that a unit now has a stream of its own, how it came to be detached, and the
+// closed set of unit kinds that can detach at all. A kind absent from
+// DetachableWork cannot claim to be detached.
+//
+// The units named here are declared where every unit is (agent_activity.proto;
+// the workflow in workflow.proto); this file only says which of them can leave.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/workflow.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// Work that has left the turn. It is announced HERE and nowhere else after
+// this: the consumer opens the stream named by `work`, and everything the work
+// produces from then on arrives there.
+message AgentDetachedWork {
+  // The handle the work is addressed by: the stream is opened under it, and a
+  // stop is aimed at it. On the envelope rather than in either arm below,
+  // because both arms have one and it is the same fact either way.
+  DetachedWorkId work = 1;
+
+  // WHERE THE WORK'S OUTPUT IS ACCUMULATING. UNSET when the producer named no
+  // file — an awaited-then-detached subagent whose frames still arrive is the
+  // ordinary case.
+  //
+  // THE SPOOL IS FREQUENTLY THE ONLY PLACE THE WORK EXISTS. A backgrounded
+  // subagent's prose reaches no stream at all; it is written here and nowhere
+  // else, so an announcement without the path leaves the work unreachable. It
+  // is also what a reader that RESTARTED needs in order to re-open the spool
+  // it was following, since the handle above addresses live work only.
+  optional DetachedWorkOutput output = 4;
+
+  // HOW it came to be detached. The two are genuinely different situations for
+  // a consumer: one continues an element it is already drawing, the other has
+  // no element yet and must be told what the work IS.
+  oneof origin {
+    // It was already streaming progress in this turn and was then backgrounded.
+    DetachedWorkDetached detached = 2;
+    // It never had an in-turn progress update: either it was created detached
+    // outright, or the agent announced it with no originating call at all.
+    DetachedWorkCreated created = 3;
+  }
+}
+
+// The file a detached unit's output is being written to.
+message DetachedWorkOutput {
+  // Its path on the host the producer runs on. Meaningful only to a reader on
+  // that host.
+  string path = 1;
+
+  // WHETHER THIS READER MAY OPEN IT. The set arm is the answer, because the
+  // two are drawn differently: an unreadable spool is a path shown for the
+  // record, while a readable one is something a surface can offer to follow.
+  oneof readability {
+    // The file may be opened and followed.
+    DetachedWorkOutputReadable readable = 2;
+    // The file exists but this reader may not open it — a remote placement, a
+    // permission the producer did not grant.
+    DetachedWorkOutputUnreadable unreadable = 3;
+  }
+}
+
+// The output file may be opened.
+message DetachedWorkOutputReadable {}
+
+// The output file may not be opened by this reader.
+message DetachedWorkOutputUnreadable {}
+
+// Work that was drawn as in-turn progress and has now left the turn. One
+// identity spans the move, so the element already on screen continues rather
+// than being replaced by a second one describing the same work.
+message DetachedWorkDetached {
+  // The in-turn unit this work was, before it left.
+  //
+  // NO WORK PAYLOAD BESIDE IT, deliberately: the consumer already received this
+  // work's description as the progress unit named here, and restating it would
+  // be a second copy able to disagree with the first.
+  AgentActivityId detached_from_id = 1;
+
+  // HOW it came to be detached. Each arm is drawn differently and one carries a
+  // figure, so the set arm is the cause rather than a flag beside it.
+  //
+  // ALL THREE ARRIVE ON THIS ARM RATHER THAN ON `created`, INCLUDING work that
+  // asked for the background up front: such a call is streamed as a progress
+  // item before it backgrounds, so it always has an item it detached FROM — it
+  // simply never has a foreground running phase.
+  // PRODUCER NOTE: the cause is harvested from the BASH TOOL RESULT
+  // (run_in_background on the call; backgroundedByUser; timedOutAfterMs) —
+  // the vendor's task stream carries no cause on any frame.
+  oneof cause {
+    // The agent asked for the background at the call site. The ordinary path.
+    DetachedCauseRequested requested = 2;
+    // A person backgrounded running work by hand. Worth distinguishing from the
+    // others: the agent did not choose it and may not expect it.
+    DetachedCauseByUser by_user = 3;
+    // The work outlived its own timeout and was backgrounded rather than
+    // killed.
+    DetachedCauseTimedOut timed_out = 4;
+  }
+}
+
+// The agent asked for the background when it made the call.
+message DetachedCauseRequested {}
+
+// A person backgrounded the running work by hand.
+message DetachedCauseByUser {}
+
+// The work exceeded its own timeout and was moved to the background instead of
+// being killed.
+message DetachedCauseTimedOut {
+  // The timeout that was exceeded, in milliseconds.
+  //
+  // THE CONFIGURED LIMIT, NOT THE WORK'S RUNTIME. The work is still running
+  // when this arrives, so its runtime is not yet a fact; drawing this figure as
+  // an elapsed time would state something untrue.
+  uint64 timeout_ms = 1;
+}
+
+// Work that is detached from the moment the consumer hears of it, so nothing
+// has described it yet.
+message DetachedWorkCreated {
+  // What was created, since there is no earlier frame that says.
+  DetachableWork work_created = 1;
+}
+
+// The kinds of work that can exist detached from a turn. Deliberately a SMALL
+// set, and deliberately its own type rather than a reuse of the in-turn kinds:
+// a kind absent here cannot claim to be detached, which is what makes
+// "reasoning ran in the background" unbuildable rather than merely wrong.
+message DetachableWork {
+  // Which kind of work left the turn. The set is deliberately small: only work
+  // that can outlive the agent that started it appears here.
+  //
+  // THESE NAME THE UNIT TYPES THEMSELVES. Each carries a `start` arm that
+  // describes the work, so a unit type can announce work a consumer has never
+  // seen — which is what a separate description type would otherwise have been
+  // for.
+  oneof work {
+    // A subagent, spawned to run independently of the turn that asked for it.
+    AgentSubagent subagent = 1;
+    // A shell command left running after the turn that started it ended.
+    AgentBash bash = 2;
+    // A workflow run. UNLIKE THE OTHER TWO it appears ONLY here and has no
+    // in-turn activity arm at all, because the producer offers no synchronous
+    // form — a workflow is detached from birth and always reaches
+    // AgentDetachedWork through its `created` arm rather than `detached`. So
+    // the announcement carries the run's START DESCRIPTION alone: the run's
+    // frames arrive only on its own stream, never here.
+    AgentWorkflowStart workflow = 3;
+    // A background watcher. FOOTER-ONLY: no feed bubble exists — the daemon
+    // tracks liveness for the footer's monitors chip and panel.
+    AgentMonitor monitor = 4;
+  }
+}
+
+// The identity of one unit of detached work, and the handle a stop is aimed at.
+// Opaque; equality is the only question asked of it.
+//
+// MINTING RULE (binding on every producer, ruled 2026-08-29): the value is the
+// SAME BYTES as the unit's AgentActivityId — the spawning call's tool_use_id —
+// so the unit's later frames (a bash terminal, a monitor's `ended`, a
+// subagent's end) retire the handle by equality without any join table. For a
+// subagent those bytes are also its AgentId. Consumers still compare only;
+// they never derive one id from the other.
+message DetachedWorkId {
+  // The detached work's identifier: the key its own stream is opened under, and
+  // the handle a stop is addressed to. Opaque: compare for equality, never
+  // parse or construct one.
+  string value = 1;
+}

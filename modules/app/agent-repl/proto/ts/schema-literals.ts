@@ -36,12 +36,12 @@ import {
   ModelMarker,
   ModelMarkerSchema,
   model_marker_literal,
-} from "../gen/ts/agentshim/core/v1/core_pb.js";
+} from "../gen/ts/conversation/v1/api_pb.js";
 import {
   SessionCommand,
   SessionCommandSchema,
   session_command_spec,
-} from "../gen/ts/agentshim/frontend/v1/slash-menu_pb.js";
+} from "../gen/ts/conversation/v1/slash_command_pb.js";
 
 /** One session command's schema facts. */
 export interface SessionCommandSpec {
@@ -56,8 +56,8 @@ export interface SessionCommandSpec {
    *
    * FALSE IS THE SAFE SIDE: a command taking no argument is recognized only as
    * an ENTIRE prompt, so "/status of the build" stays a prompt and keeps its
-   * bubble. Marking a command that takes none as taking some is the one way
-   * the table can swallow something a user genuinely wrote.
+   * user message. Marking a command that takes none as taking some is the one
+   * way the table can swallow something a user genuinely wrote.
    */
   readonly takesArgs: boolean;
 }

@@ -1,208 +1,312 @@
+// owner.go resolves WHICH CALL a task spool belongs to.
+//
+// A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY (see internal/discover): the
+// spool layout embeds the harness's RUNTIME session id, which disagrees with the
+// transcript's whenever a session was resumed. So a spool's owner is looked up
+// by task id against the spawning call the converter read out of a tool result,
+// and nothing else — filename similarity is deliberately not evidence and is
+// never consulted.
+//
+// THE CONVERTER IS WHERE THE EVIDENCE ARRIVES, and it reports it through one
+// callback per observation (Observer, below) rather than through a map two
+// packages share. Owner resolution itself lives here, in the root package,
+// because it is a fact about FILES rather than about records.
 package main
 
 import (
-	"path/filepath"
-
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// OwnerSource identifies the evidence that binds a task spool to a session.
-// Sources are recorded rather than inferred so diagnostic state can explain
-// exactly why an association is authoritative.
-type OwnerSource string
+// Observer is the callback interface the converter uses to report what it
+// learns from a tool result: which task a spawning call opened, which agent the
+// spawn created, and where that task's output is being written.
+//
+// ONE CALL PER OBSERVATION, NO SHARED MUTABLE STATE. The converter never sees
+// this index and the index never sees a record; the only thing crossing the
+// seam is the observation itself.
+type Observer interface {
+	// TaskSpawned reports a spawning call and the task it opened. toolUseID is
+	// the spawning call's activity id — which IS the created agent's AgentId
+	// under the cross-plane minting rule, so no separate id is reported —
+	// ownerAgentID the agent whose book the spawn happened in, outputPath the
+	// spool the task writes to when the vendor named one, and backgrounded
+	// whether the spawn went to the background.
+	//
+	// BACKGROUNDED TRAVELS RATHER THAN BEING RE-DERIVED. Only the converter sees
+	// the launch result that states it, and the reader's own alternative — an a*
+	// task id, or a spool target carrying a task id — is a second reading of the
+	// same fact, which is how the two halves of the seam come to disagree.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool)
 
-const (
-	OwnerSourceTarget          OwnerSource = "target-session"
-	OwnerSourceLiveLaunch      OwnerSource = "live-launch"
-	OwnerSourceDurableOpenTask OwnerSource = "durable-open-task"
-)
-
-// OwnerResolutionOutcome states why resolving a discovered target succeeded or
-// failed. Consumers must not turn an unresolved outcome into an association.
-type OwnerResolutionOutcome string
-
-const (
-	OwnerResolvedPath            OwnerResolutionOutcome = "resolved-exact-output-path"
-	OwnerResolvedTask            OwnerResolutionOutcome = "resolved-unique-task"
-	OwnerUnresolvedAwaitingOwner OwnerResolutionOutcome = "unresolved-awaiting-owner"
-	OwnerUnresolvedConflict      OwnerResolutionOutcome = "unresolved-conflicting-owner"
-	OwnerUnresolvedInvalid       OwnerResolutionOutcome = "unresolved-invalid-target"
-)
-
-// OwnerResolution is the complete owner lookup result consumed by spool held
-// lifecycle. OutputPath is normalized whenever target metadata carried a path.
-type OwnerResolution struct {
-	SessionID  string
-	TaskID     string
-	OutputPath string
-	Source     OwnerSource
-	Outcome    OwnerResolutionOutcome
+	// TaskStopped reports that a person stopped a task. The reader owns what
+	// that means: the terminal is minted by the spool's handler, which is the
+	// only thing holding the output the terminal owes.
+	TaskStopped(taskID string)
 }
 
-func (r OwnerResolution) Resolved() bool {
-	return r.Outcome == OwnerResolvedPath || r.Outcome == OwnerResolvedTask
+var _ Observer = (*sidecar)(nil)
+
+// TaskSpawned implements Observer for the sidecar.
+func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool) {
+	s.owners.observe(observation{
+		taskID:       taskID,
+		activityID:   toolUseID,
+		agentID:      ownerAgentID,
+		mainAgentID:  ownerAgentID,
+		outputPath:   discover.Normalize(outputPath),
+		backgrounded: backgrounded,
+	})
 }
 
-// MayArrive reports whether a later authoritative observation can resolve this
-// target. A conflicted task may later gain an exact output-path observation;
-// malformed metadata is the only terminally non-retryable result here.
-func (r OwnerResolution) MayArrive() bool {
-	return r.Outcome == OwnerUnresolvedAwaitingOwner || r.Outcome == OwnerUnresolvedConflict
+// TaskStopped implements Observer for the sidecar.
+//
+// A STOP IS A FACT ABOUT A RUN, AND A RUN IS A FILE HERE. So the stop is routed
+// to that file's reader if it has one, and REMEMBERED against the task if it
+// does not: a spool is frequently written before the transcript line naming it,
+// and a stop arriving in that window must not be dropped just because the spool
+// is still held. One pending value per task, applied when the spool is claimed.
+func (s *sidecar) TaskStopped(taskID string) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "task-stopped", Level: "error"}).
+			Log("task stop reported with no task id; it names no run and cannot be attributed")
+		return
+	}
+	s.stopped[taskID] = s.now().UnixMilli()
+	s.log.With(logging.Context{Operation: "task-stopped", TaskID: taskID}).
+		Log("task stop recorded; the run's terminal is minted by its spool's reader")
+	s.applyStop(taskID)
 }
 
-type ownerRecord struct {
+// applyStop mints and writes the cancelled terminal for a stopped task, if its
+// spool is being read. A task whose spool is not watched yet keeps its pending
+// stop and is retried when the spool is claimed.
+//
+// THE PENDING STOP IS RETIRED ONLY ON A DURABLE WRITE, and the run is untracked
+// at the same moment: a cancelled run must never be restated LOST, and a stop
+// forgotten against a refused write would be a run that is neither.
+func (s *sidecar) applyStop(taskID string) {
+	stoppedAt, pending := s.stopped[taskID]
+	if !pending {
+		return
+	}
+	path, watched := s.spoolForTask(taskID)
+	if !watched {
+		s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID}).
+			LogVerbose("the stopped task's spool is not being read yet; the stop is held until it is claimed")
+		return
+	}
+	bound := s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID, Path: path})
+	sink, ok := s.watchers[path].tailer.Handler().(cancelTerminalSink)
+	if !ok {
+		bound.With(logging.Context{Level: "error"}).Log(
+			"no terminal for the stopped run: the %s converter implements no CancelTerminal, so a run a person stopped stays open in every reader downstream",
+			s.watchers[path].target.Kind)
+		return
+	}
+	run := s.owners.activityFor(taskID)
+	entries := sink.CancelTerminal(taskID, run, s.owners.agentFor(taskID), stoppedAt)
+	if len(entries) == 0 {
+		// CancelTerminal already stated why it refused.
+		return
+	}
+	if err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries}); err != nil {
+		bound.With(logging.Context{Level: "error"}).Log(
+			"the cancelled terminal was not committed; the stop stays pending and is restated on the next cycle: %v", err)
+		return
+	}
+	delete(s.stopped, taskID)
+	s.tracker.Settle(path)
+	bound.With(logging.Context{ActivityID: run}).Log("cancelled terminal minted and committed entries=%d", len(entries))
+}
+
+// spoolForTask answers the watched file that IS a task's run.
+//
+// BY THE OWNER'S AUTHORITATIVE OUTPUT PATH FIRST, and by the watcher's own task
+// id otherwise — both single indexed lookups, and neither of them a guess from
+// filename similarity, which owner.go's header rules out as evidence.
+func (s *sidecar) spoolForTask(taskID string) (string, bool) {
+	if path := s.owners.outputFor(taskID); path != "" {
+		if _, ok := s.watchers[path]; ok {
+			return path, true
+		}
+	}
+	for path, w := range s.watchers {
+		if w.target.TaskID == taskID && w.target.SessionID == "" {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// observation is one authoritative spawn, as reported by the converter.
+type observation struct {
 	taskID     string
-	sessionID  string
+	activityID string
+	// agentID is the agent whose book the spawn happened in — the SPAWNER. The
+	// spawned agent's identity is activityID, so it is not stored twice.
+	agentID    string
 	outputPath string
-	source     OwnerSource
+	// mainAgentID is the agent whose stream carried the spawn.
+	mainAgentID string
+	// backgrounded reports that the spawn ran in the background, which is what
+	// makes a subagent its own top_level rather than the spawner's.
+	backgrounded bool
 }
 
-func normalizeOwnerOutputPath(path string) string {
-	if path == "" {
-		return ""
-	}
-	return filepath.Clean(path)
+// ownerIndex maps a task id to the call that spawned it.
+//
+// It holds ONE entry per open spawn, keyed by task id, plus the same entry
+// reachable by output path when the vendor named one. Both are single indexed
+// lookups; nothing here walks a lineage or accumulates per-record state.
+type ownerIndex struct {
+	byTask   map[string]observation
+	byOutput map[string]string // resolved output path -> task id
+	// backgroundedCalls remembers, by the SPAWNING CALL's activity id, that the
+	// spawn ran in the background.
+	//
+	// A BACKGROUNDED SUBAGENT IS SEEN TWICE, and only one of the two sightings
+	// names a task. Its transcript arrives as an `a*` task SPOOL, which is keyed
+	// by task id, AND as a `subagents/agent-<id>.jsonl` SIDECHAIN, which names
+	// no task at all — its only identity is the spawning call the meta file
+	// states. A backgrounded flag reachable only by task id therefore answered
+	// false for the sidechain, and the two planes' writes for ONE agent carried
+	// DIFFERENT top_level: the subagent itself from the spool, the session's
+	// main agent from the sidechain. This index is what makes the two agree.
+	backgroundedCalls map[string]bool
+	// conflicts records a task id two different spawns claimed. A conflicted
+	// task resolves to nothing: guessing between two claims is how one run's
+	// output lands in another run's card.
+	conflicts map[string]bool
+	log       *logging.Bound
 }
 
-// resolveOwnerResult resolves only a target's explicit session, an exact
-// normalized output path, or an unambiguous task mapping. Filename similarity
-// is deliberately not evidence and is never consulted.
-func (s *sidecar) resolveOwnerResult(tgt discover.Target) OwnerResolution {
-	outputPath := normalizeOwnerOutputPath(tgt.Path)
-	s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: tgt.SessionID, Task: tgt.TaskID}).LogVerbose("owner resolution entered target_session=%t task_id=%q", tgt.SessionID != "", tgt.TaskID)
-	if tgt.SessionID != "" {
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: tgt.SessionID, Task: tgt.TaskID}).LogVerbose("owner resolution selected target session")
-		return OwnerResolution{SessionID: tgt.SessionID, TaskID: tgt.TaskID, OutputPath: outputPath, Source: OwnerSourceTarget, Outcome: OwnerResolvedPath}
+func newOwnerIndex(log *logging.Bound) *ownerIndex {
+	return &ownerIndex{
+		byTask:            map[string]observation{},
+		byOutput:          map[string]string{},
+		backgroundedCalls: map[string]bool{},
+		conflicts:         map[string]bool{},
+		log:               log,
 	}
-	if tgt.TaskID == "" || outputPath == "" {
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Task: tgt.TaskID, Level: "error"}).Log("owner resolution rejected invalid spool target")
-		return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedInvalid}
-	}
-	if s.ownerPathConflicts[outputPath] {
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Task: tgt.TaskID, Level: "error"}).Log("owner resolution rejected conflicting exact output path")
-		return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedConflict}
-	}
-	if record, ok := s.ownerByOutput[outputPath]; ok {
-		if record.taskID != tgt.TaskID {
-			s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: record.sessionID, Task: tgt.TaskID, Level: "error"}).Log("owner resolution rejected exact output path task mismatch recorded_task=%s", record.taskID)
-			return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedConflict}
-		}
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: record.sessionID, Task: tgt.TaskID}).Log("owner resolution selected exact output path source=%s recorded_task=%s", record.source, record.taskID)
-		return OwnerResolution{SessionID: record.sessionID, TaskID: tgt.TaskID, OutputPath: outputPath, Source: record.source, Outcome: OwnerResolvedPath}
-	}
-	if s.ownerConflicts[tgt.TaskID] {
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Task: tgt.TaskID, Level: "error"}).Log("owner resolution rejected conflicting task ownership")
-		return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedConflict}
-	}
-	if session, ok := s.owners[tgt.TaskID]; ok {
-		if recordedPath := s.ownerTaskOutput[tgt.TaskID]; recordedPath != "" && recordedPath != outputPath {
-			s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: session, Task: tgt.TaskID, Level: "error"}).Log("owner resolution rejected task-only association with different authoritative output path recorded_path=%s", recordedPath)
-			return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedConflict}
-		}
-		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Session: session, Task: tgt.TaskID}).Log("owner resolution selected unique task association")
-		return OwnerResolution{SessionID: session, TaskID: tgt.TaskID, OutputPath: outputPath, Source: s.ownerSource[tgt.TaskID], Outcome: OwnerResolvedTask}
-	}
-	s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: outputPath, Task: tgt.TaskID}).LogVerbose("owner resolution awaiting authoritative observation")
-	return OwnerResolution{TaskID: tgt.TaskID, OutputPath: outputPath, Outcome: OwnerUnresolvedAwaitingOwner}
 }
 
-// observeOwner records one authoritative association. The output path index is
-// authoritative only for an exact cleaned path; task-only resolution remains
-// unavailable once two sessions claim the same task identifier.
-func (s *sidecar) observeOwner(taskID, sessionID, outputPath string, source OwnerSource) bool {
-	outputPath = normalizeOwnerOutputPath(outputPath)
-	if taskID == "" || sessionID == "" {
-		s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: sessionID, Task: taskID, Level: "error"}).Log("owner observation rejected missing task or session source=%s", source)
-		return false
-	}
-	s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: sessionID, Task: taskID}).LogVerbose("owner observation entered source=%s", source)
-	if prior, ok := s.owners[taskID]; ok && prior != sessionID {
-		s.ownerConflicts[taskID] = true
-		s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: prior, Task: taskID, Level: "error"}).Log("owner observation CONFLICTING owner source=%s existing_session=%s incoming_session=%s", source, prior, sessionID)
-	}
-	added := false
-	if outputPath != "" {
-		if prior, ok := s.ownerByOutput[outputPath]; ok && (prior.sessionID != sessionID || prior.taskID != taskID) {
-			delete(s.ownerByOutput, outputPath)
-			s.ownerPathConflicts[outputPath] = true
-			s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: prior.sessionID, Task: taskID, Level: "error"}).Log("owner observation conflicts exact output path source=%s existing_task=%s existing_session=%s incoming_task=%s incoming_session=%s", source, prior.taskID, prior.sessionID, taskID, sessionID)
-			return false
-		}
-		if !s.ownerPathConflicts[outputPath] {
-			if _, exists := s.ownerByOutput[outputPath]; !exists {
-				added = true
-			}
-			s.ownerByOutput[outputPath] = ownerRecord{taskID: taskID, sessionID: sessionID, outputPath: outputPath, source: source}
-		}
-	}
-	if _, ok := s.owners[taskID]; ok {
-		return added
-	}
-	s.owners[taskID] = sessionID
-	s.ownerSource[taskID] = source
-	s.ownerTaskOutput[taskID] = outputPath
-	s.log.With(logging.Context{Operation: "record-spool-owner", Path: outputPath, Session: sessionID, Task: taskID}).Log("owner observation recorded source=%s", source)
-	return true
-}
-
-// resetOwners drops connection-scoped durable observations before the next
-// recovery snapshot is seeded. A closed task from a prior connection must not
-// remain capable of claiming a newly discovered spool.
-func (s *sidecar) resetOwners() {
-	s.log.With(logging.Context{Operation: "reset-spool-owners"}).Log("owner index reset before authoritative recovery")
-	s.owners = map[string]string{}
-	s.ownerSource = map[string]OwnerSource{}
-	s.ownerTaskOutput = map[string]string{}
-	s.ownerByOutput = map[string]ownerRecord{}
-	s.ownerConflicts = map[string]bool{}
-	s.ownerPathConflicts = map[string]bool{}
-	s.openTasks = map[string]bool{}
-}
-
-// markTaskOpen records authoritative live/recovered lifecycle state separately
-// from ownership. An open task can still lack a usable owner when its durable
-// launch metadata is malformed, and must remain retryable rather than becoming
-// terminal merely because its spool is old.
-func (s *sidecar) markTaskOpen(taskID string, source OwnerSource) {
-	if taskID == "" {
-		s.log.With(logging.Context{Operation: "record-open-task", Level: "error"}).Log("open-task observation rejected missing task id source=%s", source)
+// observe records one spawn.
+//
+// A CONFLICT IS ITS OWN OPERATION (`record-spawn-conflict`): it is the branch
+// that makes a task permanently unresolvable, and sharing `record-spawn` with an
+// ordinary rejection left the two findable only by their prose.
+func (o *ownerIndex) observe(obs observation) {
+	bound := o.log.With(logging.Context{
+		Operation: "record-spawn", TaskID: obs.taskID, ActivityID: obs.activityID,
+		AgentID: obs.agentID, Path: obs.outputPath,
+	})
+	if obs.taskID == "" || obs.activityID == "" {
+		bound.With(logging.Context{Level: "error"}).Log("spawn observation rejected: it names no task or no spawning call")
 		return
 	}
-	s.openTasks[taskID] = true
-	s.log.With(logging.Context{Operation: "record-open-task", Task: taskID}).LogVerbose("open-task observation recorded source=%s", source)
-}
-
-func (s *sidecar) markTaskClosed(taskID string) {
-	if taskID == "" {
-		s.log.With(logging.Context{Operation: "record-closed-task", Level: "error"}).Log("closed-task observation rejected missing task id")
+	if prior, ok := o.byTask[obs.taskID]; ok {
+		if prior.activityID != obs.activityID {
+			o.conflicts[obs.taskID] = true
+			bound.With(logging.Context{Operation: "record-spawn-conflict", Level: "error"}).Log(
+				"CONFLICTING spawn observation: task already claimed by call %s; it resolves to nothing rather than to a guess", prior.activityID)
+			return
+		}
+		bound.LogVerbose("spawn observation re-reported by the same call")
 		return
 	}
-	delete(s.openTasks, taskID)
-	s.log.With(logging.Context{Operation: "record-closed-task", Task: taskID}).LogVerbose("closed-task observation recorded")
-}
-
-func (s *sidecar) taskOpen(taskID string) bool {
-	return s.openTasks[taskID]
-}
-
-func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
-	s.log.With(logging.Context{Operation: "seed-spool-owners"}).Log("owner seed entered open_tasks=%d", len(states))
-	n := 0
-	for _, state := range states {
-		ev := state.GetStarted()
-		if ts := ev.GetTaskStarted(); ts != nil {
-			s.markTaskOpen(ts.GetTaskId(), OwnerSourceDurableOpenTask)
-			if s.observeOwner(ts.GetTaskId(), ev.GetSessionId(), ts.GetOutputPath(), OwnerSourceDurableOpenTask) {
-				n++
-			}
-		}
+	o.byTask[obs.taskID] = obs
+	if obs.backgrounded {
+		o.backgroundedCalls[obs.activityID] = true
 	}
-	s.log.With(logging.Context{Operation: "seed-spool-owners"}).Log("owner seed completed recorded=%d open_tasks=%d", n, len(states))
-	return n
+	if obs.outputPath != "" {
+		o.byOutput[obs.outputPath] = obs.taskID
+	}
+	bound.Log("spawn recorded: the task's output belongs to this call")
 }
 
-func (s *sidecar) noteTaskOwner(taskID, session, outputPath string, source OwnerSource) bool {
-	return s.observeOwner(taskID, session, outputPath, source)
+// resolve returns the spawn that owns a spool, and whether it is known.
+//
+// THE TWO REFUSALS ARE DISTINCT BRANCHES: `resolve-spool-owner-conflicted` is a
+// task two calls claim, `resolve-spool-owner-path-mismatch` is a spool whose
+// authoritative output is a different file. They are fixed differently, so a
+// reader must be able to filter for one without reading sentences.
+func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
+	bound := o.log.With(logging.Context{Operation: "resolve-spool-owner", Path: target.Path, TaskID: target.TaskID})
+	if o.conflicts[target.TaskID] {
+		bound.With(logging.Context{Operation: "resolve-spool-owner-conflicted", Level: "error"}).Log("owner resolution refused: two calls claim this task")
+		return observation{}, false
+	}
+	// An exact output path is the strongest evidence: the vendor named this
+	// file, so no id comparison is needed at all.
+	if taskID, ok := o.byOutput[target.Path]; ok {
+		if taskID != target.TaskID {
+			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
+				"owner resolution refused: this exact output path is recorded for task %s", taskID)
+			return observation{}, false
+		}
+		bound.LogVerbose("owner resolved by exact output path")
+		return o.byTask[taskID], true
+	}
+	if obs, ok := o.byTask[target.TaskID]; ok {
+		if obs.outputPath != "" && obs.outputPath != target.Path {
+			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
+				"owner resolution refused: the task's authoritative output path is %s", obs.outputPath)
+			return observation{}, false
+		}
+		bound.LogVerbose("owner resolved by task id")
+		return obs, true
+	}
+	bound.LogVerbose("owner unknown: no spawn has been observed for this task yet")
+	return observation{}, false
+}
+
+// agentFor returns the agent whose book a task's spawn happened in, when it is
+// known — the run's owner, which is what its frames are attributed to.
+func (o *ownerIndex) agentFor(taskID string) string { return o.byTask[taskID].agentID }
+
+// activityFor returns the spawning call's activity id, when one is known.
+func (o *ownerIndex) activityFor(taskID string) string { return o.byTask[taskID].activityID }
+
+// outputFor returns the authoritative output path the vendor named for a task,
+// when it named one.
+func (o *ownerIndex) outputFor(taskID string) string { return o.byTask[taskID].outputPath }
+
+// backgroundedFor reports whether the spawn behind a watched file ran in the
+// background, by whichever identity that file actually carries.
+//
+// A SPOOL NAMES A TASK; A SIDECHAIN TRANSCRIPT NAMES THE SPAWNING CALL. Both are
+// the SAME backgrounded subagent, and `top_level` must be the same identity on
+// both — the subagent itself, because its stream outlives the turn that spawned
+// it. Asking only by task id made the sidechain's writes name the session's main
+// agent instead, so one agent's two planes disagreed about where its work
+// belongs and no consumer could reconcile them.
+func (o *ownerIndex) backgroundedFor(target discover.Target) bool {
+	// AN OBSERVED SPAWN IS THE STRONGEST ANSWER, and only a spool's TaskID is a
+	// harness task id the launch named. A sidechain transcript's TaskID is its
+	// `agent-<id>` LOCATOR, which no launch ever mentions, so the lookup misses
+	// and the fallback below is what answers for it.
+	if obs, ok := o.byTask[target.TaskID]; ok {
+		return obs.backgrounded
+	}
+	// A sidechain transcript's AgentID is the `toolUseId` its meta file states,
+	// which IS the spawning call's activity id (the cross-plane minting rule).
+	return o.backgroundedCalls[target.AgentID]
+}
+
+// mainAgentFor returns the main agent whose work a file belongs to.
+//
+// A SESSION TRANSCRIPT'S MAIN AGENT IS ITS OWN FILE NAME. The file's session
+// uuid is the identity; the per-record `sessionId` field diverges from it in a
+// fifth of records and is never read as one. A subagent transcript belongs to
+// the session directory it sits under, and a spool to the agent that spawned it.
+func (o *ownerIndex) mainAgentFor(target discover.Target) string {
+	if target.SessionID != "" {
+		return target.SessionID
+	}
+	if obs, ok := o.byTask[target.TaskID]; ok {
+		return obs.mainAgentID
+	}
+	return ""
 }

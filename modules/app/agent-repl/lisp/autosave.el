@@ -2,6 +2,18 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--register-timer "core")
+(declare-function agent-repl--ws-all-persps "workspace")
+(declare-function agent-repl--ws-buffers "workspace")
+(declare-function agent-repl--ws-persp-identity "workspace")
+(declare-function agent-repl--ws-persp-name "workspace")
+(declare-function agent-repl--ws-system-available-p "workspace")
+
 (defun agent-repl--autosave-buffer-state (buf)
   "Return minimized autosave predicate state for BUF.
 This helper runs once per buffer during a sweep.  Per-buffer logging would

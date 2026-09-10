@@ -1,0 +1,62 @@
+// endpoint_send_login_input.proto — SendLoginInput: the login pty's INPUT
+// direction — keystrokes or a resize — as a unary call, the companion of
+// the server-streamed WatchLoginTerminal. WEB LINK section. Addressed by
+// workspace exactly as the watch is; the daemon writes to the account
+// root's running login pty.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SendLoginInputRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // THE ARM IS THE INPUT.
+  oneof input {
+    LoginTerminalKeystrokes keystrokes = 2;
+    LoginTerminalResize resize = 3;
+  }
+}
+
+// THE ARM IS THE OUTCOME.
+message SendLoginInputResponse {
+  oneof result {
+    SendLoginInputSuccess success = 1;
+    SendLoginInputError error = 2;
+  }
+}
+
+// Written to the pty.
+message SendLoginInputSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SendLoginInputError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SendLoginInputUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SendLoginInputWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SendLoginInputTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SendLoginInputNotYetAdopted not_yet_adopted = 4;
+    // No login terminal is open for this workspace.
+    SendLoginInputNoLoginOpen no_login_open = 5;
+  }
+}
+message SendLoginInputUnknownWorkspace {}
+message SendLoginInputWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SendLoginInputTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SendLoginInputNotYetAdopted {}
+message SendLoginInputNoLoginOpen {}

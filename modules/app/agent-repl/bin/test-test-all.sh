@@ -67,6 +67,32 @@ EOF
 printf 'precommit-harness\n' >>"$STUB_LOG"
 EOF
 
+    cat >"$tree/modules/app/agent-repl/bin/test-e2e.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'e2e\n' >>"$STUB_LOG"
+for spec in ${STUB_FAIL_SUITES:-}; do
+    if [ "${spec%%:*}" = "e2e" ]; then
+        exit "${spec##*:}"
+    fi
+done
+exit 0
+EOF
+
+    cat >"$tree/modules/app/agent-repl/bin/test-e2e-emacs.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'e2e-emacs\n' >>"$STUB_LOG"
+if [ "${STUB_DECLINE_E2E_EMACS:-0}" = "1" ]; then
+    printf 'the e2e sandbox is not usable\n' >&2
+    exit 77
+fi
+for spec in ${STUB_FAIL_SUITES:-}; do
+    if [ "${spec%%:*}" = "e2e-emacs" ]; then
+        exit "${spec##*:}"
+    fi
+done
+exit 0
+EOF
+
     cat >"$tree/modules/app/agent-repl/bin/report-nonlisp-coverage.sh" <<'EOF'
 #!/usr/bin/env bash
 component="${1:?component required}"
@@ -111,6 +137,8 @@ EOF
         "$tree/modules/app/agent-repl/bin/test-build-frontend.sh" \
         "$tree/modules/app/agent-repl/bin/test-deploy-all.sh" \
         "$tree/modules/app/agent-repl/bin/test-readiness-report.sh" \
+        "$tree/modules/app/agent-repl/bin/test-e2e.sh" \
+        "$tree/modules/app/agent-repl/bin/test-e2e-emacs.sh" \
         "$tree/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh" \
         "$tree/.githooks/test-pre-commit.sh" \
         "$tree/modules/app/agent-repl/bin/report-nonlisp-coverage.sh" \
@@ -129,6 +157,7 @@ run_test_all() {
         STUB_LOG="$STUB_LOG" \
         STUB_FAIL_SUITES="${STUB_FAIL_SUITES:-}" \
         STUB_SLOW_SUITE="${STUB_SLOW_SUITE:-}" \
+        STUB_DECLINE_E2E_EMACS="${STUB_DECLINE_E2E_EMACS:-0}" \
         GIT_STUB_FAIL="${GIT_STUB_FAIL:-0}" \
         GIT_STUB_BRANCH="${GIT_STUB_BRANCH:-master}" \
         GIT_STUB_COMMIT="${GIT_STUB_COMMIT:-0123456789abcdef0123456789abcdef01234567}" \
@@ -144,7 +173,7 @@ test_default_runs_every_suite_without_recording() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 20 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
         grep -q "timing: proto" "$tree/stdout" &&
         grep -q "timings were not recorded" "$tree/stdout"; then
@@ -160,7 +189,7 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 19 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 21 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,logging,' "$tree/modules/app/agent-repl/test_time.csv" &&
@@ -175,16 +204,16 @@ test_record_appends_every_suite() {
 test_failure_continues_and_summarizes_every_failure() {
     local tree="$TMP/failure-continues"
     make_tree "$tree"
-    STUB_FAIL_SUITES="store:7 wire:9" run_test_all "$tree"
+    STUB_FAIL_SUITES="store:7 logging:9" run_test_all "$tree"
 
-    if grep -q '^wire$' "$tree/stub.log" &&
+    if grep -q '^logging$' "$tree/stub.log" &&
         grep -q '^proto$' "$tree/stub.log" &&
         grep -q '^logging-density$' "$tree/stub.log" &&
         grep -q "store failed after .*with exit code 7" "$tree/stderr" &&
-        grep -q "wire failed after .*with exit code 9" "$tree/stderr" &&
-        grep -q "failure summary, 2 of 18 suites failed" "$tree/stderr" &&
+        grep -q "logging failed after .*with exit code 9" "$tree/stderr" &&
+        grep -q "failure summary, 2 of 20 suites failed" "$tree/stderr" &&
         grep -q "failed: store exit code 7 after" "$tree/stderr" &&
-        grep -q "failed: wire exit code 9 after" "$tree/stderr"; then
+        grep -q "failed: logging exit code 9 after" "$tree/stderr"; then
         pass "suite failures run every later suite and summarize each failure"
     else
         fail "suite failures run every later suite and summarize each failure"
@@ -307,7 +336,7 @@ test_no_suites_argument_still_runs_everything() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 20 ] &&
         ! grep -q "not selected" "$tree/stdout"; then
         pass "an absent --suites leaves the run at every suite"
     else
@@ -385,6 +414,102 @@ test_roster_matches_the_run_block() {
     fi
 }
 
+# A suite that cannot meet its precondition exits 77. The distinction this
+# pins is the whole reason 77 exists: the run must stay GREEN (a missing
+# container is not a defect in the change under test) while the output still
+# says the suite did not run.
+test_declined_suite_does_not_fail_the_run() {
+    local tree="$TMP/declined-green"
+    make_tree "$tree"
+    STUB_DECLINE_E2E_EMACS=1 run_test_all "$tree"
+
+    if [ "$RUN_RC" -eq 0 ]; then
+        pass "a declined suite leaves the run exit status green"
+    else
+        fail "a declined suite leaves the run exit status green"
+        printf '  exit: %s\n  stderr:\n%s\n' "$RUN_RC" "$(cat "$tree/stderr")" >&2
+    fi
+}
+
+# The other half of the same ruling: green must not mean silent. A reader has
+# to be able to see, in the output, that the suite was skipped.
+test_declined_suite_is_named_in_the_output() {
+    local tree="$TMP/declined-named"
+    make_tree "$tree"
+    STUB_DECLINE_E2E_EMACS=1 run_test_all "$tree"
+
+    if grep -q 'declined: e2e-emacs did not run' "$tree/stdout" &&
+        grep -q 'e2e-emacs: DECLINED' "$tree/stdout"; then
+        pass "a declined suite is reported as declined, not as a pass"
+    else
+        fail "a declined suite is reported as declined, not as a pass"
+        printf '  stdout:\n%s\n' "$(cat "$tree/stdout")" >&2
+    fi
+}
+
+# A declined suite did not run, so it has nothing to say about timing and must
+# never reach the canonical history: a recorded row would claim a duration for
+# work that never happened.
+test_declined_suite_is_never_recorded() {
+    local tree="$TMP/declined-record"
+    make_tree "$tree"
+    STUB_DECLINE_E2E_EMACS=1 run_test_all "$tree" --record
+
+    if grep -q ',e2e-emacs,' "$tree/modules/app/agent-repl/test_time.csv"; then
+        fail "a declined suite is never appended to the timing history"
+        printf '  csv:\n%s\n' "$(cat "$tree/modules/app/agent-repl/test_time.csv")" >&2
+    else
+        pass "a declined suite is never appended to the timing history"
+    fi
+}
+
+# 77 is a DECLINE, not a blanket "any non-zero is fine". A real failure in the
+# same suite must still fail the run, or the skip path would be a hole through
+# which a broken sandboxed layer could pass unnoticed.
+test_e2e_emacs_failure_still_fails_the_run() {
+    local tree="$TMP/e2e-emacs-fail"
+    make_tree "$tree"
+    STUB_FAIL_SUITES="e2e-emacs:1" run_test_all "$tree"
+
+    if [ "$RUN_RC" -ne 0 ] && grep -q 'failed: e2e-emacs exit code 1' "$tree/stderr"; then
+        pass "a genuine e2e-emacs failure still fails the run"
+    else
+        fail "a genuine e2e-emacs failure still fails the run"
+        printf '  exit: %s\n  stderr:\n%s\n' "$RUN_RC" "$(cat "$tree/stderr")" >&2
+    fi
+}
+
+# The containerless cross-system suite is an ordinary gate suite: it has no
+# decline path, so a failure there is a failure like any other.
+test_e2e_failure_fails_the_run() {
+    local tree="$TMP/e2e-fail"
+    make_tree "$tree"
+    STUB_FAIL_SUITES="e2e:2" run_test_all "$tree"
+
+    if [ "$RUN_RC" -ne 0 ] && grep -q 'failed: e2e exit code 2' "$tree/stderr"; then
+        pass "an e2e failure fails the run"
+    else
+        fail "an e2e failure fails the run"
+        printf '  exit: %s\n  stderr:\n%s\n' "$RUN_RC" "$(cat "$tree/stderr")" >&2
+    fi
+}
+
+# The closing line is the part a reader skims, so it must not call a declined
+# suite "passed" — that would undo the exit-77 disposition at the last step.
+test_declined_suite_is_not_called_passed_at_the_end() {
+    local tree="$TMP/declined-closing"
+    make_tree "$tree"
+    STUB_DECLINE_E2E_EMACS=1 run_test_all "$tree"
+
+    if grep -q 'DECLINED: e2e-emacs' "$tree/stdout" &&
+        ! grep -q 'all agent-repl tests and coverage suites passed' "$tree/stdout"; then
+        pass "the closing line names a declined suite instead of claiming a pass"
+    else
+        fail "the closing line names a declined suite instead of claiming a pass"
+        printf '  stdout:\n%s\n' "$(cat "$tree/stdout")" >&2
+    fi
+}
+
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-test-all-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -403,6 +528,12 @@ test_unknown_suite_fails_before_running_suites
 test_empty_suites_list_fails_before_running_suites
 test_suites_records_only_the_suites_it_ran
 test_roster_matches_the_run_block
+test_declined_suite_does_not_fail_the_run
+test_declined_suite_is_named_in_the_output
+test_declined_suite_is_never_recorded
+test_e2e_emacs_failure_still_fails_the_run
+test_e2e_failure_fails_the_run
+test_declined_suite_is_not_called_passed_at_the_end
 
 printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

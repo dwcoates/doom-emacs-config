@@ -1,0 +1,39 @@
+// endpoint_create_task.proto — CreateTask: a new user task. SIDEBAR
+// section. The task appears in the roster's task view; assignment is
+// AssignWorkspaceTask's.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CreateTaskRequest {
+  // The task's title, non-blank.
+  string title = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CreateTaskResponse {
+  oneof result {
+    CreateTaskSuccess success = 1;
+    CreateTaskError error = 2;
+  }
+}
+
+// The created task's identity; everything else rides the roster stream.
+message CreateTaskSuccess {
+  TaskRef task = 1;
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message CreateTaskError {
+  oneof cause {
+    // The title is blank once trimmed.
+    CreateTaskBlankTitle blank_title = 1;
+  }
+}
+message CreateTaskBlankTitle {}

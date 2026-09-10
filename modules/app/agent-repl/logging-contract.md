@@ -73,6 +73,18 @@ Identity fields are included whenever the owning runtime knows them:
 - `claude_session_id`
 - `request_id`
 
+The browser webapp learns `agent_repl_session_id` and `claude_session_id`
+from `session_identity` on its own WatchWebWorkspace stream (landing 15) and
+binds them into its log context, rebinding on every push. Both are absent
+until the daemon states them, and absence attributes the record to the
+workspace alone.
+
+The store reads `request_id` from the inbound `X-Agent-Repl-Request-Id`
+header. No production client currently sends that header, so the field is
+absent from store records until one does; the reader stands because the header
+is the contract's declared way to carry a caller's request identity into the
+store.
+
 Identifiers belong in their dedicated fields, never only inside `message`.
 Dynamic values and error causes belong in `context`, never in an incompatible
 per-call text convention.

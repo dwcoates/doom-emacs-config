@@ -1,0 +1,68 @@
+// endpoint_open_external.proto — OpenExternal: open a clicked link in the
+// user's pinned external browser profile. WEB LINK section. The ONLY
+// thing between a clicked link and the webview navigating away (or
+// nothing happening): the shared link component calls this instead of
+// following the href; the daemon owns the pinned-profile launch.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenExternalRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The clicked link, verbatim.
+  string url = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenExternalResponse {
+  oneof result {
+    OpenExternalSuccess success = 1;
+    OpenExternalError error = 2;
+  }
+}
+
+// The browser was handed the link.
+message OpenExternalSuccess {
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message OpenExternalError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenExternalUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenExternalWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenExternalTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenExternalNotYetAdopted not_yet_adopted = 4;
+    // The url does not parse.
+    OpenExternalInvalidUrl invalid_url = 5;
+    // No browser is configured to open it with.
+    OpenExternalNoBrowserConfigured no_browser_configured = 6;
+    // Launching the browser failed.
+    OpenExternalLaunchFailed launch_failed = 7;
+  }
+}
+message OpenExternalUnknownWorkspace {}
+message OpenExternalWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenExternalTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenExternalNotYetAdopted {}
+message OpenExternalInvalidUrl {}
+message OpenExternalNoBrowserConfigured {}
+message OpenExternalLaunchFailed {
+  // The launch's own account of the failure.
+  string detail = 1;
+}

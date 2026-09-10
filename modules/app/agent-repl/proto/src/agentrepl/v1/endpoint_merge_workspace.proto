@@ -1,0 +1,62 @@
+// endpoint_merge_workspace.proto — MergeWorkspace. SIDEBAR section.
+// Enqueue this workspace's merge. Success means ENQUEUED — the merge's whole life from the queue onward is the feed's merge bubble; the merge targets the workspace's parent by definition, and the daemon decides everything else.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message MergeWorkspaceRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message MergeWorkspaceResponse {
+  oneof result {
+    MergeWorkspaceSuccess success = 1;
+    MergeWorkspaceError error = 2;
+  }
+}
+
+// Done; every visible effect arrives on the streams.
+message MergeWorkspaceSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message MergeWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    MergeWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    MergeWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    MergeWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    MergeWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The daemon holds no layout facts for this workspace to merge with.
+    MergeWorkspaceNoLayoutFacts no_layout_facts = 5;
+    // The workspace's session has been deleted.
+    MergeWorkspaceSessionDeleted session_deleted = 6;
+    // This workspace's merge is already in the queue.
+    MergeWorkspaceAlreadyQueued already_queued = 7;
+    // This workspace's merge is already in flight.
+    MergeWorkspaceAlreadyMerging already_merging = 8;
+  }
+}
+message MergeWorkspaceUnknownWorkspace {}
+message MergeWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message MergeWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message MergeWorkspaceNotYetAdopted {}
+message MergeWorkspaceNoLayoutFacts {}
+message MergeWorkspaceSessionDeleted {}
+message MergeWorkspaceAlreadyQueued {}
+message MergeWorkspaceAlreadyMerging {}

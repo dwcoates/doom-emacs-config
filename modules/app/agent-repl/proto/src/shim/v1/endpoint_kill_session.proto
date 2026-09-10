@@ -1,0 +1,53 @@
+// endpoint_kill_session.proto — KillSession: END the session and everything
+// live in it — the turn if one is open and EVERY live task, whichever turn
+// spawned it. Stops the keep-alive cadence, ends the vendor query, lets every
+// open stream conclude with a terminal frame, and exits. REFUSES while
+// anything is live unless forced: the daemon is the one decider of what dies.
+//
+// NOT the same as a consumer closing its Watch streams: that ends nothing.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/session.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Whether live work may be killed to end the session.
+message KillSessionRequest {
+  // When true, live work is killed: the turn is interrupted and every live
+  // task stopped, each stream concluding with its `interrupted` arm first.
+  // When false, live work is a refusal.
+  bool force = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message KillSessionResponse {
+  oneof result {
+    KillSessionSuccess success = 1;
+    KillSessionFailure failure = 2;
+  }
+}
+
+// Ended; the shim exits after answering.
+message KillSessionSuccess {
+  // How it ended, and what died if it was forced.
+  conversation.v1.SessionKilled closed = 1;
+}
+
+// Not ended. THE ARM IS WHY.
+message KillSessionFailure {
+  oneof cause {
+    // Work is live and force was not asked: here is what is live.
+    conversation.v1.SessionLive live = 1;
+    // No session is open on this shim.
+    KillSessionNoSession no_session = 3;
+    // The vendor query refused to end in the stand-down window.
+    KillSessionQueryRefusedToEnd query_refused_to_end = 4;
+  }
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 2;
+}
+message KillSessionNoSession {}
+message KillSessionQueryRefusedToEnd {}

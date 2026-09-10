@@ -1,16 +1,47 @@
-// Command shim-claude-sidecar is the agent-shim file-plane reader (design §7): a
-// singleton, launchd-managed process that discovers the Claude harness's on-disk
-// artifacts (session transcripts, agent sidechains, workflow journals, /tmp task
-// spools), tails them with cursored truncation-aware reads, converts records into
-// agent-shim protocol events, infers LOST terminal transitions per the staleness
-// policy, and writes everything to the shim-store with atomic cursor advancement.
+// Command shim-claude-sidecar is the agent-shim FILE-PLANE READER: a singleton,
+// launchd-managed process that discovers what the vendor's agent binary writes
+// to disk (session transcripts, subagent transcripts, workflow journals and
+// their per-agent transcripts, task spools), tails them with cursored,
+// truncation-aware reads, converts each record into conversation.v1 vocabulary,
+// and writes it to the store as store.v1 StoreEntry batches with the reader
+// position riding the same transaction.
+//
+// It is a COPIER. It has no view of liveness, no session semantics and no
+// contact with the daemon; the only thing it ever concludes on its own is that
+// it STOPPED SEEING a detached run (see internal/stale).
 //
 // Flags (the launchd plists reference these):
 //
-//	--store-socket   shim-store UDS path        (…/sock/store.sock)
-//	--config-roots   comma-separated config roots (~/.claude,~/.claude-chesscom)
-//	--spool-root     /tmp task-spool root       (/tmp; resolves claude-<uid>/… itself)
-//	--log            append-only log file (also to stderr)
+//	--store-socket     store UDS path (default $AGENT_REPL_STORE_SOCKET, else …/sock/store.sock)
+//	--state-dir        agent-repl state root (default $AGENT_REPL_STATE_DIR, else ~/.claude-emacs)
+//	--config-roots     comma-separated config roots (~/.claude,~/.claude-chesscom)
+//	--spool-root       task-spool root (/tmp; resolves claude-<uid>/… itself)
+//	--log              append-only log file (also to stderr)
+//	--poll-interval    how often each watched file is polled (1s)
+//	--rescan-interval  how often discovery runs (30s)
+//
+// The LOST policy's windows (internal/stale) are configurable too, so the
+// integration suite can exercise a conclusion in milliseconds instead of
+// waiting out a production window. Each takes Go duration syntax, each has an
+// env var standing in for it, and an explicit flag beats the env:
+//
+//	--stale-grace             $AGENT_REPL_STALE_GRACE             (30s)
+//	--stale-shell-silence     $AGENT_REPL_STALE_SHELL_SILENCE     (30m)
+//	--stale-agent-silence     $AGENT_REPL_STALE_AGENT_SILENCE     (60m)
+//	--stale-workflow-silence  $AGENT_REPL_STALE_WORKFLOW_SILENCE  (60m)
+//	--unowned-spool-window    $AGENT_REPL_UNOWNED_SPOOL_WINDOW    (60s)
+//	--recover-backoff-min     $AGENT_REPL_RECOVER_BACKOFF_MIN     (250ms)
+//	--recover-backoff-max     $AGENT_REPL_RECOVER_BACKOFF_MAX     (10s)
+//
+// The last two are the store-recovery ladder's floor and ceiling. They were
+// the only windows in this process with no override, which left the outage
+// subjects — which run a real sidecar, so the cycle's injected clock does not
+// reach them — waiting out real rungs of production's ladder.
+//
+// UNSET KEEPS THE PACKAGE DEFAULT; A MALFORMED VALUE IS REFUSED. A window that
+// does not parse, or that is negative, is a bootstrap error: the process states
+// it once and exits non-zero rather than starting with a default the operator
+// did not ask for, because a silently-defaulted window is a policy nobody chose.
 package main
 
 import (
@@ -26,72 +57,347 @@ import (
 	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-claude-sidecar/internal/discover"
-	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
-	"agentrepl/shim-claude-sidecar/internal/storeclient"
-	"agentrepl/shim-claude-sidecar/internal/tail"
-	"golang.org/x/sys/unix"
 
 	sharedlogging "agentrepl/logging"
 )
 
+// Defaults for the two loop intervals. Polling is frequent because it is what
+// carries a user's prompt echo to the GUI; rescanning is not, because a new
+// file appearing is rare and there is no fsnotify path to catch it sooner.
+const (
+	DefaultPollInterval   = time.Second
+	DefaultRescanInterval = 30 * time.Second
+)
+
+// StoreSocketEnv names the store's socket for both the store and the sidecar.
+// An explicit --store-socket beats it; it is what lets a test store live
+// somewhere private without either side hard-coding the path.
+const StoreSocketEnv = "AGENT_REPL_STORE_SOCKET"
+
+// StateDirEnv names the agent-repl state root — the same variable the daemon
+// resolves and exports into every shim it spawns. The sidecar reads it because
+// the shim's identity records live under it: `shim/<workspace-key>/agent-id.json`
+// and `shim/<workspace-key>/vendor-id/<vendor-session-id>.json` are the ONLY
+// place the link between a rotated vendor session id and the conversation's
+// original one exists — the vendor's own transcripts carry no lineage.
+// An explicit --state-dir beats it, exactly as --store-socket beats its env.
+const StateDirEnv = "AGENT_REPL_STATE_DIR"
+
+// DefaultStateDirName is the state root's location under the home directory
+// when neither the flag nor the environment names one. It is the daemon's
+// stateroot.DefaultDirName, restated here because this module cannot import the
+// daemon; the two are documented on each other and move together or not at all.
+const DefaultStateDirName = ".claude-emacs"
+
+// The env vars that stand in for the LOST policy's four window flags. An
+// explicit flag beats the env, exactly as --store-socket does.
+const (
+	StaleGraceEnv           = "AGENT_REPL_STALE_GRACE"
+	StaleShellSilenceEnv    = "AGENT_REPL_STALE_SHELL_SILENCE"
+	StaleAgentSilenceEnv    = "AGENT_REPL_STALE_AGENT_SILENCE"
+	StaleWorkflowSilenceEnv = "AGENT_REPL_STALE_WORKFLOW_SILENCE"
+
+	// UnownedSpoolWindowEnv names how long an unclaimed spool is held before
+	// its bytes are ingested as residue. It sits with the LOST windows because
+	// it is the other wall-clock wait the file plane makes a caller sit through.
+	UnownedSpoolWindowEnv = "AGENT_REPL_UNOWNED_SPOOL_WINDOW"
+
+	// RecoverBackoffMinEnv and RecoverBackoffMaxEnv name the store-recovery
+	// ladder's floor and ceiling — the delay before the first retry of a
+	// suspended cycle, and the ceiling the doubling holds forever.
+	RecoverBackoffMinEnv = "AGENT_REPL_RECOVER_BACKOFF_MIN"
+	RecoverBackoffMaxEnv = "AGENT_REPL_RECOVER_BACKOFF_MAX"
+)
+
 func main() {
 	base := defaultCacheDir()
-	storeSocket := flag.String("store-socket", filepath.Join(base, "sock", "store.sock"), "shim-store UDS path")
+	storeSocket := flag.String("store-socket", defaultStoreSocket(base), "store UDS path (default $"+StoreSocketEnv+")")
+	stateDir := flag.String("state-dir", "",
+		"agent-repl state root holding the shim's identity records (default $"+StateDirEnv+", else ~/"+DefaultStateDirName+")")
 	configRoots := flag.String("config-roots", "~/.claude,~/.claude-chesscom", "comma-separated config roots")
 	spoolRoot := flag.String("spool-root", "/tmp", "task-spool root (resolves claude-<uid>/ itself)")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-claude-sidecar.log"), "log file path (also to stderr)")
+	pollInterval := flag.Duration("poll-interval", DefaultPollInterval, "how often each watched file is polled")
+	rescanInterval := flag.Duration("rescan-interval", DefaultRescanInterval, "how often discovery runs")
+	// The LOST windows are STRINGS rather than flag.Duration values because
+	// flag.Duration cannot tell "the operator passed nothing" from "the operator
+	// passed 0s", and it answers a malformed value by printing usage and exiting
+	// 2 — neither of which can be told apart from a default this process chose.
+	staleGrace := flag.String("stale-grace", "",
+		"LOST grace window after a run's file vanishes (Go duration; default $"+StaleGraceEnv+", else 30s)")
+	staleShellSilence := flag.String("stale-shell-silence", "",
+		"how long a shell spool may stop growing before it is LOST (Go duration; default $"+StaleShellSilenceEnv+", else 30m)")
+	staleAgentSilence := flag.String("stale-agent-silence", "",
+		"how long an agent transcript spool may stop growing before it is LOST (Go duration; default $"+StaleAgentSilenceEnv+", else 60m)")
+	staleWorkflowSilence := flag.String("stale-workflow-silence", "",
+		"how long a workflow journal may stop growing before it is LOST (Go duration; default $"+StaleWorkflowSilenceEnv+", else 60m)")
+	unownedSpoolWindow := flag.String("unowned-spool-window", "",
+		"how long an unclaimed spool is held before its bytes are ingested as residue (Go duration; default $"+UnownedSpoolWindowEnv+", else 60s)")
+	recoverBackoffMinFlag := flag.String("recover-backoff-min", "",
+		"delay before the first retry of a suspended cycle (Go duration; default $"+RecoverBackoffMinEnv+", else 250ms)")
+	recoverBackoffMaxFlag := flag.String("recover-backoff-max", "",
+		"ceiling the store-recovery ladder's doubling holds forever (Go duration; default $"+RecoverBackoffMaxEnv+", else 10s)")
 	flag.Parse()
 
-	if err := run(*storeSocket, parseRoots(*configRoots), *spoolRoot, *logPath); err != nil {
+	// ONE RESOLUTION, ONE REFUSAL. Every window is resolved by a single tested
+	// function and every way of getting one wrong leaves the process through
+	// the same two lines. Three separate call-and-check pairs here would put
+	// three copies of the refusal inside main, which is the one function in
+	// this file no test can enter.
+	w, err := resolveWindows(
+		durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow},
+		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: *staleGrace},
+		durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: *staleShellSilence},
+		durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: *staleAgentSilence},
+		durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: *staleWorkflowSilence},
+		durationSource{flagName: "recover-backoff-min", envName: RecoverBackoffMinEnv, raw: *recoverBackoffMinFlag},
+		durationSource{flagName: "recover-backoff-max", envName: RecoverBackoffMaxEnv, raw: *recoverBackoffMaxFlag},
+	)
+	if err != nil {
+		reportFatal(err, os.Stderr)
+		os.Exit(1)
+	}
+
+	options := Options{
+		StoreSocket:        *storeSocket,
+		StateDir:           resolveStateDir(*stateDir),
+		ConfigRoots:        parseRoots(*configRoots),
+		SpoolRoot:          *spoolRoot,
+		PollInterval:       *pollInterval,
+		RescanInterval:     *rescanInterval,
+		Stale:              w.Stale,
+		UnownedSpoolWindow: w.UnownedSpool,
+		RecoverBackoffMin:  w.RecoverBackoffMin,
+		RecoverBackoffMax:  w.RecoverBackoffMax,
+	}
+	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
 }
 
-// reportFatal writes only bootstrap failures because all post-bootstrap errors
-// have already reached the canonical logger and its stderr sink.
+// Options is the sidecar's whole configuration, after flag and env resolution.
+type Options struct {
+	StoreSocket string
+	// StateDir is the agent-repl state root the shim writes its identity
+	// records under. Empty means no root could be resolved, and the reader then
+	// books every transcript under its own vendor session id — which is what it
+	// did before the records existed.
+	StateDir       string
+	ConfigRoots    []string
+	SpoolRoot      string
+	PollInterval   time.Duration
+	RescanInterval time.Duration
+	// Stale carries the LOST policy's windows. A zero field keeps
+	// internal/stale's own default, which is the only meaning "unset" has here.
+	Stale stale.Options
+	// UnownedSpoolWindow is how long an unclaimed spool is held before its bytes
+	// are ingested as residue. Zero keeps held.go's UnownedSpoolWindow.
+	UnownedSpoolWindow time.Duration
+	// RecoverBackoffMin and RecoverBackoffMax are the store-recovery ladder's
+	// floor and ceiling. Zero keeps cycle.go's recoverBackoffMin /
+	// recoverBackoffMax.
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
+}
+
+// durationSource is one duration option's two spellings: the flag value the
+// operator passed (empty when they passed none) and the env var that stands in
+// for it.
+type durationSource struct {
+	flagName string
+	envName  string
+	raw      string
+}
+
+// resolve answers the option's effective value: the flag when it was passed,
+// else the env, else zero — which is how the caller says "keep the package
+// default". A value that is present but unusable is REFUSED rather than
+// defaulted, because a window nobody chose is a policy nobody chose.
+//
+// It cannot log: it runs before the canonical logger exists, so the bootstrap
+// error it returns IS its record (reportFatal writes it exactly once).
+func (d durationSource) resolve() (time.Duration, error) {
+	value, origin := strings.TrimSpace(d.raw), "--"+d.flagName
+	if value == "" {
+		value, origin = strings.TrimSpace(os.Getenv(d.envName)), d.envName
+	}
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, bootstrapError{fmt.Errorf("%s: %q is not a Go duration: %w", origin, value, err)}
+	}
+	if parsed < 0 {
+		return 0, bootstrapError{fmt.Errorf("%s: %q is negative, and a negative window concludes every run LOST at once", origin, value)}
+	}
+	return parsed, nil
+}
+
+// resolveStaleOptions resolves the four LOST windows in flag order. The FIRST
+// unusable value stops bootstrap: starting with three of four windows the
+// operator asked for is worse than not starting.
+func resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence durationSource) (stale.Options, error) {
+	var out stale.Options
+	for _, field := range []struct {
+		source durationSource
+		into   *time.Duration
+	}{
+		{grace, &out.Grace},
+		{shellSilence, &out.ShellSilence},
+		{agentSilence, &out.AgentSilence},
+		{workflowSilence, &out.WorkflowSilence},
+	} {
+		resolved, err := field.source.resolve()
+		if err != nil {
+			return stale.Options{}, err
+		}
+		*field.into = resolved
+	}
+	return out, nil
+}
+
+// windows is every duration option this process takes, resolved.
+type windows struct {
+	Stale             stale.Options
+	UnownedSpool      time.Duration
+	RecoverBackoffMin time.Duration
+	RecoverBackoffMax time.Duration
+}
+
+// resolveWindows resolves all seven duration options and answers the FIRST
+// refusal, applying nothing when there is one: a bootstrap that was refused
+// configures no window at all, rather than half of them.
+func resolveWindows(unowned, grace, shellSilence, agentSilence, workflowSilence, backoffMin, backoffMax durationSource) (windows, error) {
+	resolvedUnowned, err := unowned.resolve()
+	if err != nil {
+		return windows{}, err
+	}
+	staleOptions, err := resolveStaleOptions(grace, shellSilence, agentSilence, workflowSilence)
+	if err != nil {
+		return windows{}, err
+	}
+	min, max, err := resolveBackoffOptions(backoffMin, backoffMax)
+	if err != nil {
+		return windows{}, err
+	}
+	return windows{
+		Stale:             staleOptions,
+		UnownedSpool:      resolvedUnowned,
+		RecoverBackoffMin: min,
+		RecoverBackoffMax: max,
+	}, nil
+}
+
+// resolveBackoffOptions answers the store-recovery ladder's floor and ceiling.
+//
+// Zero means "keep the package default", exactly as it does for every other
+// window. A CEILING BELOW THE FLOOR IS REFUSED rather than quietly clamped: it
+// describes a ladder that cannot climb, which is not a policy anyone chose, and
+// a process that started with it would retry forever at a delay the operator
+// never asked for. Both spellings are named in the refusal, because the two
+// values only conflict together and the operator may have supplied one of them
+// through the environment.
+func resolveBackoffOptions(min, max durationSource) (time.Duration, time.Duration, error) {
+	resolvedMin, err := min.resolve()
+	if err != nil {
+		return 0, 0, err
+	}
+	resolvedMax, err := max.resolve()
+	if err != nil {
+		return 0, 0, err
+	}
+	effectiveMin, effectiveMax := resolvedMin, resolvedMax
+	if effectiveMin == 0 {
+		effectiveMin = recoverBackoffMin
+	}
+	if effectiveMax == 0 {
+		effectiveMax = recoverBackoffMax
+	}
+	if effectiveMax < effectiveMin {
+		return 0, 0, bootstrapError{fmt.Errorf(
+			"--%s/%s resolves to %s and --%s/%s to %s: a recovery ladder whose ceiling is below its floor cannot climb",
+			min.flagName, min.envName, effectiveMin, max.flagName, max.envName, effectiveMax)}
+	}
+	return resolvedMin, resolvedMax, nil
+}
+
+// resolveStateDir answers the state root: the flag when the operator passed one,
+// else $AGENT_REPL_STATE_DIR, else $HOME/.claude-emacs — the same precedence the
+// daemon's stateroot.Root applies, so both processes resolve one root.
+//
+// A HOME THAT CANNOT BE RESOLVED IS NOT A BOOTSTRAP FAILURE. Nothing else in
+// this process needs the state root, and refusing to start over it would take
+// the whole file plane down for a facility only rotated conversations use. It
+// answers empty, which the index reports as "resolves nothing" rather than
+// guessing a path.
+func resolveStateDir(flagValue string) string {
+	if dir := strings.TrimSpace(flagValue); dir != "" {
+		return expandHome(dir)
+	}
+	if dir := strings.TrimSpace(os.Getenv(StateDirEnv)); dir != "" {
+		return expandHome(dir)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, DefaultStateDirName)
+}
+
+// defaultStoreSocket resolves the store socket's default: the shared env var
+// when it is set, otherwise the cache-dir path both services agree on.
+func defaultStoreSocket(base string) string {
+	if socket := os.Getenv(StoreSocketEnv); socket != "" {
+		return socket
+	}
+	return filepath.Join(base, "sock", "store.sock")
+}
+
+// reportFatal writes only bootstrap failures, because every post-bootstrap
+// error has already reached the canonical logger and its stderr sink.
 func reportFatal(err error, stderr io.Writer) {
-	if isBootstrapError(err) {
-		payload, encodeErr := json.Marshal(map[string]any{
-			"timestamp": sharedlogging.Timestamp(time.Now()),
-			"runtime":   "sidecar", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
-			"operation": "sidecar.bootstrap", "message": "sidecar bootstrap failed",
-			"context": map[string]any{"error": err.Error()},
-		})
-		if encodeErr != nil {
-			panic(fmt.Sprintf("shim-claude-sidecar bootstrap log encode failed: %v", encodeErr))
-		}
-		if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
-			panic(fmt.Sprintf("shim-claude-sidecar bootstrap log write failed: %v", writeErr))
-		}
+	if !isBootstrapError(err) {
+		return
+	}
+	payload, encodeErr := json.Marshal(map[string]any{
+		"timestamp": sharedlogging.Timestamp(time.Now()),
+		"runtime":   "sidecar", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
+		"operation": "sidecar.bootstrap", "message": "sidecar bootstrap failed",
+		"context": map[string]any{"error": err.Error()},
+	})
+	if encodeErr != nil {
+		panic(fmt.Sprintf("shim-claude-sidecar bootstrap log encode failed: %v", encodeErr))
+	}
+	if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
+		panic(fmt.Sprintf("shim-claude-sidecar bootstrap log write failed: %v", writeErr))
 	}
 }
 
-func run(storeSocket string, roots []string, spoolRoot, logPath string) (err error) {
-	logf, closeLog, err := openLogger(storeSocket, logPath)
+func run(options Options, logPath string) (err error) {
+	logf, closeLog, err := openLogger(options.StoreSocket, logPath)
 	if err != nil {
 		return err
 	}
 	defer closeLog()
 	defer logProcessExit(logf, &err)
 
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	return runWithLogger(storeSocket, roots, spoolRoot, logf, sigc)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	return runWithLogger(options, logf, signals)
 }
 
-// logProcessExit is the sidecar's one deferred exit trace: whatever caused
-// runWithLogger to return — a clean signal-driven shutdown, a runtime
-// failure, or a panic — is the last record this process writes, so a
-// truncated log still names why the process is gone.
+// logProcessExit is the sidecar's one deferred exit trace: whatever caused the
+// run to return — a clean signal-driven shutdown, a runtime failure, or a panic
+// — is the last record this process writes, so a truncated log still names why
+// the process is gone.
 //
 // It re-panics after logging rather than recovering: a panic here is an
-// invariant violation, and this trace exists to narrate the crash, not to
-// turn it into a normal exit.
+// invariant violation, and this trace narrates the crash rather than turning it
+// into a normal exit.
 func logProcessExit(logf *logging.Bound, err *error) {
 	if r := recover(); r != nil {
 		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: panic: %v", r)
@@ -105,29 +411,27 @@ func logProcessExit(logf *logging.Bound, err *error) {
 }
 
 // openLogger creates the sidecar's only persistent diagnostic sink. Failures
-// here are bootstrap failures because no canonical logger can exist yet.
+// here are bootstrap failures, because no canonical logger can exist yet.
 func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("creating log dir: %w", err)}
 	}
-	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	logf := logging.New(os.Stderr, lf).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
-	return logf, func() { _ = lf.Close() }, nil
+	logf := logging.New(os.Stderr, file).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	return logf, func() { _ = file.Close() }, nil
 }
 
-// runWithLogger owns process-level sidecar failures after canonical logging is
-// available. Lower layers retain ownership of errors they log themselves.
-func runWithLogger(storeSocket string, roots []string, spoolRoot string, logf *logging.Bound, stop <-chan os.Signal) error {
-	sc := newSidecar(storeSocket, roots, spoolRoot, logf)
-	logf.With(logging.Context{Operation: "start"}).Log("roots=%v spool=%s", roots, spoolRoot)
-	return runLogged(logf, func() error { return sc.Run(stop) })
-}
-
-func runLogged(logf *logging.Bound, execute func() error) error {
-	if err := execute(); err != nil {
+// runWithLogger owns process-level failures once canonical logging exists.
+// Lower layers keep ownership of the errors they log themselves.
+func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) error {
+	sc := newSidecar(options, logf)
+	logf.With(logging.Context{Operation: "start"}).Log(
+		"sidecar starting config_roots=%v spool_root=%s state_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
+		options.ConfigRoots, options.SpoolRoot, options.StateDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
+	if err := sc.Run(stop); err != nil {
 		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
 		return err
 	}
@@ -139,518 +443,37 @@ func runLogged(logf *logging.Bound, execute func() error) error {
 type bootstrapError struct{ err error }
 
 func (e bootstrapError) Error() string { return e.err.Error() }
-func (e bootstrapError) Unwrap() error { return e.err }
 
 func isBootstrapError(err error) bool {
 	var target bootstrapError
 	return errors.As(err, &target)
 }
 
-// ---------------------------------------------------------------------------
-// Sidecar orchestration
-// ---------------------------------------------------------------------------
-
-type watched struct {
-	target    discover.Target
-	sessionID string
-	tailer    *tail.Tailer
-}
-
-// UnownedSpoolWindow is how long a spool may sit unattributed before it counts
-// as an anomaly rather than a race. The launch line naming an owner is written
-// when the task starts, so a hold normally clears within a rescan tick; one
-// that outlives this window means the mapping is genuinely missing.
-const UnownedSpoolWindow = 60 * time.Second
-
-const (
-	// HeldDiagnosticSampleLimit bounds every spool-level diagnostic dimension.
-	HeldDiagnosticSampleLimit = 8
-	// ActiveUnresolvedSpoolThreshold makes any active attribution gap a
-	// readiness failure while terminal historical spools remain informational.
-	ActiveUnresolvedSpoolThreshold = 0
-)
-
-type sidecar struct {
-	store     *storeclient.Client
-	disc      *discover.Discoverer
-	tracker   *stale.Tracker
-	roots     []string
-	spoolRoot string
-	log       *logging.Bound
-
-	watchers map[string]*watched // by path
-
-	// owners maps a task id to the session that LAUNCHED it — the only session
-	// identifier in the system, sourced from the transcript that announced the
-	// task. A /tmp spool has no identity of its own (see internal/discover), so
-	// this is what attributes one. Seeded per connection from the store's
-	// authoritative open tasks and extended as transcripts are tailed.
-	owners             map[string]string      // task id -> session id
-	ownerSource        map[string]OwnerSource // task id -> authoritative source
-	ownerTaskOutput    map[string]string      // task id -> exact output path when provided
-	ownerByOutput      map[string]ownerRecord // normalized output path -> owner
-	ownerPathConflicts map[string]bool        // normalized output path -> conflicting claims observed
-	ownerConflicts     map[string]bool        // task id -> conflicting session claim observed
-	openTasks          map[string]bool        // task id -> present in authoritative open-task state
-	// held owns explicit active and terminal classifications for every spool
-	// without an authoritative owner. A held or terminal spool is never tailed.
-	held *HeldLifecycle
-
-	// Store-link state machine (link.go). `cursors` is CONNECTION-SCOPED: it is
-	// recovered as the first act of every established connection and dropped the
-	// moment the link is lost, so a tailer can never be built from a stale — or
-	// absent — recovery.
-	link    linkState
-	cursors map[string]*corev1.CursorState // by path; nil unless recovered
-	// nextDialAt is the ladder: while the link is down, Run dials whenever this
-	// deadline has passed. Holding the schedule as state the loop re-reads —
-	// rather than as a timer someone must re-arm — is what makes redialing
-	// impossible to silently stop (see link.go's dialTick).
-	nextDialAt   time.Time
-	dialing      bool // a dial is in flight; makes dial() single-flight
-	backoff      time.Duration
-	dialFailures int
-	downSince    time.Time
-	bootSwept    bool
-	diagnostics  diagnosticOutbox
-
-	// now and jitter are the state machine's clock and its backoff spread,
-	// injectable so the redial ladder is tested by advancing a fake clock
-	// rather than by waiting on a real one.
-	now    func() time.Time
-	jitter func(time.Duration) time.Duration
-}
-
-func newSidecar(storeSocket string, roots []string, spoolRoot string, log *logging.Bound) *sidecar {
-	s := &sidecar{
-		store:              storeclient.New(storeSocket, log.With(logging.Context{Component: "storeclient"})),
-		disc:               discover.New(roots, spoolRoot, log.With(logging.Context{Component: "discover"})),
-		tracker:            stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
-		roots:              roots,
-		spoolRoot:          spoolRoot,
-		log:                log,
-		watchers:           map[string]*watched{},
-		owners:             map[string]string{},
-		ownerSource:        map[string]OwnerSource{},
-		ownerTaskOutput:    map[string]string{},
-		ownerByOutput:      map[string]ownerRecord{},
-		ownerPathConflicts: map[string]bool{},
-		ownerConflicts:     map[string]bool{},
-		openTasks:          map[string]bool{},
-		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
-		// first dial due immediately. That is all "boot" means here.
-		link:      linkDown,
-		downSince: time.Now(),
-		now:       time.Now,
-		jitter:    jitterBackoff,
-	}
-	// A fresh sidecar's first dial is due immediately.
-	s.nextDialAt = s.now()
-	// Delivery only appends to an in-memory outbox. The event loop owns all
-	// store I/O, so a log created while processing a store operation cannot
-	// recursively write to the store.
-	log.SetDiagnosticSink(s.diagnostics.enqueue)
-	s.held = NewHeldLifecycle(HeldDiagnosticSampleLimit, s.reportHeldLifecycle)
-	return s
-}
-
-// Run drives the store-link state machine and, while that link is up, the
-// poll/rescan/sweep/heartbeat loop, until a termination signal.
-func (s *sidecar) Run(stop <-chan os.Signal) error {
-	pollT := time.NewTicker(time.Second)
-	sweepT := time.NewTicker(30 * time.Second)
-	beatT := time.NewTicker(15 * time.Second)
-	rescanT := time.NewTicker(10 * time.Second)
-	// The ladder's heartbeat. It runs for the life of the process, whatever the
-	// link is doing, so a down link is always being redialed.
-	dialT := time.NewTicker(dialTick)
-	defer pollT.Stop()
-	defer sweepT.Stop()
-	defer beatT.Stop()
-	defer rescanT.Stop()
-	defer dialT.Stop()
-
-	for {
-		select {
-		case sig := <-stop:
-			// storeclient.Client.Close (storeclient/client.go) owns the
-			// close-requested/closed-or-failed narration for the one teardown
-			// step this shutdown has: the shim-store connection.
-			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal=%s; beginning sidecar shutdown", sig)
-			return s.store.Close()
-		case <-dialT.C:
-			s.dialDue()
-		case <-rescanT.C:
-			s.whenUp(s.rescan)
-		case <-pollT.C:
-			s.whenUp(func() {
-				s.pollAll()
-				s.flushDiagnostics()
-			})
-		case <-sweepT.C:
-			s.whenUp(s.sweep)
-		case <-beatT.C:
-			s.whenUp(s.heartbeat)
-		}
-	}
-}
-
-// sweep emits the LOST inferences that crossed their thresholds.
-func (s *sidecar) sweep() {
-	s.emit(s.tracker.Sweep(time.Now().UnixMilli()))
-}
-
-// heartbeat uses a correlated store health probe.  The sidecar only reads
-// files while its store link is healthy, so a socket that merely exists must
-// never keep ingestion running.
-func (s *sidecar) heartbeat() {
-	requestID := fmt.Sprintf("sidecar-health-%d", time.Now().UnixNano())
-	if err := s.store.Health(requestID); err != nil {
-		// The probe that FAILS here is what tears the link down and halts every
-		// tail, so it is the cause of an ingestion outage, not a poll result.
-		s.log.With(logging.Context{Operation: "health", RequestID: requestID, Level: "error"}).Log("health check failed: %v", err)
-		s.noteStoreErr("health", err)
-	}
-}
-
-// bootSweep LOSTs persisted open tasks that predate the machine boot. The
-// tracker's set was restored from authoritative store lifecycle state before
-// this runs; discovered artifacts are deliberately not evidence of liveness.
-func (s *sidecar) bootSweep() {
-	boot := bootTimeMillis()
-	if boot == 0 {
-		// Without a boot time the pre-boot sweep never runs, so tasks killed by
-		// the reboot stay "running" in the GUI forever.
-		s.log.With(logging.Context{Operation: "boot-sweep", Level: "warn"}).Log("boot time unavailable; pre-boot open tasks are not swept and stay running")
-		return
-	}
-	now := time.Now().UnixMilli()
-	if ev := s.tracker.BootSweep(boot, now); len(ev) > 0 {
-		s.log.With(logging.Context{Operation: "boot-sweep"}).Log("%d pre-boot task(s) inferred LOST", len(ev))
-		s.emit(ev)
-	}
-}
-
-// rescan discovers targets and creates a tailer for each new one, seeded from
-// the cursor this connection's store handed us.
-//
-// This is the ONLY place a tailer is ever built, which is why it asserts the
-// link: a tailer built without a recovered cursor map starts at offset 0, and
-// that silent cold start is the bug the whole state machine exists to prevent.
-// A file the connected store genuinely holds no cursor for still starts at 0 —
-// that case is honest, and it is the backfill path.
-func (s *sidecar) rescan() {
-	s.requireLinkUp("rescan")
-	now := time.Now()
-	for _, tgt := range s.disc.Scan() {
-		if _, ok := s.watchers[tgt.Path]; ok {
-			continue
-		}
-		session, ok := s.resolveTargetOwner(tgt, now)
-		if !ok {
-			// Unattributed: held, never guessed. Tailing it would mean either
-			// inventing a session or reviving the /tmp path id this change
-			// exists to delete.
-			continue
-		}
-		ctx := &tail.Context{
-			SessionID: session,
-			Path:      tgt.Path,
-			Kind:      tgt.Kind,
-			TaskID:    tgt.TaskID,
-			SpoolDir:  tgt.SpoolDir,
-			RunID:     tgt.RunID,
-		}
-		bound := s.log.With(logging.Context{Component: "tail", Path: tgt.Path, Session: session, Task: tgt.TaskID})
-		tr := tail.New(tgt.Path, tgt.Codec(), s.newHandler(tgt.Kind, bound), ctx, bound)
-		if c := s.cursors[tgt.Path]; c != nil {
-			tr.Restore(c)
-		}
-		s.watchers[tgt.Path] = &watched{target: tgt, sessionID: session, tailer: tr}
-	}
-	s.held.Readiness(ActiveUnresolvedSpoolThreshold, now)
-}
-
-// resolveTargetOwner returns the session a target's events belong to.
-//
-// A config-root path names its own session (the transcript IS the session's
-// record), so it answers immediately. A /tmp spool does not: its path states
-// only where the bytes live, so its owner is looked up by task id against the
-// launch the transcript announced. An unresolved spool is HELD — reported and
-// left untailed — because the alternatives are inventing a session or reading
-// the path's runtime id, and that id being mistaken for an identity is the bug
-// this whole change removes.
-func (s *sidecar) resolveTargetOwner(tgt discover.Target, now time.Time) (string, bool) {
-	resolution := s.resolveOwnerResult(tgt)
-	if tgt.SessionID != "" {
-		if !resolution.Resolved() {
-			panic(fmt.Sprintf("sidecar: config target %q did not resolve its path-owned session", tgt.Path))
-		}
-		return resolution.SessionID, true
-	}
-	info, err := os.Stat(tgt.Path)
-	if err != nil {
-		ctx := logging.Context{Operation: "classify-spool-lifecycle", Path: tgt.Path, Task: tgt.TaskID, Level: "error"}
-		if os.IsNotExist(err) {
-			ctx.Level = "debug"
-		}
-		s.log.With(ctx).Log("spool stat failed before lifecycle classification: %v", err)
-		return "", false
-	}
-	path := normalizeOwnerOutputPath(tgt.Path)
-	decision, err := s.held.Observe(
-		HeldTarget{Path: path, Root: normalizeOwnerOutputPath(s.spoolRoot), TaskID: tgt.TaskID, ModTime: info.ModTime()},
-		resolution,
-		HeldEvidence{ModTime: info.ModTime(), ActiveTaskKnown: true, ActiveTask: s.taskOpen(tgt.TaskID)},
-		now,
-	)
-	if err != nil {
-		// HeldLifecycle owns the canonical error record with the hashed path and
-		// evidence. The scan aborts this target without creating a tailer.
-		return "", false
-	}
-	if decision.State != HeldStateResolved {
-		return "", false
-	}
-	return decision.SessionID, true
-}
-
-// reportHeldLifecycle routes held-state instrumentation through the sidecar's
-// canonical logger. Per-spool observations are verbose; bounded aggregate
-// reports and rare owner resolutions remain normal records.
-func (s *sidecar) reportHeldLifecycle(record HeldLogRecord) {
-	message := fmt.Sprintf("state=%s reason=%s path_hash=%s root=%s age_bucket=%s %s",
-		record.State, record.Reason, record.PathHash, record.Root, record.AgeBucket, record.Message)
-	bound := s.log.With(logging.Context{Operation: record.Operation, Task: record.TaskID, Level: record.Level})
-	if record.Verbose {
-		bound.LogVerbose("%s", message)
-		return
-	}
-	bound.Log("%s", message)
-}
-
-// pollAll polls every watched file once, writing any batch to the store and
-// committing the cursor only on a durable ack. It is reachable only with the
-// link up, so a file is never read without somewhere to put what it says.
-func (s *sidecar) pollAll() {
-	s.requireLinkUp("pollAll")
-	now := time.Now().UnixMilli()
-	for path, w := range s.watchers {
-		res, err := w.tailer.Poll()
-		if err != nil {
-			if os.IsNotExist(err) {
-				// Vanished file: start the grace clock; stop watching it.
-				if w.target.TaskID != "" {
-					s.tracker.MarkVanished(w.sessionID, w.target.TaskID, now)
-				}
-				delete(s.watchers, path)
-				// Any appended bytes past the committed offset went with the file.
-				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "warn"}).Log("tail vanished, grace clock started; uncommitted appended bytes are unrecoverable")
-				continue
-			}
-			s.log.With(logging.Context{Operation: "poll", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "error"}).Log("tail poll failed: %v", err)
-			continue
-		}
-		if !res.Changed {
-			continue
-		}
-		writeStart := time.Now()
-		if err := s.writeBatch(res); err != nil {
-			// Honest sad path: do NOT commit; the batch replays and dedup absorbs.
-			s.log.With(logging.Context{Operation: "store-write", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "error", SinkEmergency: true}).Log("cursor not advanced after %d events: %v", len(res.Events), err)
-			if s.link != linkUp {
-				// The write did not merely fail, it revealed a dead link. Abandon
-				// the pass rather than reading the remaining files with nowhere
-				// to put what they say.
-				return
-			}
-			continue
-		}
-		storeWriteMs := time.Since(writeStart).Milliseconds()
-		w.tailer.Commit(res)
-		if w.target.TaskID != "" {
-			s.tracker.Activity(w.sessionID, w.target.TaskID, now)
-		}
-		s.applyLifecycle(res.Events, now)
-		// The happy path is the one that carries the user's prompt echo to the
-		// GUI, so it gets a line too: steady state is silent, a pickup is not.
-		s.log.With(logging.Context{Operation: "tail-pickup", Path: path, Session: w.sessionID, Task: w.target.TaskID}).Log(
-			"picked up %d event(s) kind=%s store_write_ms=%d",
-			len(res.Events), kindLabel(w.target.Kind), storeWriteMs)
-	}
-}
-
-// writeBatch sends one tailer batch (events + cursor advance) as a StoreWrite.
-func (s *sidecar) writeBatch(res tail.PollResult) error {
-	diagnostics := s.diagnostics.snapshot()
-	events := make([]*corev1.Event, 0, len(res.Events)+len(diagnostics))
-	events = append(events, res.Events...)
-	events = append(events, diagnostics...)
-	batch := &corev1.EventBatch{Events: events, CursorAdvance: res.Next}
-	if err := s.storeWrite("tailer batch", batch); err != nil {
-		return err
-	}
-	s.diagnostics.acknowledge(len(diagnostics))
-	return nil
-}
-
-// flushDiagnostics sends records not naturally piggy-backed on a tail batch.
-// Failed writes retain the exact event objects for retry and store dedup.
-func (s *sidecar) flushDiagnostics() {
-	diagnostic, err := s.diagnostics.flush(func(event *corev1.Event) error {
-		return s.storeWrite("diagnostic outbox", &corev1.EventBatch{Events: []*corev1.Event{event}})
-	})
-	if err != nil {
-		s.log.With(logging.Context{
-			Operation:     "diagnostic-flush",
-			Level:         "error",
-			Session:       diagnostic.GetSessionId(),
-			RequestID:     diagnostic.GetRequestId(),
-			Path:          diagnostic.GetFilePlaneDiagnostic().GetSourcePath(),
-			SinkEmergency: true,
-		}).Log("diagnostic outbox write failed: %v", err)
-	}
-}
-
-func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
-	handlerLog := log.With(logging.Context{Component: "handler"})
-	switch kind {
-	case tail.KindSessionTranscript:
-		return handler.NewSessionTranscriptHandler(handlerLog)
-	case tail.KindAgentTranscript:
-		return handler.NewAgentTranscriptHandler(handlerLog)
-	case tail.KindWorkflowJournal:
-		return handler.NewWorkflowJournalHandler(handlerLog)
-	case tail.KindShellSpool:
-		return handler.NewShellOutputHandler(handlerLog)
-	default:
-		panic(fmt.Sprintf("sidecar: unsupported tail kind %d", kind))
-	}
-}
-
-// applyLifecycle updates the stale tracker from a batch's lifecycle events: a
-// TaskStarted opens a task, a real TaskEnded closes it (so it is never LOST-swept).
-//
-// A TaskStarted also ATTRIBUTES the task: it is emitted by the handler for the
-// transcript that announced the launch, so it carries the launching session.
-// That is what later lets a bare /tmp spool be tailed without the path ever
-// being read as an identity.
-func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
-	for _, e := range events {
-		if ts := e.GetTaskStarted(); ts != nil {
-			s.markTaskOpen(ts.GetTaskId(), OwnerSourceLiveLaunch)
-			s.noteTaskOwner(ts.GetTaskId(), e.GetSessionId(), ts.GetOutputPath(), OwnerSourceLiveLaunch)
-			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
-		}
-		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {
-			s.markTaskClosed(te.GetTaskId())
-			s.tracker.Close(e.GetSessionId(), te.GetTaskId())
-		}
-	}
-}
-
-// emit writes a set of synthetic/lifecycle events (e.g. LOST sweeps) to the store
-// as a single cursor-less batch.
-func (s *sidecar) emit(events []*corev1.Event) {
-	if len(events) == 0 {
-		return
-	}
-	if err := s.storeWrite("synthetic events", &corev1.EventBatch{Events: events}); err != nil {
-		seenSessions := map[string]bool{}
-		for _, event := range events {
-			if event.GetSessionId() != "" {
-				seenSessions[event.GetSessionId()] = true
-			}
-		}
-		if len(seenSessions) == 0 {
-			s.log.With(logging.Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("synthetic event write failed for %d events: %v", len(events), err)
-			return
-		}
-		for session := range seenSessions {
-			s.log.With(logging.Context{Operation: "store-write", Level: "error", Session: session, SinkEmergency: true}).Log("synthetic event write failed for %d events: %v", len(events), err)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Pure helpers (tested)
-// ---------------------------------------------------------------------------
-
-// taskKindToTail maps a core TaskKind back to the tail.Kind the stale tracker
-// keys its per-kind silence windows on.
-func taskKindToTail(k corev1.TaskKind) tail.Kind {
-	switch k {
-	case corev1.TaskKind_TASK_KIND_SHELL:
-		return tail.KindShellSpool
-	case corev1.TaskKind_TASK_KIND_WORKFLOW:
-		return tail.KindWorkflowJournal
-	default:
-		return tail.KindAgentTranscript
-	}
-}
-
-// kindLabel renders a watched file's kind for the log.
-func kindLabel(k tail.Kind) string {
-	switch k {
-	case tail.KindSessionTranscript:
-		return "session"
-	case tail.KindAgentTranscript:
-		return "agent"
-	case tail.KindWorkflowJournal:
-		return "workflow"
-	case tail.KindShellSpool:
-		return "shell"
-	default:
-		return fmt.Sprintf("kind(%d)", int(k))
-	}
-}
-
 // parseRoots splits a comma-separated root list and expands a leading ~.
 func parseRoots(csv string) []string {
 	var out []string
-	for _, r := range strings.Split(csv, ",") {
-		r = strings.TrimSpace(r)
-		if r == "" {
+	for _, root := range strings.Split(csv, ",") {
+		root = strings.TrimSpace(root)
+		if root == "" {
 			continue
 		}
-		out = append(out, expandHome(r))
+		out = append(out, expandHome(root))
 	}
 	return out
 }
 
-func expandHome(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") {
+func expandHome(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(p, "~"), "/"))
+			return filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
 		}
 	}
-	return p
-}
-
-// indexCursorsByPath keys recovered cursors by their file path for tailer restore.
-func indexCursorsByPath(cs []*corev1.CursorState) map[string]*corev1.CursorState {
-	m := make(map[string]*corev1.CursorState, len(cs))
-	for _, c := range cs {
-		if c.GetPath() != "" {
-			m[c.GetPath()] = c
-		}
-	}
-	return m
-}
-
-// bootTimeMillis returns the machine boot time in unix millis, or 0 if
-// unavailable (darwin/BSD kern.boottime).
-func bootTimeMillis() int64 {
-	tv, err := unix.SysctlTimeval("kern.boottime")
-	if err != nil {
-		return 0
-	}
-	return int64(tv.Sec)*1000 + int64(tv.Usec)/1000
+	return path
 }
 
 func defaultCacheDir() string {
-	if d := os.Getenv("XDG_CACHE_HOME"); d != "" {
-		return filepath.Join(d, "agent-repl")
+	if dir := os.Getenv("XDG_CACHE_HOME"); dir != "" {
+		return filepath.Join(dir, "agent-repl")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

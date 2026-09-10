@@ -1,0 +1,73 @@
+// endpoint_open_feed.proto — OpenFeed: opens ONE feed — the workspace's root
+// feed, or a subagent bubble's sub-feed. FEED section. Answers with the
+// feed's newest page and mints the watch token WatchFeed echoes; the client
+// paints the page, then tails. Called when a workspace view opens (root) and
+// when a bubble is expanded (sub-feed); a collapsed bubble's token is simply
+// abandoned.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+import "agentrepl/v1/feed_token.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message OpenFeedRequest {
+  // The workspace whose feed universe this is.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH feed. UNSET = the workspace's root feed. SET = a sub-feed the
+  // client was shown — a subagent bubble row's own FeedId, which addresses
+  // the feed within it. Only served ids open; a client never constructs one.
+  optional frontend.v1.FeedId feed = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message OpenFeedResponse {
+  oneof result {
+    OpenFeedSuccess success = 1;
+    OpenFeedError error = 2;
+  }
+}
+
+// The open's answer: paint, then tail.
+message OpenFeedSuccess {
+  // The feed's newest page, ready to draw before the tail begins.
+  frontend.v1.FeedPage page = 1;
+  // The tail's address, pinned to begin exactly after this page's newest
+  // row. Echoed verbatim to WatchFeed.
+  FeedWatchToken watch = 2;
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message OpenFeedError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenFeedUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenFeedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenFeedTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenFeedNotYetAdopted not_yet_adopted = 4;
+    // The FeedId does not decode.
+    OpenFeedFeedUndecodable feed_undecodable = 5;
+    // The FeedId decodes to another workspace.
+    OpenFeedFeedNotInWorkspace feed_not_in_workspace = 6;
+  }
+}
+message OpenFeedUnknownWorkspace {}
+message OpenFeedWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenFeedTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenFeedNotYetAdopted {}
+message OpenFeedFeedUndecodable {}
+message OpenFeedFeedNotInWorkspace {}

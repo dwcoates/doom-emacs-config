@@ -1,143 +1,175 @@
 package server
 
 import (
-	"bytes"
-	"io"
+	"fmt"
 	"testing"
-	"time"
-
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-store/internal/logging"
 )
 
-func testFanout(buffer int) *fanout {
-	return newFanout(buffer, logging.New(io.Discard, io.Discard, false))
-}
+func TestNewFanoutFallsBackToTheDefaultBuffer(t *testing.T) {
+	// Arrange.
 
-func ignoreSubscriberDrop(subscriberDropReason) {}
-func prepareSubscriber(*subscriber)             {}
+	// Act.
+	f := newFanout(0, lineKey)
 
-func persistentEvent(session string, seq uint64) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Seq:       seq,
-		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+	// Assert.
+	if f.buffer != DefaultWatchBuffer {
+		t.Fatalf("buffer = %d, want %d", f.buffer, DefaultWatchBuffer)
 	}
 }
 
-func ephemeralEvent(session string) *corev1.Event {
-	return &corev1.Event{
-		SessionId: session,
-		Class:     corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-		Payload:   &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "u"}},
+func TestPublishDeliversToTheSubscribedBook(t *testing.T) {
+	// Arrange.
+	f := newFanout(4, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
+	overflowed := f.publish([]LineWritten{line("a1", "p1", 1)})
+
+	// Assert.
+	if len(overflowed) != 0 {
+		t.Fatalf("overflowed = %d, want 0", len(overflowed))
+	}
+	got := <-sub.items
+	if got.Line.GetAt().GetValue() != "p1" {
+		t.Fatalf("delivered %q, want %q", got.Line.GetAt().GetValue(), "p1")
 	}
 }
 
-func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
-	// Arrange
-	f := testFanout(4)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act
-	f.publish(persistentEvent("s1", 1))
-	// Assert
-	select {
-	case got := <-sub.ch:
-		if got.GetSeq() != 1 {
-			t.Fatalf("delivered seq = %d, want 1", got.GetSeq())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for delivery")
+func TestPublishSkipsAnotherBooksLines(t *testing.T) {
+	// Arrange. Fan-out is an exact match on the line's book.
+	f := newFanout(4, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
+	f.publish([]LineWritten{line("other", "px", 1), line("a1", "p2", 2)})
+
+	// Assert.
+	got := <-sub.items
+	if got.Line.GetAt().GetValue() != "p2" {
+		t.Fatalf("delivered %q, want only this book's %q", got.Line.GetAt().GetValue(), "p2")
+	}
+	if len(sub.items) != 0 {
+		t.Fatalf("buffered %d more lines, want none", len(sub.items))
 	}
 }
 
-func TestFanoutIsSessionScoped(t *testing.T) {
-	// Arrange
-	f := testFanout(4)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act: publish for a different session.
-	f.publish(persistentEvent("other", 1))
-	// Assert: nothing delivered to s1's subscriber.
-	select {
-	case got := <-sub.ch:
-		t.Fatalf("unexpected delivery for wrong session: %+v", got)
-	case <-time.After(50 * time.Millisecond):
+func TestPublishDropsAnOverflowedSubscriberFromTheRegistry(t *testing.T) {
+	// Arrange. A watcher that fell behind recovers by re-opening, never by
+	// being silently thinned.
+	f := newFanout(1, lineKey)
+	f.subscribe("a1", "hash")
+
+	// Act.
+	overflowed := f.publish([]LineWritten{line("a1", "p1", 1), line("a1", "p2", 2)})
+
+	// Assert.
+	if len(overflowed) != 1 {
+		t.Fatalf("overflowed = %d, want 1", len(overflowed))
+	}
+	if f.subscribers() != 0 {
+		t.Fatalf("subscribers = %d, want 0 after an overflow", f.subscribers())
 	}
 }
 
-func TestFanoutEphemeralPassesThrough(t *testing.T) {
-	// Arrange
-	f := testFanout(4)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act: the fanout is class-agnostic; ephemeral events reach live subscribers.
-	f.publish(ephemeralEvent("s1"))
-	// Assert
-	select {
-	case got := <-sub.ch:
-		if got.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			t.Fatalf("delivered class = %v, want EPHEMERAL", got.GetClass())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("ephemeral event was not fanned out")
+func TestPublishSignalsAnOverflowedSubscriber(t *testing.T) {
+	// Arrange.
+	f := newFanout(1, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
+	f.publish([]LineWritten{line("a1", "p1", 1), line("a1", "p2", 2)})
+
+	// Assert. The signal is a CLOSED channel, so it cannot be missed.
+	<-sub.overflow
+}
+
+func TestPublishCountsTheLinesLostToAnOverflow(t *testing.T) {
+	// Arrange. The warning must say how much was dropped.
+	f := newFanout(1, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
+	f.publish([]LineWritten{line("a1", "p1", 1), line("a1", "p2", 2), line("a1", "p3", 3)})
+
+	// Assert.
+	<-sub.overflow
+	if sub.dropped != 2 {
+		t.Fatalf("dropped = %d, want 2", sub.dropped)
 	}
 }
 
-func TestFanoutSlowConsumerDisconnected(t *testing.T) {
-	// Arrange: buffer of 2, a subscriber that never drains.
-	f := testFanout(2)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act: overflow the bounded buffer.
-	f.publish(persistentEvent("s1", 1))
-	f.publish(persistentEvent("s1", 2))
-	f.publish(persistentEvent("s1", 3)) // buffer full → disconnect
-	// Assert: the subscriber is dropped and deregistered; the requester owns
-	// its session-specific reconnect diagnostic.
-	select {
-	case <-sub.done:
-	case <-time.After(time.Second):
-		t.Fatal("slow consumer was not disconnected")
-	}
-	if f.subscriberCount("s1") != 0 {
-		t.Fatalf("subscriberCount = %d, want 0 after disconnect", f.subscriberCount("s1"))
+func TestPublishOfNoLinesTouchesNoSubscriber(t *testing.T) {
+	// Arrange. A batch of unserveable rows produces no page lines.
+	f := newFanout(1, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
+	overflowed := f.publish(nil)
+
+	// Assert.
+	if len(overflowed) != 0 || len(sub.items) != 0 {
+		t.Fatalf("overflowed = %d, buffered = %d, want 0 and 0", len(overflowed), len(sub.items))
 	}
 }
 
-func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
-	// Arrange
-	f := testFanout(4)
-	sub := f.subscribe("s1", ignoreSubscriberDrop, prepareSubscriber)
-	// Act
+func TestUnsubscribeIsIdempotent(t *testing.T) {
+	// Arrange. The watch loop's defer runs even after an overflow removed it.
+	f := newFanout(4, lineKey)
+	sub := f.subscribe("a1", "hash")
+
+	// Act.
 	f.unsubscribe(sub)
-	f.publish(persistentEvent("s1", 1))
-	// Assert: no delivery, done closed, count zero.
-	if f.subscriberCount("s1") != 0 {
-		t.Fatalf("subscriberCount = %d, want 0", f.subscriberCount("s1"))
-	}
-	select {
-	case <-sub.done:
-	case <-time.After(time.Second):
-		t.Fatal("done not closed after unsubscribe")
+	f.unsubscribe(sub)
+
+	// Assert.
+	if f.subscribers() != 0 {
+		t.Fatalf("subscribers = %d, want 0", f.subscribers())
 	}
 }
 
-func TestFanoutSlowConsumerLogsCanonicalContext(t *testing.T) {
-	var logs bytes.Buffer
-	f := newFanout(1, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
-	sub := f.subscribe("vendor-session", ignoreSubscriberDrop, prepareSubscriber)
-	f.publish(persistentEvent("vendor-session", 1))
-	f.publish(persistentEvent("vendor-session", 2))
-
-	select {
-	case <-sub.done:
-	case <-time.After(time.Second):
-		t.Fatal("slow subscriber was not disconnected")
+// TestPublishAbsorbsABurstOfTheWholeBuffer is the load-independent statement of
+// what the integration suite's default-buffer test claims: a burst up to the
+// buffer's capacity is absorbed, and no subscriber is ended. The integration
+// test can only observe this through a real store on a shared box; here the
+// claim is decided by the fan-out itself.
+func TestPublishAbsorbsABurstOfTheWholeBuffer(t *testing.T) {
+	// Arrange.
+	const buffer = 4096
+	f := newFanout(buffer, lineKey)
+	sub := f.subscribe("a1", "hash")
+	burst := make([]LineWritten, 0, buffer)
+	for i := 0; i < buffer; i++ {
+		burst = append(burst, line("a1", fmt.Sprintf("p%d", i), uint64(i+1)))
 	}
 
-	record, found := findLoggedRecord(t, logs.Bytes(), "slow-consumer", "warn")
-	if !found {
-		t.Fatalf("slow-consumer record missing: %s", logs.String())
+	// Act.
+	overflowed := f.publish(burst)
+
+	// Assert.
+	if len(overflowed) != 0 {
+		t.Fatalf("overflowed = %d, want 0 on a burst of exactly the buffer", len(overflowed))
 	}
-	if record.Level != "warn" || record.Operation != "slow-consumer" || record.Session != "vendor-session" || record.Context["subscriber"] != "1" || record.Context["component"] != "server" || record.Context["socket"] != "store.sock" {
-		t.Fatalf("slow-consumer record lacks canonical context: %#v", record)
+	if got := len(sub.items); got != buffer {
+		t.Fatalf("buffered = %d, want %d", got, buffer)
+	}
+	if f.subscribers() != 1 {
+		t.Fatalf("subscribers = %d, want 1", f.subscribers())
+	}
+}
+
+// TestTheDefaultBufferExceedsADaemonBounceBurst pins the shipped default above
+// the burst the integration suite declares absorbable, so shrinking the default
+// fails here rather than as a timing-shaped flake in an integration run.
+func TestTheDefaultBufferExceedsADaemonBounceBurst(t *testing.T) {
+	// Arrange. 4096 is the burst the store's default-buffer integration test
+	// writes, itself SUBSTANTIALLY above the ~1k a daemon bounce can burst.
+	const declaredAbsorbableBurst = 4096
+
+	// Act.
+	got := DefaultWatchBuffer
+
+	// Assert.
+	if got < declaredAbsorbableBurst {
+		t.Fatalf("DefaultWatchBuffer = %d, want at least %d", got, declaredAbsorbableBurst)
 	}
 }

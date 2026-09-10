@@ -1,0 +1,274 @@
+// store.proto — the store.v1 package whole: the stored record, the write
+// batch, and the sidecar's file cursor.
+//
+// ============================ IMPORT DISCIPLINE ============================
+//
+// THE DAEMON MUST NEVER IMPORT THIS PACKAGE.
+//
+// Everything the daemon is entitled to see is conversation.v1, served over
+// shim.v1. This package holds the storage half: which observation plane
+// produced a record, the keys the store dedupes and upserts on, and whether a
+// record may ever be served. Those are implementation details of the shim,
+// the sidecar and the store.
+//
+// IT IS A SEPARATE PROTO PACKAGE, NOT MERELY A SEPARATE FILE: every file in
+// one proto package generates into ONE Go package, so a daemon importing any
+// of it would get all of it for free. check-conversation-isolation.sh refuses
+// the import at codegen time.
+//
+// ==========================================================================
+
+syntax = "proto3";
+
+package store.v1;
+
+import "google/protobuf/struct.proto";
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/session.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// One write: a conversation.v1 fact inside the storage envelope.
+message StoreEntry {
+  // Which producer observed this (shim stream | sidecar file).
+  Plane plane = 1;
+
+  // Replay dedup: minted once per WRITE, never regenerated; a redelivered
+  // batch is absorbed as a no-op.
+  string write_id = 2;
+
+  // The row this write REPLACES: the store holds one row per upsert_key and
+  // this write supersedes it whole. Opaque to the store — the producer maps
+  // it (a prompt's TurnId, a unit's activity id, a run's id); the store has
+  // exactly one place it looks, never a per-kind rule.
+  string upsert_key = 3;
+
+  // What kind of fact this is. THE ARM IS THE KIND.
+  oneof entry {
+    StoreAgentUpdate agent_update = 4;
+    conversation.v1.SessionUpdate session_update = 5;
+  }
+}
+
+// A fact about an agent's work, and whether it may ever be served.
+message StoreAgentUpdate {
+  // The nearest NON-SYNC ancestor: the turn's main agent or a detached-work
+  // agent, never a sync subagent — which live stream carried this work.
+  // Copied from the parent's row at insert (one lookup). UNSET only when it
+  // is unresolvable — an unparsed or unknown record may name no agent at all.
+  optional conversation.v1.AgentId top_level = 1;
+
+  // THE PRODUCER DECIDES PAGEABILITY. A page line names its book; every
+  // other arm is structurally unable to appear in any page.
+  oneof agent_info {
+    // A line in some agent's book.
+    StorePageLine serveable_frame = 2;
+    // Never served to anyone. THE ARM IS WHY it cannot be served.
+    StoreUnservedItem unserved_item = 3;
+    // A detached shell run's frame. Not paginatable.
+    StoreAgentBash bash = 4;
+    // A workflow run's frame. Not paginatable.
+    StoreAgentWorkflow workflow = 5;
+  }
+}
+
+// One line of one agent's book.
+message StorePageLine {
+  // The book: the agent whose page this line renders in. A pagination query
+  // filters on this and nothing else.
+  conversation.v1.AgentId page_agent_id = 1;
+  // The line itself.
+  StoreAgentItem agent_item = 2;
+}
+
+// A servable conversation fact: a prompt or an agent's frame.
+message StoreAgentItem {
+  oneof item {
+    conversation.v1.AgentPrompt agent_prompt = 1;
+    conversation.v1.AgentFrame agent_frame = 2;
+  }
+}
+
+// A detached shell run's frame, wrapped with the unit id the spawning stream
+// announced, so a reader holding the announcement resolves the run's state.
+message StoreAgentBash {
+  conversation.v1.AgentActivityId run = 1;
+  conversation.v1.AgentBash frame = 2;
+}
+
+// A workflow run's frame, wrapped with the run's agent identity for the same
+// join (a run is an agent-shaped container).
+message StoreAgentWorkflow {
+  conversation.v1.AgentId run = 1;
+  conversation.v1.AgentWorkflow frame = 2;
+}
+
+// Which producer observed a record.
+//
+// TWO ARMS, NOT THREE: every StoreEntryWrite producer is the shim or the
+// sidecar; the daemon has no store write path at all.
+message Plane {
+  oneof plane {
+    // The shim, watching the SDK as it runs. First to know, and the only source
+    // for anything that has not been written to disk yet. Authoritative for
+    // session and turn LIFECYCLE.
+    PlaneStream stream = 1;
+    // The sidecar, reading what the vendor wrote to disk. Authoritative for
+    // conversation CONTENT, because it is what the vendor itself recorded.
+    PlaneFile file = 2;
+  }
+}
+
+// Observed by the shim, live from the SDK.
+message PlaneStream {}
+
+// Read by the sidecar from what the vendor wrote to disk.
+message PlaneFile {}
+
+// A fact the store holds but never serves. THE ARM IS WHY: material with no
+// book (a keep-alive), or material the producer could not convert at all.
+// The residue arms are what keep eager conversion at the edge a reversible
+// bet — nothing unconvertible is dropped; it lands durably and whole.
+message StoreUnservedItem {
+  oneof unserved_item {
+    // A well-formed conversation fact with no book: keep-alive turns and
+    // their kin. Never returned by any page; excluded from every read.
+    StoreAgentItem keepalive = 1;
+    // Something one vendor does that no vendor-agnostic feed can show.
+    // UNDERSTOOD, unlike the two arms below: we know what it is and have
+    // decided not to carry it. The follow-up is a CONVERTER, if it turns out
+    // to be portable after all.
+    StoreVendorSpecific vendor_specific = 2;
+    // A record we PARSED but do not MODEL. The follow-up is a MODEL.
+    StoreUnknown unknown = 3;
+    // A record we could not PARSE at all — a FAILURE rather than a gap; the
+    // fields exist so it is investigable rather than merely counted.
+    StoreUnparsed unparsed = 4;
+  }
+}
+
+// Something one vendor does that no vendor-agnostic feed can show.
+message StoreVendorSpecific {
+  // What the vendor called it.
+  string kind = 1;
+  // The record entire and verbatim.
+  google.protobuf.Struct raw = 2;
+}
+
+// A record we read successfully and do not model.
+message StoreUnknown {
+  // The discriminator we did not recognize, so a later schema knows what to
+  // model.
+  string discriminator = 1;
+  // The field the discriminator was read from. Carried because a producer
+  // that looked in the wrong place and a record with a genuinely new kind
+  // produce the same entry otherwise.
+  string discriminator_field = 2;
+  // The record entire and verbatim.
+  google.protobuf.Struct raw = 3;
+}
+
+// A record we could not read at all.
+message StoreUnparsed {
+  // Where it came from — the file, the stream, the position in it.
+  string source = 1;
+  // The byte offset it started at, so it can be found again.
+  uint64 offset = 2;
+  // Why parsing failed.
+  string parse_error = 3;
+  // The bytes, verbatim.
+  string raw = 4;
+}
+
+// ---- The write batch: how a producer hands records to the store ----
+//
+// The write half is reachable only by the shim, the sidecar and the store;
+// the daemon never sees it.
+
+// A batch of records, and the reader position that becomes durable with them.
+//
+// THE CURSOR RIDES WITH THE RECORDS ON PURPOSE. The sidecar's exactly-once
+// contract is that its file position advances in the SAME transaction as the
+// records it read at that position. Split them and a crash between the two
+// either loses records (cursor advanced first) or duplicates them (records
+// first) — and the duplicate case is only survivable because of `write_id`,
+// which is a recovery, not a guarantee.
+message EntryBatch {
+  // The records, in the order the producer observed them.
+  repeated StoreEntry entries = 1;
+
+  // Where the producer had read to when it produced these. Unset for
+  // stream-plane producers, which have no file to be positioned in.
+  optional CursorState cursor_advance = 2;
+}
+
+// ---- The sidecar's file cursor: where each tailed file has been read to ----
+//
+// Persisted by the store so a restarted sidecar resumes exactly where it left
+// off — no re-read duplicates, no outage holes. The position becomes durable
+// in the SAME transaction as the records read at it (`EntryBatch.cursor_advance`),
+// which is the whole exactly-once guarantee.
+
+// Where one file has been read to.
+message CursorState {
+  // The file's stable identity ("dev:inode"), surviving renames — the vendor
+  // rotates and renames transcript files, and a path-keyed cursor would
+  // restart such a file from zero.
+  string file_id = 1;
+  // The path the file was last seen at, for reopening and for a human.
+  string path = 2;
+  // The byte offset the NEXT read starts at.
+  int64 offset = 3;
+  // A bounded partial-line carry: the bytes of an incomplete final line, so
+  // a line split across two reads is parsed once and whole.
+  bytes carry = 4;
+}
+
+// ---- Page vocabulary shared across the read endpoints ----
+
+// An opaque, store-minted position of one item in one book's order. Echoed
+// verbatim, never parsed or constructed by a caller; stable across upserts
+// because order is by the unit's FIRST insert, not its last write.
+message StoreItemPointer {
+  string value = 1;
+}
+
+// One line and its position, so the caller always holds a reconnect and
+// paging pointer for the newest thing it has seen.
+message StoreLineAt {
+  // This line's position in its book's order.
+  StoreItemPointer at = 1;
+  // The line itself.
+  StorePageLine line = 2;
+}
+
+// Older lines exist below this page.
+message ReadAgentPageMore {
+  // Points at this page's LAST (oldest) item; the next request echoes it.
+  StoreItemPointer last_item = 1;
+}
+
+// This page reached the oldest retained line.
+message ReadAgentPageFloor {}
+
+// The address of one opened reading session: an opaque, store-minted token —
+// a hash of the underlying identity, never the identity itself, so watching
+// REQUIRES opening. Echoed verbatim, never parsed or constructed.
+message AgentSessionToken {
+  string value = 1;
+}
+
+// The opening page, newest first.
+message AgentSessionPage {
+  // The lines, each with its pointer.
+  repeated StoreLineAt lines = 1;
+  // Whether older lines remain below the page (or below known_through when it
+  // bounded the page). THE ARM IS THE COMPLETENESS.
+  oneof boundary {
+    ReadAgentPageMore more = 2;
+    ReadAgentPageFloor floor = 3;
+  }
+}

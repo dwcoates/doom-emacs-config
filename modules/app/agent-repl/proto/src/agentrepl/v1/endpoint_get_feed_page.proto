@@ -1,0 +1,81 @@
+// endpoint_get_feed_page.proto — GetFeedPage: the older-pages walk of ONE
+// feed. FEED section. The first page of a feed is OpenFeed's answer; this
+// verb walks the pages beyond it into the past.
+//
+// NO CURSOR EXISTS ON THE WIRE. The client speaks only "first" and "next";
+// the DAEMON holds each feed's walk position (one webview per workspace, so
+// one reader per feed). `first` resets the walk to the newest page; `next`
+// continues older from where the walk stands, and a `next` with no walk
+// standing is a refusal, not an empty page.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message GetFeedPageRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHICH feed. UNSET = the workspace's root feed; SET = a sub-feed's
+  // address (a subagent bubble row's own FeedId), echoed as served.
+  optional frontend.v1.FeedId feed = 2;
+  // WHICH page of the walk. THE ARM IS THE ASK.
+  oneof page {
+    // The newest page; the walk resets to it.
+    GetFeedPageFirst first = 3;
+    // The next-older page from where this feed's walk stands.
+    GetFeedPageNext next = 4;
+  }
+}
+message GetFeedPageFirst {}
+message GetFeedPageNext {}
+
+// THE ARM IS THE OUTCOME. Two error layers exist ON PURPOSE: this response's
+// error = the request could not be served (unknown workspace or container, a
+// next with no walk); the page's own error (frontend.v1.FeedPageError) = the
+// page was served but the history has a hole. Distinct facts.
+message GetFeedPageResponse {
+  oneof result {
+    // The page — FeedPage carries its own success/error split, so the
+    // response's success IS the page.
+    frontend.v1.FeedPage success = 1;
+    GetFeedPageError error = 2;
+  }
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message GetFeedPageError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    GetFeedPageUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    GetFeedPageWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    GetFeedPageTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    GetFeedPageNotYetAdopted not_yet_adopted = 4;
+    // A next page was asked for with no walk standing.
+    GetFeedPageNoWalkStanding no_walk_standing = 5;
+    // The FeedId does not decode.
+    GetFeedPageFeedUndecodable feed_undecodable = 6;
+    // The FeedId decodes to another workspace.
+    GetFeedPageFeedNotInWorkspace feed_not_in_workspace = 7;
+  }
+}
+message GetFeedPageUnknownWorkspace {}
+message GetFeedPageWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message GetFeedPageTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message GetFeedPageNotYetAdopted {}
+message GetFeedPageNoWalkStanding {}
+message GetFeedPageFeedUndecodable {}
+message GetFeedPageFeedNotInWorkspace {}

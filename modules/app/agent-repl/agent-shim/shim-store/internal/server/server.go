@@ -1,840 +1,616 @@
-// Package server is the shim-store UDS front end: it accepts producer and
-// subscriber connections, ingests StoreWrite batches through the db layer, and
-// serves Subscribe replay-then-live-tail subscriptions via the fanout.
-//
-// Socket protocol (the system-wide convention every agent-shim UDS hop uses).
-// Transport is UDS with `agentrepl/wire` framing: a 4-byte big-endian length
-// prefix followed by exactly one serialized google.protobuf.Any. The Any wraps
-// the actual message (StoreWrite, StoreWriteAck, Subscribe, Heartbeat,
-// core.v1.Event for subscription delivery, ...) and its type_url is THE message
-// discriminator, resolved against the proto registry. Both halves of that
-// envelope live in `agentrepl/wire` (WriteAny / ReadAny), so this server, the
-// sidecar's store client, and the daemon cannot drift; the TS shim speaks the
-// same convention.
-//
-// Connection roles follow from the first frame's wrapped message:
-//
-//   - StoreWrite → PRODUCER connection: the store ingests the batch and replies
-//     with one StoreWriteAck frame, then loops (further StoreWrite frames each
-//     get an ack; Heartbeat frames get a Heartbeat reply).
-//   - Heartbeat → PRODUCER-PREAMBLE connection: the store echoes heartbeats
-//     until the first StoreWrite declares the producer. This keeps an idle
-//     sidecar link alive after startup recovery but before any file changes.
-//   - HealthCheck → PRODUCER-PREAMBLE connection: the store returns the
-//     correlated HealthStatus, then continues to await the first StoreWrite.
-//     This lets a recovered idle sidecar prove store health without losing its
-//     producer connection.
-//   - Subscribe → SUBSCRIBER connection: the store replays persisted events with
-//     seq > from_seq, then live-tails Event frames until the client disconnects
-//     or falls behind.
 package server
 
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"net"
-	"os"
+	"net/http"
 	"sync"
-	"sync/atomic"
-	"syscall"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
-	"agentrepl/wire"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
-// Server serves the shim-store protocol over a UDS listener.
+// RequestIDHeader carries a caller's correlation id. When present it is logged
+// as `request_id` on every record the request produces.
+const RequestIDHeader = "X-Agent-Repl-Request-Id"
+
+// Server serves store.v1.ShimStore.
+//
+// It implements storev1connect.ShimStoreHandler, so the same object answers
+// Connect, gRPC and gRPC-Web with both the binary and JSON codecs; wrapping the
+// mux in h2c means an HTTP/1.1 caller and a prior-knowledge HTTP/2 caller reach
+// it over the one unix socket with no TLS anywhere.
 type Server struct {
-	db  *db.DB
-	fan *fanout
-	log *logging.Logger
+	store  Store
+	log    *logging.Logger
+	tokens *tokenRegistry
+	fan    *fanout[LineWritten]
+	// bashFan is the WatchBashRun registry. A SECOND REGISTRY, not a second
+	// key on the first: a bash row is not a page line, and a book watcher must
+	// never be handed one.
+	bashFan *fanout[BashRowWritten]
+	http    *http.Server
 
-	mu    sync.Mutex
-	ln    net.Listener
-	conns map[net.Conn]struct{}
-	// subscribers records connection-owned terminal state.  Server.Close uses
-	// this map instead of closing a subscriber socket directly, making a
-	// shutdown terminal cause structurally unavoidable for every registered
-	// subscription.
-	subscribers map[net.Conn]*subscriptionTerminal
-	closed      bool
-	wg          sync.WaitGroup
-
-	subscriberHooks   subscriberHooks
-	subscriberHooksMu sync.RWMutex
-
-	// ingestMu serializes the whole ASSIGN-THEN-ANNOUNCE region of
-	// ingestAndFan, so a session's fan-out order is its seq order.
+	// done is CLOSED by Shutdown before the HTTP server is drained. Standing
+	// watch streams select on it and return cleanly, which is what lets
+	// http.Server.Shutdown finish: it waits for handlers, and a pure tail would
+	// otherwise never return.
 	//
-	// It is DELIBERATELY NOT `mu`. That one guards the listener/conns/closed
-	// lifecycle, and a batch ingest holding it would block every accept and
-	// close for the duration of a SQLite transaction; the two critical sections
-	// share nothing and must not be conflated.
-	//
-	// WHY IT IS NEEDED. Seq assignment is already totally ordered — db.Ingest
-	// runs under BEGIN IMMEDIATE (see internal/db/db.go), which serializes every
-	// writer globally. The PUBLISH was not: it ran after the transaction, on the
-	// producer's own goroutine, holding nothing. Every session has two
-	// concurrent producers (the shim's stream plane and the sidecar's file
-	// plane, merged by the (session_id, dedup_key) index), so two goroutines
-	// could commit as 1043-then-1044 and publish as 1044-then-1043. The daemon
-	// reads a non-increasing seq as a terminal protocol violation and kills the
-	// session — observed twice on 2026-07-29, both mid-turn.
-	//
-	// MUTUAL EXCLUSION, not a narrowed race window: while one batch holds this,
-	// no other batch can be between its own commit and its own publish, so the
-	// inversion is UNREPRESENTABLE rather than merely unlikely.
-	//
-	// It is nearly free for the same reason it is correct: BEGIN IMMEDIATE
-	// already serialized the expensive half, so the only contention this adds
-	// covers a loop of non-blocking channel sends (fanout.publish).
-	//
-	// STORE-WIDE rather than per-session, because one batch may span sessions
-	// (db.Ingest's per-session seq map), and a per-session scheme would need to
-	// hold several locks per batch with the lock-ordering hazard that implies.
-	ingestMu sync.Mutex
+	// THIS IS THE OLD Serve/Close RACE'S REPLACEMENT. Nothing tracks
+	// connections by hand any more (the old trackConn-after-Accept snapshot
+	// raced with Close); http.Server owns connection lifetime and Shutdown is
+	// the only stop.
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
-// New builds a Server over an open db. buffer<=0 uses the default fanout buffer.
-func New(database *db.DB, log *logging.Logger, buffer int) *Server {
-	if database == nil || log == nil {
-		panic("shim-store server: nil database or logger")
-	}
-	return &Server{
-		db:          database,
-		fan:         newFanout(buffer, log),
-		log:         log,
-		conns:       make(map[net.Conn]struct{}),
-		subscribers: make(map[net.Conn]*subscriptionTerminal),
-	}
-}
+var _ storev1connect.ShimStoreHandler = (*Server)(nil)
 
-// Listen removes any stale socket file and opens a UDS listener at path.
-func Listen(path string, log *logging.Logger) (net.Listener, error) {
+// New builds the service over store, logging through log, giving every watch a
+// buffer of watchBuffer frames (non-positive selects DefaultWatchBuffer).
+func New(store Store, log *logging.Logger, watchBuffer int) *Server {
+	if store == nil {
+		panic("shim-store server: nil store")
+	}
 	if log == nil {
 		panic("shim-store server: nil logger")
 	}
-	log.LogVerbose(logging.Fields{Operation: "listen", Socket: path}, "opening UDS listener")
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log.Log(logging.Fields{Operation: "remove-stale-socket", Socket: path, Level: "error"}, "removing stale socket failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: removing stale socket %q: %w", path, err)
-	} else if err == nil {
-		log.Log(logging.Fields{Operation: "remove-stale-socket", Socket: path}, "removed stale UDS socket")
-	} else {
-		log.LogVerbose(logging.Fields{Operation: "remove-stale-socket", Socket: path}, "no stale UDS socket present")
+	s := &Server{
+		store:   store,
+		log:     log,
+		tokens:  newTokenRegistry(),
+		fan:     newFanout(watchBuffer, lineKey),
+		bashFan: newFanout(watchBuffer, bashRowKey),
+		done:    make(chan struct{}),
 	}
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		log.Log(logging.Fields{Operation: "listen", Socket: path, Level: "error"}, "opening UDS listener failed: %v", err)
-		return nil, fmt.Errorf("shim-store server: listening on %q: %w", path, err)
-	}
-	log.Log(logging.Fields{Operation: "listen", Socket: path}, "UDS listener ready")
-	return ln, nil
+	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
+	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer=%d", s.fan.buffer)
+	return s
 }
 
-// Serve accepts connections until the listener is closed (via Close). It
-// blocks; run it in its own goroutine.
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	path, connectHandler := storev1connect.NewShimStoreHandler(s)
+	// The flusher middleware is INSIDE the mux so the writer it captures is
+	// the one Connect writes the stream through.
+	mux.Handle(path, s.withResponseFlusher(connectHandler))
+	return h2c.NewHandler(mux, &http2.Server{})
+}
+
+// Handler exposes the routed handler so an in-process test can mount it on an
+// httptest server instead of a socket.
+func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+// Serve runs until Shutdown. It returns http.ErrServerClosed after an orderly
+// stop, exactly as http.Server does.
 func (s *Server) Serve(ln net.Listener) error {
-	s.log.Log(logging.Fields{Operation: "serve"}, "accept loop starting listener=%s", listenerName(ln))
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return errors.New("shim-store server: Serve after Close")
-	}
-	s.ln = ln
-	s.mu.Unlock()
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			s.mu.Lock()
-			closed := s.closed
-			s.mu.Unlock()
-			if closed {
-				s.log.Log(logging.Fields{Operation: "serve"}, "accept loop stopped by server close")
-				return nil
-			}
-			return fmt.Errorf("shim-store server: accept: %w", err)
-		}
-		conn = &onceConn{Conn: conn}
-		s.log.LogVerbose(logging.Fields{Operation: "accept", Subscriber: conn.RemoteAddr().String()}, "accepted UDS connection")
-		s.trackConn(conn)
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
-			s.handleConn(conn)
-		}()
-	}
-}
-
-// Close stops accepting, closes all live connections, and waits for handlers.
-func (s *Server) Close() error {
-	s.log.Log(logging.Fields{Operation: "close"}, "server shutdown requested")
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		s.log.LogVerbose(logging.Fields{Operation: "close"}, "server already closed")
-		return nil
-	}
-	s.closed = true
-	ln := s.ln
-	conns := make([]net.Conn, 0, len(s.conns))
-	subscribers := make([]*subscriptionTerminal, 0, len(s.subscribers))
-	for c := range s.conns {
-		if terminal := s.subscribers[c]; terminal != nil {
-			subscribers = append(subscribers, terminal)
-		} else {
-			conns = append(conns, c)
-		}
-	}
-	s.mu.Unlock()
-
-	var closeErrs []error
-	if ln != nil {
-		if err := ln.Close(); err != nil {
-			s.log.Log(logging.Fields{Operation: "close-listener", Level: "error"}, "closing UDS listener failed: %v", err)
-			closeErrs = append(closeErrs, fmt.Errorf("closing UDS listener: %w", err))
-		}
-	}
-	for _, c := range conns {
-		if err := c.Close(); err != nil {
-			s.log.Log(logging.Fields{Operation: "close-connection", Subscriber: c.RemoteAddr().String(), Level: "error"}, "closing UDS connection failed: %v", err)
-			closeErrs = append(closeErrs, fmt.Errorf("closing UDS connection %s: %w", c.RemoteAddr(), err))
-		}
-	}
-	for _, terminal := range subscribers {
-		terminal.terminate("server", subscriptionTerminalServerShutdown, nil)
-	}
-	s.wg.Wait()
-	if err := errors.Join(closeErrs...); err != nil {
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving store.v1.ShimStore")
+	err := s.http.Serve(ln)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		s.log.Log(logging.Fields{Operation: "store.serve", Level: "error"}, "serving ended: %v", err)
 		return err
 	}
-	s.log.Log(logging.Fields{Operation: "close"}, "server shutdown complete connections=%d", len(conns))
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving stopped")
+	return err
+}
+
+// Shutdown ends every standing watch, then drains the HTTP server within ctx.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		close(s.done)
+		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers=%d bash_watchers=%d outstanding_tokens=%d", s.fan.subscribers(), s.bashFan.subscribers(), s.tokens.outstanding())
+	})
+	if err := s.http.Shutdown(ctx); err != nil {
+		s.log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "draining the HTTP server failed: %v", err)
+		return err
+	}
+	s.log.Log(logging.Fields{Operation: "store.shutdown"}, "store.v1.ShimStore stopped")
 	return nil
 }
 
-func (s *Server) trackConn(c net.Conn) {
-	s.mu.Lock()
-	s.conns[c] = struct{}{}
-	s.mu.Unlock()
+// ---- correlation and refusal plumbing ----
+
+// rpcLogger binds the procedure and the caller's correlation id to every record
+// one request produces.
+func (s *Server) rpcLogger(procedure string, header http.Header) *logging.Logger {
+	return s.log.With(logging.Fields{RPC: procedure, RequestID: header.Get(RequestIDHeader)})
 }
 
-func (s *Server) untrackConn(c net.Conn) {
-	s.mu.Lock()
-	delete(s.conns, c)
-	delete(s.subscribers, c)
-	s.mu.Unlock()
+// correlated carries the caller's request id down to the storage layer.
+//
+// THE STORAGE LAYER'S RECORDS NEED IT TOO. Its logger is built once at boot and
+// belongs to the process, so without this a db record could never say which call
+// it belonged to — and "no statement ran for this request" would be
+// unassertable, which is exactly the hole that made the suite's
+// no-database-touch check vacuous.
+func correlated(ctx context.Context, header http.Header) context.Context {
+	return logging.ContextWithRequestID(ctx, header.Get(RequestIDHeader))
 }
 
-// registerSubscriberTerminal assigns the only terminal owner before replay
-// begins.  Close either finds the owner in subscribers or sees no registered
-// subscriber yet; it can never directly close a registered subscriber socket.
-func (s *Server) registerSubscriberTerminal(conn net.Conn, terminal *subscriptionTerminal) bool {
-	s.mu.Lock()
-	_, tracked := s.conns[conn]
-	if !tracked {
-		s.mu.Unlock()
-		panic("shim-store server: registering untracked subscriber connection")
-	}
-	if s.closed {
-		s.mu.Unlock()
-		terminal.terminate("server", subscriptionTerminalServerShutdown, nil)
-		return false
-	}
-	s.subscribers[conn] = terminal
-	s.mu.Unlock()
-	return true
+// logRefusal records a refusal exactly once, at its owning layer, with the site
+// in its own context key.
+func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.Level = "warn"
+	fields.RefusalSite = ref.site
+	fields.RefusalKind = ref.class.armName()
+	log.Log(fields, "refused: %s", ref.detail)
 }
 
-func (s *Server) unregisterSubscriberTerminal(conn net.Conn, terminal *subscriptionTerminal) {
-	s.mu.Lock()
-	if current := s.subscribers[conn]; current == terminal {
-		delete(s.subscribers, conn)
-	}
-	s.mu.Unlock()
-}
-
-func (s *Server) handleConn(conn net.Conn) {
-	defer conn.Close()
-	defer s.untrackConn(conn)
-	peer := conn.RemoteAddr().String()
-	s.log.LogVerbose(logging.Fields{Operation: "connection", Subscriber: peer}, "reading initial protocol frame")
-
-	msg, err := wire.ReadAny(conn)
-	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			s.log.Log(logging.Fields{Operation: "read-first-frame", Subscriber: peer, Level: "error"}, "protocol frame read failed: %v", err)
-		} else {
-			s.log.LogVerbose(logging.Fields{Operation: "read-first-frame", Subscriber: peer}, "connection closed before initial frame")
+// storeRefusal maps a storage-layer error onto this layer's refusal.
+//
+// THE SITE AND THE FIELD COME FROM THE STORAGE LAYER when it named them,
+// because it is the layer that decided them: this one never opens a frame, so
+// it cannot know that the upsert changed a row's book or that the residue
+// carried no raw record. A failure the storage layer did not classify at all is
+// a database failure — never softened into a success, and never guessed at.
+func storeRefusal(err error) *refusal {
+	site := db.RefusalSite(err)
+	field := db.RefusalField(err)
+	switch {
+	case errors.Is(err, ErrUnknownAgent):
+		if site == "" {
+			site = SiteUnknownAgent
 		}
-		return
-	}
-	switch m := msg.(type) {
-	case *corev1.StoreWrite:
-		s.log.Log(logging.Fields{Operation: "classify-connection", Producer: m.GetProducer(), Subscriber: peer}, "classified producer connection")
-		s.serveProducer(conn, m)
-	case *corev1.Heartbeat:
-		if err := s.echoHeartbeat(conn, m); err != nil {
-			return
+		return refuseClass(classUnknownAgent, site, field, err.Error())
+	case errors.Is(err, ErrStalePointer):
+		if site == "" {
+			site = SiteStalePointer
 		}
-		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "connection opened with heartbeat; awaiting first StoreWrite")
-		s.serveProducerPreamble(conn)
-	case *corev1.Subscribe:
-		s.log.Log(logging.Fields{Operation: "classify-connection", Session: m.GetSessionId(), Subscriber: peer}, "classified subscriber connection from_seq=%d", m.GetFromSeq())
-		s.serveSubscriber(conn, m)
-	case *corev1.CursorQuery:
-		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer}, "classified cursor query file_id=%q", m.GetFileId())
-		s.serveCursorQuery(conn, m)
-	case *corev1.HealthCheck:
-		s.serveHealth(conn, m)
-		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer, RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
-		s.serveProducerPreamble(conn)
+		return refuseClass(classStalePointer, site, field, err.Error())
+	case errors.Is(err, ErrInvalid):
+		if site == "" {
+			site = SiteStoreRefusedRequest
+		}
+		return &refusal{site: site, field: field, detail: err.Error(), class: classInvalid}
 	default:
-		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer, Level: "error"},
-			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
+		return refuseClass(classStorage, SiteDatabaseFailure, "", err.Error())
 	}
 }
 
-// serveHealth proves that the store is accepting framed protocol traffic after
-// its database-backed server has been constructed.  A socket file alone can be
-// stale or merely listening; only this correlated response is health.
-func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
-	s.log.LogVerbose(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "processing health check")
-	if check.GetRequestId() == "" {
-		s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "health check rejected: empty request_id")
-		return
+// storeFailure classifies a storage-layer error, records it at the weight its
+// class deserves, and returns the refusal the failure arm carries.
+//
+// A REFUSED REQUEST IS NOT A DATABASE FAILURE, and the refusal belongs to the
+// CALL. Only this layer knows the call — its procedure, its request id, its
+// producer — so this is where a refused request gets its ONE normal-level
+// record, whether the storage layer classified it as malformed (ErrInvalid) or
+// as a pointer that has moved (ErrStalePointer). The storage layer traces both
+// at verbose with its statement and table, which is context, not a second
+// record.
+//
+// A DATABASE FAILURE IS THE OTHER WAY AROUND: internal/db already recorded it at
+// `error` with the statement that failed, so this layer adds only a verbose
+// trace tying the rpc to it.
+func (s *Server) storeFailure(log *logging.Logger, operation string, err error, fields logging.Fields) *refusal {
+	ref := storeRefusal(err)
+	if ref.class == classInvalid || ref.class == classStalePointer || ref.class == classUnknownAgent {
+		s.logRefusal(log, operation, ref, fields)
+		return ref
 	}
-	status := &corev1.HealthStatus{
-		RequestId: check.GetRequestId(),
-		Healthy:   true,
-		Component: "shim-store",
-	}
-	if err := wire.WriteAny(conn, status); err != nil {
-		s.log.Log(logging.Fields{Operation: "health-reply", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId(), Level: "error"}, "health reply failed: %v", err)
-		return
-	}
-	s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "health PASS")
+	s.logStoreFailure(log, operation, ref, fields)
+	return ref
 }
 
-// serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
-// an empty file_id returns all persisted cursors, a set file_id returns just
-// that one (or an empty list when absent). One CursorList reply, then the
-// connection is done.
-func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
-	peer := conn.RemoteAddr().String()
-	s.log.LogVerbose(logging.Fields{Operation: "cursor-query", Subscriber: peer}, "processing cursor query file_id=%q", q.GetFileId())
-	var cursors []*corev1.CursorState
-	var openTasks []*corev1.OpenTaskState
-	if id := q.GetFileId(); id != "" {
-		c, err := s.db.Cursor(id)
-		if err != nil {
-			return
-		}
-		if c != nil {
-			cursors = append(cursors, c)
-		}
-	} else {
-		all, err := s.db.Cursors()
-		if err != nil {
-			return
-		}
-		cursors = all
-		openTasks, err = s.db.OpenTasks()
-		if err != nil {
-			return
-		}
-	}
-	s.log.Log(logging.Fields{Operation: "cursor-query", Subscriber: peer},
-		"startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q", len(cursors), len(openTasks), q.GetFileId())
-	if err := wire.WriteAny(conn, &corev1.CursorList{
-		Cursors:                cursors,
-		OpenTasks:              openTasks,
-		OpenTasksAuthoritative: q.GetFileId() == "",
-	}); err != nil {
-		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: peer, Level: "error"}, "protocol cursor reply write failed: %v", err)
-	}
+// logStoreFailure records that a request ended in the failure arm BECAUSE of
+// the storage layer.
+//
+// EVERY ERROR IS LOGGED EXACTLY ONCE BY ITS OWNING LAYER, and internal/db
+// already logged this one with its own statement and table context — so this
+// is a VERBOSE trace that ties the rpc to it, not a second error record. The
+// refusals this layer owns (validation, tokens, overflow) go through
+// logRefusal at warn instead.
+func (s *Server) logStoreFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.RefusalSite = ref.site
+	fields.Level = "debug"
+	log.LogVerbose(fields, "answering the failure arm: %s", ref.detail)
 }
 
-// ---- producer side --------------------------------------------------------
-
-// serveProducerPreamble keeps a recovered-but-idle producer connection alive
-// until its first StoreWrite identifies the producer. A sidecar can legitimately
-// have no event to write for hours after startup, so requiring a write before
-// its first heartbeat turns healthy idleness into a reconnect loop.
-func (s *Server) serveProducerPreamble(conn net.Conn) {
-	peer := conn.RemoteAddr().String()
-	s.log.LogVerbose(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "awaiting producer declaration")
-	for {
-		msg, err := wire.ReadAny(conn)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				s.log.Log(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer, Level: "error"}, "connection dropped: %v", err)
-			} else {
-				s.log.LogVerbose(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer}, "producer preamble closed cleanly")
-			}
-			return
-		}
-		switch m := msg.(type) {
-		case *corev1.StoreWrite:
-			s.log.Log(logging.Fields{Operation: "producer-preamble", Producer: m.GetProducer(), Subscriber: peer}, "producer declared by StoreWrite")
-			s.serveProducer(conn, m)
-			return
-		case *corev1.Heartbeat:
-			if err := s.echoHeartbeat(conn, m); err != nil {
-				return
-			}
-		case *corev1.HealthCheck:
-			s.serveHealth(conn, m)
-		default:
-			s.log.Log(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer, Level: "error"}, "unrecognized frame %T; disconnecting", m)
-			return
-		}
-	}
+// logOwnFailure records a failure this layer OWNS — one no lower layer saw, so
+// nothing else will record it.
+func (s *Server) logOwnFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.RefusalSite = ref.site
+	fields.Level = "error"
+	log.Log(fields, "failed: %s", ref.detail)
 }
 
-func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
-	peer := conn.RemoteAddr().String()
-	producer := first.GetProducer()
-	s.log.LogVerbose(logging.Fields{Operation: "producer", Producer: producer, Subscriber: peer}, "serving producer connection")
-	if err := s.processWrite(conn, first); err != nil {
-		return
-	}
-	for {
-		msg, err := wire.ReadAny(conn)
-		if err != nil {
-			if !errors.Is(err, io.EOF) {
-				s.log.Log(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer, Level: "error"}, "protocol producer frame read failed: %v", err)
-			} else {
-				s.log.LogVerbose(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer}, "producer connection closed cleanly")
-			}
-			return
-		}
-		switch m := msg.(type) {
-		case *corev1.StoreWrite:
-			if err := s.processWrite(conn, m); err != nil {
-				return
-			}
-		case *corev1.Heartbeat:
-			if err := s.echoHeartbeat(conn, m); err != nil {
-				return
-			}
-		case *corev1.HealthCheck:
-			s.serveHealth(conn, m)
-		default:
-			s.log.Log(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer, Level: "error"}, "protocol frame is %T; disconnecting producer", m)
-			return
-		}
-	}
-}
+// ---- WriteBatch ----
 
-func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *corev1.Heartbeat) error {
-	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: heartbeat.GetSentAtMs()}); err != nil {
-		s.log.Log(logging.Fields{Operation: "heartbeat-reply", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol heartbeat reply failed sent_at_ms=%d: %v", heartbeat.GetSentAtMs(), err)
-		return err
-	}
-	s.log.LogVerbose(logging.Fields{Operation: "heartbeat-reply", Subscriber: conn.RemoteAddr().String()}, "echoed heartbeat sent_at_ms=%d", heartbeat.GetSentAtMs())
-	return nil
-}
+func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header())
+	msg := req.Msg
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
+		"write batch entries=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), msg.GetBatch().GetCursorAdvance() != nil)
 
-// processWrite ingests one batch and fans out its events, then acks. A rejected
-// batch acks with a non-empty error and a loud log; it is never silently
-// dropped.
-func (s *Server) processWrite(conn net.Conn, sw *corev1.StoreWrite) error {
-	events := sw.GetBatch().GetEvents()
-	ack, durable := s.ingestAndFan(sw)
-	if durable {
-		s.log.LogVerbose(logging.Fields{Operation: "store-write", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "processing StoreWrite events=%d cursor_advance=%t", len(events), sw.GetBatch().GetCursorAdvance() != nil)
+	if ref := validateWriteBatchRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
+		return writeBatchFailure(ref), nil
 	}
-	if err := wire.WriteAny(conn, ack); err != nil {
-		s.log.Log(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol StoreWriteAck failed accepted=%d deduped=%d last_seq=%d rejected=%t: %v", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "", err)
-		return err
-	}
-	if durable {
-		s.log.LogVerbose(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "StoreWriteAck sent accepted=%d deduped=%d last_seq=%d rejected=%t", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "")
-	}
-	return nil
-}
 
-func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, bool) {
-	batch := sw.GetBatch()
-	events := batch.GetEvents()
-
-	// Split ephemeral out: they never touch the DB but still fan out in
-	// arrival position (§4.3, §6.5).
-	persistent := make([]*corev1.Event, 0, len(events))
-	for _, ev := range events {
-		if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			persistent = append(persistent, ev)
-		}
-	}
-	if len(persistent) == 0 && batch.GetCursorAdvance() == nil {
-		// EPHEMERAL batches are a hot live-tail path. They neither persist nor
-		// change a cursor, so a store log would bury the durable outcomes the
-		// store owns without adding diagnostic value.
-		//
-		// It still takes ingestMu, even holding no seq of its own: this path is
-		// what makes the "fan out in arrival position" claim above true. Without
-		// the lock an ephemeral batch could publish between another batch's
-		// commit and that batch's publish, landing ahead of a persistent event
-		// that was assigned before it.
-		s.ingestMu.Lock()
-		for _, ev := range events {
-			s.fan.publish(ev)
-		}
-		s.ingestMu.Unlock()
-		return &corev1.StoreWriteAck{}, false
-	}
-	s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: sw.GetProducer()}, "classified batch total_events=%d persistent_events=%d ephemeral_events=%d", len(events), len(persistent), len(events)-len(persistent))
-
-	// ASSIGN THEN ANNOUNCE, as one indivisible step (see Server.ingestMu). The
-	// lock opens here rather than after the Ingest because it is the ORDER of
-	// the two that must hold: a publish that overtakes an earlier batch's
-	// publish is exactly the seq inversion the daemon reads as fatal.
-	s.ingestMu.Lock()
-	start := time.Now()
-	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
-	ingestMs := time.Since(start).Milliseconds()
+	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), msg.GetBatch())
 	if err != nil {
-		// The rejected-batch path is unchanged: a loud non-empty ack error, and
-		// the batch counted as durable-intent. Only the unlock is added, so a
-		// rejection cannot wedge every later write behind a held lock.
-		s.ingestMu.Unlock()
-		return &corev1.StoreWriteAck{Error: err.Error()}, true
+		ref := s.storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
+		return writeBatchFailure(ref), nil
 	}
 
-	// Fan out in arrival order. Ingest stamped accepted persistent events with
-	// seq>0 and reset deduped ones to seq==0; deduped losers are already
-	// durable and were delivered by the first writer, so we skip them.
-	for _, ev := range events {
-		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			s.fan.publish(ev)
-			continue
-		}
-		if ev.GetSeq() > 0 {
-			s.fan.publish(ev)
-		}
-	}
-	// The announce is complete, so the ordering guarantee is discharged. The log
-	// below is deliberately outside: it reports what already happened and no
-	// other batch's correctness depends on it.
-	s.ingestMu.Unlock()
-
-	// Successful persisted batches are high-frequency session narration rather
-	// than lifecycle or failure evidence. Keep their detailed outcome available
-	// in verbose mode without growing the normal global service log.
-	if len(persistent) > 0 {
-		s.log.LogVerbose(logging.Fields{
-			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
-		}, "persisted batch events=%d accepted=%d deduped=%d replayed=%d last_seq=%d ingest_ms=%d",
-			len(persistent), res.Accepted, res.Deduped, res.Replayed, res.LastSeq, ingestMs)
-	}
-	// A REPLAY is a normal-log fact, not narration: it says a producer resent a
-	// batch it never saw acked, and that the write identity held. It is rare by
-	// construction (one store bounce per deploy), so it never floods.
-	if res.Replayed > 0 {
-		s.log.Log(logging.Fields{
-			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
-		}, "REPLAYED batch absorbed idempotently events=%d accepted=%d replayed=%d — the producer resent writes whose ack it never saw, and the (session_id, write_id) identity made them no-ops instead of duplicate rows",
-			len(persistent), res.Accepted, res.Replayed)
-	}
-	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}, true
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
+		"batch durable written=%d absorbed=%d page_lines=%d bash_rows=%d", result.Written, result.Absorbed, len(result.Lines), len(result.BashRows))
+	s.publish(log, msg.GetProducer(), result.Lines)
+	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
+	return connect.NewResponse(&storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}), nil
 }
 
-// ---- subscriber side ------------------------------------------------------
-
-// subscriptionTerminalReason is the sole classification of a subscriber
-// connection's ending.  A candidate is accepted exactly once by its
-// subscriptionTerminal, which owns cancellation, deregistration, socket close,
-// and the final canonical lifecycle record.
-type subscriptionTerminalReason string
-
-const (
-	subscriptionTerminalClientEOF        subscriptionTerminalReason = "client-eof"
-	subscriptionTerminalClientReset      subscriptionTerminalReason = "client-reset"
-	subscriptionTerminalSlowConsumer     subscriptionTerminalReason = "slow-consumer"
-	subscriptionTerminalServerShutdown   subscriptionTerminalReason = "server-shutdown"
-	subscriptionTerminalReplayFailure    subscriptionTerminalReason = "replay-failure"
-	subscriptionTerminalReadinessFailure subscriptionTerminalReason = "readiness-failure"
-	subscriptionTerminalTransportFailure subscriptionTerminalReason = "transport-failure"
-)
-
-// subscriberHooks supplies deterministic lifecycle observations for focused
-// tests. Production leaves every hook nil.
-type subscriberHooks struct {
-	beforeReplayRow func()
-	beforeTailWrite func()
-	onTerminal      func(subscriberTerminalRecord)
-}
-
-type subscriberTerminalRecord struct {
-	Owner          string
-	Reason         subscriptionTerminalReason
-	SessionID      string
-	Peer           string
-	FromSeq        uint64
-	Delivered      uint64
-	FirstReplaySeq uint64
-	LastReplaySeq  uint64
-	Cause          error
-}
-
-type subscriptionTerminal struct {
-	once       sync.Once
-	terminated atomic.Bool
-
-	conn       net.Conn
-	fan        *fanout
-	subscriber *subscriber
-	cancel     context.CancelFunc
-	log        *logging.Logger
-	hooks      subscriberHooks
-
-	sessionID string
-	peer      string
-	fromSeq   uint64
-	started   time.Time
-
-	mu             sync.Mutex
-	delivered      uint64
-	firstReplaySeq uint64
-	lastReplaySeq  uint64
-}
-
-func newSubscriptionTerminal(conn net.Conn, fan *fanout, log *logging.Logger, sessionID string, fromSeq uint64, cancel context.CancelFunc, hooks subscriberHooks) *subscriptionTerminal {
-	if conn == nil || fan == nil || log == nil || cancel == nil {
-		panic("shim-store server: invalid subscription terminal dependencies")
+// writeBatchFailure builds the typed failure. THE ARM IS WHY, and it is never
+// left unset: a caller that received a failure with no kind would have to parse
+// `detail` to decide whether retrying its bytes could ever help.
+//
+// WriteBatch has exactly two arms, and a stale pointer is unreachable on it —
+// the verb names no position — so everything that is not a storage failure is a
+// request the caller must fix.
+func writeBatchFailure(ref *refusal) *connect.Response[storev1.WriteBatchResponse] {
+	failure := &storev1.WriteBatchFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.WriteBatchFailure_InvalidRequest{
+			InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: ref.field},
+		}
 	}
-	return &subscriptionTerminal{
-		conn: conn, fan: fan, cancel: cancel, log: log, hooks: hooks,
-		sessionID: sessionID, peer: conn.RemoteAddr().String(), fromSeq: fromSeq, started: time.Now(),
-	}
-}
-
-func (t *subscriptionTerminal) attach(subscriber *subscriber) {
-	if subscriber == nil {
-		panic("shim-store server: nil terminal subscriber")
-	}
-	if t.subscriber != nil {
-		panic("shim-store server: terminal subscriber attached twice")
-	}
-	t.subscriber = subscriber
-}
-
-func (t *subscriptionTerminal) setReplayProgress(delivered, firstReplaySeq, lastReplaySeq uint64) {
-	t.mu.Lock()
-	t.delivered = delivered
-	t.firstReplaySeq = firstReplaySeq
-	t.lastReplaySeq = lastReplaySeq
-	t.mu.Unlock()
-}
-
-func (t *subscriptionTerminal) isTerminated() bool { return t.terminated.Load() }
-
-func (t *subscriptionTerminal) terminate(owner string, reason subscriptionTerminalReason, cause error) {
-	t.once.Do(func() {
-		t.terminated.Store(true)
-		t.cancel()
-		if t.subscriber == nil {
-			panic("shim-store server: terminal without attached subscriber")
-		}
-		t.fan.remove(t.subscriber)
-		t.subscriber.stop()
-		closeErr := t.conn.Close()
-		t.mu.Lock()
-		delivered, firstReplaySeq, lastReplaySeq := t.delivered, t.firstReplaySeq, t.lastReplaySeq
-		t.mu.Unlock()
-		level := "info"
-		switch reason {
-		case subscriptionTerminalSlowConsumer:
-			level = "warn"
-		case subscriptionTerminalReplayFailure, subscriptionTerminalReadinessFailure, subscriptionTerminalTransportFailure:
-			level = "error"
-		}
-		if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
-			if cause == nil {
-				cause = closeErr
-			} else {
-				cause = fmt.Errorf("%w; socket_close=%v", cause, closeErr)
-			}
-		}
-		record := subscriberTerminalRecord{Owner: owner, Reason: reason, SessionID: t.sessionID, Peer: t.peer, FromSeq: t.fromSeq, Delivered: delivered, FirstReplaySeq: firstReplaySeq, LastReplaySeq: lastReplaySeq, Cause: cause}
-		fields := logging.Fields{Operation: "subscribe-terminal", Session: t.sessionID, Subscriber: t.peer, ReplayFromSeq: t.fromSeq, ReplayFirstSeq: firstReplaySeq, ReplayLastSeq: lastReplaySeq, Delivered: delivered, TerminalOwner: owner, TerminalReason: string(reason), Level: level}
-		if cause != nil {
-			fields.ErrorCause = cause.Error()
-		}
-		t.log.Log(fields, "subscription terminal owner=%s reason=%s elapsed_ms=%d", owner, reason, time.Since(t.started).Milliseconds())
-		if t.hooks.onTerminal != nil {
-			t.hooks.onTerminal(record)
-		}
+	return connect.NewResponse(&storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{Failure: failure},
 	})
 }
 
-func (s *Server) subscriberHooksSnapshot() subscriberHooks {
-	s.subscriberHooksMu.RLock()
-	defer s.subscriberHooksMu.RUnlock()
-	return s.subscriberHooks
+// publish fans the committed page lines out and warns for every watcher that
+// could not keep up. It runs AFTER the commit: nothing is ever published that
+// is not already durable.
+func (s *Server) publish(log *logging.Logger, producer string, lines []LineWritten) {
+	if len(lines) == 0 {
+		log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer}, "batch produced no page lines")
+		return
+	}
+	overflowed := s.fan.publish(lines)
+	log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer},
+		"published lines=%d watchers=%d", len(lines), s.fan.subscribers())
+	for _, sub := range overflowed {
+		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", BookAgentID: sub.key, WatchTokenHash: sub.tokenHash},
+			"watch buffer overflowed; ending this subscriber's stream buffer=%d dropped=%d", s.fan.buffer, sub.dropped)
+	}
 }
 
-func terminalReasonForRead(err error) subscriptionTerminalReason {
-	switch {
-	case errors.Is(err, io.EOF):
-		return subscriptionTerminalClientEOF
-	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
-		return subscriptionTerminalClientReset
+// ---- OpenAgentSession ----
+
+func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[storev1.OpenAgentSessionRequest]) (*connect.Response[storev1.OpenAgentSessionResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header())
+	msg := req.Msg
+	agentID := msg.GetAgent().GetValue()
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
+		"open page_size=%d known_through=%t page_only=%t", msg.GetPageSize(), msg.KnownThrough != nil, msg.GetPageOnly())
+
+	if ref := validateOpenAgentSessionRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+
+	opened, err := s.store.OpenPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetKnownThrough())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.open-agent-session", err, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+	if opened.Page == nil {
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no page for this open")
+		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+
+	// A PAGE-ONLY OPEN MINTS NOTHING. OpenAgentSession is unary and the service
+	// has no close, so the store cannot learn that a page was abandoned: a token
+	// minted for a read that never watched lived for the whole process lifetime.
+	// The caller states at the open whether a watch follows, and a page-only
+	// open answers with `watch` UNSET — there is nothing to present later, and a
+	// watch attempted from it meets the ordinary unknown-token refusal.
+	if msg.GetPageOnly() {
+		log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WriteSeq: opened.PinSeq},
+			"page-only read served; no watch token minted lines=%d", len(opened.Page.GetLines()))
+		return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+			Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
+				Page: opened.Page,
+			}},
+		}), nil
+	}
+
+	token, err := s.tokens.mint(agentID, opened.PinSeq)
+	if err != nil {
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", err.Error())
+		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+	log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
+		"reading session opened lines=%d", len(opened.Page.GetLines()))
+	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+		Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
+			Page:  opened.Page,
+			Watch: &storev1.AgentSessionToken{Value: token},
+		}},
+	}), nil
+}
+
+func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {
+	failure := &storev1.OpenAgentSessionFailure{Detail: ref.detail}
+	switch ref.class {
+	case classUnknownAgent:
+		failure.Kind = &storev1.OpenAgentSessionFailure_UnknownAgent{UnknownAgent: &storev1.OpenAgentSessionUnknownAgent{}}
+	case classStalePointer:
+		failure.Kind = &storev1.OpenAgentSessionFailure_StalePointer{StalePointer: &storev1.OpenAgentSessionStalePointer{}}
+	case classStorage:
+		failure.Kind = &storev1.OpenAgentSessionFailure_StorageFailure{StorageFailure: &storev1.OpenAgentSessionStorageFailure{}}
 	default:
-		return subscriptionTerminalTransportFailure
+		failure.Kind = &storev1.OpenAgentSessionFailure_InvalidRequest{
+			InvalidRequest: &storev1.OpenAgentSessionInvalidRequest{Field: ref.field},
+		}
 	}
+	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+		Result: &storev1.OpenAgentSessionResponse_Failure{Failure: failure},
+	})
 }
 
-func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
-	sessionID := sub.GetSessionId()
-	peer := conn.RemoteAddr().String()
-	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting streaming replay-then-tail from_seq=%d", sub.GetFromSeq())
-	if sessionID == "" {
-		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: peer, Level: "error"}, "protocol subscription rejected: empty session_id")
-		return
+// ---- WatchAgentSession ----
+
+// WatchAgentSession is the pure tail of one opened reading session.
+//
+// THERE IS NO FAILURE ARM BY DESIGN (project lead, 2026-08-29): a refused watch
+// — a token never minted, a token already spent, a token from a store that has
+// since restarted — closes at the TRANSPORT with connect.CodeNotFound, and the
+// caller re-opens. That is the contract's refused-open convention.
+func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[storev1.WatchAgentSessionRequest], stream *connect.ServerStream[storev1.WatchAgentSessionResponse]) error {
+	log := s.rpcLogger(storev1connect.ShimStoreWatchAgentSessionProcedure, req.Header())
+	if ref := validateWatchAgentSessionRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.watch-agent-session", ref, logging.Fields{})
+		return connect.NewError(connect.CodeNotFound, ref)
 	}
 
-	replayCtx, cancelReplay := context.WithCancel(context.Background())
-	terminal := newSubscriptionTerminal(conn, s.fan, s.log, sessionID, sub.GetFromSeq(), cancelReplay, s.subscriberHooksSnapshot())
-	subr := s.fan.subscribe(sessionID, func(reason subscriberDropReason) {
-		if reason == subscriberDropSlowConsumer {
-			terminal.terminate("fanout", subscriptionTerminalSlowConsumer, nil)
-		}
-	}, terminal.attach)
-	if !s.registerSubscriberTerminal(conn, terminal) {
-		return
+	token := req.Msg.GetWatch().GetValue()
+	hash := tokenHash(token)
+	entry, ok := s.tokens.consume(token)
+	if !ok {
+		ref := refuse(SiteUnknownWatchToken, "watch", "watch: this token was never minted by this store, or has already been spent")
+		s.logRefusal(log, "store.rpc.watch-agent-session", ref, logging.Fields{WatchTokenHash: hash})
+		return connect.NewError(connect.CodeNotFound, ref)
 	}
-	defer s.unregisterSubscriberTerminal(conn, terminal)
-	defer terminal.terminate("handler", subscriptionTerminalTransportFailure, errors.New("subscriber handler returned without a terminal candidate"))
-	go s.subReadLoop(terminal)
+	log = log.With(logging.Fields{AgentID: entry.agentID, BookAgentID: entry.agentID, WatchTokenHash: hash})
 
-	// Register (above) BEFORE replay so live events arriving during replay are
-	// buffered, then de-overlapped by seq afterwards. ReplayFrom yields one
-	// SQLite row at a time, and this callback writes it before the query advances
-	// to the next row. That first-row progress is what keeps the shim's
-	// activity deadline alive during large history pulls.
-	var delivered, firstReplaySeq, lastReplaySeq uint64
-	replayStats, err := s.db.ReplayFrom(replayCtx, sessionID, sub.GetFromSeq(), func(ev *corev1.Event) error {
-		if terminal.hooks.beforeReplayRow != nil {
-			terminal.hooks.beforeReplayRow()
-		}
-		nextDelivered := delivered + 1
-		if err := wire.WriteAny(conn, ev); err != nil {
+	// SUBSCRIBE BEFORE THE REPLAY QUERY. Everything committed from this instant
+	// on reaches the channel, so the replay can only overlap the live stream,
+	// never leave a hole in it; the overlap is removed below by write ordinal.
+	sub := s.fan.subscribe(entry.agentID, hash)
+	defer s.fan.unsubscribe(sub)
+
+	replay, err := s.store.LinesSince(correlated(ctx, req.Header()), entry.agentID, entry.pinSeq)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.watch-agent-session", err, logging.Fields{WriteSeq: entry.pinSeq})
+		return connect.NewError(connect.CodeInternal, ref)
+	}
+	replayed := make(map[uint64]struct{}, len(replay))
+	for _, line := range replay {
+		if err := s.send(log, stream, line); err != nil {
 			return err
 		}
-		if delivered == 0 {
-			firstReplaySeq = ev.GetSeq()
-		}
-		delivered = nextDelivered
-		lastReplaySeq = ev.GetSeq()
-		terminal.setReplayProgress(delivered, firstReplaySeq, lastReplaySeq)
-		// One bounded record at first progress and then every 512 events keeps
-		// large replays diagnosable without turning this per-event path into a
-		// log-volume multiplier.
-		if delivered == 1 || delivered%512 == 0 {
-			s.log.LogVerbose(logging.Fields{Operation: "subscribe-replay-progress", Session: sessionID, Subscriber: peer},
-				"streaming replay progress from_seq=%d delivered=%d first_seq=%d last_seq=%d",
-				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq)
-		}
-		return nil
-	})
-	if err != nil {
-		if !terminal.isTerminated() {
-			terminal.terminate("replay", subscriptionTerminalReplayFailure, err)
-		}
-		return
+		replayed[line.WriteSeq] = struct{}{}
 	}
-	if replayStats.Events != delivered || replayStats.FirstSeq != firstReplaySeq || replayStats.LastSeq != lastReplaySeq {
-		panic(fmt.Sprintf("shim-store server: replay accounting diverged: query=%+v transport={events:%d first_seq:%d last_seq:%d}",
-			replayStats, delivered, firstReplaySeq, lastReplaySeq))
+	// THE HEADERS GO OUT BEFORE THE TAIL BLOCKS. Until they do, the caller's
+	// WatchAgentSession call has not returned, so the producer that would write
+	// the next line is itself still waiting on this stream. A replay that sent
+	// frames has flushed already; this is what covers the empty replay, which
+	// is the ordinary case for a watch pinned exactly after its page.
+	if err := s.openStream(ctx, log, "store.rpc.watch-agent-session"); err != nil {
+		return err
 	}
-	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer},
-		"streaming replay completed from_seq=%d delivered=%d first_seq=%d last_seq=%d query_ms=%d",
-		sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, replayStats.Elapsed.Milliseconds())
-	// The readiness heartbeat is written only after registration and replay
-	// complete. A subscribing shim waits for this frame before asserting its
-	// bring-up gate, so a producer write issued immediately after readiness
-	// cannot overtake registration on another accepted socket.
-	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
-		terminal.terminate("readiness", subscriptionTerminalReadinessFailure, err)
-		return
-	}
-	s.log.LogVerbose(logging.Fields{Operation: "subscribe-ready", Session: sessionID, Subscriber: peer}, "standing subscription registered and replay complete")
+	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
+		"watch live after replay replayed=%d", len(replay))
 
 	for {
+		// Overflow is checked FIRST and on its own, so a subscriber that has
+		// already been dropped ends deterministically instead of racing the
+		// frames still sitting in its buffer.
 		select {
-		case <-subr.done:
-			s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "live tail stopped after terminal owner")
-			return
-		case ev := <-subr.ch:
-			// Skip persistent events already covered by replay (overlap window).
-			if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL &&
-				ev.GetSeq() > 0 && ev.GetSeq() <= lastReplaySeq {
-				s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "skipped replay overlap seq=%d", ev.GetSeq())
+		case <-sub.overflow:
+			return s.endOverflowed(log, sub)
+		default:
+		}
+		select {
+		case <-sub.overflow:
+			return s.endOverflowed(log, sub)
+		case <-s.done:
+			log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down")
+			return nil
+		case <-ctx.Done():
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away")
+			return nil
+		case line := <-sub.items:
+			if line.WriteSeq <= entry.pinSeq {
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin")
 				continue
 			}
-			if terminal.hooks.beforeTailWrite != nil {
-				terminal.hooks.beforeTailWrite()
+			if _, duplicate := replayed[line.WriteSeq]; duplicate {
+				delete(replayed, line.WriteSeq)
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line the replay already delivered")
+				continue
 			}
-			if err := wire.WriteAny(conn, ev); err != nil {
-				terminal.terminate("tail", subscriptionTerminalTransportFailure, err)
-				return
+			if err := s.send(log, stream, line); err != nil {
+				return err
 			}
-			// Successful live delivery is a per-event hot path which can fire
-			// hundreds of times per second. Subscription transitions and write
-			// failures retain the useful store-owned diagnostics.
 		}
 	}
 }
 
-// subReadLoop reads (and discards, apart from close detection) frames from a
-// subscriber connection so a client close unblocks the tail loop.
-func (s *Server) subReadLoop(terminal *subscriptionTerminal) {
-	for {
-		if _, err := wire.ReadAny(terminal.conn); err != nil {
-			if terminal.isTerminated() {
-				return
-			}
-			reason := terminalReasonForRead(err)
-			cause := error(nil)
-			if reason == subscriptionTerminalTransportFailure {
-				cause = err
-			}
-			terminal.terminate("reader", reason, cause)
-			return
+func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.WatchAgentSessionResponse], line LineWritten) error {
+	if err := stream.Send(&storev1.WatchAgentSessionResponse{Line: line.Line}); err != nil {
+		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
+			"sending a line to the watcher failed: %v", err)
+		return err
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "line delivered")
+	return nil
+}
+
+func (s *Server) endOverflowed(log *logging.Logger, sub *sink[LineWritten]) error {
+	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn"},
+		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped=%d", sub.dropped)
+	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "watch",
+		"watch: the subscriber fell too far behind its buffer; re-open with known_through"))
+}
+
+// ---- ReadAgentPage ----
+
+func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1.ReadAgentPageRequest]) (*connect.Response[storev1.ReadAgentPageResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header())
+	msg := req.Msg
+	agentID := msg.GetBook().GetValue()
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
+		"read page page_size=%d", msg.GetPageSize())
+
+	if ref := validateReadAgentPageRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
+		return readPageFailure(ref), nil
+	}
+
+	page, err := s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetAfter())
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.read-agent-page", err, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
+		return readPageFailure(ref), nil
+	}
+	if page == nil {
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no page for this read")
+		s.logOwnFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
+		return readPageFailure(ref), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID}, "page served lines=%d", len(page.GetLines()))
+	return connect.NewResponse(&storev1.ReadAgentPageResponse{
+		Result: &storev1.ReadAgentPageResponse_Success{Success: page},
+	}), nil
+}
+
+func readPageFailure(ref *refusal) *connect.Response[storev1.ReadAgentPageResponse] {
+	failure := &storev1.ReadAgentPageFailure{Detail: ref.detail}
+	switch ref.class {
+	case classStalePointer:
+		failure.Kind = &storev1.ReadAgentPageFailure_StalePointer{StalePointer: &storev1.ReadAgentPageStalePointer{}}
+	case classStorage:
+		failure.Kind = &storev1.ReadAgentPageFailure_StorageFailure{StorageFailure: &storev1.ReadAgentPageStorageFailure{}}
+	default:
+		failure.Kind = &storev1.ReadAgentPageFailure_InvalidRequest{
+			InvalidRequest: &storev1.ReadAgentPageInvalidRequest{Field: ref.field},
 		}
 	}
+	return connect.NewResponse(&storev1.ReadAgentPageResponse{
+		Result: &storev1.ReadAgentPageResponse_Failure{Failure: failure},
+	})
 }
 
-// onceConn makes physical socket closure a one-owner operation even where a
-// generic connection handler and a subscriber terminal both reach teardown.
-type onceConn struct {
-	net.Conn
-	once sync.Once
-	err  error
+// ---- GetWorkflow ----
+
+// GetWorkflow is NOT IMPLEMENTED THIS WAVE and says so in the typed failure
+// arm. The workflow table exists and nothing routes into it, so serving a
+// synthesized answer would be an invention; the refusal is the honest reply.
+func (s *Server) GetWorkflow(_ context.Context, req *connect.Request[storev1.GetWorkflowRequest]) (*connect.Response[storev1.GetWorkflowResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetWorkflowProcedure, req.Header())
+	ref := refuseClass(classNotImplemented, SiteWorkflowNotImplemented, "work", "workflow is not implemented this wave")
+	s.logRefusal(log, "store.rpc.get-workflow", ref, logging.Fields{TaskID: req.Msg.GetWork().GetValue()})
+	return connect.NewResponse(&storev1.GetWorkflowResponse{
+		Result: &storev1.GetWorkflowResponse_Failure{Failure: &storev1.GetWorkflowFailure{
+			Detail: ref.detail,
+			// `unknown_run` and `invalid_request` are RESERVED FOR THE WORKFLOW
+			// WAVE. Nothing routes into the workflow table, so this verb has
+			// exactly one honest answer and answering any other arm would be an
+			// invention.
+			Kind: &storev1.GetWorkflowFailure_NotImplemented{NotImplemented: &storev1.GetWorkflowNotImplemented{}},
+		}},
+	}), nil
 }
 
-func (c *onceConn) Close() error {
-	c.once.Do(func() { c.err = c.Conn.Close() })
-	return c.err
-}
+// ---- GetLiveWork ----
 
-func listenerName(ln net.Listener) string {
-	if ln == nil {
-		return "<nil>"
+func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.GetLiveWorkRequest]) (*connect.Response[storev1.GetLiveWorkResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"}, "reading the open obligations")
+
+	live, err := s.store.LiveWork(correlated(ctx, req.Header()))
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-live-work", err, logging.Fields{})
+		return liveWorkFailure(ref), nil
 	}
-	return ln.Addr().String()
+	if live == nil {
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no live-work answer")
+		s.logOwnFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		return liveWorkFailure(ref), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"},
+		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetached()))
+	return connect.NewResponse(&storev1.GetLiveWorkResponse{
+		Result: &storev1.GetLiveWorkResponse_Success{Success: live},
+	}), nil
 }
 
-// ---- Any framing ----------------------------------------------------------
-//
-// The encode/decode pair lives in agentrepl/wire (WriteAny / ReadAny). It used
-// to be copy-pasted here and in three other packages; one wire contract with
-// four hand-maintained copies is the drift that package exists to prevent.
-// ReadAny still returns ReadFrame's error VERBATIM, which is what lets the
-// handlers below tell a clean io.EOF close from a fault.
+// liveWorkFailure has ONE arm, because GetLiveWork takes no request fields:
+// there is nothing a caller can have sent wrong, so every way this verb fails
+// is the database failing.
+func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse] {
+	return connect.NewResponse(&storev1.GetLiveWorkResponse{
+		Result: &storev1.GetLiveWorkResponse_Failure{Failure: &storev1.GetLiveWorkFailure{
+			Detail: ref.detail,
+			Kind:   &storev1.GetLiveWorkFailure_StorageFailure{StorageFailure: &storev1.GetLiveWorkStorageFailure{}},
+		}},
+	})
+}
+
+// ---- GetSidecarCursors ----
+
+func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetSidecarCursorsProcedure, req.Header())
+	msg := req.Msg
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()},
+		"reading cursors scoped=%t", msg.FileId != nil)
+
+	if ref := validateGetSidecarCursorsRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-sidecar-cursors", ref, logging.Fields{})
+		return cursorsFailure(ref), nil
+	}
+
+	cursors, err := s.store.Cursors(correlated(ctx, req.Header()), msg.FileId)
+	if err != nil {
+		ref := s.storeFailure(log, "store.rpc.get-sidecar-cursors", err, logging.Fields{FileID: msg.GetFileId()})
+		return cursorsFailure(ref), nil
+	}
+	// An empty answer is the fresh-store answer, not a failure: every tailed
+	// file starts from zero.
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()}, "cursors served cursors=%d", len(cursors))
+	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{Cursors: cursors}},
+	}), nil
+}
+
+func cursorsFailure(ref *refusal) *connect.Response[storev1.GetSidecarCursorsResponse] {
+	failure := &storev1.GetSidecarCursorsFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.GetSidecarCursorsFailure_StorageFailure{StorageFailure: &storev1.GetSidecarCursorsStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.GetSidecarCursorsFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetSidecarCursorsInvalidRequest{Field: ref.field},
+		}
+	}
+	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Failure{Failure: failure},
+	})
+}

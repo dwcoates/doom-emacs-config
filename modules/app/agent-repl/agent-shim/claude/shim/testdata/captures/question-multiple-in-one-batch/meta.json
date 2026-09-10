@@ -1,0 +1,27 @@
+{
+  "scenario": "question-multiple-in-one-batch",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Ask me three questions in a single question-tool call: which language, which test runner, and which CI provider.",
+  "prompts": [
+    {
+      "text": "Ask me three questions in a single question-tool call: which language, which test runner, and which CI provider.",
+      "resume": false
+    }
+  ],
+  "world": "question-multiple-in-one-batch",
+  "cwd_init": null,
+  "vendor_session_id": "b30a6446-3f41-446e-8af1-dcfb9755da5d",
+  "manual": null,
+  "expect": [
+    "tool:AskUserQuestion with 3 questions",
+    "3 keys in the answers map"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-question-multiple-in-one-batch-y4VRX4-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:22:49.245Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

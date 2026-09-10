@@ -37,6 +37,22 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--frontend-dispatch-show "frontends")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--warn "core")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-log-name "workspace")
+
+;; Special variables owned by other sources in this module, declared here
+;; so the byte-compiler binds and reads them dynamically rather than
+;; lexically.
+(defvar agent-repl--eager-open-in-progress)
+
 (require 'cl-lib)
 
 ;;;; --- Panel registry -----------------------------------------------------

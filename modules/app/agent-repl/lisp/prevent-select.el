@@ -18,6 +18,14 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--agent-panel-buffer-p "core")
+(declare-function agent-repl--buffer-owner "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+
 (require 'cl-lib)
 
 (defun agent-repl--prev-buffer-skip-agent-panel (_window buffer bury-or-kill)

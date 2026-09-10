@@ -1,0 +1,363 @@
+// topbar.proto — THE TOPBAR: one THIN strip. Left, tight: account label,
+// connectivity dot. Center: the title, and ALL free width flexes around it
+// — the flank groups never spread. Right, tight, in order: model selector,
+// context chip, warning chip at the far edge.
+//
+//   │ dodge@…com ●        DWC/fix-flaky-reconnect   haiku 4.5 ▾  142.3k  ⚠ 2 │
+//
+// REVEAL CONVENTION: every strip element's detail (session line, model
+// options, the context chip's usage breakdown, the warning dropdown and
+// its overlays) renders BELOW the strip and CLAMPS within the viewport —
+// never off-screen left or right.
+//
+// EVERY FIELD OF THE VIEW IS AN ELEMENT MESSAGE. Reading TopbarView
+// enumerates the topbar's subcomponents; each element's props are its own
+// message, so the UI's partition is a fact of the schema and no value rides
+// bare where it could be conflated with a neighbor. Where the same fact also
+// appears in another component's view, THAT component wraps it in ITS OWN
+// message — two dedicated wrappers of one fact imply two separate
+// subcomponents, which is exactly the information a shared wrapper would lose.
+//
+// NO WORKSPACE, NO FENCE: the topbar's stream is per-workspace, so the
+// workspace is the stream's, and one ordered stream per component needs no
+// staleness token — a push cannot overtake a newer one on its own stream.
+//
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "conversation/v1/api.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// One workspace's topbar, resolved completely by the daemon. The client
+// renders each element verbatim and derives nothing.
+message TopbarView {
+  // The title line.
+  TopbarTitle title = 1;
+  // The session identity line (hover/expanded state).
+  TopbarSessionLine session_line = 2;
+  // The model selector: current selection and the selectable list.
+  TopbarModelSelector model_selector = 3;
+  // The connectivity glyph.
+  TopbarConnectivity connectivity = 4;
+  // The warning strip.
+  TopbarWarningStrip warnings = 5;
+  // Tag 6 RETIRED (TokenBreakdownView token_breakdown): the breakdown now
+  // rides the context chip's hover content.
+  reserved 6;
+  // The context chip — a NUMBER, not an icon.
+  TopbarContextChip context = 7;
+  // Which account the session spends as.
+  TopbarAccount account = 8;
+  // The permission-mode picker, the model selector's sibling.
+  TopbarPermissionModePicker permission_mode_picker = 9;
+  // The vendor's fast mode, the permission mode's sibling: the other
+  // session-level standing state a reader has to know before sending, and
+  // the only one that can be neither on nor off. UNSET means the vendor has
+  // stated no fast mode for this session yet — presence, never a bool that
+  // would have to guess.
+  TopbarFastMode fast_mode = 10;
+}
+
+// The vendor's fast mode, as it stands. THE ARM IS THE STATE, carried by
+// name from conversation.v1's SessionFastMode rather than flattened to a
+// bool: cooldown is neither on nor off, and a bool would force the client to
+// draw it as one of them — offering a switch that cannot take effect, or
+// claiming a speed the session does not have.
+//
+// STANDING, not momentary: the state sticks until the vendor states another,
+// so the strip draws it continuously beside the permission mode.
+message TopbarFastMode {
+  oneof state {
+    TopbarFastModeOn on = 1;
+    TopbarFastModeOff off = 2;
+    TopbarFastModeCooldown cooldown = 3;
+  }
+}
+
+// Fast mode is in effect.
+message TopbarFastModeOn {}
+
+// Fast mode is not in effect.
+message TopbarFastModeOff {
+  // The vendor's reason, verbatim — drawn as the cell's tooltip. Empty when
+  // the vendor gave none.
+  string reason = 1;
+}
+
+// Fast mode is unavailable for now and returns on its own. DISTINCT FROM
+// OFF: nothing needs doing, so the cell draws no affordance to turn it back
+// on. SessionFastModeCooldown carries no reset instant, so neither does
+// this — a countdown would be invented rather than reported.
+message TopbarFastModeCooldown {}
+
+// The permission-mode picker: the mode in force and the modes this session
+// may switch to (the daemon serves exactly the set SetPermissionMode will
+// accept — an ungated mode only where creation consented to it). Modes are
+// spelled as the session facts spell them (the shim's mode vocabulary);
+// SetPermissionMode echoes an option's `mode` unchanged.
+message TopbarPermissionModePicker {
+  // The mode in force, WHOLE — the button shows its display_name.
+  TopbarPermissionModeOption current = 1;
+  // The switchable modes, in display order. The picker renders exactly this
+  // list.
+  repeated TopbarPermissionModeOption options = 2;
+}
+
+// One mode the picker offers.
+message TopbarPermissionModeOption {
+  // The mode's wire spelling — what SetPermissionMode echoes.
+  string mode = 1;
+  // The name the picker shows for it.
+  string display_name = 2;
+}
+
+// THE CHIP IS THE CURRENT CONTEXT SIZE, rendered YELLOW: the one figure
+// that must stay visible, because "how full is my context" is what the
+// topbar's token presence exists to answer. It SHRINKS on a compaction or
+// clear, and can never exceed the model's context window — a PRODUCER
+// fact, never a client clamp. Hover reveals the session's usage breakdown.
+message TopbarContextChip {
+  // The current context size, daemon-formatted ("142.3k").
+  string text = 1;
+  // The hover content: the SESSION's token usage. ALWAYS POPULATED so the
+  // hover needs no round-trip.
+  TokenBreakdownView breakdown = 2;
+}
+
+// Which Claude account the session spends as, resolved by the daemon from
+// the session's own config root (its .claude.json login). Far left of the
+// strip. THE ARM IS THE STATE: a logged-out root is a DRAWN WARNING —
+// a session whose root is logged out cannot run a turn, so the label is
+// the warning, never a blank (blank reads as "loading", the one thing it
+// is not).
+message TopbarAccount {
+  oneof state {
+    TopbarAccountLoggedIn logged_in = 1;
+    TopbarAccountLoggedOut logged_out = 2;
+  }
+}
+message TopbarAccountLoggedIn {
+  // The logged-in email, verbatim.
+  string email = 1;
+}
+message TopbarAccountLoggedOut {}
+
+// The title line the topbar shows.
+message TopbarTitle {
+  // Pre-composed (workspace name, or name + branch when the daemon resolves a
+  // branch worth showing); the client never concatenates identity fragments.
+  string text = 1;
+}
+
+// The session identity line, shown in the hover/expanded state.
+message TopbarSessionLine {
+  // Verbatim.
+  string text = 1;
+}
+
+// The model selector: what is selected, and what may be.
+message TopbarModelSelector {
+  // The current selection, WHOLE — the button shows its display_name. UNSET
+  // means no selection and the button renders its placeholder; presence, not
+  // an empty display string.
+  optional conversation.v1.ModelOption selected = 1;
+  // The selectable models, in display order. The selector renders exactly
+  // this list.
+  repeated conversation.v1.ModelOption options = 2;
+}
+
+// The connectivity indicator, fully resolved: a literal glyph, a literal
+// tooltip, and a tone naming a color class from the shared render-colors
+// vocabulary (proto/vocab/render-colors.json — the one deliberate shared
+// authority, so the topbar and the footer paint one condition one color).
+// The STATE it derives from is the session's connectivity, resolved by the
+// daemon; the client never maps that state itself.
+message TopbarConnectivity {
+  // Vocabulary color-class name: one of proto/vocab/render-colors.json's
+  // `topbar_tones` ("none" plus the five live colors; teal died with
+  // hibernation).
+  string tone = 1;
+  // The literal glyph character(s) the indicator draws.
+  string glyph = 2;
+  // Tooltip text, verbatim.
+  string title = 3;
+}
+
+// The warning strip: everything the topbar has to WARN about right now.
+//
+// THE STRIP STATES NOTHING WHEN NOTHING IS WRONG. An empty list is the daemon
+// saying there is nothing wrong, and the client draws no indicator at all
+// rather than a quiet one — a control over an empty list only invites the
+// click that proves it is empty. It is a LIST because a warning is not a
+// property of accounting: a second concern (a degraded watcher, a skewed
+// build) joins this list and reaches the same affordance.
+// The warning dropdown: the last warnings, newest first, capped by the
+// daemon. Each entry is one line in the list; clicking it opens the
+// entry's DETAIL OVERLAY, whose content the kind arm carries.
+message TopbarWarningStrip {
+  // The list, newest first. Empty = nothing is wrong; the strip draws
+  // nothing.
+  repeated TopbarWarning warnings = 1;
+}
+
+// One warning: its list line, and the overlay behind the click.
+message TopbarWarning {
+  // The dropdown row's sentence, drawn verbatim. Never empty.
+  TopbarWarningLine line = 1;
+  // WHICH concern, carrying that kind's overlay content — the expanded
+  // detail a click reveals.
+  oneof detail {
+    TopbarAccountingWarningDetail accounting = 2;
+    TopbarUnmodeledToolWarningDetail unmodeled_tool = 3;
+    TopbarDetachedUnmodeledWarningDetail detached_unmodeled = 4;
+    // A session fault the shim reported — the workspace's session is
+    // unhealthy in a named way.
+    TopbarSessionFaultWarningDetail session_fault = 5;
+    // A degraded window: a span in which a shim component was dropping or
+    // delaying what it observed — evidence that what is on screen may have
+    // holes from that span.
+    TopbarDegradedWindowWarningDetail degraded_window = 6;
+  }
+}
+// The list-line element.
+message TopbarWarningLine {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+
+// The accounting overlay: the reconciliation's evidence, composed — this
+// component's OWN resolved copy (duplicate, don't share: the footer's
+// verdict line is the same fact drawn in its place; the resolver
+// re-publishes both).
+message TopbarAccountingWarningDetail {
+  // One composed evidence line each ("2 responses missing usage"), in
+  // display order.
+  repeated TopbarWarningDetailLine lines = 1;
+}
+// A shared detail-line element WITHIN this dropdown family.
+message TopbarWarningDetailLine {
+  // The line, drawn verbatim.
+  string text = 1;
+}
+
+// The unmodeled-tool overlay: what ran, in an ABBREVIATED, LEGIBLE form a
+// reader can act on (decide whether the tool deserves an arm) — never a raw
+// argument dump, and never drawn as a failure: the tool very likely ran
+// fine; the only thing wrong is that this contract cannot describe it.
+message TopbarUnmodeledToolWarningDetail {
+  // The tool's name, verbatim from the producer.
+  TopbarUnmodeledToolName tool_name = 1;
+  // The daemon's abbreviated account of the call's arguments, one legible
+  // line each. Empty when the daemon could not compose any — the name alone
+  // then carries the overlay.
+  repeated TopbarWarningDetailLine argument_lines = 2;
+}
+// The name element.
+message TopbarUnmodeledToolName {
+  // Verbatim.
+  string text = 1;
+}
+
+// The detached-unmodeled overlay: unmodeled work running DETACHED — the
+// live-work fact the footer's chips deliberately do not carry; surfaced
+// here so it can never vanish. One warning per live item.
+message TopbarDetachedUnmodeledWarningDetail {
+  // The tool's name, verbatim.
+  TopbarUnmodeledToolName tool_name = 1;
+  // When it started, epoch ms — the overlay's clock; the client ticks.
+  int64 started_at_ms = 2;
+}
+
+// The session-fault overlay. The daemon pulls GetSessionDiagnostics at its
+// own cadence and projects unhealthy faults into entries — one warning per
+// fault; a healthy pull retracts them on the next push.
+message TopbarSessionFaultWarningDetail {
+  // Which shim component faulted, verbatim.
+  TopbarWarningComponent component = 1;
+  // The fault's detail, verbatim from the shim.
+  TopbarWarningDetailLine detail = 2;
+}
+// A component-name element, shared WITHIN the dropdown family.
+message TopbarWarningComponent {
+  // Verbatim.
+  string text = 1;
+}
+
+// The degraded-window overlay — one warning per window. Data, drawn by the
+// client: the span's bounds tick and format client-side.
+message TopbarDegradedWindowWarningDetail {
+  // Which component degraded, verbatim.
+  TopbarWarningComponent component = 1;
+  // The shim's stated reason, verbatim.
+  TopbarWarningDetailLine reason = 2;
+  // When the window opened, epoch ms.
+  int64 began_at_ms = 3;
+  // Whether the window has closed. THE ARM IS THE EXTENT.
+  oneof extent {
+    // Still degraded now — the loudest state.
+    TopbarDegradedWindowOpen open = 4;
+    // Closed: when, and what was dropped inside it.
+    TopbarDegradedWindowClosed closed = 5;
+  }
+}
+// Still open. Empty: the arm is the fact.
+message TopbarDegradedWindowOpen {}
+// Closed, with its cost.
+message TopbarDegradedWindowClosed {
+  // When it closed, epoch ms.
+  int64 ended_at_ms = 1;
+  // How many observations were dropped inside the window.
+  int64 dropped_count = 2;
+}
+
+// ==========================================================================
+// THE TOKEN-BREAKDOWN MENU the topbar opens: titled sections of rows. The
+// SESSION's accounting — the footer's turn-level tokens are a different fact
+// and a different component (footer.proto), deliberately uncoupled.
+// ==========================================================================
+
+// The token-breakdown menu, fully resolved. Sections and rows arrive in
+// display order; the client renders exactly this tree.
+// SESSION-SCOPED ONLY: input/output, cached/uncached, thinking, per-model.
+// NO turn-scoped section may ever appear here — turn figures are the
+// FOOTER's domain exclusively (the topbar is turn-nonspecific by nature).
+message TokenBreakdownView {
+  // Menu sections, in display order (e.g. "session", per-model).
+  repeated TokenBreakdownSection sections = 1;
+}
+
+// One titled section of the breakdown menu.
+message TokenBreakdownSection {
+  // The section heading.
+  TokenBreakdownHeading heading = 1;
+  // Rows, in display order.
+  repeated TokenBreakdownRow rows = 2;
+}
+
+// A section's heading.
+message TokenBreakdownHeading {
+  // Verbatim.
+  string text = 1;
+}
+
+// One row of the breakdown menu — the row IS the element, and these are its
+// props. All numbers are resolved; the share is precomputed so the client
+// does no arithmetic.
+message TokenBreakdownRow {
+  // Row label, verbatim (e.g. "uncached input", "fresh input", "cache read").
+  string label = 1;
+  // The row's token count.
+  int64 tokens = 2;
+  // The row's share of its section's basis, in permille (0-1000), already
+  // rounded. UNSET means no share applies to this row and the client omits
+  // the percentage; 0 is a real zero percent. Presence, not a -1 sentinel.
+  optional int32 share_permille = 3;
+  // True when the row is a headline (rendered unindented/emphasized), false
+  // for detail rows. Layout fact resolved daemon-side.
+  bool emphasized = 4;
+  // Indent depth for nested detail rows; 0 = top level.
+  int32 depth = 5;
+}

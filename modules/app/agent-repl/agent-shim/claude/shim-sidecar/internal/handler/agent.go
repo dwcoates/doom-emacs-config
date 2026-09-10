@@ -1,60 +1,87 @@
 package handler
 
+// agent.go — a subagent's sidechain transcript, which is the same JSONL shape as
+// a session transcript and is therefore read by the same converter.
+//
+// WHAT DIFFERS IS THE BOOK, AND ONLY THE BOOK. A subagent's constituents form ITS
+// OWN book, keyed by the vendor `agentId`; the SPAWN that created it is a line in
+// the PARENT's book. Nothing has to be correlated with the session transcript
+// that launched it and nothing has to survive a restart for the association to
+// hold, because both identities are derived from the file path.
+//
+// A sidechain can itself launch detached work — a subagent spawning a subagent —
+// and those launches are read off the tool result exactly as in any other file.
+
 import (
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// AgentTranscriptHandler reads an agent sidechain transcript (agent-*.jsonl and
-// the a*.output agent spool, which is the same JSONL shape). It REUSES the
-// transcript line parser and emits (§7.2): one TaskProgress per batch (the
-// running record count is the agent task's liveness signal) plus any recursive
-// grandchild launches (nested Agent/Workflow/shell launches inside the sidechain
-// become their own TaskStarted). Parse failures still surface as UnparsedEvents.
+// AgentTranscriptHandler reads a subagent's sidechain transcript.
 type AgentTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// obs is the reader's callbacks, adopted one at a time and installed on the
+	// converter once, at construction: a converter has exactly one observer, and
+	// two independent adoptions must not overwrite each other.
+	obs *seamObserver
+	// coords are the FILE COORDINATES of the last batch this handler read, and
+	// mainAgent the agent whose stream the file belongs to.
+	//
+	// THEY EXIST FOR THE SEAM-MINTED TERMINAL, exactly as the shell handler's
+	// do. A backgrounded subagent arrives through an `a*` task spool, and a
+	// terminal the READER concludes for it (a LOST sweep) is built from an
+	// attribution that must carry a real write identity: without one, every such
+	// terminal in the process would digest "producer||0|settle:<run>" and the
+	// store — whose absorption IS write_id equality — would swallow the second
+	// as a replay of the first.
+	coords    fileCoords
+	mainAgent string
 }
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
 func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	log.With(logging.Context{Operation: "agent-handler-new"}).LogVerbose("constructing agent transcript handler")
-	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
+	obs := &seamObserver{}
+	conv := convert.New(log)
+	conv.SetObserver(obs)
+	return &AgentTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
-// Handle implements Handler.
-func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
-	var out []*corev1.Event
-	sawRecord := false
-	for _, f := range frames {
-		if f.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("parse failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless bubble: %v", f.Offset, f.ParseErr)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
-			continue
-		}
-		sawRecord = true
-		line, _, err := h.conv.TranscriptLine(f.Obj)
-		if err != nil {
-			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).Log("conversion failure at offset=%d; the record persists only as an UnparsedEvent and the user reads a structureless bubble: %v", f.Offset, err)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
-			continue
-		}
-		// Recursive grandchild launches: a sidechain agent can itself launch
-		// detached work.
-		if u := line.GetUser(); u != nil {
-			out = append(out, launchTwins(u.GetToolUseResult(), u.GetEnvelope(), ctx)...)
-		}
+// Handle implements tail.Handler.
+func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
+	h.log.With(handleCtx("agent-handle", ctx)).
+		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+	// WHERE WE READ IS A READER FACT, not a conversion outcome, so it is
+	// remembered before the identity check below: a spool whose book never
+	// resolved was still READ, and a terminal minted for it must say so at a
+	// real position.
+	h.rememberCoords(ctx)
+	if ctx.AgentID == "" {
+		// A SIDECHAIN'S BOOK IS ITS AGENT, and its agent is the spawning call
+		// named in the meta file. A transcript whose meta has not been read is
+		// HELD by the reader, so arriving here without an identity means the hold
+		// was skipped — and converting anyway would put this agent's whole book
+		// under the empty id, or under its filename, which the other plane would
+		// never agree with. Refused, loudly, rather than mis-filed.
+		h.log.With(handleErr("agent-handle", ctx)).Log(
+			"subagent transcript reached the handler with no agent identity; its meta file names the spawning call and must be read before it is tailed, so nothing is converted for it")
+		return nil
 	}
-	if sawRecord {
-		out = append(out, taskProgressEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskProgress{
-			TaskId:          ctx.TaskID,
-			Kind:            corev1.TaskKind_TASK_KIND_AGENT,
-			RecordsObserved: ctx.RecordsObserved,
-		}))
-	}
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d saw_record=%t events=%d", len(frames), sawRecord, len(out))
+	out := convertFrames(h.conv, h.log, frames, ctx)
+	h.log.With(handleCtx("agent-handle", ctx)).
+		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
+}
+
+// rememberCoords records where this handler has read to, so a terminal the
+// READER concludes can be stated at a real file position rather than at the
+// zero value every such terminal would otherwise share.
+func (h *AgentTranscriptHandler) rememberCoords(ctx *Context) {
+	h.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
+	if ctx.MainAgentID != "" {
+		h.mainAgent = ctx.MainAgentID
+	}
 }

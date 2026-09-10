@@ -3,1517 +3,1431 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	datav1 "agentrepl/proto/agentshim/data/v1"
-	"agentrepl/shim-store/internal/db"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-store/internal/logging"
-	"agentrepl/wire"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
 )
 
-// --- harness ---------------------------------------------------------------
-
-type harness struct {
-	srv  *Server
-	db   *db.DB
-	path string
-	done <-chan struct{}
+func TestMain(m *testing.M) {
+	// Nothing in this package can reach a vendor, and the suite states so
+	// rather than relying on that remaining true.
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
 }
 
-// start brings up a server on a short UDS path (macOS sun_path limit) with the
-// given fanout buffer and log sink.
-func start(t *testing.T, buffer int, log *logging.Logger) *harness {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "sst")
-	if err != nil {
-		t.Fatalf("mkdtemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	sockPath := filepath.Join(dir, "s")
+// ---- test doubles ----
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "events.db"), log.With(logging.Fields{Component: "db"}))
-	if err != nil {
-		t.Fatalf("db.Open: %v", err)
-	}
-	t.Cleanup(func() { database.Close() })
-
-	ln, err := Listen(sockPath, log.With(logging.Fields{Component: "server", Socket: sockPath}))
-	if err != nil {
-		t.Fatalf("Listen: %v", err)
-	}
-	srv := New(database, log, buffer)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = srv.Serve(ln)
-	}()
-	t.Cleanup(func() {
-		_ = srv.Close()
-		<-done
-	})
-	return &harness{srv: srv, db: database, path: sockPath, done: done}
+// syncBuffer is a log sink safe to read from the test goroutine while server
+// goroutines write to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 }
 
-func testLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
-
-func (h *harness) dial(t *testing.T) net.Conn {
-	t.Helper()
-	conn, err := net.Dial("unix", h.path)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { conn.Close() })
-	return conn
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
 }
 
-// sendMsg / recvMsg are the GOROUTINE-SAFE halves of the framing helpers: they
-// return errors instead of calling t.Fatalf, which a non-test goroutine must
-// never do. The concurrency tests below drive producers from their own
-// goroutines and so cannot use the t-bound wrappers.
-func sendMsg(conn net.Conn, m proto.Message) error {
-	a, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("anypb.New: %w", err)
-	}
-	b, err := proto.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	if err := wire.WriteFrame(conn, b); err != nil {
-		return fmt.Errorf("write frame: %w", err)
-	}
-	return nil
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
-func recvMsg(conn net.Conn) (proto.Message, error) {
-	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		return nil, fmt.Errorf("set read deadline: %w", err)
-	}
-	frame, err := wire.ReadFrame(conn)
-	if err != nil {
-		return nil, fmt.Errorf("read frame: %w", err)
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		return nil, fmt.Errorf("unmarshal Any: %w", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("resolve Any: %w", err)
-	}
-	return m, nil
-}
-
-func send(t *testing.T, conn net.Conn, m proto.Message) {
-	t.Helper()
-	if err := sendMsg(conn, m); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-}
-
-func recv(t *testing.T, conn net.Conn) proto.Message {
-	t.Helper()
-	m, err := recvMsg(conn)
-	if err != nil {
-		t.Fatalf("recv: %v", err)
-	}
-	return m
-}
-
-func recvEvent(t *testing.T, conn net.Conn) *corev1.Event {
-	t.Helper()
-	m := recv(t, conn)
-	ev, ok := m.(*corev1.Event)
-	if !ok {
-		t.Fatalf("expected *Event, got %T", m)
-	}
-	return ev
-}
-
-func recvSubscriptionReady(t *testing.T, conn net.Conn) {
-	t.Helper()
-	if _, ok := recv(t, conn).(*corev1.Heartbeat); !ok {
-		t.Fatal("subscription readiness frame is not a Heartbeat")
-	}
-}
-
-func recvAck(t *testing.T, conn net.Conn) *corev1.StoreWriteAck {
-	t.Helper()
-	m := recv(t, conn)
-	ack, ok := m.(*corev1.StoreWriteAck)
-	if !ok {
-		t.Fatalf("expected *StoreWriteAck, got %T", m)
-	}
-	return ack
-}
-
-func collectStoredReplay(t *testing.T, database *db.DB, session string, fromSeq uint64) []*corev1.Event {
-	t.Helper()
-	var events []*corev1.Event
-	if _, err := database.ReplayFrom(context.Background(), session, fromSeq, func(ev *corev1.Event) error {
-		events = append(events, ev)
-		return nil
-	}); err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
-	return events
-}
-
-func vAssistantStream(t *testing.T, session, uuid string) *corev1.Event {
-	t.Helper()
-	a, err := anypb.New(&datav1.ClaudeStreamMessage{
-		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: uuid}},
-	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{SessionId: session, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_Vendor{Vendor: a}}
-}
-
-func vAssistantDisk(t *testing.T, session, uuid string) *corev1.Event {
-	t.Helper()
-	a, err := anypb.New(&datav1.TranscriptLine{
-		Line: &datav1.TranscriptLine_Assistant{Assistant: &datav1.AssistantLine{Envelope: &datav1.LineEnvelope{Uuid: uuid}}},
-	})
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	return &corev1.Event{SessionId: session, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_FILE, Payload: &corev1.Event_Vendor{Vendor: a}}
-}
-
-func write(events ...*corev1.Event) *corev1.StoreWrite {
-	return &corev1.StoreWrite{Producer: "test", Batch: &corev1.EventBatch{Events: events}}
-}
-
-// --- tests -----------------------------------------------------------------
-
-func TestRoundTripWriteAckSubscribeReplay(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	// Act: write a two-event batch.
-	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B")))
-	ack := recvAck(t, prod)
-	// Assert ack.
-	if ack.GetAccepted() != 2 || ack.GetDeduped() != 0 || ack.GetLastSeq() != 2 {
-		t.Fatalf("ack = %+v, want accepted=2 deduped=0 last_seq=2", ack)
-	}
-	// Act: subscribe from 0 and read the replay.
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	e1 := recvEvent(t, sub)
-	e2 := recvEvent(t, sub)
-	recvSubscriptionReady(t, sub)
-	// Assert replay.
-	if e1.GetSeq() != 1 || e2.GetSeq() != 2 {
-		t.Fatalf("replayed seqs = [%d %d], want [1 2]", e1.GetSeq(), e2.GetSeq())
-	}
-}
-
-func TestSubscribeReadyProvesRegistrationBeforeAnImmediateProducerWrite(t *testing.T) {
-	// Arrange: an empty store makes readiness the first subscriber frame.
-	h := start(t, 0, testLogger())
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-
-	// Act: the readiness frame is the registration barrier, then another socket
-	// writes without any delay.
-	recvSubscriptionReady(t, sub)
-	prod := h.dial(t)
-	send(t, prod, write(vAssistantStream(t, "s1", "after-ready")))
-	if ack := recvAck(t, prod); ack.GetAccepted() != 1 {
-		t.Fatalf("write ack accepted = %d, want 1", ack.GetAccepted())
-	}
-
-	// Assert: the event cannot have overtaken subscriber registration.
-	if ev := recvEvent(t, sub); ev.GetSeq() != 1 {
-		t.Fatalf("live event seq = %d, want 1", ev.GetSeq())
-	}
-}
-
-func TestHeartbeatCanPrecedeTheFirstProducerWrite(t *testing.T) {
-	// Arrange: startup recovery established the producer socket, but no source
-	// file changed yet, so the sidecar has no StoreWrite with which to declare
-	// the connection's role.
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-
-	// Act: idle liveness traffic arrives first, then a real producer batch.
-	send(t, prod, &corev1.Heartbeat{SentAtMs: 42})
-	echo, ok := recv(t, prod).(*corev1.Heartbeat)
-	if !ok {
-		t.Fatalf("heartbeat reply type = %T, want *Heartbeat", echo)
-	}
-	send(t, prod, write(vAssistantStream(t, "s1", "A")))
-	ack := recvAck(t, prod)
-
-	// Assert: the preamble stayed connected and the first write was ingested.
-	if echo.GetSentAtMs() != 42 {
-		t.Fatalf("heartbeat sent_at_ms = %d, want 42", echo.GetSentAtMs())
-	}
-	if ack.GetAccepted() != 1 || ack.GetLastSeq() != 1 {
-		t.Fatalf("ack = %+v, want accepted=1 last_seq=1", ack)
-	}
-}
-
-func TestHealthCheckCanPrecedeTheFirstProducerWrite(t *testing.T) {
-	// Arrange: health is the first intentional frame on the recovered producer
-	// socket, before a file change provides a StoreWrite.
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-
-	// Act: assert a correlated health reply, then write on the same connection.
-	send(t, prod, &corev1.HealthCheck{RequestId: "health-before-write"})
-	status, ok := recv(t, prod).(*corev1.HealthStatus)
-	if !ok {
-		t.Fatalf("health reply type = %T, want *HealthStatus", status)
-	}
-	send(t, prod, write(vAssistantStream(t, "s1", "A")))
-	ack := recvAck(t, prod)
-
-	// Assert: health was correlated and did not discard the producer preamble.
-	if status.GetRequestId() != "health-before-write" || !status.GetHealthy() || status.GetComponent() != "shim-store" {
-		t.Fatalf("health status = %+v, want correlated healthy shim-store status", status)
-	}
-	if ack.GetAccepted() != 1 || ack.GetLastSeq() != 1 {
-		t.Fatalf("ack = %+v, want accepted=1 last_seq=1", ack)
-	}
-}
-
-func TestEmptySubscribeLogsCanonicalProtocolRejection(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
-	conn := h.dial(t)
-	send(t, conn, &corev1.Subscribe{})
-	conn.SetReadDeadline(time.Now().Add(time.Second))
-	if _, err := wire.ReadAny(conn); err == nil {
-		t.Fatal("empty subscription unexpectedly received a response")
-	}
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-	<-h.done
-
-	record, found := findLoggedRecord(t, logs.Bytes(), "subscribe", "error")
-	if !found {
-		t.Fatalf("empty-subscribe rejection log missing: %s", logs.String())
-	}
-	if record.Context["component"] != "server" || record.Context["socket"] != "store.sock" || record.Context["subscriber"] == "" {
-		t.Fatalf("empty-subscribe rejection lacks canonical connection context: %#v", record)
-	}
-}
-
-func TestCloseLogsListenerFailure(t *testing.T) {
-	var logs bytes.Buffer
-	closeErr := errors.New("listener close failed")
-	srv := &Server{
-		log:   logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}),
-		ln:    failingListener{err: closeErr},
-		conns: make(map[net.Conn]struct{}),
-	}
-	if err := srv.Close(); !errors.Is(err, closeErr) {
-		t.Fatalf("Close error = %v, want listener failure", err)
-	}
-
-	record, found := findLoggedRecord(t, logs.Bytes(), "close-listener", "error")
-	if !found {
-		t.Fatalf("listener-close error record missing: %s", logs.String())
-	}
-	if record.Level != "error" || record.Context["component"] != "server" || record.Context["socket"] != "store.sock" {
-		t.Fatalf("listener-close error lacks canonical context: %#v", record)
-	}
-}
-
-type failingListener struct{ err error }
-
-func (l failingListener) Accept() (net.Conn, error) { return nil, l.err }
-func (l failingListener) Close() error              { return l.err }
-func (l failingListener) Addr() net.Addr            { return fakeAddr("store.sock") }
-
-type fakeAddr string
-
-func (a fakeAddr) Network() string { return "unix" }
-func (a fakeAddr) String() string  { return string(a) }
-
-func TestReplayFromMidSeq(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B"), vAssistantStream(t, "s1", "C")))
-	recvAck(t, prod)
-	// Act: subscribe from_seq=1 (exclusive) → expect seqs 2,3.
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 1})
-	e1 := recvEvent(t, sub)
-	e2 := recvEvent(t, sub)
-	recvSubscriptionReady(t, sub)
-	// Assert
-	if e1.GetSeq() != 2 || e2.GetSeq() != 3 {
-		t.Fatalf("replay from_seq=1 gave [%d %d], want [2 3]", e1.GetSeq(), e2.GetSeq())
-	}
-}
-
-func TestLargeReplayStreamsInOrderWithBoundedProgressLogs(t *testing.T) {
-	// Arrange: one batch near the observed incident scale's first progress
-	// boundary. The store must emit the first row before advancing through the
-	// query and must not emit one diagnostic per row.
-	const eventCount = 513
-	logf, drain := collectLogs(128, true)
-	h := start(t, 0, logf)
-	prod := h.dial(t)
-	events := make([]*corev1.Event, 0, eventCount)
-	for i := range eventCount {
-		events = append(events, vAssistantStream(t, "s1", fmt.Sprintf("replay-%04d", i)))
-	}
-	send(t, prod, write(events...))
-	recvAck(t, prod)
-
-	// Act
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	for want := uint64(1); want <= eventCount; want++ {
-		if got := recvEvent(t, sub).GetSeq(); got != want {
-			t.Fatalf("streamed seq=%d, want=%d", got, want)
-		}
-	}
-	recvSubscriptionReady(t, sub)
-	// A live event proves serveSubscriber finished the replay and entered its
-	// tail loop, so the completion record is present without a timing sleep.
-	send(t, prod, write(vAssistantStream(t, "s1", "tail-proof")))
-	recvAck(t, prod)
-	if got := recvEvent(t, sub).GetSeq(); got != eventCount+1 {
-		t.Fatalf("tail proof seq=%d, want=%d", got, eventCount+1)
-	}
-
-	// Assert
-	lines := drain()
-	if got := findLineContaining(lines, "subscribe-replay-progress", "delivered=512 first_seq=1 last_seq=512"); got == "" {
-		t.Fatalf("bounded replay progress record missing from %d log lines", len(lines))
-	}
-	if got := findLineContaining(lines, "subscribe-replay", "delivered=513 first_seq=1 last_seq=513 query_ms="); got == "" {
-		t.Fatalf("replay completion range and timing missing from %d log lines", len(lines))
-	}
-	progressRecords := 0
-	for _, line := range lines {
-		if strings.Contains(line, `"operation":"subscribe-replay-progress"`) {
-			progressRecords++
-		}
-	}
-	if progressRecords != 2 {
-		t.Fatalf("progress records=%d, want 2 at delivered=1 and delivered=512", progressRecords)
-	}
-}
-
-func TestDedupCollisionAcrossPlanes(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	// Act: the stream twin then the file twin of the same uuid.
-	send(t, prod, write(vAssistantStream(t, "s1", "X")))
-	ack1 := recvAck(t, prod)
-	send(t, prod, write(vAssistantDisk(t, "s1", "X")))
-	ack2 := recvAck(t, prod)
-	// Assert: first accepted, second fully deduped.
-	if ack1.GetAccepted() != 1 || ack1.GetDeduped() != 0 {
-		t.Fatalf("ack1 = %+v, want accepted=1 deduped=0", ack1)
-	}
-	if ack2.GetAccepted() != 0 || ack2.GetDeduped() != 1 {
-		t.Fatalf("ack2 = %+v, want accepted=0 deduped=1", ack2)
-	}
-	// Assert: exactly one row persisted.
-	replayed := collectStoredReplay(t, h.db, "s1", 0)
-	if len(replayed) != 1 {
-		t.Fatalf("persisted %d events, want 1 (deduped twin)", len(replayed))
-	}
-}
-
-func TestCrashReplayIdempotency(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	batch := func() *corev1.StoreWrite {
-		return write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B"))
-	}
-	// Act: the identical batch twice (a producer crash-and-replay).
-	send(t, prod, batch())
-	ack1 := recvAck(t, prod)
-	send(t, prod, batch())
-	ack2 := recvAck(t, prod)
-	// Assert: first fully accepted, second fully deduped.
-	if ack1.GetAccepted() != 2 {
-		t.Fatalf("ack1 accepted = %d, want 2", ack1.GetAccepted())
-	}
-	if ack2.GetAccepted() != 0 || ack2.GetDeduped() != 2 {
-		t.Fatalf("ack2 = %+v, want accepted=0 deduped=2", ack2)
-	}
-	replayed := collectStoredReplay(t, h.db, "s1", 0)
-	if len(replayed) != 2 {
-		t.Fatalf("persisted %d events, want 2", len(replayed))
-	}
-}
-
-func TestEphemeralPassThroughNotPersisted(t *testing.T) {
-	// Arrange
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	recvSubscriptionReady(t, sub)
-
-	// Handshake: a persistent event proves the subscriber is registered and
-	// live-tailing (received via replay or live either way) before we send the
-	// ephemeral, with no timing assumptions.
-	send(t, prod, write(vAssistantStream(t, "s1", "P1")))
-	recvAck(t, prod)
-	if got := recvEvent(t, sub); got.GetSeq() != 1 {
-		t.Fatalf("handshake seq = %d, want 1", got.GetSeq())
-	}
-
-	// Act: a batch mixing a persistent event and an ephemeral one.
-	eph := &corev1.Event{SessionId: "s1", Class: corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-		Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "live"}}}
-	send(t, prod, write(vAssistantStream(t, "s1", "P2"), eph))
-	ack := recvAck(t, prod)
-
-	// Assert: only the persistent event was accepted/persisted.
-	if ack.GetAccepted() != 1 {
-		t.Fatalf("ack accepted = %d, want 1 (ephemeral not persisted)", ack.GetAccepted())
-	}
-	p2 := recvEvent(t, sub)
-	if p2.GetSeq() != 2 {
-		t.Fatalf("persistent seq = %d, want 2", p2.GetSeq())
-	}
-	live := recvEvent(t, sub)
-	if live.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-		t.Fatalf("expected ephemeral pass-through, got class %v", live.GetClass())
-	}
-
-	// Assert: the DB contains only the two persistent events, never the ephemeral.
-	replayed := collectStoredReplay(t, h.db, "s1", 0)
-	if len(replayed) != 2 {
-		t.Fatalf("persisted %d events, want 2 (no ephemeral)", len(replayed))
-	}
-	for _, ev := range replayed {
-		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-			t.Fatal("ephemeral event was persisted")
-		}
-	}
-}
-
-// --- publish-order (seq inversion) ----------------------------------------
-//
-// THE INCIDENT THESE COVER. Seq assignment was always serialized (BEGIN
-// IMMEDIATE), but the fan-out publish ran after the transaction on the
-// producer's own goroutine holding nothing. Two producers on one session could
-// therefore commit as N-then-N+1 and publish as N+1-then-N. The daemon reads a
-// non-increasing seq on a session as a terminal protocol violation and kills the
-// session, mid-turn — seen twice on 2026-07-29 (seq=642 after 647, and seq=1043
-// after 1044).
-
-// concurrentProducer drives one producer connection from its own goroutine.
-//
-// IT PIPELINES DELIBERATELY: every batch is written without waiting for its ack,
-// and a second goroutine drains the acks. Ack-per-batch would defeat the whole
-// test — the ack is written AFTER the fan-out publish, so a producer that waits
-// for it is serialized against its own publish and can never be mid-region while
-// another producer publishes. Pipelining is what keeps both of the store's
-// handler goroutines deep in ingestAndFan at the same time, which is the
-// condition the production inversion needed.
-func concurrentProducer(conn net.Conn, batches []*corev1.StoreWrite, ready *sync.WaitGroup, start <-chan struct{}) error {
-	drained := make(chan error, 1)
-	go func() {
-		for i := range batches {
-			m, err := recvMsg(conn)
-			if err != nil {
-				drained <- fmt.Errorf("batch %d ack: %w", i, err)
-				return
-			}
-			if _, ok := m.(*corev1.StoreWriteAck); !ok {
-				drained <- fmt.Errorf("batch %d: ack type = %T, want *StoreWriteAck", i, m)
-				return
-			}
-		}
-		drained <- nil
-	}()
-
-	ready.Done()
-	<-start
-	for i, batch := range batches {
-		if err := sendMsg(conn, batch); err != nil {
-			return fmt.Errorf("batch %d: %w", i, err)
-		}
-	}
-	return <-drained
-}
-
-// runProducersConcurrently releases every producer at once from a channel
-// barrier and waits for all of them. No sleeps: `ready` proves each goroutine
-// reached the barrier, closing `start` releases them together, and `wg` bounds
-// the act.
-func runProducersConcurrently(t *testing.T, fns ...func(*sync.WaitGroup, <-chan struct{}) error) {
-	t.Helper()
-	var ready, done sync.WaitGroup
-	ready.Add(len(fns))
-	done.Add(len(fns))
-	start := make(chan struct{})
-	errs := make([]error, len(fns))
-	for i, fn := range fns {
-		go func() {
-			defer done.Done()
-			errs[i] = fn(&ready, start)
-		}()
-	}
-	ready.Wait() // every producer is at the barrier
-	close(start) // release them together
-	done.Wait()
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("producer %d: %v", i, err)
-		}
-	}
-}
-
-// registerSubscriber opens a subscription from 0 and proves it is REGISTERED and
-// live-tailing by round-tripping one persistent event through it. Returns the
-// subscriber conn and the seq that handshake consumed, so a caller can assert
-// only on what follows. No timing assumptions.
-func registerSubscriber(t *testing.T, h *harness, session string) (net.Conn, uint64) {
-	t.Helper()
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: session, FromSeq: 0})
-	recvSubscriptionReady(t, sub)
-	prod := h.dial(t)
-	send(t, prod, write(vAssistantStream(t, session, "handshake")))
-	if ack := recvAck(t, prod); ack.GetAccepted() != 1 {
-		t.Fatalf("handshake ack accepted = %d, want 1", ack.GetAccepted())
-	}
-	ev := recvEvent(t, sub)
-	if ev.GetSeq() == 0 {
-		t.Fatal("handshake event arrived with seq=0")
-	}
-	return sub, ev.GetSeq()
-}
-
-// watchSeqOrder drains the subscriber CONCURRENTLY with the producers, checking
-// monotonicity as each event lands, and returns a join func yielding the first
-// violation (nil if none).
-//
-// Draining concurrently is not an optimization, it is what makes the test valid.
-// Buffering every event to assert afterwards caps the batch count at the fanout
-// buffer, and overrunning that buffer HARD-DISCONNECTS the subscriber
-// (fanout.publish's slow-consumer path) — which surfaces as an EOF read error
-// that looks like a failure but proves nothing about ordering. Reading as they
-// arrive decouples volume from the buffer, and volume is what makes the
-// inversion reproducible.
-//
-// `wantPersistent` counts only seq-bearing events; ephemerals are passed over
-// (they carry no seq and so cannot violate the ordering).
-func watchSeqOrder(sub net.Conn, floor uint64, wantPersistent int) func() error {
-	result := make(chan error, 1)
-	go func() {
-		last := floor
-		for seen := 0; seen < wantPersistent; {
-			m, err := recvMsg(sub)
-			if err != nil {
-				result <- fmt.Errorf("after %d/%d persistent events: %w", seen, wantPersistent, err)
-				return
-			}
-			ev, ok := m.(*corev1.Event)
-			if !ok {
-				result <- fmt.Errorf("after %d persistent events: frame type = %T, want *Event", seen, m)
-				return
-			}
-			if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
-				continue
-			}
-			if ev.GetSeq() <= last {
-				result <- fmt.Errorf("persistent event %d: seq %d did not increase past %d — publish order inverted", seen, ev.GetSeq(), last)
-				return
-			}
-			last = ev.GetSeq()
-			seen++
-		}
-		result <- nil
-	}()
-	return func() error { return <-result }
-}
-
-// oneEventBatches builds n single-event batches from a per-index event factory.
-func oneEventBatches(n int, event func(i int) *corev1.Event) []*corev1.StoreWrite {
-	batches := make([]*corev1.StoreWrite, n)
-	for i := range n {
-		batches[i] = write(event(i))
-	}
-	return batches
-}
-
-func TestConcurrentProducersOnOneSessionPublishInSeqOrder(t *testing.T) {
-	// Arrange: one session, two producers on different planes with distinct
-	// dedup identities — the shim's stream plane and the sidecar's file plane,
-	// which is exactly the pair that collided in production. Distinct uuids mean
-	// nothing dedups, so every event is assigned a seq and must be published.
-	// The fanout buffer is set well above the event count so a slow-consumer
-	// disconnect can never masquerade as an ordering failure; the buffer is not
-	// what is under test here.
-	const perProducer = 1500
-	h := start(t, 4*perProducer, testLogger())
-	sub, handshakeSeq := registerSubscriber(t, h, "s1")
-
-	streamConn, diskConn := h.dial(t), h.dial(t)
-	streamBatches := oneEventBatches(perProducer, func(i int) *corev1.Event {
-		return vAssistantStream(t, "s1", fmt.Sprintf("stream-%d", i))
-	})
-	diskBatches := oneEventBatches(perProducer, func(i int) *corev1.Event {
-		return vAssistantDisk(t, "s1", fmt.Sprintf("disk-%d", i))
-	})
-
-	// Assert (armed first): the subscriber's stream is STRICTLY INCREASING. This
-	// is the daemon's own invariant — dispatchEvent treats any non-increasing seq
-	// on a session as a terminal protocol violation — checked off the same wire
-	// the daemon reads.
-	joinWatcher := watchSeqOrder(sub, handshakeSeq, 2*perProducer)
-
-	// Act: both producers write the same session at once.
-	runProducersConcurrently(t,
-		func(ready *sync.WaitGroup, start <-chan struct{}) error {
-			return concurrentProducer(streamConn, streamBatches, ready, start)
-		},
-		func(ready *sync.WaitGroup, start <-chan struct{}) error {
-			return concurrentProducer(diskConn, diskBatches, ready, start)
-		},
-	)
-
-	if err := joinWatcher(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRejectedBatchReleasesTheIngestLock(t *testing.T) {
-	// Arrange: a batch the db layer refuses outright. A persistent event with no
-	// session_id is rejected inside Ingest (it has no seq space to belong to), so
-	// ingestAndFan returns down its error branch — the one path that must still
-	// release the lock it took on the way in.
-	h := start(t, 0, testLogger())
-	bad := h.dial(t)
-
-	// Act: the rejected batch, then an ordinary batch on a DIFFERENT producer
-	// connection — the real hazard is a leaked lock wedging every OTHER producer.
-	send(t, bad, write(&corev1.Event{
-		Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		Plane:   corev1.Plane_PLANE_STREAM,
-		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
-	}))
-	rejected := recvAck(t, bad)
-
-	good := h.dial(t)
-	send(t, good, write(vAssistantStream(t, "s1", "after-rejection")))
-	served := recvAck(t, good) // a leaked lock hangs here until the read deadline
-
-	// Assert: the rejection was reported loudly, and the store still serves. The
-	// error branch is unchanged; only the unlock was added.
-	if rejected.GetError() == "" {
-		t.Fatal("rejected batch acked with an empty error; the loud rejection path changed")
-	}
-	if rejected.GetAccepted() != 0 {
-		t.Fatalf("rejected ack accepted = %d, want 0", rejected.GetAccepted())
-	}
-	if served.GetAccepted() != 1 || served.GetLastSeq() != 1 {
-		t.Fatalf("post-rejection ack = %+v, want accepted=1 last_seq=1", served)
-	}
-}
-
-// collectLogs returns a log sink plus a drain. Every line the server emits for
-// a batch is logged before its ack is written, so draining after recvAck sees
-// exactly that batch's lines with no timing assumptions.
-type channelWriter chan string
-
-func (w channelWriter) Write(p []byte) (int, error) {
-	select {
-	case w <- strings.TrimSpace(string(p)):
-	default:
-	}
-	return len(p), nil
-}
-
-func collectLogs(capacity int, verbose bool) (*logging.Logger, func() []string) {
-	lines := make(chan string, capacity)
-	logf := logging.New(channelWriter(lines), io.Discard, verbose)
-	drain := func() []string {
-		var out []string
-		for {
-			select {
-			case l := <-lines:
-				out = append(out, l)
-			default:
-				return out
-			}
-		}
-	}
-	return logf, drain
-}
-
-func findLine(lines []string, operation string) string {
-	for _, l := range lines {
-		if strings.Contains(l, `"operation":"`+operation+`"`) {
-			return l
-		}
-	}
-	return ""
-}
-
-func findLineContaining(lines []string, operation, message string) string {
-	for _, l := range lines {
-		if strings.Contains(l, `"operation":"`+operation+`"`) && strings.Contains(l, message) {
-			return l
-		}
-	}
-	return ""
-}
-
-type loggedRecord struct {
-	Level     string         `json:"level"`
+type logRecord struct {
 	Operation string         `json:"operation"`
+	Level     string         `json:"level"`
 	Message   string         `json:"message"`
-	Session   string         `json:"claude_session_id"`
+	RequestID string         `json:"request_id"`
 	Context   map[string]any `json:"context"`
 }
 
-func findLoggedRecord(t *testing.T, logs []byte, operation, level string) (loggedRecord, bool) {
+func records(t *testing.T, sink *syncBuffer) []logRecord {
 	t.Helper()
-	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
-		var record loggedRecord
-		if err := json.Unmarshal(line, &record); err != nil {
-			t.Fatalf("server record is not JSON: %v", err)
+	var out []logRecord
+	for _, line := range strings.Split(strings.TrimSpace(sink.String()), "\n") {
+		if line == "" {
+			continue
 		}
-		if record.Operation == operation && record.Level == level {
-			return record, true
+		var rec logRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+func findRecord(t *testing.T, sink *syncBuffer, operation, level string) (logRecord, bool) {
+	t.Helper()
+	for _, rec := range records(t, sink) {
+		if rec.Operation == operation && rec.Level == level {
+			return rec, true
 		}
 	}
-	return loggedRecord{}, false
+	return logRecord{}, false
 }
 
-func TestIngestVerboseLineLogsBatchFacts(t *testing.T) {
-	// Arrange
-	logf, drain := collectLogs(64, true)
-	h := start(t, 0, logf)
-	prod := h.dial(t)
+// fakeStore is the storage layer as internal/server needs it: every answer is
+// staged by the test, and the two gates make the replay-to-live handoff
+// observable without a single sleep.
+type fakeStore struct {
+	mu sync.Mutex
 
-	// Act: a two-event persistent batch.
-	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B")))
-	recvAck(t, prod)
+	writeResult WriteResult
+	writeErr    error
+	writes      []string
 
-	// Assert: the server's durable-batch outcome carries the batch's facts.
-	want := "persisted batch events=2 accepted=2 deduped=0 replayed=0 last_seq=2 ingest_ms="
-	got := findLineContaining(drain(), "ingest", want)
-	if !strings.Contains(got, want) {
-		t.Fatalf("ingest line = %q, want message containing %q", got, want)
+	opened  OpenedPage
+	openErr error
+
+	page    *storev1.ReadAgentPageSuccess
+	pageErr error
+
+	since    []LineWritten
+	sinceErr error
+	// sinceEntered is closed the first time LinesSince is called, which is the
+	// signal that the handler has already subscribed to the fan-out.
+	sinceEntered chan struct{}
+	// sinceRelease, when non-nil, blocks LinesSince until the test closes it.
+	sinceRelease chan struct{}
+
+	bashRun    BashRunReplay
+	bashRunErr error
+	// bashRunEntered is closed the first time BashRun is called, which is the
+	// signal that the handler has already subscribed to the bash fan-out.
+	bashRunEntered chan struct{}
+	// bashRunRelease, when non-nil, blocks BashRun until the test closes it.
+	bashRunRelease chan struct{}
+
+	live    *storev1.GetLiveWorkSuccess
+	liveErr error
+
+	cursors      []*storev1.CursorState
+	cursorsErr   error
+	cursorsFor   *string
+	cursorsScope bool
+
+	closed bool
+}
+
+func newFakeStore() *fakeStore {
+	return &fakeStore{
+		opened:         OpenedPage{Page: &storev1.AgentSessionPage{Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}}},
+		page:           &storev1.ReadAgentPageSuccess{Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}},
+		live:           &storev1.GetLiveWorkSuccess{},
+		sinceEntered:   make(chan struct{}),
+		bashRunEntered: make(chan struct{}),
 	}
 }
 
-func TestIngestVerboseLineSilentForEphemeralOnlyBatch(t *testing.T) {
-	// Arrange
-	logf, drain := collectLogs(64, true)
-	h := start(t, 0, logf)
-	prod := h.dial(t)
-
-	// Act: a batch with nothing persistent in it.
-	eph := &corev1.Event{SessionId: "s1", Class: corev1.EventClass_EVENT_CLASS_EPHEMERAL,
-		Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "live"}}}
-	send(t, prod, write(eph))
-	recvAck(t, prod)
-
-	// Assert: no ingest line for a batch that never touched the DB.
-	if got := findLine(drain(), "ingest"); got != "" {
-		t.Fatalf("ephemeral-only batch logged %q, want silence", got)
-	}
+func (f *fakeStore) WriteBatch(_ context.Context, producer string, _ *storev1.EntryBatch) (WriteResult, error) {
+	f.mu.Lock()
+	f.writes = append(f.writes, producer)
+	result, err := f.writeResult, f.writeErr
+	f.mu.Unlock()
+	return result, err
 }
 
-func TestIngestSuccessSilentWhenVerboseDisabled(t *testing.T) {
-	logf, drain := collectLogs(64, false)
-	h := start(t, 0, logf)
-	prod := h.dial(t)
-
-	send(t, prod, write(vAssistantStream(t, "s1", "A")))
-	recvAck(t, prod)
-
-	if got := findLine(drain(), "ingest"); got != "" {
-		t.Fatalf("non-verbose ingest success logged %q, want silence", got)
-	}
+func (f *fakeStore) OpenPage(context.Context, string, uint32, *storev1.StoreItemPointer) (OpenedPage, error) {
+	return f.opened, f.openErr
 }
 
-// --- subscriber termination -------------------------------------------------
-//
-// These fixtures hold the exact producer-side transition with a hook owned by
-// the subscriber state machine.  A test only advances a gate after it has
-// observed the preceding transition, so no outcome relies on a scheduler race
-// or a duration being long enough.
-
-type subscriberTerminalCapture struct {
-	records chan subscriberTerminalRecord
+func (f *fakeStore) ReadPage(context.Context, string, uint32, *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error) {
+	return f.page, f.pageErr
 }
 
-func newSubscriberTerminalCapture() *subscriberTerminalCapture {
-	return &subscriberTerminalCapture{records: make(chan subscriberTerminalRecord, 2)}
-}
-
-func (c *subscriberTerminalCapture) hook(record subscriberTerminalRecord) {
-	c.records <- record
-}
-
-func (c *subscriberTerminalCapture) await(t *testing.T) subscriberTerminalRecord {
-	t.Helper()
+func (f *fakeStore) LinesSince(context.Context, string, uint64) ([]LineWritten, error) {
+	f.mu.Lock()
 	select {
-	case record := <-c.records:
-		return record
-	case <-time.After(time.Second):
-		t.Fatal("subscriber terminal record was not emitted")
-		return subscriberTerminalRecord{}
-	}
-}
-
-func (c *subscriberTerminalCapture) assertExactlyOne(t *testing.T) {
-	t.Helper()
-	select {
-	case extra := <-c.records:
-		t.Fatalf("extra subscriber terminal record = %+v", extra)
+	case <-f.sinceEntered:
 	default:
+		close(f.sinceEntered)
 	}
+	release := f.sinceRelease
+	f.mu.Unlock()
+	if release != nil {
+		<-release
+	}
+	return f.since, f.sinceErr
 }
 
-type subscriberGate struct {
-	reached chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func newSubscriberGate() *subscriberGate {
-	return &subscriberGate{reached: make(chan struct{}), release: make(chan struct{})}
-}
-
-func (g *subscriberGate) wait() {
-	g.once.Do(func() { close(g.reached) })
-	<-g.release
-}
-
-func (g *subscriberGate) await(t *testing.T) {
-	t.Helper()
+func (f *fakeStore) BashRun(context.Context, string) (BashRunReplay, error) {
+	f.mu.Lock()
 	select {
-	case <-g.reached:
-	case <-time.After(time.Second):
-		t.Fatal("subscriber gate was not reached")
+	case <-f.bashRunEntered:
+	default:
+		close(f.bashRunEntered)
 	}
-}
-
-func (g *subscriberGate) open() { close(g.release) }
-
-// nthSubscriberGate blocks one selected replay row without changing the
-// preceding rows.  The counter runs only in serveSubscriber's replay owner.
-type nthSubscriberGate struct {
-	want    int
-	seen    int
-	mu      sync.Mutex
-	blocked *subscriberGate
-}
-
-func (g *nthSubscriberGate) wait() {
-	g.mu.Lock()
-	g.seen++
-	block := g.seen == g.want
-	g.mu.Unlock()
-	if block {
-		g.blocked.wait()
+	release := f.bashRunRelease
+	f.mu.Unlock()
+	if release != nil {
+		<-release
 	}
+	return f.bashRun, f.bashRunErr
 }
 
-// writeFaultConn fails its next socket write after the caller releases the
-// gate.  Reads remain delegated to the pipe, allowing the terminal owner to
-// close the server side and prove the reader suppresses its self-close error.
-type writeFaultConn struct {
-	net.Conn
-	gate      *subscriberGate
-	err       error
-	once      sync.Once
-	readError chan struct{}
-	readOnce  sync.Once
+func (f *fakeStore) LiveWork(context.Context) (*storev1.GetLiveWorkSuccess, error) {
+	return f.live, f.liveErr
 }
 
-type readFaultConn struct {
-	net.Conn
-	release <-chan struct{}
-	err     error
-	noticed chan<- struct{}
-	once    sync.Once
+func (f *fakeStore) Cursors(_ context.Context, fileID *string) ([]*storev1.CursorState, error) {
+	f.mu.Lock()
+	f.cursorsScope = true
+	f.cursorsFor = fileID
+	f.mu.Unlock()
+	return f.cursors, f.cursorsErr
 }
 
-func (c *readFaultConn) Read([]byte) (int, error) {
-	<-c.release
-	c.once.Do(func() { close(c.noticed) })
-	return 0, c.err
+func (f *fakeStore) Close() error {
+	f.closed = true
+	return nil
 }
 
-func (c *writeFaultConn) Write(p []byte) (int, error) {
-	c.gate.wait()
-	fail := false
-	c.once.Do(func() { fail = true })
-	if fail {
-		return 0, c.err
-	}
-	return c.Conn.Write(p)
+// ---- harness ----
+
+type harness struct {
+	server *Server
+	client storev1connect.ShimStoreClient
+	// stream is the h2c client the watch tests use, so streaming is exercised
+	// on the same cleartext HTTP/2 the store's socket offers.
+	stream storev1connect.ShimStoreClient
+	url    string
+	logs   *syncBuffer
+	http   *http.Client
 }
 
-func (c *writeFaultConn) Read(p []byte) (int, error) {
-	n, err := c.Conn.Read(p)
-	if err != nil && c.readError != nil {
-		c.readOnce.Do(func() { close(c.readError) })
-	}
-	return n, err
+// h2cClient dials cleartext HTTP/2 with prior knowledge: no TLS anywhere, which
+// is what the store's unix socket offers.
+func h2cClient() *http.Client {
+	return &http.Client{Transport: &http2.Transport{
+		AllowHTTP: true,
+		DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}}
 }
 
-func seedSubscriberReplay(t *testing.T, h *harness, session string, count int) {
+// newHarness mounts the service on an HTTP/1.1 test server, which is the
+// transport a Connect stream uses over the store's unix socket too.
+func newHarness(t *testing.T, store Store, watchBuffer int) *harness {
 	t.Helper()
-	events := make([]*corev1.Event, 0, count)
-	for i := range count {
-		events = append(events, vAssistantStream(t, session, fmt.Sprintf("terminal-%d", i)))
-	}
-	if _, err := h.db.Ingest("subscriber-terminal-test", events, nil); err != nil {
-		t.Fatalf("seed replay: %v", err)
-	}
-}
-
-func installSubscriberHooks(s *Server, capture *subscriberTerminalCapture, replayHook, tailHook func()) {
-	s.subscriberHooksMu.Lock()
-	s.subscriberHooks = subscriberHooks{
-		onTerminal:      capture.hook,
-		beforeReplayRow: replayHook,
-		beforeTailWrite: tailHook,
-	}
-	s.subscriberHooksMu.Unlock()
-}
-
-func serveSubscriberAsync(s *Server, conn net.Conn, sub *corev1.Subscribe) <-chan struct{} {
-	conn = &onceConn{Conn: conn}
-	s.trackConn(conn)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer s.untrackConn(conn)
-		s.serveSubscriber(conn, sub)
-	}()
-	return done
-}
-
-func awaitSubscriberDone(t *testing.T, done <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("subscriber did not stop")
-	}
-}
-
-func assertSubscriberTerminalLog(t *testing.T, logs []byte, want subscriberTerminalRecord, wantCause bool) {
-	t.Helper()
-	var terminals []loggedRecord
-	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
-		var record loggedRecord
-		if err := json.Unmarshal(line, &record); err != nil {
-			t.Fatalf("server record is not JSON: %v", err)
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+	srv := New(store, log, watchBuffer)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() {
+		// 1s: an in-process httptest.Server over a fake Store shuts down in
+		// single-digit milliseconds even under -race; see flush_test.go's
+		// openBound for the same package-level basis.
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
 		}
-		if record.Operation == "subscribe-terminal" {
-			terminals = append(terminals, record)
-		}
-		if record.Operation == "subscriber-read" && record.Level == "error" {
-			t.Fatalf("self-close was logged as a subscriber-read error: %#v", record)
-		}
-	}
-	if len(terminals) != 1 {
-		t.Fatalf("terminal records = %d, want 1; logs=%s", len(terminals), logs)
-	}
-	record := terminals[0]
-	if record.Session != want.SessionID || record.Context["subscriber"] != want.Peer {
-		t.Fatalf("terminal record identity = session %q peer %#v, want session %q peer %q: %#v", record.Session, record.Context["subscriber"], want.SessionID, want.Peer, record)
-	}
-	for key, wantValue := range map[string]any{
-		"terminal_owner":   want.Owner,
-		"terminal_reason":  string(want.Reason),
-		"replay_from_seq":  float64(want.FromSeq),
-		"replay_first_seq": float64(want.FirstReplaySeq),
-		"replay_last_seq":  float64(want.LastReplaySeq),
-		"delivered":        float64(want.Delivered),
-	} {
-		if got := record.Context[key]; got != wantValue {
-			t.Fatalf("terminal context[%q] = %#v, want %#v; record=%#v", key, got, wantValue, record)
-		}
-	}
-	if wantCause && record.Context["error"] == "" {
-		t.Fatalf("terminal record omitted loud error cause: %#v", record)
-	}
-	if !wantCause {
-		if got, exists := record.Context["error"]; exists {
-			t.Fatalf("expected terminal record included error %#v: %#v", got, record)
-		}
+	})
+	return &harness{
+		server: srv,
+		client: storev1connect.NewShimStoreClient(ts.Client(), ts.URL),
+		stream: storev1connect.NewShimStoreClient(h2cClient(), ts.URL),
+		url:    ts.URL,
+		logs:   sink,
+		http:   ts.Client(),
 	}
 }
 
-func TestSubscriberCloseBeforeFirstReplayRowTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	seedSubscriberReplay(t, h, "close-before-replay", 1)
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, gate.wait, nil)
-	serverConn, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-before-replay"})
-
-	gate.await(t)
-	if err := clientConn.Close(); err != nil {
-		t.Fatalf("client close: %v", err)
-	}
-	record := capture.await(t)
-	gate.open()
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 0 {
-		t.Fatalf("terminal record = %+v, want client EOF before replay delivery", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
+func agentID(value string) *conversationv1.AgentId {
+	return &conversationv1.AgentId{Value: value}
 }
 
-func TestSubscriberCloseMidReplayTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	seedSubscriberReplay(t, h, "close-mid-replay", 2)
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	secondRow := &nthSubscriberGate{want: 2, blocked: gate}
-	installSubscriberHooks(h.srv, capture, secondRow.wait, nil)
-	serverConn, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-mid-replay"})
-	if ev := recvEvent(t, clientConn); ev.GetSeq() != 1 {
-		t.Fatalf("first replay seq = %d, want 1", ev.GetSeq())
-	}
-	gate.await(t)
-	if err := clientConn.Close(); err != nil {
-		t.Fatalf("client close: %v", err)
-	}
-	record := capture.await(t)
-	gate.open()
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 1 {
-		t.Fatalf("terminal record = %+v, want client EOF after one replay row", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSubscriberCloseDuringLiveTailTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, nil, gate.wait)
-	serverConn, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "close-live-tail"})
-	recvSubscriptionReady(t, clientConn)
-	h.srv.fan.publish(vAssistantStream(t, "close-live-tail", "tail"))
-
-	gate.await(t)
-	if err := clientConn.Close(); err != nil {
-		t.Fatalf("client close: %v", err)
-	}
-	record := capture.await(t)
-	gate.open()
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("client-eof") || record.Delivered != 0 {
-		t.Fatalf("terminal record = %+v, want client EOF in live tail", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSubscriberReplayWriteFailureIsLoudAndDoesNotSelfReportReaderClose(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	seedSubscriberReplay(t, h, "replay-write-failure", 1)
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, nil, nil)
-	serverPipe, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	injected := errors.New("injected replay write failure")
-	done := serveSubscriberAsync(h.srv, &writeFaultConn{Conn: serverPipe, gate: gate, err: injected}, &corev1.Subscribe{SessionId: "replay-write-failure"})
-
-	gate.await(t)
-	gate.open()
-	record := capture.await(t)
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("replay-failure") || !errors.Is(record.Cause, injected) {
-		t.Fatalf("terminal record = %+v, want loud replay write failure", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, true)
-}
-
-func TestSubscriberSimultaneousReadAndReplayWriteFailureTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	seedSubscriberReplay(t, h, "simultaneous-read-write", 1)
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, nil, nil)
-	serverPipe, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	readError := make(chan struct{})
-	done := serveSubscriberAsync(h.srv, &writeFaultConn{
-		Conn: serverPipe, gate: gate, err: errors.New("injected concurrent replay write failure"), readError: readError,
-	}, &corev1.Subscribe{SessionId: "simultaneous-read-write"})
-
-	gate.await(t)
-	if err := clientConn.Close(); err != nil {
-		t.Fatalf("client close: %v", err)
-	}
-	select {
-	case <-readError:
-	case <-time.After(time.Second):
-		t.Fatal("subscriber read failure was not observed before write release")
-	}
-	record := capture.await(t)
-	gate.open()
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("client-eof") {
-		t.Fatalf("terminal record = %+v, want reader-owned client EOF", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSubscriberStoreShutdownTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, nil, gate.wait)
-	serverConn, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "store-shutdown"})
-	recvSubscriptionReady(t, clientConn)
-	h.srv.fan.publish(vAssistantStream(t, "store-shutdown", "tail"))
-	gate.await(t)
-
-	// Server.Close owns this connection because the fixture registered it before
-	// starting the subscriber.  The gated write makes shutdown occur during the
-	// live-tail socket transition rather than at an arbitrary time.
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("store shutdown: %v", err)
-	}
-	gate.open()
-	record := capture.await(t)
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("server-shutdown") {
-		t.Fatalf("terminal record = %+v, want server shutdown", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSubscriberClientResetTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 0, logging.New(&logs, io.Discard, false))
-	capture := newSubscriberTerminalCapture()
-	readRelease, readNoticed := make(chan struct{}), make(chan struct{})
-	installSubscriberHooks(h.srv, capture, nil, nil)
-	serverPipe, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, &readFaultConn{
-		Conn: serverPipe, release: readRelease, err: syscall.ECONNRESET, noticed: readNoticed,
-	}, &corev1.Subscribe{SessionId: "client-reset"})
-	recvSubscriptionReady(t, clientConn)
-
-	close(readRelease)
-	select {
-	case <-readNoticed:
-	case <-time.After(time.Second):
-		t.Fatal("injected reset was not read")
-	}
-	record := capture.await(t)
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("client-reset") || record.Owner != "reader" || record.Cause != nil {
-		t.Fatalf("terminal record = %+v, want client reset", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSubscriberSlowConsumerTerminatesOnce(t *testing.T) {
-	var logs bytes.Buffer
-	h := start(t, 1, logging.New(&logs, io.Discard, false))
-	capture, gate := newSubscriberTerminalCapture(), newSubscriberGate()
-	installSubscriberHooks(h.srv, capture, nil, gate.wait)
-	serverConn, clientConn := net.Pipe()
-	t.Cleanup(func() { _ = clientConn.Close() })
-	done := serveSubscriberAsync(h.srv, serverConn, &corev1.Subscribe{SessionId: "slow-consumer"})
-	recvSubscriptionReady(t, clientConn)
-
-	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "one"))
-	gate.await(t)
-	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "two"))
-	h.srv.fan.publish(vAssistantStream(t, "slow-consumer", "three"))
-	gate.open()
-	record := capture.await(t)
-	awaitSubscriberDone(t, done)
-	if record.Reason != subscriptionTerminalReason("slow-consumer") || record.Owner != "fanout" {
-		t.Fatalf("terminal record = %+v, want slow-consumer", record)
-	}
-	capture.assertExactlyOne(t)
-	assertSubscriberTerminalLog(t, logs.Bytes(), record, false)
-}
-
-func TestSlowConsumerHardDisconnect(t *testing.T) {
-	// Arrange: a tiny buffer and a subscriber that stops reading. The
-	// workspace-aware requester owns this session-specific disconnect.
-	h := start(t, 1, testLogger())
-	prod := h.dial(t)
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	recvSubscriptionReady(t, sub)
-
-	// Handshake so the subscriber is registered and live.
-	send(t, prod, write(vAssistantStream(t, "s1", "P1")))
-	recvAck(t, prod)
-	recvEvent(t, sub)
-
-	// Act: blast a batch of large, unique events while the subscriber never
-	// reads again. Padding makes each frame ~1KiB so a modest count reliably
-	// overflows the OS socket buffer plus the bounded per-subscriber buffer,
-	// and the store hard-disconnects — without the ingest cost of a huge batch.
-	pad := strings.Repeat("x", 1024)
-	big := make([]*corev1.Event, 0, 2000)
-	for i := range 2000 {
-		big = append(big, vAssistantStream(t, "s1", fmt.Sprintf("u%04d%s", i, pad)))
-	}
-	send(t, prod, write(big...))
-	recvAck(t, prod)
-
-	// Assert: the slow consumer is disconnected. No store narrative record is
-	// expected because the requester can attribute and report the session.
-	if err := sub.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		t.Fatalf("setting subscriber read deadline: %v", err)
-	}
-	for {
-		if _, err := wire.ReadAny(sub); err != nil {
-			return
-		}
+func line(agent, pointer string, seq uint64) LineWritten {
+	return LineWritten{
+		AgentID: agent,
+		Line: &storev1.StoreLineAt{
+			At:   &storev1.StoreItemPointer{Value: pointer},
+			Line: &storev1.StorePageLine{PageAgentId: agentID(agent)},
+		},
+		WriteSeq: seq,
 	}
 }
 
-func recvCursorList(t *testing.T, conn net.Conn) *corev1.CursorList {
-	t.Helper()
-	m := recv(t, conn)
-	cl, ok := m.(*corev1.CursorList)
-	if !ok {
-		t.Fatalf("expected *CursorList, got %T", m)
-	}
-	return cl
-}
-
-func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
-	// Arrange: a producer commits a batch carrying a cursor advance.
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	sw := write(vAssistantStream(t, "s1", "A"))
-	sw.Batch.CursorAdvance = &corev1.CursorState{FileId: "10:20", Path: "/x/y.jsonl", Offset: 42, Carry: []byte("tail")}
-	send(t, prod, sw)
-	recvAck(t, prod)
-
-	// Act: a fresh connection recovers cursors (empty file_id = all).
-	cq := h.dial(t)
-	send(t, cq, &corev1.CursorQuery{})
-	list := recvCursorList(t, cq)
-
-	// Assert
-	if len(list.GetCursors()) != 1 {
-		t.Fatalf("cursors = %d, want 1", len(list.GetCursors()))
-	}
-	c := list.GetCursors()[0]
-	if c.GetFileId() != "10:20" || c.GetOffset() != 42 || string(c.GetCarry()) != "tail" {
-		t.Fatalf("cursor = %+v", c)
-	}
-}
-
-func TestCursorQueryReturnsAuthoritativeOpenTaskStarts(t *testing.T) {
-	h := start(t, 0, testLogger())
-	started := func(taskID string) *corev1.Event {
-		return &corev1.Event{
-			SessionId: "s1", Plane: corev1.Plane_PLANE_FILE,
-			Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: 100,
-			Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
-				TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_SHELL,
-			}},
-		}
-	}
-	closed := started("closed")
-	ended := &corev1.Event{
-		SessionId: "s1", Plane: corev1.Plane_PLANE_STREAM,
-		Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: 200,
-		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
-			TaskId: "closed", Kind: corev1.TaskKind_TASK_KIND_SHELL,
-			Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+func validEntry(writeID, upsertKey string) *storev1.StoreEntry {
+	return &storev1.StoreEntry{
+		Plane:     &storev1.Plane{Plane: &storev1.Plane_Stream{Stream: &storev1.PlaneStream{}}},
+		WriteId:   writeID,
+		UpsertKey: upsertKey,
+		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
+			AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{ServeableFrame: &storev1.StorePageLine{PageAgentId: agentID("a1")}},
 		}},
 	}
-	if _, err := h.db.Ingest("test", []*corev1.Event{started("open"), closed, ended}, nil); err != nil {
-		t.Fatalf("Ingest lifecycle: %v", err)
-	}
+}
 
-	cq := h.dial(t)
-	send(t, cq, &corev1.CursorQuery{})
-	list := recvCursorList(t, cq)
-	if !list.GetOpenTasksAuthoritative() {
-		t.Fatal("all-cursors recovery did not attest authoritative open-task state")
+func writeOne(t *testing.T, h *harness) {
+	t.Helper()
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:test",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+	if err != nil {
+		t.Fatalf("WriteBatch: %v", err)
 	}
-	if len(list.GetOpenTasks()) != 1 {
-		t.Fatalf("open_tasks = %d, want 1", len(list.GetOpenTasks()))
-	}
-	if got := list.GetOpenTasks()[0].GetStarted().GetTaskStarted().GetTaskId(); got != "open" {
-		t.Fatalf("open task id = %q, want open", got)
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("WriteBatch = %v, want the success arm", res.Msg.GetResult())
 	}
 }
 
-func TestCursorQueryByFileID(t *testing.T) {
-	// Arrange: two persisted cursors.
-	h := start(t, 0, testLogger())
-	prod := h.dial(t)
-	for _, fid := range []string{"1:1", "2:2"} {
-		sw := write(vAssistantStream(t, "s1", "E"+fid))
-		sw.Batch.CursorAdvance = &corev1.CursorState{FileId: fid, Path: "/p/" + fid, Offset: 7}
-		send(t, prod, sw)
-		recvAck(t, prod)
+func openSession(t *testing.T, h *harness, agent string) string {
+	t.Helper()
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(agent), PageSize: 10,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession: %v", err)
 	}
-	// Act: query one file_id.
-	cq := h.dial(t)
-	send(t, cq, &corev1.CursorQuery{FileId: "2:2"})
-	list := recvCursorList(t, cq)
-	// Assert: exactly that cursor.
-	if len(list.GetCursors()) != 1 || list.GetCursors()[0].GetFileId() != "2:2" {
-		t.Fatalf("by-id query = %+v, want just 2:2", list.GetCursors())
+	success := res.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession = %v, want the success arm", res.Msg.GetResult())
+	}
+	return success.GetWatch().GetValue()
+}
+
+// ---- WriteBatch ----
+
+func TestWriteBatchSuccessArmOnACommittedBatch(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Written: 1}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
 	}
 }
 
-func TestCursorQueryEmptyWhenAbsent(t *testing.T) {
-	// Arrange: nothing persisted.
-	h := start(t, 0, testLogger())
-	// Act
-	cq := h.dial(t)
-	send(t, cq, &corev1.CursorQuery{FileId: "nope"})
-	list := recvCursorList(t, cq)
-	// Assert
-	if len(list.GetCursors()) != 0 {
-		t.Fatalf("cursors = %d, want 0", len(list.GetCursors()))
+func TestWriteBatchAnswersAnAbsorbedReplayWithTheSameSuccessArm(t *testing.T) {
+	// Arrange. Every write_id landed before; nothing new was written.
+	store := newFakeStore()
+	store.writeResult = WriteResult{Absorbed: 3}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm for an absorbed replay", res.Msg.GetResult())
 	}
 }
 
-func TestCloseDisconnectsLiveConnections(t *testing.T) {
-	// Arrange: an established subscriber connection.
-	h := start(t, 0, testLogger())
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	recvSubscriptionReady(t, sub)
-	// Give the handler a moment to register by round-tripping a write so we
-	// know the server is actively serving this session.
-	prod := h.dial(t)
-	send(t, prod, write(vAssistantStream(t, "s1", "P1")))
-	recvAck(t, prod)
-	recvEvent(t, sub) // subscriber is live
+func TestWriteBatchMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.writeErr = fmt.Errorf("%w: disk is gone", ErrStorage)
+	h := newHarness(t, store, 0)
 
-	// Act
-	if err := h.srv.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert. A refusal is an HTTP 200 with the typed arm, never a Connect error.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil (a refusal is not a transport error)", err)
 	}
-
-	// Assert: the live subscriber connection is closed by the server.
-	sub.SetReadDeadline(time.Now().Add(3 * time.Second))
-	if _, err := wire.ReadFrame(sub); err == nil {
-		t.Fatal("expected subscriber read to fail after server Close")
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
 	}
-}
-
-// --- idempotent replay by write identity ------------------------------------
-
-// identified stamps a producer write identity on a stream event, which is what
-// makes re-delivering it a no-op rather than a second row.
-func identified(ev *corev1.Event, writeID string) *corev1.Event {
-	ev.WriteId = writeID
-	return ev
-}
-
-func TestReplayedBatchIsAbsorbedWithoutDuplicateRows(t *testing.T) {
-	// Arrange: a batch the store has already ingested. A producer whose ack was
-	// lost to a store bounce cannot tell that from a batch that never arrived,
-	// so it resends — here, on a fresh producer connection, exactly as a relink
-	// does.
-	h := start(t, 0, testLogger())
-	first := h.dial(t)
-	send(t, first, write(
-		identified(vAssistantStream(t, "s1", "A"), "w-1"),
-		identified(vAssistantStream(t, "s1", "B"), "w-2"),
-	))
-	if ack := recvAck(t, first); ack.GetAccepted() != 2 {
-		t.Fatalf("first ack = %+v, want accepted=2", ack)
+	// internal/db logged this failure already; the server must not record it a
+	// second time, only trace that it answered the failure arm.
+	if _, ok := findRecord(t, h.logs, "store.rpc.write-batch", "error"); ok {
+		t.Fatalf("records = %+v, want no second error record for a db failure", records(t, h.logs))
 	}
-	first.Close()
-
-	// Act
-	second := h.dial(t)
-	send(t, second, write(
-		identified(vAssistantStream(t, "s1", "A"), "w-1"),
-		identified(vAssistantStream(t, "s1", "B"), "w-2"),
-	))
-	ack := recvAck(t, second)
-
-	// Assert
-	if ack.GetAccepted() != 0 || ack.GetDeduped() != 2 {
-		t.Fatalf("replay ack = %+v, want accepted=0 deduped=2", ack)
-	}
-	if rows := collectStoredReplay(t, h.db, "s1", 0); len(rows) != 2 {
-		t.Fatalf("store holds %d rows after a replayed batch, want 2", len(rows))
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "debug")
+	if !ok || rec.Context["refusal_site"] != SiteDatabaseFailure {
+		t.Fatalf("records = %+v, want a verbose trace at site %q", records(t, h.logs), SiteDatabaseFailure)
 	}
 }
 
-func TestReplayedBatchIsNotFannedOutASecondTime(t *testing.T) {
-	// Arrange: a live subscriber that has already been handed the batch.
-	h := start(t, 0, testLogger())
-	sub := h.dial(t)
-	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
-	recvSubscriptionReady(t, sub)
-	prod := h.dial(t)
-	send(t, prod, write(identified(vAssistantStream(t, "s1", "A"), "w-1")))
-	recvAck(t, prod)
-	if got := recvEvent(t, sub); got.GetSeq() != 1 {
-		t.Fatalf("first delivery seq = %d, want 1", got.GetSeq())
+func TestWriteBatchRefusesARequestNamingNoProducer(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert. The store must not be touched by a refused request.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	if len(store.writes) != 0 {
+		t.Fatalf("store writes = %d, want 0: validation runs before the store is touched", len(store.writes))
+	}
+}
+
+func TestWriteBatchRefusalIsLoggedAtItsSite(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	if _, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:s1",
+		Batch:    &storev1.EntryBatch{},
+	})); err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
 	}
 
-	// Act: replay the delivered batch, then write a genuinely new event. The new
-	// event is the barrier — no sleep is needed, because the subscriber's NEXT
-	// frame is either the duplicate (a failure) or the new event (a pass).
-	send(t, prod, write(identified(vAssistantStream(t, "s1", "A"), "w-1")))
-	recvAck(t, prod)
-	send(t, prod, write(identified(vAssistantStream(t, "s1", "C"), "w-2")))
-	recvAck(t, prod)
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteBatchEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteBatchEmpty)
+	}
+}
 
-	// Assert
-	next := recvEvent(t, sub)
-	if next.GetWriteId() != "w-2" || next.GetSeq() != 2 {
-		t.Fatalf("subscriber's next frame = write_id=%q seq=%d, want the NEW event w-2 at seq 2 — the replay was re-delivered",
-			next.GetWriteId(), next.GetSeq())
+// ---- OpenAgentSession ----
+
+func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+		Lines:    []*storev1.StoreLineAt{line("a1", "p1", 7).Line},
+		Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}, PinSeq: 7}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 1 || success.GetWatch().GetValue() == "" {
+		t.Fatalf("result = %v, want one page line and a minted token", res.Msg.GetResult())
+	}
+}
+
+// openPageOnly runs the one-shot open a caller uses when no watch will follow,
+// and asserts the answer carries no token.
+func openPageOnly(t *testing.T, h *harness, agent string) {
+	t.Helper()
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(agent), PageSize: 10, PageOnly: true,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession: %v", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession = %v, want the success arm", res.Msg.GetResult())
+	}
+	if success.GetWatch() != nil {
+		t.Fatalf("watch = %v, want UNSET for a page-only open", success.GetWatch())
+	}
+}
+
+// TestOpenAgentSessionMintsNoTokenForAPageOnlyRead: the caller said no watch
+// follows, so there is nothing to mint and nothing to answer with.
+func TestOpenAgentSessionMintsNoTokenForAPageOnlyRead(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+		Lines:    []*storev1.StoreLineAt{line("a1", "p1", 7).Line},
+		Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}, PinSeq: 7}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10, PageOnly: true,
+	}))
+
+	// Assert. The page is served in full; only the token is withheld.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 1 {
+		t.Fatalf("result = %v, want one page line", res.Msg.GetResult())
+	}
+	if success.GetWatch() != nil {
+		t.Fatalf("watch = %v, want UNSET for a page-only open", success.GetWatch())
+	}
+}
+
+// TestOpenAgentSessionRetainsTheTokenAnOrdinaryOpenMinted: the ordinary open is
+// untouched — a watch is coming, so the registry holds the token for it.
+func TestOpenAgentSessionRetainsTheTokenAnOrdinaryOpenMinted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	token := openSession(t, h, "a1")
+
+	// Assert.
+	if token == "" {
+		t.Fatalf("watch token = %q, want a minted token", token)
+	}
+	if got := h.server.tokens.outstanding(); got != 1 {
+		t.Fatalf("outstanding = %d, want 1", got)
+	}
+}
+
+// TestWatchRefusesTheBookOfAPageOnlyOpen: a page-only open leaves the caller
+// with no token, so the watch it cannot address meets the ordinary refusal
+// rather than any arm of its own.
+func TestWatchRefusesTheBookOfAPageOnlyOpen(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	openPageOnly(t, h, "a1")
+
+	// Act.
+	err := startWatch(h, context.Background(), "").refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteTokenEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteTokenEmpty)
+	}
+}
+
+// TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens: the two
+// one-shot reads a single turn performs — the opening page and the teardown's
+// book head — leave the registry exactly as they found it.
+func TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	openPageOnly(t, h, "a1")
+	openPageOnly(t, h, "a1")
+
+	// Assert.
+	if got := h.server.tokens.outstanding(); got != 0 {
+		t.Fatalf("outstanding = %d, want 0", got)
+	}
+}
+
+func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(""), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// TestWriteBatchRecordsAStorageRefusalAgainstItsProcedure: a request the
+// storage layer refuses is a refusal of THIS call, and the only record that can
+// name the procedure is written here.
+func TestWriteBatchRecordsAStorageRefusalAgainstItsProcedure(t *testing.T) {
+	// Arrange. The malformed part is inside the envelope this layer keeps
+	// opaque, so the storage layer is what refuses it.
+	store := newFakeStore()
+	store.writeErr = fmt.Errorf("%w: entries[0].agent_update sets no `agent_info` arm", ErrInvalid)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: "claude-shim:test",
+		Batch:    &storev1.EntryBatch{Entries: []*storev1.StoreEntry{validEntry("w1", "u1")}},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("WriteBatch = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.write-batch", "warn")
+	if !ok {
+		t.Fatalf("records = %+v, want the refusal recorded at warn", records(t, h.logs))
+	}
+	if rec.Context["rpc"] != storev1connect.ShimStoreWriteBatchProcedure {
+		t.Errorf("rpc = %v, want %q", rec.Context["rpc"], storev1connect.ShimStoreWriteBatchProcedure)
+	}
+	if rec.Context["refusal_site"] != SiteStoreRefusedRequest {
+		t.Errorf("refusal_site = %v, want %q", rec.Context["refusal_site"], SiteStoreRefusedRequest)
+	}
+}
+
+func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: known_through names no position in this book", ErrStalePointer)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10, KnownThrough: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	// A REFUSED REQUEST IS THIS LAYER'S RECORD TO WRITE, at warn: the storage
+	// layer's own trace names a statement and a table and ties the refusal to
+	// nothing, while only this layer knows the rpc, the request id and the
+	// producer it belongs to. It is a `warn` and never an `error`, because a
+	// pointer that has moved is an ordinary race whose recovery is a repaint.
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteStalePointer {
+		t.Fatalf("records = %+v, want one warn record at site %q", records(t, h.logs), SiteStalePointer)
+	}
+	if _, isError := findRecord(t, h.logs, "store.rpc.open-agent-session", "error"); isError {
+		t.Fatalf("a stale pointer produced an error record: %+v", records(t, h.logs))
+	}
+}
+
+// TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm: the storage layer's
+// ErrUnknownAgent becomes unknown_agent on the wire and never invalid_request,
+// because the request was well formed and respelling it cannot help.
+func TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("ghost"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetUnknownAgent() == nil {
+		t.Fatalf("failure kind = %v, want unknown_agent", res.Msg.GetFailure().GetKind())
+	}
+}
+
+// TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys: a refused
+// request belongs to the CALL, so this layer writes the one normal-level record
+// — at warn, never error, since a stale target is an ordinary consumer race.
+func TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("ghost"), PageSize: 10,
+	})); err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteUnknownAgent || rec.Context["refusal_kind"] != "unknown_agent" {
+		t.Fatalf("records = %+v, want one warn record at site %q and kind %q", records(t, h.logs), SiteUnknownAgent, "unknown_agent")
+	}
+	if _, isError := findRecord(t, h.logs, "store.rpc.open-agent-session", "error"); isError {
+		t.Fatalf("an unknown agent produced an error record: %+v", records(t, h.logs))
+	}
+}
+
+func TestOpenAgentSessionServesAnEmptyBookAsALegalPage(t *testing.T) {
+	// Arrange. An agent the store knows but that has no rows is an empty book,
+	// not an unknown agent; the fake answers the empty page the db would.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("fresh"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 0 || success.GetWatch().GetValue() == "" {
+		t.Fatalf("result = %v, want an empty page with a valid token", res.Msg.GetResult())
+	}
+}
+
+// ---- WatchAgentSession ----
+
+// watcher runs one WatchAgentSession call off the test goroutine.
+//
+// THE CALL ITSELF BLOCKS UNTIL THE SERVER WRITES RESPONSE HEADERS, which a
+// Connect server stream does on its first frame. A test that must observe a
+// STANDING watch — one that has subscribed but has nothing to deliver yet —
+// therefore cannot wait on the call; it waits on the fake store's LinesSince
+// gate instead, which is entered strictly after the subscription.
+type watcher struct {
+	streamc chan *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse]
+	errc    chan error
+}
+
+func startWatch(h *harness, ctx context.Context, token string) *watcher {
+	w := &watcher{
+		streamc: make(chan *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse], 1),
+		errc:    make(chan error, 1),
+	}
+	go func() {
+		stream, err := h.stream.WatchAgentSession(ctx, connect.NewRequest(&storev1.WatchAgentSessionRequest{
+			Watch: &storev1.AgentSessionToken{Value: token},
+		}))
+		if err != nil {
+			w.errc <- err
+			return
+		}
+		w.streamc <- stream
+	}()
+	return w
+}
+
+// open blocks until the stream is readable and fails if it was refused.
+func (w *watcher) open(t *testing.T) *connect.ServerStreamForClient[storev1.WatchAgentSessionResponse] {
+	t.Helper()
+	select {
+	case stream := <-w.streamc:
+		t.Cleanup(func() { stream.Close() })
+		return stream
+	case err := <-w.errc:
+		t.Fatalf("WatchAgentSession = %v, want a stream", err)
+		return nil
+	}
+}
+
+// refusal blocks until the watch ends and returns why.
+func (w *watcher) refusal(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-w.errc:
+		return err
+	case stream := <-w.streamc:
+		defer stream.Close()
+		for stream.Receive() {
+		}
+		return stream.Err()
+	}
+}
+
+func TestWatchDeliversALineWrittenAfterThePin(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. The write lands after the subscription, so it can only arrive live.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p5", 5)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p5" {
+		t.Fatalf("pointer = %q, want %q", got, "p5")
+	}
+}
+
+func TestWatchNeverDeliversALineAtOrBelowThePin(t *testing.T) {
+	// Arrange. The page was read at write ordinal 5.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{}, PinSeq: 5}
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. Ordinal 5 is already in the page; ordinal 6 is not.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 2, Lines: []LineWritten{line("a1", "p5", 5), line("a1", "p6", 6)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert. The first frame delivered is the one above the pin.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p6" {
+		t.Fatalf("first delivered pointer = %q, want %q", got, "p6")
+	}
+}
+
+func TestWatchNeverDeliversALineOfAnotherBook(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. One batch carrying another agent's line and then this agent's.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 2, Lines: []LineWritten{line("other", "px", 1), line("a1", "p2", 2)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want a line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
+		t.Fatalf("first delivered pointer = %q, want %q", got, "p2")
+	}
+}
+
+func TestWatchDeliversALineWrittenBetweenOpenAndWatchExactlyOnce(t *testing.T) {
+	// Arrange. The watch is held inside LinesSince — i.e. after it subscribed —
+	// while the very line the replay is about to return is also published live.
+	// That overlap is what the handoff must collapse.
+	store := newFakeStore()
+	store.since = []LineWritten{line("a1", "p1", 1)}
+	store.sinceRelease = make(chan struct{})
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p1", 1)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+	close(store.sinceRelease)
+
+	// Act. A later, distinct line proves nothing sat between the two.
+	stream := w.open(t)
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the replayed line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p1" {
+		t.Fatalf("first pointer = %q, want %q", got, "p1")
+	}
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 1, Lines: []LineWritten{line("a1", "p2", 2)}}
+	store.mu.Unlock()
+	writeOne(t, h)
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("Receive = false, want the second line: %v", stream.Err())
+	}
+	if got := stream.Msg().GetLine().GetAt().GetValue(); got != "p2" {
+		t.Fatalf("second pointer = %q, want %q (p1 was delivered twice)", got, "p2")
+	}
+}
+
+func TestWatchTokenIsSingleUse(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. The same token, a second time.
+	err := startWatch(h, context.Background(), token).refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+}
+
+func TestWatchRefusesATokenThisStoreNeverMinted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	err := startWatch(h, context.Background(), "0123456789abcdef").refusal(t)
+
+	// Assert. There is no failure arm on this rpc by design: the refusal is the
+	// transport's CodeNotFound and the caller re-opens.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteUnknownWatchToken {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteUnknownWatchToken)
+	}
+}
+
+func TestWatchRefusesATokenWithNoValue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	err := startWatch(h, context.Background(), "").refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteTokenEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteTokenEmpty)
+	}
+}
+
+func TestWatchOverflowEndsTheStreamAndLogsAWarning(t *testing.T) {
+	// Arrange. A one-frame buffer, and the watch held inside LinesSince so it
+	// cannot drain while the writer publishes.
+	store := newFakeStore()
+	store.sinceRelease = make(chan struct{})
+	h := newHarness(t, store, 1)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act.
+	store.mu.Lock()
+	store.writeResult = WriteResult{Written: 3, Lines: []LineWritten{
+		line("a1", "p1", 1), line("a1", "p2", 2), line("a1", "p3", 3),
+	}}
+	store.mu.Unlock()
+	writeOne(t, h)
+	close(store.sinceRelease)
+
+	// Assert.
+	err := w.refusal(t)
+	if connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeResourceExhausted)
+	}
+	if _, ok := findRecord(t, h.logs, "store.fanout.overflow", "warn"); !ok {
+		t.Fatalf("records = %+v, want a store.fanout.overflow warning", records(t, h.logs))
+	}
+}
+
+func TestWatchMapsAReplayFailureToATransportError(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.sinceErr = fmt.Errorf("%w: read failed", ErrStorage)
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+
+	// Act.
+	err := startWatch(h, context.Background(), token).refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeInternal)
+	}
+}
+
+func TestShutdownEndsAStandingWatchCleanly(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	token := openSession(t, h, "a1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := startWatch(h, ctx, token)
+	<-store.sinceEntered
+
+	// Act. 1s: same in-process fake-Store basis as the package's other
+	// shutdown bounds.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer shutdownCancel()
+	if err := h.server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown = %v, want nil", err)
+	}
+
+	// Assert. The stream ends without an error: the store concluded nothing, it
+	// simply stopped.
+	if err := w.refusal(t); err != nil {
+		t.Fatalf("stream error = %v, want a clean end", err)
+	}
+}
+
+// ---- ReadAgentPage ----
+
+func TestReadAgentPageServesAPage(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.page = &storev1.ReadAgentPageSuccess{
+		Lines: []*storev1.StoreLineAt{{
+			At:   &storev1.StoreItemPointer{Value: "sip1-8"},
+			Line: &storev1.StorePageLine{PageAgentId: agentID("a1")},
+		}},
+		Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetLines()) != 1 {
+		t.Fatalf("result = %v, want one line", res.Msg.GetResult())
+	}
+	// A CONTINUATION LINE CARRIES ITS OWN POINTER, so a reader never mints a
+	// placeholder mark for a page it walked to.
+	if got := success.GetLines()[0].GetAt().GetValue(); got != "sip1-8" {
+		t.Fatalf("line pointer = %q, want the position the store served", got)
+	}
+}
+
+func TestReadAgentPageRefusesAMissingAfterPointer(t *testing.T) {
+	// Arrange. This verb only walks older; the first page is the open's answer.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+func TestReadAgentPageMapsAStalePointerToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.pageErr = fmt.Errorf("%w: p9 is not in this book", ErrStalePointer)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.ReadAgentPage(context.Background(), connect.NewRequest(&storev1.ReadAgentPageRequest{
+		Book: agentID("a1"), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p9"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReadAgentPage = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetLiveWork ----
+
+func TestGetLiveWorkServesTheOpenObligations(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.live = &storev1.GetLiveWorkSuccess{LiveAgents: []*conversationv1.AgentId{agentID("a1")}}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetLiveAgents()) != 1 {
+		t.Fatalf("result = %v, want one live agent", res.Msg.GetResult())
+	}
+}
+
+func TestGetLiveWorkMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.liveErr = fmt.Errorf("%w: scan failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetSidecarCursors ----
+
+func TestGetSidecarCursorsServesAnEmptySetAsSuccess(t *testing.T) {
+	// Arrange. A fresh store has no cursors and every file starts from zero.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if success := res.Msg.GetSuccess(); success == nil || len(success.GetCursors()) != 0 {
+		t.Fatalf("result = %v, want an empty success", res.Msg.GetResult())
+	}
+}
+
+func TestGetSidecarCursorsScopesToOneFileWhenAsked(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: "/t.jsonl", Offset: 12}}
+	h := newHarness(t, store, 0)
+	fileID := "1:2"
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &fileID}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+	if store.cursorsFor == nil || *store.cursorsFor != fileID {
+		t.Fatalf("store scoped to %v, want %q", store.cursorsFor, fileID)
+	}
+}
+
+func TestGetSidecarCursorsRefusesAPresentButEmptyFileId(t *testing.T) {
+	// Arrange. Absence is spelled by omitting the field, never by "".
+	store := newFakeStore()
+	h := newHarness(t, store, 0)
+	empty := ""
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: &empty}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+	if store.cursorsScope {
+		t.Fatal("the store was queried for a refused request")
+	}
+}
+
+func TestGetSidecarCursorsMapsAStorageFailureToTheFailureArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.cursorsErr = fmt.Errorf("%w: select failed", ErrStorage)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.GetSidecarCursors(context.Background(), connect.NewRequest(&storev1.GetSidecarCursorsRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetSidecarCursors = %v, want nil", err)
+	}
+	if res.Msg.GetFailure() == nil {
+		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
+	}
+}
+
+// ---- GetWorkflow ----
+
+func TestGetWorkflowAnswersTheNotImplementedFailure(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetWorkflow(context.Background(), connect.NewRequest(&storev1.GetWorkflowRequest{
+		Work: &conversationv1.DetachedWorkId{Value: "wf1"},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetWorkflow = %v, want nil", err)
+	}
+	failure := res.Msg.GetFailure()
+	if failure == nil || !strings.Contains(failure.GetDetail(), "not implemented") {
+		t.Fatalf("result = %v, want the not-implemented failure arm", res.Msg.GetResult())
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.get-workflow", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteWorkflowNotImplemented {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteWorkflowNotImplemented)
+	}
+}
+
+// ---- transport ----
+
+func TestServesOverHTTP11(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.client.GetLiveWork(context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over HTTP/1.1 = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestServesOverH2CWithPriorKnowledge(t *testing.T) {
+	// Arrange. No TLS anywhere: the h2c wrapper is what makes an HTTP/2
+	// prior-knowledge client work on the same cleartext socket.
+	sink := &syncBuffer{}
+	srv := New(newFakeStore(), logging.New(sink, io.Discard, true), 0)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	client := h2cClient()
+
+	// Act.
+	res, err := storev1connect.NewShimStoreClient(client, ts.URL).GetLiveWork(
+		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over h2c = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestServesTheJSONCodec(t *testing.T) {
+	// Arrange. A plain POST with a JSON body is the shape a curl probe uses.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	res, err := h.http.Post(h.url+storev1connect.ShimStoreGetLiveWorkProcedure, "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	// Assert.
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body = %s, want 200", res.StatusCode, body)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	if _, ok := decoded["success"]; !ok {
+		t.Fatalf("body = %s, want a success arm", body)
+	}
+}
+
+func TestServesOverAUnixSocket(t *testing.T) {
+	// Arrange. macOS caps sun_path at ~104 bytes, so the path is short by
+	// construction rather than under t.TempDir().
+	sink := &syncBuffer{}
+	log := logging.New(sink, io.Discard, true)
+	path := shortSocketPath(t)
+	ln, err := Listen(path, log)
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	srv := New(newFakeStore(), log, 0)
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		// 1s: an in-process httptest.Server over a fake Store shuts down in
+		// single-digit milliseconds even under -race; see flush_test.go's
+		// openBound for the same package-level basis.
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			t.Errorf("shutdown: %v", err)
+		}
+	})
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", path)
+		},
+	}}
+
+	// Act.
+	res, err := storev1connect.NewShimStoreClient(client, "http://store").GetLiveWork(
+		context.Background(), connect.NewRequest(&storev1.GetLiveWorkRequest{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("GetLiveWork over the unix socket = %v, want nil", err)
+	}
+	if res.Msg.GetSuccess() == nil {
+		t.Fatalf("result = %v, want the success arm", res.Msg.GetResult())
+	}
+}
+
+func TestRequestIdHeaderIsCarriedIntoTheLog(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	req := connect.NewRequest(&storev1.GetWorkflowRequest{Work: &conversationv1.DetachedWorkId{Value: "wf1"}})
+	req.Header().Set(RequestIDHeader, "req-42")
+
+	// Act.
+	if _, err := h.client.GetWorkflow(context.Background(), req); err != nil {
+		t.Fatalf("GetWorkflow = %v, want nil", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.get-workflow", "warn")
+	if !ok || rec.RequestID != "req-42" {
+		t.Fatalf("record = %+v, want request_id %q", rec, "req-42")
+	}
+}
+
+func TestNewPanicsWithoutAStore(t *testing.T) {
+	// Arrange.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("New with a nil store returned, want a panic")
+		}
+	}()
+
+	// Act.
+	New(nil, logging.New(&syncBuffer{}, io.Discard, false), 0)
+}
+
+func TestARefusalRecordNamesBothTheSiteAndTheWireArm(t *testing.T) {
+	// Arrange. THE SITE IS NOT THE ARM: several sites map to one arm, so a
+	// reader triaging refusals needs the site to find the check that said no
+	// and the kind to know whether the caller could ever have retried.
+	tests := []struct {
+		name      string
+		operation string
+		call      func(*harness)
+		wantSite  string
+		wantKind  string
+	}{
+		{
+			name:      "an empty batch is invalid_request",
+			operation: "store.rpc.write-batch",
+			wantSite:  SiteBatchEmpty,
+			wantKind:  "invalid_request",
+			call: func(h *harness) {
+				h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{ //nolint:errcheck // the refusal is the subject
+					Producer: "claude-shim:s1",
+					Batch:    &storev1.EntryBatch{},
+				}))
+			},
+		},
+		{
+			name:      "workflow is not_implemented",
+			operation: "store.rpc.get-workflow",
+			wantSite:  SiteWorkflowNotImplemented,
+			wantKind:  "not_implemented",
+			call: func(h *harness) {
+				h.client.GetWorkflow(context.Background(), connect.NewRequest(&storev1.GetWorkflowRequest{ //nolint:errcheck // the refusal is the subject
+					Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+				}))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, newFakeStore(), 0)
+
+			// Act.
+			tc.call(h)
+
+			// Assert.
+			rec, ok := findRecord(t, h.logs, tc.operation, "warn")
+			if !ok {
+				t.Fatalf("records = %+v, want a warn record at %q", records(t, h.logs), tc.operation)
+			}
+			if rec.Context["refusal_site"] != tc.wantSite {
+				t.Errorf("refusal_site = %v, want %q", rec.Context["refusal_site"], tc.wantSite)
+			}
+			if rec.Context["refusal_kind"] != tc.wantKind {
+				t.Errorf("refusal_kind = %v, want %q", rec.Context["refusal_kind"], tc.wantKind)
+			}
+		})
 	}
 }

@@ -1,0 +1,330 @@
+// api.proto — THE VENDOR API'S OWN OUTCOMES: what the API itself recorded about
+// a request — its usage accounting, its failures, and the models it offers.
+// The actor here is the API, not the agent, the user, or a tool.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A request to the vendor API failed, and the vendor RECORDED that it did.
+//
+// NARROW ON PURPOSE. A failure card the daemon SYNTHESIZED — a session that
+// never started, a store write the shim rejected — is not this: nothing
+// observed it and no transcript holds it. That is `frontend.v1`'s failure
+// card, which the daemon mints and pushes. What lands here is the vendor's
+// own recorded error, which the CLI writes to its transcript and the sidecar
+// reads back; a reader scrolling back must see that the turn failed rather
+// than find it merely absent.
+//
+// THE KIND IS THE VENDOR'S, NOT A CLASSIFICATION. The arm names the error
+// type the API itself declares (its documented closed set); whether anything
+// can be DONE about it is the daemon's judgement and reaches a client already
+// resolved on the failure card. A producer stating recoverability here would
+// be a second authority on one question.
+message ApiRequestFailed {
+  // What went wrong, as the vendor worded it. Held apart from the kind so a
+  // client can show the sentence without switching on the arm.
+  string message = 1;
+  // Which class of failure this was, so a consumer can decide whether waiting
+  // helps, whether the user must act, or whether the request itself was wrong.
+  // The set follows the vendor's documented error taxonomy; a class it adds
+  // later arrives as `unmodeled` rather than as a silently mishandled value.
+  oneof kind {
+    // 429. The only kind that carries a retry hint, so the hint lives here.
+    ApiRateLimited rate_limited = 2;
+    // 529. The API is overloaded; also carries the retry hint when given.
+    ApiOverloaded overloaded = 3;
+    // 401 — the credential was rejected.
+    ApiAuthenticationFailed authentication_failed = 4;
+    // 403 — the credential lacks permission for this request.
+    ApiPermissionDenied permission_denied = 5;
+    // 400 — the request itself was malformed or refused.
+    ApiInvalidRequest invalid_request = 6;
+    // 413 — the request exceeded the size limit.
+    ApiRequestTooLarge request_too_large = 7;
+    // 404 — the model or resource does not exist.
+    ApiNotFound not_found = 8;
+    // 500 — the API's own internal error.
+    ApiInternal internal = 9;
+    // The account cannot be charged for this request — an exhausted spend
+    // limit, a lapsed payment method. The user must act on their billing,
+    // which is why it is not folded into `permission_denied`.
+    ApiBillingError billing_error = 11;
+    // The credential's organization is not permitted to use this deployment
+    // at all. Distinct from `permission_denied`: the refusal is about the ORG
+    // rather than about this request's scope, so no per-request change helps.
+    ApiOauthOrgNotAllowed oauth_org_not_allowed = 12;
+    // The request asked for more output tokens than the model will produce.
+    // The request itself must be made smaller; retrying it unchanged cannot
+    // succeed.
+    ApiMaxOutputTokens max_output_tokens = 13;
+    // A type the API declared that this schema does not model, kept by name.
+    ApiUnmodeledError unmodeled = 10;
+  }
+}
+
+// The API rate-limited the request.
+message ApiRateLimited {
+  // How long the vendor said to wait before retrying, in millis, WHEN it said.
+  // Unset means it said nothing — which is different from "retry now".
+  optional int64 retry_after_ms = 1;
+}
+
+// The API was overloaded.
+message ApiOverloaded {
+  // As ApiRateLimited.retry_after_ms.
+  optional int64 retry_after_ms = 1;
+}
+
+// The credential was rejected.
+message ApiAuthenticationFailed {}
+
+// The credential lacks permission for this request.
+message ApiPermissionDenied {}
+
+// The request itself was malformed or refused.
+message ApiInvalidRequest {}
+
+// The request exceeded the size limit.
+message ApiRequestTooLarge {}
+
+// The model or resource does not exist.
+message ApiNotFound {}
+
+// The API's own internal error.
+message ApiInternal {}
+
+// The account cannot be charged for this request.
+message ApiBillingError {}
+
+// The credential's organization is not permitted to use this deployment.
+message ApiOauthOrgNotAllowed {}
+
+// The request asked for more output than the model will produce.
+message ApiMaxOutputTokens {}
+
+// An error type this schema does not model.
+message ApiUnmodeledError {
+  // The vendor's type string, so a later schema knows what to add.
+  string type = 1;
+}
+
+// A model the vendor API offers for selection.
+//
+// The live query is the only authority on selectable model ids for a
+// session/account: the shim reports the list it learned, the daemon forwards
+// it, the topbar and footer render it. It is an API FACT, so it lives with
+// the API's other facts and every surface imports it from here — shim.v1's
+// ModelCatalog included. A second declaration on any surface is a
+// re-spelling.
+// A model's identity — a TYPED ECHO TOKEN: the daemon mints it (inside each
+// ModelOption it serves), and a client HANDS IT BACK unchanged when
+// selecting; a client never invents or parses one.
+message AgentModel {
+  // The id the API accepts (e.g. "claude-opus-5").
+  string name = 1;
+}
+
+// One model a session may run under, as offered by the vendor for this account.
+// Served as a list for a selector to draw; a selection echoes back the embedded
+// identity rather than any of the display text, so a client never constructs a
+// model id of its own.
+message ModelOption {
+  // The model's identity — what a selection echoes back.
+  AgentModel model = 1;
+  // The name a selector shows for it.
+  string display_name = 2;
+  // A one-line description, when the vendor gives one; empty otherwise.
+  string description = 3;
+
+  // What this particular model can do. UNSET when the vendor reported no
+  // capability block for it, in which case a selector must not assume any
+  // capability either way.
+  //
+  // WHY IT RIDES THE OFFER: fast mode and auto mode are per-model, so a
+  // surface that offers either without consulting the selected model's
+  // capabilities is offering something that will be refused.
+  optional ModelCapabilities capabilities = 4;
+}
+
+// What one model can do, as the vendor declares it.
+message ModelCapabilities {
+  // The id the vendor resolves this option to when it is selected — an alias
+  // ("sonnet") names a dated id. UNSET when the vendor stated no resolution,
+  // in which case the option's own id is what runs.
+  optional AgentModel resolved_model = 1;
+
+  // Whether a reasoning-effort level may be asked for, and which levels this
+  // model accepts. THE ARM IS THE ANSWER, so a model that takes no effort
+  // carries no level list to be misread as "every level".
+  oneof effort_support {
+    // The model does not take a reasoning-effort level; asking for one is a
+    // request it will refuse.
+    ModelEffortUnsupported effort_unsupported = 2;
+    // The model takes a reasoning-effort level, and these are the levels.
+    ModelEffortSupported effort_supported = 3;
+  }
+
+  // Whether the model adjusts its own thinking budget rather than holding to
+  // the level asked for.
+  bool supports_adaptive_thinking = 4;
+  // Whether the vendor's fast mode may be turned on for this model.
+  bool supports_fast_mode = 5;
+  // Whether the vendor's auto permission mode may be used with this model.
+  bool supports_auto_mode = 6;
+}
+
+// The model takes no reasoning-effort level.
+message ModelEffortUnsupported {}
+
+// The model takes a reasoning-effort level.
+message ModelEffortSupported {
+  // The levels this model accepts, in the vendor's own order. A level absent
+  // here is refused by this model even though another model accepts it.
+  repeated AgentEffortLevel levels = 1;
+}
+
+// How much reasoning a response was asked to spend before answering.
+//
+// A closed set of scalar choices with no per-value payload and no exclusive
+// sibling — an enum by the convention's own carve-out, and one canonical
+// vocabulary so a model's accepted levels and a response's reported level are
+// the same values.
+enum AgentEffortLevel {
+  AGENT_EFFORT_LEVEL_UNSPECIFIED = 0;
+  AGENT_EFFORT_LEVEL_LOW = 1;
+  AGENT_EFFORT_LEVEL_MEDIUM = 2;
+  AGENT_EFFORT_LEVEL_HIGH = 3;
+  AGENT_EFFORT_LEVEL_XHIGH = 4;
+  // Above `xhigh`: the vendor's largest reasoning budget.
+  AGENT_EFFORT_LEVEL_MAX = 5;
+}
+
+// ---------------------------------------------------------------------------
+// USAGE ACCOUNTING — the one canonical token shape.
+//
+// It arrived in this tree in frontend.v1 and moved to conversation.v1
+// unchanged: the shim translates vendor usage into this shape at the boundary
+// and stops there, and a durable record carrying what a response cost cannot
+// depend on the daemon's resolved output surface. It lives in THIS file
+// because it is the API's own accounting of a request — the same actor as the
+// failures above. There is exactly one place this system states what a
+// request cost.
+// ---------------------------------------------------------------------------
+
+// THE ONE CANONICAL TOKEN SHAPE, and the only representation in which this
+// system states what a request cost.
+//
+// IT IS ORGANIZED BY ECONOMICS, NOT BY THE VENDOR'S FIELD NAMES. The vendor
+// reports three disjoint input counters whose names describe WHERE the tokens
+// went, not what they were charged, and reading any one of them as "the cost"
+// is the mistake this shape makes unrepresentable:
+//
+//   - `input_hits.read` (vendor `cache_read_input_tokens`) is the ONLY cheap
+//     bucket: the standing prefix presented again and served from the prompt
+//     cache.
+//   - `input_misses.written` (vendor `cache_creation_input_tokens`) was
+//     processed fresh at full price AND carries the cache-write premium (1.25x).
+//   - `input_misses.unwritten` (vendor `input_tokens`) was processed fresh at
+//     the base rate and never entered the cache at all. It carries no cache
+//     label because it was never cached, not because it was served from a cache.
+//
+// THE EXPENSIVE SUM IS STRUCTURAL HERE: it is `input_misses` — both of its
+// fields, together, because both missed the cache — rather than an addition a
+// reader has to know to perform. That is the whole reason for the nesting. The
+// CLI marks nearly all input cacheable, so a COLD prompt (a full context
+// re-ingest, the most expensive thing that can happen) surfaces almost entirely
+// as `written` while `unwritten` stays near zero; a turn with a deliberately
+// uncacheable prefix surfaces the other way round. Neither field alone is ever
+// the answer.
+//
+// RATES ARE NOT STORED. The cache-hit / cache-write / fresh-input partition is
+// three quotients over these same counters, so it is DERIVED at the point of
+// use by the daemon (`internal/tokenusage`) and never persisted as a field
+// alongside the counters it is computed from.
+//
+// THE DAEMON IS THE SOLE OWNER of every judgment taken from this shape. The
+// shim translates vendor usage into it at the boundary and stops there; the
+// webapp renders what the daemon resolved.
+message TokenUsage {
+  // What the prompt cache served: the cheap bucket.
+  TokenCacheHits input_hits = 1;
+  // What the prompt cache did not serve: the expensive buckets, together.
+  TokenCacheMisses input_misses = 2;
+  // Generated tokens, including extended thinking where the API includes it.
+  // There is no output cache, so no cache partition applies; this remains the
+  // TOTAL, and `output_thinking_tokens` below names a part of it.
+  uint64 output_tokens = 3;
+
+  // The part of `output_tokens` the vendor attributed to extended thinking.
+  //
+  // A PARTITION OF output_tokens, NOT AN ADDITION TO IT — never sum the two.
+  // Carried because the old narrow usage projection could not express it, and a
+  // record built without it is durably unfaithful to what the vendor reported.
+  //
+  // Zero when the vendor reported no thinking tokens, which is also what a
+  // response with no extended thinking reports.
+  uint64 output_thinking_tokens = 4;
+
+  // Tags 5-6 are RETIRED: the refusal-fallback credit and the cache-miss
+  // diagnostics are deferred.
+}
+
+// The prompt input this request did not have to process, because the prompt
+// cache already held it.
+message TokenCacheHits {
+  // Prompt-prefix tokens served from the prompt cache (vendor
+  // `cache_read_input_tokens`). Billed at the cache-read rate.
+  uint64 read = 1;
+}
+
+// The prompt input this request processed fresh, split by whether processing it
+// also placed it in the cache. BOTH FIELDS ARE EXPENSIVE and their sum is the
+// figure every cost judgment in this system reads.
+message TokenCacheMisses {
+  // Tokens processed fresh that entered the cache as they were processed
+  // (vendor `cache_creation_input_tokens`). Billed at 1.25x the base input rate
+  // — the base price plus the cache-write premium.
+  uint64 written = 1;
+  // Tokens processed fresh that never entered the cache at all (vendor
+  // `input_tokens`). Billed at the base input rate.
+  uint64 unwritten = 2;
+}
+
+// ---- The vendor's non-model model names ----
+
+// Carries a model marker's on-the-wire spelling on the enum value that names
+// it.  An EXTENSION rather than a constant because protobuf has no constants:
+// an enum value's option is the only construct that puts a literal into the
+// SCHEMA itself, where every generated runtime — Go, TypeScript, anything
+// added later — reads the same bytes back by reflection instead of restating
+// them.
+extend google.protobuf.EnumValueOptions {
+  string model_marker_literal = 60001;
+}
+
+// The closed set of model names the CLI reports that are NOT model ids.
+//
+// The CLI answers `<synthetic>` whenever it is not running a real nameable
+// model.  Treated as an id it is corrosive twice over: it poisons the live
+// registry record with a value nothing can ever be spawned under, and it
+// reaches the webapp picker as a selectable option that cannot be selected.
+// So a marker must be RECOGNIZED before a reported model is committed, and
+// recognizing it requires the literal.
+//
+// That literal was re-declared SIX times — in Go, in the shim, and in three
+// inline webapp comparisons — kept aligned by review alone, which is exactly
+// the arrangement where one corrected spelling leaves five stale ones and the
+// marker silently becomes an id again on the surfaces that missed the change.
+// This enum is now the one definition, and the option below is how the other
+// five sites read it instead of writing it.
+enum ModelMarker {
+  MODEL_MARKER_UNSPECIFIED = 0;
+  // Not a model: the CLI's own stand-in for "no real nameable model is in
+  // play".  Never a spawnable id, never an offerable picker entry.
+  MODEL_MARKER_SYNTHETIC = 1 [(model_marker_literal) = "<synthetic>"];
+}

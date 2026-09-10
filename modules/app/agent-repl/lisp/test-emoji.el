@@ -577,6 +577,41 @@ was being returned instead, which owns no log sink."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none")))
       (should-not (agent-repl--emoji-log-ws)))))
 
+;;;; ---- Tests: prepare-commit-msg hook installer ----
+;;
+;; `agent-repl-install-commit-emoji-hook' is an autoloaded interactive command
+;; documented in hooks/prepare-commit-msg-emoji.sh as the way to install that
+;; hook; it has no elisp caller by design.  These pin it.
+
+(ert-deftest agent-repl-test-install-commit-emoji-hook-refuses-outside-a-repository ()
+  "No git hooks directory means a refusal, never a silent no-op."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--git-hooks-dir) (lambda () nil)))
+      (should-error (agent-repl-install-commit-emoji-hook) :type 'user-error))))
+
+(ert-deftest agent-repl-test-install-commit-emoji-hook-copies-the-hook-script ()
+  "The checked-in hook script lands in the resolved hooks directory."
+  (agent-repl-test--with-clean-state
+    (let ((hooks-dir (make-temp-file "agent-repl-hooks" t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--git-hooks-dir) (lambda () hooks-dir)))
+            (agent-repl-install-commit-emoji-hook)
+            (should (file-exists-p (expand-file-name "prepare-commit-msg" hooks-dir))))
+        (delete-directory hooks-dir t)))))
+
+(ert-deftest agent-repl-test-install-commit-emoji-hook-backs-up-an-existing-hook ()
+  "An existing hook is preserved as a .bak rather than overwritten away."
+  (agent-repl-test--with-clean-state
+    (let* ((hooks-dir (make-temp-file "agent-repl-hooks" t))
+           (dest (expand-file-name "prepare-commit-msg" hooks-dir)))
+      (unwind-protect
+          (progn
+            (with-temp-file dest (insert "#!/bin/sh\nexit 0\n"))
+            (cl-letf (((symbol-function 'agent-repl--git-hooks-dir) (lambda () hooks-dir)))
+              (agent-repl-install-commit-emoji-hook)
+              (should (file-exists-p (concat dest ".bak")))))
+        (delete-directory hooks-dir t)))))
+
 (provide 'test-emoji)
 
 ;;; test-emoji.el ends here

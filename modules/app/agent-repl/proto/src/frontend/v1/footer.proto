@@ -1,0 +1,1274 @@
+// footer.proto — THE FOOTER: the workspace's status strip, its selectable
+// cells and chips, and the expanded section their selection opens.
+// Per-workspace; resolved by the daemon.
+//
+// THE MAIN STRIP, left to right — resolution INCREASES left to right across
+// the three status sections, each TYPED, each "less" typed than the last by
+// carrying more of its information in text fields; then the turn's figures;
+// then the live-work chips, right-aligned:
+//
+//   ┌───────────┬─────────────────────┬──────────────────────────────┬───────┬───────────────┬─────────────┐
+//   │ merging   │ cherry-picking 3/7  │ 4f2a1c: fold tokens into api │ 0:42  │ 18.2k in ⚠ ✓ │ ⚙3 ☑3/7 $2 │
+//   └───────────┴─────────────────────┴──────────────────────────────┴───────┴───────────────┴─────────────┘
+//     Status      SubStatus             StatusActivity                 Clock   Tokens cell     LiveWork chips
+//     coarsest ──────────── resolution increases ────────────► finest
+//
+//   Status         the coarsest state, one word + color, a small closed set;
+//                  `interrupted` is a status like any other, cleared by the
+//                  next status update.
+//   SubStatus      the step WITHIN the status, typed per status family, with
+//                  the small facts a step has (queue position, commit counts).
+//   StatusActivity the finest, DYNAMIC line: typed KINDS whose payload is
+//                  mostly text the daemon composed.
+//   Clock          how long the current turn has been running.
+//   Tokens cell    the turn's uncached-input figure with two glyphs; a click
+//                  target opening the token panel.
+//   LiveWork chips ⚙ live subagents · ☑ the task tracker · $ live shells —
+//                  each a click target opening its panel.
+//
+// THE EXPANDED SECTION opens above the strip when a selectable element (the
+// tokens cell or a chip) is selected. The selection is WEBVIEW-LOCAL, so the
+// daemon ships EVERY panel fully resolved on every push and the client draws
+// whichever one the local selection picks — opening a panel needs no
+// round-trip (the folded-menu convention).
+//
+// EVERY FIELD IS AN ELEMENT MESSAGE, nested as the UI nests. The daemon
+// resolves every level; the client renders and derives nothing — there is no
+// client-side precedence between windows, no phase→word table, no mapping of
+// any state to a color, and no counting of panel rows to label a chip.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "frontend/v1/feed.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// ==========================================================================
+// THE FOOTER VIEW
+// ==========================================================================
+
+// The footer: the always-drawn strip plus the expanded section's panels.
+// EVERY panel is always resolved on every push: which panel is open is a
+// webview-local selection the daemon never learns.
+// PUSH CADENCE, the convention for this view and every frontend.v1 view:
+// EVENT-DRIVEN, WHOLE-VIEW, NO TICKS. The daemon pushes the view WHOLE
+// whenever ANY resolved fact changes — never a partial, never a delta —
+// and pushes NOTHING when nothing changed: there is no keepalive, no
+// periodic re-push, and an identical consecutive push is waste, not
+// protocol. Continuous motion (clocks, countdowns, relative ages) is
+// CLIENT-side ticking from shipped instants. Bursts of upstream frames may
+// coalesce into one push, because the wire carries STATES, not events.
+message FooterView {
+  // The one-line strip at the bottom of the workspace view. Always drawn.
+  FooterStrip strip = 1;
+  // The expanded section's content, one panel per selectable strip element.
+  // Drawn only while a strip element is selected; the selection picks which.
+  FooterExpanded expanded = 2;
+}
+
+// ==========================================================================
+// THE MAIN STRIP
+// ==========================================================================
+
+// The strip's elements, left to right. Status, sub-status and activity are
+// the three typed resolution levels (coarsest → finest); clock and tokens
+// are the turn's figures; the live-work chips sit right-aligned.
+message FooterStrip {
+  // The whole status family — coarse status, its step, and its activity
+  // line — as ONE tree: each status arm declares exactly the sub-status
+  // steps and activity kinds legal while it stands. Colors the strip.
+  FooterStatus status = 1;
+  // Tags 2-3 are RETIRED: the sub-status and activity cells are no longer
+  // siblings of the status — each lives INSIDE the status arm that makes it
+  // legal, so an illegal pairing is unrepresentable.
+  // The turn clock. The client ticks from the carried instant.
+  FooterClock clock = 4;
+  // The tokens CELL: the turn's uncached-input figure plus two glyphs, and
+  // the click target that opens FooterExpandedTokens. The full breakdown
+  // lives in that panel, never here.
+  FooterTokensCell tokens = 5;
+  // The live-work chips, right-aligned. Each chip is a click target opening
+  // its panel.
+  FooterLiveWorkChips live_work = 6;
+}
+
+// ---- The status family — one hierarchy, legality by construction ---------
+
+// The strip's coarse status, its finer step, and its finest activity line
+// are ONE tree: the set arm IS the status, and each status arm declares
+// exactly the sub-status steps and activity kinds that are legal while it
+// stands, so an illegal pairing (a wakeup countdown under merging, a
+// cherry-pick step under idle) is unrepresentable rather than forbidden by
+// comment. Each arm's color is the shared render-colors vocabulary's, one
+// per arm, resolved by the daemon into the CSS class the client applies;
+// the client holds no table.
+//
+// RENDERING RULES, stated once:
+// - The strip draws | status | substatus | activity |. A status arm with NO
+//   substatus oneof merges the substatus cell into the status cell, and the
+//   activity cell always absorbs the free width.
+// - STATUS AND SUBSTATUS TEXT is rendered lowercase ASCII with spaces,
+//   NEVER underscores — the arm name is a schema spelling, not the label.
+// - ACTIVITY is the rich cell: colorized, formatted, ideally one line. A
+//   STATICALLY TYPED datum in an activity message (a count, an instant, a
+//   sha) is a strong indicator that datum deserves color in the rendered
+//   line.
+// - THREE ACTIVITY KINDS ARE STATUS-INDEPENDENT and appear in EVERY status
+//   arm's oneof (notification, rate_limited, context_budget). The daemon
+//   selects ONE standing activity per push, by precedence: notification
+//   OUTRANKS every competing activity; the status-bound kinds rank next, by
+//   the daemon's judgment; rate_limited is SECOND-LOWEST; context_budget is
+//   LOWEST — shown only when nothing else stands.
+message FooterStatus {
+  // What the session is doing now, at the coarsest resolution. Exactly one
+  // arm is set; a frame with none is malformed and rejected loudly.
+  oneof status {
+    // Nothing in flight; the session serves on demand.
+    FooterStatusIdle idle = 1;
+    // A turn is in flight.
+    FooterStatusThinking thinking = 2;
+    // The session is parked on something — a self-scheduled wakeup, a
+    // consent card, or a question batch.
+    FooterStatusWaiting waiting = 3;
+    // MOMENTARY: the last turn was stopped; cleared by the next status push.
+    FooterStatusInterrupted interrupted = 4;
+    // A daemon-orchestrated merge is in flight for this workspace.
+    FooterStatusMerging merging = 5;
+    // Detached work runs while the main thread is free.
+    FooterStatusBackground background = 6;
+    // The session cannot proceed until something outside it changes.
+    FooterStatusBlocked blocked = 7;
+    // Tag 8 is RETIRED: the asleep status died with hibernation leaving
+    // the contract.
+    // The daemon's link to the session's shim is not serving.
+    FooterStatusDisconnected disconnected = 9;
+    // A close was requested and has not completed.
+    FooterStatusClosing closing = 10;
+    // MOMENTARY: context is being injected (memory, skills); falls back on
+    // the next frame.
+    FooterStatusLoading loading = 11;
+  }
+}
+
+// Nothing in flight; the session serves on demand.
+message FooterStatusIdle {
+  // The finer idle step. UNSET when the daemon knows no finer step.
+  oneof substatus {
+    // Never ran a turn this session.
+    FooterSubStatusIdleReady ready = 1;
+    // The last turn concluded normally.
+    FooterSubStatusIdleDone done = 2;
+  }
+  // OPTIONAL BY EVIDENCE: an idle session most often has NOTHING finer to
+  // say — no producer emits a standing line for plain idleness — so absence
+  // is the common, legitimate state, not a producer gap.
+  optional FooterStatusIdleActivity activity = 3;
+}
+// The activity kinds legal while idle.
+message FooterStatusIdleActivity {
+  // When this activity began standing; the client ticks the relative age
+  // per the clock convention. A push without it is a loud daemon fault.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // The vendor's context-budget warning, standing while it holds.
+    FooterStatusActivityContextBudget context_budget = 3;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 4;
+  }
+}
+// Never ran a turn this session.
+message FooterSubStatusIdleReady {}
+// The last turn concluded normally.
+message FooterSubStatusIdleDone {}
+
+// A turn is in flight.
+message FooterStatusThinking {
+  // The finer turn step. UNSET when the daemon knows no finer step.
+  oneof substatus {
+    // The prompt is being delivered.
+    FooterSubStatusThinkingSubmitting submitting = 1;
+    // The model is reasoning.
+    FooterSubStatusThinkingThinking thinking = 2;
+    // A /clear is being applied.
+    FooterSubStatusThinkingClearing clearing = 3;
+    // A compaction is running.
+    FooterSubStatusThinkingCompacting compacting = 4;
+  }
+  // OPTIONAL BY EVIDENCE: most of a turn passes with no finer fact standing
+  // (no hook running, no retry, no notification); absence is the ordinary
+  // state.
+  optional FooterStatusThinkingActivity activity = 5;
+}
+// The activity kinds legal while a turn runs.
+message FooterStatusThinkingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // A hook is running.
+    FooterStatusActivityHook hook = 2;
+    // The vendor call is being retried.
+    FooterStatusActivityRetrying retrying = 3;
+    // The specific context item taken on (a turn can inject mid-flight).
+    FooterStatusActivityContextInjected context_injected = 4;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 5;
+    // The vendor's context-budget warning.
+    FooterStatusActivityContextBudget context_budget = 6;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 7;
+  }
+}
+// The prompt is being delivered.
+message FooterSubStatusThinkingSubmitting {}
+// The model is reasoning.
+message FooterSubStatusThinkingThinking {}
+// A /clear is being applied.
+message FooterSubStatusThinkingClearing {}
+// A compaction is running.
+message FooterSubStatusThinkingCompacting {}
+
+// Parked on a wakeup, a consent card, or a question batch.
+message FooterStatusWaiting {
+  // WHAT the session waits on. Exactly one; a waiting status with no step
+  // is malformed.
+  oneof substatus {
+    // The self-scheduled wakeup fallback: shown only when the footer would
+    // otherwise read idle/done — any real status wins, resolved daemon-side.
+    FooterSubStatusWaitingWakeup wakeup = 1;
+    // A permission card is open; the agent is blocked on consent.
+    FooterSubStatusWaitingPermission permission = 2;
+    // A question batch is open; the agent is blocked on answers.
+    FooterSubStatusWaitingQuestion question = 3;
+    // The cold-context gate stands: the session is parked on the user's
+    // remediation choice (pay / clear / compact). The feed's gate row is the
+    // answering surface; the footer only says the session is parked on it.
+    FooterSubStatusWaitingColdGate cold_gate = 5;
+    // An interrupt was registered and the running turn's teardown has
+    // begun; the next delivery will be the interrupting prompt. Pushed
+    // the MOMENT the interrupt registers, before the turn's real end —
+    // the user must see their stop acknowledged immediately.
+    FooterSubStatusWaitingInterrupting interrupting = 6;
+  }
+  // REQUIRED: every waiting state has a composable line by construction —
+  // the countdown, the gated call, or the question lead. A producer that
+  // cannot compose it has a bug, not a missing fact.
+  FooterStatusWaitingActivity activity = 4;
+}
+// The self-scheduled wakeup fallback state.
+message FooterSubStatusWaitingWakeup {}
+// A permission card is open; the agent is blocked on consent.
+message FooterSubStatusWaitingPermission {}
+// A question batch is open; the agent is blocked on answers.
+message FooterSubStatusWaitingQuestion {}
+// The cold-context gate stands; the session is parked on its answer.
+message FooterSubStatusWaitingColdGate {}
+// The turn is being stopped on the user's behalf.
+message FooterSubStatusWaitingInterrupting {}
+// The activity kinds legal while waiting.
+message FooterStatusWaitingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The wakeup countdown; the client ticks from the deadline instant.
+    FooterStatusActivityWakeup wakeup = 2;
+    // The gated call, composed ("Bash: rm -rf …").
+    FooterStatusActivityGatedCall gated_call = 3;
+    // The open batch's lead, composed ("2 questions · Which approach?").
+    FooterStatusActivityQuestionLead question_lead = 4;
+    // The session reports it is parked on the user (requires_action) — a
+    // vendor fact the daemon cannot decompose further.
+    FooterStatusActivityBlockedOnUser blocked_on_user = 5;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 6;
+    // The cold gate's cost line, composed by the daemon ("context cold —
+    // 182k tokens to re-read").
+    FooterStatusActivityColdGateCost cold_gate_cost = 7;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 8;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 9;
+    // The interrupting line, composed by the daemon ("stopping the
+    // current turn…"), standing until the teardown resolves.
+    FooterStatusActivityInterrupting interrupting = 10;
+  }
+}
+// The composed interrupting line.
+message FooterStatusActivityInterrupting {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The cold gate's composed cost line.
+message FooterStatusActivityColdGateCost {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The gated call's composed line.
+message FooterStatusActivityGatedCall {
+  // Drawn verbatim.
+  string text = 1;
+}
+// The open question batch's composed lead line.
+message FooterStatusActivityQuestionLead {
+  // Drawn verbatim.
+  string text = 1;
+}
+
+// MOMENTARY: the last turn was stopped; cleared by the next status push.
+message FooterStatusInterrupted {
+  // Who stopped it.
+  oneof substatus {
+    // The user commanded the stop.
+    FooterSubStatusInterruptedByUser by_user = 1;
+    // The host shut the session down mid-turn.
+    FooterSubStatusInterruptedByHostShutdown host_shutdown = 2;
+  }
+  // OPTIONAL BY EVIDENCE: the status is momentary and no producer composes
+  // a standing line for it; only a notification can accompany it.
+  optional FooterStatusInterruptedActivity activity = 3;
+}
+// The user commanded the stop.
+message FooterSubStatusInterruptedByUser {}
+// The host shut the session down mid-turn.
+message FooterSubStatusInterruptedByHostShutdown {}
+// The activity kinds legal while interrupted.
+message FooterStatusInterruptedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
+  }
+}
+
+// A daemon-orchestrated merge is in flight.
+message FooterStatusMerging {
+  // The merge run's phase, projected from the merge bubble's vocabulary.
+  oneof substatus {
+    // The merge is being enqueued.
+    FooterSubStatusMergingEnqueuing enqueuing = 1;
+    // Waiting in the repo's queue.
+    FooterSubStatusMergingQueued queued = 2;
+    // The configured --before-ws-merge prompt is running.
+    FooterSubStatusMergingPrePrompt pre_prompt = 3;
+    // The no-FF merge commit is being created (the bubble's merge tab).
+    FooterSubStatusMergingMerge merge = 4;
+    // The test suite is running against the merge commit.
+    FooterSubStatusMergingTesting testing = 5;
+    // The merge is PARKED awaiting the user's guidance — the resolution
+    // agent exhausted its attempt; the composer is open (merge_parked)
+    // and everything typed is delivered to the merge's agent.
+    FooterSubStatusMergingParked parked = 6;
+    // The configured --post-processing-prompt is running.
+    FooterSubStatusMergingPostPrompt post_prompt = 7;
+    // The merge failed; the bubble carries the account.
+    FooterSubStatusMergingFailed failed = 8;
+    // The merge landed.
+    FooterSubStatusMergingMerged merged = 9;
+    // Test-failure fixes are running (the bubble's fixes tab).
+    FooterSubStatusMergingFixes fixes = 11;
+    // Conflict resolution is running (the bubble's conflicts tab).
+    FooterSubStatusMergingConflicts conflicts = 12;
+  }
+  // OPTIONAL BY EVIDENCE: the commit line exists only while a commit is
+  // landing; most phases have no finer line.
+  optional FooterStatusMergingActivity activity = 10;
+}
+// The merge is being enqueued.
+message FooterSubStatusMergingEnqueuing {}
+// The queue place the run was admitted at.
+message FooterSubStatusMergingQueued {
+  // 1-based position in its repo's queue.
+  int32 position = 1;
+  // How many are queued in that repo.
+  int32 depth = 2;
+}
+// The configured --before-ws-merge prompt is running.
+message FooterSubStatusMergingPrePrompt {}
+// The no-FF merge commit is being created.
+message FooterSubStatusMergingMerge {}
+// The test suite is running against the merge commit.
+message FooterSubStatusMergingTesting {}
+// Parked awaiting the user's guidance.
+message FooterSubStatusMergingParked {
+  // The daemon-composed line — the same standing fact the bubble's parked
+  // tab shows, this component's own wrapper.
+  string line = 1;
+}
+// Test-failure fixes are running.
+message FooterSubStatusMergingFixes {}
+// Conflict resolution is running.
+message FooterSubStatusMergingConflicts {}
+// The configured --post-processing-prompt is running.
+message FooterSubStatusMergingPostPrompt {}
+// The merge failed; the bubble carries the account.
+message FooterSubStatusMergingFailed {}
+// The merge landed.
+message FooterSubStatusMergingMerged {}
+
+// The activity kinds legal while merging.
+message FooterStatusMergingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The commit landing right now.
+    FooterStatusActivityMergingCommit merging_commit = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
+  }
+}
+
+// Detached work runs while the main thread is free.
+message FooterStatusBackground {
+  // No substatus: the chips and expanded panels carry the detail, so the
+  // substatus cell merges into the status cell.
+  // OPTIONAL BY EVIDENCE: nothing finer stands unless a notification or a
+  // newsworthy rate-limit report does.
+  optional FooterStatusBackgroundActivity activity = 1;
+}
+// The activity kinds legal while background.
+message FooterStatusBackgroundActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
+  }
+}
+
+// The session cannot proceed until something outside it changes.
+message FooterStatusBlocked {
+  // WHY it is blocked.
+  oneof substatus {
+    // An auth prompt is up.
+    FooterSubStatusBlockedAuth auth = 1;
+    // The usage allowance is exhausted.
+    FooterSubStatusBlockedUsageLimit usage_limit = 2;
+    // The vendor is refusing requests.
+    FooterSubStatusBlockedVendorError vendor_error = 3;
+    // The account's billing state refuses requests.
+    FooterSubStatusBlockedBilling billing = 4;
+    // The vendor query died while the shim stayed healthy and nothing has
+    // restarted it — the session looks idle but cannot serve until the next
+    // prompt restarts the query. Distinct from disconnected, which is the
+    // daemon<->shim link.
+    FooterSubStatusBlockedQueryDied query_died = 6;
+  }
+  // OPTIONAL BY EVIDENCE: the auth prompt line exists only on the auth
+  // step; the other steps have no standing line beyond the step itself.
+  optional FooterStatusBlockedActivity activity = 5;
+}
+// An auth prompt is up.
+message FooterSubStatusBlockedAuth {}
+// The usage allowance is exhausted.
+message FooterSubStatusBlockedUsageLimit {}
+// The vendor is refusing requests.
+message FooterSubStatusBlockedVendorError {}
+// The account's billing state refuses requests.
+message FooterSubStatusBlockedBilling {}
+// The vendor query died and is not yet restarted.
+message FooterSubStatusBlockedQueryDied {}
+// The activity kinds legal while blocked.
+message FooterStatusBlockedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The auth prompt line, verbatim.
+    FooterStatusActivityAuthenticating authenticating = 2;
+    // A newsworthy rate-limit report.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 4;
+    // The dead-query line, composed by the daemon ("vendor query died —
+    // the next prompt restarts it").
+    FooterStatusActivityQueryDied query_died = 5;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 6;
+  }
+}
+// The dead-query line.
+message FooterStatusActivityQueryDied {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// The daemon's link to the session's shim is not serving.
+message FooterStatusDisconnected {
+  // The link's step.
+  oneof substatus {
+    // The shim is starting.
+    FooterSubStatusDisconnectedStarting starting = 1;
+    // The link serves with degradation.
+    FooterSubStatusDisconnectedDegraded degraded = 2;
+    // The link was severed and reconnection is being attempted.
+    FooterSubStatusDisconnectedSevered severed = 3;
+    // The shim process is gone.
+    FooterSubStatusDisconnectedDead dead = 4;
+    // The shim failed to start.
+    FooterSubStatusDisconnectedStartFailed start_failed = 5;
+  }
+  // OPTIONAL BY EVIDENCE: no producer composes a standing line for a dead
+  // link; only a notification can accompany it.
+  optional FooterStatusDisconnectedActivity activity = 6;
+}
+// The shim is starting.
+message FooterSubStatusDisconnectedStarting {}
+// The link serves with degradation.
+message FooterSubStatusDisconnectedDegraded {}
+// The link was severed and reconnection is being attempted.
+message FooterSubStatusDisconnectedSevered {}
+// The shim process is gone.
+message FooterSubStatusDisconnectedDead {}
+// The shim failed to start.
+message FooterSubStatusDisconnectedStartFailed {}
+// The activity kinds legal while disconnected.
+message FooterStatusDisconnectedActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 2;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 3;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 4;
+  }
+}
+
+// A close was requested and has not completed.
+message FooterStatusClosing {
+  // The close's step. UNSET while the close proceeds unremarkably; the
+  // family anticipates a graceful-drain step if one is ever wanted.
+  oneof substatus {
+    // The close is refused while work is live; the activity line carries
+    // the daemon's composed reasons.
+    FooterSubStatusCloseBlocked blocked = 1;
+  }
+  // OPTIONAL BY EVIDENCE: only the blocked step composes a reasons line;
+  // an unremarkable close has nothing finer to say.
+  optional FooterStatusClosingActivity activity = 2;
+}
+// The close is refused while work is live.
+message FooterSubStatusCloseBlocked {}
+// The activity kinds legal while closing.
+message FooterStatusClosingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // WHY the close is blocked, in concise plain English resolved by the
+    // daemon ("a turn is in flight; 2 subagents and a shell are running").
+    FooterStatusActivityCloseBlocked close_blocked = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
+  }
+}
+
+// MOMENTARY: context is being injected (memory, skills).
+message FooterStatusLoading {
+  // WHAT kind of injection.
+  oneof substatus {
+    // A memory file is being injected.
+    FooterSubStatusLoadingMemory memory = 1;
+    // An invoked skill's document is loading.
+    FooterSubStatusLoadingInvoked invoked = 2;
+    // Discovered skills are being injected.
+    FooterSubStatusLoadingDiscovered discovered = 3;
+    // A skill listing is being injected.
+    FooterSubStatusLoadingListing listing = 4;
+  }
+  // REQUIRED: the injected item is always known — the injection IS the
+  // status, so a loading push with no item line is a producer bug.
+  FooterStatusLoadingActivity activity = 5;
+}
+// A memory file is being injected.
+message FooterSubStatusLoadingMemory {}
+// An invoked skill's document is loading.
+message FooterSubStatusLoadingInvoked {}
+// Discovered skills are being injected.
+message FooterSubStatusLoadingDiscovered {}
+// A skill listing is being injected.
+message FooterSubStatusLoadingListing {}
+// The activity kinds legal while loading.
+message FooterStatusLoadingActivity {
+  // When this activity began standing; the client ticks the relative age.
+  FooterStatusActivityAt at = 1;
+  // The one standing line.
+  oneof kind {
+    // The specific item taken on, composed by the daemon
+    // ("webapp/CLAUDE.md", "graphify", "3 skills from ~/.claude/skills").
+    FooterStatusActivityContextInjected context_injected = 2;
+    // An agent notification, shown until the next activity replaces it.
+    FooterStatusActivityNotification notification = 3;
+    // A newsworthy rate-limit report; second-lowest precedence.
+    FooterStatusActivityRateLimited rate_limited = 4;
+    // The vendor's context-budget warning; LOWEST precedence — shown only
+    // when nothing else stands.
+    FooterStatusActivityContextBudget context_budget = 5;
+  }
+}
+
+// ---- Shared activity leaf payloads ----------------------------------------
+// One drawn cell, one payload vocabulary: these leaves are shared across the
+// per-status activity oneofs above — the per-status ONEOF types are what
+// confine legality, and a leaf carries only the line's content.
+
+// The activity's standing instant.
+message FooterStatusActivityAt {
+  // Epoch ms. The client derives and ticks the RELATIVE age ("· 2m ago")
+  // per the clock convention — an instant is shipped, a duration is drawn.
+  int64 at_ms = 1;
+}
+
+// The notification line.
+message FooterStatusActivityNotification {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// The context-budget warning line.
+message FooterStatusActivityContextBudget {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// The pending wakeup's countdown line.
+message FooterStatusActivityWakeup {
+  // When the wakeup fires, epoch ms; the client derives the remaining
+  // duration and re-renders it at a one-second tick. A FUTURE deadline
+  // counting down, distinct from the envelope instant counting up.
+  int64 wake_at_ms = 1;
+  // The agent's one-sentence reason, drawn after the countdown. UNSET when
+  // the agent gave none.
+  optional FooterStatusActivityWakeupReason reason = 2;
+}
+// The reason element.
+message FooterStatusActivityWakeupReason {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+
+// The commit a merge is landing right now.
+message FooterStatusActivityMergingCommit {
+  // The commit's sha, abbreviated by the daemon.
+  string sha = 1;
+  // The commit's subject line.
+  string subject = 2;
+}
+
+// A hook is running.
+message FooterStatusActivityHook {
+  // The hook's name.
+  string name = 1;
+}
+
+// The vendor call is being retried.
+message FooterStatusActivityRetrying {
+  // Which attempt this is.
+  int32 attempt = 1;
+  // The retry's status summary, verbatim.
+  string status = 2;
+}
+
+// An auth prompt is up.
+message FooterStatusActivityAuthenticating {
+  // The auth prompt line, verbatim.
+  string line = 1;
+}
+
+// The session reports it is parked on the user (requires_action) — a fact
+// the daemon cannot otherwise see, so a permission count alone
+// under-reports it.
+message FooterStatusActivityBlockedOnUser {
+  // The vendor's detail, verbatim.
+  string detail = 1;
+}
+
+// The rate-limit rung. The vendor bills TWO independent allowances (rolling
+// five-hour session, seven-day weekly) reported through one event; both
+// figures are shown so a reader can tell WHICH allowance the newsworthy
+// percentage belongs to.
+message FooterStatusActivityRateLimited {
+  // The rolling five-hour session allowance.
+  FooterAllowance session = 1;
+  // The seven-day weekly allowance.
+  FooterAllowance weekly = 2;
+  // What the newest account-usage SAMPLE managed to read. UNSET means no
+  // sample has been observed and the figures above came from a rate-limit
+  // event alone.
+  //
+  // WHY THIS EXISTS. The figures above are the last ones READ; this states
+  // whether the last ATTEMPT read anything. Without it a sample that failed
+  // is indistinguishable from one that never happened, and the strip draws
+  // yesterday's percentage as though it were today's. It is carried
+  // ALONGSIDE the figures and never instead of them: an unreadable sample
+  // leaves the figures on hand standing (the daemon's own sourcing rule),
+  // and this cell is what lets the client say the figures are stale rather
+  // than silently implying they are fresh.
+  FooterAllowanceSample sample = 3;
+}
+
+// The newest account-usage sample's outcome, BY NAME. THE ARM IS WHETHER A
+// FIGURE WAS READ, mirroring conversation.v1 SessionAccountUsage's own
+// outcome oneof arm for arm, so no consumer has to reconstruct the reason
+// from an absence.
+message FooterAllowanceSample {
+  oneof outcome {
+    // A figure was read; the allowances above are as fresh as this sample.
+    FooterAllowanceSampleAvailable available = 1;
+    // The usage service did not answer.
+    FooterAllowanceSampleServiceUnavailable service_unavailable = 2;
+    // The service answered without a five-hour window.
+    FooterAllowanceSampleWindowUnavailable window_unavailable = 3;
+    // The window carried no utilization figure.
+    FooterAllowanceSampleUtilizationUnavailable utilization_unavailable = 4;
+    // The shim's own sampling failed; it states the cause.
+    FooterAllowanceSampleSamplingFailure sampling_failure = 5;
+  }
+}
+// A figure was read.
+message FooterAllowanceSampleAvailable {}
+// The usage service did not answer.
+message FooterAllowanceSampleServiceUnavailable {}
+// The service answered without a five-hour window.
+message FooterAllowanceSampleWindowUnavailable {}
+// The window carried no utilization figure.
+message FooterAllowanceSampleUtilizationUnavailable {}
+// The shim's own sampling failed.
+message FooterAllowanceSampleSamplingFailure {
+  // The cause, verbatim from the shim. Empty when it stated none.
+  string cause = 1;
+}
+
+// The close-blocked reasons line.
+message FooterStatusActivityCloseBlocked {
+  // The composed reasons, drawn verbatim.
+  string text = 1;
+}
+
+// The injection line's element.
+message FooterStatusActivityContextInjected {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+message FooterAllowance {
+  bool newsworthy = 1;
+  // Epoch SECONDS, the vendor event's own unit.
+  int64 resets_at_s = 2;
+  // 0..1.
+  double utilization = 3;
+  // Tag 4 (status, verbatim string) is RETIRED: the vocabulary is now in
+  // evidence (SessionRateLimitStatus), so the arm is typed.
+  // The vendor's VERDICT, copied from SessionRateLimitStatus.status for this
+  // window. UNSET IS LEGAL: no rate-limit event has been observed for the
+  // window yet — the figures above (from the sampled account usage) draw
+  // without a verdict class, and the arm joins when the vendor speaks.
+  oneof status {
+    FooterAllowanceAllowed allowed = 5;
+    FooterAllowanceAllowedWarning allowed_warning = 6;
+    FooterAllowanceRejected rejected = 7;
+  }
+}
+message FooterAllowanceAllowed {}
+message FooterAllowanceAllowedWarning {}
+message FooterAllowanceRejected {}
+// ---- 4. Clock ------------------------------------------------------------
+
+// The turn clock. UNSET = no turn in flight; the cell renders idle.
+message FooterClock {
+  optional int64 turn_started_at_ms = 1;
+}
+
+// ---- 5. Tokens cell -------------------------------------------------------
+
+// The strip's tokens cell. Deliberately ONE figure: the turn's uncached
+// input tokens — the number that costs money at full price — with the alarm
+// and accounting verdict reduced to glyphs. Everything else (thinking,
+// cache figures, first-token latency, alarm detail, verdict evidence) is
+// FooterExpandedTokens' content, reached by clicking this cell. Figures
+// accumulate while the turn runs; a new turn resets the cell.
+message FooterTokensCell {
+  // The turn's uncached input figure, daemon-formatted ("18.2k in") from the
+  // canonical TokenUsage input_misses total (written + unwritten; cache
+  // READS excluded, which is the whole point). The client draws it verbatim
+  // — no arithmetic, no unit rounding.
+  FooterTokensCellInput input = 1;
+  // The expensive-turn alarm glyph (⚠). PRESENT iff the alarm tripped this
+  // turn; presence IS the glyph, and the composed sentence is the panel's
+  // alarm line. Kept until the next turn starts.
+  optional FooterTokensCellAlarm alarm = 2;
+  // The accounting verdict badge. UNSET while the turn runs (no verdict
+  // yet); set once the settled turn is reconciled.
+  optional FooterTokensCellVerdict verdict = 3;
+}
+
+// The cell's figure. Wrapped so the cell's one number is its own element and
+// a later prop (a tone, a tooltip) lands here without touching the cell.
+message FooterTokensCellInput {
+  // The formatted figure, exactly as drawn ("18.2k in").
+  string text = 1;
+}
+
+// The tripped-alarm glyph. Empty on purpose: being set is the whole fact —
+// "this turn crossed the cost threshold" — and the evidence is the panel's
+// alarm line, never a second copy here.
+message FooterTokensCellAlarm {}
+
+// The accounting badge. The set arm picks the glyph treatment; the evidence
+// behind it is the panel's verdict line, never this badge.
+message FooterTokensCellVerdict {
+  // Which verdict the settled turn's reconciliation reached. Exactly one arm
+  // is set; the arms are mutually exclusive readings of one reconciliation.
+  oneof verdict {
+    // Every response's usage was observed and the sums reconcile (✓).
+    FooterTokensCellVerdictComplete complete = 1;
+    // Some responses carried no usage, so the figures are a floor (✗).
+    FooterTokensCellVerdictIncomplete incomplete = 2;
+    // The observed usage contradicts itself (✗) — a producer defect.
+    FooterTokensCellVerdictInvalid invalid = 3;
+  }
+}
+// Reconciliation succeeded. Empty: the arm is the whole fact.
+message FooterTokensCellVerdictComplete {}
+// Usage is missing for part of the turn. Empty here — the missing-evidence
+// prose is the panel line's.
+message FooterTokensCellVerdictIncomplete {}
+// Usage is self-contradictory. Empty here — the problem list is the panel
+// line's.
+message FooterTokensCellVerdictInvalid {}
+
+// ---- 6. Live-work chips ----------------------------------------------------
+
+// The live-work chips. An UNSET chip is NOT DRAWN — nothing of that kind
+// exists right now — so a quiet workspace shows no chips at all. A set chip
+// carries its count, daemon-resolved: the client never counts panel rows to
+// label a chip, even though the rows arrive in the same push (duplicate,
+// don't share). Detached UNMODELED work has no chip: its surfacing home is
+// the topbar's warning dropdown.
+message FooterLiveWorkChips {
+  // ⚙ — live agent-spawned subagents (the ones with feed bubbles). Set iff
+  // at least one is live.
+  optional FooterChipAgents agents = 1;
+  // ☑ — the task tracker's progress. Set iff the tracker is non-empty; a
+  // task chip is about the LIST existing, not about anything running.
+  optional FooterChipTasks tasks = 2;
+  // $ — live detached shells. Set iff at least one is running.
+  optional FooterChipShells shells = 3;
+  // 👁 — live background monitors. Set iff at least one is live.
+  optional FooterChipMonitors monitors = 4;
+  // ⏱ — live scheduled jobs (cron/wakeup schedules). Set iff at least one
+  // job is scheduled.
+  optional FooterChipCrons crons = 5;
+}
+// The crons chip's props.
+message FooterChipCrons {
+  // How many rows the scheduled-jobs panel holds. At least 1 when this chip
+  // is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
+}
+// The monitors chip's props.
+message FooterChipMonitors {
+  // How many monitor rows the monitors panel holds. At least 1 when this
+  // chip is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
+}
+// The agents chip's props.
+message FooterChipAgents {
+  // How many agent rows the agents panel holds. At least 1 when this chip
+  // is set (a zero-count chip is expressed by leaving the chip unset).
+  uint32 count = 1;
+}
+// The tasks chip's props, drawn as "☑ 3/7". A progress fraction, both
+// figures always drawn — NOT a completeness pair: neither count qualifies
+// the other, so no oneof factoring applies.
+message FooterChipTasks {
+  // How many tracker tasks are completed.
+  uint32 done = 1;
+  // How many tracker tasks exist in total. At least 1 when the chip is set.
+  uint32 total = 2;
+}
+// The shells chip's props.
+message FooterChipShells {
+  // How many detached shells are live. At least 1 when the chip is set.
+  uint32 count = 1;
+}
+
+// ==========================================================================
+// THE EXPANDED SECTION
+// ==========================================================================
+
+// One panel per selectable strip element. ALL panels arrive populated on
+// every push; the webview-local selection picks which one is drawn. A panel
+// whose subject is empty (no live shells, say) still arrives — as an empty
+// row list — because its chip is then unset and nothing can select it.
+message FooterExpanded {
+  // The turn's token breakdown — the tokens cell's expansion.
+  FooterExpandedTokens tokens = 1;
+  // The live agent-spawned subagents — the ⚙ chip's expansion.
+  FooterExpandedAgents agents = 2;
+  // The task tracker's checklist — the ☑ chip's expansion.
+  FooterExpandedTasks tasks = 3;
+  // The live detached shells — the $ chip's expansion.
+  FooterExpandedShells shells = 4;
+  // The live background monitors — the 👁 chip's expansion.
+  FooterExpandedMonitors monitors = 5;
+  // The scheduled jobs — the ⏱ chip's expansion.
+  FooterExpandedCrons crons = 6;
+}
+
+// ---- The scheduled-jobs panel ----------------------------------------------
+
+// The ⏱ panel: one row per live scheduled job. A TRUE LIST, like the agents
+// panel. NOT jump targets: jobs have no feed bubble.
+message FooterExpandedCrons {
+  // The rows, in the daemon's order. Empty when nothing is scheduled — the
+  // chip is then unset and the panel unreachable.
+  repeated FooterCronRow rows = 1;
+}
+
+// One job's line: ⏱ · schedule · prompt · countdown · markers.
+message FooterCronRow {
+  // The human schedule ("every 5 min"), vendor-composed, drawn verbatim.
+  FooterCronRowSchedule schedule = 1;
+  // The job's prompt, daemon-truncated for width (the shell-row precedent —
+  // what arrives is what is drawn).
+  FooterCronRowPrompt prompt = 2;
+  // The next fire. The DAEMON resolves the instant from the job's cron
+  // expression; the client derives and ticks the remaining duration
+  // ("5m 12s") per the clock convention — an instant is shipped, a duration
+  // is drawn. UNSET when the daemon could not resolve one; the row then
+  // draws the schedule alone.
+  optional FooterCronRowNextFire next_fire = 3;
+  // The recurring marker. Present iff the job repeats.
+  optional FooterCronRowRecurring recurring = 4;
+  // The durable marker. Present iff the job survives the session — worth
+  // distinguishing, since everything else in this footer dies with it.
+  optional FooterCronRowDurable durable = 5;
+}
+// The schedule element.
+message FooterCronRowSchedule {
+  // The line, drawn verbatim.
+  string text = 1;
+}
+// The prompt element.
+message FooterCronRowPrompt {
+  // The prompt text, drawn verbatim.
+  string text = 1;
+}
+// The countdown element.
+message FooterCronRowNextFire {
+  // When the job fires, epoch ms; the client ticks the countdown from it.
+  int64 fire_at_ms = 1;
+}
+// The recurring marker. Empty: presence is the fact.
+message FooterCronRowRecurring {}
+// The durable marker. Empty: presence is the fact.
+message FooterCronRowDurable {}
+
+// ---- The monitors panel ----------------------------------------------------
+
+// The 👁 panel: one row per live monitor.
+message FooterExpandedMonitors {
+  // The rows, in the daemon's order. Empty when nothing is live — the chip
+  // is then unset and the panel unreachable.
+  repeated FooterMonitorRow rows = 1;
+}
+
+// One live monitor's line: 👁 · description · (persistent) · clock. NOT a
+// jump target: monitors have no feed bubble, unlike the agent and shell rows.
+message FooterMonitorRow {
+  // What is being watched, drawn verbatim (the agent's description).
+  FooterMonitorRowDescription description = 1;
+  // The runtime clock; the client ticks from the start instant.
+  FooterMonitorRowRuntime runtime = 2;
+  // Present iff the watch is persistent; draws the "persistent" marker.
+  optional FooterMonitorRowPersistent persistent = 3;
+}
+// The row's description element.
+message FooterMonitorRowDescription {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// The row's clock element.
+message FooterMonitorRowRuntime {
+  // When the watch was armed; the client ticks the duration from it.
+  int64 started_at_ms = 1;
+}
+// The persistent marker element. Empty: presence is the marker.
+message FooterMonitorRowPersistent {}
+
+// ---- The tokens panel ------------------------------------------------------
+
+// The TURN's token accounting (distinct from the topbar's SESSION breakdown
+// — a different fact and a different component), one line per figure, name
+// dim and value bright. NOT a list: these are heterogeneous facts, so each
+// line is its own dedicated field. Every line message is ALWAYS SET so the
+// panel's shape is stable while the turn runs; a line whose figure is not
+// yet known carries no value and draws its name with an empty slot. Values
+// are daemon-formatted strings — the client does no arithmetic and no unit
+// rounding.
+message FooterExpandedTokens {
+  // "input (uncached)" — the same figure the strip's cell shows, repeated
+  // here as a line (the cell and the line are two drawn elements of one
+  // resolved value).
+  FooterTokensLineInput input = 1;
+  // "input (cache read)" — input tokens served from cache.
+  FooterTokensLineCacheRead cache_read = 2;
+  // "input (cache write)" — input tokens written to cache this turn.
+  FooterTokensLineCacheWrite cache_write = 3;
+  // "output" — all output tokens, thinking included.
+  FooterTokensLineOutput output = 4;
+  // "thinking" — the output subclass, drawn indented under output. A
+  // consumer must NOT add it to output: it is already inside it.
+  FooterTokensLineThinking thinking = 5;
+  // "first token" — latency to the current response's first token. A
+  // duration, not a token count; same line layout, different unit.
+  FooterTokensLineFirstToken first_token = 6;
+  // The alarm's detail line. PRESENT iff the alarm tripped (mirrors the
+  // cell's glyph); carries the composed sentence.
+  optional FooterTokensLineAlarm alarm = 7;
+  // The verdict's detail line. UNSET while the turn runs (mirrors the
+  // cell's badge); set once reconciled.
+  optional FooterTokensLineVerdict verdict = 8;
+}
+
+// The uncached-input line.
+message FooterTokensLineInput {
+  // The formatted figure ("18.2k"). UNSET = figure not yet known this turn;
+  // the line still draws, with an empty slot.
+  optional string value = 1;
+}
+// The cache-read line.
+message FooterTokensLineCacheRead {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The cache-write line.
+message FooterTokensLineCacheWrite {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The output line.
+message FooterTokensLineOutput {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The thinking line (output subclass; drawn indented).
+message FooterTokensLineThinking {
+  // The formatted figure. UNSET = draw the empty slot.
+  optional string value = 1;
+}
+// The first-token latency line.
+message FooterTokensLineFirstToken {
+  // The formatted duration ("412ms"). UNSET until the current response's
+  // first token lands; held afterwards for the rest of the turn.
+  optional string value = 1;
+}
+// The tripped alarm's line. Exists only while the cell's glyph does.
+message FooterTokensLineAlarm {
+  // The daemon-composed sentence ("expensive turn — 41k over 20k"). Drawn
+  // verbatim; the sentence also states WHY the turn ran when that changes
+  // the reading (an ordinary prompt vs a cache keep-alive that came back
+  // cold — its own alarm, phrased as such by the daemon).
+  string text = 1;
+}
+// The verdict's line. The set arm picks the treatment; the text is the
+// composed evidence the badge alone could not carry.
+message FooterTokensLineVerdict {
+  // Which verdict the reconciliation reached — always the same arm as the
+  // cell's badge, with the evidence attached where an arm has any.
+  oneof verdict {
+    // Reconciled cleanly. No evidence to show; the line draws its ✓ alone.
+    FooterTokensLineVerdictComplete complete = 1;
+    // Figures are a floor; the text says what is missing.
+    FooterTokensLineVerdictIncomplete incomplete = 2;
+    // Figures contradict; the text names the problems.
+    FooterTokensLineVerdictInvalid invalid = 3;
+  }
+}
+// The clean-reconciliation line. Empty: the arm is the whole fact.
+message FooterTokensLineVerdictComplete {}
+// The floor verdict's evidence.
+message FooterTokensLineVerdictIncomplete {
+  // Daemon-composed ("2 responses missing usage"). Drawn verbatim.
+  string text = 1;
+}
+// The contradiction verdict's evidence.
+message FooterTokensLineVerdictInvalid {
+  // Daemon-composed problem summary. Drawn verbatim.
+  string text = 1;
+}
+
+// ---- The agents panel ------------------------------------------------------
+
+// The live agent-spawned subagents — the subagents that ALSO have feed
+// bubbles. One row per live subagent; each row is a jump target to its
+// bubble. Rows leave the list when the subagent's run ends. A TRUE LIST:
+// every row is the same kind of thing.
+message FooterExpandedAgents {
+  // The rows, in the daemon's order (spawn order). Empty when nothing is
+  // live — the chip is then unset and the panel unreachable.
+  repeated FooterAgentRow rows = 1;
+}
+
+// One live subagent's line: glyph · type · description · tokens · clock · ▸.
+message FooterAgentRow {
+  // Jump target: the subagent bubble's FeedId, exactly as the feed served
+  // it. Echoed into navigation, never parsed.
+  FeedId target = 1;
+  // The subagent type ("Explore") — the row's leading label.
+  FooterAgentRowLabel label = 2;
+  // The commission's description. UNSET when the spawn carried none; the
+  // row then draws the label alone, never a synthesized description.
+  optional FooterAgentRowDescription description = 3;
+  // The subagent's running token sum, daemon-formatted.
+  FooterAgentRowTokens tokens = 4;
+  // The row's clock. The client ticks from the instant.
+  FooterAgentRowRuntime runtime = 5;
+}
+// The row's type label.
+message FooterAgentRowLabel {
+  // The label text, drawn verbatim ("Explore").
+  string text = 1;
+}
+// The row's description element.
+message FooterAgentRowDescription {
+  // The description, drawn verbatim (the spawn's short commission).
+  string text = 1;
+}
+// The row's token element.
+message FooterAgentRowTokens {
+  // The formatted running sum ("12.4k tok"). Re-pushed as it grows.
+  string text = 1;
+}
+// The row's clock element. Carries only the start instant: the client draws
+// its own ticking elapsed time, so the clock never jumps to push cadence.
+message FooterAgentRowRuntime {
+  // When the subagent's run began, epoch ms. The ORIGINAL instant — it does
+  // not reset if the work re-announces on another stream.
+  int64 started_at_ms = 1;
+}
+
+// ---- The tasks panel -------------------------------------------------------
+
+// The task tracker's checklist — the CURRENT list, resolved by the daemon,
+// so no consumer replays tracker acts to learn what the tasks are. One row
+// per task, in the tracker's order; done and open tasks alike stay listed
+// (the chip's fraction is this list's summary).
+message FooterExpandedTasks {
+  // The rows, in the daemon's order. Empty when the tracker is empty — the
+  // chip is then unset and the panel unreachable.
+  repeated FooterTaskRow rows = 1;
+}
+
+// One task's line: status glyph · subject · (active form while running).
+message FooterTaskRow {
+  // Tag 1 is RETIRED: tracker tasks have no feed bubble, so the row is not a
+  // jump target (unlike the agent and shell rows).
+  // The glyph element; the set arm picks the treatment.
+  FooterTaskRowStatus status = 2;
+  // The task's subject line, drawn verbatim.
+  FooterTaskRowSubject subject = 3;
+}
+// The row's subject element.
+message FooterTaskRowSubject {
+  // The subject text, drawn verbatim.
+  string text = 1;
+}
+// The row's status element. The DRAWN PROJECTION of the tracker's status —
+// the arm picks the glyph, so a bool checkbox (which would collapse
+// running, failed, killed and paused into "unchecked") is unrepresentable.
+message FooterTaskRowStatus {
+  // The tracker status, projected to what the checklist draws distinctly.
+  oneof status {
+    // ☐ — not started.
+    FooterTaskRowPending pending = 1;
+    // Spinner — in progress, with the in-progress phrasing when given.
+    FooterTaskRowRunning running = 2;
+    // ☑ — done. Tags 4-6 are RETIRED: the tracker's vocabulary carries no
+    // process states, so the checklist draws none.
+    FooterTaskRowCompleted completed = 3;
+  }
+}
+// Not started. Empty: the arm is the whole fact.
+message FooterTaskRowPending {}
+// In progress.
+message FooterTaskRowRunning {
+  // The in-progress phrasing ("Running the migration…"). UNSET when the
+  // agent gave none; the row then draws the subject alone.
+  optional FooterTaskRowActiveForm active_form = 1;
+}
+// The running row's phrasing element.
+message FooterTaskRowActiveForm {
+  // The phrasing, drawn verbatim in place of the subject while running.
+  string text = 1;
+}
+// Done. Empty: the arm is the whole fact.
+message FooterTaskRowCompleted {}
+
+// ---- The shells panel ------------------------------------------------------
+
+// The live detached shells. One row per running background command; each
+// row jumps to the shell's feed bubble. No token element — a shell has no
+// token cost. A TRUE LIST, like the agents panel.
+message FooterExpandedShells {
+  // One row per live shell, in the daemon's order. Empty when none.
+  repeated FooterShellRow rows = 1;
+}
+
+// One live shell's line: $ · command · clock · ▸.
+message FooterShellRow {
+  // Jump target: the shell bubble's FeedId, exactly as the feed served it.
+  FeedId target = 1;
+  // The command line being run.
+  FooterShellRowCommand command = 2;
+  // The row's clock. The client ticks from the instant.
+  FooterShellRowRuntime runtime = 3;
+}
+// The row's command element.
+message FooterShellRowCommand {
+  // The command text, drawn verbatim (the daemon may truncate for width —
+  // what arrives is what is drawn).
+  string text = 1;
+}
+// The row's clock element.
+message FooterShellRowRuntime {
+  // When the command began, epoch ms. The ORIGINAL instant — detaching from
+  // the turn does not reset it.
+  int64 started_at_ms = 1;
+}

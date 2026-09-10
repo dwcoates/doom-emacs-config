@@ -1,0 +1,72 @@
+// endpoint_get_workflow.proto — GetWorkflow: one run's stored state — its
+// description, its agents, and how it ended if it has.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/detached_work.proto";
+import "conversation/v1/workflow.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Which run: the announced handle, the workflow table's key.
+message GetWorkflowRequest {
+  conversation.v1.DetachedWorkId work = 1;
+}
+
+// The run, or why it could not be served.
+message GetWorkflowResponse {
+  oneof result {
+    GetWorkflowSuccess success = 1;
+    GetWorkflowFailure failure = 2;
+  }
+}
+
+// The run as the store knows it. The subagent level is DERIVED at serve
+// time from the agent table (agents spawned by this run, with liveness) —
+// it is stored nowhere, so it cannot disagree with the agents' own rows.
+message GetWorkflowSuccess {
+  // The run's description, from the workflow row's unpacked columns.
+  conversation.v1.AgentWorkflowStart start = 1;
+  // THE ARM IS THE RUN'S STANDING, from the terminal columns.
+  oneof standing {
+    GetWorkflowLive live = 2;
+    GetWorkflowEnded ended = 3;
+  }
+}
+
+// Still running, as of the last write observed.
+message GetWorkflowLive {
+  // The current level: every agent this run spawned, with liveness.
+  conversation.v1.AgentWorkflowUpdate subagents = 1;
+}
+
+// Concluded — the terminal in the run stream's own vocabulary, reassembled
+// from the terminal columns.
+message GetWorkflowEnded {
+  oneof outcome {
+    conversation.v1.AgentWorkflowSuccess success = 1;
+    conversation.v1.AgentWorkflowFailure failure = 2;
+  }
+}
+
+// The run could not be served. THE ARM IS WHY.
+message GetWorkflowFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // Workflow is not implemented this wave — the only arm produced today.
+    GetWorkflowNotImplemented not_implemented = 2;
+    // `work` empty. Reserved for the workflow wave.
+    GetWorkflowInvalidRequest invalid_request = 3;
+    // No run is known under this handle. Reserved for the workflow wave.
+    GetWorkflowUnknownRun unknown_run = 4;
+  }
+}
+message GetWorkflowNotImplemented {}
+message GetWorkflowInvalidRequest {
+  string field = 1;
+}
+message GetWorkflowUnknownRun {}

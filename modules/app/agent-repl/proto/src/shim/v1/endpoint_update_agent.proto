@@ -1,0 +1,67 @@
+// endpoint_update_agent.proto — UpdateAgent: speak to an EXISTING agent —
+// stop it, answer the ask it is blocked on, or prompt it. One rpc for every
+// agent kind. The session's own turns are never started here: StartTurn.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent.proto";
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The input and its address.
+message UpdateAgentRequest {
+  // WHOM. UNSET = the session's prompt thread, resolved by the shim.
+  optional conversation.v1.AgentId target = 1;
+  // What is said: stop, an answer to an open ask, or a prompt.
+  conversation.v1.AgentInput input = 2;
+}
+
+// Delivered, or refused.
+message UpdateAgentResponse {
+  oneof result {
+    UpdateAgentSuccess success = 1;
+    UpdateAgentFailure failure = 2;
+  }
+}
+
+// The input reached the agent. Nothing is restated: the ask's new state and
+// the stop's acknowledgment arrive as the agent's next frames.
+message UpdateAgentSuccess {}
+
+// Not delivered. THE ARM IS WHY.
+message UpdateAgentFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The addressed agent is not known to this shim.
+    UpdateAgentUnknownAgent unknown_agent = 2;
+    // An answer was sent but the agent has no open ask.
+    UpdateAgentNoOpenAsk no_open_ask = 3;
+    // The answer's echoed values do not match the pending ask.
+    UpdateAgentAnswerMismatch answer_mismatch = 4;
+    // A stop was sent but nothing is running on the agent.
+    UpdateAgentNothingRunning nothing_running = 5;
+    // No session is open on this shim.
+    UpdateAgentNoSession no_session = 6;
+    // The input is well-formed and the agent is known, but the vendor offers
+    // NO ROUTE to deliver it to this agent kind — a prompt addressed to a
+    // subagent on an SDK whose input stream reaches only the main thread.
+    // Not a fault of the caller's state: the same input to the main agent
+    // would deliver.
+    UpdateAgentNotDeliverable not_deliverable = 7;
+    // A prompt was sent to a subagent whose own turn is already running; the
+    // daemon relays it as SubmitPromptError.bubble_refused{agent_busy}.
+    // (Landing 7, 2026-09-02.)
+    UpdateAgentAgentBusy agent_busy = 8;
+  }
+}
+message UpdateAgentAgentBusy {}
+message UpdateAgentUnknownAgent {}
+message UpdateAgentNoOpenAsk {}
+message UpdateAgentAnswerMismatch {}
+message UpdateAgentNothingRunning {}
+message UpdateAgentNoSession {}
+message UpdateAgentNotDeliverable {}

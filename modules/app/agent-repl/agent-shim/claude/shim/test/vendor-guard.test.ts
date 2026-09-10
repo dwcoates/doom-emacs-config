@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -8,7 +9,7 @@ import {
   assertVendorCallsAllowed,
   importRealSDK,
 } from "../src/vendor-guard.js";
-import { makeCreateQuery, parseArgs } from "../src/main.js";
+import { createFakeQuery } from "../src/fake/index.js";
 
 // test/setup.ts sets the variable for the whole suite; the "allowed" cases
 // below clear it and this restores the suite-wide posture afterwards.
@@ -65,14 +66,38 @@ describe("importRealSDK", () => {
 });
 
 describe("fake mode", () => {
-  it("never reaches the chokepoint even with the variable set", () => {
-    // Arrange
+  it("builds a query without ever reaching the vendor chokepoint", () => {
+    // Arrange. The mocked vendor is a full scenario engine now, so `--fake`
+    // must SUCCEED with the guard armed. A VendorCallsForbiddenError here would
+    // mean --fake had reached for the real SDK; any other throw would mean the
+    // mock cannot run offline, which is the one thing it exists to do.
     process.env[FORBID_VENDOR_CALLS_ENV] = "1";
-    const createQuery = makeCreateQuery(parseArgs(["--fake", "--session-id", "s1"]));
     const prompt = (async function* () {})() as never;
     const canUseTool = (async () => ({ behavior: "allow" as const, updatedInput: {} })) as never;
-    // Act + Assert
-    expect(() => createQuery(prompt, canUseTool)).not.toThrow();
+
+    // Act.
+    let raised: unknown;
+    let built = false;
+    try {
+      const query = createFakeQuery(prompt, canUseTool, {
+        sessionId: "s1",
+        newUuid: () => "u1",
+        cwd: mkdtempSync(path.join(tmpdir(), "vendor-guard-fake-")),
+        configDir: mkdtempSync(path.join(tmpdir(), "vendor-guard-cfg-")),
+        spoolRoot: mkdtempSync(path.join(tmpdir(), "vendor-guard-spool-")),
+      });
+      built = true;
+      query.close();
+    } catch (err) {
+      raised = err;
+    }
+
+    // Assert.
+    expect({
+      built,
+      forbidden: raised instanceof VendorCallsForbiddenError,
+      message: raised instanceof Error ? raised.message : JSON.stringify(raised) ?? "",
+    }).toEqual({ built: true, forbidden: false, message: "" });
   });
 });
 

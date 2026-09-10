@@ -1,0 +1,56 @@
+// endpoint_set_workspace_priority.proto — SetWorkspacePriority: set or
+// clear a workspace's priority after creation. SIDEBAR section. The roster
+// resolver orders by priority and the roster row carries the badge fact;
+// the new state arrives on the roster stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_priority.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetWorkspacePriorityRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The new priority. UNSET = clear (back to unprioritized); presence,
+  // never a sentinel level.
+  optional WorkspacePriority priority = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetWorkspacePriorityResponse {
+  oneof result {
+    SetWorkspacePrioritySuccess success = 1;
+    SetWorkspacePriorityError error = 2;
+  }
+}
+
+// Done; the roster push carries the new state.
+message SetWorkspacePrioritySuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SetWorkspacePriorityError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetWorkspacePriorityUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetWorkspacePriorityWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetWorkspacePriorityTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetWorkspacePriorityNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message SetWorkspacePriorityUnknownWorkspace {}
+message SetWorkspacePriorityWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetWorkspacePriorityTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SetWorkspacePriorityNotYetAdopted {}

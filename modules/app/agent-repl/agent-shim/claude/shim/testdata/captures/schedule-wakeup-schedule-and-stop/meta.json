@@ -1,0 +1,29 @@
+{
+  "scenario": "schedule-wakeup-schedule-and-stop",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Schedule a wakeup two minutes from now that reminds you to check out.log. Then immediately cancel that wakeup.",
+  "prompts": [
+    {
+      "text": "Schedule a wakeup two minutes from now that reminds you to check out.log. Then immediately cancel that wakeup.",
+      "resume": false
+    }
+  ],
+  "world": "schedule-wakeup-schedule-and-stop",
+  "cwd_init": null,
+  "vendor_session_id": "e7913962-fe9f-4dc7-bb42-ef78e1ce80e6",
+  "manual": null,
+  "expect": [
+    "tool:ScheduleWakeup",
+    "tool_result:schedule_wakeup(scheduled)",
+    "tool:ScheduleWakeup(stop)",
+    "tool_result:schedule_wakeup(stopped)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-schedule-wakeup-schedule-and-stop-7DAgzS-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:25:41.233Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

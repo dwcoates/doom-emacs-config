@@ -1,0 +1,1683 @@
+package workspace
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/account"
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/shimclient"
+	"claude-repld/internal/shimsocket"
+	"claude-repld/internal/wsm"
+)
+
+// fakeClient is a shimclient.Client whose StartSession answer the test
+// arranges.
+type fakeClient struct {
+	shimclient.Client
+
+	requests []*shimv1.StartSessionRequest
+	response *shimv1.StartSessionResponse
+	startErr error
+	pid      int
+	kills    []shimclient.KillAttribution
+	killErr  error
+	// standDown is the fixture's shared step order, appended to on the shim's
+	// own KillSession.
+	standDown *[]string
+	// reaped makes the supervised process ALREADY GONE, which is how a test
+	// reaches the split between a session row and a live shim.
+	reaped bool
+}
+
+func (c *fakeClient) Reaped() (shimclient.ExitInfo, bool) {
+	if !c.reaped {
+		return shimclient.ExitInfo{}, false
+	}
+	return shimclient.ExitInfo{PID: c.pid, Signal: "SIGKILL"}, true
+}
+
+func (c *fakeClient) StartSession(_ context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error) {
+	c.requests = append(c.requests, req)
+	if c.startErr != nil {
+		return nil, c.startErr
+	}
+	return c.response, nil
+}
+
+func (c *fakeClient) KillSession(context.Context, *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+	if c.standDown != nil {
+		*c.standDown = append(*c.standDown, "shim.KillSession")
+	}
+	return &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}},
+	}, nil
+}
+
+func (c *fakeClient) PID() int { return c.pid }
+
+func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
+	if c.killErr != nil {
+		return c.killErr
+	}
+	c.kills = append(c.kills, attr)
+	return nil
+}
+
+// fakeSupervisor records which bring-up path the lock probe selected.
+type fakeSupervisor struct {
+	client   *fakeClient
+	spawns   []shimclient.Spec
+	adopts   []string
+	spawnErr error
+	adoptErr error
+}
+
+func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimclient.Client, error) {
+	if s.spawnErr != nil {
+		return nil, s.spawnErr
+	}
+	s.spawns = append(s.spawns, spec)
+	return s.client, nil
+}
+
+func (s *fakeSupervisor) Adopt(_ context.Context, _ ids.WorkspaceID, _ string, uds string) (shimclient.Client, error) {
+	if s.adoptErr != nil {
+		return nil, s.adoptErr
+	}
+	s.adopts = append(s.adopts, uds)
+	return s.client, nil
+}
+
+// fakeWatcher is a sessionwatcher.Watcher with no watches behind it.
+type fakeWatcher struct {
+	sessionwatcher.Watcher
+	closed bool
+	// standDown is the fixture's shared step order, appended to when the
+	// daemon declares the session ending.
+	standDown *[]string
+}
+
+func (w *fakeWatcher) SessionEnding(string) {
+	if w.standDown != nil {
+		*w.standDown = append(*w.standDown, "watcher.SessionEnding")
+	}
+}
+
+func (w *fakeWatcher) Close() error { w.closed = true; return nil }
+
+func (w *fakeWatcher) Connected() bool { return true }
+
+func (w *fakeWatcher) TurnInFlight() *ids.TurnID { return nil }
+
+func (w *fakeWatcher) LiveWork() sessionwatcher.LiveWorkSet { return sessionwatcher.LiveWorkSet{} }
+
+// startedResponse is the success answer a healthy bring-up gets back.
+func startedResponse(vendorSessionID string) *shimv1.StartSessionResponse {
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
+			Session: &conversationv1.SessionStarted{
+				VendorSessionId: vendorSessionID,
+				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: "sha-1"},
+				EffectiveModel:  &conversationv1.AgentModel{Name: "opus"},
+				PermissionMode:  permissionMode("plan"),
+			},
+		}},
+	}
+}
+
+// coldResponse is the cold refusal a parked conversation gets back.
+func coldResponse() *shimv1.StartSessionResponse {
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause: &shimv1.StartSessionFailure_Cold{Cold: &conversationv1.SessionCold{
+				ContextTokens:   120_000,
+				LastRequestAtMs: 1,
+				RequestedModel:  &conversationv1.AgentModel{Name: "opus"},
+			}},
+			Detail: "the cache lapsed",
+		}},
+	}
+}
+
+// fleetFixture is one arranged Fleet plus the fakes behind it.
+type fleetFixture struct {
+	fleet      *Fleet
+	db         *fakeDB
+	accounts   *fakeAccounts
+	supervisor *fakeSupervisor
+	client     *fakeClient
+	feed       *fakeFeed
+	footer     *fakeFooter
+	log        *fakeSurfaces
+	watcher    *fakeWatcher
+	links      *recordingLinkSink
+	probeState sessionlock.State
+	probeErr   error
+	// socketState and socketErr script the shim-socket listener probe, which
+	// decides adopt-versus-spawn beside the lock.
+	socketState shimsocket.State
+	socketErr   error
+	// standDown is the ORDER the stand-down's steps happened in, shared by the
+	// fake watcher and the fake client, because the ordering is the guarantee.
+	standDown *[]string
+}
+
+// recordingLinkSink answers the three view sinks' OnLink and nothing else: the
+// fleet states the link itself only on the gate-parked bring-up, where no
+// watcher opens to state it.
+type recordingLinkSink struct {
+	links []sessionwatcher.LinkState
+}
+
+func (s *recordingLinkSink) note(link sessionwatcher.LinkState) {
+	s.links = append(s.links, link)
+}
+
+// The three view sinks are separate types because one type cannot embed all
+// three interfaces (their method sets overlap).
+type footerLinkSink struct {
+	sessionwatcher.FooterSink
+	rec *recordingLinkSink
+}
+
+func (s footerLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
+
+type topbarLinkSink struct {
+	sessionwatcher.TopbarSink
+	rec *recordingLinkSink
+}
+
+func (s topbarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
+
+type sidebarLinkSink struct {
+	sessionwatcher.SidebarSink
+	rec *recordingLinkSink
+}
+
+func (s sidebarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
+
+// newFleetFixture arranges a fleet whose lock probe reports free and whose
+// bring-up succeeds.
+func newFleetFixture(t *testing.T) *fleetFixture {
+	t.Helper()
+	order := &[]string{}
+	f := &fleetFixture{
+		standDown:  order,
+		db:         newFakeDB(),
+		accounts:   &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
+		client:     &fakeClient{response: startedResponse("vendor-1"), pid: 4242, standDown: order},
+		feed:       &fakeFeed{},
+		footer:     newFakeFooter(),
+		log:        newFakeSurfaces(),
+		watcher:    &fakeWatcher{standDown: order},
+		links:      &recordingLinkSink{},
+		probeState: sessionlock.StateFree,
+
+		socketState: shimsocket.StateAbsent,
+	}
+	f.supervisor = &fakeSupervisor{client: f.client}
+
+	fleet, err := NewFleet(FleetDeps{
+		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor,
+		Feed: f.feed, Footer: f.footer, Log: f.log,
+		Sinks: sessionwatcher.Sinks{
+			Footer:  footerLinkSink{rec: f.links},
+			Topbar:  topbarLinkSink{rec: f.links},
+			Sidebar: sidebarLinkSink{rec: f.links},
+		},
+		SocketPath: func(ws ids.WorkspaceID) string { return "/sock/" + string(ws) + ".sock" },
+		LockDir:    t.TempDir(),
+		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
+		SocketProbe: func(string) (shimsocket.State, error) {
+			return f.socketState, f.socketErr
+		},
+		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
+			return f.watcher, nil
+		},
+		Now: func() time.Time { return fixedNow },
+	})
+	if err != nil {
+		t.Fatalf("NewFleet: %v", err)
+	}
+	f.fleet = fleet
+	return f
+}
+
+// workspace records one workspace in the fleet fixture's registry.
+func (f *fleetFixture) workspace(id ids.WorkspaceID) wsm.Workspace {
+	ws := wsm.Workspace{ID: id, Dir: "/tree/" + string(id), Repo: "repo-1"}
+	f.db.with(ws)
+	return ws
+}
+
+func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
+	tests := []struct {
+		name string
+		deps FleetDeps
+	}{
+		{name: "no state client", deps: FleetDeps{}},
+		{name: "no account resolver", deps: FleetDeps{DB: newFakeDB()}},
+		{name: "no supervisor", deps: FleetDeps{DB: newFakeDB(), Accounts: &fakeAccounts{}}},
+		{
+			name: "no socket path",
+			deps: FleetDeps{DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{}},
+		},
+		{
+			name: "no log surfaces",
+			deps: FleetDeps{
+				DB: newFakeDB(), Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				SocketPath: func(ids.WorkspaceID) string { return "" },
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			_, err := NewFleet(tt.deps)
+			// Assert.
+			if err == nil {
+				t.Fatalf("NewFleet(%s) = nil error, want a refusal", tt.name)
+			}
+		})
+	}
+}
+
+func TestClassifySourceTable(t *testing.T) {
+	deleted := &wsm.SessionTerminal{Kind: "deleted", Detail: "the user deleted it"}
+	killed := &wsm.SessionTerminal{Kind: "killed", Detail: "KillWorkspace"}
+	tests := []struct {
+		name         string
+		session      wsm.Session
+		exists       bool
+		noTranscript bool
+		wantFresh    bool
+		wantID       string
+		wantErr      bool
+	}{
+		{
+			name:      "no session record at all is the only proof of a fresh start",
+			wantFresh: true,
+		},
+		{
+			name:      "a record with no conversation still starts fresh",
+			session:   wsm.Session{},
+			exists:    true,
+			wantFresh: true,
+		},
+		{
+			name:    "a recorded conversation whose transcript is found resumes",
+			session: wsm.Session{VendorSessionID: "vendor-1"},
+			exists:  true,
+			wantID:  "vendor-1",
+		},
+		{
+			name:         "a recorded conversation with NO transcript comes up fresh",
+			session:      wsm.Session{VendorSessionID: "vendor-1"},
+			exists:       true,
+			noTranscript: true,
+			wantFresh:    true,
+		},
+		{
+			name:    "a killed session still resumes its conversation",
+			session: wsm.Session{VendorSessionID: "vendor-1", Terminal: killed},
+			exists:  true,
+			wantID:  "vendor-1",
+		},
+		{
+			name:    "a deleted session refuses resurrection",
+			session: wsm.Session{VendorSessionID: "vendor-1", Terminal: deleted},
+			exists:  true,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			if tt.noTranscript {
+				f.accounts.transcriptErr = errors.New("no such file")
+			}
+
+			// Act.
+			got, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", tt.session, tt.exists)
+
+			// Assert.
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("classifySource() = %+v, want a refusal", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("classifySource: %v", err)
+			}
+			if got.Fresh != tt.wantFresh || got.VendorSessionID != tt.wantID {
+				t.Fatalf("classifySource() = %+v, want fresh=%v id=%q", got, tt.wantFresh, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestClassifySourceOpensTheAbandonedConversationFaultOnce(t *testing.T) {
+	// Arrange: the same recorded conversation classified twice must leave ONE
+	// record of what was abandoned, naming the old vendor session id.
+	f := newFleetFixture(t)
+	f.accounts.transcriptErr = errors.New("no such file")
+	session := wsm.Session{Workspace: "w1", VendorSessionID: "vendor-old"}
+
+	// Act.
+	for range 2 {
+		if _, err := f.fleet.classifySource(context.Background(), f.log.logger, "w1", "/tree/w1", session, true); err != nil {
+			t.Fatalf("classifySource: %v", err)
+		}
+	}
+
+	// Assert.
+	var opened []wsm.Fault
+	for _, fault := range f.db.dbFaults {
+		if fault.Kind == health.KindConversationAbandoned {
+			opened = append(opened, fault)
+		}
+	}
+	if len(opened) != 1 {
+		t.Fatalf("abandoned-conversation faults = %d, want exactly one", len(opened))
+	}
+	if got := opened[0].Evidence["vendor_session_id"]; got != "vendor-old" {
+		t.Fatalf("fault evidence vendor_session_id = %q, want the abandoned id", got)
+	}
+}
+
+func TestStartFreshCarriesTheRecordedModelAndMode(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, Model: "opus", PermissionMode: "plan"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	fresh := f.client.requests[0].GetFresh()
+	if fresh == nil || fresh.GetModel().GetName() != "opus" || fresh.GetPermissionMode().GetPlan() == nil {
+		t.Fatalf("StartSession request = %v, want a fresh start carrying opus in plan mode", f.client.requests[0])
+	}
+}
+
+func TestStartResumesARecordedConversation(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	resume := f.client.requests[0].GetResume()
+	if resume == nil || resume.GetVendorSessionId() != "vendor-1" {
+		t.Fatalf("StartSession request = %v, want a resume of vendor-1", f.client.requests[0])
+	}
+}
+
+func TestStartRefusesADeletedSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1",
+		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "/clear"},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	asRefusal(t, err, ArmSessionDeleted)
+}
+
+func TestStartComesUpFreshWhenTheRecordedTranscriptIsMissing(t *testing.T) {
+	// Arrange: a session that pre-minted a vendor id but never took a turn has
+	// no transcript, and refusing it left the workspace with no session at all.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.accounts.transcriptErr = errors.New("no such file")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start = %v, want a fresh session rather than a refusal", err)
+	}
+	if got := f.client.requests[0].GetFresh(); got == nil {
+		t.Fatalf("StartSession source = %+v, want the fresh arm", f.client.requests[0].GetSource())
+	}
+}
+
+func TestStartDoesNotDrawTranscriptMissingForANeverTurnedSession(t *testing.T) {
+	// Arrange: the retired refusal. The classifier answers fresh instead.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.accounts.transcriptErr = errors.New("no such file")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	var refusal *Refusal
+	if errors.As(err, &refusal) && refusal.Arm == ArmTranscriptMissing {
+		t.Fatalf("Start = %v, want no transcript_missing refusal", err)
+	}
+}
+
+func TestStartFreshSpawnsWithNoTranscriptOnDisk(t *testing.T) {
+	// Arrange: a fresh start names no conversation, so there is no transcript
+	// to guard.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.accounts.transcriptErr = errors.New("no such file")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.spawns) != 1 {
+		t.Fatalf("spawns = %d, want exactly one", len(f.supervisor.spawns))
+	}
+}
+
+func TestStartSpawnsWhenTheWorkspaceLockIsFree(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.spawns) != 1 || len(f.supervisor.adopts) != 0 {
+		t.Fatalf("bring-ups = %d spawns, %d adopts; want one spawn", len(f.supervisor.spawns), len(f.supervisor.adopts))
+	}
+}
+
+func TestStartAdoptsWhenASurvivingShimHoldsTheLock(t *testing.T) {
+	// Arrange: a held lock means a surviving shim already owns the
+	// conversation, so a second one is never spawned onto it.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.adopts) != 1 || len(f.supervisor.spawns) != 0 {
+		t.Fatalf("bring-ups = %d spawns, %d adopts; want one adopt", len(f.supervisor.spawns), len(f.supervisor.adopts))
+	}
+}
+
+func TestStartRefusesWhenTheLockProbeCouldNotTell(t *testing.T) {
+	// Arrange: "could not tell" is never read as free.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.probeState, f.probeErr = sessionlock.StateUnknown, errors.New("permission denied")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the unreadable lock refused")
+	}
+	if len(f.supervisor.spawns) != 0 {
+		t.Fatalf("spawns = %d, want none on an unreadable lock", len(f.supervisor.spawns))
+	}
+}
+
+func TestStartPassesTheRoutedConfigDirToTheSpawn(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if f.supervisor.spawns[0].ConfigDir != "/config" {
+		t.Fatalf("spawn config dir = %q, want /config", f.supervisor.spawns[0].ConfigDir)
+	}
+}
+
+func TestStartRecordsTheSessionFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	session := f.db.sessions[ws.ID]
+	if session.VendorSessionID != "vendor-1" || session.ConfigDir != "/config" ||
+		session.Model != "opus" || session.PermissionMode != "plan" {
+		t.Fatalf("recorded session = %+v, want the vendor identity, config dir, model and mode", session)
+	}
+}
+
+func TestStartKeepsTheOriginalStartedAtAcrossARespawn(t *testing.T) {
+	// Arrange: the session outlives one shim process, so its start instant does
+	// not move when the process does.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	original := fixedNow.Add(-2 * time.Hour)
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, StartedAt: original}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !f.db.sessions[ws.ID].StartedAt.Equal(original) {
+		t.Fatalf("StartedAt = %v, want the original %v", f.db.sessions[ws.ID].StartedAt, original)
+	}
+}
+
+func TestStartAnswersAColdRefusalWithTheGate(t *testing.T) {
+	// Arrange: a cold context is refused with its cost named, never silently
+	// paid.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if !f.footer.coldGates[ws.ID].Standing {
+		t.Fatal("the footer does not report a standing cold gate")
+	}
+	if len(f.feed.synthesized) != 1 || f.feed.synthesized[0].GetColdGate().GetStanding() == nil {
+		t.Fatalf("synthesized rows = %v, want one standing gate row", f.feed.synthesized)
+	}
+}
+
+func TestStartRemembersTheColdGateMenu(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.client.response = coldResponse()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	gate, ok := f.fleet.ColdGate(ws.ID)
+	if !ok || gate.VendorSessionID != "vendor-1" || len(gate.Models) != 1 || len(gate.Scopes) != 3 {
+		t.Fatalf("served cold gate = (%+v, %v), want the menu the row offered", gate, ok)
+	}
+}
+
+func TestStartSurfacesANonColdStartFailure(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: &shimv1.StartSessionVendorStartFailed{}},
+			Detail: "the vendor binary is missing",
+		}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the vendor-start failure surfaced")
+	}
+	r := asRefusal(t, err, ArmVendorStartFailed)
+	if r.Fields["detail"] != "the vendor binary is missing" {
+		t.Fatalf("vendor_start_failed detail field = %v, want the shim's own account", r.Fields["detail"])
+	}
+}
+
+func TestStartIsIdempotentForALiveSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.spawns) != 1 {
+		t.Fatalf("spawns = %d, want exactly one", len(f.supervisor.spawns))
+	}
+}
+
+func TestLiveReportsTheSessionAfterAStart(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !f.fleet.Live(ws.ID) {
+		t.Fatal("Live() reported no session after a successful start")
+	}
+}
+
+func TestStopClosesTheWatcher(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert.
+	if !f.watcher.closed {
+		t.Fatal("Stop() left the watcher open")
+	}
+}
+
+func TestStopOfAnAbsentSessionIsSuccess(t *testing.T) {
+	// Arrange: the caller asked for a state that already holds.
+	f := newFleetFixture(t)
+
+	// Act.
+	err := f.fleet.Stop(context.Background(), "w1", false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Stop(absent session) = %v, want success", err)
+	}
+}
+
+func TestRunningAnswersFalseWithoutASession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	_, live := f.fleet.Running("w1")
+
+	// Assert.
+	if live {
+		t.Fatal("Running() reported a live session where none exists")
+	}
+}
+
+func TestHealthReportsTheLinkOfALiveSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	exists, connected := f.fleet.Health(ws.ID)
+
+	// Assert.
+	if !exists || !connected {
+		t.Fatalf("Health() = (%v, %v), want a live, connected session", exists, connected)
+	}
+}
+
+func TestShimAnswersFalseWithoutASession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	_, ok := f.fleet.Shim("w1")
+
+	// Assert.
+	if ok {
+		t.Fatal("Shim() answered a surface for a workspace with no session")
+	}
+}
+
+func TestLockDirPrefersTheExplicitSetting(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	t.Setenv(LockDirEnv, "/from/env")
+
+	// Act.
+	got := f.fleet.lockDir()
+
+	// Assert.
+	if got == "/from/env" {
+		t.Fatalf("lockDir() = %q, want the explicitly configured directory", got)
+	}
+}
+
+func TestLockDirFallsBackToTheEnvironmentOverride(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	f.fleet.deps.LockDir = ""
+	t.Setenv(LockDirEnv, "/from/env")
+
+	// Act.
+	got := f.fleet.lockDir()
+
+	// Assert.
+	if got != "/from/env" {
+		t.Fatalf("lockDir() = %q, want /from/env", got)
+	}
+}
+
+func TestPermissionModeRoundTripsEveryArm(t *testing.T) {
+	tests := []string{"default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"}
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			got := permissionModeName(permissionMode(name))
+			// Assert.
+			if got != name {
+				t.Fatalf("permissionModeName(permissionMode(%q)) = %q", name, got)
+			}
+		})
+	}
+}
+
+func TestPermissionModeOfAnUnknownNameIsTheGatedDefault(t *testing.T) {
+	// Arrange: an unknown name never resolves to a mode that disables the gate.
+	// Act.
+	got := permissionMode("something-nobody-implemented")
+
+	// Assert.
+	if got.GetDefault() == nil {
+		t.Fatalf("permissionMode(unknown) = %v, want the default (gated) mode", got)
+	}
+}
+
+func TestStartSurfacesAShimSinkFailure(t *testing.T) {
+	// Arrange: a spawn without its fd 3 would inherit whatever was there.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.log.shimSinkErr = errors.New("the sink symlink is broken")
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the sink failure surfaced")
+	}
+}
+
+func TestStartSurfacesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	err := f.fleet.Start(context.Background(), "nope")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start(unknown workspace) = nil error, want a failure")
+	}
+}
+
+// TestMain keeps the vendor guard on for every test in this package, which is
+// the standing rule: no test ever calls the vendor.
+func TestMain(m *testing.M) {
+	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	os.Exit(m.Run())
+}
+
+// TestFreshModelNamesTheRecordedModel pins that the user's choice is what a
+// fresh session names.
+func TestFreshModelNamesTheRecordedModel(t *testing.T) {
+	// Arrange / Act.
+	got := freshModel("sonnet")
+
+	// Assert.
+	if got.GetName() != "sonnet" {
+		t.Fatalf("freshModel(\"sonnet\") = %v, want the recorded model", got)
+	}
+}
+
+// TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone is the landing-7
+// contract: StartSessionFresh.model is optional and UNSET means the SDK's own
+// default, so the daemon substitutes nothing of its own.
+func TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone(t *testing.T) {
+	// Arrange / Act.
+	got := freshModel("")
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("freshModel(\"\") = %v, want an unset model", got)
+	}
+}
+
+// TestBringUpRelaysTheShimsConversationOwnedRefusal covers the workspace
+// kernel lock's whole purpose from the daemon's side: another shim already
+// holds this conversation, and the shim says so instead of starting a second
+// vendor process on it.
+func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Detail: "another shim holds this workspace's conversation",
+			Cause: &shimv1.StartSessionFailure_ConversationOwned{
+				ConversationOwned: &shimv1.StartSessionConversationOwned{},
+			},
+		}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	asRefusal(t, err, ArmConversationOwned)
+}
+
+// TestAGateParkedBringUpStatesTheLinkItself pins the link restatement: no
+// watcher opens on the gate-parked path, so without this the surfaces keep
+// drawing the DEAD link of the shim that died before this one — which outranks
+// the gate in the footer's status tree and hides what the user must answer.
+func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+
+	// Act
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Assert
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkConnected, shimclient.LinkConnected, shimclient.LinkConnected,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is connected", f.links.links)
+	}
+	for i, got := range f.links.links {
+		if got != want[i] {
+			t.Fatalf("OnLink call %d = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
+// TestRunningAnswersQuietForAGateParkedSessionWithNoWatcher pins the nil-watcher
+// guard: a session parked behind a cold gate keeps its client but never started
+// a session, so it has NO watcher. Reading freeness off it must answer "live and
+// quiet" rather than dereference nothing — the close verb reads exactly this,
+// and a standing gate is ruled not to block a close.
+func TestRunningAnswersQuietForAGateParkedSessionWithNoWatcher(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Act
+	running, live := f.fleet.Running(ws.ID)
+
+	// Assert
+	if !live {
+		t.Fatal("Running() reports no live session for a gate-parked workspace, want the session reported")
+	}
+	if running.Turn != nil || !running.LiveWork.Empty() {
+		t.Fatalf("Running() = %+v, want nothing in flight behind a standing gate", running)
+	}
+}
+
+// TestHealthAnswersNotServingForAGateParkedSession is the same guard on the
+// liveness probe: the session exists and its link truth is unknown, which is
+// "not serving", never a crash.
+func TestHealthAnswersNotServingForAGateParkedSession(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Act
+	exists, serving := f.fleet.Health(ws.ID)
+
+	// Assert
+	if !exists || serving {
+		t.Fatalf("Health() = (%v, %v), want the session to exist and not be serving", exists, serving)
+	}
+}
+
+// TestStopTellsTheViewsTheLinkIsDead pins the edge the roster's `dead` arm
+// rests on. Stop closes the watcher BEFORE it kills the process, so the
+// client's own LinkDead publish has nobody left to route it: whether the views
+// ever heard the death would otherwise depend on the exit landing before the
+// close, which is a race the stop itself can settle.
+func TestStopTellsTheViewsTheLinkIsDead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.links.links = nil
+
+	// Act
+	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+	for i, got := range f.links.links {
+		if got != want[i] {
+			t.Fatalf("OnLink call %d = %v, want %v", i, got, want[i])
+		}
+	}
+}
+
+// TestCloseWatchersEndsEveryLiveSessionsWatcher covers the daemon's teardown
+// order: the watchers are closed (and their in-flight sink work joined) before
+// the state client their sinks read is closed.
+func TestCloseWatchersEndsEveryLiveSessionsWatcher(t *testing.T) {
+	// Arrange: a live session with a watcher.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	f.fleet.CloseWatchers()
+
+	// Assert.
+	if !f.watcher.closed {
+		t.Fatal("the live session's watcher was not closed by the fleet's teardown")
+	}
+}
+
+// TestCloseWatchersOnAFleetWithNoSessionsDoesNothing is the other edge: a
+// daemon that never brought a session up tears down cleanly.
+func TestCloseWatchersOnAFleetWithNoSessionsDoesNothing(t *testing.T) {
+	// Arrange, Act.
+	f := newFleetFixture(t)
+	f.fleet.CloseWatchers()
+
+	// Assert.
+	if f.watcher.closed {
+		t.Fatal("a watcher was closed on a fleet that has no live session")
+	}
+}
+
+// TestStartPortsTheTranscriptWhenTheAccountRoutingChanged pins daemon.md 10a:
+// the config dir is decided at every start, and a resume whose recorded root
+// is no longer the routed one carries its transcript across first.
+func TestStartPortsTheTranscriptWhenTheAccountRoutingChanged(t *testing.T) {
+	// Arrange: the session was filed under /old; this boot routes to /config.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.accounts.transcript = account.Transcript{Path: "/old/projects/w1/vendor-1.jsonl", ConfigDir: "/old"}
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 1 || f.accounts.moved[0].ToConfigDir != "/config" {
+		t.Fatalf("moved transcripts = %+v, want one into the routed root /config", f.accounts.moved)
+	}
+}
+
+// TestStartSpawnsUnderTheRoutedRootAfterAnAccountSwitch pins the other half:
+// the shim is spawned under the newly routed root, not the recorded one.
+func TestStartSpawnsUnderTheRoutedRootAfterAnAccountSwitch(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.accounts.transcript = account.Transcript{Path: "/old/projects/w1/vendor-1.jsonl", ConfigDir: "/old"}
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if got := f.supervisor.spawns[0].ConfigDir; got != "/config" {
+		t.Fatalf("spawn ConfigDir = %q, want the routed root /config", got)
+	}
+}
+
+// TestStartPortsNothingForAFreshSession pins that a fresh start has no
+// conversation to carry: the new root is simply where this one is filed.
+func TestStartPortsNothingForAFreshSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 0 {
+		t.Fatalf("moved transcripts = %+v, want none for a fresh start", f.accounts.moved)
+	}
+}
+
+// TestStartPortsNothingWhenTheRoutingIsUnchanged pins that the ordinary start
+// -- the recorded root and the routed one agreeing -- touches no transcript.
+func TestStartPortsNothingWhenTheRoutingIsUnchanged(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/config"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 0 {
+		t.Fatalf("moved transcripts = %+v, want none when the routing is unchanged", f.accounts.moved)
+	}
+}
+
+// TestShimAnswersFalseForASessionWhoseProcessIsGone covers the liveness split:
+// the map entry outlives a shim killed out from under the daemon, and reading
+// presence alone would drive a verb over a dead connection.
+func TestShimAnswersFalseForASessionWhoseProcessIsGone(t *testing.T) {
+	// Arrange: a live session whose process has since been reaped.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.supervisor.client.reaped = true
+
+	// Act.
+	_, ok := f.fleet.Shim(ws.ID)
+
+	// Assert.
+	if ok {
+		t.Fatal("Shim() answered a surface for a session whose process is gone")
+	}
+}
+
+// TestShimAnswersTheSurfaceForALiveSession is the other side of the same split,
+// so a liveness read that refused everything would be caught here.
+func TestShimAnswersTheSurfaceForALiveSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	_, ok := f.fleet.Shim(ws.ID)
+
+	// Assert.
+	if !ok {
+		t.Fatal("Shim() refused a live session")
+	}
+}
+
+// TestFleetProbeWorkspaceLockRecordsAnOrdinaryProbe pins that the fleet's
+// production probe lands a debug record for a lock it could read, so a
+// spawn-versus-adopt decision is reconstructable from the log.
+func TestFleetProbeWorkspaceLockRecordsAnOrdinaryProbe(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	if _, err := probeWorkspaceLock(log)(t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("probe() error = %v", err)
+	}
+
+	// Assert.
+	records := log.Records()
+	if len(records) != 1 || records[0].Level != "debug" ||
+		records[0].Operation != "daemon.sessionlock.probe" {
+		t.Fatalf("records = %+v, want one debug daemon.sessionlock.probe record", records)
+	}
+}
+
+// TestFleetProbeWorkspaceLockRecordsAnUnderivablePath pins that a lock path the
+// fleet cannot derive is recorded rather than returned silently.
+func TestFleetProbeWorkspaceLockRecordsAnUnderivablePath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	state, err := probeWorkspaceLock(log)("", "")
+
+	// Assert.
+	if err == nil || state != sessionlock.StateUnknown {
+		t.Fatalf("probe() = %v, %v, want StateUnknown and an error", state, err)
+	}
+	records := log.Records()
+	if len(records) != 1 || records[0].Level != "error" ||
+		records[0].Operation != "daemon.workspace.probe_workspace_lock" {
+		t.Fatalf("records = %+v, want one error daemon.workspace.probe_workspace_lock record", records)
+	}
+}
+
+// alreadyStartedResponse is the refusal a shim answers a SECOND StartSession
+// with: one shim serves exactly one session.
+func alreadyStartedResponse() *shimv1.StartSessionResponse {
+	return &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Cause:  &shimv1.StartSessionFailure_AlreadyStarted{AlreadyStarted: &shimv1.StartSessionAlreadyStarted{}},
+			Detail: "this shim already started its session; one shim serves exactly one",
+		}},
+	}
+}
+
+func TestStartSendsNoStartSessionToAnAdoptedShim(t *testing.T) {
+	// Arrange: a held lock selects the adopt path, and the surviving shim on
+	// the other side of it already serves its one session.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+	f.client.response = alreadyStartedResponse()
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if len(f.client.requests) != 0 {
+		t.Fatalf("StartSession requests = %d, want none on an adopted shim", len(f.client.requests))
+	}
+}
+
+func TestStartRemembersTheAdoptedShimAsLive(t *testing.T) {
+	// Arrange: mounting a parked workspace onto a surviving shim is a mount,
+	// so the session it attaches to is live afterwards.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if !f.fleet.Live(ws.ID) {
+		t.Fatal("Live() = false after adopting a surviving shim, want the mounted session live")
+	}
+}
+
+func TestStartOpensTheAdoptedSessionsWatches(t *testing.T) {
+	// Arrange: the adopted session's facts arrive on the watch's landing-7
+	// re-announcement, so a watch that never opens leaves the daemon blind.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1"}
+	f.probeState = sessionlock.StateHeld
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	exists, serving := f.fleet.Health(ws.ID)
+	if !exists || !serving {
+		t.Fatalf("Health() = %v, %v; want an adopted session whose watch is serving", exists, serving)
+	}
+}
+
+func TestStartRefusesAnAlreadyStartedShimUnderItsOwnArm(t *testing.T) {
+	// Arrange: a SPAWNED shim that answers already_started is a named state,
+	// never an untyped internal on a contract path.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = alreadyStartedResponse()
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the already-started refusal surfaced")
+	}
+	asRefusal(t, err, ArmAlreadyStarted)
+}
+
+func TestStartRefusesAnUnsetStartFailureCauseUnderItsOwnArm(t *testing.T) {
+	// Arrange: an unset cause oneof is illegal on the wire; it is surfaced
+	// rather than guessed at.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{Detail: "no cause"}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Start() = nil error, want the unset cause surfaced")
+	}
+	asRefusal(t, err, ArmStartSessionUnspecified)
+}
+
+// ---------------------------------------------------------------------------
+// ResumeCold: the remediated re-open an answered cold gate spends.
+//
+// The gap these pin is what left TestColdGate red end to end: AnswerColdGate
+// called the shim directly, so the shim re-opened the session perfectly well
+// and the DAEMON installed no watcher, recorded no facts and never republished
+// the host view — and the very next SubmitPrompt was refused `no_session`.
+// ---------------------------------------------------------------------------
+
+// parkedGate arranges a workspace parked behind a standing cold gate and leaves
+// the shim ready to answer the remediated resume with a started session.
+func parkedGate(t *testing.T, f *fleetFixture, ws wsm.Workspace) {
+	t.Helper()
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1"}
+	f.client.response = coldResponse()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+	f.client.response = startedResponse("vendor-2")
+}
+
+// payRemediation is the simplest answered choice: the read is paid for.
+func payRemediation() *conversationv1.SessionColdRemediation {
+	return &conversationv1.SessionColdRemediation{
+		Remediation: &conversationv1.SessionColdRemediation_Pay{Pay: &conversationv1.SessionColdPay{}},
+	}
+}
+
+func TestResumeColdCarriesTheRemediationOnTheResume(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if len(f.client.requests) != 2 {
+		t.Fatalf("StartSession calls = %d, want the refused bring-up and the remediated re-open", len(f.client.requests))
+	}
+	resume := f.client.requests[1].GetResume()
+	if resume.GetVendorSessionId() != "vendor-1" || resume.GetColdRemediation().GetPay() == nil {
+		t.Fatalf("re-open resume = %v, want vendor-1 carrying the pay remediation", resume)
+	}
+}
+
+func TestResumeColdInstallsTheSessionWatcher(t *testing.T) {
+	// Arrange: a parked session has no watcher, which is what refuses the next
+	// prompt `no_session`.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	if _, serving := f.fleet.Health(ws.ID); serving {
+		t.Fatal("the parked session already reports serving, so this test could not tell the watcher apart")
+	}
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	exists, serving := f.fleet.Health(ws.ID)
+	if !exists || !serving {
+		t.Fatalf("Health() = (%v, %v), want the re-opened session watched and serving", exists, serving)
+	}
+}
+
+func TestResumeColdRecordsTheReopenedSessionFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	recorded := f.db.sessions[ws.ID]
+	if recorded.VendorSessionID != "vendor-2" || recorded.Model != "opus" {
+		t.Fatalf("recorded session = %+v, want the conversation and model the re-open reported", recorded)
+	}
+}
+
+func TestResumeColdKeepsTheParkedHostIdentity(t *testing.T) {
+	// Arrange: the remediated resume is the SAME session, so it must not mint a
+	// second host identity for a conversation that never ended.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+
+	// Act.
+	if err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()}); err != nil {
+		t.Fatalf("ResumeCold: %v", err)
+	}
+
+	// Assert.
+	if got := f.db.sessions[ws.ID].HostSessionID; got != "host-1" {
+		t.Fatalf("host session id = %q, want the parked session's own %q", got, "host-1")
+	}
+}
+
+func TestResumeColdRefusesAWorkspaceWithNoLiveSession(t *testing.T) {
+	// Arrange: no bring-up ever ran, so nothing is parked.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdRefusesAReapedClient(t *testing.T) {
+	// Arrange: the map entry outlives the process, and re-opening over a dead
+	// connection answers a raw transport error where the contract spells
+	// no_session.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.reaped = true
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdRefusesWhenTheShimRefusesTheRemediatedResumeAsColdAgain(t *testing.T) {
+	// Arrange: the shim states the cost a second time, so the session is parked
+	// once more rather than up.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.response = coldResponse()
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	asRefusal(t, err, ArmNoSession)
+}
+
+func TestResumeColdSurfacesAShimRefusal(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	parkedGate(t, f, ws)
+	f.client.startErr = errors.New("the link is gone")
+
+	// Act.
+	err := f.fleet.ResumeCold(context.Background(), ws.ID,
+		ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeCold() = nil error, want the failed re-open surfaced")
+	}
+}
+
+// liveHostSessionID reads the identity the fleet is operating a workspace's
+// session under -- the same value its shim was spawned with.
+func liveHostSessionID(t *testing.T, fleet *Fleet, ws ids.WorkspaceID) string {
+	t.Helper()
+	fleet.mu.RLock()
+	defer fleet.mu.RUnlock()
+	session, ok := fleet.sessions[ws]
+	if !ok {
+		t.Fatalf("the fleet has no live session for %q", ws)
+	}
+	return session.hostSessionID
+}
+
+// sessionStamps returns the agent_repl_session_id of every captured record
+// that carries one.
+func sessionStamps(records []dlog.Record) []string {
+	var out []string
+	for _, r := range records {
+		if id, ok := r.Context[dlog.KeyAgentReplSessionID].(string); ok {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func TestStartStampsTheSessionIdentityOnTheWorkspaceRecords(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert: the bring-up's own records carry the identity the shim was
+	// spawned with, so the two runtimes' records join on it.
+	want := liveHostSessionID(t, f.fleet, ws.ID)
+	stamps := sessionStamps(f.log.logger.Records())
+	if len(stamps) == 0 {
+		t.Fatalf("no record carried %s; records = %+v", dlog.KeyAgentReplSessionID, f.log.logger.Records())
+	}
+	for _, got := range stamps {
+		if got != want {
+			t.Fatalf("%s = %q, want the session's host identity %q", dlog.KeyAgentReplSessionID, got, want)
+		}
+	}
+}
+
+func TestStartStampsNothingBeforeTheIdentityIsDecided(t *testing.T) {
+	// Arrange: a refused start never reaches the mint, so no record may claim
+	// a session identity.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1",
+		Terminal: &wsm.SessionTerminal{Kind: "deleted", Detail: "/clear"},
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err == nil {
+		t.Fatal("Start() = nil error, want the deleted session refused")
+	}
+
+	// Assert.
+	if stamps := sessionStamps(f.log.logger.Records()); len(stamps) != 0 {
+		t.Fatalf("%s stamped %v on a start that never minted one", dlog.KeyAgentReplSessionID, stamps)
+	}
+}
+
+func TestStartRestampsTheRotatedIdentityOnAFreshRestart(t *testing.T) {
+	// Arrange: a fresh start after a stop mints a new identity, and the
+	// records of the second start must carry only that one.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("first Start: %v", err)
+	}
+	first := liveHostSessionID(t, f.fleet, ws.ID)
+	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	// The recorded conversation is gone, so the second start is FRESH and
+	// mints a second identity rather than keeping the first.
+	delete(f.db.sessions, ws.ID)
+	before := len(f.log.logger.Records())
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("second Start: %v", err)
+	}
+
+	// Assert.
+	second := liveHostSessionID(t, f.fleet, ws.ID)
+	if second == first {
+		t.Fatalf("the restart kept host session id %q; the fixture must rotate it", first)
+	}
+	for _, got := range sessionStamps(f.log.logger.Records()[before:]) {
+		if got != second {
+			t.Fatalf("%s = %q after the restart, want the rotated identity %q", dlog.KeyAgentReplSessionID, got, second)
+		}
+	}
+}
+
+// StandDownEverySpawn is the supervisor's own sweep of processes it started
+// and still owns. These fakes spawn no process, so there is never one to
+// sweep.
+func (s *fakeSupervisor) StandDownEverySpawn(context.Context, string) error { return nil }
+
+// TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails covers the other path
+// out of Stop. A kill that reports a failure -- and Client.Kill can now report
+// one, because its caller's context bounds its waits -- has still sent
+// everything it is going to send, and the session left this fleet's map before
+// it ran. Views left showing a live link for a session nothing serves is the
+// worse answer than an error with the views correct.
+func TestStopTellsTheViewsTheLinkIsDeadEvenWhenTheKillFails(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.links.links = nil
+	f.client.killErr = errors.New("the exit decode did not land inside the caller's bound")
+
+	// Act
+	err := f.fleet.Stop(context.Background(), ws.ID, false)
+
+	// Assert
+	if err == nil {
+		t.Fatal("Stop() error = nil, want the kill's failure surfaced")
+	}
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+}
+
+// TestStartRevivesAWorkspaceWhoseShimWasReaped covers the other half of the
+// same defect: the dead shim's row made the bring-up answer "already live", so
+// the revival a held prompt waits on brought nothing up at all.
+func TestStartRevivesAWorkspaceWhoseShimWasReaped(t *testing.T) {
+	// Arrange: a session came up, then its shim was killed out from under the
+	// daemon and reaped.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.client.reaped = true
+	fresh := &fakeClient{response: startedResponse("vendor-2"), pid: 5151, standDown: f.standDown}
+	f.supervisor.client = fresh
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start after the shim died: %v", err)
+	}
+
+	// Assert.
+	if len(f.supervisor.spawns) != 2 {
+		t.Fatalf("spawns = %d, want a second shim spawned for the revival", len(f.supervisor.spawns))
+	}
+	client, live := f.fleet.Client(ws.ID)
+	if !live {
+		t.Fatal("the revived workspace has no live client; every prompt would answer no_session")
+	}
+	if client != shimclient.Client(fresh) {
+		t.Fatalf("Client() = %v, want the freshly spawned shim", client)
+	}
+	if !f.watcher.closed {
+		t.Fatal("the dead session's watches were left open by the revival")
+	}
+}

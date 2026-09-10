@@ -1,0 +1,32 @@
+// workspace_priority.proto — the workspace priority vocabulary, shared by
+// CreateWorkspace (creation-time priority) and SetWorkspacePriority (the
+// post-creation setter). The roster resolver orders rows by it and the
+// roster row carries it for the badge treatment.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// THE ARM IS THE PRIORITY LEVEL — highest first.
+message WorkspacePriority {
+  oneof level {
+    WorkspacePriorityP05 p05 = 1;
+    WorkspacePriorityP1 p1 = 2;
+    WorkspacePriorityP2 p2 = 3;
+    WorkspacePriorityP3 p3 = 4;
+  }
+}
+
+message WorkspacePriorityP05 {
+}
+
+message WorkspacePriorityP1 {
+}
+
+message WorkspacePriorityP2 {
+}
+
+message WorkspacePriorityP3 {
+}

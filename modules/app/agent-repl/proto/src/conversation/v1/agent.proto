@@ -1,0 +1,442 @@
+// agent.proto — WHAT AN AGENT'S STREAM SAYS: growth, or one of the two ways it
+// ends. Agnostic between the main agent (whose stream is the turn) and a
+// detached subagent (whose stream is its own): one vocabulary, one handler.
+// AgentFrame is the frame itself, wrapped whole by every stream that carries an
+// agent; AgentAnswer is what a consumer writes back when the agent is blocked.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/api.proto";
+import "conversation/v1/detached_work.proto";
+import "conversation/v1/permission.proto";
+import "conversation/v1/question.proto";
+import "conversation/v1/slash_command.proto";
+import "conversation/v1/user.proto";
+import "conversation/v1/workflow.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// One frame of an agent's bounded stream. THE ARM IS WHAT THE STREAM IS
+// SAYING: growth, or one of the two ways it ends. A stream that ends WITHOUT a
+// terminal arm is a TRANSPORT FAILURE and is read as one — never as the agent
+// concluding. Declared once so the turn's stream and a detached subagent's
+// stream are one shape and one handler.
+message AgentFrame {
+  // WHICH AGENT this frame is about: the main-thread agent, or a subagent at
+  // any depth. FRAMES ARE FLAT AND THIS IS THE WHOLE OF THEIR ATTRIBUTION — a
+  // subagent's work is never nested inside its spawn; it arrives as frames
+  // carrying its own identity, on whichever stream carries it (the spawning
+  // turn's for an awaited spawn, its own for a detached one, the run's for a
+  // workflow's agent). A consumer routes by this value alone, into whatever it
+  // drew when it saw the agent's creation; nothing on the wire carries
+  // ancestry, because placement comes from the request when history is read
+  // and from the consumer's own drawn structure when frames arrive live.
+  AgentId agent_id = 4;
+  // THE ARM IS BOTH the consumer's obligation and the datalayer's route.
+  oneof result {
+    // Conversation content: the agent did something, or is blocked on the
+    // user. The consumer reads or writes back; the store lands it as a page
+    // line of this agent's book.
+    AgentUpdate update = 1;
+    // The agent ended on terms the consumer asked for. Lands BOTH as a page
+    // line (the feed's stop notice has no other source) and as the agent's
+    // terminal state.
+    AgentSuccess success = 2;
+    // The agent ended because something broke. Lands as success does.
+    AgentFailure failure = 3;
+    // Work left this agent's stream for a life of its own. The consumer opens
+    // the connection its handle names. The announcement IS a page line of the
+    // announcing agent's book (upsert key `detached:<work id>`): a replayed
+    // page must carry it, and the store's liveness of non-agent detached runs
+    // is read from it. The run's own rows land in the lifecycle table for its
+    // kind, which never holds the announcement.
+    AgentDetachedWork detached_work = 5;
+  }
+}
+
+// What a consumer can SAY to a live agent. ONE type for the main agent and a
+// detached subagent alike: the requests that carry it differ only in the
+// address. How each arm is DELIVERED is the producer's business per kind —
+// a prompt to a busy agent may be injected at its next tool round, a prompt
+// to a finished agent resumes it as a new run — and the consumer never
+// learns which mechanism was used.
+message AgentInput {
+  oneof input {
+    // Stop it. Its stream then concludes with AgentSuccess.interrupted once
+    // the agent binary acknowledges; the carrying call returns before that.
+    AgentStop stop = 1;
+    // Answer a question or decide a permission it is blocked on.
+    AgentAnswer answer = 2;
+    // A prompt addressed to an EXISTING agent — a subagent, a workflow's
+    // agent. The producer decides HOW it lands per kind (a steer to a live
+    // one, a resume to a finished one), and the caller never learns which.
+    // The session's own turns are never spoken this way: they are StartTurn.
+    UserSaid prompt = 3;
+  }
+}
+
+// A user-commanded stop. Carries nothing: the target is the addressed agent
+// and the reason is always the user.
+message AgentStop {}
+
+// What a consumer WRITES BACK to an agent that is blocked: the counterpart of
+// AgentUpdate's two blocking arms, one answer each. Declared once so every
+// write rpc — to the turn, to a detached subagent, to a workflow's agent —
+// carries the same shape.
+message AgentAnswer {
+  oneof answer {
+    // The user's choices for an open question.
+    AgentQuestionAnswer question_answer = 1;
+    // The user's decision on an open permission.
+    AgentPermissionDecision permission_decision = 2;
+  }
+}
+
+// Something a running agent has to say. The arm states WHAT THE CONSUMER MUST
+// DO with it: pipe it back on this agent's own stream, or open a stream of its
+// own for it.
+message AgentUpdate {
+  // THE ARM IS THE CONSUMER'S OBLIGATION. Activity is read-only — it happened
+  // and nothing is owed. A question and a permission both BLOCK the agent
+  // until the user writes back on the update channel, and differ in what is
+  // written: a choice, or consent. Every arm is conversation content and
+  // lands as a page line. Tag 2 (detached_work) is RETIRED: leaving the
+  // stream is a frame-level fact, stated on AgentFrame beside the terminal
+  // arms.
+  oneof update {
+    // Work happening on this agent's stream. Everything about it arrives here,
+    // and it cannot outlive the stream.
+    AgentActivity activity = 1;
+    // The agent is blocked on the user's CHOICE among options it posed.
+    AgentQuestion question = 3;
+    // The agent is blocked on the user's CONSENT to run a tool it called.
+    AgentPermission permission = 4;
+    // THE CONVERSATION WAS CUT HERE — /clear, a compaction (manual or the
+    // vendor's automatic one), or a compaction that failed. A page line of
+    // the main agent's book; the feed draws it as the separation divider.
+    // Instantaneous: one frame, no lifecycle (ruled 2026-08-29).
+    ContextCut context_cut = 5;
+    // A vendor API request FAILED MID-TURN and the turn went on (a retried
+    // request, an error the vendor recorded and recovered from). EVIDENCE,
+    // never a terminal: the turn's end is the frame-level failure arm
+    // (AgentFailure.api_request_failed) and nothing else. A page line.
+    ApiRequestFailed api_error = 6;
+    // The vendor's own CONTEXT-BUDGET WARNING, injected into the prompt as the
+    // window fills. A FILE-PLANE fact: it exists only as an attachment line in
+    // the agent's transcript, so the sidecar is its only producer and it
+    // reaches a consumer as a page line of the agent's book (moved here from
+    // SessionUpdate tag 24, which had no producer on the live session stream).
+    // The footer's activity line draws it; instantaneous, no lifecycle.
+    ContextBudgetWarning context_budget_warning = 7;
+  }
+}
+
+// The vendor's context-budget warning as it appeared in the transcript.
+message ContextBudgetWarning {
+  // The vendor's warning text, verbatim — the producer composes it and no
+  // structured figure rides the record.
+  string text = 1;
+}
+
+// The agent's stream ended on terms the consumer asked for. THE ARM IS HOW —
+// both are answers, never failures. For the main agent this is the instant
+// the main thread can accept a prompt again.
+message AgentSuccess {
+  oneof outcome {
+    // The agent finished on its own.
+    AgentCompleted completed = 1;
+    // A user-commanded stop was acknowledged by the agent binary and the agent
+    // ended because of it. An ACCUSATION the producer must have evidence for:
+    // only an acknowledged stop sets it.
+    AgentInterrupted interrupted = 2;
+    // The agent was asked to continue in the BACKGROUND, so this stream ended
+    // while the work did not. A SUCCESS and not a failure: it is what was
+    // asked for. The work's own stream carries it from here.
+    AgentBackgrounded backgrounded = 3;
+  }
+
+  // Tag 4 is RETIRED: run accounting is deferred — see the deferred-work
+  // metadocument ("run accounting").
+}
+
+// The agent moved to the background rather than ending.
+message AgentBackgrounded {}
+
+// The agent ran to its own end.
+message AgentCompleted {
+  // The response unit that is the agent's ANSWER — the last top-level prose it
+  // produced — so a consumer marks it final without deriving finality from
+  // position. UNSET when no prose was produced at all (a refusal with empty
+  // content, a token ceiling hit before anything was said); absence is not an
+  // error.
+  optional AgentActivityId answer = 1;
+}
+
+// The agent was stopped. Units open when the stop landed have ALREADY received
+// their own failure frames on this stream; nothing about them is restated here.
+message AgentInterrupted {
+  // WHO OR WHAT STOPPED IT. UNSET when the producer stated no cause, which a
+  // consumer reads as the ordinary user stop.
+  //
+  // THE DISTINCTION IS LOAD-BEARING FOR RECOVERY: a user stop is a decision
+  // and the conversation waits, while a host shutdown is an accident and the
+  // work is expected to be driven again when the host returns. Drawing the
+  // second as the first tells the user they stopped something they did not.
+  oneof cause {
+    // A person commanded the stop and the agent binary acknowledged it.
+    AgentInterruptedByUser by_user = 1;
+    // The process hosting the agent went down under it. Nobody chose this.
+    AgentInterruptedByHostShutdown host_shutdown = 2;
+  }
+}
+
+// A person commanded the stop.
+message AgentInterruptedByUser {}
+
+// The host process went down under the agent.
+message AgentInterruptedByHostShutdown {}
+
+// The agent's stream ended because something broke. Every arm is a fact the
+// producer OBSERVED; a stream that merely stops sending is a transport failure
+// and is never reported as one of these.
+message AgentFailure {
+  // Every error string the producer accumulated over the failed run, oldest
+  // first. Empty when it accumulated none, which is the ordinary case — the
+  // arm below is the account for most failures.
+  //
+  // A LIST BECAUSE A RUN CAN FAIL SEVERAL TIMES BEFORE IT GIVES UP: a retry
+  // exhaustion is many errors, and reporting only the last one hides that the
+  // earlier attempts failed differently.
+  repeated string errors = 30;
+
+  // Tag 31 is RETIRED: run accounting is deferred — see the deferred-work
+  // metadocument ("run accounting").
+
+  oneof failure {
+    // The vendor API refused or failed a request and RECORDED that it did, so
+    // the agent could not continue. The vendor's own error taxonomy, imported
+    // whole from api.proto.
+    ApiRequestFailed api_request_failed = 1;
+
+    // ---- The producer's own turn-ending vocabulary ----
+    //
+    // ARMS RATHER THAN A REASON STRING because each of these leads somewhere
+    // different: some are waited out, some are the user's to raise, and some
+    // are a fault to report. A consumer that had to match on prose would be
+    // parsing an error message to decide what to offer.
+
+    // An account-level block stopped the run before it could proceed.
+    AgentStoppedAtBlockingLimit blocking_limit = 2;
+    // The account was refilling its allowance too fast to be served, and a
+    // breaker tripped. A WAIT, not a fault.
+    AgentStoppedByRapidRefillBreaker rapid_refill_breaker = 3;
+    // The prompt itself was too long to send. The context must be cut before
+    // anything else can happen.
+    AgentPromptTooLong prompt_too_long = 4;
+    // An image in the request could not be processed.
+    AgentImageRejected image_error = 5;
+    // The model itself errored in a way the API did not classify as a request
+    // failure.
+    AgentModelError model_error = 6;
+    // The model kept emitting tool calls the producer could not parse, and the
+    // attempts ran out. The run's own fault, and retrying it unchanged is
+    // unlikely to help.
+    AgentMalformedToolUseExhausted malformed_tool_use_exhausted = 7;
+    // A Stop hook forbade the agent from continuing. A DELIBERATE STOP
+    // SOMEONE CONFIGURED, not a fault — but the agent stopped short of what it
+    // was asked, and a consumer that draws it as completion is wrong.
+    AgentStoppedByStopHook stop_hook_prevented = 8;
+    // A hook other than the Stop hook ended the run.
+    AgentStoppedByHook hook_stopped = 9;
+    // A tool call was deferred and the run ended waiting on it.
+    AgentToolDeferred tool_deferred = 10;
+    // A tool call was deferred to something that then proved unavailable.
+    AgentToolDeferredUnavailable tool_deferred_unavailable = 11;
+    // The run reached the ceiling on model round-trips it was given.
+    AgentMaxTurnsReached max_turns = 12;
+    // The run reached the spending ceiling it was given.
+    AgentBudgetExhausted budget_exhausted = 13;
+    // The model could not produce output matching the structure it was asked
+    // for, and the retries ran out.
+    AgentStructuredOutputRetriesExhausted structured_output_retry_exhausted = 14;
+    // The run could not be set up at all and never reached the model.
+    AgentTurnSetupFailed turn_setup_failed = 15;
+    // The run broke while executing, in a way the producer did not classify
+    // further. `errors` above is the account.
+    AgentExecutionError execution_error = 16;
+    // An informational notice from the producer ENDED the run. Without an arm
+    // this is a turn that simply stops, which a consumer draws as still
+    // working.
+    AgentContinuationPrevented continuation_prevented = 17;
+    // WE STOPPED BEING ABLE TO SEE THE AGENT — a detached agent whose
+    // transcript vanished or went silent, or one a boot sweep found open with
+    // no producer. Not known to have failed; the feed draws "lost".
+    DetachedLost lost = 18;
+  }
+}
+
+// An account-level block stopped the run.
+message AgentStoppedAtBlockingLimit {}
+
+// A refill-rate breaker tripped.
+message AgentStoppedByRapidRefillBreaker {}
+
+// The prompt was too long to send.
+message AgentPromptTooLong {}
+
+// An image in the request could not be processed.
+message AgentImageRejected {}
+
+// The model errored in a way the API did not classify.
+message AgentModelError {}
+
+// The model's tool calls could not be parsed and the attempts ran out.
+message AgentMalformedToolUseExhausted {}
+
+// A Stop hook forbade continuation.
+message AgentStoppedByStopHook {}
+
+// A hook ended the run.
+message AgentStoppedByHook {}
+
+// A tool call was deferred and the run ended waiting on it.
+message AgentToolDeferred {}
+
+// A tool call was deferred to something unavailable.
+message AgentToolDeferredUnavailable {}
+
+// The ceiling on model round-trips was reached.
+message AgentMaxTurnsReached {}
+
+// The spending ceiling was reached.
+message AgentBudgetExhausted {}
+
+// Structured-output retries ran out.
+message AgentStructuredOutputRetriesExhausted {}
+
+// The run could not be set up and never reached the model.
+message AgentTurnSetupFailed {}
+
+// The run broke while executing, unclassified.
+message AgentExecutionError {}
+
+// A producer notice ended the run.
+message AgentContinuationPrevented {}
+
+// ---- The workflow run's frame: the one unit that contains agents ----
+
+// ALWAYS DETACHED. The producer's launch answer reports only that a run started,
+// never that one finished, and there is no option asking for a blocking run — so
+// a workflow's frames arrive on the run's OWN stream and never on the stream of
+// the turn that launched it.
+//
+// THIS UNIT IS THE ONLY ONE THAT CONTAINS OTHER UNITS, and that is deliberate
+// rather than a leak: a workflow is the only kind of work that is a PROGRAM
+// rather than an action, so its progress simply IS the work of the agents its
+// script spawned. Those agents arrive inside the update arm below, each carrying
+// its own identity, at any depth and flat — a workflow agent that spawns an agent
+// of its own arrives the same way, so nothing anywhere maintains a lineage.
+message AgentWorkflow {
+  // Where the run stands. Expect one start, then any number of updates, then one
+  // terminal arm.
+  oneof result {
+    // This stream is now carrying this run.
+    AgentWorkflowStart start = 1;
+    // Work its agents have done since the last frame.
+    AgentWorkflowUpdate update = 2;
+    // The run finished.
+    AgentWorkflowSuccess success = 3;
+    // The run could not be launched, or ended without finishing.
+    AgentWorkflowFailure failure = 4;
+  }
+}
+
+// A STATELESS LEVEL, replace semantics: every frame carries ALL of the run's
+// top-level subagents, and a consumer swaps its picture for the payload. A
+// late or restarted watcher is whole after one frame; nothing is paged,
+// because a run is small by nature and this contract deliberately supports
+// no workflow history. The run's stream says nothing about what its agents
+// DO — the daemon opens an ordinary per-agent connection for each, exactly
+// as for any subagent.
+message AgentWorkflowUpdate {
+  // Every top-level agent the script has spawned, in spawn order.
+  repeated AgentWorkflowSubagent all_subagents = 1;
+
+  // Tag 2 is RETIRED: workflow phases are deferred — see the deferred-work
+  // metadocument ("workflow phases and progress").
+}
+
+// One of the run's agents: its spawn description, and whether it is live.
+message AgentWorkflowSubagent {
+  // The spawn as announced — carries the created agent's identity, which is
+  // what the daemon watches.
+  AgentSubagentStart agent_start = 1;
+  // Whether the agent is still running. THE ARM IS THE LIVENESS.
+  oneof liveness {
+    AgentWorkflowSubagentLive live = 2;
+    AgentWorkflowSubagentEnded ended = 3;
+  }
+
+  // Tags 4-5 are RETIRED: workflow phases and per-agent progress are
+  // deferred.
+}
+
+// The agent is running; its own stream is live.
+message AgentWorkflowSubagentLive {}
+
+// The agent has ended; its own stream carried how.
+message AgentWorkflowSubagentEnded {}
+
+// The run ended on terms the consumer asked for. THE ARM IS HOW — both are
+// answers, never failures.
+message AgentWorkflowSuccess {
+  oneof outcome {
+    // The run finished on its own.
+    AgentWorkflowCompleted completed = 1;
+    // A user-commanded stop was acknowledged and the run ended because of it.
+    // Agents live when the stop landed have already received their own
+    // terminal frames in this stream.
+    AgentWorkflowInterrupted interrupted = 2;
+  }
+}
+
+// The run finished on its own.
+message AgentWorkflowCompleted {
+  // What the run reported at the end, when it reported anything. UNSET when it
+  // finished without a summary, which is not a failure.
+  optional AgentWorkflowSummary summary = 1;
+
+  // Tag 2 is RETIRED: workflow run totals are deferred.
+}
+
+// The run was stopped at the user's command.
+message AgentWorkflowInterrupted {}
+
+// The run could not be launched, or ended without finishing.
+message AgentWorkflowFailure {
+  // Why it failed. Two arms because the first is structurally distinguishable
+  // rather than inferred: the producer reports a rejected script separately from
+  // anything that can happen once a run has begun.
+  oneof cause {
+    // The script did not compile and the run never started. The message is
+    // carried because the author's next action is to fix the script and this is
+    // the only account of what was wrong with it.
+    AgentWorkflowScriptRejected script_rejected = 1;
+    // The run started and ended without finishing. Arms are DERIVED from the
+    // producer's real sites at the implementation wave; empty until then.
+    AgentWorkflowRunEnded run_ended = 2;
+  }
+}
+
+// The script did not compile and the run never started.
+message AgentWorkflowScriptRejected {
+  // What the producer said was wrong with it, verbatim.
+  string error = 1;
+}
+
+// The run started and ended without finishing. Arms are DERIVED from the
+// producer's real sites at the implementation wave; empty until then.
+message AgentWorkflowRunEnded {}

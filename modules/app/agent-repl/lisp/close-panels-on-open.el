@@ -45,6 +45,15 @@
 
 ;;; Code:
 
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--agent-panel-buffer-p "core")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--panels-visible-p "panels")
+(declare-function agent-repl--simple-hide-and-preserve-status "panels")
+(declare-function agent-repl--ws-current-name "workspace")
+
 (require 'cl-lib)
 
 (defcustom agent-repl-close-panels-on-open-fns

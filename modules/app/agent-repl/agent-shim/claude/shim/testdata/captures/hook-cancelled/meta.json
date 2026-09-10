@@ -1,0 +1,32 @@
+{
+  "scenario": "hook-cancelled",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `echo hook-cancel-probe`.",
+  "prompts": [
+    {
+      "text": "Run `echo hook-cancel-probe`.",
+      "resume": false
+    }
+  ],
+  "world": "hook-cancelled",
+  "cwd_init": null,
+  "vendor_session_id": "5e21ccaa-a0f5-46d9-82aa-19c82af1f2c2",
+  "manual": null,
+  "expect": [
+    "hook_started",
+    "attachment:hook_cancelled"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-hook-cancelled-p1naKi-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:36:45.270Z",
+  "controls": [
+    {
+      "verb": "interrupt",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

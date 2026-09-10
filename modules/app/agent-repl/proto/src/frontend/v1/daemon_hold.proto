@@ -1,0 +1,269 @@
+// daemon_hold.proto — THE HELD TRAY: what the daemon is holding FOR the user
+// on this workspace — prompts awaiting delivery, and questions awaiting an
+// answer. Its own component, its own stream. Drawn as its own region at the
+// feed's tail; whole-list-replaced on every change.
+//
+//   ├─ held (3) ──────────────────────────────────────────────────────────┤
+//   │ ⏳ "fix the flaky test"   queued · after this turn  [force] [cancel] │  HeldPrompt
+//   │ ⚡ "stop and rebase"      queued · interject         [accept]        │  HeldPrompt
+//   │ ?  take this merge off the queue?              [dequeue] [keep]     │  HeldOffer
+//
+// NOT here: gates. A merge lease or a hibernated session REFUSES input, it
+// holds nothing — those are the footer's and the refusal arms'. A context cut
+// makes the running turn uninterruptible — that is a classification below,
+// not a hold. And nothing here is a conversation record: a queued prompt is
+// daemon-owned pending intent the vendor never saw, drawn beside the feed,
+// never in it.
+//
+// EVERY MESSAGE HERE IS FRONTEND SURFACE, not shim wire. A queued prompt is an
+// artifact of the DAEMON's decision to hold it back, and the tray's actions
+// (force, cancel, accept, answer) are agentrepl.v1 requests whose MECHANISM
+// (Interrupt then SubmitPrompt) is what actually crosses the shim UDS.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "conversation/v1/slash_command.proto";
+import "conversation/v1/turn.proto";
+import "conversation/v1/user.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The tray, resolved by the daemon and pushed on EVERY change. An empty
+// items list is a meaningful value (the tray is empty), not an absent one.
+message DaemonHoldTray {
+  // The tray's heading, composed by the daemon (e.g. "held (3)").
+  DaemonHoldHeading heading = 1;
+  // The held things, in display order.
+  repeated DaemonHoldItem items = 2;
+}
+
+// The tray's heading.
+message DaemonHoldHeading {
+  // The heading line, composed by the daemon. Drawn verbatim; a client never
+  // assembles a count or a summary of its own from the items below.
+  string text = 1;
+}
+
+// One held thing. THE ARM IS THE KIND.
+message DaemonHoldItem {
+  // Which kind of held thing this is. The two are answered differently — a
+  // prompt is released or dropped, an offer is answered — so a consumer routes
+  // on the arm rather than on anything inside it.
+  oneof item {
+    // A prompt the daemon is holding for delivery.
+    HeldPrompt prompt = 1;
+    // A question the daemon is holding for the user's answer.
+    HeldOffer offer = 2;
+  }
+}
+
+// A prompt the daemon is holding for delivery.
+//
+// A prompt submitted while the session's turn is already running is NOT
+// forwarded. The daemon holds it, asks a classifier whether it is the sort of
+// thing the agent should hear NOW rather than after the turn, and either
+// interjects it (interrupt, then submit once the turn has actually ended) or
+// leaves it to be delivered FIFO when the turn ends on its own.
+message HeldPrompt {
+  // The turn this prompt will run as — DAEMON-MINTED, the one identity a
+  // force, cancel or accept names, and the same TurnId the submission's
+  // response returned. There is no second, daemon-internal entry id.
+  conversation.v1.TurnId turn = 1;
+  // What the user said, WHOLE — the very payload the daemon will forward, so
+  // the tray shows exactly what will land in the feed, and a UserSaid that
+  // carries images (or anything UserContent grows) is held intact.
+  conversation.v1.UserSaid said = 2;
+  // When it was queued.
+  HeldPromptQueuedAt queued_at = 3;
+  // What the classifier decided about ORDER. THE ARM IS THE VERDICT. Never
+  // unset on a wire entry: an entry with no arm here is a malformed frame and
+  // is rejected loudly rather than rendered as pending. Each verdict's own
+  // facts — a rationale, an acceptance — live on the arm that owns them, so a
+  // rationale cannot arrive with no verdict to explain and an acceptance
+  // cannot be set on an entry no classifier held.
+  oneof classification {
+    // A classifier is still deciding. Expect this arm to be replaced by one of
+    // the verdicts below.
+    HeldPromptClassifying classifying = 4;
+    // The verdict is that this prompt should interrupt the running turn rather
+    // than wait for it.
+    HeldPromptInterject interject = 5;
+    // The verdict is that this prompt waits for the running turn to end.
+    HeldPromptHoldForTurnEnd hold_for_turn_end = 6;
+    // No classifier ran and none will: the turn in front of this entry is a
+    // context cut, which is never interrupted. Delivery is the ordinary
+    // turn-end drain's, so this arm changes WHO decided rather than WHEN the
+    // prompt runs.
+    HeldPromptUninterruptibleTurn uninterruptible_turn = 7;
+    // The classifier itself failed, so no verdict exists. The prompt is still
+    // held and still deliverable; what is missing is the advice, not the
+    // prompt.
+    HeldPromptClassificationError classification_error = 8;
+  }
+  // WHAT is holding this entry, when something other than a running turn is.
+  //
+  // An entry is held by at most one thing at a time: a drain lease, a
+  // keep-alive turn, a pending revival and a build refresh are mutually
+  // exclusive session conditions, and an entry held by two of them at once
+  // would have two different sets of exits and two different states to
+  // render. Stating them as arms makes that impossible to express rather than
+  // merely unlikely. No arm set means the entry is held by the ordinary case
+  // — a turn is running — and the classifier decides when it is delivered.
+  //
+  // THESE FOUR ARE THE WHOLE SET, and they are entry-scoped. A merge lease is
+  // NOT a hold — it refuses, and holds nothing.
+  oneof hold {
+    // The daemon is draining toward a scheduled shutdown and is not admitting
+    // new work.
+    HeldPromptShutdownHold shutdown = 9;
+    // A cache keep-alive turn holds the session; it yields to real work, so the
+    // wait is brief.
+    HeldPromptKeepAliveHold keep_alive = 10;
+    // The session is starting up and cannot accept a prompt until it is up.
+    HeldPromptSessionStartingHold session_starting = 11;
+    // The session's build is being refreshed onto a newer one before it takes
+    // more work.
+    HeldPromptBuildRefreshHold build_refresh = 12;
+  }
+}
+
+// When a held prompt was queued.
+message HeldPromptQueuedAt {
+  // Epoch milliseconds.
+  int64 at_ms = 1;
+}
+
+// The classifier is still running: the entry is queued and undecided.
+message HeldPromptClassifying {}
+
+// Deliver NOW: interrupt the running turn and submit once it has ended.
+message HeldPromptInterject {
+  // The classifier's stated reason. Free text for display; never parsed.
+  string rationale = 1;
+}
+
+// Deliver when the turn ends on its own; do not interrupt for it.
+message HeldPromptHoldForTurnEnd {
+  // The classifier's stated reason. Free text for display; never parsed.
+  string rationale = 1;
+  // Whether the user has seen and confirmed this hold. View state only — it
+  // changes nothing about when the entry is delivered. It lives on this arm
+  // because confirming a hold is the ONLY thing an accept does; no other
+  // verdict has anything to accept.
+  HeldPromptAccepted accepted = 2;
+}
+
+// The user's confirmation of a hold.
+message HeldPromptAccepted {
+  // True once the user has confirmed the hold. False means the confirmation has
+  // not been given yet, not that it was declined — a declined hold is dropped
+  // and leaves the tray entirely.
+  bool accepted = 1;
+}
+
+// NOTHING CLASSIFIED THIS ENTRY, because the turn in front of it is a CONTEXT
+// CUT — `/compact` or `/clear` — and a context cut is never interrupted for a
+// queued prompt.
+//
+// It is a verdict rather than a `hold` arm because the entry is NOT held by
+// anything other than the running turn: it is delivered by the ordinary
+// turn-end drain, in order, exactly as a hold-for-turn-end verdict is. What it
+// does not have is a classifier behind it. A compaction reads the whole
+// conversation and a clear discards it; interrupting either one spends that
+// cost for nothing and leaves the context in the state the cut was supposed
+// to change, so there is no question left for a model to answer.
+//
+// THERE IS NO FORCE-THROUGH. A force is refused on one of these for the reason
+// the keep-alive and revival holds refuse it: the force's mechanism is an
+// interrupt, and the interrupt is precisely what must not happen. A user who
+// genuinely wants the cut stopped still has the interrupt command itself.
+message HeldPromptUninterruptibleTurn {
+  // Which cut is running, so the card can name it. Never UNSPECIFIED: the arm
+  // is set only when the daemon recognized the running prompt as one of the
+  // two, and an arm that could not say which would explain nothing.
+  conversation.v1.SessionCommand command = 1;
+}
+
+// The classifier could not be believed (it answered with neither token, or
+// both). Surfaced as its own arm rather than silently defaulted to one of the
+// real verdicts: a frontend must be able to see that nothing decided this.
+// Delivery falls back to the ordinary turn-end drain, so an unclassifiable
+// prompt is delayed, never dropped.
+message HeldPromptClassificationError {
+  // The failure detail. Free text for display; never parsed.
+  string detail = 1;
+}
+
+// Held by a scheduled shutdown's drain lease. The classifier NEVER runs on
+// such an entry: the only exits are the user's explicit force (deliver now,
+// further delaying the bounce), cancel, or delivery after the bounce
+// completes. Held entries are durable and survive the daemon swap, so such a
+// prompt is delayed, never lost.
+message HeldPromptShutdownHold {
+  // The schedule holding this entry, joining the entry to the shutdown
+  // schedule it should explain.
+  string schedule_id = 1;
+}
+
+// Held because a cache keep-alive turn is in flight. The classifier NEVER runs
+// on such an entry and there is NO force-through: the keep-alive must complete
+// before the rewind-and-submit can run, so the only exits are delivery when
+// the ping's turn ends (the daemon rewinds, then submits this entry) or
+// cancel.
+message HeldPromptKeepAliveHold {
+  // The in-flight keep-alive turn whose completion releases this entry.
+  conversation.v1.TurnId turn = 1;
+}
+
+// Held because the session is still coming up — a cold resume in progress, a
+// compaction the user chose at the cold gate still landing. The classifier
+// NEVER runs on such an entry and there is NO force-through: the exits are
+// delivery once the session is up, a loud drop when the bring-up fails (a
+// session that never comes up can never deliver, so a retained entry would
+// be a leak, not a delay), or cancel.
+//
+// DELIBERATELY EMPTY: the arm's presence is the whole fact it carries. The
+// bring-up is a WORKSPACE-level event and the entry already rides its
+// workspace's tray, so naming a session here would join the entry to nothing
+// the client could not already reach.
+message HeldPromptSessionStartingHold {}
+
+// Held because the session's shim is being restarted onto the current build
+// at the turn boundary (automatic stale-shim refresh). The classifier never
+// runs on such an entry; the exit is delivery the moment the restarted shim
+// reports ready.
+message HeldPromptBuildRefreshHold {}
+
+// A question the daemon holds for the user's answer. THE ARM IS THE QUESTION.
+message HeldOffer {
+  // Which question is being asked. The arm determines both the card drawn and
+  // the answers available, so a consumer switches on it rather than inspecting
+  // the payload.
+  oneof offer {
+    // Take this workspace's merge off the queue? Raised by an interrupt during
+    // a merge; cleared by the answer, by the merge reaching its own terminal,
+    // or by the merge leaving the queue on its own. A frontend draws the card
+    // if and only if this item is present.
+    HeldOfferMergeDequeue merge_dequeue = 1;
+  }
+}
+
+// The merge-dequeue question, resolved for drawing: the daemon composes the
+// sentence ("interrupting — keep your merge's queue slot, or release it?");
+// the card draws it and offers the two answers, which are AnswerHeldOffer's
+// arms (keep | release), never fields here.
+message HeldOfferMergeDequeue {
+  // The sentence the card leads with, composed by the daemon. The two answers
+  // are not fields here — they are the answer request's arms — so this message
+  // carries only what is drawn.
+  HeldOfferHeadline headline = 1;
+}
+
+// The sentence an offer card leads with, composed daemon-side.
+message HeldOfferHeadline {
+  // The composed sentence, drawn verbatim. Never assembled client-side from
+  // the offer's kind.
+  string text = 1;
+}

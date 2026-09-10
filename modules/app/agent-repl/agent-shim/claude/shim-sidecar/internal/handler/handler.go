@@ -1,117 +1,166 @@
-// Package handler is the sidecar's Layer-2 record→event logic (design §7.2):
-// pure functions with ZERO IO that turn decoded file records into core.Event
-// values. Each handler owns a converter and emits the file-plane twins of the
-// records it reads plus the vendor-neutral lifecycle events the design assigns
-// to that plane (TaskStarted / TaskEnded / TaskProgress).
+// Package handler is the sidecar's record→record layer: pure functions with ZERO
+// IO that turn decoded file records into the store entries shim-store persists.
+//
+// A handler owns a converter and does three things with a batch of frames:
+// ATTRIBUTES each frame (whose book, which file, which offset), asks the
+// converter what the record IS, and DEFERS the one record whose meaning depends
+// on a line that may not be written yet.
+//
+// IT NEVER DECIDES WHETHER A RECORD IS INTERESTING. Curation is a downstream
+// concern; ingestion's only job is that every byte on disk ends up in the store
+// as a protobuf shape — as a page line, a run frame, or durable residue.
 package handler
 
 import (
-	"fmt"
 	"path/filepath"
-	"time"
+	"strings"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Producer is the fixed StoreWrite producer identity for the sidecar (§5.2).
-const Producer = "shim-claude-sidecar"
+// Producer is the fixed WriteBatch producer identity for the sidecar.
+const Producer = convert.Producer
 
 // Context / Kind live in the tail package (tailer-owned attribution); aliased
 // here so handler code reads naturally.
 type Context = tail.Context
 
-// nowMillis is the producer wall clock in unix millis (Event.produced_at_ms).
-var nowMillis = func() int64 { return time.Now().UnixMilli() }
-
-// vendorEvent wraps a data.v1 vendor message as a PERSISTENT file-plane Event.
-// dedupKey is set only where the store cannot derive it (journal); "" lets
-// the store derive uuid:/tur: keys itself.
-func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct, dedupKey string, log *logging.Bound) *corev1.Event {
-	a, err := anypb.New(vendor)
-	if err != nil {
-		// A generated data.v1 message always marshals into Any; a failure is a
-		// build-time impossibility, surfaced loudly rather than dropped.
-		log.With(logging.Context{Operation: "wrap-any", Session: sessionID, Level: "error"}).Log("wrapping %T in Any failed; the record on disk never reaches the store: %v", vendor, err)
-		return nil
+// attribute builds the conversion attribution for one frame.
+//
+// EVERY IDENTITY COMES FROM THE READER, which derived it from the file path (R9:
+// the main agent is the transcript FILE's session uuid, never the per-record
+// `sessionId`, which diverges from the runtime's answer in ~22% of records).
+// Reading it here rather than re-deriving it means the two halves of the seam
+// cannot disagree about whose book a record lands in.
+//
+// EVERY FIELD IS READ DEFENSIVELY: an empty value means the reader has not
+// supplied it, and the fallbacks below are what keep a book named rather than
+// leaving a record unservable.
+func attribute(ctx *Context, offset int64) convert.Attribution {
+	main := firstNonEmpty(ctx.MainAgentID, ctx.SessionID, sessionIDFromPath(ctx.Path))
+	at := convert.Attribution{
+		VendorSessionID: firstNonEmpty(ctx.SessionID, main),
+		MainAgentID:     main,
+		Path:            ctx.Path,
+		FileID:          ctx.FileID,
+		Offset:          offset,
+		TaskID:          ctx.TaskID,
+		Backgrounded:    ctx.SpawnBackgrounded,
 	}
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		ProducedAtMs: nowMillis(),
-		DedupKey:     dedupKey,
-		Extras:       extras,
-		Payload:      &corev1.Event_Vendor{Vendor: a},
+	switch ctx.Kind {
+	case tail.KindSessionTranscript:
+		// The session's own book is the main agent's.
+		at.AgentID = main
+	case tail.KindAgentTranscript:
+		// A subagent's constituents form ITS OWN book, keyed by the SPAWNING
+		// CALL's tool_use_id (the cross-plane minting rule), which the reader
+		// read out of the agent's meta file. The SPAWN that created it is a line
+		// in the PARENT's book, which is why the two identities are distinct.
+		//
+		// THERE IS NO FILENAME FALLBACK. `agent-<id>` is a locator, and naming
+		// the book by it would give one agent two books — one per plane — that no
+		// consumer could ever reconcile. A transcript whose meta has not been
+		// read is HELD by the reader and never reaches here, so an empty id is a
+		// reader defect and is stated as one.
+		at.AgentID = ctx.AgentID
+	default:
+		// A spool or a journal: the run's frames name the run, and the owning
+		// agent is whatever the reader resolved.
+		at.AgentID = firstNonEmpty(ctx.AgentID, main)
 	}
+	return at
 }
 
-// base builds the common PERSISTENT lifecycle Event scaffold on a plane.
-func base(sessionID string, plane corev1.Plane) *corev1.Event {
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        plane,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		ProducedAtMs: nowMillis(),
-	}
-}
-
-func taskStartedEvent(sessionID string, plane corev1.Plane, ts *corev1.TaskStarted) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskStarted{TaskStarted: ts}
-	return e
-}
-
-func taskProgressEvent(sessionID string, plane corev1.Plane, tp *corev1.TaskProgress) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskProgress{TaskProgress: tp}
-	return e
-}
-
-func taskEndedEvent(sessionID string, plane corev1.Plane, te *corev1.TaskEnded) *corev1.Event {
-	e := base(sessionID, plane)
-	e.Payload = &corev1.Event_TaskEnded{TaskEnded: te}
-	return e
-}
-
-// unparsedEvent records a record that failed conversion (§5.1). raw is bounded to
-// 64KiB per the core.UnparsedEvent contract.
-func unparsedEvent(sessionID, path string, offset int64, raw []byte, convErr error) *corev1.Event {
-	const cap64 = 64 << 10
-	if len(raw) > cap64 {
-		raw = raw[:cap64]
-	}
-	return &corev1.Event{
-		SessionId:    sessionID,
-		Plane:        corev1.Plane_PLANE_FILE,
-		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
-		ProducedAtMs: nowMillis(),
-		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
-			SourcePath: path,
-			ByteOffset: offset,
-			Raw:        append([]byte(nil), raw...),
-			Error:      convErr.Error(),
-			Producer:   Producer,
-		}},
-	}
-}
-
-// shellOutputPath constructs a background shell task's spool output path from its
-// backgroundTaskId and the session's spool dir (design §7.2). Returns "" when the
-// spool dir is unknown.
-func shellOutputPath(spoolDir, backgroundTaskID string) string {
-	if spoolDir == "" || backgroundTaskID == "" {
+// sessionIDFromPath reads the session uuid out of a transcript path, for the case
+// where the reader supplied none.
+//
+// `projects/<project>/<session>.jsonl` names it directly; a subagent transcript
+// at `projects/<project>/<session>/subagents/agent-<id>.jsonl` names it as the
+// directory two levels above.
+func sessionIDFromPath(path string) string {
+	if path == "" {
 		return ""
 	}
-	return filepath.Join(spoolDir, backgroundTaskID+".output")
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if !strings.HasPrefix(base, "agent-") {
+		return base
+	}
+	return filepath.Base(filepath.Dir(filepath.Dir(path)))
 }
 
-// journalDedupKey is the producer-supplied dedup key for a journal record (§6.4):
-// wf:<run_id>:<key>:<type>. The run_id comes from the journal PATH.
-func journalDedupKey(runID, key, recType string) string {
-	return fmt.Sprintf("wf:%s:%s:%s", runID, key, recType)
+// firstNonEmpty is the defensive read the seam requires: the first value the
+// reader actually supplied.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// logResidue records every record that landed with no path to a page.
+//
+// IT IS THE RUNNING MEASURE of how much of what the vendor writes this schema
+// does not carry. An unserved item is by construction not a servable frame, so it
+// never reaches a page and is invisible to the user — a legitimate outcome, and
+// the one worth counting.
+//
+// IT IS PER SOURCE RECORD RATHER THAN PER BATCH, because a write record owes the
+// full write vocabulary — file_id, path, OFFSET and write_id — and the offset is
+// the one coordinate a batch cannot state: the position is the record's own, and
+// a record whose position is unstated cannot be found again on disk.
+func logResidue(log *logging.Bound, ctx *Context, offset int64, entries []*storev1.StoreEntry) {
+	for _, entry := range entries {
+		if entry.GetAgentUpdate().GetUnservedItem() == nil {
+			continue
+		}
+		log.With(logging.Context{
+			Operation: "residue", Path: ctx.Path, FileID: ctx.FileID, TaskID: ctx.TaskID,
+			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID, Offset: logging.Off(offset),
+			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
+		}).LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
+	}
+}
+
+// handleCtx is the correlation base for a handler's own records: the reader's
+// identities in DEDICATED KEYS, never interpolated into a sentence, so the
+// integration loop that reads these logs can filter and join on them.
+func handleCtx(operation string, ctx *Context) logging.Context {
+	return logging.Context{
+		Operation:       operation,
+		Producer:        Producer,
+		Path:            ctx.Path,
+		FileID:          ctx.FileID,
+		TaskID:          ctx.TaskID,
+		AgentID:         firstNonEmpty(ctx.AgentID, ctx.MainAgentID),
+		VendorSessionID: ctx.SessionID,
+	}
+}
+
+// handleWarn is handleCtx at warning level.
+func handleWarn(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "warn"
+	return c
+}
+
+// handleErr is handleCtx at error level.
+func handleErr(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "error"
+	return c
+}
+
+// lookahead returns the decoded record that FOLLOWS a frame in the file, or nil
+// past the end of the batch. It exists for exactly one record: a compaction
+// boundary, whose summary the harness writes as the following line.
+func lookahead(frames []tail.Frame, i int) map[string]any {
+	if i < 0 || i >= len(frames) {
+		return nil
+	}
+	return frames[i].Obj
 }

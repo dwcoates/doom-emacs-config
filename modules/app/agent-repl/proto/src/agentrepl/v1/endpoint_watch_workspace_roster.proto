@@ -1,0 +1,21 @@
+// endpoint_watch_workspace_roster.proto — WatchWorkspaceRoster: the sidebar's
+// stream. SIDEBAR section. THE ONE GLOBAL STREAM: no workspace — every
+// webview watches the same roster, and the daemon's stream order is the only
+// order. The response wraps frontend.v1.WorkspaceRoster itself, whole.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/sidebar.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the stream. Empty on purpose: the roster is global.
+message WatchWorkspaceRosterRequest {}
+
+// The current roster, delivered live.
+message WatchWorkspaceRosterResponse {
+  // The roster, whole.
+  frontend.v1.WorkspaceRoster roster = 1;
+}

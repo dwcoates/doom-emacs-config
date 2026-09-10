@@ -1,430 +1,435 @@
-;;; test-prompt-queue.el --- Tests for prompt-queue.el -*- lexical-binding: t; -*-
+;;; test-prompt-queue.el --- ERT tests for agent-repl prompt-queue.el -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; The held-prompt queue: holding a prompt while the link is down, draining it
-;; in order once the workspace revives, refusing to drain into an unwired
-;; workspace, and surfacing a per-prompt failure for anything that never got
-;; sent.  One edge case per test (AAA).
+;; Run with:
+;;   AGENT_REPL_FORBID_VENDOR_CALLS=1 emacs -batch -Q -l ert \
+;;     -l lisp/test-prompt-queue.el -f ert-run-tests-batch-and-exit
+;;
+;; The submit is stubbed and records what it was handed, so the two RELEASE
+;; EDGES -- the roster's finish edge for a deferral, and link-up for an
+;; outage -- are driven directly rather than waited on.  Nothing here uses a
+;; timer or a sleep: both edges are function calls, which is the point of
+;; wiring them to hooks.
+;;
+;; The two assertions that matter most: a drained prompt carries
+;; `:deferred-prompt' whatever origin it was composed under (this queue is
+;; that origin's one send site), and a prompt is never released into a
+;; composer gate the daemon would refuse.
 
 ;;; Code:
 
-(require 'ert)
-(require 'cl-lib)
+(load (expand-file-name "test-helpers.el" (file-name-directory
+                                           (or load-file-name buffer-file-name)))
+      nil t)
 
-(let ((dir (file-name-directory (or load-file-name buffer-file-name))))
-  (load (expand-file-name "test-helpers.el" dir) nil t))
+;;;; ---- Fixtures ----
 
-(defvar agent-repl-test--pq-sent nil
-  "Texts the queue handed to the send seam, in dispatch order.")
-(defvar agent-repl-test--pq-pending nil
-  "Texts surfaced as pending, in order.")
-(defvar agent-repl-test--pq-failures nil
-  "(TEXT . REASON) pairs surfaced as per-prompt failures, in order.")
-(defvar agent-repl-test--pq-settled nil
-  "Texts whose `:on-settle' ran, in order.")
-(defvar agent-repl-test--pq-link-down t)
-(defvar agent-repl-test--pq-revived nil)
-(defvar agent-repl-test--pq-verdicts nil
-  "Per-send verdicts consumed in order: `sent', `failed', or `hold'.")
-(defvar agent-repl-test--pq-holds nil
-  "Continuations parked by a `hold' verdict: (ON-SENT . ON-FAILED), oldest first.")
+(defvar agent-repl-test-pq--submitted nil
+  "Submissions the stubbed composer received, as (WS SAID ORIGIN RAW KEY).")
 
-(defmacro agent-repl-test--with-prompt-queue (&rest body)
-  "Run BODY over a private held-prompt queue with every seam stubbed.
+(defvar agent-repl-test-pq--link-up t
+  "Whether the stubbed daemon link reports up.")
 
-The send seam consumes one verdict per dispatch: `sent' settles it as
-dispatched, `failed' settles it as refused, and `hold' parks its
-continuations so a test can settle it explicitly while the drain is
-mid-flight.  An exhausted verdict list defaults to `sent'."
+(defvar agent-repl-test-pq--gate :open
+  "The composer gate the stubbed host reports.")
+
+(defvar agent-repl-test-pq--conn nil
+  "The REAL connection object the stubbed host hands the drain, or nil.
+Real, not faked: aliveness is the struct's own flag, so the dead-connection
+case is arranged by actually closing it.")
+
+(defun agent-repl-test-pq--said (text)
+  "Return a `UserSaid' carrying TEXT, as the composer would have built it."
+  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
+
+(defmacro agent-repl-test-pq--with (&rest body)
+  "Run BODY with an empty queue and the wire and the gate stubbed."
   (declare (indent 0))
-  `(let* ((agent-repl--prompt-queue (make-hash-table :test 'equal))
-          (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
-          (agent-repl--prompt-queue-timers (make-hash-table :test 'equal))
-          (agent-repl--prompt-queue-seq 0)
-          (agent-repl-prompt-queue-revival-bound 60)
-          (agent-repl-test--pq-sent nil)
-          (agent-repl-test--pq-pending nil)
-          (agent-repl-test--pq-failures nil)
-          (agent-repl-test--pq-settled nil)
-          (agent-repl-test--pq-link-down t)
-          (agent-repl-test--pq-revived nil)
-          (agent-repl-test--pq-verdicts nil)
-          (agent-repl-test--pq-holds nil)
-          (agent-repl-prompt-queue-link-down-function
-           (lambda () agent-repl-test--pq-link-down))
-          (agent-repl-prompt-queue-revived-function
-           (lambda (_ws) agent-repl-test--pq-revived))
-          (agent-repl-prompt-queue-pending-function
-           (lambda (_ws entry)
-             (setq agent-repl-test--pq-pending
-                   (append agent-repl-test--pq-pending
-                           (list (plist-get entry :text))))))
-          (agent-repl-prompt-queue-failure-function
-           (lambda (_ws entry reason)
-             (setq agent-repl-test--pq-failures
-                   (append agent-repl-test--pq-failures
-                           (list (cons (plist-get entry :text) reason))))))
-          (agent-repl-prompt-queue-send-function
-           (lambda (_ws entry on-sent on-failed)
-             (setq agent-repl-test--pq-sent
-                   (append agent-repl-test--pq-sent
-                           (list (plist-get entry :text))))
-             (pcase (or (pop agent-repl-test--pq-verdicts) 'sent)
-               ('sent (funcall on-sent "req-1"))
-               ('failed (funcall on-failed "the daemon refused the prompt"))
-               ('hold (setq agent-repl-test--pq-holds
-                            (append agent-repl-test--pq-holds
-                                    (list (cons on-sent on-failed)))))))))
-     ;; No wall-clock deadline may fire during a test: the bound is exercised by
-     ;; calling the deadline handler directly, never by waiting for a timer.
-     (cl-letf (((symbol-function 'run-at-time) (lambda (&rest _) nil))
-               ((symbol-function 'cancel-timer) (lambda (&rest _) nil)))
+  `(let ((agent-repl--prompt-queue (make-hash-table :test 'equal))
+         (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
+         (agent-repl-test-pq--submitted nil)
+         (agent-repl-test-pq--link-up t)
+         (agent-repl-test-pq--gate :open)
+         (agent-repl-test-pq--conn
+          (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
+     (cl-letf (((symbol-function 'agent-repl-link-up-p)
+                (lambda () agent-repl-test-pq--link-up))
+               ((symbol-function 'agent-repl-host-conn)
+                (lambda (_ws) agent-repl-test-pq--conn))
+               ((symbol-function 'agent-repl-link-primary)
+                (lambda () agent-repl-test-pq--conn))
+               ((symbol-function 'agent-repl-host-composer-gate)
+                (lambda (_ws) agent-repl-test-pq--gate))
+               ((symbol-function 'agent-repl--input-submit)
+                (lambda (ws said origin raw &optional key)
+                  (push (list ws said origin raw key) agent-repl-test-pq--submitted)
+                  (or key "key-1")))
+               ((symbol-function 'message) (lambda (&rest _) nil)))
        ,@body)))
 
-(defun agent-repl-test--pq-offer (ws text)
-  "Offer TEXT for WS with a settle callback that records its text."
-  (agent-repl-prompt-queue-offer
-   ws text text "PROMPT_ORIGIN_EMACS_USER_SENT"
-   (lambda () (setq agent-repl-test--pq-settled
-                    (append agent-repl-test--pq-settled (list text))))))
+(defun agent-repl-test-pq--sent-texts ()
+  "Return the text of every submission, oldest first."
+  (mapcar (lambda (entry)
+            (plist-get (plist-get (car (plist-get (plist-get (nth 1 entry) :content) :blocks))
+                                  :value)
+                       :text))
+          (reverse agent-repl-test-pq--submitted)))
 
-(defun agent-repl-test--pq-texts (ws)
-  "Return WS's held prompt texts, oldest first."
-  (mapcar (lambda (e) (plist-get e :text))
-          (agent-repl-prompt-queue-pending ws)))
+;;;; ---- Offering ----
 
-;;;; ---- Holding while the link is down ----------------------------------
+(ert-deftest agent-repl-pq-offer-holds-an-outage-entry ()
+  "A prompt offered after a transport failure is held as an outage entry."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a")
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :outage)) 1))))
 
-(ert-deftest agent-repl-test-prompt-queue-holds-while-the-link-is-down ()
-  "A prompt offered while the link is down is taken by the queue."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange / Act
-    (let ((held (agent-repl-test--pq-offer "/w" "first")))
-      ;; Assert
-      (should held))))
+(ert-deftest agent-repl-pq-offer-sends-nothing-immediately ()
+  "Offering HOLDS: the link is down, which is why it was offered."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a")
+    (should-not agent-repl-test-pq--submitted)))
 
-(ert-deftest agent-repl-test-prompt-queue-declines-while-the-link-is-up ()
-  "A prompt offered on a live link with nothing held is NOT taken."
-  (agent-repl-test--with-prompt-queue
+(ert-deftest agent-repl-pq-offer-records-the-composed-origin ()
+  "The composed origin is kept on the entry even though the drain replaces it."
+  (agent-repl-test-pq--with
+    (let ((entry (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                                :user-sent-with-prefix "a")))
+      (should (eq (plist-get entry :origin) :user-sent-with-prefix)))))
+
+(ert-deftest agent-repl-pq-offer-keeps-order-per-workspace ()
+  "Order is the user's typing order, per workspace."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "b") :user-sent "b")
+    (should (equal (mapcar (lambda (e) (plist-get e :raw))
+                           (agent-repl-prompt-queue-pending "ws-one"))
+                   '("a" "b")))))
+
+(ert-deftest agent-repl-pq-queues-are-per-workspace ()
+  "One workspace's held prompts are not another's."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (should-not (agent-repl-prompt-queue-pending "ws-two"))))
+
+;;;; ---- The liveness gate ----
+
+(ert-deftest agent-repl-pq-not-deliverable-while-the-link-is-down ()
+  "A drain needs the link up before anything else."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--link-up nil)
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-while-merging ()
+  "A drain into a merging composer would be refused, so it does not happen."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--gate :merging)
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-while-draining ()
+  "A draining daemon is not somewhere to release a held prompt."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--gate :draining)
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-while-restarting ()
+  "A restarting session is not somewhere to release a held prompt."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--gate :restarting)
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-deliverable-when-open ()
+  "An open composer on a live link is deliverable."
+  (agent-repl-test-pq--with
+    (should (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-on-a-dead-connection ()
+  "A closed connection cannot carry a send, whatever the link reports."
+  (agent-repl-test-pq--with
     ;; Arrange
-    (setq agent-repl-test--pq-link-down nil)
+    (agent-repl-connect-close agent-repl-test-pq--conn)
     ;; Act / Assert
-    (should-not (agent-repl-test--pq-offer "/w" "first"))))
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
 
-(ert-deftest agent-repl-test-prompt-queue-sends-nothing-while-holding ()
-  "Holding a prompt does not put it on the wire."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange / Act
-    (agent-repl-test--pq-offer "/w" "first")
-    ;; Assert
-    (should (null agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-surfaces-the-held-prompt-as-pending ()
-  "A held prompt is surfaced as pending the instant it is taken."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange / Act
-    (agent-repl-test--pq-offer "/w" "first")
-    ;; Assert
-    (should (equal '("first") agent-repl-test--pq-pending))))
-
-(ert-deftest agent-repl-test-prompt-queue-keeps-submission-order ()
-  "Held prompts keep the order they were submitted in."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange / Act
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    ;; Assert
-    (should (equal '("first" "second") (agent-repl-test--pq-texts "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-holds-per-workspace ()
-  "One workspace's held prompt is not held for another."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange / Act
-    (agent-repl-test--pq-offer "/w" "first")
-    ;; Assert
-    (should (null (agent-repl-prompt-queue-pending "/other")))))
-
-(ert-deftest agent-repl-test-prompt-queue-holds-behind-an-earlier-held-prompt ()
-  "A prompt offered on a restored link still queues behind a held one."
-  (agent-repl-test--with-prompt-queue
+(ert-deftest agent-repl-pq-not-deliverable-without-a-connection ()
+  "No connection at all is the same refusal: there is nothing to send on."
+  (agent-repl-test-pq--with
     ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-link-down nil)
-    ;; Act / Assert — sending directly would overtake the prompt ahead of it.
-    (should (agent-repl-test--pq-offer "/w" "second"))))
+    (setq agent-repl-test-pq--conn nil)
+    ;; Act / Assert
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
 
-;;;; ---- Draining on revival ---------------------------------------------
-
-(ert-deftest agent-repl-test-prompt-queue-drains-in-order-on-revival ()
-  "A revived workspace's held prompts go out in submission order."
-  (agent-repl-test--with-prompt-queue
+(ert-deftest agent-repl-pq-dead-connection-is-warned ()
+  "The refusal is not silent: a held prompt not going out is news."
+  (agent-repl-test-pq--with
     ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (setq agent-repl-test--pq-link-down nil
-          agent-repl-test--pq-revived t)
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first" "second") agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-empties-after-a-full-drain ()
-  "Nothing is left held once every prompt has been sent."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t)
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (null (agent-repl-prompt-queue-pending "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-settles-a-drained-prompt ()
-  "A drained prompt's `:on-settle' runs, so its caller is not left waiting."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t)
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first") agent-repl-test--pq-settled))))
-
-(ert-deftest agent-repl-test-prompt-queue-drain-all-covers-every-workspace ()
-  "The snapshot-applied subscriber drains every workspace holding prompts."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/other" "second")
-    (setq agent-repl-test--pq-revived t)
-    ;; Act
-    (agent-repl-prompt-queue-drain-all)
-    ;; Assert
-    (should (equal 2 (length agent-repl-test--pq-sent)))))
-
-;;;; ---- Never into an unwired workspace ---------------------------------
-
-(ert-deftest agent-repl-test-prompt-queue-refuses-to-drain-into-an-unwired-workspace ()
-  "A restored link is not enough: an unwired workspace receives nothing."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-link-down nil)
-    ;; Act — the link is back, but no session controller holds the workspace
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (null agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-keeps-holding-an-unwired-workspace ()
-  "A prompt not drained into an unwired workspace stays held."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-link-down nil)
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first") (agent-repl-test--pq-texts "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-stops-when-the-workspace-leaves-mid-drain ()
-  "A workspace that goes away mid-drain stops the drain."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(hold))
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Act — the first send is in flight when the controller disappears
-    (setq agent-repl-test--pq-revived nil)
-    (funcall (car (pop agent-repl-test--pq-holds)) "req-1")
-    ;; Assert
-    (should (equal '("first") agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-keeps-the-remainder-when-it-stops ()
-  "The prompts behind a stopped drain stay held, in order."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(hold))
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Act
-    (setq agent-repl-test--pq-revived nil)
-    (funcall (car (pop agent-repl-test--pq-holds)) "req-1")
-    ;; Assert
-    (should (equal '("second") (agent-repl-test--pq-texts "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-drain-is-a-no-op-with-nothing-held ()
-  "Draining a workspace holding no prompts sends nothing."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (setq agent-repl-test--pq-revived t)
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (null agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-second-drain-does-not-double-send ()
-  "A drain edge arriving mid-drain does not re-dispatch what is in flight."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(hold))
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first") agent-repl-test--pq-sent))))
-
-;;;; ---- Failure honesty --------------------------------------------------
-
-(ert-deftest agent-repl-test-prompt-queue-surfaces-a-refused-drain ()
-  "A held prompt the daemon refuses is surfaced, not dropped."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(failed))
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '(("first" . "the daemon refused the prompt"))
-                   agent-repl-test--pq-failures))))
-
-(ert-deftest agent-repl-test-prompt-queue-surfaces-one-failure-per-prompt ()
-  "Two refused held prompts produce two reports, not one."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(failed failed))
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first" "second") (mapcar #'car agent-repl-test--pq-failures)))))
-
-(ert-deftest agent-repl-test-prompt-queue-still-sends-behind-a-refusal ()
-  "A refused held prompt does not take the prompts behind it down with it."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(failed sent))
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first" "second") agent-repl-test--pq-sent))))
-
-(ert-deftest agent-repl-test-prompt-queue-settles-a-refused-prompt ()
-  "A refused held prompt still settles its caller."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t
-          agent-repl-test--pq-verdicts '(failed))
-    ;; Act
-    (agent-repl-prompt-queue-drain "/w")
-    ;; Assert
-    (should (equal '("first") agent-repl-test--pq-settled))))
-
-;;;; ---- The revival bound ------------------------------------------------
-
-(ert-deftest agent-repl-test-prompt-queue-fails-a-prompt-past-the-bound ()
-  "A workspace that never comes back fails its held prompt."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (equal '("first") (mapcar #'car agent-repl-test--pq-failures)))))
-
-(ert-deftest agent-repl-test-prompt-queue-names-the-bound-it-enforced ()
-  "The expiry failure says what the prompt waited for and for how long."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (string-match-p "did not come back within 60s"
-                            (cdr (car agent-repl-test--pq-failures))))))
-
-(ert-deftest agent-repl-test-prompt-queue-releases-an-expired-prompt ()
-  "An expired held prompt is no longer held."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (null (agent-repl-prompt-queue-pending "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-expiry-spares-the-other-held-prompts ()
-  "One prompt's bound expiring leaves the rest of the queue held."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (agent-repl-test--pq-offer "/w" "second")
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (equal '("second") (agent-repl-test--pq-texts "/w")))))
-
-(ert-deftest agent-repl-test-prompt-queue-deadline-drains-a-revived-workspace ()
-  "A deadline reached on a revived workspace sends rather than fails."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (setq agent-repl-test--pq-revived t)
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (null agent-repl-test--pq-failures))))
-
-(ert-deftest agent-repl-test-prompt-queue-deadline-ignores-an-already-sent-prompt ()
-  "A deadline firing after its prompt already went out reports nothing."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange
-    (agent-repl-test--pq-offer "/w" "first")
-    (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-      (setq agent-repl-test--pq-revived t)
-      (agent-repl-prompt-queue-drain "/w")
-      (setq agent-repl-test--pq-revived nil)
-      ;; Act
-      (agent-repl--prompt-queue-deadline "/w" entry))
-    ;; Assert
-    (should (null agent-repl-test--pq-failures))))
-
-(ert-deftest agent-repl-test-prompt-queue-expiry-hands-back-the-raw-text ()
-  "The default failure report carries the RAW prompt, not the decorated one."
-  (agent-repl-test--with-prompt-queue
-    ;; Arrange — the send path decorates; only what the user wrote may return.
-    (let ((agent-repl-prompt-queue-failure-function
-           #'agent-repl--prompt-queue-default-note-failure)
-          (warned nil))
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    (let ((warnings nil))
       (cl-letf (((symbol-function 'agent-repl--warn)
-                 (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args)))))
-        (agent-repl-prompt-queue-offer
-         "/w" "DECORATED: what I wrote" "what I wrote"
-         "PROMPT_ORIGIN_EMACS_USER_SENT" nil)
-        (let ((entry (car (agent-repl-prompt-queue-pending "/w"))))
-          ;; Act
-          (agent-repl--prompt-queue-deadline "/w" entry)))
-      ;; Assert
-      (should (string-match-p "what I wrote" warned))
-      (should-not (string-match-p "DECORATED" warned)))))
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (agent-repl-prompt-queue-deliverable-p "ws-one")
+        ;; Assert
+        (should (cl-find-if (lambda (text)
+                              (string-match-p "elisp.prompt-queue.dead-conn" text))
+                            warnings))))))
+
+(ert-deftest agent-repl-pq-drain-on-a-dead-connection-sends-nothing ()
+  "A drain onto a corpse would lose the prompt for a send that cannot happen."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    ;; Act
+    (agent-repl-prompt-queue-drain "ws-one" :outage)
+    ;; Assert
+    (should-not agent-repl-test-pq--submitted)))
+
+(ert-deftest agent-repl-pq-drain-on-a-dead-connection-keeps-the-entry ()
+  "What was not sent stays HELD: this queue never drops a prompt silently."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    ;; Act
+    (agent-repl-prompt-queue-drain "ws-one" :outage)
+    ;; Assert
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :outage)) 1))))
+
+(ert-deftest agent-repl-pq-deliverable-when-merge-parked ()
+  "A parked merge leaves the composer open, so a held prompt may go."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--gate :merge-parked)
+    (should (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-deliverable-with-no-session ()
+  "SubmitPrompt has no precondition, so a session-less workspace is fine."
+  (agent-repl-test-pq--with
+    (setq agent-repl-test-pq--gate :no-session)
+    (should (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+;;;; ---- The outage drain, on link-up ----
+
+(ert-deftest agent-repl-pq-link-up-drains-outage-entries ()
+  "The link-up edge releases what the outage held."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))))
+
+(ert-deftest agent-repl-pq-link-up-drains-in-order ()
+  "The drain is strictly sequential: entry N+1 never overtakes entry N."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "b") :user-sent "b")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should (equal (agent-repl-test-pq--sent-texts) '("a" "b")))))
+
+(ert-deftest agent-repl-pq-link-up-empties-the-queue ()
+  "A sent entry leaves the queue before the send, so it cannot go twice."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should-not (agent-repl-prompt-queue-pending "ws-one"))))
+
+(ert-deftest agent-repl-pq-link-up-leaves-deferred-entries-alone ()
+  "Link-up is the OUTAGE edge; a deferral waits for the finish edge."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "d")
+                                      :deferred-prompt "d")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should-not agent-repl-test-pq--submitted)
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :deferred)) 1))))
+
+(ert-deftest agent-repl-pq-link-up-defers-when-not-deliverable ()
+  "A workspace that is not deliverable keeps its held prompts, in order."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (setq agent-repl-test-pq--gate :merging)
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should-not agent-repl-test-pq--submitted)
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one")) 1))))
+
+(ert-deftest agent-repl-pq-drained-prompt-carries-the-queue-origin ()
+  "A drained prompt says it was HELD, not that it went out when typed."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent-with-prefix "a")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should (eq (nth 2 (car agent-repl-test-pq--submitted)) :deferred-prompt))))
+
+(ert-deftest agent-repl-pq-drain-recomposes-nothing ()
+  "The held `UserSaid' is submitted as composed: a second pass would double it."
+  (agent-repl-test-pq--with
+    (let ((said (agent-repl-test-pq--said "already composed")))
+      (agent-repl-prompt-queue-offer "ws-one" said :user-sent "raw")
+      (agent-repl--prompt-queue-on-link-up 'conn)
+      (should (equal (nth 1 (car agent-repl-test-pq--submitted)) said)))))
+
+;;;; ---- The deferral drain, on the finish edge ----
+
+(ert-deftest agent-repl-pq-finish-edge-releases-one-deferred-prompt ()
+  "Each finished turn releases ONE deferral: each is meant to be its own turn."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "a")
+                                      :deferred-prompt "a")
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "b")
+                                      :deferred-prompt "b")
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :deferred)) 1))))
+
+(ert-deftest agent-repl-pq-finish-edge-releases-the-oldest-first ()
+  "The queue does not reorder itself: the head goes first."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "first")
+                                      :deferred-prompt "first")
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "second")
+                                      :deferred-prompt "second")
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should (equal (agent-repl-test-pq--sent-texts) '("first" "second")))))
+
+(ert-deftest agent-repl-pq-finish-edge-with-nothing-held-sends-nothing ()
+  "The finish edge fires on every settled turn; usually nothing is held."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should-not agent-repl-test-pq--submitted)))
+
+(ert-deftest agent-repl-pq-finish-edge-holds-when-not-deliverable ()
+  "A deferral is not released into a composer the daemon would refuse."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "a")
+                                      :deferred-prompt "a")
+    (setq agent-repl-test-pq--gate :merging)
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should-not agent-repl-test-pq--submitted)
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :deferred)) 1))))
+
+(ert-deftest agent-repl-pq-finish-edge-ignores-outage-entries ()
+  "The finish edge is the DEFERRAL edge; an outage waits for link-up."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a") :user-sent "a")
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should-not agent-repl-test-pq--submitted)))
+
+(ert-deftest agent-repl-pq-finish-edge-is-workspace-scoped ()
+  "A finish edge on one workspace does not release another's deferral."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-two" :deferred (agent-repl-test-pq--said "a")
+                                      :deferred-prompt "a")
+    (agent-repl--prompt-queue-on-finish "ws-one")
+    (should-not agent-repl-test-pq--submitted)))
+
+;;;; ---- Registration ----
+
+(ert-deftest agent-repl-pq-registers-on-the-finish-edge ()
+  "The deferral drain is wired to the roster's finish edge and nothing else."
+  (should (memq #'agent-repl--prompt-queue-on-finish agent-repl-roster-finish-functions)))
+
+(ert-deftest agent-repl-pq-promotion-drains-outage-entries ()
+  "A handover never brings the link down, so the promotion is the other edge."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))))
+
+(ert-deftest agent-repl-pq-promotion-resends-under-the-held-key ()
+  "The re-drive stays a RETRY of the refused submission, not a second turn."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (nth 4 (car agent-repl-test-pq--submitted)) "key-9"))))
+
+(ert-deftest agent-repl-pq-registers-on-the-promote-edge ()
+  "The registration IS the release: without it a refused prompt is never sent."
+  ;; Act / Assert
+  (should (memq #'agent-repl--prompt-queue-on-link-promote
+                (default-value 'agent-repl-link-promote-functions))))
+
+(ert-deftest agent-repl-pq-registers-on-link-up ()
+  "The outage drain is wired to link-up and nothing else."
+  (should (memq #'agent-repl--prompt-queue-on-link-up agent-repl-link-up-functions)))
+
+;;;; ---- The deferral command ----
+
+(ert-deftest agent-repl-pq-defer-command-enqueues-and-clears ()
+  "Deferring captures the text, clears the composer and holds the prompt."
+  (agent-repl-test-pq--with
+    (let ((buf (generate-new-buffer " *agent-repl-test-composer*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buf (agent-repl-input-mode) (insert "later please"))
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                      ((symbol-function 'agent-repl--ws-get)
+                       (lambda (_ws key) (when (eq key :input-buffer) buf)))
+                      ((symbol-function 'agent-repl--history-push) (lambda (&optional _t) nil))
+                      ((symbol-function 'agent-repl--history-reset) (lambda () nil))
+                      ((symbol-function 'agent-repl--history-save) (lambda (_ws) nil)))
+              (agent-repl-queue-deferred-prompt)
+              (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :deferred)) 1))
+              (should (equal (with-current-buffer buf (buffer-string)) ""))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-pq-defer-command-on-empty-input-holds-nothing ()
+  "There is nothing to defer when nothing was written."
+  (agent-repl-test-pq--with
+    (let ((buf (generate-new-buffer " *agent-repl-test-composer*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
+                    ((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (when (eq key :input-buffer) buf))))
+            (with-current-buffer buf (agent-repl-input-mode))
+            (agent-repl-queue-deferred-prompt)
+            (should-not (agent-repl-prompt-queue-pending "ws-one")))
+        (kill-buffer buf)))))
+
+
+;;;; ---- Finding 66: the re-drive is a RETRY, not a second turn ----
+
+(ert-deftest agent-repl-pq-offer-records-the-failed-attempts-key ()
+  "An offered entry carries the failed attempt\='s idempotency key."
+  (agent-repl-test-pq--with
+    (let ((entry (agent-repl-prompt-queue-offer
+                  "ws-one" (agent-repl-test-pq--said "a") :user-sent "a" "key-failed")))
+      (should (equal (plist-get entry :idempotency-key) "key-failed")))))
+
+(ert-deftest agent-repl-pq-outage-drain-resends-under-the-failed-key ()
+  "The outage drain re-submits under the SAME key: a re-drive is a retry."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-failed")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should (equal (nth 4 (car agent-repl-test-pq--submitted)) "key-failed"))))
+
+(ert-deftest agent-repl-pq-deferred-entry-carries-no-key ()
+  "A deferral never attempted anything, so it holds no key to retry under."
+  (agent-repl-test-pq--with
+    (let ((entry (agent-repl--prompt-queue-enqueue
+                  "ws-one" :deferred (agent-repl-test-pq--said "a") :deferred-prompt "a")))
+      (should (null (plist-get entry :idempotency-key))))))
+
+(ert-deftest agent-repl-pq-deferred-drain-mints-a-fresh-key ()
+  "A deferred drain passes no key, so the composer mints one."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "a")
+                                      :deferred-prompt "a")
+    (agent-repl-prompt-queue-drain "ws-one" :deferred)
+    (should (null (nth 4 (car agent-repl-test-pq--submitted))))))
 
 (provide 'test-prompt-queue)
+
 ;;; test-prompt-queue.el ends here
