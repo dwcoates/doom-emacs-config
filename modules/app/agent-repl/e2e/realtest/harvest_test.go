@@ -374,3 +374,77 @@ func TestHarvestSurfacesARecordWithNoTimestamp(t *testing.T) {
 		t.Fatalf("a record with no timestamp produced %+v, want one malformed finding", harvest.Findings)
 	}
 }
+
+func TestHarvestFollowsARenamedLogWithoutReportingALoss(t *testing.T) {
+	// Arrange: the daemon ROTATES daemon.run.log ON OPEN, so a cold start that
+	// spawns a daemon renames the file this run snapshotted to `.1` and creates
+	// a fresh one. The bytes are intact one name over; nothing was lost, and a
+	// harvester that reported a loss here would fabricate a finding on every
+	// daemon-spawning cold start.
+	dir := t.TempDir()
+	current := filepath.Join(dir, "daemon.run.log")
+	rotated := filepath.Join(dir, "daemon.run.log.1")
+	writeLines(t, current,
+		rec("2026-09-10T12:00:01.000000-04:00", "daemon", "info", "daemon.boot", "the previous daemon", ""))
+	sources := []Source{
+		{Name: "daemon.global", Path: current, Kind: KindJSONL},
+		{Name: "daemon.global", Path: rotated, Kind: KindJSONL},
+	}
+	snapshot := TakeSnapshot(sources)
+
+	// The rotation: the snapshotted bytes move to `.1`, a fresh log takes the
+	// name, and both hold records belonging to this run.
+	appendLines(t, current,
+		rec("2026-09-10T12:00:05.000000-04:00", "daemon", "warn", "daemon.exit", "the outgoing daemon complained", ""))
+	if err := os.Rename(current, rotated); err != nil {
+		t.Fatalf("rotate the daemon log: %v", err)
+	}
+	writeLines(t, current,
+		rec("2026-09-10T12:00:09.000000-04:00", "daemon", "error", "daemon.boot", "the incoming daemon complained", ""))
+
+	// Act.
+	harvest, err := HarvestSources(sources, snapshot, testWindow(t), nil)
+	if err != nil {
+		t.Fatalf("harvest across a rename: %v", err)
+	}
+
+	// Assert: both records, and NO rotation finding.
+	if harvest.Count() != 2 {
+		t.Fatalf("harvested %d finding(s) across a rename, want the two records: %+v",
+			harvest.Count(), harvest.Findings)
+	}
+	for _, finding := range harvest.Findings {
+		if finding.Kind == KindRotation {
+			t.Errorf("a rename was reported as a loss: %s", finding.Note)
+		}
+	}
+}
+
+func TestSnapshotOffsetForFollowsARenamedFile(t *testing.T) {
+	// Arrange: the phase reader asks the snapshot where its own records start,
+	// and it asks by PATH. After a rename the path holds different bytes, and
+	// the honest answer is zero — all of them are this run's.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doom-agent-repl.log")
+	writeLines(t, path, rec("2026-09-10T12:00:01.000000-04:00", "emacs", "info", "elisp.a.b", "old", ""))
+	snapshot := TakeSnapshot([]Source{{Name: "emacs.global", Path: path, Kind: KindJSONL}})
+	before := snapshot.OffsetFor(path)
+	if before == 0 {
+		t.Fatalf("the snapshot reports offset 0 for a file it saw with content")
+	}
+	if err := os.Rename(path, path+".prev"); err != nil {
+		t.Fatalf("rotate the module log: %v", err)
+	}
+	writeLines(t, path, rec("2026-09-10T12:00:09.000000-04:00", "emacs", "info", "elisp.a.b", "new", ""))
+
+	// Act.
+	after := snapshot.OffsetFor(path)
+
+	// Assert.
+	if after != 0 {
+		t.Errorf("the snapshot reports offset %d for a freshly created file, want 0", after)
+	}
+	if got := snapshot.OffsetFor(path + ".prev"); got != before {
+		t.Errorf("the renamed file's offset is %d, want the %d it had under its old name", got, before)
+	}
+}
