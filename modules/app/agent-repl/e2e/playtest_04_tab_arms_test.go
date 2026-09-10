@@ -296,21 +296,48 @@ func TestPlaytestTabArmAttentionOnPermission(t *testing.T) {
 	a.selectAsking(t)
 	s.awaitInPage(t, "the permission card to be open in the asking workspace's webview",
 		`document.querySelector('[data-feed-row] [data-permission="allowOnce"]')`)
+	// THE SENTENCE'S OTHER PROMISES, ASSERTED. The manifest below tells a
+	// reviewer the card offers a standing verb and a denial beside `allow
+	// once`, carries the optional `why not` field, and has a RUNNING shell
+	// bubble under it. Each is a `data-*` hook the webapp layer's own suite
+	// already asserts, so promising them in prose without reading them here
+	// would leave the picture the only thing that could catch their loss --
+	// and a missing control is exactly what a reviewer's eye slides past.
+	s.awaitInPage(t, "the card's other two verbs and its denial-reason field to be drawn beside `allow once`",
+		`document.querySelector('[data-feed-row] [data-permission="allowStanding"]') &&
+         document.querySelector('[data-feed-row] [data-permission="deny"]') &&
+         document.querySelector('[data-feed-row] [data-permission-reason]')`)
+	s.awaitInPage(t, "the gated shell call to be drawn beneath the card, its head still live",
+		`document.querySelector('[data-feed-row] .shell-bubble[data-state="live"]')`)
 	s.captureArm(t, "selected-marker-cleared", a.askingName,
 		"the asking workspace selected, its panel showing the open permission card",
 		":permission",
 		fmt.Sprintf("%q is now the SELECTED tab and carries NO attention marker; its arm is still "+
 			"permission, so the selected tab is painted GREEN. The webapp shows the OPEN permission "+
-			"card for `Bash` with its `allow once` button.", a.askingName))
+			"card headed `Claude wants to run Bash`, reading `waiting`, offering `allow once`, "+
+			"`always allow` and `deny` with an optional `why not` field beside them; the gated "+
+			"`$ git status` call is drawn beneath the card as a shell bubble marked `running...`, "+
+			"which is what the ask is holding up.", a.askingName))
 
 	s.clickInPage(t, "the permission card's `allow once` button", `[data-feed-row] [data-permission="allowOnce"]`)
 	s.awaitInPage(t, "the card to settle as allowed once",
 		`document.querySelector('[data-permission-verdict="allowedOnce"]')`)
 	done := s.awaitArm(t, a.askingName, "the turn to conclude once the allowed call ran", emGHISettledArms...)
+	// The other half of this step's sentence: the allowed call actually RAN
+	// and the turn closed on prose. Asserted for the same reason as the open
+	// card's controls above -- a verdict chip over a shell head that never
+	// left `live` would be a permission answered into nothing, and that is
+	// not a difference a picture makes obvious.
+	s.awaitInPage(t, "the allowed shell call's head to settle once it ran",
+		`document.querySelector('[data-feed-row] .shell-bubble[data-state="settled"]')`)
+	s.awaitInPage(t, "the closing prose answer to settle on the standing tail",
+		`document.querySelector('[data-feed-row][data-row-kind="activity"][data-unit="response"][data-state="success"]')`)
 	s.captureArm(t, "answered-done", a.askingName,
 		"`allow once` clicked on the card, the allowed call run, and the turn concluded",
 		done,
-		"The card carries the `allowed once` verdict and the feed carries the closing answer; the "+
+		"The card has closed onto its verdict -- the buttons are gone and an `allowed once` chip "+
+			"stands where they were -- the shell bubble beneath it has settled to `ran ... done` "+
+			"with `clean` as its output, and the closing answer `Ran the command.` follows. The "+
 			"tab carries no marker.")
 	p.note("teardown", "nothing is parked: the ask was answered and the turn concluded, so the world shuts down on its own")
 }
