@@ -469,6 +469,54 @@ func TestEmacsSelectOnWorkspaceSwitch(t *testing.T) {
 		})
 }
 
+// TestEmacsRegisteringAWorkspaceMakesItTheDaemonsCurrentRow is scenario 9's
+// other half, and it is the half nothing covered.
+//
+// Scenario 9 above drives a SWITCH to a workspace that was already
+// registered, so its perspective activation finds a daemon-minted ref and the
+// Select goes out. A REGISTRATION is the opposite order: Doom switches to the
+// new perspective and the daemon answers with the ref afterwards, so that
+// activation found no ref and skipped. Nothing came back for it, and the
+// consequence was end to end: the daemon never stamped `current`, so every
+// `RosterRow.current` it resolved was false and NO sidebar row in any webview
+// was ever drawn as the selected one.
+//
+// THE ASSERTION IS ON THE ROW'S OWN FLAG, not on Emacs's `last-selected-id`.
+// The id says Emacs got an ack; the row's flag is the field the webapp turns
+// into `data-current` (`webapp/src/sidebar/row.ts`), so it is the one that
+// says the selection actually reaches what draws it.
+//
+// COST: one fixture world and one roster dial, which is what every scenario
+// in this file already pays; it adds no wait the file does not already make.
+func TestEmacsRegisteringAWorkspaceMakesItTheDaemonsCurrentRow(t *testing.T) {
+	t.Parallel()
+	box := requireSandbox(t)
+	f := newEmacsWorkspaceFixture(t, box)
+
+	// NOTHING IS SWITCHED TO. The fixture registers and stops, which is
+	// exactly the state the defect lived in: the workspace Emacs is standing
+	// in, freshly registered, and never switched to since.
+	if got := f.Emacs.EvalString(`(format "%s" (agent-repl--ws-current-name))`); got != f.Name {
+		t.Fatalf("the current workspace is %q, want the freshly registered %q", got, f.Name)
+	}
+
+	awaitDaemonRoster(t, f.Emacs.DaemonAddr(), emacsVerbBound,
+		"the daemon's roster to mark the registered workspace's row as the current one",
+		func(r *frontendv1.WorkspaceRoster) bool { return rosterCurrentRowRefID(r) == f.RefID })
+}
+
+// rosterCurrentRowRefID answers the ref id of the row the daemon marked as
+// the selected one, or the empty string when no row carries the flag.
+func rosterCurrentRowRefID(r *frontendv1.WorkspaceRoster) string {
+	id := ""
+	walkRosterRows(r, func(row *frontendv1.RosterRow) {
+		if row.GetCurrent().GetCurrent() {
+			id = row.GetWorkspace().GetWorkspace().GetId()
+		}
+	})
+	return id
+}
+
 // ---------------------------------------------------------------------------
 // #10 — CloseWorkspaceIsAViewAct
 // ---------------------------------------------------------------------------
