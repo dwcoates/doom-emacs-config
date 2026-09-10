@@ -670,6 +670,75 @@ looked at."
     (should (agent-repl-test-host--logged-p
              :error "elisp.host.gate-unknown-composer-arm"))))
 
+(ert-deftest agent-repl-test-host-restart-hold-closes-the-gate-before-any-push ()
+  "The requested forced restart closes the gate the daemon still calls open."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+    ;; Act
+    (agent-repl-host-take-restart-hold "ws-1")
+    ;; Assert
+    (should (eq (agent-repl-host-composer-gate "ws-1") :restarting))))
+
+(ert-deftest agent-repl-test-host-restart-hold-survives-a-stale-open-push ()
+  "A push from the DYING generation cannot reopen a gate the restart shut."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+    (agent-repl-host-take-restart-hold "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+    ;; Assert
+    (should (eq (agent-repl-host-composer-gate "ws-1") :restarting))))
+
+(ert-deftest agent-repl-test-host-restart-hold-ends-when-the-daemon-says-restarting ()
+  "The daemon publishing `restarting' takes the fact back off the hold."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+    (agent-repl-host-take-restart-hold "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :restarting)))
+    ;; Assert
+    (should (null (plist-get (agent-repl-host--entry "ws-1") :restart-hold)))))
+
+(ert-deftest agent-repl-test-host-restart-hold-ends-when-the-generation-rolls ()
+  "The relaunched shim reporting a new generation reopens the composer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+    (agent-repl-host-take-restart-hold "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host
+                  :value (agent-repl-test-host--live
+                          :generation (list :value "gen-2"))))
+    ;; Assert
+    (should (eq (agent-repl-host-composer-gate "ws-1") :open))))
+
+(ert-deftest agent-repl-test-host-restart-hold-ends-when-the-stream-is-lost ()
+  "No push can settle the hold once the standing stream drops, so it ends."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((stream (agent-repl-test-host--subscribe "ws-1")))
+      (agent-repl-test-host--push
+       "ws-1" (list :arm :host :value (agent-repl-test-host--composer :open)))
+      (agent-repl-host-take-restart-hold "ws-1")
+      ;; Act
+      (funcall (plist-get stream :on-close) '(:ended))
+      ;; Assert
+      (should (eq (agent-repl-host-composer-gate "ws-1") :open)))))
+
 (ert-deftest agent-repl-test-host-parked-session-still-gates-open ()
   "`shim_attached' false has NO treatment: parked is invisible by design."
   (agent-repl-test-host--with-harness
