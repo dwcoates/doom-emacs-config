@@ -14,10 +14,14 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// LayoutVersion is the schema version this build writes and is the ONLY
-// version it opens. The file carries its own version in the layout table; a
-// file stamped with anything else is refused rather than migrated, because the
-// rebuild's store is recreated from scratch, never upgraded in place.
+// LayoutVersion is the schema version this build writes. The file carries its
+// own version in the layout table; a file stamped OLDER is carried forward by
+// the ordered migration list in migrate.go, because the workspace state is the
+// user's data and is never thrown away over an additive schema change. Only a
+// layout this build genuinely cannot interpret is refused — see LayoutError.
+//
+// A NEW VERSION IS A NEW ENTRY IN `migrations`. Bumping this constant alone
+// makes the daemon refuse every database the previous build wrote.
 const LayoutVersion = 4
 
 // Option configures an open. Options exist so the logger can be supplied
@@ -49,8 +53,10 @@ type store struct {
 }
 
 // Open opens the workspace-state-manager database at path, creating the file
-// and its schema when it does not exist. A file whose layout version is not
-// exactly this build's REFUSES to open with a *LayoutError.
+// and its schema when it does not exist. A file stamped with an OLDER layout
+// is migrated forward in place; one this build cannot interpret refuses to
+// open with a *LayoutError, and a migration that fails with a
+// *MigrationError.
 func Open(ctx context.Context, path string, opts ...Option) (DB, error) {
 	if err := usablePath(path); err != nil {
 		return nil, err
@@ -132,8 +138,8 @@ func openStore(ctx context.Context, path, dsn string, readOnly bool, opts []Opti
 	return s, nil
 }
 
-// ensureLayout stamps a fresh file with this build's schema and refuses an
-// existing file stamped with any other version.
+// ensureLayout stamps a fresh file with this build's schema, and carries an
+// existing file forward to it.
 func (s *store) ensureLayout(ctx context.Context) error {
 	var count int
 	err := s.handle.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'layout'`).Scan(&count)
@@ -147,28 +153,64 @@ func (s *store) ensureLayout(ctx context.Context) error {
 		s.log.Info("daemon.wsm.open", "created a fresh state database", dlog.Context{"path": s.path, "layout": LayoutVersion})
 		return nil
 	}
-	return s.checkLayout(ctx)
+	version, err := s.layoutVersion(ctx)
+	if err != nil {
+		return err
+	}
+	switch {
+	case version == LayoutVersion:
+		return nil
+	case version > LayoutVersion:
+		return s.refuseLayout(version, "a downgrade is not a migration")
+	default:
+		return s.migrateForward(ctx, version)
+	}
 }
 
-// checkLayout reads the file's stamped version and refuses anything but an
-// exact match.
+// checkLayout is the READ-ONLY open's layout gate. It refuses every mismatch,
+// including an older file it could otherwise migrate: this handle is
+// guaranteed to change nothing, and migrating is a change. The joining daemon
+// that opens read-only does so alongside an incumbent that has already
+// migrated the file, so an older layout here means there is no writer to carry
+// it forward.
 func (s *store) checkLayout(ctx context.Context) error {
+	version, err := s.layoutVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if version == LayoutVersion {
+		return nil
+	}
+	if version > LayoutVersion {
+		return s.refuseLayout(version, "a downgrade is not a migration")
+	}
+	return s.refuseLayout(version, "a read-only handle cannot migrate it forward")
+}
+
+// layoutVersion reads the file's stamped version. A file carrying no layout
+// row is undecodable, not merely foreign.
+func (s *store) layoutVersion(ctx context.Context) (int, error) {
 	var version int
 	err := s.handle.QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) {
 		refusal := &DecodeError{Table: "layout", Row: "1", Err: errors.New("no layout row")}
 		s.log.Error("daemon.wsm.open", "state database carries no layout version", dlog.Context{"path": s.path, "error": refusal.Error()})
-		return refusal
+		return 0, refusal
 	}
 	if err != nil {
-		return fmt.Errorf("wsm: read layout version from %q: %w", s.path, err)
+		return 0, fmt.Errorf("wsm: read layout version from %q: %w", s.path, err)
 	}
-	if version != LayoutVersion {
-		refusal := &LayoutError{Path: s.path, File: version, Binary: LayoutVersion}
-		s.log.Error("daemon.wsm.open", "refused a state database with a foreign layout version", dlog.Context{"path": s.path, "file_layout": version, "binary_layout": LayoutVersion})
-		return refusal
-	}
-	return nil
+	return version, nil
+}
+
+// refuseLayout builds and records the refusal of a layout this build cannot
+// interpret. It changes nothing on disk: the file is left exactly as found.
+func (s *store) refuseLayout(version int, reason string) error {
+	refusal := &LayoutError{Path: s.path, File: version, Binary: LayoutVersion, Reason: reason}
+	s.log.Error("daemon.wsm.open", "refused a state database with a foreign layout version", dlog.Context{
+		"path": s.path, "file_layout": version, "binary_layout": LayoutVersion, "error": refusal.Error(),
+	})
+	return refusal
 }
 
 // createSchema writes the whole schema and the layout stamp in ONE
