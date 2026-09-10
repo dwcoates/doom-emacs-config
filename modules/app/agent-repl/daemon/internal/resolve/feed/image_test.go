@@ -178,6 +178,110 @@ func TestURLArmWithNoURLIsRefused(t *testing.T) {
 	}
 }
 
+// urlResolver builds a resolver whose registrar must not be reached, for the
+// url-arm cases; the returned logger is what the refusals are read off.
+func urlResolver(t *testing.T) (ImageResolver, *dlog.TestLogger) {
+	t.Helper()
+	var seen []string
+	log := dlog.NewTestLogger()
+	resolve, err := PathImageResolver(registrarReturning("/feed-images/abc", &seen), log)
+	if err != nil {
+		t.Fatalf("build the resolver: %v", err)
+	}
+	return resolve, log
+}
+
+// TestURLArmDrawsTheFileTheURLNamesAsAltText covers the alt a fetchable url
+// carries: the file it names, the same thing the path arm's alt is.
+func TestURLArmDrawsTheFileTheURLNamesAsAltText(t *testing.T) {
+	// Arrange.
+	resolve, _ := urlResolver(t)
+
+	// Act.
+	_, alt, err := resolve(urlBlock("https://example.invalid/shots/a.png"))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve a url arm: %v", err)
+	}
+	if alt != "a.png" {
+		t.Errorf("the alt is %q, want the file the url names", alt)
+	}
+}
+
+// TestADataURLCarriesNoAltText covers the inlined-bytes url: it names no file,
+// and FeedImageBlock says an unnamed image carries an empty alt.
+func TestADataURLCarriesNoAltText(t *testing.T) {
+	// Arrange.
+	resolve, _ := urlResolver(t)
+
+	// Act.
+	_, alt, err := resolve(urlBlock("data:image/png;base64,aGk="))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve a data url: %v", err)
+	}
+	if alt != "" {
+		t.Errorf("the alt is %q, want the empty alt an unnamed image carries", alt)
+	}
+}
+
+// TestAPathlessURLCarriesNoAltText covers a url whose path names nothing: the
+// alt stays empty rather than becoming a slash or a dot.
+func TestAPathlessURLCarriesNoAltText(t *testing.T) {
+	// Arrange.
+	resolve, _ := urlResolver(t)
+
+	// Act.
+	_, alt, err := resolve(urlBlock("https://example.invalid/"))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve a pathless url: %v", err)
+	}
+	if alt != "" {
+		t.Errorf("the alt is %q, want no name at all", alt)
+	}
+}
+
+// TestAnUnparseableURLIsRefused covers a url that is not one: no src is drawn
+// from a reference the daemon cannot even read.
+func TestAnUnparseableURLIsRefused(t *testing.T) {
+	// Arrange.
+	resolve, log := urlResolver(t)
+
+	// Act.
+	src, _, err := resolve(urlBlock("https://example.invalid/%zz"))
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("the resolver answered %q for an unparseable url, want a refusal", src)
+	}
+	if !loggedAt(log, "error", "daemon.feed.image_url_unparseable") {
+		t.Errorf("the unparseable url was not recorded; records: %v", log.Records())
+	}
+}
+
+// TestAURLSchemeAnImageMustNotBeHandedIsRefused covers the scheme allowlist:
+// the daemon owns the resolution, so the set an `<img>` may be handed is
+// stated here rather than sniffed by the client.
+func TestAURLSchemeAnImageMustNotBeHandedIsRefused(t *testing.T) {
+	// Arrange.
+	resolve, log := urlResolver(t)
+
+	// Act.
+	src, _, err := resolve(urlBlock("file:///etc/passwd"))
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("the resolver answered %q for a file: url, want a refusal", src)
+	}
+	if !loggedAt(log, "error", "daemon.feed.image_url_scheme") {
+		t.Errorf("the refused scheme was not recorded; records: %v", log.Records())
+	}
+}
+
 // TestUnsetLocationIsRefused covers an image block with neither arm set.
 func TestUnsetLocationIsRefused(t *testing.T) {
 	// Arrange.

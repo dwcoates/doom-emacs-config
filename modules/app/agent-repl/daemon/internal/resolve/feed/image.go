@@ -2,7 +2,10 @@ package feed
 
 import (
 	"fmt"
+	"net/url"
+	"path"
 	"path/filepath"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -61,15 +64,7 @@ func PathImageResolver(register ImageRegistrar, log dlog.Logger) (ImageResolver,
 				dlog.Context{"path": path, "src": src})
 			return src, alt, nil
 		case *conversationv1.ImageBlock_Url:
-			url := location.Url.GetUrl()
-			if url == "" {
-				log.Error("daemon.feed.image_unresolvable",
-					"a prompt's image carries a url arm with no url", dlog.Context{})
-				return "", "", fmt.Errorf("feed: an image's url arm carries no url")
-			}
-			log.Debug("daemon.feed.image_resolved",
-				"a prompt's image url is answered verbatim", dlog.Context{"url": url})
-			return url, "", nil
+			return resolveImageURL(log, location.Url.GetUrl())
 		default:
 			log.Error("daemon.feed.image_unresolvable",
 				"a prompt's image states no location, so it has no source",
@@ -77,6 +72,58 @@ func PathImageResolver(register ImageRegistrar, log dlog.Logger) (ImageResolver,
 			return "", "", fmt.Errorf("feed: an image block states no location")
 		}
 	}, nil
+}
+
+// safeImageSchemes are the url schemes a resolved `src` may carry. The src is
+// assigned to an `<img>`'s `src` on the far end, so the set is stated HERE —
+// where the daemon owns the resolution — rather than left for the client to
+// sniff. `data:` is in the set because it is what the shim carries a vendor's
+// inlined bytes as; anything else is refused rather than passed through.
+var safeImageSchemes = map[string]bool{"http": true, "https": true, "data": true}
+
+// resolveImageURL answers a url reference: the url VERBATIM as the src, and
+// the file it names as the alt. The url is not rewritten — it is the vendor's
+// own, and a daemon that re-composed it would be inventing a source — but it
+// is checked, because an unparseable url and a scheme an `<img>` must not be
+// handed are both a broken picture on every client rather than a src.
+func resolveImageURL(log dlog.Logger, raw string) (string, string, error) {
+	if raw == "" {
+		log.Error("daemon.feed.image_unresolvable",
+			"a prompt's image carries a url arm with no url", dlog.Context{})
+		return "", "", fmt.Errorf("feed: an image's url arm carries no url")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		log.Error("daemon.feed.image_url_unparseable",
+			"a prompt's image url cannot be parsed, so no src is drawn from it",
+			dlog.Context{"cause": err.Error()})
+		return "", "", fmt.Errorf("feed: an image's url is unparseable: %w", err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if !safeImageSchemes[scheme] {
+		log.Error("daemon.feed.image_url_scheme",
+			"a prompt's image url names a scheme an image element must not be handed",
+			dlog.Context{"scheme": scheme})
+		return "", "", fmt.Errorf("feed: an image's url names the unservable scheme %q", scheme)
+	}
+	log.Debug("daemon.feed.image_resolved",
+		"a prompt's image url is answered verbatim", dlog.Context{"url": raw})
+	return raw, imageURLAlt(parsed, scheme), nil
+}
+
+// imageURLAlt names the picture for a reader who cannot see it. A fetchable
+// url names a FILE, exactly as the path arm's alt does; a `data:` url names
+// nothing, and an empty alt is what FeedImageBlock says an unnamed image
+// carries.
+func imageURLAlt(parsed *url.URL, scheme string) string {
+	if scheme == "data" {
+		return ""
+	}
+	base := path.Base(parsed.Path)
+	if base == "." || base == "/" {
+		return ""
+	}
+	return base
 }
 
 // blockDescription names an image reference for a record without leaking its
