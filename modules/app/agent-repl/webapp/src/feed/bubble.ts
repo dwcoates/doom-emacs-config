@@ -51,6 +51,7 @@ import type {
   RowRenderers,
 } from "./renderers.js";
 import { stopTicking } from "./ticking.js";
+import type { FeedReveal } from "../scroll.js";
 
 export interface BubbleOptions {
   ctx: AppContext;
@@ -70,6 +71,11 @@ export interface BubbleOptions {
   composerFactory?: ComposerFactory;
   /** The fold this bubble takes on its FIRST draw only. */
   initialFolded: boolean;
+  /**
+   * The view rule the CARET obeys, absent only where the feed has no scroll
+   * box (a fixture rendering the feed on its own). See `FeedReveal`.
+   */
+  scroll?: FeedReveal;
 }
 
 /** Build the bubble chrome for one bubble row. */
@@ -113,10 +119,19 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   toggle.addEventListener("click", () => {
     clearRefusal();
     if (expanded) {
+      // A COLLAPSE NEVER MOVES THE VIEW. It removes content from below the
+      // reader's eyes; nothing they are looking at changed place, and moving
+      // them anyway would be the yank in the other direction.
       collapse();
       return;
     }
-    void expand();
+    // SAMPLED BEFORE THE OPEN, not after: the open paints a page of rows into
+    // the panel, and asking afterwards would ask about a feed the expansion
+    // itself has already grown.
+    const following = opts.scroll?.isFollowing() ?? false;
+    void expand().then((opened) => {
+      if (opened) settleView(following);
+    });
   });
 
   // The wire's fold is the INITIAL state, so an unfolded merge bubble opens
@@ -134,6 +149,25 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
     child: () => child,
     dispose,
   };
+
+  /**
+   * WHERE THE READER IS LEFT once the caret's expansion has painted.
+   *
+   * Only the CARET calls this. A bubble the wire opened for itself
+   * (`initialFolded` false) and a bubble the reveal walk opened on its way to a
+   * row are renders rather than reader acts, and a render moving the view is
+   * the class of defect `TailFollow` exists to end -- the walk's own landing
+   * scrolls to the row it was after, which is the position that must win.
+   */
+  function settleView(wasFollowing: boolean): void {
+    const scroll = opts.scroll;
+    if (scroll === undefined) return;
+    if (wasFollowing) {
+      scroll.park();
+      return;
+    }
+    scroll.reveal(panel);
+  }
 
   /** The collapsed head, redrawn whole from the row's latest push. */
   function drawHead(): void {
