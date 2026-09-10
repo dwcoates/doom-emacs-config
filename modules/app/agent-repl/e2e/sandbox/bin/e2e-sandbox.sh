@@ -564,13 +564,18 @@ do_run() {
   # `docker run` starts a container with an EMPTY environment but for what the
   # image and these flags put there, so a caller who exported
   # SANDBOX_NODE_MODULES or SANDBOX_SKIP_NPM saw it silently ignored -- a
-  # documented escape hatch that could not actually be reached. Only these two
-  # are forwarded, by name: a blanket passthrough would leak the host's whole
-  # environment into a sandbox whose entire point is that it carries nothing of
-  # the host in with it. Unset stays unset, so the entrypoint's defaults are
-  # untouched.
+  # documented escape hatch that could not actually be reached. Only the names
+  # listed here are forwarded: a blanket passthrough would leak the host's
+  # whole environment into a sandbox whose entire point is that it carries
+  # nothing of the host in with it. Unset stays unset, so the entrypoint's
+  # defaults are untouched.
+  #
+  # AGENT_REPL_PLAYTEST_SETTLE_DIAG is on the list for the same reason: it is
+  # the playtest capture's own "say WHICH pixels are still moving" switch
+  # (e2e/playtest_capture_test.go), it is set by a human diagnosing a torn
+  # capture, and the only place it can be read is inside the container.
   local knob
-  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM; do
+  for knob in SANDBOX_NODE_MODULES SANDBOX_SKIP_NPM AGENT_REPL_PLAYTEST_SETTLE_DIAG; do
     if [[ -n ${!knob:-} ]]; then
       args+=(--env "$knob=${!knob}")
       log "forwarding $knob=${!knob} to the container"
