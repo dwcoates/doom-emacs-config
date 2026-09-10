@@ -444,10 +444,20 @@ export function createReader(options: ReaderOptions): Reader {
    */
   const bashTerminalsWritten = new Set<string>();
 
+  /**
+   * The open itself.
+   *
+   * `pageOnly` STATES THAT NO WATCH FOLLOWS, and it is the caller's to state
+   * because the store cannot work it out: OpenAgentSession is unary and the
+   * service has no close, so a token minted for a page that is then abandoned
+   * can never be reclaimed and lives for the store's whole process lifetime.
+   * A page-only open mints nothing and answers with `watch` unset.
+   */
   const openSession = async (
     agent: conversationv1.AgentId,
     pageSize: number,
     knownThrough?: conversationv1.HistoryPointer,
+    pageOnly = false,
   ): Promise<storev1.OpenAgentSessionSuccess> => {
     let response: storev1.OpenAgentSessionResponse;
     try {
@@ -456,6 +466,7 @@ export function createReader(options: ReaderOptions): Reader {
           agent,
           pageSize,
           knownThrough: knownThrough === undefined ? undefined : toStorePointer(knownThrough),
+          pageOnly,
         }),
       );
     } catch (error) {
@@ -873,9 +884,12 @@ export function createReader(options: ReaderOptions): Reader {
     pageSize: number,
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> => {
-    let opened: AgentPageSession;
+    let opened: storev1.OpenAgentSessionSuccess;
     try {
-      opened = await openBookNow(agent, pageSize, undefined);
+      // PAGE-ONLY: this read stands no tail, so it asks for no token. Nothing
+      // is minted, so there is nothing to abandon — the reason the store's
+      // registry no longer grows by one per one-shot read.
+      opened = await openSession(agent, pageSize, undefined, true);
     } catch (error) {
       if (known === undefined || !(error instanceof PersistenceError)) throw error;
       if (error.kind !== "unknown_agent" || !known()) throw error;
@@ -889,10 +903,17 @@ export function createReader(options: ReaderOptions): Reader {
         boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
       });
     }
-    // One page and no tail: the reading session opened to get the page is
-    // closed at once rather than leaked for a tail nobody reads.
-    opened.close();
-    return opened.page;
+    if (opened.page === undefined) {
+      throw new PersistenceError(
+        "store_unavailable",
+        "the store answered a page-only open with no page",
+      );
+    }
+    // THE STORE ANSWERED FOR THE BOOK, so it holds a row for it, exactly as on
+    // the watched open. A minted id whose book demonstrably exists is no longer
+    // a certain absence.
+    booksMinted.delete(agent.value);
+    return toHistoryPage(opened.page);
   };
 
   return {
