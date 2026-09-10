@@ -609,6 +609,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Sidebar:          h.Sidebar,
 		Holds:            h.Holds,
 		WebappDist:       dist,
+		ImageOrigin:      http.NotFoundHandler(),
 		Log:              h.Surfaces,
 	}
 	for _, apply := range opts {
