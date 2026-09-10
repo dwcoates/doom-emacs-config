@@ -236,8 +236,19 @@ export interface ScenarioContext {
   ): void;
   /** Write one `attachment` transcript record (no SDK message accompanies it). */
   attachment(attachment: Record<string, unknown>): void;
-  /** Emit one `system` SDK message AND its transcript record. */
-  systemRecord(subtype: string, fields: Record<string, unknown>): void;
+  /**
+   * Emit one `system` SDK message AND its transcript record, under ONE uuid,
+   * answering that uuid.
+   *
+   * `file`, when given, replaces `fields` for the transcript line — the vendor
+   * spells some records differently on the two planes (`compact_metadata` on
+   * the stream, `compactMetadata` in the file) while keeping one uuid.
+   */
+  systemRecord(
+    subtype: string,
+    fields: Record<string, unknown>,
+    file?: Record<string, unknown>,
+  ): string;
   /** Emit one `system` SDK message with no transcript record. */
   systemMessage(subtype: string, fields: Record<string, unknown>): void;
   /** End the turn. Exactly once per turn. */

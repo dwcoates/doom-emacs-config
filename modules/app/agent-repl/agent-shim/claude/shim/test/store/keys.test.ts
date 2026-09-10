@@ -322,6 +322,16 @@ describe("the cross-plane key spellings", () => {
     );
   });
 
+  it("spells a context cut as session:context_cut:<uuid>, the way the sidecar mints it", () => {
+    // The stream's `compact_boundary` and the transcript's carry ONE uuid (see
+    // testdata/captures/compaction-directed), so this is the one spelling that
+    // lets the two planes' writes collapse onto one row instead of drawing the
+    // divider twice.
+    expect(keys.contextCutUpsertKey("11111111-2222-4333-8444-555555555555")).toBe(
+      "session:context_cut:11111111-2222-4333-8444-555555555555",
+    );
+  });
+
   it("spells residue as residue:<uuid>, with no kind segment", () => {
     expect(keys.residueUpsertKey("11111111-2222-4333-8444-555555555555")).toBe(
       "residue:11111111-2222-4333-8444-555555555555",

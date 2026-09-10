@@ -39,6 +39,7 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -215,8 +216,16 @@ func TestCompactionDirected(t *testing.T) {
 	if sep.GetTokens() == nil {
 		t.Error("separation.tokens = nil, want the before/after token-size fact every cut carries (feed.proto: \"Every cut has one\")")
 	}
-	if sep.GetLabel().GetText() == "" {
-		t.Error("separation.label.text = \"\", want a composed divider label")
+	// THE LABEL NAMES THE TRIGGER, and that is the only thing on the glass
+	// telling a compaction the user ASKED FOR apart from one that happened to
+	// them (`daemon/internal/resolve/feed/separation.go` compactionLabel:
+	// "drawing the two identically is the most misleading thing this divider
+	// can do"). It was pinned only in that package's own unit test, so nothing
+	// said the wording survived the whole stack; a playtest capture of two
+	// dividers in one feed is what raised the question.
+	if got := sep.GetLabel().GetText(); !strings.HasPrefix(got, "context compacted on request") {
+		t.Errorf("separation.label.text = %q, want it to open with %q -- a compaction the user asked for",
+			got, "context compacted on request")
 	}
 
 	// Assert: the turn itself concluded normally.
@@ -268,12 +277,13 @@ func TestCompactionDirectedWithSummaryOverride(t *testing.T) {
 // #24 CompactionAuto — `!compact-auto`. Same shapes as #22 with
 // `trigger: "auto"` the only scenario-side discriminator (session.ts
 // COMPACT_AUTO's own doc comment). frontend/v1's FeedContextCutCompacted
-// carries no trigger field of its own (only summary/fold/cold_read) and the
-// daemon's composed divider label/token text is UNSPECIFIED by the contract
-// docs beyond "composed by the daemon" — this test therefore does not assert
-// a distinguishing manual-vs-automatic marker on the wire beyond the
-// scenario's own distinctive concluding summary, to avoid guessing an
-// unmodeled or unformatted field.
+// carries no trigger field of its own (only summary/fold/cold_read), which is
+// why this test once asserted nothing that told an automatic compaction from a
+// directed one. IT DOES NOW, and it is not a guess at an unformatted field:
+// the divider's `label.text` is a modeled field the daemon composes FROM the
+// trigger (`resolve/feed/separation.go` compactionLabel) and the client draws
+// verbatim, so the wording is the wire's own answer to "which kind of cut was
+// this".
 // ---------------------------------------------------------------------------
 
 func TestCompactionAuto(t *testing.T) {
@@ -298,6 +308,16 @@ func TestCompactionAuto(t *testing.T) {
 	}
 	if sep.GetTokens() == nil {
 		t.Error("separation.tokens = nil, want the before/after token-size fact every cut carries")
+	}
+	// THE AUTOMATIC TRIGGER IS ON THE GLASS, which this file's own header used
+	// to deny: FeedContextCutCompacted carries no trigger field, but the daemon
+	// composes the divider's LABEL from the trigger and the client draws that
+	// label verbatim, so the distinction reaches a reader through a modeled
+	// field rather than through a guess. This is the negative of
+	// TestCompactionDirected's "on request".
+	if got := sep.GetLabel().GetText(); !strings.HasPrefix(got, "context compacted automatically") {
+		t.Errorf("separation.label.text = %q, want it to open with %q -- a compaction that happened on its own",
+			got, "context compacted automatically")
 	}
 
 	ended := cpFindTurnEnded(t, rows, turn)

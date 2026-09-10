@@ -225,6 +225,29 @@ export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string 
 }
 
 /**
+ * A CONTEXT CUT — a `/clear` or a compaction — keyed by the vendor record that
+ * stated it.
+ *
+ * THE SAME RULING AS THE BUDGET WARNING ABOVE, and for the same reason. Both
+ * planes produce this fact from ONE vendor record: the stream carries the
+ * `compact_boundary` (or the `conversation_reset`) and the transcript carries
+ * the identical record, uuid and all — `testdata/captures/compaction-directed`
+ * has the two spellings of one boundary sharing uuid `b14c2f08-…`. write_id
+ * dedup collapses the two writes into one row only if the key BYTES match, and
+ * the sidecar mints `session:context_cut:<uuid>` (its `SessionKey`, pinned by
+ * `internal/convert/entry_test.go` and its own AGENTS.md).
+ *
+ * This plane spelled it `cut:<uuid>` instead. The keys never collided, so the
+ * store held TWO entries at TWO positions for one compaction, and the daemon —
+ * which keys the separation divider on the store position precisely so a second
+ * delivery upserts the first's row — drew the divider TWICE, the second copy
+ * from whichever plane's frame was less complete.
+ */
+export function contextCutUpsertKey(vendorRecordUuid: string): string {
+  return sessionUpsertKey("context_cut", vendorRecordUuid);
+}
+
+/**
  * A residue row, keyed by THE RECORD IT WAS and nothing else.
  *
  * Residue has no identity of its own — that is what makes it residue — so the

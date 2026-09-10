@@ -231,6 +231,7 @@ Use exactly these attribute names; values are the generated oneof CASE names
   jump rows `[data-jump="<FeedId.value>"]`.
 - Topbar: host `[data-component="topbar"]`; `.topbar-account[data-arm]`,
   `.topbar-connectivity[data-tone]`, `.topbar-title`, `.topbar-model`,
+  `.topbar-model[data-model="<AgentModel.name>"]` when a model is selected (absent otherwise),
   `.topbar-context`, `.topbar-warnings`, `.topbar-warning-row[data-arm]`,
   `.topbar-reveal[data-reveal="session|model|mode|context|warnings|warning-detail"]`
   (`mode` is the permission-mode picker's, blessed 2026-09-01 — the picker
@@ -275,7 +276,9 @@ Footer:
 
 Topbar:
 - `[data-topbar-strip]` the strip element; `.topbar-mode` the permission-mode picker with
-  `[data-mode-option="<mode>"]` per option; `.topbar-model [data-model-option="<AgentModel.name>"]`;
+  `[data-mode-option="<mode>"]` per option; `.topbar-model [data-model-option="<AgentModel.name>"]`,
+  with `[data-selected]` on the option row that is the current selection, and
+  `.topbar-model[data-model="<AgentModel.name>"]` naming the model in force (absent when unselected);
   `.topbar-context [data-share]` a share cell, `[data-depth="N"]`, `[data-emphasized="true"]`;
   `[data-detail]` the warning detail overlay; login overlay `[data-login-term]` (the terminal mount)
   and `[data-login-close]`.

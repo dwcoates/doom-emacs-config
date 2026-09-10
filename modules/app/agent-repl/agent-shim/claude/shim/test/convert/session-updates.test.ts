@@ -232,6 +232,15 @@ describe("conversation_reset", () => {
 
     expect(entries[1]?.source.discriminator).toBe("agent_update.context_cut.cleared");
   });
+
+  it("keys the clear's cut the way the sidecar spells it, so one clear is one row", () => {
+    // The file plane reads the same reset record and mints
+    // `session:context_cut:<uuid>`; a different spelling here would leave the
+    // clear in the book twice.
+    const entries = convert({ type: "conversation_reset", new_conversation_id: "new" });
+
+    expect(entries[1]?.upsertKey).toBe("session:context_cut:uuid-1");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -424,8 +433,12 @@ describe("compactionEntry", () => {
     expect(cutOf(compactionEntry(foldContext(), pending(false), "x")).trigger.case).toBe("requested");
   });
 
-  it("keys the row by the vendor record that stated the boundary", () => {
-    expect(compactionEntry(foldContext(), pending(true), "x").upsertKey).toBe("cut:uuid-boundary");
+  it("keys the row by the vendor record that stated the boundary, spelled as the sidecar spells it", () => {
+    // `cut:<uuid>` here and `session:context_cut:<uuid>` on the file plane left
+    // one compaction as TWO store rows, and the feed drew two dividers.
+    expect(compactionEntry(foldContext(), pending(true), "x").upsertKey).toBe(
+      "session:context_cut:uuid-boundary",
+    );
   });
 });
 

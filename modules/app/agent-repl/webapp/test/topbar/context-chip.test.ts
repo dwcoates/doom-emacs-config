@@ -14,6 +14,7 @@ import {
   formatSharePermille,
   formatTokenCount,
 } from "../../src/topbar/context-chip.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { openPanel, topbarContext } from "./fixtures.js";
 
 const row = (init: Partial<{ label: string; tokens: number; sharePermille: number; emphasized: boolean; depth: number }>) =>
@@ -43,6 +44,36 @@ describe("drawTopbarContextChip", () => {
     expect(drawn.querySelector(".topbar-context-figure")?.classList.contains("tone-yellow")).toBe(
       true,
     );
+  });
+
+  it("lets the yellow WIN the cascade, the class alone having been a lie once", () => {
+    // The class assertion above passed for as long as the stylesheet's shared
+    // topbar-button rule carried `color: var(--muted)`: same specificity,
+    // declared later, so the one colored number in the strip was drawn grey in
+    // every running page and only a playtest capture of the topbar saw it.
+    // ARRANGE
+    const remove = installStylesheet();
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarContextChip(chip("142.3k"), tc));
+    // ACT
+    const figure = host.querySelector(".topbar-context-figure");
+    // ASSERT
+    expect(cascadedValue(figure as Element, "color")).toBe("var(--async)");
+    remove();
+  });
+
+  it("leaves the quiet controls beside it quiet", () => {
+    // The negative of the row above: the shared muted color was not deleted,
+    // it was narrowed to the controls it was written for.
+    // ARRANGE
+    const remove = installStylesheet();
+    const button = document.createElement("button");
+    button.className = "topbar-model-button";
+    document.body.append(button);
+    // ACT / ASSERT
+    expect(cascadedValue(button, "color")).toBe("var(--muted)");
+    button.remove();
+    remove();
   });
 
   it("opens the breakdown on a click", () => {
