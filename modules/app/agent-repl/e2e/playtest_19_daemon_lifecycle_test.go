@@ -419,32 +419,32 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 			}
 			return false
 		})
-	// THE CONVERSATION DOES NOT COME BACK, AND THAT IS FILED RATHER THAN
-	// ASSERTED. Measured here: the workspace's id is IDENTICAL across the
-	// restart (`elisp.host.registered ... id="260186..."` before and after),
-	// the fresh daemon serves the page and the page opens its feed
-	// (`WatchFeed` twice on the new daemon), and the feed comes back with
-	// ZERO rows -- the two bubbles of the turn that ran before the stop are
-	// gone from the view, and the footer reads `ready` rather than `done`.
-	// The rows are the SESSION's and the stop stood every session down, so
-	// whether a restarted daemon re-attaches the prior transcript is that
-	// subsystem's question, not this section's.
-	//
-	// It is NOT asserted either way: pinning "the feed is empty" would make
-	// the fix red this playbook, and pinning "the feed is full" would red it
-	// today. The manifest sentence below says what the picture holds and
-	// names the defect, which is what a reviewer needs.
+	// THE CONVERSATION COMES BACK, AND THAT IS THE ASSERTION THIS STEP WAS
+	// FILED FOR. Measured before the fix: the workspace's id was IDENTICAL
+	// across the restart, the fresh daemon served the page and the page
+	// opened its feed, and the feed came back with ZERO rows — the two
+	// bubbles of the turn that ran before the stop were gone and the footer
+	// read `ready` rather than `done`. The rows are the session's record in
+	// the store, and a relaunched daemon now REVIVES a workspace whose
+	// durable record names a conversation the moment Emacs announces it
+	// again, so the resumed session's own history is what the page draws.
+	s.awaitInPage(t, "the pre-stop turn's prompt bubble to be drawn again after the relaunch",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"]')`)
+	s.awaitInPage(t, "the pre-stop turn's answer bubble to be drawn again after the relaunch",
+		`document.querySelector('`+p09ResponseRow+`')`)
 	p.capture("daemon-back",
 		"`agent-repl-frontend-daemon-ensure` -- a fresh daemon launched and adopted -- then the first workspace re-selected and its panel re-opened",
 		fmt.Sprintf("a NEW daemon pid is live (the old one was %d), `agent-repl-link-up-p` is non-nil, the reconnect "+
-			"timer stood down, and the tab bar carries two workspaces again", pid),
-		"THE OUTAGE IS OVER, AND TWO THINGS THE RESTART DID NOT RESTORE ARE VISIBLE HERE. What must be "+
-			"true: both tabs are drawn, the panel on screen is the FIRST workspace's (its mode line names "+
-			"`*agent-frontend-repo-one*`), the failure card is gone and nothing reports a disconnection. "+
-			"What is FILED, and is expected in this picture until it is fixed: the feed is EMPTY -- the two "+
-			"bubbles of the pre-stop turn are gone and the footer reads `ready` rather than `done` -- and the "+
-			"panel had to be re-selected and re-opened at all, because the restart left the frame showing the "+
-			"OTHER workspace's magit buffer. Neither is a fault in this capture.")
+			"timer stood down, the tab bar carries two workspaces again, and the feed draws the pre-stop turn's "+
+			"prompt and answer bubbles again", pid),
+		"THE OUTAGE IS OVER AND THE CONVERSATION SURVIVED IT. What must be true: both tabs are drawn, "+
+			"the panel on screen is the FIRST workspace's (its mode line names `*agent-frontend-repo-one*`), "+
+			"the failure card is gone, nothing reports a disconnection, and the feed carries the SAME TWO "+
+			"BUBBLES it had before the stop -- the prompt and the answer beneath it -- because the relaunched "+
+			"daemon resumed the conversation rather than starting a new one. Compare this picture against "+
+			"`before-stop`: the feed should read the same. What is still FILED, and is expected here until it "+
+			"is fixed: the panel had to be re-selected and re-opened at all, because the restart left the frame "+
+			"showing the OTHER workspace's magit buffer. That one is not a fault in this capture.")
 }
 
 // ---------------------------------------------------------------------------
