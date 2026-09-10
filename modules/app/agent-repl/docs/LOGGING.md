@@ -71,11 +71,11 @@ Store and sidecar (Go)
   `workspace_dir`/`workspace_id`/`claude_session_id`, and carry that scope over
   spawn observations to claimed spools. Store request loggers stamp the
   `agent_id`/book they concern (sorted plural keys for a mixed batch).
-- BLOCKED ON PROTO: `agentrepl.v1.ClientLogRecord` has the landed `timestamp`
-  and `verbose` fields but no runtime discriminator; the daemon still labels
-  every forwarded record `webapp`. Sidecar records remain in the global
-  rotating sink until that message can say `sidecar`, rather than being
-  forwarded under a false runtime.
+- DONE: `agentrepl.v1.ClientLogRecord.runtime.sidecar` lets every file-scoped
+  sidecar diagnostic retain its originating timestamp, verbosity, level,
+  operation, message, context, PID, Claude session, and workspace ref while the
+  daemon persists it into workspace `sidecar.log`. Global lifecycle records
+  remain in the sidecar's own rotating sink.
 - DONE: both processes honor `AGENT_REPL_LOG_LEVEL`; verbose request/state
   records are `debug`, lifecycle remains `info`, decisions/refusals are `warn`,
   and owned failures are `error`.

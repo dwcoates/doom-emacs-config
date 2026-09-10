@@ -6,9 +6,11 @@ truncation-aware reads, converts each record into `conversation.v1` vocabulary,
 and writes it to the store as `store.v1.StoreEntry` batches with the reader
 position riding the same transaction.
 
-It is a COPIER. It has no view of process liveness, no session semantics, owns
-no database, and never contacts the daemon. The only thing it concludes on its
-own is that it STOPPED SEEING a detached run.
+It is a COPIER. It has no view of process liveness, no session semantics, and
+owns no database. Its only daemon call is `ClientLog` for file-scoped
+diagnostics; the daemon persists those records into workspace `sidecar.log`.
+The only thing it concludes on its own is that it STOPPED SEEING a detached
+run.
 
 Dual-plane relationship with the shim: `StoreEntry.plane` names the producer.
 The SHIM (stream plane) watches the SDK live — first to know, authoritative for
@@ -578,13 +580,14 @@ foreground harnesses may use `logging.NewAtLevel`.
   lifecycle fact, so `rescan` states it once per pass — how many files the pass
   started watching and how many are watched now — and a pass that changed
   nothing states nothing. WHICH file, and of what kind, is verbose detail.
-- SIDECAR SELF-DIAGNOSTICS REMAIN IN THE GLOBAL ROTATING SINK UNTIL THE WIRE CAN
-  NAME THEIR RUNTIME. `agentrepl.v1.ClientLogRecord` now carries the originating
-  `timestamp` and `verbose` class, but still has no `runtime` field; the daemon
-  therefore hardcodes forwarded records as `webapp`. Do not forward sidecar
-  records through `ClientLog` and mislabel them. The required proto change is a
-  runtime discriminator, after which file-scoped records can be forwarded to
-  each workspace's `sidecar.log` with their original timestamp and verbosity.
+- FILE-SCOPED DIAGNOSTICS GO THROUGH `agentrepl.v1.AgentRepl.ClientLog` with
+  the `sidecar` runtime arm, the sidecar's timestamp and verbosity class, its
+  PID and Claude session in context, and the complete daemon-minted workspace
+  ref. The daemon address is re-read from `<state-dir>/daemon.addr` for every
+  record so handover changes the destination without a sidecar restart.
+- GENUINELY GLOBAL SERVICE RECORDS stay in the global rotating sink only. A
+  forwarding failure writes one global error per daemon address and outage
+  window and never fails the file-plane operation that produced the diagnostic.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
