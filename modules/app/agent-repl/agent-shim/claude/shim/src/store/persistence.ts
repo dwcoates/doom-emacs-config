@@ -254,6 +254,17 @@ export interface Persistence {
     knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<AgentPageSession>;
+  /**
+   * Declare that this shim MINTED an agent id, so no book exists for it yet.
+   *
+   * THE REGISTRATION ORDER, DECLARED RATHER THAN DISCOVERED. A book comes into
+   * existence when the first write names its agent; until then the store has
+   * never heard of the id and refuses `OpenAgentSession` for it. A fresh
+   * conversation's AgentId is minted here, so this session is the one authority
+   * that can state the absence — and stating it is what keeps a contract-abiding
+   * cold bring-up from probing the store for an answer it already has.
+   */
+  noteAgentMinted(agentValue: string): void;
   /** An OLDER page of one book, walking down from a pointer already served. */
   readAgentPage(
     agent: conversationv1.AgentId,
@@ -368,6 +379,7 @@ export function unavailablePersistence(): Persistence {
     },
     flush: () => Promise.resolve({ lostRows: 0 }),
     openAgentPage: () => Promise.reject(refuse("openAgentPage")),
+    noteAgentMinted: () => undefined,
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
     liveWork: () => Promise.reject(refuse("liveWork")),
     openBashRun: () => Promise.reject(refuse("openBashRun")),
