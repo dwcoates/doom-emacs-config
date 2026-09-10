@@ -172,6 +172,19 @@ Generation-scoped: a fault window dies with its generation, which is why
 these live on the live arm alone."
   (plist-get (agent-repl-host--live ws) :faults))
 
+(defun agent-repl-host-generation (ws)
+  "Return WS's live generation id string, or nil when the session is not live.
+The generation ROLLS whenever the shim is relaunched, so a changed value
+is the one fact that says a restart\='s bounce actually happened."
+  (plist-get (plist-get (agent-repl-host--live ws) :generation) :value))
+
+(defun agent-repl-host--live-composer-arm (ws)
+  "Return the RAW composer arm off WS\='s live push, or nil.
+Unvetted on purpose: this is the arm as pushed, with no vocabulary check
+and no local hold folded in, so the settle below can read what the daemon
+actually said without logging a second breach for the gate\='s own read."
+  (plist-get (plist-get (agent-repl-host--live ws) :composer) :arm))
+
 (defun agent-repl-host-vendor-session-id (ws)
   "Return WS's VENDOR conversation id, or nil.
 
@@ -191,19 +204,13 @@ later answers nil here until it is threaded through deliberately."
     (when (eq (plist-get vendor :arm) :claude)
       (plist-get (plist-get vendor :value) :session-id))))
 
-(defun agent-repl-host-composer-gate (ws)
-  "Return the composer gate for WS as one keyword of the fixed vocabulary.
+(defun agent-repl-host--pushed-composer-gate (ws)
+  "Return the composer gate WS's last host push spells, with no local hold.
 
 `:open' `:merge-parked' `:merging' `:draining' `:restarting' come straight
 off the LIVE arm's `composer' oneof — the resolved arm IS the gate.  The
 other standings are blocked by their own nature and answer `:no-session'
-or `:terminal'; `:unknown' means no host push has arrived yet.
-
-The gate is ADVISORY about intent, never a precondition: `:no-session',
-`:terminal' and `:unknown' all still SEND (ruled — SubmitPrompt has no
-precondition, and the daemon starts or revives the session implicitly),
-while `:merging', `:draining' and `:restarting' are refusals input.el
-draws.  Emacs enforces it because the composer is host-native."
+or `:terminal'; `:unknown' means no host push has arrived yet."
   (let* ((host (agent-repl-host-state ws))
          (session (plist-get host :session)))
     (cond
@@ -227,6 +234,76 @@ draws.  Emacs enforces it because the composer is host-native."
      (t
       (agent-repl--error ws "elisp.host.gate-unset-session ws=%s host=%S" ws host)
       :unknown))))
+
+(defun agent-repl-host-take-restart-hold (ws)
+  "Close WS's composer LOCALLY from the instant a forced restart is accepted.
+
+THE SEND IS THE EDGE, NOT THE PUSH.  RestartWorkspace is sent
+asynchronously and answers success once the daemon has taken the work on;
+the bounce it schedules -- prelaunch, stand-down, reap, relaunch -- runs
+after that answer again.  The `restarting' composer arm therefore arrives
+on the WatchHostWorkspace stream some time LATER, over a different stream
+than the one that carried the ack, and nothing orders the two.  A caller
+that reads the gate the instant it asked for a restart reads the arm the
+PREVIOUS generation left there -- `:open' -- and a prompt submitted on the
+strength of that reading is refused a few hundred milliseconds later when
+the real `:restarting' lands.  That is exactly the race playtest F.42 hit.
+
+So the hold makes the local fact structural: the accepted restart CLOSES
+the gate here, and nothing reopens it but the daemon.  The generation
+current at the moment of the hold is recorded because it is what the
+release below compares against.
+
+The hold is taken for FORCED restarts only.  A graceful restart is
+SCHEDULED -- the daemon defers the bounce until the turn settles -- and
+the composer stays open until the daemon itself says otherwise."
+  (let ((generation (agent-repl-host-generation ws)))
+    (agent-repl-host--put ws :restart-hold (list :generation generation))
+    (agent-repl--info ws "elisp.host.restart-hold-taken ws=%s generation=%s"
+                      ws (or generation "-"))))
+
+(defun agent-repl-host-release-restart-hold (ws reason)
+  "Drop WS's local restart hold, recording REASON for why it ended."
+  (when (plist-get (agent-repl-host--entry ws) :restart-hold)
+    (agent-repl-host--put ws :restart-hold nil)
+    (agent-repl--info ws "elisp.host.restart-hold-released ws=%s reason=%s"
+                      ws reason)))
+
+(defun agent-repl-host--settle-restart-hold (ws)
+  "Release WS's restart hold once the DAEMON's own push resolves it.
+
+Two edges end the hold, and a forced restart is guaranteed to produce one
+of them: the daemon publishes `restarting' -- it now owns the fact, and
+the pushed arm is the gate again -- or the live generation ROLLS, which is
+the relaunched shim reporting itself and means the bounce is already over.
+Neither edge can be missed by a push that coalesces them, because a rolled
+generation is read off the same state as the arm."
+  (let ((hold (plist-get (agent-repl-host--entry ws) :restart-hold)))
+    (when hold
+      (let ((arm (agent-repl-host--live-composer-arm ws))
+            (generation (agent-repl-host-generation ws)))
+        (cond
+         ((eq arm :restarting)
+          (agent-repl-host-release-restart-hold ws "daemon-says-restarting"))
+         ((and generation (not (equal generation (plist-get hold :generation))))
+          (agent-repl-host-release-restart-hold ws "generation-rolled")))))))
+
+(defun agent-repl-host-composer-gate (ws)
+  "Return the composer gate for WS as one keyword of the fixed vocabulary.
+
+The pushed arm IS the gate, save for one local fact the daemon has not
+had time to publish yet: an accepted forced restart holds the gate at
+`:restarting' until the daemon's own push resolves it (see
+`agent-repl-host-take-restart-hold').
+
+The gate is ADVISORY about intent, never a precondition: `:no-session',
+`:terminal' and `:unknown' all still SEND (ruled -- SubmitPrompt has no
+precondition, and the daemon starts or revives the session implicitly),
+while `:merging', `:draining' and `:restarting' are refusals input.el
+draws.  Emacs enforces it because the composer is host-native."
+  (if (plist-get (agent-repl-host--entry ws) :restart-hold)
+      :restarting
+    (agent-repl-host--pushed-composer-gate ws)))
 
 (defun agent-repl-host-display-title (ws)
   "Return the name WS's buffers are titled from.
@@ -532,6 +609,11 @@ only records the fact and drops the dead stream."
     (:cancelled (agent-repl--log ws "elisp.host.stream-cancelled ws=%s" ws))
     (_
      (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
+     ;; NOTHING CAN RESOLVE THE HOLD ANY MORE.  The hold is a bet that the
+     ;; daemon's next push settles it; a dropped standing stream means no
+     ;; such push is coming, so keeping the composer shut would wedge it
+     ;; until the link's reconnect happened to land a new one.
+     (agent-repl-host-release-restart-hold ws "stream-lost")
      (agent-repl-host--put ws :stream nil))))
 
 ;;;; ---- Pushes ----
@@ -586,6 +668,7 @@ daemon has by then rather than wearing the bare canonical name forever."
 live and unwired, and the frontend cannot tell parked from idle, on
 purpose."
   (agent-repl-host--put ws :host host)
+  (agent-repl-host--settle-restart-hold ws)
   (agent-repl-host--apply-naming ws)
   (agent-repl--log ws "elisp.host.state ws=%s gate=%S backfill=%S faults=%d"
                    ws (agent-repl-host-composer-gate ws)
