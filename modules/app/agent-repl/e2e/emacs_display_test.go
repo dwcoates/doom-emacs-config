@@ -82,9 +82,8 @@ type xdisplay struct {
 	LogPath string
 	// FramebufferPath is screen 0's framebuffer, on disk and LIVE: Xvfb
 	// mmaps it under `-fbdir`, so reading it is reading what is on the
-	// screen at that instant. It is what a screenshot is taken from -- see
-	// playtest_capture_test.go, and PLAYTEST-SPEC.md for why nothing else
-	// in this image can take one.
+	// screen at that instant. It is the only way anything in this image can
+	// see what is on the screen at all.
 	FramebufferPath string
 
 	t    *testing.T
@@ -106,7 +105,7 @@ func startXvfb(t *testing.T, box sandbox, dir string) *xdisplay {
 	}
 	logPath := filepath.Join(dir, "xvfb.log")
 	numPath := filepath.Join(dir, "xvfb.display")
-	// THE FRAMEBUFFER IS ON DISK, ALWAYS, AND NOT ONLY FOR THE PLAYTEST.
+	// THE FRAMEBUFFER IS ON DISK, ALWAYS, FOR EVERY SCENARIO ALIKE.
 	//
 	// `-fbdir` makes Xvfb mmap screen 0's framebuffer to a file instead of
 	// anonymous memory. It is the ONLY way anything in this image can see

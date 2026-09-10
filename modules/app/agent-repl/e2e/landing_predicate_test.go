@@ -28,7 +28,7 @@ func landingStateOf(ws, current, landing, pending, window, webview string) strin
 	}, landingStateSeparator)
 }
 
-func TestPlaytestLandingSettled(t *testing.T) {
+func TestLandingSettled(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -82,7 +82,7 @@ func TestPlaytestLandingSettled(t *testing.T) {
 // BUFFER NAME, and Emacs writes spaces into those. Split on spaces and the
 // tail of a buffer name becomes the next field's value, which is a predicate
 // that answers about the wrong fact.
-func TestPlaytestLandingStateKeepsBufferNamesWhole(t *testing.T) {
+func TestLandingStateKeepsBufferNamesWhole(t *testing.T) {
 	t.Parallel()
 	state := landingStateOf("harbor-lantern", "harbor-lantern", "nil", "nil", "t", "*agent-repl web: harbor-lantern*")
 
