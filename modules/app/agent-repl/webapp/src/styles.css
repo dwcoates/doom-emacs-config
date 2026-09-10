@@ -4470,6 +4470,32 @@ body.draining #composer-input::placeholder {
 .footer-allowance-newsworthy { font-weight: 650; }
 .footer-allowance { font-variant-numeric: tabular-nums; }
 
+/* THE RATE LINE IS THE ONE ACTIVITY LINE WITH ITS OWN CUT. Every other kind is
+   prose the grow cell may ellipsize anywhere, because a clipped sentence is
+   still read from its front. This one is two different things — figures and a
+   staleness caveat about them — and letting the cell cut it wherever it liked
+   dropped the caveat off the glass entirely at 1280.
+
+   So the line lays itself out: an inline flex box no wider than the cell, with
+   the FIGURES elastic (they ellipsize, newsworthy window first) and the unread
+   MARKER rigid beside them. The marker is therefore on the glass whenever it
+   is in the DOM, and the figures are what gives when the strip tightens. The
+   caveat in full is a row of the tokens sheet. */
+.footer-activity-rate-limited {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+.footer-rate-figures {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.footer-activity-rate-limited > .footer-allowance-unread { flex: 0 0 auto; }
+
 /* THE STOP CONTROLS (src/footer/stop.ts). A quiet square that only exists
    while there is something to stop — never a disabled control, and never a
    colored one until it has something to report. */
