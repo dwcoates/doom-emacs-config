@@ -85,6 +85,10 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 func (w *watcher) routeQueryDiedLocked(update *conversationv1.SessionUpdate) {
 	w.log.Error("daemon.sessionwatcher.query_died", "the session's query died", nil)
 	w.sessionEnded = true
+	// A TERMINAL HELD FOR A NAME THAT WILL NEVER COME. The query is dead, so
+	// StartTurn's answer — the only thing that names the main agent — is not
+	// arriving; the views take the terminal now rather than lose it.
+	w.flushHeldTerminalLocked()
 
 	w.sinks.Footer.OnSessionUpdate(w.ws, update)
 	// THE FEED MAY NOT KNOW THE TURN YET. OnTurnOpening records the turn
@@ -401,6 +405,30 @@ func (w *watcher) watchSpawnedSubagentLocked(act *conversationv1.AgentActivity) 
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch
 // it was carried on. Exactly one of success and failure is set.
 func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.AgentId, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure) {
+	if a.id == nil && w.mainAgent == nil {
+		// THE MAIN AGENT HAS NOT BEEN NAMED YET, so this terminal cannot be
+		// attributed to the turn. It arrived on the SHIM'S STREAM plane while
+		// the naming rides StartTurn's answer, and the two planes carry no
+		// ordering between them — so under load the end outruns the name.
+		//
+		// IT IS HELD, NOT DROPPED. Routing it unattributed would leave the
+		// turn standing in flight with no edge left to end it: the footer
+		// never comes back to idle and every freeness waiter hangs. Guessing
+		// the attribution is equally wrong — it would drain the prompt queue
+		// on a subagent's terminal. So the WHOLE terminal waits here, views
+		// included, and is replayed in full the moment the name lands
+		// (adoptMainAgentLocked) or the turn is known to be unattributable
+		// (flushHeldTerminalLocked).
+		//
+		// DEBUG, NOT WARN: the hold is the design, and the race is an
+		// ordinary consequence of two planes with no ordering between them.
+		w.log.Debug("daemon.sessionwatcher.turn_end_withheld", "a terminal arrived before the main agent was named", dlog.Context{
+			"agent_id": agent.GetValue(), "turn_id": turnValue(w.turn),
+		})
+		w.held = &heldTerminal{agent: agent, success: success, failure: failure}
+		return
+	}
+
 	isMain := w.isMainAgent(agent)
 
 	var turn *ids.TurnID
@@ -423,19 +451,66 @@ func (w *watcher) routeTerminalLocked(a *agentWatch, agent *conversationv1.Agent
 			"turn_id": string(*turn), "close": int(how),
 		})
 		w.turnEndedLocked(*turn, how)
-	case a.id == nil && w.mainAgent == nil:
-		// THE MAIN AGENT HAS NOT BEEN NAMED, so this terminal cannot be
-		// attributed to the turn. The views still get it; only the lifecycle
-		// edge is withheld, because guessing it would drain the prompt queue
-		// on a subagent's terminal.
-		w.log.Warn("daemon.sessionwatcher.turn_end_withheld", "a terminal arrived before the main agent was named", dlog.Context{
-			"agent_id": agent.GetValue(), "turn_id": turnValue(w.turn),
-		})
 	}
 
 	if w.reapAgentLocked(agent.GetValue()) {
 		w.publishLiveWorkLocked()
 	}
+}
+
+// heldTerminal is a main-watch terminal that arrived before the main agent was
+// named. It is the whole terminal, so its replay is indistinguishable from the
+// routing it would have had if the name had come first.
+type heldTerminal struct {
+	agent   *conversationv1.AgentId
+	success *conversationv1.AgentSuccess
+	failure *conversationv1.AgentFailure
+}
+
+// releaseHeldTerminalLocked replays a held terminal now that the main agent has
+// a name. It is called from the ONE place the name is latched, so the replay
+// cannot re-hold: w.mainAgent is non-nil by the time it runs.
+func (w *watcher) releaseHeldTerminalLocked() {
+	held := w.held
+	if held == nil || w.mainAgent == nil {
+		return
+	}
+	w.held = nil
+	w.log.Debug("daemon.sessionwatcher.turn_end_released", "the held terminal was routed once the main agent was named", dlog.Context{
+		"agent_id": held.agent.GetValue(), "turn_id": turnValue(w.turn),
+	})
+	w.routeTerminalLocked(w.mainWatchLocked(), held.agent, held.success, held.failure)
+}
+
+// flushHeldTerminalLocked routes a still-held terminal on the edges that settle
+// the turn WITHOUT ever naming a main agent — the shim's refusal of the turn,
+// and the session's own death. The attribution will never arrive, so the views
+// take it unattributed rather than the terminal being lost.
+func (w *watcher) flushHeldTerminalLocked() {
+	held := w.held
+	if held == nil {
+		return
+	}
+	w.held = nil
+	w.log.Info("daemon.sessionwatcher.turn_end_unattributed", "a held terminal was routed unattributed; the main agent was never named", dlog.Context{
+		"agent_id": held.agent.GetValue(),
+	})
+	w.sinks.Feed.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure, w.addr)
+	w.sinks.Footer.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
+	w.sinks.Sidebar.OnAgentTerminal(w.ws, held.agent, nil, held.success, held.failure)
+	if w.reapAgentLocked(held.agent.GetValue()) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// mainWatchLocked is the main agent's watch, which a replayed terminal is
+// routed against. The watch is opened at bring-up; the empty stand-in keeps a
+// replay from depending on that ordering.
+func (w *watcher) mainWatchLocked() *agentWatch {
+	if w.main != nil {
+		return w.main
+	}
+	return &agentWatch{}
 }
 
 // turnCloseOf derives how a turn ended from the terminal arm that ended it.
