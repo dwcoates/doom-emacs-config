@@ -318,6 +318,49 @@ the rest of its life."
     ;; Assert
     (should (equal agent-repl-test-roster--unsubscribed '("fix-login")))))
 
+(ert-deftest agent-repl-test-roster-a-signalling-persp-kill-does-not-abort-the-walk ()
+  "A persp kill that signals leaves the REST of the teardown walk to run.
+The kill runs against a live frame, so it can signal on something the
+roster knows nothing about; escaping here would abort the reconcile
+mid-list and leave later tabs describing a roster nobody finished
+reading."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    ;; Act
+    (cl-letf (((symbol-function 'agent-repl--ws-persp-kill)
+               (lambda (ws)
+                 (push ws agent-repl-test-roster--killed)
+                 (when (equal ws "first")
+                   (error "Window is dedicated to `*agent-panel-input-first*'")))))
+      (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) nil))))
+
+(ert-deftest agent-repl-test-roster-a-signalling-persp-kill-is-recorded ()
+  "The failed kill is loud: the workspace and the error ride the record."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--ws-persp-kill)
+                 (lambda (_ws) (error "Window is dedicated to `*agent-panel-input-first*'")))
+                ((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.tab-teardown-persp-kill-failed" text))
+                        logs)))))
+
 (ert-deftest agent-repl-test-roster-teardown-is-idempotent ()
   "A second push with the row already gone tears nothing down twice.
 CloseWorkspace's own success tears the tab down too, so the roster push

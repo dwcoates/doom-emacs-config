@@ -366,10 +366,25 @@ as nil, so the caller applies the rename or leaves it alone entire."
   "Tear NAME's tab down: cancel its host stream, kill the persp, tombstone it.
 IDEMPOTENT, because CloseWorkspace's own success tears the tab down too
 and the roster push that follows must not care which of the two got
-there first."
+there first.
+
+The persp kill runs against a LIVE FRAME -- windows, dedications, buffers
+with processes -- so it is the one step here that can signal on something
+the roster knows nothing about.  Such a signal must not escape the push
+handler, for the same reason a refused rename must not
+(`agent-repl-roster--rename-state'): it would abort the reconcile walk
+mid-list, leaving every tab after this one describing a roster nobody
+finished reading.  It is recorded at ERROR with the workspace and the
+error, and the tombstone is still written -- the row is gone from the
+daemon either way, and a tab whose persp outlived its kill must not also
+keep its registry entry."
   (when (fboundp 'agent-repl-host-unsubscribe)
     (agent-repl-host-unsubscribe name))
-  (agent-repl--ws-persp-kill name)
+  (condition-case err
+      (agent-repl--ws-persp-kill name)
+    (error
+     (agent-repl--error name "elisp.roster.tab-teardown-persp-kill-failed: ws=%s error=%s"
+                        name (error-message-string err))))
   (agent-repl--ws-del name)
   (agent-repl--info name "elisp.roster.tab-teardown: ws=%s" name))
 
