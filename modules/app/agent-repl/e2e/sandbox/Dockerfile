@@ -404,10 +404,22 @@ ARG TARGETARCH
 # and files it with the failure artifacts. Emacs is compiled here without
 # `-g`, so the frames carry function names from the symbol table rather than
 # source lines -- enough to name the loop, which is what the wedge needs.
+#
+# `Acquire::ForceIPv4=true` IS NOT A PREFERENCE, IT IS WHAT MAKES THIS STEP
+# FINISH. snapshot.debian.org is a Fastly name, and in the BUILD sandbox its
+# resolver answers with AAAA records only while the sandbox has no working
+# IPv6 route: every request then burns a ~16s connect timeout and the 8.8 MB
+# Packages fetch never completes at all (measured: this step sat for an hour
+# having fetched one InRelease, with `bookworm-security` already Ign'd, and
+# reproduced identically on a second run). The SAME apt lines in a plain
+# `docker run` of the same base finish in 3 seconds, which is what isolates
+# it to the build sandbox's network rather than to the archive. Forcing IPv4
+# pins the request to the A records that do route. It changes transport only:
+# the snapshot, the suite and every version pinned above are untouched.
 COPY --from=emacs-builder /emacs-runtime-pkgs.txt /tmp/emacs-runtime-pkgs.txt
 RUN set -eux; \
-    apt-get -o Acquire::Check-Valid-Until=false update; \
-    apt-get install -y --no-install-recommends \
+    apt-get -o Acquire::Check-Valid-Until=false -o Acquire::ForceIPv4=true update; \
+    apt-get -o Acquire::ForceIPv4=true install -y --no-install-recommends \
         binutils \
         bsdutils \
         curl \
