@@ -2534,6 +2534,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-navigate-widget
     agent-repl--frontend-webview-uri
     agent-repl--image-call-process
+    agent-repl--image-call-process-to-file
+    agent-repl--image-executable-find
     agent-repl--prompt-summary-process-start
     agent-repl--prompt-summary-process-send-input
     agent-repl-connect--open-socket)
