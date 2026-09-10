@@ -105,6 +105,31 @@ Any of those missing fails the build loudly. The same three are asserted in
 the Dockerfile; they are re-asserted in `verify_image` so the property
 belongs to the *image*, not to one build path.
 
+### One build at a time, and the image says which sources made it
+
+Two structural properties, because five simultaneous builds thrashed one
+buildkit cache and a build from a stale checkout re-tagged
+`agent-repl-e2e-sandbox:latest` over a good image:
+
+* **`build` takes an exclusive, host-wide lock.** It is a directory claimed
+  with `mkdir` at `/tmp/agent-repl-sandbox-build.lock` (override with
+  `AGENT_REPL_SANDBOX_BUILD_LOCK_DIR`), with the holder's pid recorded inside
+  and a dead holder's lock taken over — the same technique as
+  `bin/suite-slot.sh` and the run gate. A second build **waits**, out loud,
+  and then does nothing at all if the tag already carries this checkout's
+  sandbox sources. `--force` (or `--no-cache`) rebuilds anyway.
+
+* **The image is labelled with its sources.** The git tree hash of
+  `e2e/sandbox` is written on as `org.agent-repl.sandbox-tree` (a dirty
+  sandbox directory gets a `dirty-<digest>` stamp instead, so it never claims
+  to be the committed tree). `run` reads it back and **refuses**, naming both
+  stamps, when it is not this checkout's — including when the image carries no
+  stamp at all. `AGENT_REPL_SANDBOX_ALLOW_STALE=1` overrides it deliberately
+  and says so.
+
+The gate is covered by `e2e/sandbox_build_lock_test.go`, which drives the
+script against a fake `docker` on `PATH`; it never needs a real runtime.
+
 ## Emacs is built FROM SOURCE, not installed from apt
 
 **The webapp panel is an `xwidget-webkit` webview, and no distro Emacs is
