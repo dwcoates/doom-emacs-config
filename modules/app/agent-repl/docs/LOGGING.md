@@ -1,114 +1,97 @@
-# Logging — the contract
+# Logging — the contract and the work
 
-The owner's ruling, 2026-09-10. Every agent-repl system logs the same way, to
-the same place, and one command reads it back per workspace. This document is
-the contract; each system's AGENTS.md states how it meets it.
+The owner's ruling, 2026-09-10: every agent-repl system logs through one
+function per codebase; every record guarantees time and debugging context;
+debug/info/warn/error coverage is thorough; a workspace's whole log is
+retrievable efficiently; and all of it is codified in AGENTS.md.
 
-## One function per codebase
+## The contract is `logging-contract.md`
 
-Every log site in a codebase calls ONE logging function (or one object with
-one method per level). Nothing else writes a record: no `fmt.Println`, no
-`log.Printf`, no `console.*`, no `message`/`princ` to stderr, no `error`
-signalled as a substitute for a record. A lint or test per codebase fails on a
-bypass. The function is:
+`modules/app/agent-repl/logging-contract.md` already states the shared
+record schema, the per-workspace persistence layout
+(`<workspace>/.claude/emacs/{emacs,daemon,shim,webapp,sidecar}.log`, each a
+canonical symlink to a runtime-owned target), runtime ownership, the
+64 MiB cap, and the emission rules. It stays the contract. This document
+records the owner's requirements on top of it and the gaps the 2026-09-10
+audit found, which are the work.
 
-| system | function |
-|---|---|
-| daemon (Go) | `dlog.Logger` (`daemon/internal/dlog`) |
-| shim-store (Go) | `agentrepl/logging` (`agent-shim/logging/go`) |
-| shim-claude-sidecar (Go) | `agentrepl/logging` (`agent-shim/logging/go`) |
-| shim (TypeScript) | `agentrepl/logging` (`agent-shim/logging/ts`) |
-| webapp (TypeScript) | the page logger, which forwards through the daemon's `ClientLog` rpc |
-| Emacs (lisp) | `agent-repl--log` with a level argument (warn/error variants call it) |
+## Requirements restated
 
-## What every record guarantees
+1. ONE logging function per codebase (or one object with one method per
+   level), called by every log site; nothing else writes a record. A lint or
+   test per codebase fails on a bypass.
+2. Every record guarantees: `timestamp` (RFC 3339, offset, sub-second),
+   `runtime`, `level`, `verbosity`, `operation`, `message`, `context`, `pid`,
+   and the workspace/session/request identifiers whenever the event has them.
+   A record about a workspace without `workspace_id` is a defect; the logger
+   takes the workspace from its scope so a site cannot forget it.
+3. Coverage: `error` never swallowed and always carrying the error text;
+   `warn` only for a defect or a named decision; `info` for every lifecycle
+   edge; `debug` for request boundaries, state transitions and decisions.
+   One switch, `AGENT_REPL_LOG_LEVEL` (`debug|info|warn|error`, default
+   `info`), honored by every system without a rebuild.
+4. Retrieval: ONE reader, `bin/logs.sh`, that answers a workspace (by id, dir
+   or name), the central records, or everything, merged by timestamp,
+   filtered by level and runtime, and `--harvest <from> <to>` for every
+   warn/error in a window as an attributed table (the realtest remediation
+   bar). `scripts/agent-repl-log-discovery.sh` is what it grows from.
+5. Rotation everywhere: size cap with N generations (`agentrepl/logging`'s
+   `OpenRotating`); never truncate-and-lose, never poison.
+6. Codified: the module's AGENTS.md carries the layout, every log path, the
+   reader and a harvest recipe; each system's AGENTS.md carries its function,
+   its level switch, where its records land, and the lint that fails a bypass.
 
-One JSON object per line, with exactly these fields; the daemon's `dlog`
-record (`daemon/internal/dlog/record.go`) is the reference schema and every
-other system emits the same field names:
+## Gaps (audit 2026-09-10) → the work
 
-| field | meaning |
-|---|---|
-| `timestamp` | RFC 3339 with offset and sub-second precision, the writer's wall clock |
-| `runtime` | `daemon`, `shim`, `store`, `sidecar`, `webapp`, `emacs` |
-| `level` | `debug`, `info`, `warn`, `error` |
-| `verbosity` | `normal` or `verbose` (the record's own class; see below) |
-| `operation` | a stable dotted name, `system.component.event`, never prose |
-| `message` | one sentence for a human |
-| `context` | an object of typed fields specific to the event |
-| `pid` | the writer's pid |
-| `workspace_id` | the workspace this record belongs to, when it belongs to one |
-| `workspace_dir` | its directory, when known |
-| `agent_repl_session_id`, `claude_session_id`, `request_id` | when the event has them |
+Daemon
+- verbosity is hardcoded off (`cmd/claude-repld/run.go` passes `false` to
+  `OpenSurfaces`); wire `AGENT_REPL_LOG_LEVEL`.
+- `sidecar.log` is dead: `ClientLog` persistence hardcodes the webapp runtime
+  (`internal/server/admin.go`, "SEAM GAP") and the sidecar never forwards;
+  honor the record's runtime and persist the sidecar's forwarded diagnostics.
+- the forwarded record's own `timestamp` and `verbose` (proto, landed) are
+  ignored; persist them instead of the arrival clock and a recomputed class.
+- per-workspace sinks truncate in place and poison at the cap
+  (`internal/dlog/sink.go`); rotate with generations. The run log rotates on
+  open, so a bounce loop evicts history; rotate on size.
+- a bypass lint (raw stderr/`fmt.Print`/`log.Print` outside the sanctioned
+  bootstrap sites).
 
-A record with no `workspace_id` is a CENTRAL record. A record about a
-workspace without `workspace_id` is a defect: the logger takes the workspace
-from its scope (a per-workspace child logger), so a site cannot forget it.
+Shim (TypeScript)
+- no explicit `debug` level at any site; 163 `warn` / 102 `error` / 10
+  `info` is an inverted pyramid. Give the API one method per level, reclassify
+  every site, add debug records at request boundaries and state transitions.
+- `AGENT_REPL_LOG_VERBOSE` gates only the stderr mirror; honor
+  `AGENT_REPL_LOG_LEVEL`.
 
-Emacs `*Messages*` is not a log; the module's records go through
-`agent-repl--log` into the module log file in this format, and `*Messages*`
-only ever shows what the user should read.
+Store and sidecar (Go)
+- records carry no workspace attribution. The sidecar knows the transcript's
+  project dir; stamp `workspace_dir`/`workspace_id`/`claude_session_id` on
+  every file-scoped record and forward file-scoped diagnostics to
+  `sidecar.log` through `ClientLog` (the dead seam). The store stamps the
+  `agent_id`/book on every request-scoped record so the reader can join it.
+- no meaningful `debug` population; `AGENT_REPL_LOG_LEVEL`.
+- bypass lint.
 
-## Levels and coverage
+Emacs (lisp)
+- 332 of ~1,027 sites pass a nil workspace; resolve the workspace from the
+  buffer or explicit scope, and stop degrading an unroutable record to the
+  global sink (the contract forbids it; today it only warns once).
+- records carry no `agent_repl_session_id`/`request_id`; add them where the
+  edge has them.
+- the file truncates its oldest 80% at the cap; rotate with generations.
+- `--log-verbose` records are dropped from the durable sink; persist them
+  like every other runtime (the level switch governs).
+- 138 `(message …)` sites: a lint that separates a user-facing echo (kept)
+  from a diagnostic that must be a record.
+- the six rungs stay as thin wrappers, but one function builds every record.
 
-- `error`: something failed and the user or a later reader must know; never
-  swallowed, always carries the error text.
-- `warn`: something is wrong but the system continued; every warn is a defect
-  or a decision to be justified by name.
-- `info`: the lifecycle edges a reader needs to follow a run (bring-up, link
-  up, turn start/end, restart, adoption, shutdown), one record per edge.
-- `debug`: everything else worth having when something is wrong: request
-  boundaries, state transitions, decisions taken and why. Volume is fine at
-  debug; it is off by default and switched on per system without a rebuild.
+Webapp
+- send the client instant and verbosity class on every forwarded record
+  (proto landed); remove the dead localStorage verbose toggle.
 
-`verbosity: verbose` marks records a reader wants only when tracing; `normal`
-records are the run's story. Every system honors the same switch:
-`AGENT_REPL_LOG_LEVEL` (`debug|info|warn|error`, default `info`).
-
-## Where records go
-
-One root, `~/.claude-emacs/logs/`:
-
-```
-~/.claude-emacs/logs/
-  central/<runtime>.log            records with no workspace_id, one file per runtime
-  workspaces/<workspace_id>/
-    <runtime>.log                  that workspace's records, one file per runtime
-    meta.json                      workspace_dir, first/last seen, the ids it has held
-```
-
-Every file rotates at a size cap with N generations (`agentrepl/logging`'s
-`OpenRotating`, already the daemon's and store's rule). A process that writes
-for several workspaces (the daemon, the store, the sidecar) opens the
-workspace's file on first use and keeps it open; the writer, not a reader,
-does the fan-out, so retrieval never parses a central file to find a
-workspace. The launchd services' stdout/stderr paths receive only bootstrap
-errors (`NewDurableOnly`).
-
-The Emacs side writes `emacs.log` under the same root: `agent-repl--log`
-resolves the current workspace from the buffer or explicit argument and
-writes to that workspace's directory; central otherwise.
-
-## Reading it back
-
-`bin/logs.sh` is the one reader:
-
-```
-bin/logs.sh --workspace <id|dir|name> [--since <ts|duration>] [--level warn]
-            [--runtime daemon,shim] [--follow] [--json]
-bin/logs.sh --central [...]
-bin/logs.sh --all [...]            # every workspace and central, merged
-bin/logs.sh --harvest <from> <to>  # every warn/error in the window, attributed, as a table
-```
-
-It merges the chosen files by `timestamp`, filters by level and runtime,
-and prints one line per record (`time level runtime operation message` plus
-context) or raw JSON. `--harvest` is what a realtest uses as its remediation
-bar. The name or directory forms resolve through `workspaces/*/meta.json`.
-
-## Codified
-
-Each system's AGENTS.md carries: the function to call, the record schema
-reference (this file), where its records land, its level switch, and the lint
-that fails a bypass. The module's AGENTS.md carries the root layout and
-`bin/logs.sh`. A change to this contract is a change to this file first.
+Reader and docs
+- `bin/logs.sh` as specified; the module AGENTS.md "Logs" section (path,
+  writer, format, window selection, attribution field, level switch, recipe);
+  per-system AGENTS.md sections; `logging-contract.md` amended for rotation,
+  the level switch, the reader, and the sidecar seam once implemented.
