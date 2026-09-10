@@ -10,10 +10,9 @@
 #
 #   1. protobufs        `make -C proto all` (Go + TS regeneration)
 #   2. build-frontend   shim bundle, webapp, daemon (build-frontend.sh)
-#   3. daemon (forced)  `go build` unconditionally — build-frontend's mtime
-#                       staleness check cannot see proto REGENERATION (the
-#                       generated .go files live outside daemon/), so after
-#                       step 1 the daemon must be rebuilt regardless
+#   3. daemon (forced)  `go build` unconditionally. Step 1 may have rewritten
+#                       generated sources, and this build is cheap next to
+#                       being wrong about it
 #   4. store/sidecar    `go build` into ~/.cache/agent-repl/bin; each service
 #                       is kickstarted when the installed binary is not the one
 #                       its running process was started on (a stamp written at
@@ -22,6 +21,9 @@
 #                       wait on store.sock in between — the recorded safe order
 #                       (a simultaneous bounce once cost a silent full re-read
 #                       via cold cursor recovery)
+#  4b. revision gate   readiness-report.sh --require-ready webapp, run once
+#                       everything is built and BEFORE any kickstart or daemon
+#                       restart: a stale artifact must never be bounced into
 #   5. runtime bounce   first loads the runtime control plane from THIS
 #                       checkout so its artifact-root constants name the
 #                       binaries built above, then calls
@@ -112,6 +114,18 @@ MOD_REL="${ROOT#"$REPO_ROOT/"}"            # e.g. modules/app/agent-repl
 # shellcheck source=lib-deploy-stamp.sh
 . "$THIS_DIR/lib-deploy-stamp.sh"
 
+# Every artifact this script builds itself owes BOTH stamps: the built-sha, and
+# the source-tree stamp that is the staleness authority build-frontend.sh and
+# readiness-report.sh share. Writing only the first would leave the artifact
+# looking un-built to the very gate a few lines below.
+stamp_built_tree() { # NAME STAMP-DIR
+    local paths
+    paths="$(deploy_stamp_system_paths "$1" "$MOD_REL")" || return 0
+    # Deliberately unquoted: the table carries a space-separated pathspec list.
+    # shellcheck disable=SC2086
+    write_source_tree "$2" "$(source_tree_id "$REPO_ROOT" $paths || true)"
+}
+
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 STORE_SOCK="$HOME/.cache/agent-repl/sock/store.sock"
 # The store's launchd StandardErrorPath (launchd/com.agentrepl.shim-store.plist).
@@ -177,11 +191,16 @@ if [ "$NO_BOUNCE" -eq 0 ] && [ "$NO_DAEMON_BOUNCE" -eq 0 ]; then
     verify_preload_files
 fi
 
+# The build stamp is the only deployment identity for a webview artifact, so
+# this is asserted after everything is built and BEFORE any service or the
+# daemon is bounced — see step 4b. Nothing is running the new image yet when it
+# fails, which is what makes the failure recoverable.
 verify_webapp_revision() {
     local report
     if ! report="$("$READINESS_REPORT" --require-ready webapp)"; then
         echo "[deploy-all] webapp revision gate failed; structured readiness report follows:" >&2
         printf '%s\n' "$report" >&2
+        echo "[deploy-all] refusing to bounce: no service was kickstarted and the runtime was not restarted" >&2
         exit 3
     fi
     log "webapp: revision gate passed"
@@ -234,6 +253,7 @@ log "daemon: forced rebuild..."
 mkdir -p "$ROOT/daemon/bin"
 ( cd "$ROOT/daemon" && go build -o "$ROOT/daemon/bin/claude-repld" ./cmd/claude-repld )
 write_built_sha "$ROOT/daemon/bin/.built-sha" "$ROOT"
+stamp_built_tree daemon "$ROOT/daemon/bin/.source-tree"
 log "daemon: done"
 
 # ---- 4. store + sidecar ----------------------------------------------------
@@ -253,6 +273,7 @@ build_service() { # name module-dir — builds and installs when content differs
     # against master. It is the deployed-FINGERPRINT stamp that must not be
     # touched here — that one is bounce detection and belongs to kickstart.
     write_built_sha "$CACHE_BIN/.$name.built-sha" "$ROOT"
+    stamp_built_tree "$name" "$CACHE_BIN/.$name.source-tree"
     if [ -f "$installed" ] && cmp -s "$staged" "$installed"; then
         rm -f "$staged"
         log "$name: build unchanged"
@@ -272,6 +293,14 @@ record_deployed() { record_service_deployed "$CACHE_BIN" "$1"; }
 
 build_service shim-store          "$ROOT/agent-shim/shim-store"
 build_service shim-claude-sidecar "$ROOT/agent-shim/claude/shim-sidecar"
+
+# ---- 4b. the revision gate, BEFORE anything is bounced ---------------------
+# Everything that will be deployed has now been built, and nothing has been
+# restarted yet. That is the only safe moment to assert it: a stale artifact
+# must never be bounced INTO. The gate used to run at the very end, after the
+# services were kickstarted and the daemon restarted, so a failing gate reported
+# the problem from a stack that was already running the stale build.
+verify_webapp_revision
 
 STORE_STALE=0
 SIDECAR_STALE=0
@@ -506,11 +535,6 @@ else
     log "daemon: restart completed"
 
 fi
-
-# The build stamp is the only deployment identity for a webview artifact.
-# Assert it after the daemon bounce, so this command cannot
-# claim a complete deploy while the page artifact lags the source tree.
-verify_webapp_revision
 
 # ---- 6. elisp hot-reload ---------------------------------------------------
 #
