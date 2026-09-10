@@ -117,6 +117,16 @@ type DB interface {
 	CloseTurn(ctx context.Context, turn TurnID, at time.Time, how TurnClose) error
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
+	// PutPortedPrompts writes a fork's whole ported conversation in one
+	// transaction: the parent's prompt rows, re-minted under the child's own
+	// turn identities. All or nothing.
+	PutPortedPrompts(ctx context.Context, id WorkspaceID, rows []PortedPrompt) error
+	// PortedPrompts loads one workspace's ported conversation, oldest first.
+	PortedPrompts(ctx context.Context, id WorkspaceID) ([]PortedPrompt, error)
+	// ConversationPrompts is what a FORK of this workspace inherits: what this
+	// workspace itself inherited followed by every prompt of its own, in one
+	// order with contiguous ordinals.
+	ConversationPrompts(ctx context.Context, id WorkspaceID) ([]PortedPrompt, error)
 	// AllDisplacedTurns loads every turn still marked displaced, across every
 	// workspace and REGARDLESS of whether the turn is still open: a merge
 	// displaces a turn by ending it, so the record a boot has to put back is
