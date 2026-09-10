@@ -54,6 +54,31 @@ describe("taskActConverter.start", () => {
     expect([act.task?.value, act.act.case]).toEqual(["1", "changed"]);
   });
 
+  // AN ANNOUNCEMENT HAS LEFT THE TASK NOWHERE. `AgentTaskAct.state` is where
+  // the act LEFT the task, resolved by the producer; at announcement the
+  // tracker has not answered, and the status the call asked for is not the
+  // standing one. It was stated, and a REFUSED `TaskUpdate(9, completed)` then
+  // drew a ticked checklist row because the announcement is re-delivered after
+  // the refusal and overwrote it. Caught by the G52 playbook.
+  it("states NO status for an update the tracker has not answered yet", () => {
+    // Arrange, Act.
+    const act = actOf(taskActConverter.start(call("TaskUpdate", { taskId: "1", status: "completed" })));
+
+    // Assert.
+    expect(act.state?.status.case).toBeUndefined();
+  });
+
+  it("still carries the fields the call itself named", () => {
+    // Arrange, Act.
+    const act = actOf(
+      taskActConverter.start(call("TaskUpdate", { taskId: "1", subject: "rename me", status: "completed" })),
+    );
+
+    // Assert: the subject IS the caller's own act; only the status is the
+    // tracker's to confirm.
+    expect(act.state?.subject).toBe("rename me");
+  });
+
   it("produces NO frame for an update that names no task", () => {
     // Arrange, Act.
     const item = taskActConverter.start(call("TaskUpdate", { status: "completed" }));

@@ -304,6 +304,95 @@ func TestARunningTaskWithNoPhrasingDrawsNoActiveForm(t *testing.T) {
 	}
 }
 
+// unstatedTask is a state that says NOTHING about where the task stands --
+// the shape a `TaskUpdate` that moved only an edge or a subject produces, and
+// the shape an announcement the tracker has not answered yet produces.
+func unstatedTask(subject string) *conversationv1.AgentTaskState {
+	return &conversationv1.AgentTaskState{Subject: subject}
+}
+
+// AN UNSET STATUS IS NOT `pending`. The oneof exists so "this act said nothing
+// about where the task stands" is representable, and reading it as pending
+// knocked a running task back to unstarted on every subject-only or
+// edge-only update.
+func TestAnUnstatedStatusLeavesARunningTaskRunning(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	form := "running the migration"
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", &form)))
+
+	// Act: an update that names an edge and no status at all.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("migrate")))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if rows[0].GetStatus().GetRunning() == nil {
+		t.Fatalf("task status = %+v, want it still running", rows[0].GetStatus())
+	}
+}
+
+// A NEW ENTRY STILL STARTS PENDING: "recorded and not begun" is what a task
+// nobody has said anything about IS.
+func TestAnUnstatedStatusOnANewTaskIsPending(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("brand new")))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if rows[0].GetStatus().GetPending() == nil {
+		t.Fatalf("task status = %+v, want pending", rows[0].GetStatus())
+	}
+}
+
+// AN EMPTY SUBJECT IS NOT A SUBJECT. A `TaskUpdate` naming only a status
+// carries none, and overwriting with it drew the whole checklist as blank
+// lines beside its glyphs -- observed in the G52 playbook.
+func TestAnActThatNamesNoSubjectKeepsTheOneTheTaskHas(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+
+	// Act: a status-only update, which is what the tracker's own answer to
+	// `TaskUpdate(status)` produces.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("", nil)))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if got := rows[0].GetSubject().GetText(); got != "Land the converter" {
+		t.Fatalf("task subject = %q, want the one the create established", got)
+	}
+}
+
+// A CHECKLIST ENTRY IS A SUBJECT. A `TaskUpdate` the tracker REFUSED for an id
+// it does not hold names the task and no subject at either end, and the
+// checklist gained a PHANTOM ROW -- a bare glyph with no words, counted in the
+// chip's denominator, for a task the tracker had just said it does not have.
+// `AgentTaskRejected` says it outright: nothing was added and nothing changed.
+func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+
+	// Act: the refused update's own shape -- a task nobody has named.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask("")))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if len(rows) != 1 {
+		t.Fatalf("the checklist holds %d rows, want only the one that was named: %+v", len(rows), rows)
+	}
+	if chip := h.view(t).GetStrip().GetLiveWork().GetTasks(); chip.GetTotal() != 1 {
+		t.Fatalf("tasks chip = %+v, want a denominator of 1", chip)
+	}
+}
+
 func TestADeletedTaskLeavesTheChecklist(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

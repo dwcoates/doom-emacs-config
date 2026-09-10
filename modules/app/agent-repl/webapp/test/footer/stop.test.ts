@@ -9,9 +9,8 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   STOP_GLYPH,
   buildInterruptRequest,
-  drawAgentsPanelStopAll,
+  createStopControls,
   drawInterruptSuccess,
-  drawTurnStopControl,
 } from "../../src/footer/stop.js";
 import { INTERRUPT_ERROR_ARMS } from "../../src/interrupt-error.js";
 import {
@@ -22,6 +21,15 @@ import {
   interruptSuccess,
   type Harness,
 } from "./harness.js";
+
+// THE CONTROLS ARE BUILT AS A PAIR, once per footer mount, because a stop's
+// answer has to survive the redraw the stop itself causes (see StopControls).
+// These two keep every test below reading as one control per call.
+const turnStop = (ctx: Parameters<typeof createStopControls>[0]): HTMLElement =>
+  createStopControls(ctx).turn;
+const allAgentsStop = (ctx: Parameters<typeof createStopControls>[0]): HTMLElement =>
+  createStopControls(ctx).allAgents;
+
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -66,32 +74,32 @@ describe("buildInterruptRequest", () => {
 
 describe("drawTurnStopControl", () => {
   it("draws the stop hook the integration suite targets", () => {
-    const control = drawTurnStopControl(harness().ctx);
+    const control = turnStop(harness().ctx);
     expect(control.querySelector("[data-interrupt]")).not.toBeNull();
   });
 
   it("draws a stop GLYPH rather than a word alone", () => {
-    const control = drawTurnStopControl(harness().ctx);
+    const control = turnStop(harness().ctx);
     expect(control.textContent).toContain(STOP_GLYPH);
   });
 
   it("interrupts the TURN when pressed", async () => {
     const h = harness();
-    press(drawTurnStopControl(h.ctx));
+    press(turnStop(h.ctx));
     await settle();
     expect(h.calls.interrupt[0]?.target.case).toBe("turn");
   });
 
   it("does not confirm agents on the first press", async () => {
     const h = harness();
-    press(drawTurnStopControl(h.ctx));
+    press(turnStop(h.ctx));
     await settle();
     expect(h.calls.interrupt[0]?.confirmAgents).toBe(false);
   });
 
   it("notes an interrupted turn at the control", async () => {
     const h = harness({ interrupt: () => interruptSuccess("interruptedTurn") });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-stop-outcome]")?.getAttribute("data-stop-outcome")).toBe(
@@ -101,7 +109,7 @@ describe("drawTurnStopControl", () => {
 
   it("notes a stop that found nothing running — an ANSWER, not a refusal", async () => {
     const h = harness({ interrupt: () => interruptSuccess("nothingRunning") });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")).toBeNull();
@@ -110,7 +118,7 @@ describe("drawTurnStopControl", () => {
 
   it("draws the confirm step naming the live agents the stop would also end", async () => {
     const h = harness({ interrupt: () => confirmRequired(3n) });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-interrupt-confirm]")?.textContent).toBe(
@@ -120,7 +128,7 @@ describe("drawTurnStopControl", () => {
 
   it("singularizes the challenge for one live agent", async () => {
     const h = harness({ interrupt: () => confirmRequired(1n) });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-interrupt-confirm]")?.textContent).toBe(
@@ -137,7 +145,7 @@ describe("drawTurnStopControl", () => {
         return confirmRequired(2n);
       },
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     press(control, "[data-interrupt-confirm]");
@@ -154,7 +162,7 @@ describe("drawTurnStopControl", () => {
         return confirmRequired(2n);
       },
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     press(control, "[data-interrupt-confirm]");
@@ -166,7 +174,7 @@ describe("drawTurnStopControl", () => {
     "draws the %s refusal at the control, by its own arm",
     async (arm) => {
       const h = harness({ interrupt: () => interruptRefused(arm) });
-      const control = drawTurnStopControl(h.ctx);
+      const control = turnStop(h.ctx);
       press(control);
       await settle();
       expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
@@ -177,7 +185,7 @@ describe("drawTurnStopControl", () => {
     "offers no confirm step on the %s refusal",
     async (arm) => {
       const h = harness({ interrupt: () => interruptRefused(arm) });
-      const control = drawTurnStopControl(h.ctx);
+      const control = turnStop(h.ctx);
       press(control);
       await settle();
       expect(control.querySelector("[data-interrupt-confirm]")).toBeNull();
@@ -188,7 +196,7 @@ describe("drawTurnStopControl", () => {
     const h = harness({
       interrupt: () => interruptRefused("workspaceRefMismatch", { registryDir: "/w/other" }),
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.textContent).toContain("/w/other");
@@ -198,7 +206,7 @@ describe("drawTurnStopControl", () => {
     const h = harness({
       interrupt: () => interruptRefused("transferringAway", { address: "127.0.0.1:9931" }),
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.textContent).toContain("127.0.0.1:9931");
@@ -206,7 +214,7 @@ describe("drawTurnStopControl", () => {
 
   it("draws the challenge as a plain refusal at the fan-wide stop, which cannot answer it", async () => {
     const h = harness({ interrupt: () => confirmRequired(2n) });
-    const control = drawAgentsPanelStopAll(h.ctx);
+    const control = allAgentsStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("confirmRequired");
@@ -214,7 +222,7 @@ describe("drawTurnStopControl", () => {
 
   it("offers no confirm step at the fan-wide stop", async () => {
     const h = harness({ interrupt: () => confirmRequired(2n) });
-    const control = drawAgentsPanelStopAll(h.ctx);
+    const control = allAgentsStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-interrupt-confirm]")).toBeNull();
@@ -226,7 +234,7 @@ describe("drawTurnStopControl", () => {
         throw new Error("no route to the daemon");
       },
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("transport");
@@ -236,7 +244,7 @@ describe("drawTurnStopControl", () => {
     const h = harness({
       interrupt: () => create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
     });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("malformed");
@@ -246,14 +254,14 @@ describe("drawTurnStopControl", () => {
     const h = harness({
       interrupt: () => create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
     });
-    press(drawTurnStopControl(h.ctx));
+    press(turnStop(h.ctx));
     await settle();
     expect(h.sink.reported).toContain("frameUndecodable");
   });
 
   it("refuses a response whose result oneof sets no arm", async () => {
     const h = harness({ interrupt: () => create(InterruptResponseSchema, {}) });
-    const control = drawTurnStopControl(h.ctx);
+    const control = turnStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("malformed");
@@ -263,14 +271,14 @@ describe("drawTurnStopControl", () => {
 describe("drawAgentsPanelStopAll", () => {
   it("interrupts EVERY live agent when pressed", async () => {
     const h: Harness = harness({ interrupt: () => interruptSuccess("interruptedDetached", 3n) });
-    press(drawAgentsPanelStopAll(h.ctx));
+    press(allAgentsStop(h.ctx));
     await settle();
     expect(h.calls.interrupt[0]?.target.case).toBe("allAgents");
   });
 
   it("reports how many agents the stop reached", async () => {
     const h = harness({ interrupt: () => interruptSuccess("interruptedDetached", 3n) });
-    const control = drawAgentsPanelStopAll(h.ctx);
+    const control = allAgentsStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped 3 agents");
@@ -278,7 +286,7 @@ describe("drawAgentsPanelStopAll", () => {
 
   it("singularizes a stop that reached one agent", async () => {
     const h = harness({ interrupt: () => interruptSuccess("interruptedDetached", 1n) });
-    const control = drawAgentsPanelStopAll(h.ctx);
+    const control = allAgentsStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped 1 agent");
@@ -286,7 +294,7 @@ describe("drawAgentsPanelStopAll", () => {
 
   it("notes a fan-wide stop that found nothing running", async () => {
     const h = harness({ interrupt: () => interruptSuccess("nothingRunning") });
-    const control = drawAgentsPanelStopAll(h.ctx);
+    const control = allAgentsStop(h.ctx);
     press(control);
     await settle();
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("nothing running");

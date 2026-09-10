@@ -57,7 +57,7 @@ import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { drawAgentsPanelStopAll } from "./stop.js";
+import type { StopControls } from "./stop.js";
 import {
   allowanceUnreadSentence,
   drawFooterAllowance,
@@ -94,6 +94,14 @@ export interface ExpandedDeps {
    * figure. The sheet expands the strip's line; the strip is where it lives.
    */
   readonly activity?: FooterActivity;
+  /**
+   * The footer's stop controls, built once per mount.
+   *
+   * HANDED IN RATHER THAN BUILT HERE -- see `StopControls`: the footer redraws
+   * whole on every push, and the fan-wide stop's own answer (the COUNT it
+   * reached) is the one statement of that number anywhere.
+   */
+  readonly stops: StopControls;
 }
 
 /**
@@ -370,7 +378,7 @@ export function drawFooterExpandedAgents(
   title.className = "footer-panel-title";
   title.textContent = "live agents";
   header.appendChild(title);
-  header.appendChild(drawAgentsPanelStopAll(deps.ctx));
+  header.appendChild(deps.stops.allAgents);
 
   if (u.rows.length === 0) return [header, emptyRow("no live agents")];
   return [

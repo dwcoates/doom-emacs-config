@@ -4,6 +4,8 @@ import { create } from "@bufbuild/protobuf";
 import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountBubble } from "../../src/feed/bubble.js";
+import STYLESHEET from "../../src/styles.css?raw";
+import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
 import {
   Channel,
@@ -598,5 +600,108 @@ describe("mountBubble: disposed while a reopen is in flight", () => {
     await settle();
     // Assert: the fresh page is dropped rather than painted into a dead bubble.
     expect(bubble.element.querySelector('[data-feed-row="r2"]')).toBeNull();
+  });
+});
+
+describe("mountBubble: the fold actually hides the sub-feed", () => {
+  // THE CASCADE IS THE CLAIM, and it cannot be asked of jsdom. `applyExpanded`
+  // folds a bubble by setting `panel.hidden`, and `[hidden]` is a USER-AGENT
+  // rule that an author rule setting `display` on the same element outranks by
+  // source order -- so `.agent-panel { display: flex }` left a collapsed
+  // sub-feed FULLY DRAWN in WebKit while the caret said it was shut, and every
+  // other assertion in this file passed in that state. jsdom cannot reproduce
+  // it: its `getComputedStyle` answers `none` for a `hidden` element whatever
+  // the author sheet says (measured -- an author `.agent-panel { display: flex
+  // }` over a hidden element still computes `none` there), so the browser's
+  // answer is asserted where the browser is, in the playtest's real webview,
+  // and what is asserted HERE is the sheet the browser will read.
+  //
+  // THE SELECTOR COMES FROM THE PRODUCTION ELEMENT, never restated: the class
+  // is read off a mounted bubble's own panel, so renaming it in `bubble.ts`
+  // moves this assertion with it rather than leaving it pinning a dead name.
+
+  /** The sub-feed panel of a mounted bubble. */
+  function panelOf(bubble: { element: HTMLElement }): HTMLElement {
+    const panel = bubble.element.querySelector<HTMLElement>("[data-subfeed]");
+    if (panel === null) throw new Error("the bubble mounted no sub-feed panel");
+    return panel;
+  }
+
+  /** Every rule block in the sheet, in source order, as selector + body. */
+  function rules(): { selector: string; body: string }[] {
+    const found: { selector: string; body: string }[] = [];
+    const pattern = /([^{}]+)\{([^{}]*)\}/g;
+    let match: RegExpExecArray | null = pattern.exec(STYLESHEET);
+    while (match !== null) {
+      found.push({ selector: match[1].trim(), body: match[2] });
+      match = pattern.exec(STYLESHEET);
+    }
+    return found;
+  }
+
+  it("guards every display the sheet sets on the panel with a [hidden] rule", () => {
+    // Arrange: the class production actually puts on the sub-feed panel.
+    const { bubble } = mount(subagentRow("b1"));
+    const classes = [...panelOf(bubble).classList];
+    expect(classes.length).toBeGreaterThan(0);
+    // Act: the sheet's rules that set `display` on any of those classes, and
+    // the ones that set it on the same class WHEN HIDDEN.
+    const sets = rules().filter(
+      (rule) =>
+        classes.some((cls) => rule.selector.includes(`.${cls}`)) &&
+        /(^|[;\s])display\s*:/.test(rule.body),
+    );
+    const guards = sets.filter(
+      (rule) => rule.selector.includes("[hidden]") && /display\s*:\s*none/.test(rule.body),
+    );
+    // Assert: the LAST word on display for a hidden panel is `none`.
+    expect(sets.length).toBeGreaterThan(0);
+    expect(guards.length).toBeGreaterThan(0);
+    expect(sets.indexOf(guards[guards.length - 1])).toBe(sets.length - 1);
+  });
+
+  // AND IT STACKS. The bubble wears `.bubble` for the card's fill, border and
+  // lift, and `.bubble` is a flex ROW -- so the head line and the whole
+  // sub-feed were laid out SIDE BY SIDE, half the bubble left empty under the
+  // head and every nested row squeezed into the other half. Photographed by
+  // the G49 playbook the first time a subagent bubble was opened in the real
+  // webview. jsdom resolves the cascade for this one, so it is asked here.
+  it("lays the sub-feed BENEATH the head rather than beside it", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert
+      expect(window.getComputedStyle(bubble.element).flexDirection).toBe("column");
+    } finally {
+      remove();
+    }
+  });
+
+  it("lets the sub-feed take the bubble's whole width", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: stretched, so a column layout does not shrink-wrap it.
+      expect(window.getComputedStyle(bubble.element).alignItems).toBe("stretch");
+    } finally {
+      remove();
+    }
+  });
+
+  it("hides the panel on the caret's collapse", async () => {
+    // Arrange
+    const { bubble } = mount(subagentRow("b1"));
+    await bubble.expand();
+    await settle();
+    expect(panelOf(bubble).hidden).toBe(false);
+    // Act
+    bubble.element.querySelector<HTMLElement>("[data-expand]")?.click();
+    await settle();
+    // Assert
+    expect(panelOf(bubble).hidden).toBe(true);
   });
 });
