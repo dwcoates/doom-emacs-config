@@ -2,6 +2,7 @@ package dlog
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,7 +48,7 @@ func TestOpenSinkLinksToAnExternalTarget(t *testing.T) {
 		t.Fatalf("link names %q, want the owned target %q", dest, s.target)
 	}
 	if strings.HasPrefix(dest, dir) {
-		t.Fatalf("target %q lives inside the workspace; it must live under the OS temp dir", dest)
+		t.Fatalf("target %q lives inside the workspace; it must live under the supplied logs directory", dest)
 	}
 }
 
@@ -156,49 +157,72 @@ func TestSinkWriteAppends(t *testing.T) {
 	}
 }
 
-func TestSinkTruncatesInPlaceAtTheCap(t *testing.T) {
-	// Arrange: put the sink just under the cap without writing 64 MiB.
-	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
-	if err != nil {
-		t.Fatalf("openSink: %v", err)
-	}
-	t.Cleanup(func() { s.close(); os.Remove(s.target) })
-	if err := s.f.Truncate(CapBytes); err != nil {
-		t.Fatalf("grow the target: %v", err)
-	}
-	s.size = CapBytes
-	before, err := os.Stat(s.target)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
+func TestDaemonOwnedSinksRotateWithGenerationsAtTheCap(t *testing.T) {
+	for _, name := range []string{"daemon", "webapp", "sidecar"} {
+		t.Run(name, func(t *testing.T) {
+			// Arrange: one generation at its eight-byte cap and a reader holding
+			// the inode that is about to retire.
+			dir, id := newWorkspace(t)
+			s, err := openSinkSized(t.TempDir(), dir, id, name, "", 8, 2)
+			if err != nil {
+				t.Fatalf("openSinkSized: %v", err)
+			}
+			t.Cleanup(func() { s.close(); os.Remove(s.target) })
+			if err := s.write([]byte("old-one\n")); err != nil {
+				t.Fatalf("write old generation: %v", err)
+			}
+			held, err := os.Open(s.target)
+			if err != nil {
+				t.Fatalf("open a reader on the old target: %v", err)
+			}
+			defer held.Close()
+			oldInfo, err := held.Stat()
+			if err != nil {
+				t.Fatalf("stat old target: %v", err)
+			}
 
-	// Act.
-	if err := s.write([]byte("{\"after\":\"cap\"}\n")); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+			// Act.
+			if err := s.write([]byte("new-one\n")); err != nil {
+				t.Fatalf("write new generation: %v", err)
+			}
+			if err := s.write([]byte("new-two\n")); err != nil {
+				t.Fatalf("write second new generation: %v", err)
+			}
 
-	// Assert: the same inode, cleared, now holding only the new record.
-	after, err := os.Stat(s.target)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if !os.SameFile(before, after) {
-		t.Fatalf("the target was replaced; readers holding it open must keep the same inode")
-	}
-	got, err := os.ReadFile(s.target)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if string(got) != "{\"after\":\"cap\"}\n" {
-		t.Fatalf("target = %q, want only the post-truncation record", got)
+			// Assert: the canonical symlink resolves to a fresh inode, the two
+			// configured generations are retained, and the held reader stays on
+			// the oldest retained inode.
+			currentInfo, err := os.Stat(s.link)
+			if err != nil {
+				t.Fatalf("stat canonical link: %v", err)
+			}
+			if os.SameFile(oldInfo, currentInfo) {
+				t.Fatal("the canonical link still resolves to the retired inode")
+			}
+			heldBytes, err := io.ReadAll(held)
+			if err != nil {
+				t.Fatalf("read the held old target: %v", err)
+			}
+			if got := string(heldBytes); got != "old-one\n" {
+				t.Fatalf("held target = %q, want the old generation", got)
+			}
+			if got, err := os.ReadFile(s.target + ".1"); err != nil || string(got) != "new-one\n" {
+				t.Fatalf("generation .1 = %q, %v; want the immediately retired generation", got, err)
+			}
+			if got, err := os.ReadFile(s.target + ".2"); err != nil || string(got) != "old-one\n" {
+				t.Fatalf("generation .2 = %q, %v; want the oldest retained generation", got, err)
+			}
+			if got, err := os.ReadFile(s.target); err != nil || string(got) != "new-two\n" {
+				t.Fatalf("current target = %q, %v; want the new generation", got, err)
+			}
+		})
 	}
 }
 
-func TestSinkRefusesToTruncateAnInodeItNoLongerOwns(t *testing.T) {
+func TestSinkRefusesToRepointALinkItNoLongerOwns(t *testing.T) {
 	// Arrange: the workspace redirects the canonical link elsewhere.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -209,14 +233,19 @@ func TestSinkRefusesToTruncateAnInodeItNoLongerOwns(t *testing.T) {
 	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere.log"), s.link); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	s.size = CapBytes
+	if err := s.write([]byte("12345678")); err != nil {
+		t.Fatalf("fill target: %v", err)
+	}
+	if s.size != 8 || s.cap != 8 {
+		t.Fatalf("filled sink = size %d cap %d, want 8 and 8", s.size, s.cap)
+	}
 
 	// Act.
 	err = s.write([]byte("{\"n\":1}\n"))
 
 	// Assert.
 	if err == nil {
-		t.Fatalf("write succeeded; cap maintenance must refuse an inode the link no longer names")
+		t.Fatalf("write succeeded; rotation must refuse a link the daemon no longer owns")
 	}
 	if !errors.Is(err, ErrPoisoned) {
 		t.Fatalf("error = %v, want a poisoned sink", err)
@@ -226,7 +255,7 @@ func TestSinkRefusesToTruncateAnInodeItNoLongerOwns(t *testing.T) {
 func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -234,7 +263,9 @@ func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 	if err := os.Remove(s.link); err != nil {
 		t.Fatalf("remove link: %v", err)
 	}
-	s.size = CapBytes
+	if err := s.write([]byte("12345678")); err != nil {
+		t.Fatalf("fill target: %v", err)
+	}
 
 	// Act.
 	err = s.write([]byte("{\"n\":1}\n"))
@@ -248,7 +279,7 @@ func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 func TestSinkRefusesEveryRecordOncePoisoned(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
+	s, err := openSinkSized(t.TempDir(), dir, id, "daemon", "", 8, 2)
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -256,7 +287,9 @@ func TestSinkRefusesEveryRecordOncePoisoned(t *testing.T) {
 	if err := os.Remove(s.link); err != nil {
 		t.Fatalf("remove link: %v", err)
 	}
-	s.size = CapBytes
+	if err := s.write([]byte("12345678")); err != nil {
+		t.Fatalf("fill target: %v", err)
+	}
 	first := s.write([]byte("{\"n\":1}\n"))
 	if first == nil {
 		t.Fatalf("the sink was not poisoned")
@@ -274,7 +307,7 @@ func TestSinkRefusesEveryRecordOncePoisoned(t *testing.T) {
 	}
 }
 
-func TestSinkScanSeesWritesTheDaemonNeverMade(t *testing.T) {
+func TestSinkScanMarksWritesTheDaemonNeverMadeForTheNextShimRoll(t *testing.T) {
 	// Arrange: the shim writes straight to the same inode through fd 3, so the
 	// daemon's own byte count is only a lower bound.
 	dir, id := newWorkspace(t)
@@ -293,17 +326,22 @@ func TestSinkScanSeesWritesTheDaemonNeverMade(t *testing.T) {
 	}
 
 	// Act.
-	if err := s.scan(); err != nil {
+	result, err := s.scan()
+	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 
-	// Assert.
+	// Assert: the target remains intact for fd 3 and is marked for the next
+	// process roll instead of being truncated in place.
 	info, err := os.Stat(s.target)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Size() != 0 {
-		t.Fatalf("size after the scan = %d, want 0 — the scan is the only thing that sees fd-3 writes", info.Size())
+	if info.Size() != CapBytes+1 {
+		t.Fatalf("size after the scan = %d, want the fd-3 bytes left intact", info.Size())
+	}
+	if !result.marked || !s.rotatePending {
+		t.Fatalf("scan result = %+v and rotatePending = %v, want the next shim roll marked", result, s.rotatePending)
 	}
 }
 
@@ -320,7 +358,8 @@ func TestSinkScanLeavesAnUnderCapTargetAlone(t *testing.T) {
 	}
 
 	// Act.
-	if err := s.scan(); err != nil {
+	result, err := s.scan()
+	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 
@@ -331,6 +370,9 @@ func TestSinkScanLeavesAnUnderCapTargetAlone(t *testing.T) {
 	}
 	if string(got) != "{\"n\":1}\n" {
 		t.Fatalf("target = %q, want the record untouched", got)
+	}
+	if result.marked || s.rotatePending {
+		t.Fatalf("scan result = %+v and rotatePending = %v, want no roll below the cap", result, s.rotatePending)
 	}
 }
 

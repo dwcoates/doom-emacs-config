@@ -48,6 +48,9 @@ const (
 	ReasonBuildStale RelaunchReason = "build_stale"
 	// ReasonRestartVerb is an operator's RestartWorkspace.
 	ReasonRestartVerb RelaunchReason = "restart_verb"
+	// ReasonShimLogCeiling is dlog forcing a process roll after shim.log
+	// reached its hard ceiling.
+	ReasonShimLogCeiling RelaunchReason = "shim_log_hard_ceiling"
 )
 
 // Controller is the rollout surface.

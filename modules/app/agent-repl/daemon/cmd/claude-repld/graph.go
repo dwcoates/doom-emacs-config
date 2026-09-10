@@ -702,6 +702,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Background: []backgroundLoop{
 			{Name: "drain", Run: drainController.Run},
 			{Name: "command_file_ingress", Run: ingress.Run},
+			{Name: "shim_log_roll", Run: func(ctx context.Context) error {
+				return runShimLogRolls(ctx, p.Surfaces.ShimRollRequests(), p.DB, rolloutController)
+			}},
 		},
 		CloseWatchers: fleet.CloseWatchers,
 		DrainQueue:    queue.Drain,

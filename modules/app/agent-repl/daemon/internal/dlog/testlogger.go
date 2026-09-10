@@ -160,6 +160,10 @@ func (s *TestSurfaces) ShimSink(dir string) (Borrowed, error) {
 	return nil, fmt.Errorf("TestSurfaces has no shim sink to borrow for %q", dir)
 }
 
+// ShimRollRequests implements Surfaces. Test surfaces never own a real shim
+// target, so no hard-ceiling request can be emitted.
+func (s *TestSurfaces) ShimRollRequests() <-chan ShimRollRequest { return nil }
+
 // ClientLog implements Surfaces by capturing the call.
 func (s *TestSurfaces) ClientLog(dir string, record ClientRecord) error {
 	s.mu.Lock()
