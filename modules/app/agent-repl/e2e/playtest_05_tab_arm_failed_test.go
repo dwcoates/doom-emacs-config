@@ -390,12 +390,33 @@ func TestPlaytestTabArmMergingDoneParked(t *testing.T) {
 		func(r *frontendv1.WorkspaceRoster) bool {
 			return pt05RowClosedIn(r.GetRecentlyMerged().GetRows().GetRows(), landingRef.GetId())
 		})
+	// WHERE THE USER ENDS UP, ASSERTED. The merged child is the workspace the
+	// user was STANDING ON when the roster tore its tab down, so the teardown
+	// has to name where they land (`agent-repl--land-after-teardown`) and arm
+	// the survivor to show itself. Without that the frame kept whatever
+	// persp-mode dropped it in and the main area came up on the fallback
+	// buffer -- `*scratch*` under a lone tab, which is what the picture below
+	// showed before this was fixed and is indistinguishable from a wedged
+	// editor. The selected window's buffer is read back through the panel
+	// name's own identity segment (`agent-repl--extract-panel-id`), so the
+	// assertion is that the survivor's OWN panel is on the frame rather than
+	// merely that some buffer is.
+	e.AwaitEvalFor(pt05MergeLandBound, "the landing to put the surviving workspace's own panel in the selected window",
+		`(let ((name (buffer-name (window-buffer (selected-window)))))
+                   (or (agent-repl--extract-panel-id name) name))`,
+		func(raw json.RawMessage) bool {
+			var name string
+			return json.Unmarshal(raw, &name) == nil && name == main
+		})
 	p.capture("tab-bar-after-landing",
 		"the merge test gate opened, the tests passed, and the merge landed",
-		fmt.Sprintf("`agent-repl--ws-tabline-names` no longer carries %q, and the daemon's roster files its row closed under recently_merged", landing),
+		fmt.Sprintf("`agent-repl--ws-tabline-names` no longer carries %q, and the daemon's roster files its row closed "+
+			"under recently_merged; the selected window shows a panel of %q, read back through `agent-repl--extract-panel-id`", landing, main),
 		fmt.Sprintf("ONE tab only, the checkout's own %q. The merged child %q has NO tab: a landed merge "+
 			"closes the workspace and a closed row has no tab. Nothing is painted for a merge any "+
-			"more.", main, landing))
+			"more. The main area belongs to %q -- its own panel, NOT `*scratch*` or any other "+
+			"fallback buffer: the tab that vanished was the one the user was standing on, so the "+
+			"teardown landed them on the survivor and the survivor shows itself.", main, landing, main))
 
 	// ---- the merge that parks ----
 	parking := s.pt05CreateChild(t, label, "park")

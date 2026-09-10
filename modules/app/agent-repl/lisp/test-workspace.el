@@ -2259,6 +2259,74 @@ The screen must only demote names that could not be routed at all."
         ;; Assert
         (should (equal switched "keeper"))))))
 
+(ert-deftest agent-repl-test-land-after-teardown-skips-a-built-in-perspective ()
+  "Doom's startup `main' is not a landing: the user goes to a REAL workspace.
+`main' is auto-vivified into the registry by a persp hook, so it can lead
+`agent-repl--ws-list-names' and be picked ahead of every workspace this
+module owns -- and it has no panels, so the frame came up on the
+fallback buffer."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("main" "keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("main" "keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl--land-after-teardown "gone")
+        ;; Assert
+        (should (equal switched "keeper"))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-warns-when-only-built-ins-survive ()
+  "Built-in perspectives alone are NO survivor: there is nowhere to land, the
+frame keeps the fallback buffer, and that is reported rather than taken
+for a landing."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          (warnings nil)
+          switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "gone"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("none" "main")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("main")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (should-not (agent-repl--land-after-teardown "gone"))
+        ;; Assert
+        (should-not switched)
+        (should (seq-some (lambda (text)
+                            (string-search "NO surviving workspace to land in" text))
+                          warnings))))))
+
+(ert-deftest agent-repl-test-land-after-teardown-does-not-count-a-built-in-as-standing-somewhere ()
+  "Standing in `main' is standing in no workspace: the landing is still owed.
+Otherwise a teardown that dropped the user into Doom's startup perspective
+read as a landing already made and left them on an empty frame."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((persp-nil-name "none")
+          switched)
+      (cl-letf (((symbol-function 'agent-repl--ws-main-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () '("main" "keeper")))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () '("keeper")))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq switched ws))))
+        ;; Act
+        (agent-repl--land-after-teardown "gone")
+        ;; Assert
+        (should (equal switched "keeper"))))))
+
 (ert-deftest agent-repl-test-land-after-teardown-arms-the-landing-panels ()
   "The workspace landed on is armed to SHOW ITSELF on arrival.
 Without it the switch restores whatever window configuration persp-mode
