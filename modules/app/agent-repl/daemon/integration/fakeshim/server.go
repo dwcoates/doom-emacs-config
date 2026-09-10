@@ -118,6 +118,16 @@ type server struct {
 	// its own subscription, so each frame is delivered exactly once whether it
 	// was pushed before the stream opened or after.
 	bashLog map[string][]*conversationv1.AgentBash
+	// bashEndings is HOW EACH RUN ENDED, once it has: the terminal frame that
+	// was published for the handle.
+	//
+	// IT SURVIVES A STREAM DROP, unlike the log, because a redial does not
+	// un-end a run. The real shim answers WatchBash out of its store, which
+	// holds every row the run ever wrote, so a watch opened after the run
+	// finished is handed the ending; a fake that answered a bare `start`
+	// instead would report a finished command as one still going, and no test
+	// here could see the difference.
+	bashEndings map[string]*conversationv1.AgentBash
 
 	sessions            *hub[*conversationv1.SessionUpdate]
 	sessionStreamOpened bool
@@ -176,6 +186,7 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 		bashes:          newHub[bashFrame](),
 		answers:         map[string][]scriptedAnswer{},
 		bashLog:         map[string][]*conversationv1.AgentBash{},
+		bashEndings:     map[string]*conversationv1.AgentBash{},
 		bashStarts:      map[string]*conversationv1.AgentBash{},
 		openPermissions: map[string]openPermission{},
 		unhang:          make(chan struct{}),
@@ -849,6 +860,9 @@ func (s *server) publishBash(work string, bash *conversationv1.AgentBash) int {
 	s.bashMu.Lock()
 	defer s.bashMu.Unlock()
 	s.bashLog[work] = append(s.bashLog[work], bash)
+	if bashEnds(bash) {
+		s.bashEndings[work] = bash
+	}
 	s.bashes.publish(bashFrame{work: work, bash: bash})
 	return s.bashes.count()
 }
@@ -862,7 +876,32 @@ func (s *server) subscribeBash(work string) (int, chan bashFrame, []*conversatio
 	defer s.bashMu.Unlock()
 	id, ch := s.bashes.subscribe()
 	backlog := append([]*conversationv1.AgentBash(nil), s.bashLog[work]...)
+	// A RUN THAT HAS ENDED IS HANDED ITS ENDING, whatever the log still holds.
+	// The log is severed on a redial and the ending is not, so this is the one
+	// thing that keeps a reopened watch from reporting a finished command as
+	// one still going -- which is what the real shim's store-backed replay
+	// does. Appended only when the backlog does not already carry it, so no
+	// frame is ever sent twice.
+	if ending, ok := s.bashEndings[work]; ok && !endsWithTerminal(backlog) {
+		backlog = append(backlog, ending)
+	}
 	return id, ch, backlog
+}
+
+// bashEnds reports whether a frame is a run's TERMINAL: the two arms that
+// conclude it, and no other.
+func bashEnds(bash *conversationv1.AgentBash) bool {
+	return bash.GetSuccess() != nil || bash.GetFailure() != nil
+}
+
+// endsWithTerminal reports whether a backlog already concludes the run.
+func endsWithTerminal(backlog []*conversationv1.AgentBash) bool {
+	for _, bash := range backlog {
+		if bashEnds(bash) {
+			return true
+		}
+	}
+	return false
 }
 
 // dropBashStreams severs every open bash stream AND forgets what was pushed
@@ -870,6 +909,10 @@ func (s *server) subscribeBash(work string) (int, chan bashFrame, []*conversatio
 // a replay of the frames the severed stream already carried: handing it the
 // log again would feed the daemon the same deltas twice and read as a spool
 // gap.
+//
+// THE ENDINGS ARE NOT FORGOTTEN. A run that finished stays finished across a
+// redial, and the real shim's store says so to every watch opened afterwards;
+// dropping that here would make the fake report an ended command as live.
 func (s *server) dropBashStreams() {
 	s.bashMu.Lock()
 	defer s.bashMu.Unlock()

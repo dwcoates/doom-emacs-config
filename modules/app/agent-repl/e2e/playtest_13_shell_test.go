@@ -36,14 +36,17 @@ import (
 //     FeedShellExit), so `!bash-image` draws the picture and `!bash-fail`
 //     draws a red `exit 3`. Both were filed by this owner as proto needs and
 //     both landed; the rows below assert the landed shapes.
-//   - A TIMED-OUT COMMAND'S CARD DOES NOT SETTLE, AND THAT IS THE CONTRACT.
-//     The vendor auto-backgrounds rather than killing, so its receipt names a
-//     `backgroundTaskId` and the shim answers no terminal for it at all: "A
-//     BACKGROUNDED COMMAND DID NOT END, IT MOVED" (convert/tools/bash.ts),
-//     pinned by that module's own integration test. So `!bash-timeout` is
-//     photographed as the TWO rows it really is -- a `Bash` card still running
-//     and a detached shell row live beneath it -- and the remainder (the card
-//     has no arm that says the work MOVED) is filed rather than asserted.
+//   - A TIMED-OUT COMMAND'S CARD SAYS THE WORK MOVED. The vendor auto-
+//     backgrounds rather than killing, so its receipt names a
+//     `backgroundTaskId` and neither plane answers a terminal for it at all:
+//     "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" (convert/tools/bash.ts),
+//     pinned by that module's own integration test. This owner filed the
+//     remainder -- the card had no arm for it and sat on `running` forever
+//     above a row already reporting its own end -- and Landing 18 landed it as
+//     FeedSimpleToolCall's `moved` arm. So `!bash-timeout` is photographed as
+//     the TWO rows it really is, a `moved` Bash card and a live detached shell
+//     row beneath it, and the card reading `running` is now a FAILURE rather
+//     than a filing.
 
 // playtestBashCardJS answers the `.tool-card` of the Bash tool call whose
 // drawn text contains COMMAND, or null. Rows are matched by their command
@@ -202,27 +205,32 @@ func TestPlaytestShellFamily(t *testing.T) {
 					`(function () { var sh = `+playtestShellBubbleJS("sleep 600")+`;
 					               return sh.querySelector(".shell-spool") !== null &&
 					                      sh.querySelector(".shell-spool").textContent.indexOf("still going") >= 0; })()`)
-				s.awaitInPage(t, "the Bash card for sleep 600 to be STILL RUNNING, its work having moved rather than ended",
+				s.awaitInPage(t, "the Bash card for sleep 600 to say its work MOVED rather than ended",
 					`(function () { var card = `+playtestBashCardJS("sleep 600")+`;
-					               return card !== null && card.getAttribute("data-state") === "running"; })()`)
+					               return card !== null && card.getAttribute("data-state") === "moved"; })()`)
 			},
-			// THE CARD DOES NOT SETTLE, AND THAT IS THE CONTRACT. The receipt
-			// names a `backgroundTaskId`, so NEITHER plane answers a terminal
-			// for it -- "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" -- and
-			// the work goes on as the detached row above. The card staying
-			// `running` is the truth about the command; what it cannot say is
-			// that the run MOVED, which is filed.
-			settled: `card.getAttribute("data-state") === "running" &&
+			// THE CARD NEVER SETTLES AND NEVER RUNS ON. The receipt names a
+			// `backgroundTaskId`, so NEITHER plane answers a terminal for it --
+			// "A BACKGROUNDED COMMAND DID NOT END, IT MOVED" -- and the work
+			// goes on as the detached row above. The card said `running`
+			// forever over a row already reporting its own end until the
+			// `moved` arm existed to state where the work went (F43, filed
+			// 2026-09-09, landed as FeedToolCallMoved).
+			settled: `card.getAttribute("data-state") === "moved" &&
+			          card.getAttribute("data-state") !== "running" &&
+			          card.querySelector(".tool-output") === null &&
 			          (function () { var sh = ` + playtestShellBubbleJS("sleep 600") + `;
 			                         return sh !== null && sh.getAttribute("data-state") === "live" &&
 			                                sh.querySelector(".shell-exit") === null &&
 			                                sh.querySelector(".shell-spool").textContent.indexOf("still going") >= 0; })()`,
 			expected: "TWO ROWS FOR ONE COMMAND, and the picture must show both. The `Bash` tool card for " +
-				"`sleep 600` is still drawn RUNNING -- a running marker, no badge, no output body -- and " +
+				"`sleep 600` reads MOVED -- a muted `moved` badge, no verdict tone, no output body -- and " +
 				"beneath it a DETACHED SHELL row for the same command is LIVE: a `$` command line, a running " +
 				"dot, a ticking clock, a spool box carrying `still going`, a stop button, and NO exit chip. " +
 				"The vendor auto-backgrounded the run rather than killing it, so the command really is still " +
-				"going; the card simply has no way to say the work moved.",
+				"going, and the card says exactly that: the work left, and the row beneath it is where it " +
+				"finishes. The card must NOT read `running`: that is the F43 defect, a spinner over a row " +
+				"that had already reported `exit 0`.",
 		},
 		{
 			prompt:  "!bash-spill",

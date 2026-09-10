@@ -263,3 +263,65 @@ func TestPushedUserPromptRendersTheUserPromptArm(t *testing.T) {
 		t.Fatalf("entry = %T, want the user_prompt arm carrying turn-1", entry.GetEntry())
 	}
 }
+
+// A RUN THAT ENDED STAYS ENDED, and the real shim says so to every watch
+// opened afterwards -- it answers WatchBash out of a store holding every row
+// the run ever wrote. A fake that forgot the ending on a redial would report a
+// finished command as one still going, and no daemon test could see the
+// difference.
+
+// endedRun publishes a run's terminal frame for a work handle.
+func endedRun(srv *server, work string) {
+	srv.publishBash(work, &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
+		Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "make"},
+		},
+	}})
+}
+
+func TestAWatchOpenedAfterARedialIsStillHandedTheRunsEnding(t *testing.T) {
+	// Arrange: a run that ended, and a redial that severed its stream.
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	endedRun(srv, "work-1")
+	srv.dropBashStreams()
+
+	// Act
+	_, _, backlog := srv.subscribeBash("work-1")
+
+	// Assert
+	if len(backlog) != 1 || backlog[0].GetSuccess() == nil {
+		t.Fatalf("backlog = %v, want the run's remembered ending", backlog)
+	}
+}
+
+func TestARunsEndingIsNotHandedTwiceToAWatchTheLogAlreadyAnswers(t *testing.T) {
+	// Arrange: no redial, so the log itself still carries the terminal.
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	endedRun(srv, "work-1")
+
+	// Act
+	_, _, backlog := srv.subscribeBash("work-1")
+
+	// Assert
+	if len(backlog) != 1 {
+		t.Fatalf("backlog = %d frames, want the terminal exactly once", len(backlog))
+	}
+}
+
+func TestAWatchOnARunThatIsStillGoingIsHandedNoEnding(t *testing.T) {
+	// Arrange: output, and no terminal. Inventing one would settle a run that
+	// has not finished.
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
+		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n"},
+	}})
+	srv.dropBashStreams()
+
+	// Act
+	_, _, backlog := srv.subscribeBash("work-1")
+
+	// Assert
+	if len(backlog) != 0 {
+		t.Fatalf("backlog = %v, want nothing for a run that has not ended", backlog)
+	}
+}
