@@ -343,6 +343,33 @@ func TestARemovedTreeDrawsTheDiscardLineLoudWhenAnythingWasDiscarded(t *testing.
 	}
 }
 
+func TestASingleDiscardedFileAndCommitAreNamedInTheSingular(t *testing.T) {
+	// Arrange, Act: the fake's `!worktree-remove` discards exactly one commit,
+	// and the playtest photographed the line reading "1 commits discarded".
+	h := newHarness(t)
+	files, commits := uint32(1), uint32(1)
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "unit-1"},
+		Item: &conversationv1.AgentActivity_Worktree{Worktree: &conversationv1.AgentWorktree{
+			State: &conversationv1.AgentWorktree_Success{Success: &conversationv1.AgentWorktreeSuccess{
+				Act: &conversationv1.AgentWorktreeSuccess_Exited{Exited: &conversationv1.AgentWorktreeExited{
+					Outcome: &conversationv1.AgentWorktreeExited_Removed{
+						Removed: &conversationv1.AgentWorktreeRemoved{
+							DiscardedFiles: &files, DiscardedCommits: &commits,
+						},
+					},
+				}},
+			}},
+		}},
+	})
+
+	// Assert.
+	got := h.separationRow().GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded().GetText()
+	if got != "1 file, 1 commit discarded" {
+		t.Fatalf("discard line = %q", got)
+	}
+}
+
 func TestARemovedTreeWithNoStatedDiscardDrawsTheLabelAlone(t *testing.T) {
 	// Arrange, Act: an UNSET figure is not zero.
 	h := newHarness(t)
