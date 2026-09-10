@@ -57,9 +57,13 @@ central records or every daemon-known workspace; includes all retained
 generations; merges records by timestamp; filters by time, minimum level, and
 runtime; follows active current generations; and emits either compact local
 time lines or original JSONL. A malformed selected line is reported with its
-file and line number and aborts the read. `--harvest <from> <to>` reads every
-workspace and central sink and groups every warning and error by workspace ID
-and directory, level, runtime, operation, and message.
+file and line number and aborts the read. An absent or unreadable sink and a
+workspace sink that is not a symlink are findings rather than read failures:
+the reader reports each one, continues through every other sink, and exits
+nonzero only when no selected sink can be read. `--harvest <from> <to>` reads
+every workspace and central sink and groups every warning, error, and sink
+finding by workspace ID and directory, level, runtime, operation, and message.
+Other modes summarize sink findings on stderr.
 
 `scripts/agent-repl-log-discovery.sh` remains the focused identity and latency
 diagnostic for callers that need its session, process, span, or gap queries;
