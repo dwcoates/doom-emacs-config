@@ -252,14 +252,13 @@ func TestHookCancelled(t *testing.T) {
 		t.Fatalf("feed drew a hook card %v for a CANCELLED hook, want none", h)
 	}
 	// The only remaining proof the hook fired and was cancelled is the
-	// shim's own durable structured log (convert/hooks.ts:
-	// `LOGGER.log({level:"warn", hook_id}, "a hook was cancelled before it
-	// finished")`).
+	// shim's own durable structured log. Cancellation is an ordinary vendor
+	// outcome, so convert/hooks.ts records it at INFO rather than WARN.
 	record := w.AwaitLogRecord(harness.WorkspaceLogPath(repo.Dir, "shim"), "the cancelled hook's own log record",
 		func(r harness.LogRecord) bool {
 			return r.Operation == "shim.convert.hooks" && r.Message == "a hook was cancelled before it finished"
 		})
-	if got, want := record.Level, "warn"; got != want {
+	if got, want := record.Level, "info"; got != want {
 		t.Fatalf("cancelled-hook log level = %q, want %q", got, want)
 	}
 }
