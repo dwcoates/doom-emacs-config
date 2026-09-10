@@ -5257,10 +5257,21 @@ body.draining #composer-input::placeholder {
   color: var(--thinking);
 }
 
+/* THE SESSION LINE WRAPS, AND THAT IS WHAT PUTS THE MODEL ON THE GLASS. The
+   line is `<session id> · <account root> · <model>` composed by the daemon, and
+   the panel holding it is capped at `min(90vw, 32rem)`; drawn `nowrap` it ran
+   past that cap and the MODEL -- the last segment, and the one a reader opens
+   this reveal to check -- was cut off the right edge in every capture. The
+   reveal is a panel and not a strip cell, so it has a second axis to spend: the
+   line takes as many rows as it needs and the panel grows down within the
+   clamp's max-height. `anywhere` because a session id and a checkout path carry
+   no spaces of their own, so a segment longer than the panel must be allowed to
+   break inside itself rather than force the panel wider than its cap. */
 .topbar-session-line {
   padding: 0.35rem 0.6rem;
   color: var(--muted);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* The connectivity glyph is a different CHARACTER per state and those
