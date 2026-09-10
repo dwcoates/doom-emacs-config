@@ -300,9 +300,10 @@ func TestPlaytestAutomation(t *testing.T) {
 			predicate: `document.querySelector('.footer-chip[data-chip="monitors"]') !== null &&
 			            parseInt(document.querySelector('.footer-chip[data-chip="monitors"]').textContent.replace(/[^0-9]/g, ""), 10) >= 1`,
 			asserted: "the footer's ◉ monitors chip is drawn with a count of at least one, the deadline monitor still being live after the turn",
-			expected: "The footer's right-hand chips now carry a ◉ MONITORS chip with a count of 1. The feed shows " +
-				"the prompt bubble and the response `Monitoring until the deadline.` and no monitor card, " +
-				"since a monitor lives in the footer rather than the feed.",
+			expected: "The footer's right-hand chips now carry a ◉ MONITORS chip with a count of 1, and its status " +
+				"cell has turned from idle to BACKGROUND. The feed shows the prompt bubble and the response " +
+				"`Monitoring until the deadline.` and no monitor card, since a monitor lives in the footer " +
+				"rather than the feed.",
 		},
 		{
 			name:   "monitor-persistent",
