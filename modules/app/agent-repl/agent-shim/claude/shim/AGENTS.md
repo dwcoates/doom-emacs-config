@@ -518,6 +518,19 @@ way a refusal does.
   - The empty-book refusal in `watchAgent` also stays, for a store that serves
     an empty page instead of refusing. Retire both — and `knowsAgent` with them
     — only once an id's existence is answerable without the producer.
+- **A TAIL'S CONCLUSION ASKS "HAVE I SERVED THIS POINTER", AND THE ANSWER IS A
+  SET, NEVER THE LAST POINTER.** The teardown concludes every open `WatchAgent`
+  tail through its book's HEAD and waits, bounded by
+  `WATCHER_CONCLUSION_BUDGET_MS`. The store streams an UPSERT of an old row at
+  its ORIGINAL pointer, so the newest pointer a tail has handed over walks
+  BACKWARD whenever a line already read past is updated — and a conclusion
+  through the head then named a row that went out earlier and will never be sent
+  again. The tail stood on it and `KillSession` spent the whole budget. Both the
+  real session and the deferred wrapper keep the set of pointers they served;
+  a pointer names a POSITION and an upsert reuses it, so the set is bounded by
+  the book's LINES, not by the frames written to them. The pointers stay
+  OPAQUE — the shim compares them, never parses them, so there is no "newer
+  than" to lean on.
 
 ## Verification
 

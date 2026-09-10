@@ -353,6 +353,42 @@ describe("the tail", () => {
     ).resolves.toBe("settled");
   });
 
+  it("ends when the head was served before an upsert of an older row", async () => {
+    // AN UPSERT OF AN OLD ROW ARRIVES AT ITS ORIGINAL POINTER, which is older
+    // than the head the tail already served -- so the newest pointer handed
+    // over walks BACKWARD, and a conclusion through the head matched nothing.
+    // The tail then stood for a row that will never be sent again and the
+    // shim's KillSession spent its whole conclusion budget on it.
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () =>
+        opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH),
+      watchAgentSession: () =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+        ]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    const upsert = await iterator.next();
+    expect(unitOf(upsert.value as conversationv1.HistoryEntryAt)).toBe("unit-a");
+
+    // Act.
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
+
+    // Assert.
+    await expect(
+      Promise.race([
+        iterator.next().then(() => "settled"),
+        // A HANG guard, not the mechanism of success. It is counted in
+        // MACROTASK TICKS rather than milliseconds on purpose: a wall-clock
+        // guard races the settle, so under machine load the guard can win and
+        // report a hang that never happened. A tick budget cannot.
+        hangGuard(),
+      ]),
+    ).resolves.toBe("settled");
+  });
+
   it("concludeThrough(undefined) ends the tail at once, with nothing left to wait for", async () => {
     const { plane } = await seeded("tail-conclude-unbounded", 1);
     const session = await plane.openAgentPage(BOOK, 10);
@@ -1551,6 +1587,47 @@ describe("the deferred book's own waiting", () => {
 
     // Assert. The row it waited for is delivered, and then the stream ends.
     expect(served).toEqual(["unit-a"]);
+  });
+
+  it("ends a deferred book's tail on a head served before an upsert of an older row", async () => {
+    // THE SAME BACKWARD WALK, through the wrapper. Its opening page is empty, so
+    // the rows that landed while it waited go out of the REAL session's page --
+    // and an upsert arriving after them names an OLDER position, which is what
+    // a last-pointer mark mistakes for "the head has not been served".
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens === 1
+          ? refusingOpen()
+          : opened(floorPage([storedLine("2", "unit-b"), storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () =>
+        standingWatch([
+          create(storev1.WatchAgentSessionResponseSchema, { line: storedLine("1", "unit-a") }),
+        ]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    await iterator.next();
+    await iterator.next();
+    await iterator.next();
+
+    // Act. The head went out first; the upsert of the older row went out last.
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "2" }));
+
+    // Assert.
+    await expect(
+      Promise.race([
+        iterator.next().then(() => "settled"),
+        // A HANG guard, not the mechanism of success. It is counted in
+        // MACROTASK TICKS rather than milliseconds on purpose: a wall-clock
+        // guard races the settle, so under machine load the guard can win and
+        // report a hang that never happened. A tick budget cannot.
+        hangGuard(),
+      ]),
+    ).resolves.toBe("settled");
   });
 
   it("passes a later conclusion through to the session it already opened", async () => {
