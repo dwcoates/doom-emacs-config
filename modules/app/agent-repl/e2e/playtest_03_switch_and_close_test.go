@@ -306,9 +306,9 @@ func barFaceColors(t *testing.T, s *playtestScenario) string {
 	t.Helper()
 	parts := s.E.EvalStrings(`(list (format "%s" (face-background 'default nil t))
                                     (format "%s" (face-background 'agent-repl-tab-unarmed nil t))
-                                    (format "%s" (face-foreground 'agent-repl-tab-unarmed nil t))
+                                    (format "%s" (agent-repl--tab-bar-legible-fg))
                                     (format "%s" (face-background (agent-repl--ws-tab-selected-face) nil t))
-                                    (format "%s" (face-background 'tab-bar nil t)))`)
+                                    (format "%s" (agent-repl--tab-bar-background)))`)
 	if len(parts) != 5 {
 		t.Fatalf("reading the bar's face colors answered %v, want default, the un-armed pair, the "+
 			"selected tab face and `tab-bar`", parts)
@@ -360,10 +360,17 @@ func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after st
 // THE BAR MUST BE READABLE, AND THAT IS READ OFF THE PICTURE
 // ---------------------------------------------------------------------------
 
-// assertTabBarLegible requires the un-armed tab's STATED pair of colors --
-// `agent-repl-tab-unarmed`'s own foreground and background -- to clear
-// `agent-repl-tab-contrast-floor` by the module's own arithmetic, and to
-// actually be the colors on the glass in the picture just taken.
+// assertTabBarLegible requires the un-armed tab's pair of colors -- the TAB
+// BAR's own background, and the foreground the module chooses against it --
+// to clear `agent-repl-tab-contrast-floor` by the module's own arithmetic,
+// and to actually be the colors on the glass in the picture just taken.
+//
+// THE GROUND IS THE BAR'S, and that is the reference this reads. An
+// unselected tab sits flush on the bar it lives in, so its background is not
+// a color of its own to look up: it is whatever `tab-bar` resolves to on this
+// frame, read here through `agent-repl--tab-bar-background` -- the same
+// reader the renderer uses, so the picture is measured against the bar rather
+// than against a literal that would be right on one theme.
 //
 // WHY THE ASSERTION IS SHAPED THIS WAY. The defect it exists for was not a
 // pair that was too close together; it was NO PAIR AT ALL. An un-armed tab
@@ -380,11 +387,19 @@ func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after st
 //     module's own answer, against the module's own floor. Nothing is
 //     restated here, so this cannot drift from what `lisp/test-status.el`
 //     holds the palette to.
-//   - DID THAT PAIR REACH THE GLASS? The stated background must cover a
-//     tab-sized field of the tab-bar band, and the stated foreground must be
-//     drawn on it. A face whose colors are right and whose pixels are some
-//     other pair is the display failing to take a string that was correct,
-//     which is the OTHER half of the split `tabPaintSentence` sets up.
+//   - DID THAT PAIR REACH THE GLASS? The bar's background must cover a
+//     tab-sized field of the tab-bar band, and the chosen foreground must be
+//     drawn ON that ground. A pair whose colors are right and whose pixels
+//     are some other pair is the display failing to take a string that was
+//     correct, which is the OTHER half of the split `tabPaintSentence` sets
+//     up.
+//
+// WHAT MOVED WHEN THE TAB WENT FLUSH. The field the ground covers is no
+// longer one tab's worth: the bar's own band is painted that color end to
+// end, and an unselected tab adds no second ground to it. So the INK is what
+// carries the assertion now -- text in the chosen foreground, standing in the
+// bar's ground -- and the field check survives as the cheaper statement that
+// the bar is painted the color Emacs says it is at all.
 //
 // IT IS NOT A HEURISTIC OVER GLYPH PIXELS, and that was tried first: reading
 // the "best contrast any ink achieves on each ground" catches the defect, but
@@ -419,15 +434,25 @@ func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, cap
 	answer := s.E.EvalStrings(`(let* ((hex (lambda (c)
                                             (apply #'format "#%02x%02x%02x"
                                                    (mapcar (lambda (v) (/ v 256)) (color-values c)))))
-                                     (fg (face-foreground 'agent-repl-tab-unarmed nil t))
-                                     (bg (face-background 'agent-repl-tab-unarmed nil t)))
+                                     (bg (agent-repl--tab-bar-background))
+                                     (fg (agent-repl--tab-bar-legible-fg bg)))
                                 (list (funcall hex fg)
                                       (funcall hex bg)
                                       (format "%.4f" (agent-repl-color-contrast-ratio fg bg))
-                                      (format "%s" agent-repl-tab-contrast-floor)))`)
-	if len(answer) != 4 {
-		t.Fatalf("capture %s: reading the un-armed pair answered %v, want its foreground, its "+
-			"background, their ratio and the floor", capture, answer)
+                                      (format "%s" agent-repl-tab-contrast-floor)
+                                      (funcall hex (face-background 'agent-repl-tab-unarmed nil t))))`)
+	if len(answer) != 5 {
+		t.Fatalf("capture %s: reading the un-armed pair answered %v, want its foreground, the bar's "+
+			"background, their ratio, the floor and the face's own resolved ground", capture, answer)
+	}
+	// THE FACE'S GROUND IS THE BAR'S GROUND. `agent-repl-tab-unarmed` inherits
+	// `tab-bar` for exactly this, and a face that had drifted off the bar would
+	// draw the tab on a ground the picture is not being measured against --
+	// every assertion below would then be reading the wrong color and passing.
+	if answer[4] != answer[1] {
+		t.Fatalf("capture %s: `agent-repl-tab-unarmed` resolves its background to %s while the tab "+
+			"bar's own is %s. An unselected tab sits FLUSH on the bar, so the face has to inherit "+
+			"the bar's ground rather than paint one of its own.", capture, answer[4], answer[1])
 	}
 	fg, bg := mustParseHexColor(t, answer[0]), mustParseHexColor(t, answer[1])
 	ratio, err := strconv.ParseFloat(answer[2], 64)
@@ -441,10 +466,11 @@ func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, cap
 			capture, answer[3], err)
 	}
 	if ratio < floor {
-		t.Fatalf("capture %s: the un-armed tab's own pair, %s on %s, is %.2f:1 -- under the %.2f:1 "+
-			"floor `agent-repl-tab-contrast-floor` states. Every appearance in "+
-			"`agent-repl--tab-palette` states a foreground legible against its background.",
-			capture, answer[0], answer[1], ratio, floor)
+		t.Fatalf("capture %s: the un-armed tab's pair, %s on the bar's own %s, is %.2f:1 -- under "+
+			"the %.2f:1 floor `agent-repl-tab-contrast-floor` states. "+
+			"`agent-repl--tab-bar-legible-fg` picks whichever of the palette's two foregrounds can "+
+			"be read on the bar, so a pair under the floor means the bar is a color neither of them "+
+			"clears.", capture, answer[0], answer[1], ratio, floor)
 	}
 
 	band := s.E.EvalInt(`(tab-bar-height nil t)`)
@@ -464,8 +490,9 @@ func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, cap
 				field++
 			case fg:
 				// INK ONLY WHERE IT SITS ON THAT GROUND. The same foreground
-				// is drawn elsewhere on the bar, so a count of the color
-				// alone would not say the un-armed TAB carried any text.
+				// is drawn elsewhere -- on the SELECTED tab's own grey, for
+				// one -- so a count of the color alone would not say anything
+				// was drawn on the BAR.
 				//
 				// THE NEAREST GROUND ALONG THE ROW, not the pixel next door:
 				// a glyph's stroke is separated from the ground it sits on by
@@ -479,14 +506,14 @@ func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, cap
 		}
 	}
 	if field < playtestTabBarFieldArea {
-		t.Errorf("capture %s: the un-armed tab's stated background %s covers %d pixels of the "+
-			"%d-pixel tab bar band, want at least %d. The module says an un-armed tab is drawn in "+
-			"that color, and the glass says it is not: the string was right and the display did "+
-			"not take it.", capture, answer[1], field, band, playtestTabBarFieldArea)
+		t.Errorf("capture %s: the tab bar's own background %s covers %d pixels of the %d-pixel tab "+
+			"bar band, want at least %d. Emacs says the bar is that color and an unselected tab is "+
+			"drawn flush on it, and the glass says it is not: the string was right and the display "+
+			"did not take it.", capture, answer[1], field, band, playtestTabBarFieldArea)
 	}
 	if ink == 0 {
-		t.Errorf("capture %s: not one pixel of the un-armed tab's stated foreground %s is drawn on "+
-			"its stated background %s, so the tab carries no readable text at all in this picture",
+		t.Errorf("capture %s: not one pixel of the un-armed tab's foreground %s is drawn on the "+
+			"bar's own background %s, so the tab carries no readable text at all in this picture",
 			capture, answer[0], answer[1])
 	}
 }
@@ -547,13 +574,19 @@ func isFlatNeighbourhood(img *image.RGBA, x, y int) bool {
 // narrowest is over 90 pixels.
 const playtestGlyphBlendReach = 12
 
-// playtestTabBarFieldArea is how many pixels of the tab-bar band the un-armed
-// tab's own background must cover before the tab counts as DRAWN.
+// playtestTabBarFieldArea is how many pixels of the tab-bar band the BAR's own
+// background must cover before the bar counts as painted.
 //
-// MEASURED, not chosen: on this frame one tab of a two-tab bar covers about
-// 1,500 pixels of the band, and the largest run of glyph ink covers under
-// 300. 600 sits between the two populations by more than a factor of two on
-// either side, so it separates them rather than cutting through one.
+// MEASURED, not chosen: on this frame one tab of a two-tab bar covered about
+// 1,500 pixels of the band back when a tab painted a ground of its own, and
+// the largest run of glyph ink covers under 300. 600 sits between the two
+// populations by more than a factor of two on either side, so it separates
+// them rather than cutting through one.
+//
+// It is a LOWER bound and stays honest now that the ground is the bar's: the
+// band is that color everywhere no tab or glyph covers, which is far more
+// than 600 pixels, so this catches only the case where the bar is not painted
+// what Emacs says it is at all.
 const playtestTabBarFieldArea = 600
 
 // pixelAt answers the picture's color at one point, alpha discarded, so two
