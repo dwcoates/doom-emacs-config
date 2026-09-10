@@ -200,6 +200,19 @@ describe("the activity cell", () => {
     expect(harness.text(".footer-activity")).toContain("the agent addressed you");
   });
 
+  // THE SENTENCE, NOT MERELY THE ARM. The table above pins `data-arm` for every
+  // status/activity pair, which a build that drew an empty cell would still
+  // satisfy. This is the dead-query line specifically, and it is drawn under
+  // `vendorError` on purpose: the death is a SESSION fact and the daemon draws
+  // it under whichever blocked step is standing, so the client must not tie the
+  // sentence to the query_died STEP either.
+  it("draws the dead-query sentence under a blocked step that is not query_died", async () => {
+    // Arrange / Act
+    await withFooter({ status: "blocked", substatus: "vendorError", activity: "queryDied" });
+    // Assert
+    expect(harness.text(".footer-activity")).toContain("the vendor query died");
+  });
+
   it("draws the hook's own name verbatim", async () => {
     // Arrange / Act
     await withFooter({ status: "thinking", activity: "hook" });
