@@ -50,7 +50,7 @@ func (r *resolver) accountingWarning(s *wsState) (warning, bool) {
 	// ordinary prose turn, whose usage rode the thinking unit that opened the
 	// response, would warn that its one response is missing usage.
 	var lines []string
-	missing := unaccountedResponses(s)
+	missing := s.responses.Unaccounted()
 	switch {
 	case len(s.contradictions) > 0:
 		lines = append([]string(nil), s.contradictions...)
