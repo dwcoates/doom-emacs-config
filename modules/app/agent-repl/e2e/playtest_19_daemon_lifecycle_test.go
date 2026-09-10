@@ -291,19 +291,25 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 	// which is the order every multi-workspace playbook here uses:
 	// registering SELECTS, so a panel opened after both registrations would
 	// be opened on the workspace this playbook does not act on.
-	firstRepo := s.repoAt(t, "repo-one")
-	first := s.register(t, firstRepo.Dir)
+	first := s.register(t, s.repoAt(t, "repo-one").Dir)
 	s.openPanel(t)
 	second := s.register(t, s.repoAt(t, "repo-two").Dir)
 	e.AwaitEval("the second workspace to become the selected one on registration",
 		`(format "%s" (agent-repl--ws-current-name))`,
 		func(raw json.RawMessage) bool { return decodeString(raw) == second })
 	// And the selection is put back on the workspace whose panel is open, so
-	// the picture below is of the page this playbook drove.
-	e.Eval(`(agent-repl-switch-to-project ` + elispString(firstRepo.Dir) + `)`)
-	e.AwaitEval("the first workspace to be selected again, with its panel open",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == first })
+	// the pictures below are of the page this playbook drove.
+	//
+	// THROUGH THE WORKSPACE PICKER, NOT THE PROJECT ROOT, and that is a
+	// measured difference rather than a preference. `agent-repl-switch-to-project`
+	// given a project root goes through `projectile-switch-project-by-name`
+	// and then opens that project's most recent file, which under Doom lands
+	// a `*magit: ...*` status buffer in the window the panel was in -- the
+	// `daemon-back` capture of the first run of this playbook is a picture of
+	// magit with no webapp in it at all. With NO argument the command
+	// completes over `agent-repl--live-ws-names` and switches by WORKSPACE
+	// NAME, which moves the selection and touches no window.
+	playtestSwitchToWorkspace(t, s, first)
 
 	// A REAL TURN FIRST, so the tabs this step takes down are tabs that were
 	// serving. A stop against a world where nothing ever ran would make the
@@ -377,6 +383,13 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 	e.AwaitEval("the tab bar to carry both workspaces again on the fresh daemon",
 		emHOTabBarNamesForm,
 		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 2 })
+	// AND THE PAGE IS SERVING AGAIN, asserted rather than left to the
+	// picture: the webview was pointed at the daemon that exited, so a page
+	// that never came back would leave the failure card standing under a tab
+	// bar that had healed without it.
+	s.awaitPageMounted(t)
+	s.awaitInPage(t, "the webapp's failure overlay to be carrying nothing again",
+		`document.querySelector('[data-component="failure-overlay"]').hasAttribute("data-empty")`)
 	p.capture("daemon-back",
 		"`agent-repl-frontend-daemon-ensure` -- a fresh daemon launched and adopted",
 		fmt.Sprintf("a NEW daemon pid is live (the old one was %d), `agent-repl-link-up-p` is non-nil, the reconnect "+
@@ -632,16 +645,7 @@ func TestPlaytestHandoverKeepsTheTabsAndReconnects(t *testing.T) {
 	// WORKSPACE NAME, which is the roster's own vocabulary and the one this
 	// playbook has. So the binding is asserted and the picker is answered,
 	// which is how every prompting verb is driven here.
-	if want, got := "agent-repl-switch-to-project", e.LeaderBinding("p p"); got != want {
-		t.Fatalf("SPC p p resolves to %q, want %q", got, want)
-	}
-	e.Eval(`(cl-letf (((symbol-function 'completing-read)
-                        (lambda (&rest _) ` + elispString(play) + `)))
-              (agent-repl-switch-to-project)
-              t)`)
-	e.AwaitEval("the play workspace to be the selected one again",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == play })
+	playtestSwitchToWorkspace(t, s, play)
 
 	tabsBefore := s.tabNames()
 	if len(tabsBefore) < 3 {
@@ -811,4 +815,26 @@ func playtestWithout(xs []string, except string) []string {
 		}
 	}
 	return out
+}
+
+// playtestSwitchToWorkspace moves the selection to WS through the ordinary
+// workspace picker, asserting the binding it lives on first.
+//
+// `SPC p p` is `agent-repl-switch-to-project`, whose NO-ARGUMENT form
+// completes over the live workspace names and switches by name. The
+// PROJECT-ROOT form of the same command is a different act -- it switches
+// projectile and then opens that project's most recent file -- so a playbook
+// that only wants the selection moved must take the picker.
+func playtestSwitchToWorkspace(t *testing.T, s *playtestScenario, ws string) {
+	t.Helper()
+	if want, got := "agent-repl-switch-to-project", s.E.LeaderBinding("p p"); got != want {
+		t.Fatalf("SPC p p resolves to %q, want %q", got, want)
+	}
+	s.E.Eval(`(cl-letf (((symbol-function 'completing-read)
+                          (lambda (&rest _) ` + elispString(ws) + `)))
+                (agent-repl-switch-to-project)
+                t)`)
+	s.E.AwaitEval("the selection to move to "+ws,
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == ws })
 }

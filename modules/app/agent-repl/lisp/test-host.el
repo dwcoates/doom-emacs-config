@@ -1331,6 +1331,54 @@ neither the dedup nor the self-reference swallows the second one."
       (should (equal (plist-get (agent-repl-host-stream "ws-1") :ref)
                      (agent-repl-test-host--ref))))))
 
+(ert-deftest agent-repl-test-host-link-up-repoints-the-webview-at-the-new-daemon ()
+  "A daemon Emacs relaunches listens on a FRESH PORT, so the page must move.
+
+Without this the tab bar healed, the roster came back and the composer
+worked while the webview went on dialing a daemon that had exited, and
+the page drew a permanent `daemonUnreachable\=' card over its last feed.
+The reload is what re-points it, and it must see the NEW connection —
+frontend.el derives the page url from `agent-repl-host-conn\='."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) "/tmp/ws-1")))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (equal (assq :reload agent-repl-test-host--effects) '(:reload . "ws-1")))
+      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects)) conn)))))
+
+(ert-deftest agent-repl-test-host-link-up-repoints-after-subscribing ()
+  "The reload comes AFTER the subscribe, which is what moved `:conn'.
+Reloading first would navigate the page at the daemon that just died."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) "/tmp/ws-1")))
+        (setq agent-repl-test-host--walk nil)
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (let ((walk (reverse agent-repl-test-host--walk)))
+        (should (< (seq-position walk :subscribe) (seq-position walk :reload)))))))
+
+(ert-deftest agent-repl-test-host-link-up-register-failure-repoints-nothing ()
+  "A workspace the new daemon would not register is not re-pointed at it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-test-host--register-answer
+            (list :response (list :arm :error :value (list :message "no"))))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
+                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) "/tmp/ws-1")))
+        ;; Act
+        (agent-repl-host-on-link-up conn))
+      ;; Assert
+      (should (null (assq :reload agent-repl-test-host--effects))))))
+
 (ert-deftest agent-repl-test-host-link-up-skips-a-workspace-with-no-dir ()
   "A workspace with no directory has nothing to register."
   (agent-repl-test-host--with-harness
