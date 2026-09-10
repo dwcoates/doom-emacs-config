@@ -356,6 +356,24 @@ func barFaceColors(t *testing.T, s *playtestScenario) string {
 // over a tab-sized area are decided by the palette, not by the rasterizer.
 func assertTabBarLegible(t *testing.T, s *playtestScenario, img *image.RGBA, capture string) {
 	t.Helper()
+	// THERE HAS TO BE AN UN-ARMED TAB TO READ. A bar whose every tab is the
+	// selected one draws none of this pair -- the selected tab takes Doom's
+	// own selection face, which is not this module's palette -- so there is
+	// nothing here to be right or wrong about. It is SAID rather than passed
+	// over quietly: a check that silently stopped applying is how a suite
+	// comes to assert nothing while still going green.
+	names, current := s.tabNames(), s.E.EvalString(`(format "%s" (agent-repl--ws-current-name))`)
+	unselected := 0
+	for _, name := range names {
+		if name != current {
+			unselected++
+		}
+	}
+	if unselected == 0 {
+		t.Logf("capture %s: the bar carries %d tab(s), all selected (%q), so it draws no un-armed tab "+
+			"and this legibility check has nothing to read", capture, len(names), current)
+		return
+	}
 	// EVERY NUMBER HERE IS THE MODULE'S. The pair, the ratio it makes and the
 	// floor it is held to all come back from Emacs; this file supplies only
 	// the picture.
@@ -689,6 +707,99 @@ func TestPlaytestCloseAndKillLeaveTheEditorAnswering(t *testing.T) {
 		`(and (emacs-pid) t)`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 	p.note("Emacs probed for liveness after the close",
+		"the command loop still answers, and the heartbeat has not missed for the whole run")
+}
+
+// TestPlaytestClosingATabLandsOnALivePanel is plan A.9's close in the
+// configuration the close above cannot reach: one where a workspace SURVIVES
+// it.
+//
+// WHAT THE CLOSE ABOVE CANNOT SAY. It registers one workspace and closes it,
+// so nothing survives and there is nowhere to land -- which is a real case,
+// and it is the one where a bare frame is correct. The case a user is
+// actually in is the other one: they close a tab and are moved to another
+// workspace, and what they must arrive at is that workspace.
+//
+// THE DEFECT THIS WAS WRITTEN FOR. Landing switched the perspective and
+// stopped there, so the frame restored whatever window configuration
+// persp-mode had saved for the survivor -- and for a workspace nobody had
+// stood in since its panel was pre-created, that was nothing. The frame came
+// up EMPTY: one window, no buffer content, not even a mode line, with only
+// the tab bar to say anything had happened. Photographed by owner 5 after a
+// merged child's teardown, and indistinguishable from a wedged editor.
+//
+// THE ASSERTIONS ARE THE ONES THE REST OF THIS FILE ALREADY MAKES, plus the
+// one that names the emptiness: `awaitPanelShown` says the survivor's own
+// webview and composer are in windows of the frame, and the selected window
+// is required to be showing one of them. A frame with a single window holding
+// something else is exactly the picture that was filed.
+func TestPlaytestClosingATabLandsOnALivePanel(t *testing.T) {
+	t.Parallel()
+	s := newPlaytestScenario(t, "03-close-lands",
+		"Plan A.9's close WITH A SURVIVOR. Closing a tab moves the user to another workspace, and "+
+			"what they arrive at is that workspace's panel -- never a bare frame.")
+	p, e := s.Book, s.E
+
+	survivor := s.repoAt(t, "repo-survivor")
+	survivorName := s.register(t, survivor.Dir)
+	s.openPanel(t)
+	awaitPanelShown(t, s, survivorName)
+
+	// THE ONE THAT WILL BE CLOSED IS REGISTERED SECOND, so it is the selected
+	// workspace and closing it is closing the tab the user is standing in --
+	// which is the configuration that has somewhere to land FROM.
+	doomed := s.repoAt(t, "repo-doomed")
+	doomedName := s.register(t, doomed.Dir)
+	e.AwaitEval("the second workspace to become the selected one",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == doomedName })
+	enterWorkspace(t, s, doomedName)
+	p.note("two repositories registered, the second one selected with its panel open",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q and its own webview and composer windows "+
+			"are on the frame", doomedName))
+
+	e.Leader("j d")
+	e.AwaitEval("the closed workspace's tab to be gone",
+		emacsWSTablineNamesForm,
+		func(raw json.RawMessage) bool { return !containsString(decodeStrings(raw), doomedName) })
+	// THE LANDING IS ASSERTED AS A LANDING, not as the absence of the closed
+	// workspace: the user has to be somewhere, and where is the whole point.
+	e.AwaitEval("the surviving workspace to be the one the user landed on",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == survivorName })
+	s.Name = survivorName
+
+	// AND THE LANDING HAS SOMETHING ON IT.
+	awaitPanelShown(t, s, survivorName)
+	e.AwaitEvalFor(emacsVerbBound,
+		fmt.Sprintf("the selected window to be showing one of %q's own panel buffers", survivorName),
+		`(let ((shown (buffer-name (window-buffer (selected-window)))))
+           (and (member shown
+                        (list (agent-repl--frontend-webview-buffer-name `+elispString(survivorName)+`)
+                              (buffer-name (agent-repl--input-buffer `+elispString(survivorName)+`))))
+                t))`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("`SPC j d` pressed on the selected tab, with one workspace left behind it",
+		fmt.Sprintf("the tab is gone, `agent-repl--ws-current-name` is %q, its own webview and "+
+			"composer are in windows of the frame, and the SELECTED window is showing one of "+
+			"them -- the frame is not bare", survivorName))
+
+	landedShot := p.capture("landed-on-the-survivor", "`SPC j d` pressed on the selected tab",
+		fmt.Sprintf("the closed tab is gone from `agent-repl--ws-tabline-names`, "+
+			"`agent-repl--ws-current-name` is %q, %q's own webview and composer buffers are both in "+
+			"windows of the frame, and the selected window holds one of them. The bar wrote %s",
+			survivorName, survivorName, tabPaints(t, s, s.tabNames())),
+		fmt.Sprintf("The tab bar carries ONE tab, %q, and it is highlighted. The main area shows that "+
+			"workspace's WEBAPP with its composer beneath it — a sidebar, a hold tray and a footer, and "+
+			"a mode line under them. What this picture must NOT be is an empty frame: a single blank "+
+			"window with no buffer content and no mode line, with only the tab bar drawn, is the defect "+
+			"this step exists for.", survivorName))
+	assertTabBarLegible(t, s, landedShot, "landed-on-the-survivor")
+
+	e.AwaitEvalFor(emacsWedgeProbeBound, "emacs to still answer its command loop after the landing",
+		`(and (emacs-pid) t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	p.note("Emacs probed for liveness after the close and the landing",
 		"the command loop still answers, and the heartbeat has not missed for the whole run")
 }
 
