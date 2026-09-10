@@ -24,6 +24,7 @@ import {
   contextCutFailed,
   readAmbient,
 } from "../../src/engine/compaction.js";
+import { readTranscriptFacts } from "../../src/engine/cold.js";
 
 /** The ambient fields every observed line of one real transcript carries. */
 const OBSERVED_AMBIENT = {
@@ -53,6 +54,7 @@ function lines(): { boundary: Record<string, unknown>; summary: Record<string, u
     durationMs: 194511,
     trigger: "manual",
     atMs: Date.parse("2026-08-09T23:31:32.812Z"),
+    permissionMode: "acceptEdits",
     newUuid: () => `uuid-${++minted}`,
   });
 }
@@ -170,6 +172,10 @@ describe("the summary record", () => {
       "user",
     ]);
   });
+
+  it("states the SESSION'S permission mode, so a resume does not adopt the summarizer's plan mode", () => {
+    expect(lines().summary.permissionMode).toBe("acceptEdits");
+  });
 });
 
 describe("appending them", () => {
@@ -179,6 +185,23 @@ describe("appending them", () => {
     appendCompactionLines(file, lines());
 
     expect(readFileSync(file, "utf8").split("\n").filter(Boolean)).toHaveLength(3);
+  });
+
+  it("leaves the SESSION'S mode as the transcript's last word, not the summarizer's plan", () => {
+    // The shape a hibernation actually produces: the user's own turn, then the
+    // throwaway summarizing query's `plan` record — it resumes the same vendor
+    // session id, so it writes into this very file — then the compaction's own
+    // two records. A resume reads the LAST stated mode, so before the summary
+    // line carried the session's mode this read answered "plan" and the
+    // revived session came back in a mode nobody chose.
+    const file = transcript([
+      { ...OBSERVED_AMBIENT, type: "user", uuid: "u-1", permissionMode: "acceptEdits" },
+      { ...OBSERVED_AMBIENT, type: "user", uuid: "u-2", permissionMode: "plan" },
+    ]);
+
+    appendCompactionLines(file, lines());
+
+    expect(readTranscriptFacts(file)?.lastPermissionMode).toBe("acceptEdits");
   });
 
   it("writes one JSON object per line", () => {
@@ -268,6 +291,7 @@ describe("the two records written from a terse ambient", () => {
       durationMs: 2,
       trigger: "auto",
       atMs: Date.parse("2026-08-09T23:31:32.812Z"),
+      permissionMode: "default",
       newUuid: () => `uuid-${++minted}`,
     });
   };

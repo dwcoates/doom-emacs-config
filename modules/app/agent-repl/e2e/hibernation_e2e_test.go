@@ -605,3 +605,70 @@ func TestSweepRecordSinceIgnoresAnotherOperationAtTheSameMessage(t *testing.T) {
 			"daemon.workspace.bring_up", hibernateSweepOp)
 	}
 }
+
+// TestRevivalRunsInTheSessionsModeNotTheSummarizers is the hibernation
+// contract's own posture clause, and it is here because a playtest of plan
+// B.15 photographed it broken: after an idle-cutoff park and a revival, the
+// topbar read `plan` and the revived turn ran under plan mode, which nobody
+// chose.
+//
+// THE MECHANISM, END TO END. The daemon compacts before standing a shim down
+// (`daemon.md`'s Hibernate directive, and `engine/compaction.ts`'s header).
+// The compaction runs on a THROWAWAY query under `plan` so it can take no
+// tools -- but that query RESUMES the user's own vendor session id, and the
+// vendor records `permissionMode` on every `user` record it writes, so the
+// summarizing prompt left `plan` as the last mode the transcript stated. A
+// resume restores the conversation's posture from exactly that field
+// (`engine/cold.ts`: "the permission mode: the last `user` line's
+// permissionMode"), so the revived session came up in the summarizer's mode.
+//
+// The assertion is the REVIVED TURN'S OWN CONCLUSION, not a view: the fake's
+// prose scenario echoes `[mode=<the mode the query is running under>]`
+// (`fake/scenarios/prose.ts`), so this reads what the resumed query actually
+// runs under rather than what a resolver decided to draw.
+func TestRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
+	t.Parallel()
+	// Arrange: the same world TestRevivalAfterHibernate declares, for the same
+	// reasons -- a compressed cutoff so the sweep really parks the session, and
+	// the chain budget because this drives two real process lifecycles.
+	w := NewWorld(t, WorldOpts{DaemonOpts: harness.Opts{
+		Timeout:      HibernationChainTimeout,
+		IdleCutoffMS: hibernationIdleCutoffMS,
+	}})
+	w.ExpectWarnings("daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
+		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
+		"daemon.shimclient.exit")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, w.Daemon, repo.Dir)
+	host := w.WatchHost(ws)
+	defer host.Close()
+
+	// Act: one real turn, the compressed cutoff's real park (which is what
+	// runs the compaction), then a real prompt, which is the implicit revival.
+	mark := markSweepLog(w, ws.GetDir())
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+	awaitHibernateSweepRecordSince(t, w, ws.GetDir(), mark,
+		"the idle sweep hibernating the session, which is what compacts it", hibernateSucceededMsg)
+	hostCtx, cancel := context.WithTimeout(w.Ctx(), HibernationChainTimeout)
+	defer cancel()
+	harness.AwaitView(t, hostCtx, host,
+		"the host reporting the parked workspace with its shim detached before revival", shimDetached)
+	revived := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "prose-streamed")
+
+	// Assert: the revived turn ran under the session's own mode. `plan` is
+	// named because it is the exact contamination -- the summarizer's mode,
+	// and the value this read answered before the compaction stated the
+	// session's own mode on the last record it appends.
+	ended := AwaitTurnEnded(t, w, ws, revived).GetTurnEnded()
+	concluded := ended.GetConcluded()
+	if concluded == nil {
+		t.Fatalf("the revived turn's outcome = %v, want a Concluded terminal", ended)
+	}
+	markdown := tlResponseMarkdown(t, tlOpenRows(t, w, ws), concluded.GetAnswer())
+	if !strings.Contains(markdown, "[mode=default]") {
+		t.Fatalf("the revived turn concluded %q, want it to run under [mode=default]: a revival must "+
+			"restore the session's own posture, and [mode=plan] would be the compaction summarizer's "+
+			"throwaway query leaking through the transcript", markdown)
+	}
+}
