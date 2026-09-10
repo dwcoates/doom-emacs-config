@@ -341,6 +341,17 @@ func stringList(raw any) []string {
 	return out
 }
 
+// bashMovedToBackground reports whether a shell receipt says the command LEFT
+// rather than ended.
+//
+// PRESENCE OF THE TASK ID IS THE WHOLE FACT: the vendor returns the same shape
+// for a command that finished and for one it launched into the background, and
+// only the id distinguishes them. Both of the vendor's spellings are read
+// because the disk carries both.
+func bashMovedToBackground(result map[string]any) bool {
+	return str(pick(result, "backgroundTaskId", "background_task_id")) != ""
+}
+
 // bashSuccess: a NONZERO EXIT IS STILL THIS ARM. The failure arm is for a call
 // that could not be performed; a command that ran and failed ran, and what it
 // printed is the answer the caller wanted.

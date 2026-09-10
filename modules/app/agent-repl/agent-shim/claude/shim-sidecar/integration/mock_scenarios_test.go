@@ -42,6 +42,12 @@ type mockScenario struct {
 	// DOES: both write the same unit under one upsert key, so a row here
 	// claiming `whole` erases the truncation the other plane already drew.
 	SpilledOutput bool
+	// MovedShell — the scenario's `Bash` result names a `backgroundTaskId`, so
+	// the command MOVED rather than ended and NO settled shell frame may reach
+	// the agent's book from this plane. The detached-work frames naming the
+	// unit are what say where it went, and a terminal here would replace the
+	// stream plane's live card with a finished one carrying no output.
+	MovedShell bool
 	// ContextCut — the scenario cuts the conversation (a clear, a compaction),
 	// so exactly one `AgentUpdate.context_cut` page line must land.
 	ContextCut bool
@@ -133,6 +139,9 @@ func TestMockScenarios(t *testing.T) {
 			if tc.SpilledOutput {
 				requireBashPartialExtent(t, tc.Prompt, entries)
 			}
+			if tc.MovedShell {
+				requireNoSettledShellForMovedWork(t, tc.Prompt, entries)
+			}
 			if tc.ContextCut {
 				requireContextCutPageLine(t, tc.Prompt, entries)
 			}
@@ -171,10 +180,10 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!glob", Wait: waitTerminal},
 	{Prompt: "!bash", Wait: waitTerminal},
 	{Prompt: "!bash-fail", Wait: waitTerminal},
-	{Prompt: "!bash-timeout", Wait: waitTerminal},
+	{Prompt: "!bash-timeout", Wait: waitTerminal, MovedShell: true},
 	{Prompt: "!bash-spill", Wait: waitTerminal, SpilledOutput: true},
 	{Prompt: "!bash-image", Wait: waitTerminal},
-	{Prompt: "!bash-detach", Wait: waitTerminal, BashRun: true, ExitCode: true},
+	{Prompt: "!bash-detach", Wait: waitTerminal, BashRun: true, ExitCode: true, MovedShell: true},
 	{Prompt: "!bash-detach-fail", Wait: waitTerminal, BashRun: true, ExitCode: true},
 	{Prompt: "!bash-detach-live", Wait: waitTerminal, BashRun: true},
 	{Prompt: "!vendor-backgrounded", Wait: waitDetach},

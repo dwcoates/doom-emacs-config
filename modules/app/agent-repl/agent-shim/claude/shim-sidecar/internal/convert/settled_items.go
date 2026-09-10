@@ -68,6 +68,24 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		// alone drew every failing test run as a broken shell. A result that
 		// states an exit ran; only one that states none — a tool error, a killed
 		// call — could not be performed.
+		// A BACKGROUNDED COMMAND DID NOT END, IT MOVED, and this plane owes the
+		// same silence the stream plane keeps. The vendor returns the SAME
+		// receipt for a command that finished and for one it launched into the
+		// background -- empty output and a `backgroundTaskId` -- so settling on
+		// it says the work concluded when it had not. The detached-work frames
+		// naming this unit are what say where it went.
+		//
+		// THE TWO PLANES MUST AGREE, and that is why this is here rather than
+		// only in convert/tools/bash.ts. Both write this unit under one upsert
+		// key, so a file-plane terminal arriving second REPLACED the stream
+		// plane's live card with a settled one carrying no output at all: a
+		// timed-out `sleep 600` drew as a command that ran and printed nothing
+		// while its own detached row was still ticking beside it.
+		if bashMovedToBackground(result) {
+			c.log.With(at.ctxFor("bash")).With(logging.Context{ActivityID: call.activityID}).
+				LogVerbose("the command MOVED rather than ended; its detached-work frames settle it, not this receipt")
+			return nil
+		}
 		exit := bashExitCode(result, block, failed)
 		if failed && exit == nil {
 			return item(&conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{
