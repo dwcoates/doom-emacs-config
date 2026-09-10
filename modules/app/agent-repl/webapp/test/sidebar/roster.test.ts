@@ -10,6 +10,7 @@ import {
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { MERGED_FOLD_KEY, repoFoldKey, taskFoldKey } from "../../src/sidebar/context.js";
 import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import {
   appContext,
   memoryPrefs,
@@ -161,41 +162,84 @@ describe("the sections", () => {
 });
 
 describe("recently merged", () => {
+  /** A roster carrying one landed merge -- the band only draws with rows. */
+  function landed(): ReturnType<typeof roster> {
+    return roster({
+      merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]),
+    });
+  }
+
   it("appears under BOTH groupings", () => {
-    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
-    expect(drawn.querySelectorAll(".merged-section").length).toBe(2);
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext());
+    expect(drawn.querySelectorAll(".merged-section:not([hidden])").length).toBe(2);
   });
 
   it("starts folded, because settled history should not spend rail height", () => {
-    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext());
     expect(
       pane(drawn, "repository").querySelector(".merged-section")?.classList.contains("folded"),
     ).toBe(true);
   });
 
+  it("points its folded triangle at the rows it is hiding", () => {
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext());
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section [data-section-fold]")?.textContent,
+    ).toBe("\u25b8");
+  });
+
+  it("lets the glyph state the fold, with no second turn from the stylesheet", () => {
+    // The glyph is written by `paintTriangle`; a CSS rotation on top of it
+    // turned the folded \u25b8 a further quarter turn and drew \u25b2, which
+    // reads as "collapse me" on a section already collapsed.
+    const teardown = installStylesheet();
+    try {
+      const rail = document.createElement("div");
+      rail.id = "ws-sidebar";
+      rail.appendChild(drawWorkspaceRoster(landed(), sidebarContext()));
+      document.body.appendChild(rail);
+      const triangle = rail.querySelector(
+        ".merged-section.folded [data-section-fold]",
+      ) as HTMLElement;
+      expect(cascadedValue(triangle, "transform")).toBe("none");
+      rail.remove();
+    } finally {
+      teardown();
+    }
+  });
+
   it("remembers its fold under the one fixed key", async () => {
     const prefs = memoryPrefs();
-    const drawn = drawWorkspaceRoster(roster(), sidebarContext(appContext(), prefs));
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext(appContext(), prefs));
     const section = pane(drawn, "repository").querySelector(".merged-section") as HTMLElement;
     await click(section.querySelector("[data-section-fold]") as Element);
     expect(prefs.state.folded[MERGED_FOLD_KEY]).toBe(false);
   });
 
   it("draws its rows", () => {
-    const drawn = drawWorkspaceRoster(
-      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
-      sidebarContext(),
-    );
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext());
     expect(
       pane(drawn, "repository").querySelector(".merged-section [data-roster-row='ws-9']"),
     ).not.toBeNull();
   });
 
   it("draws its header label", () => {
-    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    const drawn = drawWorkspaceRoster(landed(), sidebarContext());
     expect(
       pane(drawn, "repository").querySelector(".merged-section .sb-label")?.textContent,
     ).toBe("Recently Merged");
+  });
+
+  it("draws no heading when no merge has landed", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(pane(drawn, "repository").querySelector(".merged-section .sb-label")).toBeNull();
+  });
+
+  it("keeps the empty band out of the rail entirely", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(
+      (pane(drawn, "repository").querySelector(".merged-section") as HTMLElement).hidden,
+    ).toBe(true);
   });
 });
 

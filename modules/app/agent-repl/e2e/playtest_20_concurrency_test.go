@@ -467,6 +467,16 @@ func TestPlaytestAttentionInBackgroundWhileForegroundIdle(t *testing.T) {
 // ended on instead of timing out with no cause.
 var pt20MergeSettledArms = []string{":merged", ":merge-conflict", ":merge-failed"}
 
+// pt20RecentlyMergedNamesForm reads the display names of the rows the roster's
+// RECENTLY-MERGED section carries, straight out of the last decoded push.
+//
+// It reads the section itself rather than the tab order, because the two
+// answer different questions: the daemon recedes a landed merge's row
+// (`closed = true`), and a receded row gets no tab -- so the tab order is
+// silent about a section whose every row is receded by construction.
+const pt20RecentlyMergedNamesForm = `(mapcar (lambda (row) (plist-get (plist-get row :name) :text))
+   (plist-get (plist-get (plist-get agent-repl-roster-view :recently-merged) :rows) :rows))`
+
 // pt20CreateChild runs the ORDINARY create command with only its READERS
 // stubbed, the way `emacs_handover_e2e_test.go`'s scenario 40 does: the
 // command's own call sites run, and nothing reaches past the command.
@@ -629,9 +639,20 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 	e.AwaitEval(fmt.Sprintf("the merged workspace %q to leave the tab bar", merging),
 		emacsWSTablineNamesForm,
 		func(raw json.RawMessage) bool { return !slices.Contains(decodeStrings(raw), merging) })
+	// LEAVING THE BAR IS NOT LEAVING THE ROSTER. The workspace is hoisted into
+	// `recently_merged` and drawn there under both groupings -- that it is done
+	// is the interesting fact (frontend/v1/sidebar.proto) -- so the row's
+	// arrival is asserted here rather than inferred from the tab's absence: a
+	// workspace that lost its tab AND its row would pass the check above and
+	// have vanished from the product entirely.
+	e.AwaitEval(fmt.Sprintf("the merged workspace %q to appear under recently merged", merging),
+		pt20RecentlyMergedNamesForm,
+		func(raw json.RawMessage) bool { return slices.Contains(decodeStrings(raw), merging) })
 	p.note("the merge gate opened, so the parked merge ran its test gate and landed",
 		fmt.Sprintf("%q's arm is %s, and its tab has left the bar -- `agent-repl--ws-tabline-names` "+
-			"no longer carries it, while the roster's own order is now %v", merging, mergeArm,
+			"no longer carries it -- while the roster's recently-merged section now carries its row "+
+			"(%v) and the tab order is %v", merging, mergeArm,
+			s.E.EvalStrings(pt20RecentlyMergedNamesForm),
 			s.E.EvalStrings(`(agent-repl-roster-tab-order)`)))
 
 	pt20OpenGate(t, turnGate)
