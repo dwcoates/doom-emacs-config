@@ -133,6 +133,10 @@ type planState struct {
 	row *frontendv1.FeedId
 	// feed is where the bubble landed.
 	feed placement
+	// closed says the episode has reached its final state. A closed episode is
+	// KEPT rather than forgotten, so the other plane's copies of its calls are
+	// recognized as re-deliveries instead of opening a second episode.
+	closed bool
 }
 
 // shellState is one detached shell's accumulation: the spool the daemon caps

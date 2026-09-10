@@ -567,6 +567,42 @@ func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
 	}
 }
 
+// TestPlanModeSettlesPlanned reads the plan bubble's state off the page AFTER
+// both planes have delivered, rather than waiting for a `planned` row to
+// appear at any moment. The difference is the whole defect: the sidecar's copy
+// of the turn arrives after the shim's, its `EnterPlanMode` last, and a bubble
+// that took that enter would go back to its PLANNING treatment with the plan
+// already presented. #85's wait passes either way.
+func TestPlanModeSettlesPlanned(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+
+	// Assert
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		plan := row.GetActivity().GetPlan()
+		if plan == nil {
+			continue
+		}
+		if plan.GetPlanned() == nil {
+			t.Fatalf("the plan bubble settled as %T, want planned", plan.GetState())
+		}
+		return
+	}
+	t.Fatal("the feed holds no plan bubble at all")
+}
+
 // ===========================================================================
 // #86 PushNotificationSent — golden "push-notification-sent", registered
 // scenario name "push-sent" (automation.ts pushScenario, outcome=sent).

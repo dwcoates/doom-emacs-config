@@ -78,8 +78,12 @@ type wsState struct {
 	units map[string]*unitState
 	// responses is the prose fold, keyed by activity id.
 	responses map[string]*proseState
-	// plans is the open plan episode per agent, keyed by agent id.
+	// plans is the agent's current plan episode, keyed by agent id. It is the
+	// OPEN one, or the last one once that has settled.
 	plans map[string]*planState
+	// planUnits attributes a plan-mode call to its episode, keyed by activity
+	// id, so the same call re-delivered is never taken for a new episode.
+	planUnits map[string]*planState
 	// shells is the detached-shell accumulation, keyed by detached work id.
 	shells map[string]*shellState
 	// detachedUnits are the units a detachment announced BEFORE this resolver
@@ -301,6 +305,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		units:           map[string]*unitState{},
 		responses:       map[string]*proseState{},
 		plans:           map[string]*planState{},
+		planUnits:       map[string]*planState{},
 		shells:          map[string]*shellState{},
 		detachedUnits:   map[string]string{},
 		subagents:       map[string]*subagentState{},

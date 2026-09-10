@@ -192,6 +192,57 @@ func TestAnEpisodeReDeliveredDrawsOntoTheSameBubble(t *testing.T) {
 	}
 }
 
+func TestASettledEpisodeReDeliveredStaysPlanned(t *testing.T) {
+	// Arrange: an episode presented and settled.
+	h := newHarness(t)
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+		Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+			Plan: &conversationv1.AgentResponseProse{Markdown: "## the plan"},
+		}},
+	})
+
+	// Act: the other plane's copy of the ENTER arrives after the exit already
+	// settled the bubble, which is the order the sidecar's file tail produces.
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert: the presented plan stands; it does not go back to planning.
+	if h.planBubble().GetPlanned().GetProse().GetMarkdown() != "## the plan" {
+		t.Fatalf("state = %T, want the planned bubble to stand", h.planBubble().GetState())
+	}
+}
+
+func TestATurnEndingAfterThePlanWasPresentedLeavesItPlanned(t *testing.T) {
+	// Arrange: an episode presented and settled within the turn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "plan it")
+	h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+		Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+		Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+			Plan: &conversationv1.AgentResponseProse{Markdown: "## the plan"},
+		}},
+	})
+
+	// Act: the turn ends. Plan mode was NOT still open.
+	h.terminal("turn-1", &conversationv1.AgentSuccess{
+		Outcome: &conversationv1.AgentSuccess_Completed{Completed: &conversationv1.AgentCompleted{}},
+	}, nil)
+
+	// Assert: the break is for OPEN episodes only.
+	if h.planBubble().GetPlanned() == nil {
+		t.Fatalf("state = %T, want the presented plan to stand", h.planBubble().GetState())
+	}
+}
+
 func TestATurnThatEndsInPlanModeBreaksTheEpisode(t *testing.T) {
 	// Arrange: an open episode.
 	h := newHarness(t)
