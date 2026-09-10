@@ -1039,13 +1039,27 @@ describe("restoreFeedAnchor key escaping", () => {
  */
 describe("observeScrollBox", () => {
   /**
+   * Let the MutationObserver keeping the watched-child set in step with the
+   * DOM deliver. Its callback is a microtask checkpoint rather than a
+   * synchronous call, so a child appended a line earlier is not yet watched.
+   */
+  function flushMutations(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  /**
    * A real element that answers scroll geometry, since jsdom lays nothing out.
    * `scrollTop` clamps into the scrollable range on write, as a browser's does
    * — which is what turns `parkAtTail`'s "assign scrollHeight" into the bottom.
    */
   function scrollBox(init: { scrollHeight: number; clientHeight: number; scrollTop: number }) {
     const element = document.createElement("div");
-    const scrollHeight = init.scrollHeight;
+    // The box's CONTENT root, as the real markup has one (`#feed` inside
+    // `#feed-scroll`): the box's scrollHeight is what this child measures, so
+    // growth is reported against the child and never against the box.
+    const content = document.createElement("main");
+    element.append(content);
+    let scrollHeight = init.scrollHeight;
     let clientHeight = init.clientHeight;
     let scrollTop = init.scrollTop;
     Object.defineProperties(element, {
@@ -1060,9 +1074,15 @@ describe("observeScrollBox", () => {
     });
     return {
       element,
+      content,
       /** The footer appearing or growing by PX: the box loses that height. */
       loseHeight: (px: number) => {
         clientHeight -= px;
+      },
+      /** A deferred expansion settling: the content gains PX, the box none. */
+      contentGrows: (px: number) => {
+        scrollHeight += px;
+        scrollTop = Math.max(0, Math.min(scrollTop, scrollHeight - clientHeight));
       },
       top: () => scrollTop,
     };
@@ -1117,6 +1137,70 @@ describe("observeScrollBox", () => {
     box.element.dispatchEvent(new Event("scroll"));
     // Assert
     expect(tail.isFollowing()).toBe(false);
+  });
+
+  it("re-lands the tail when the content grows with no render behind it", () => {
+    // Arrange — parked at the tail, and nothing else will touch this feed.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act — a bubble the wire pushed unfolded finishes fetching its page and
+    // paints 120px of rows into its panel: growth no render performed.
+    box.contentGrows(120);
+    fireResize(box.content);
+    // Assert — the tail is the new bottom, not 120px below the fold.
+    expect(box.top()).toBe(820);
+  });
+
+  it("leaves a reader who scrolled away where they are when the content grows", () => {
+    // Arrange — the reader left the tail, so growth below them is not theirs.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    box.element.scrollTop = 200;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Act
+    box.contentGrows(120);
+    fireResize(box.content);
+    // Assert
+    expect(box.top()).toBe(200);
+  });
+
+  it("watches a content root mounted after the subscription", async () => {
+    // Arrange — the box is wired before its content exists, as a mount that
+    // creates the scroll zone first and fills it after would leave it.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    const late = document.createElement("section");
+    // Act
+    box.element.append(late);
+    await flushMutations();
+    // Assert — the child set follows the DOM, so the late root is watched.
+    expect(() => fireResize(late)).not.toThrow();
+  });
+
+  it("stops watching a content root removed from the box", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    observeScrollBox(box.element, tail);
+    // Act
+    box.content.remove();
+    await flushMutations();
+    // Assert — an element the box no longer holds is nothing to re-park for.
+    expect(() => fireResize(box.content)).toThrow(/no ResizeObserver/);
+  });
+
+  it("stops observing the content when its unsubscriber is called", () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    const unobserve = observeScrollBox(box.element, tail);
+    // Act
+    unobserve();
+    // Assert — the content half is released with the box half, not left on.
+    expect(() => fireResize(box.content)).toThrow(/no ResizeObserver/);
   });
 
   it("stops observing the box when its unsubscriber is called", () => {

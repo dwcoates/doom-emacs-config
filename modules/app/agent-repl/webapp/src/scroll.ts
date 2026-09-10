@@ -368,6 +368,11 @@ export class TailFollow {
    *
    * `sync` now attributes the clamp itself (see there), so the reason to skip
    * it is gone and the window with it.
+   *
+   * IT IS ALSO WHAT THE CONTENT'S OWN SIZE REPORTS THROUGH. A box that keeps
+   * the same viewport while the rows inside it grow has moved its tail exactly
+   * as far as one that shrank, and the correction is identical — so the two
+   * arrive at the same method rather than at a twin that could drift from it.
    */
   onResize(): void {
     this.sync();
@@ -412,8 +417,8 @@ export class TailFollow {
 }
 
 /**
- * Wire a REAL scroll box to its tail owner: the box's own scroll events, and
- * the box's own size changes.
+ * Wire a REAL scroll box to its tail owner: the box's own scroll events, the
+ * box's own size changes, and the size of the CONTENT inside it.
  *
  * THE SIZE HALF IS WHAT KEEPS THE LAST BUBBLE OUT FROM UNDER THE FOOTER.
  * The progress footer is a flex sibling laid out BELOW the scroll box
@@ -437,19 +442,58 @@ export class TailFollow {
  * reader who scrolled away is left where they are, which is `onResize`'s own
  * rule and not re-decided here.
  *
+ * THE CONTENT HALF IS THE OTHER WAY THE TAIL GOES STALE, and it is the half
+ * that outlived the footer fix. Watching only the box hears every change to
+ * the VIEWPORT and none to what is inside it, yet `scrollHeight` growing under
+ * a `scrollTop` nobody moved leaves the tail exactly as far below the fold as
+ * a shrinking viewport does. The renders that append rows re-park themselves
+ * (`feed-view.ts`'s followTail), so the growth that escapes is the growth NO
+ * render performs: a bubble the wire pushed unfolded fetches its own page and
+ * paints it into its panel milliseconds later (`bubble.ts`'s `initialFolded`
+ * open), a deferred card settles to its real height, a font or a highlighted
+ * block relayouts. Each of those grows the feed after the last park, and under
+ * load — where the fetch behind that unfold is slowest — it is the LAST thing
+ * that happens, so nothing follows it to correct the position. That is the
+ * `awaitTailClearsFooter` failure that survived subscribing the box.
+ *
+ * `scrollHeight` is not observable, but it is the sum of the box's children's
+ * heights, so the children are what is watched — and the child set is kept in
+ * step with the DOM, so a content root mounted after this call is watched too
+ * rather than silently exempt.
+ *
  * Returns the unsubscriber. A mount that drops it leaks an observer onto an
  * element the next workspace will mount over.
  */
 export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void {
   const observer = new ResizeObserver(() => tail.onResize());
   const onScroll = (): void => tail.onScroll();
+  const watched = new Set<Element>();
+  const watchChildren = (): void => {
+    for (const child of box.children) {
+      if (watched.has(child)) continue;
+      watched.add(child);
+      observer.observe(child);
+    }
+    for (const child of watched) {
+      if (child.parentElement === box) continue;
+      watched.delete(child);
+      observer.unobserve(child);
+    }
+  };
+  const children = new MutationObserver(watchChildren);
   tail.observe(
     () => box.addEventListener("scroll", onScroll, { passive: true }),
-    () => observer.observe(box),
+    () => {
+      observer.observe(box);
+      watchChildren();
+      children.observe(box, { childList: true });
+    },
   );
   return () => {
     box.removeEventListener("scroll", onScroll);
+    children.disconnect();
     observer.disconnect();
+    watched.clear();
   };
 }
 
