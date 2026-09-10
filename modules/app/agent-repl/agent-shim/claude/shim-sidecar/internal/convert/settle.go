@@ -61,6 +61,15 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	if call.name == taskStopTool {
 		return c.taskStopTerminal(result, at, env, agent)
 	}
+	if IsStreamOwned(call.name) {
+		// The stream plane authors this unit whole; see streamowned.go. The
+		// result is dropped rather than settled, because the transcript states
+		// the answer only in the vendor's joined form and a settle minted from
+		// it would supersede the shim's structured one.
+		c.log.With(at.ctxFor("stream-owned-drop")).With(logging.Context{ActivityID: callID}).
+			LogVerbose("tool result for stream-owned tool name=%q not converted here", call.name)
+		return nil
+	}
 	if IsExempt(call.name) {
 		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: callID}).
 			LogVerbose("tool result for exempt tool name=%q dropped entirely", call.name)
@@ -73,9 +82,6 @@ func (c *Converter) toolReturn(block, record map[string]any, at Attribution, env
 	c.reportLaunch(call, result, at)
 
 	kind, known := classifyTool(call.name)
-	if known && kind == kindQuestion {
-		return []*storev1.StoreEntry{c.settleQuestion(call, result, block, failed, at, env, agent)}
-	}
 	if !known {
 		return []*storev1.StoreEntry{c.settleUnmodeled(call, block, failed, at, env, agent)}
 	}
