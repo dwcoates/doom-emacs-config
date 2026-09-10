@@ -527,14 +527,10 @@ func TestPlaytestPermissionModePicker(t *testing.T) {
 	// pointer takes and the one the webapp layer's own model-selector scenario
 	// drives.
 	s.clickInPage(t, "the mode button", ".topbar-mode-button")
-	// The reveal layer, the panel and the options are each their own step, so a
-	// failure names WHICH of them did not happen instead of reporting a
-	// conjunction that could have failed three ways.
-	t.Logf("after the click: %s reveal layer(s), %s open reveal(s), %s reveal anchor(s), %s mode option(s)",
-		s.readInPage(t, "the reveal layer count", `document.querySelectorAll('.topbar-reveal-layer').length`),
-		s.readInPage(t, "the open reveal count", `document.querySelectorAll('[data-reveal]').length`),
-		s.readInPage(t, "the reveal anchor count", `document.querySelectorAll('[data-reveal-anchor]').length`),
-		s.readInPage(t, "the mode option count", `document.querySelectorAll('[data-mode-option]').length`))
+	// THE PANEL AND ITS OPTIONS ARE TWO STEPS, so a failure names which of
+	// them did not happen. It is also what proves the click was ONE act: a
+	// second click on this toggle would have closed the reveal again, which
+	// is the defect `pageClickOnce` exists for.
 	s.awaitInPage(t, "the mode reveal to open", `document.querySelector('[data-reveal="mode"]') !== null`)
 	s.awaitInPage(t, "the mode reveal to carry the six served modes",
 		`document.querySelectorAll('[data-reveal="mode"] [data-mode-option]').length === 6`)
