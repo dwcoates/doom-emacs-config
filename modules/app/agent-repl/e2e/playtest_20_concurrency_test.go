@@ -191,6 +191,34 @@ func (s *playtestScenario) pt20Select(t *testing.T, dir, name string) {
 		func(raw json.RawMessage) bool { return decodeString(raw) == name })
 }
 
+// pt20OpenPanelFor points the scenario at NAME and opens THAT workspace's
+// panel, in one step because the two cannot be separated.
+//
+// `openPanel` opens the CURRENT workspace's panel and then waits on the
+// SCENARIO's own `Name` -- its composer, its webview, its page. A playbook
+// working one workspace never notices, because the two are the same name. A
+// playbook here works several, and K.63 proved what the gap costs: the
+// scenario was still pointed at the merge target while registering
+// `repo-turning` had selected it, so the panel that opened was
+// `repo-turning`'s and the composer waited for was the merge target's, which
+// nothing was ever going to create. The step failed with a bare "the composer
+// buffer to appear: never satisfied" naming neither workspace.
+//
+// So the selection is ASSERTED first rather than assumed -- registering
+// selects, and reading `agent-repl--ws-current-name` back is what makes that
+// a fact of the run instead of a fact about the source -- and only then is
+// the scenario re-pointed and the panel opened.
+func (s *playtestScenario) pt20OpenPanelFor(t *testing.T, name string) {
+	t.Helper()
+	s.E.AwaitEval(fmt.Sprintf("%q to be the selected workspace before its panel is opened", name),
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == name })
+	s.Name = name
+	// `openPanel` re-reads the composer into `s.Input` itself, so the
+	// scenario is fully re-pointed when this answers.
+	s.openPanel(t)
+}
+
 // pt20PointAt re-points the scenario's acting workspace, which is what
 // `playtestScenario` documents its Name and Input fields for: "a playbook
 // with several workspaces re-points them". Every playbook in this file does.
@@ -223,13 +251,13 @@ func TestPlaytestTwoWorkspacesThinkingAtOnce(t *testing.T) {
 			"as running, and each settling on its own when the one gate opens.",
 		WithEmacsEnv(turnGatePathEnv, gatePath),
 		WithEmacsEnv(turnGateTextEnv, pt20GatedPrompt))
-	p, e := s.Book, s.E
+	p := s.Book
 
 	// Arrange: the first workspace, with its panel open so the composer RET
 	// path is the real one.
 	first := s.repoAt(t, "repo-first")
 	firstName := s.register(t, first.Dir)
-	s.openPanel(t)
+	s.pt20OpenPanelFor(t, firstName)
 	s.awaitArm(t, firstName, "the first workspace's arm before anything is submitted", pt20IdleArm)
 	p.note("the first repository registered through `SPC TAB C-n` and its panel opened",
 		fmt.Sprintf("the webapp drew its footer against this daemon, and %q's arm is %s", firstName, pt20IdleArm))
@@ -248,11 +276,7 @@ func TestPlaytestTwoWorkspacesThinkingAtOnce(t *testing.T) {
 	// Act: a second workspace, which registering SELECTS, and its own turn.
 	second := s.repoAt(t, "repo-second")
 	secondName := s.register(t, second.Dir)
-	e.AwaitEval("the second workspace to become the selected one",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == secondName })
-	s.openPanel(t)
-	s.pt20PointAt(t, secondName)
+	s.pt20OpenPanelFor(t, secondName)
 	s.submit(t, pt20GatedPrompt)
 	s.awaitArm(t, secondName, "the second workspace's turn to reach thinking", ":thinking")
 	p.note("a second repository registered, its panel opened, and the SAME gated prompt submitted in it",
@@ -325,7 +349,7 @@ func TestPlaytestAttentionInBackgroundWhileForegroundIdle(t *testing.T) {
 	// Arrange: the workspace the ask will be raised against.
 	asking := s.repoAt(t, "repo-asking")
 	askingName := s.register(t, asking.Dir)
-	s.openPanel(t)
+	s.pt20OpenPanelFor(t, askingName)
 
 	// Act: start the ask's turn while this workspace is still selected, and
 	// park it on the gate.
@@ -339,11 +363,7 @@ func TestPlaytestAttentionInBackgroundWhileForegroundIdle(t *testing.T) {
 	// submitted in it, which is what "the foreground is idle" means.
 	idle := s.repoAt(t, "repo-idle")
 	idleName := s.register(t, idle.Dir)
-	e.AwaitEval("the idle workspace to become the selected one",
-		`(format "%s" (agent-repl--ws-current-name))`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == idleName })
-	s.openPanel(t)
-	s.pt20PointAt(t, idleName)
+	s.pt20OpenPanelFor(t, idleName)
 	s.awaitArm(t, idleName, "the foreground workspace's arm to be idle", pt20IdleArm)
 	p.note("a second repository registered -- which selects it -- and its panel opened; nothing is ever submitted in it",
 		fmt.Sprintf("`agent-repl--ws-current-name` is %q and its arm is %s, so the foreground is "+
@@ -501,8 +521,7 @@ func TestPlaytestMergeBesideRunningTurn(t *testing.T) {
 	// fake's gate.
 	other := s.repoAt(t, "repo-turning")
 	otherName := s.register(t, other.Dir)
-	s.openPanel(t)
-	s.pt20PointAt(t, otherName)
+	s.pt20OpenPanelFor(t, otherName)
 	s.submit(t, pt20GatedPrompt)
 	s.awaitArm(t, otherName, "the other workspace's turn to reach thinking", ":thinking")
 	p.note("a second repository registered, its panel opened, and the gated prompt submitted in it",
