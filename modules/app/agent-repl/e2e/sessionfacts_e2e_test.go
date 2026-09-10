@@ -677,6 +677,47 @@ func TestAccountUsageUnreadArmsAreNamedOnTheFooter(t *testing.T) {
 	}
 }
 
+// THE SAMPLE THE SESSION PROBES AT ITS OWN START REACHES THE FOOTER, and it
+// did not before. The shim probes the account's usage once inside StartSession
+// (engine/session.ts, the `void pushAccountUsage()` beside the keepalive
+// cadence), while the daemon opens its standing WatchSession only AFTER
+// StartSession has answered — so with `accountUsage` missing from
+// SessionPushes.REPLAYED that first sample was fanned out to a stream nobody
+// was reading and the footer held no allowance figure at all until a turn
+// closed and reprobed.
+//
+// MEASURED in a playtest run before the fix: the sample went out at 37.494 to
+// the bring-up's stream, the daemon's own watch opened at 37.503, and the
+// footer's first sighting of any account usage was the turn-close reprobe
+// 41ms later.
+//
+// The FIRST turn of the workspace is an unread one on purpose: the figures it
+// draws cannot have come from its own close (that sample read nothing), so
+// drawing them at all is the start-time probe having survived. It is the same
+// shape the D33 playbook photographs.
+func TestAccountUsageProbedAtSessionStartReachesTheFooter(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+
+	// Act: the workspace's very first turn, and it reads nothing.
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
+	sfAwaitConclusion(t, w, ws, turn,
+		"The account-usage probe now answers with the service_unavailable shape.")
+
+	// Assert
+	view := sfAwaitSampleArm(t, w, ws, "service_unavailable")
+	line := sfRateLimited(view)
+	if got := line.GetSession().GetUtilization(); got != sfFiveHourUtilization {
+		t.Errorf("FooterAllowance(session).utilization = %v, want %v from the session's own start-time probe",
+			got, sfFiveHourUtilization)
+	}
+	if got := line.GetWeekly().GetUtilization(); got != sfSevenDayUtilization {
+		t.Errorf("FooterAllowance(weekly).utilization = %v, want %v from the session's own start-time probe",
+			got, sfSevenDayUtilization)
+	}
+}
+
 // THE SAMPLING FAILURE KEEPS THE SHIM'S OWN CAUSE. The arm exists so a reader
 // learns WHY the shim could not sample, and a cause the daemon dropped would
 // leave the arm saying only "something".
