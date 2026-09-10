@@ -80,6 +80,23 @@ clean; BODY runs after the load with the same bindings still active."
       ;; Assert
       (should (equal (getenv "AGENT_REPL_STATE_DIR") "/sentinel-state-dir")))))
 
+(ert-deftest agent-repl-test-helpers-interactive-load-preserves-log-level-env ()
+  "Interactive load must not override AGENT_REPL_LOG_LEVEL."
+  ;; Arrange: a sentinel value in a let-bound copy of the environment.
+  (let ((process-environment
+         (cons "AGENT_REPL_LOG_LEVEL=warn" process-environment)))
+    ;; Act
+    (agent-repl-test-helpers--with-interactive-reload
+      ;; Assert
+      (should (equal (getenv "AGENT_REPL_LOG_LEVEL") "warn")))))
+
+(ert-deftest agent-repl-test-helpers-batch-log-level-enables-debug-files ()
+  "Batch module reloads must retain the harness's debug file threshold."
+  ;; Arrange / Act: loading test-helpers.el established the batch environment.
+  ;; Assert
+  (should (equal (getenv "AGENT_REPL_LOG_LEVEL") "debug"))
+  (should (eq (agent-repl--log-level-from-environment) 'debug)))
+
 (ert-deftest agent-repl-test-helpers-batch-global-log-is-process-isolated ()
   "Each batch process writes load-time records inside its PID-scoped state dir."
   (let ((state-dir (file-name-as-directory (getenv "AGENT_REPL_STATE_DIR"))))

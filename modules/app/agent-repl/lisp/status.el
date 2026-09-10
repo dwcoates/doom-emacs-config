@@ -277,10 +277,12 @@ is deliberately soft rather than an assertion: the buffer can legitimately
 exist before its workspace directory is known."
   (cond
    ((not (buffer-live-p buf))
-    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped dead-buffer=%S" ws buf))
+    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped dead-buffer=%S" ws buf)
+    nil)
    ((not (agent-repl--ws-get ws :project-dir))
     (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped missing-project-dir buffer=%s"
-                              ws (buffer-name buf)))
+                              ws (buffer-name buf))
+    nil)
    (t
     (let ((dir (agent-repl--ws-get ws :project-dir)))
       (with-current-buffer buf

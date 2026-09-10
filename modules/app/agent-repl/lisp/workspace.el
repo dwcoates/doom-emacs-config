@@ -69,6 +69,8 @@
 (declare-function agent-repl--ws-dir "status")
 (declare-function agent-repl--ws-log-routable-p "core")
 
+(defvar agent-repl--global-log-scope)
+
 (require 'cl-lib)
 
 ;; Forward declarations for symbols defined later in the load order (status.el).
@@ -627,7 +629,8 @@ e.g. `\"ws-render-status\"' or `\"ws-open-p\"'.  Used by wrappers that
 contractually refuse to operate on an unknown ws (per the AGENTS.md
 no-silent-fallback rule).  Returns nil on success."
   (unless (agent-repl--ws-known-p ws)
-    (agent-repl--log ws "ws-require-known: REJECT ws=%S context=%s reason=unregistered"
+    (agent-repl--log agent-repl--global-log-scope
+                     "ws-require-known: REJECT ws=%S context=%s reason=unregistered"
                      ws context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
@@ -653,7 +656,12 @@ Nothing to revive is not a failure: an unknown name and a live name both
 answer nil, so a caller may call this unconditionally before it opens."
   (cond
    ((not (agent-repl--ws-known-p ws))
-    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=unknown" ws)
+    ;; An unknown name has no workspace sink by definition.  This is a
+    ;; registry-level observation about refusing to create state, so preserve
+    ;; the candidate name in the record body and route it explicitly to the
+    ;; process-wide sink.
+    (agent-repl--log agent-repl--global-log-scope
+                     "ws-revive: SKIP ws=%s reason=unknown" ws)
     nil)
    ((null (agent-repl--ws-get ws :killed-at))
     (agent-repl--log ws "ws-revive: SKIP ws=%s reason=already-live" ws)
@@ -1455,7 +1463,11 @@ Guarded with `fboundp' and `condition-case': the repaint is a courtesy
 on top of the tick that would eventually notice anyway, so it must
 never turn a teardown into an error."
   (if (not (fboundp 'agent-repl--sidebar-push))
-      (agent-repl--log ws "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)" ws reason)
+      (progn
+        (agent-repl--log ws
+                         "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)"
+                         ws reason)
+        nil)
     (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
     (condition-case err
         ;; Forced past the sidebar's signature gate: the removal this repaint
@@ -1583,7 +1595,7 @@ Callers must use this function instead of calling `persp-rename'
 directly or wrapping it themselves with `fboundp'."
   (cond
    ((not (fboundp 'persp-rename))
-    (agent-repl--log old-ws
+    (agent-repl--log new-ws
                      "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=persp-rename-unbound"
                      old-ws new-ws)
     t)
@@ -1591,17 +1603,17 @@ directly or wrapping it themselves with `fboundp'."
     (let ((persp (agent-repl--ws-resolve-persp old-ws)))
       (if (not persp)
           (progn
-            (agent-repl--log old-ws
+            (agent-repl--log new-ws
                              "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=no-live-persp"
                              old-ws new-ws)
             t)
         (if (persp-rename new-ws persp)
             (progn
-              (agent-repl--log old-ws
+              (agent-repl--log new-ws
                                "ws-rename-persp: RENAMED old-ws=%s new-ws=%s persp=%S"
                                old-ws new-ws persp)
               t)
-          (agent-repl--log old-ws
+          (agent-repl--log new-ws
                            "ws-rename-persp: FAILED old-ws=%s new-ws=%s persp=%S"
                            old-ws new-ws persp)
           nil))))))

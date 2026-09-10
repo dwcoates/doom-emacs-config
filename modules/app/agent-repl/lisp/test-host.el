@@ -842,6 +842,34 @@ looked at."
       ;; Act / Assert
       (should (equal (agent-repl-host-faults "ws-1") faults)))))
 
+(ert-deftest agent-repl-test-host-session-id-is-read-off-the-existing-arm ()
+  "The logging accessor returns the daemon-minted session echo token."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+    ;; Act / Assert
+    (should (equal (agent-repl-host-session-id "ws-1") "session-1"))))
+
+(ert-deftest agent-repl-test-host-session-id-is-nil-without-a-session ()
+  "A workspace with no session has no agent-repl session identifier."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :host :value (agent-repl-test-host--none)))
+    ;; Act / Assert
+    (should (null (agent-repl-host-session-id "ws-1")))))
+
+(ert-deftest agent-repl-test-host-session-id-is-nil-before-the-first-push ()
+  "The ordinary pre-push state carries no session identifier."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should (null (agent-repl-host-session-id "ws-1")))))
+
 (ert-deftest agent-repl-test-host-vendor-session-id-is-read-off-the-claude-arm ()
   "The durable id is the vendor conversation's, not the daemon's echo token."
   (agent-repl-test-host--with-harness
@@ -1623,13 +1651,17 @@ Reloading first would navigate the page at the daemon that just died."
   "A workspace with no directory has nothing to register."
   (agent-repl-test-host--with-harness
     ;; Arrange
-    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001"))
+          (logged-workspace nil))
       (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws-1")))
-                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil)))
+                ((symbol-function 'agent-repl--ws-get) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
         ;; Act
         (agent-repl-host-on-link-up conn))
       ;; Assert
-      (should (null agent-repl-test-host--calls)))))
+      (should (null agent-repl-test-host--calls))
+      (should (eq logged-workspace agent-repl--global-log-scope)))))
 
 (ert-deftest agent-repl-test-host-link-up-reselects-the-dir-the-user-stood-in ()
   "Emacs owns the user's selection across a daemon restart.
