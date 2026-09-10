@@ -12,6 +12,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	workspacev1 "agentrepl/proto/workspace/v1"
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 )
@@ -43,6 +44,8 @@ func startFakeClientLog(t *testing.T, stateDir, globalLogPath string) *fakeClien
 	}
 	fake := &fakeClientLog{t: t, listener: listener, received: make(chan struct{}, 4096)}
 	mux := http.NewServeMux()
+	mux.Handle(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplRegisterWorkspaceProcedure, fake.registerWorkspace))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure, fake.handle))
 	fake.server = &http.Server{Handler: mux}
@@ -59,6 +62,17 @@ func startFakeClientLog(t *testing.T, stateDir, globalLogPath string) *fakeClien
 		_ = fake.server.Shutdown(ctx)
 	})
 	return fake
+}
+
+func (f *fakeClientLog) registerWorkspace(
+	_ context.Context,
+	req *connect.Request[agentreplv1.RegisterWorkspaceRequest],
+) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.RegisterWorkspaceResponse{
+		Result: &agentreplv1.RegisterWorkspaceResponse_Success{Success: &agentreplv1.RegisterWorkspaceSuccess{
+			Workspace: &workspacev1.WorkspaceRef{Id: "daemon-workspace-id", Dir: req.Msg.GetDir()},
+		}},
+	}), nil
 }
 
 func (f *fakeClientLog) handle(
