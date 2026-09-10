@@ -26,6 +26,12 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/suite-slot.sh"
 
+# The harness owns a private slot tree and must exercise independent-process
+# contention inside it. A caller may itself be correctly host-gated; that
+# outer process-tree marker describes the harness as a whole, not the private
+# children below, so do not let it make every subject look nested.
+unset AGENT_REPL_SUITE_SLOT_HELD
+
 PASS=0
 FAIL=0
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
