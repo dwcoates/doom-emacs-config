@@ -301,7 +301,9 @@ func TestPlaytestFullscreenToggleAndRestore(t *testing.T) {
 	// judged against a "work layout" that was never on the frame.
 	repository := s.repoAt(t, "repo")
 	s.register(t, repository.Dir)
-	awaitRegistrationLanding(e, repository.Dir)
+	// `s.register` already waited the landing out (landing_test.go); what is
+	// left is to put it away, so the work layout below is arranged on a frame
+	// the landing's own show has been cleared off.
 	putTheLandingAway(e, s.Name)
 
 	const workA, workB = "*playtest-work-a*", "*playtest-work-b*"
