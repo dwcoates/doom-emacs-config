@@ -221,14 +221,14 @@ func newGlyphPage(t *testing.T) *glyphPage {
 	// The frame is sized before anything is drawn in it, for the reason
 	// `playbook.prepareFrame` gives: the webview is laid out in real pixels,
 	// so a frame resized afterwards would measure a page laid out for a
-	// different window. The blink is off because `settleFramebuffer` waits
-	// for the screen to hold still, and a blinking cursor guarantees it
-	// never does.
-	e.Eval(fmt.Sprintf(`(progn
-             (blink-cursor-mode -1)
-             (set-frame-size (selected-frame) %d %d t)
-             (redisplay t)
-             t)`, playtestFrameWidth, playtestFrameHeight))
+	// different window. It goes through `fitFrameToDisplay` -- the same
+	// helper the playbooks use, and not a second copy of the arithmetic --
+	// because a frame sized past the screen edge is read here as a page that
+	// drew the wrong pixels. The blink is off because `settleFramebuffer`
+	// waits for the screen to hold still, and a blinking cursor guarantees
+	// it never does.
+	e.Eval(`(progn (blink-cursor-mode -1) t)`)
+	fitFrameToDisplay(t, e)
 
 	p := &glyphPage{e: e}
 	p.show(t, "", false)
