@@ -4447,6 +4447,30 @@ describe("the teardown's tails", () => {
     expect(h.persistence.lastKnownAgent?.()).toBe(true);
   });
 
+  it("reads the book's head with the ONE-SHOT verb, so no watch token is minted for it", async () => {
+    // Arrange. The head read stands no tail, and the store cannot learn that a
+    // page was abandoned — OpenAgentSession is unary and there is no close — so
+    // a reading session opened here would leave a token nothing ever spends.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+    const openedBeforeTeardown = h.persistence.pagesOpened;
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert. The head arrived as a one-shot read, and the teardown opened no
+    // further reading session.
+    expect([h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([
+      1,
+      openedBeforeTeardown,
+    ]);
+  });
+
   it("concludes NOTHING for a tail that already ended on its own", async () => {
     const h = harness({ watcherConclusionBudgetMs: 25 });
     await started(h);
