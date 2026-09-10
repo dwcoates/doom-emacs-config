@@ -2292,6 +2292,52 @@ it."
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
         (agent-repl-connect-close conn)))))
 
+(ert-deftest agent-repl-itest-host-link-up-navigates-the-webview-at-the-new-daemon ()
+  "After a daemon restart the page is navigated at the daemon that is SERVING.
+
+THE DEFECT THIS PINS, measured in the e2e sandbox: a daemon Emacs
+relaunches listens on a FRESH PORT, and the page\='s url names the port it
+was opened at.  Stopping the daemon and ensuring another healed the tab
+bar, the roster and the composer while the webview went on dialing the
+daemon that had exited -- the page reported
+`failureArms=[daemonUnreachable]\=' at a url naming the dead port, and the
+only way out was the user reaching for `SPC o l\='.
+
+The observable is the URL the navigate was ASKED FOR, because the widget
+is navigated rather than remounted."
+  ;; Arrange: a mounted webview, and a SECOND daemon to come back on.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary _ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((fresh (agent-repl-connect-open
+                      (agent-repl-itest-daemon-address successor)))
+              (navigated nil))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
+                         (lambda () t))
+                        ((symbol-function 'agent-repl--frontend-webview-live-widget)
+                         (lambda (&rest _) 'fake-widget))
+                        ((symbol-function 'agent-repl--frontend-watch-load) #'ignore)
+                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
+                         (lambda (_widget url) (push url navigated)))
+                        ((symbol-function 'agent-repl--call-in-background-workspace)
+                         (lambda (_ws fn) (funcall fn))))
+                (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
+                (agent-repl--ws-put agent-repl-itest-host--ws :project-dir
+                                    (agent-repl-itest--fixture-dir "itest-host-ws"))
+                (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+                (setq navigated nil)
+                ;; Act.
+                (agent-repl-host-on-link-up fresh)
+                ;; Assert.
+                (agent-repl-itest--await-call successor "RegisterWorkspace")
+                (agent-repl-itest--wait-until (lambda () navigated) nil
+                                              "the webview to be re-pointed")
+                (should (string-prefix-p
+                         (format "http://%s/" (agent-repl-itest-daemon-address successor))
+                         (car navigated))))
+            (agent-repl-connect-close fresh)))))))
+
 ;; audit-3 #24
 (ert-deftest agent-repl-itest-host-select-with-no-ref-sends-nothing ()
   "Select on a workspace with no ref yet sends nothing at all.

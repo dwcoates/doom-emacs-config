@@ -802,10 +802,28 @@ dired."
 ;;;; ---- Link lifecycle ----
 
 (defun agent-repl-host-on-link-up (conn)
-  "Re-register and re-subscribe every live workspace on CONN.
+  "Re-register, re-subscribe and re-point every live workspace on CONN.
 This is the NORMAL path after a daemon restart, not an error recovery:
 registration is idempotent by dir, streams are \"now\" and never \"since\",
-and no resume token exists anywhere."
+and no resume token exists anywhere.
+
+THE WEBVIEW IS RE-POINTED TOO, and leaving it out stranded every open
+panel.  A daemon Emacs launches listens on a FRESH PORT, and the page\='s
+url names the port it was opened at — so after a stop and an ensure the
+tab bar healed, the roster came back and the composer worked, while the
+webview went on dialing a daemon that had exited and drew a permanent
+`daemonUnreachable\=' card over the last feed it had.  Measured in the e2e
+sandbox: with both workspaces re-registered and the link up, the page
+still reported `failureArms=[daemonUnreachable]\=' at a url naming the
+dead daemon\='s port.  The only way out was the user reaching for
+`SPC o l\=' — a manual step for a recovery the product otherwise makes on
+its own.
+
+The reload runs AFTER the subscribe, because `agent-repl-host-subscribe\='
+is what moves `:conn\=' to the new daemon (`agent-repl-host--attach\=') and
+frontend.el derives the page url from `agent-repl-host-conn\='.  It is a
+no-op for a workspace with no live webview, so a headless one costs
+nothing."
   (let ((names (agent-repl--live-ws-names)))
     (agent-repl--info nil "elisp.host.link-up workspaces=%d" (length names))
     (dolist (ws names)
@@ -817,7 +835,10 @@ and no resume token exists anywhere."
            (lambda (ref)
              (if (null ref)
                  (agent-repl--error ws "elisp.host.link-up-register-failed ws=%s dir=%S" ws dir)
-               (agent-repl-host-subscribe conn ws ref)))))))))
+               (agent-repl-host-subscribe conn ws ref)
+               (agent-repl-frontend-reload-webview ws)
+               (agent-repl--info ws "elisp.host.link-up-webview-repointed ws=%s address=%S"
+                                 ws (agent-repl-connect-connection-address conn))))))))))
 
 (defun agent-repl-host-on-link-down (conn)
   "Forget the streams CONN carried, keeping every workspace's last state.
