@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startHarness, type Harness } from "./harness";
+import { installStylesheet } from "../stylesheet.js";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
@@ -295,6 +296,27 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     await harness.click('[data-feed-row="bubble"] [data-expand]');
     // Assert
     expect(harness.fake.calls("openFeed").length).toBe(opensBefore + 1);
+  });
+
+  // A SUB-FEED HANGS BENEATH ITS HEAD. The bubble wears `.bubble` for the
+  // card's fill and lift, and `.bubble` is a flex ROW, so the head line and the
+  // whole sub-feed were laid out side by side -- half the bubble empty under
+  // the head and every nested row squeezed into the other half. Photographed by
+  // the G49 playbook. The cascade is installed here because a class assertion
+  // alone passed the entire time.
+  it("stacks its sub-feed under its head, under the real stylesheet", async () => {
+    // Arrange
+    harness = await openBubble();
+    const remove = installStylesheet();
+    try {
+      await harness.click('[data-feed-row="bubble"] [data-expand]');
+      const bubble = harness.row("bubble")?.querySelector(".bubble");
+      // Act / Assert
+      expect(bubble).not.toBeNull();
+      expect(window.getComputedStyle(bubble as Element).flexDirection).toBe("column");
+    } finally {
+      remove();
+    }
   });
 
   it("hosts the sub-feed inside the bubble rather than navigating to it", async () => {

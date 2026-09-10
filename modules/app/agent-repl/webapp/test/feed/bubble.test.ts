@@ -5,6 +5,7 @@ import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { FeedIdSchema, FeedRowSchema, type FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { mountBubble } from "../../src/feed/bubble.js";
 import STYLESHEET from "../../src/styles.css?raw";
+import { installStylesheet } from "../stylesheet.js";
 import { defaultBubbleBody, type Handle } from "../../src/feed/renderers.js";
 import {
   Channel,
@@ -657,6 +658,38 @@ describe("mountBubble: the fold actually hides the sub-feed", () => {
     expect(sets.length).toBeGreaterThan(0);
     expect(guards.length).toBeGreaterThan(0);
     expect(sets.indexOf(guards[guards.length - 1])).toBe(sets.length - 1);
+  });
+
+  // AND IT STACKS. The bubble wears `.bubble` for the card's fill, border and
+  // lift, and `.bubble` is a flex ROW -- so the head line and the whole
+  // sub-feed were laid out SIDE BY SIDE, half the bubble left empty under the
+  // head and every nested row squeezed into the other half. Photographed by
+  // the G49 playbook the first time a subagent bubble was opened in the real
+  // webview. jsdom resolves the cascade for this one, so it is asked here.
+  it("lays the sub-feed BENEATH the head rather than beside it", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert
+      expect(window.getComputedStyle(bubble.element).flexDirection).toBe("column");
+    } finally {
+      remove();
+    }
+  });
+
+  it("lets the sub-feed take the bubble's whole width", () => {
+    // Arrange
+    const remove = installStylesheet();
+    try {
+      const { bubble } = mount(subagentRow("b1"));
+      document.body.replaceChildren(bubble.element);
+      // Act / Assert: stretched, so a column layout does not shrink-wrap it.
+      expect(window.getComputedStyle(bubble.element).alignItems).toBe("stretch");
+    } finally {
+      remove();
+    }
   });
 
   it("hides the panel on the caret's collapse", async () => {
