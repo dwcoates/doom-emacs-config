@@ -1,18 +1,27 @@
-# Owner 6 (B17–18: detached indicator, link severed/recovered) — stand-down state
+# Owner 6 (B17-18: detached indicator, link severed/recovered) — live state
 
-Reconstructed by the lead from git at the 2026-09-09 stand-down; the owner
-left no STATE.md. Seven commits ahead of overhaul/integration after the lead's
-WIP commit.
+Opus-medium replacement owner. Branch `overhaul/int-play-06`, worktree
+`integration-agents/play-06`.
 
-## Landed on this branch
-- shim/fake: a detached run outlives its turn long enough to be caught (a79cf3a7a,
-  5e9492ae2, 0ab8e4ade).
-- daemon/workspace: a shim that is gone is not the workspace's client (160145f17), with
-  an integration test that a prompt revives a workspace whose shim was killed.
-- playtest: the tab says work is live, and says the route is gone (1689ca6eb).
+## Done
+- Rebased onto `overhaul/integration` by cherry-pick, DROPPING the lead's
+  `wip(playtest/06)` 50ms-settle-window commit; integration's reconciled
+  `playtest_capture_test.go` wins.
+- `go vet -tags playtest ./e2e` clean after the rebase.
 
-## WIP (lead-committed, unreviewed, unrun)
-- e2e/playtest_capture_test.go: settle on a 50ms UNCHANGED WINDOW instead of two agreeing
-  reads, with the measured torn captures documented in the comment. This is the THIRD
-  independent fix to capture settling (owner 7: rAF paint gate; owner 1: redisplay between
-  reads). The lead reconciles all three into one substrate change before owners rerun.
+## Landed on this branch (inherited, all with tests)
+- shim/fake: `AGENT_REPL_FAKE_DETACH_GATE` parks `bash-detach` after its first
+  spool line, so "detached work outlives its turn" is arranged rather than raced.
+- daemon/workspace: a reaped shim is not the workspace's client (`Fleet.Client`
+  reads liveness like `Fleet.Shim`; `Fleet.Start` retires the dead row first),
+  with a unit test and a daemon integration test.
+- playbook `e2e/playtest_06_tab_arms_link_test.go`.
+
+## In flight
+- Run 1 of the section queued on the host suite slot (one image build has held
+  it ~50 minutes with ~10 waiters behind it). Log:
+  scratchpad/owner-06/run1.log; pictures under scratchpad/owner-06/out-r1.
+
+## Remaining
+- Two consecutive green runs with every picture matching its manifest sentence.
+- Delete this file in the last commit before merge.
