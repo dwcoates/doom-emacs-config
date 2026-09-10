@@ -65,8 +65,13 @@ func taskAct(id string, state *conversationv1.AgentTaskState) *conversationv1.Ag
 	}
 }
 
+// stated is a subject the act NAMES. `AgentTaskState.subject` carries presence,
+// so a test says which of the two things it means -- named, or not named at
+// all -- rather than leaning on the empty string to mean either.
+func stated(subject string) *string { return &subject }
+
 // pendingTask is a recorded, unstarted task.
-func pendingTask(subject string) *conversationv1.AgentTaskState {
+func pendingTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Pending{Pending: &conversationv1.AgentTaskPending{}},
@@ -74,7 +79,7 @@ func pendingTask(subject string) *conversationv1.AgentTaskState {
 }
 
 // completedTask is a task that achieved what it described.
-func completedTask(subject string) *conversationv1.AgentTaskState {
+func completedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Completed{Completed: &conversationv1.AgentTaskCompleted{}},
@@ -83,7 +88,7 @@ func completedTask(subject string) *conversationv1.AgentTaskState {
 
 // runningTask is a task being worked on, with the agent's phrasing when it gave
 // one.
-func runningTask(subject string, activeForm *string) *conversationv1.AgentTaskState {
+func runningTask(subject *string, activeForm *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status: &conversationv1.AgentTaskState_Running{
@@ -93,7 +98,7 @@ func runningTask(subject string, activeForm *string) *conversationv1.AgentTaskSt
 }
 
 // deletedTask is a task removed from the plan.
-func deletedTask(subject string) *conversationv1.AgentTaskState {
+func deletedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{
 		Subject: subject,
 		Status:  &conversationv1.AgentTaskState_Deleted{Deleted: &conversationv1.AgentTaskDeleted{}},
@@ -257,14 +262,133 @@ func TestASubagentsTerminalRetiresItsRow(t *testing.T) {
 	}
 }
 
+// detachedSubagentWork announces a spawn that is detached from the moment the
+// footer hears of it -- the `created` origin.
+func detachedSubagentWork(work, created, subagentType string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: work},
+		Origin: &conversationv1.AgentDetachedWork_Created{Created: &conversationv1.DetachedWorkCreated{
+			WorkCreated: &conversationv1.DetachableWork{
+				Work: &conversationv1.DetachableWork_Subagent{Subagent: &conversationv1.AgentSubagent{
+					Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+						CreatedAgentId: &conversationv1.AgentId{Value: created},
+						Prompt:         &conversationv1.AgentSubagentPrompt{SubagentType: &subagentType},
+						StartedAt:      &conversationv1.AgentActivityStartedAt{AtMs: instant.UnixMilli()},
+					}},
+				}},
+			},
+		}},
+	}
+}
+
+// movedSubagent announces an in-turn spawn LEAVING the turn under a handle.
+func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+}
+
+// subagentSettled is a detached run's own terminal, success or failure.
+func subagentSettled(failed bool) *conversationv1.AgentSubagent {
+	if failed {
+		return &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{}},
+		}
+	}
+	return &conversationv1.AgentSubagent{
+		Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+	}
+}
+
+// workID addresses one piece of detached work.
+func workID(v string) *conversationv1.DetachedWorkId {
+	return &conversationv1.DetachedWorkId{Value: v}
+}
+
+func TestADetachedSubagentCountsInTheAgentsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents().GetCount(); got != 1 {
+		t.Fatalf("agents chip = %d, want the detached run counted", got)
+	}
+}
+
+// THE DEFECT G50 READ: two settled placements and one live one, and the chip
+// counted all three. A detached run's terminal is addressed to its HANDLE, and
+// nothing retired the row from it.
+func TestADetachedSubagentsTerminalRetiresItsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
+
+	// Assert
+	if h.view(t).GetStrip().GetLiveWork().GetAgents() != nil {
+		t.Fatalf("the agents chip survived the detached run's own terminal")
+	}
+}
+
+// HOWEVER IT SETTLED. A failed run is as over as a successful one, exactly as a
+// shell's is.
+func TestADetachedSubagentsFailureRetiresItsChip(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "agent-2", "Explore"))
+
+	// Act
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(true))
+
+	// Assert
+	if h.view(t).GetStrip().GetLiveWork().GetAgents() != nil {
+		t.Fatalf("the agents chip survived the detached run's failure")
+	}
+}
+
+// THE SPAWNING CALL RETURNING IS A LAUNCH RECEIPT. Once the run has left the
+// turn, the caller's stream states nothing about whether it is still going, so
+// a terminal arm read off that unit must not retire a run that is still live.
+func TestTheSpawningCallsReturnDoesNotRetireADetachedRun(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+
+	// Act: the spawn unit's own settled arm on the CALLER's activity stream.
+	h.r.OnActivity(testWS, mainAgent, &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item:       &conversationv1.AgentActivity_Subagent{Subagent: subagentSettled(false)},
+	})
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents().GetCount(); got != 1 {
+		t.Fatalf("agents chip = %d, want the detached run still counted", got)
+	}
+}
+
 func TestTheTaskChipCountsDoneOverTotal(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", completedTask("write it")))
-	h.r.OnActivity(testWS, mainAgent, taskAct("t2", pendingTask("test it")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", completedTask(stated("write it"))))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t2", pendingTask(stated("test it"))))
 
 	// Assert
 	chip := h.view(t).GetStrip().GetLiveWork().GetTasks()
@@ -280,7 +404,7 @@ func TestARunningTaskCarriesItsActiveForm(t *testing.T) {
 	form := "running the migration"
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", &form)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), &form)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -295,7 +419,7 @@ func TestARunningTaskWithNoPhrasingDrawsNoActiveForm(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", nil)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -307,7 +431,7 @@ func TestARunningTaskWithNoPhrasingDrawsNoActiveForm(t *testing.T) {
 // unstatedTask is a state that says NOTHING about where the task stands --
 // the shape a `TaskUpdate` that moved only an edge or a subject produces, and
 // the shape an announcement the tracker has not answered yet produces.
-func unstatedTask(subject string) *conversationv1.AgentTaskState {
+func unstatedTask(subject *string) *conversationv1.AgentTaskState {
 	return &conversationv1.AgentTaskState{Subject: subject}
 }
 
@@ -320,10 +444,10 @@ func TestAnUnstatedStatusLeavesARunningTaskRunning(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	form := "running the migration"
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("migrate", &form)))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated("migrate"), &form)))
 
 	// Act: an update that names an edge and no status at all.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("migrate")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask(stated("migrate"))))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -340,7 +464,7 @@ func TestAnUnstatedStatusOnANewTaskIsPending(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask("brand new")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", unstatedTask(stated("brand new"))))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -349,18 +473,18 @@ func TestAnUnstatedStatusOnANewTaskIsPending(t *testing.T) {
 	}
 }
 
-// AN EMPTY SUBJECT IS NOT A SUBJECT. A `TaskUpdate` naming only a status
+// AN UNSTATED SUBJECT IS NOT A SUBJECT. A `TaskUpdate` naming only a status
 // carries none, and overwriting with it drew the whole checklist as blank
 // lines beside its glyphs -- observed in the G52 playbook.
 func TestAnActThatNamesNoSubjectKeepsTheOneTheTaskHas(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
 
 	// Act: a status-only update, which is what the tracker's own answer to
-	// `TaskUpdate(status)` produces.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask("", nil)))
+	// `TaskUpdate(status)` produces -- the subject field UNSET, not empty.
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(nil, nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -378,10 +502,10 @@ func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("Land the converter")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
 
 	// Act: the refused update's own shape -- a task nobody has named.
-	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask("")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t9", unstatedTask(nil)))
 
 	// Assert
 	rows := h.view(t).GetExpanded().GetTasks().GetRows()
@@ -393,14 +517,33 @@ func TestAnActWithNoSubjectOpensNoChecklistEntry(t *testing.T) {
 	}
 }
 
+// A SUBJECT STATED EMPTY IS A SUBJECT. Presence is what tells the two apart,
+// and the reading that mattered for the checklist -- keeping what an act did
+// not state -- must not become a reading that IGNORES what an act did state.
+func TestAnActThatStatesAnEmptySubjectSetsIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("Land the converter"))))
+
+	// Act
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", runningTask(stated(""), nil)))
+
+	// Assert
+	rows := h.view(t).GetExpanded().GetTasks().GetRows()
+	if got := rows[0].GetSubject().GetText(); got != "" {
+		t.Fatalf("task subject = %q, want the empty subject the act stated", got)
+	}
+}
+
 func TestADeletedTaskLeavesTheChecklist(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask("drop me")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", pendingTask(stated("drop me"))))
 
 	// Act
-	h.r.OnActivity(testWS, mainAgent, taskAct("t1", deletedTask("drop me")))
+	h.r.OnActivity(testWS, mainAgent, taskAct("t1", deletedTask(stated("drop me"))))
 
 	// Assert
 	if h.view(t).GetStrip().GetLiveWork().GetTasks() != nil {

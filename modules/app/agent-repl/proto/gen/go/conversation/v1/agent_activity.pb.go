@@ -5041,10 +5041,13 @@ func (x *AgentTaskRejected) GetError() *AgentToolFailure {
 // A task as it stands after an act.
 type AgentTaskState struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The task's subject line.
-	Subject string `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
-	// Its full description.
-	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	// The task's subject line. UNSET = the act did not state one (an update
+	// that changes only status keeps the subject the checklist already holds);
+	// SET, even to "", = the act states it. Presence is what lets a consumer
+	// tell "not stated" from "empty", exactly as `owner` below already does.
+	Subject *string `protobuf:"bytes,1,opt,name=subject,proto3,oneof" json:"subject,omitempty"`
+	// Its full description. Presence as for `subject`.
+	Description *string `protobuf:"bytes,2,opt,name=description,proto3,oneof" json:"description,omitempty"`
 	// Which agent it is assigned to, when it is assigned to one. Unset for a task
 	// the agent created for itself and has not handed off, which is the ordinary
 	// case. Presence rather than an empty-string sentinel.
@@ -5107,15 +5110,15 @@ func (*AgentTaskState) Descriptor() ([]byte, []int) {
 }
 
 func (x *AgentTaskState) GetSubject() string {
-	if x != nil {
-		return x.Subject
+	if x != nil && x.Subject != nil {
+		return *x.Subject
 	}
 	return ""
 }
 
 func (x *AgentTaskState) GetDescription() string {
-	if x != nil {
-		return x.Description
+	if x != nil && x.Description != nil {
+		return *x.Description
 	}
 	return ""
 }
@@ -19265,11 +19268,11 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x10AgentTaskChanged\"[\n" +
 	"\x11AgentTaskRejected\x12<\n" +
 	"\x05error\x18\x01 \x01(\v2!.conversation.v1.AgentToolFailureH\x00R\x05error\x88\x01\x01B\b\n" +
-	"\x06_error\"\xf0\x03\n" +
-	"\x0eAgentTaskState\x12\x18\n" +
-	"\asubject\x18\x01 \x01(\tR\asubject\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\x12\x19\n" +
-	"\x05owner\x18\x03 \x01(\tH\x01R\x05owner\x88\x01\x01\x12=\n" +
+	"\x06_error\"\x96\x04\n" +
+	"\x0eAgentTaskState\x12\x1d\n" +
+	"\asubject\x18\x01 \x01(\tH\x01R\asubject\x88\x01\x01\x12%\n" +
+	"\vdescription\x18\x02 \x01(\tH\x02R\vdescription\x88\x01\x01\x12\x19\n" +
+	"\x05owner\x18\x03 \x01(\tH\x03R\x05owner\x88\x01\x01\x12=\n" +
 	"\apending\x18\x04 \x01(\v2!.conversation.v1.AgentTaskPendingH\x00R\apending\x12=\n" +
 	"\arunning\x18\x05 \x01(\v2!.conversation.v1.AgentTaskRunningH\x00R\arunning\x12C\n" +
 	"\tcompleted\x18\x06 \x01(\v2#.conversation.v1.AgentTaskCompletedH\x00R\tcompleted\x12=\n" +
@@ -19278,7 +19281,10 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\x06blocks\x18\v \x03(\v2\x1c.conversation.v1.AgentTaskIdR\x06blocks\x12;\n" +
 	"\n" +
 	"blocked_by\x18\f \x03(\v2\x1c.conversation.v1.AgentTaskIdR\tblockedByB\b\n" +
-	"\x06statusB\b\n" +
+	"\x06statusB\n" +
+	"\n" +
+	"\b_subjectB\x0e\n" +
+	"\f_descriptionB\b\n" +
 	"\x06_owner\"\x12\n" +
 	"\x10AgentTaskPending\"H\n" +
 	"\x10AgentTaskRunning\x12$\n" +

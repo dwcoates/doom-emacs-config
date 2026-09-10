@@ -492,6 +492,10 @@ func (s *footerSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWork
 	s.rec.emit(event{sink: "footer", method: "OnBash", detail: work.GetValue()})
 }
 
+func (s *footerSink) OnSubagent(_ ids.WorkspaceID, work *conversationv1.DetachedWorkId, _ *conversationv1.AgentSubagent) {
+	s.rec.emit(event{sink: "footer", method: "OnSubagent", detail: work.GetValue()})
+}
+
 func (s *footerSink) OnContextBudgetWarning(_ ids.WorkspaceID, agent *conversationv1.AgentId, w *conversationv1.ContextBudgetWarning) {
 	s.rec.emit(event{sink: "footer", method: "OnContextBudgetWarning", agent: agent.GetValue(), detail: w.GetText()})
 }

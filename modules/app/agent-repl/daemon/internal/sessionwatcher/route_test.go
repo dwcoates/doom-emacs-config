@@ -554,6 +554,32 @@ func TestRouteBashFrame(t *testing.T) {
 	assertNames(t, got, []string{"feed.OnBash", "footer.OnBash"})
 }
 
+// TestRouteDetachedSubagentFrame covers a DETACHED run's own subagent frame:
+// it reaches the footer addressed by its HANDLE, so the chip retires at the
+// terminal whichever book carried it. The counterpart of TestRouteBashFrame.
+func TestRouteDetachedSubagentFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("sub-1", subagentWork("sub-1")))})
+	open := h.client.nextAgentOpen(t)
+	h.quiet()
+
+	// Act.
+	got := h.route(open.stream, entryFrame(&conversationv1.AgentFrame{
+		AgentId: agentID("sub-1"),
+		Result: &conversationv1.AgentFrame_Update{Update: activityUpdate(&conversationv1.AgentActivity{
+			ActivityId: &conversationv1.AgentActivityId{Value: "sub-unit-9"},
+			Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+				Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+			}},
+		})},
+	}))
+
+	// Assert.
+	assertNames(t, got, []string{
+		"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
+	})
+}
+
 // TestRouteDetachedWorkAnnouncement covers the announcement itself: the bubble
 // head reaches the feed, the chip the footer, the roster row the sidebar.
 func TestRouteDetachedWorkAnnouncement(t *testing.T) {

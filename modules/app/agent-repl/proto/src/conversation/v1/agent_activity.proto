@@ -755,10 +755,13 @@ message AgentTaskRejected {
 
 // A task as it stands after an act.
 message AgentTaskState {
-  // The task's subject line.
-  string subject = 1;
-  // Its full description.
-  string description = 2;
+  // The task's subject line. UNSET = the act did not state one (an update
+  // that changes only status keeps the subject the checklist already holds);
+  // SET, even to "", = the act states it. Presence is what lets a consumer
+  // tell "not stated" from "empty", exactly as `owner` below already does.
+  optional string subject = 1;
+  // Its full description. Presence as for `subject`.
+  optional string description = 2;
 
   // Which agent it is assigned to, when it is assigned to one. Unset for a task
   // the agent created for itself and has not handed off, which is the ordinary
