@@ -2249,6 +2249,11 @@ frame's text area instead of requesting an outer NSWindow resize, which
 prevents the clipped-resize redisplay livelock.  The obsolete reactive
 watchdog is removed after a hot reload.
 
+Finally registers `agent-repl--tabbar-reassert-row-count' on
+`window-setup-hook' and `persp-activated-functions', because the pin
+above does not survive on its own: see that function for which resets
+undo it and why hook ordering, not advice, is the fix.
+
 Logs every before/after value needed to diagnose a future regression:
 row count, auto-resize value, default frame parameters, current frame
 parameters, and the watchdog cleanup result."
@@ -2295,6 +2300,15 @@ parameters, and the watchdog cleanup result."
           (alist-get 'tab-bar-lines-keep-state default-frame-alist) t)
     (dolist (frame frames)
       (agent-repl--tabbar-pin-frame frame rows))
+    ;; Both hooks are APPENDED, and both registrations happen after
+    ;; `tab-bar-mode' above: that is what puts the re-assertion after Doom's
+    ;; `+workspaces-load-tab-bar-data-h' (which `tab-bar-mode-hook' installs
+    ;; on `persp-activated-functions') and after `frame-notice-user-settings'
+    ;; (which `command-line' runs immediately before `window-setup-hook').
+    ;; See `agent-repl--tabbar-reassert-row-count' for the measured cause.
+    (add-hook 'window-setup-hook #'agent-repl--tabbar-reassert-row-count t)
+    (add-hook 'persp-activated-functions
+              #'agent-repl--tabbar-reassert-row-count t)
     (agent-repl--log
      (let ((current (agent-repl--ws-current-name)))
        (and current (agent-repl--ws-known-p current) current))
@@ -2312,6 +2326,62 @@ parameters, and the watchdog cleanup result."
                      (frame-parameter frame 'tab-bar-lines-keep-state)))
              frames)
      watchdog-cleanup)))
+
+(defun agent-repl--tabbar-reassert-row-count (&rest _)
+  "Re-pin the fixed two-row tab-bar contract in both scopes Emacs reads.
+
+Two resets undo `agent-repl--install-fixed-height-tab-bar' after it has
+already run, and neither is stopped by `tab-bar-lines-keep-state':
+
+- Doom's `+workspaces-load-tab-bar-data-h' (on `persp-activated-functions')
+  ends with `(tab-bar--update-tab-bar-lines t)'.  In Emacs 30.2 that
+  function honors `tab-bar-lines-keep-state' only for the per-frame
+  parameter; the `frames' = t branch afterwards rewrites
+  `default-frame-alist' unconditionally, putting `(tab-bar-lines . 1)'
+  back.  Every frame created after a workspace switch therefore starts
+  one row tall — and inherits the alist's `tab-bar-lines-keep-state' t,
+  which then LOCKS it at one row.
+
+- At startup `frame-notice-user-settings' applies `default-frame-alist'
+  to the initial frame, so an alist already clobbered to 1 (by
+  `tab-bar-mode' itself, or by the reset above) sizes the initial frame
+  to one row.  The bar stays one row until something else repaints it.
+
+Both resets are followed by a hook, so no advice on the private
+`tab-bar--update-tab-bar-lines' is needed: `window-setup-hook' runs
+immediately after `frame-notice-user-settings' in `command-line', and
+appending to `persp-activated-functions' places this after Doom's
+handler.  `agent-repl--install-fixed-height-tab-bar' registers both.
+
+Repair is conditional: a scope already carrying the contract is left
+untouched, so a workspace switch does not push a correct frame through
+`agent-repl--tabbar-pin-frame''s NS zero-transition on every activation.
+Returns the list of graphical frames that were actually re-pinned."
+  (let* ((rows agent-repl--tabline-row-count)
+         (prior-default-lines (alist-get 'tab-bar-lines default-frame-alist))
+         (prior-default-keep-state
+          (alist-get 'tab-bar-lines-keep-state default-frame-alist))
+         (default-repaired
+          (not (and (equal prior-default-lines rows)
+                    (eq t prior-default-keep-state))))
+         (repinned nil))
+    (when default-repaired
+      (setf (alist-get 'tab-bar-lines default-frame-alist) rows
+            (alist-get 'tab-bar-lines-keep-state default-frame-alist) t))
+    (dolist (frame (cl-remove-if-not #'display-graphic-p (frame-list)))
+      (unless (and (equal (frame-parameter frame 'tab-bar-lines) rows)
+                   (eq t (frame-parameter frame 'tab-bar-lines-keep-state)))
+        (agent-repl--tabbar-pin-frame frame rows)
+        (push frame repinned)))
+    (setq repinned (nreverse repinned))
+    (when (or default-repaired repinned)
+      (agent-repl--log
+       (let ((current (agent-repl--ws-current-name)))
+         (and current (agent-repl--ws-known-p current) current))
+       "tabbar-reassert: rows=%d default-repaired=%s prior-default-lines=%S prior-default-keep-state=%S repinned=%S"
+       rows default-repaired prior-default-lines prior-default-keep-state
+       repinned))
+    repinned))
 
 ;; Install after persp-mode loads so workspace names resolve during render.
 (agent-repl--ws-after-system-load #'agent-repl--install-fixed-height-tab-bar)
