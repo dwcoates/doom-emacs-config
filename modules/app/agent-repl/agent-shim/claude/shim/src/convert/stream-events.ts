@@ -138,6 +138,7 @@ function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
   }
   const unknownFields = Object.keys(normalized.unknownUsageFields);
   if (unknownFields.length > 0) {
+    // warn: a defect because unmodelled usage counters make the canonical bill incomplete.
     LOGGER.warn(
       { unmodeled_usage_fields: unknownFields },
       "the vendor's usage block carries fields this contract cannot express",
@@ -226,6 +227,7 @@ export function convertStreamEvent(
     case "message_start": {
       const id = event.message?.id;
       if (typeof id !== "string" || id === "") {
+        // warn: a defect because a stream message without identity cannot key any block.
         LOGGER.warn({}, "a message_start named no message id; no block can be identified");
         return [];
       }
@@ -238,6 +240,7 @@ export function convertStreamEvent(
       const index = event.index ?? 0;
       const messageId = state.messageId;
       if (messageId === undefined) {
+        // warn: a defect because an orphaned content block is omitted from the conversation.
         LOGGER.warn({}, "a content block opened with no message_start seen; skipped");
         return [];
       }
@@ -373,7 +376,7 @@ export function convertStreamEvent(
       return [];
 
     default:
-      LOGGER.warn(
+      LOGGER.debug(
         { event_type: event.type },
         "no converter owns this stream event; it lands as residue",
       );
@@ -497,6 +500,7 @@ export function convertAssistantMessage(
   const api = message.message as unknown as RawAssistantMessage;
   const messageId = api.id;
   if (typeof messageId !== "string" || messageId === "") {
+    // warn: a defect because an assistant message without identity cannot produce addressable frames.
     LOGGER.warn(
       { uuid: message.uuid },
       "an assistant message named no id; its blocks have no identity and produce no frames",
@@ -607,6 +611,7 @@ export function convertAssistantMessage(
       const toolUseId = typeof block.id === "string" ? block.id : "";
       const toolName = typeof block.name === "string" ? block.name : "";
       if (toolUseId === "" || toolName === "") {
+        // warn: a defect because a tool call without identity or a name cannot produce a unit.
         LOGGER.warn(
           { message_id: messageId, index },
           "a tool_use block named no id or no tool; no unit can be identified",
@@ -638,7 +643,7 @@ export function convertAssistantMessage(
       continue;
     }
 
-    LOGGER.warn(
+    LOGGER.debug(
       { message_id: messageId, index, block_type: kind },
       "no converter owns this assistant content block; it lands as residue",
     );
@@ -670,9 +675,9 @@ export function convertModelRefusal(
     typeof stated === "string" && stated !== ""
       ? create(conversationv1.AgentResponseRefusalExplanationSchema, { text: stated })
       : undefined;
-  LOGGER.warn(
+  LOGGER.info(
     { uuid: message.uuid, explained: explanation !== undefined },
-    "the model REFUSED and no fallback is configured; settling the response as a refusal",
+    "the model refused the request; settling the response as a refusal",
   );
   return [
     activityEntry(
@@ -723,7 +728,7 @@ export function convertThinkingTokens(
 ): readonly PersistEntry[] {
   const activityId = state.openThinking;
   if (activityId === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       {},
       "a thinking-token estimate arrived with no open reasoning block; nothing to upsert",
     );

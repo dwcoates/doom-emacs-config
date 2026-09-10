@@ -44,7 +44,7 @@ const LOGGER = bindLog({ component: "shim-routes", operation: "shim.service.rout
 
 /** Record that a verb was entered, before anything can refuse it. */
 function entered(rpc: string): void {
-  LOGGER.logVerbose({ rpc, boundary: "entered" }, `serving shim.v1.${rpc}`);
+  LOGGER.debug({ rpc, boundary: "entered" }, `serving shim.v1.${rpc}`);
 }
 
 /**
@@ -58,7 +58,7 @@ function entered(rpc: string): void {
 async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
   try {
     const response = await act();
-    LOGGER.logVerbose({ rpc, boundary: "completed" }, `completed shim.v1.${rpc}`);
+    LOGGER.debug({ rpc, boundary: "completed" }, `completed shim.v1.${rpc}`);
     return response;
   } catch (error) {
     throw reportUnhandled(rpc, error);
@@ -75,7 +75,7 @@ async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
 async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
   try {
     yield* frames();
-    LOGGER.logVerbose({ rpc, boundary: "completed" }, `completed shim.v1.${rpc} stream`);
+    LOGGER.debug({ rpc, boundary: "completed" }, `completed shim.v1.${rpc} stream`);
   } catch (error) {
     throw reportUnhandled(rpc, error);
   }
@@ -202,20 +202,20 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
        */
       getWorkflow() {
         entered("GetWorkflow");
-        LOGGER.warn({ rpc: "GetWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.debug({ rpc: "GetWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("GetWorkflow");
       },
 
       // eslint-disable-next-line require-yield
       async *watchWorkflow() {
         entered("WatchWorkflow");
-        LOGGER.warn({ rpc: "WatchWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.debug({ rpc: "WatchWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("WatchWorkflow");
       },
 
       stopWorkflow() {
         entered("StopWorkflow");
-        LOGGER.warn({ rpc: "StopWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
+        LOGGER.debug({ rpc: "StopWorkflow" }, "refused a workflow verb: workflow is not implemented in this wave");
         throw unimplemented("StopWorkflow");
       },
 

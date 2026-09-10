@@ -83,6 +83,7 @@ export function convertUserRecord(
   for (const block of results) {
     const toolUseId = block.tool_use_id;
     if (typeof toolUseId !== "string" || toolUseId === "") {
+      // warn: a defect because a tool result without a call id cannot settle a unit.
       LOGGER.warn(
         { uuid: message.uuid },
         "a tool_result block names no call; nothing can be settled by it",
@@ -196,6 +197,7 @@ function skillDocumentEntry(
             .join("")
         : "";
   if (markdown === "") {
+    // warn: a defect because an empty skill document leaves its invocation open.
     LOGGER.warn(
       { tool_use_id: sourceToolUseId },
       "a skill document record carried no markdown; the skill unit stays open",
@@ -211,6 +213,7 @@ function skillDocumentEntry(
     context.nowMs(),
   );
   if (item === undefined) {
+    // warn: a defect because a nameless skill document cannot populate its success arm.
     LOGGER.warn(
       { tool_use_id: sourceToolUseId },
       "a skill document names no skill; the settle frame is skipped rather than written with no arm",

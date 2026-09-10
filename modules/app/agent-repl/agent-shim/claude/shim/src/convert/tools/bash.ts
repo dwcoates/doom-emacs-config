@@ -143,7 +143,7 @@ function bashOutput(
       // NAMING A TYPE THE VENDOR NEVER STATED WOULD BE INVENTING A FACT, and an
       // empty one would be the sentinel this contract forbids — so no terminal
       // is produced, exactly as before this arm could ever be filled.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a command produced image output the result carries no loadable bytes for; no terminal frame is produced",
       );
@@ -290,7 +290,7 @@ export const bashConverter: ToolConverter = {
   start(call) {
     const line = requestedLine(call);
     if (line === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a command was announced with no command line; no start frame is produced",
       );
@@ -336,7 +336,7 @@ export const bashConverter: ToolConverter = {
     // unit open forever over a command that plainly ran and ended.
     const record = typed ?? (exited === undefined ? undefined : {});
     if (record === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a command settled with no typed output; no terminal frame is produced",
       );
@@ -358,7 +358,7 @@ export const bashConverter: ToolConverter = {
     }
     const line = requestedLine(call);
     if (line === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a command settled with no command line to restate; no terminal frame is produced",
       );
@@ -412,7 +412,7 @@ export const bashConverter: ToolConverter = {
   cut(call, atMs) {
     const line = requestedLine(call);
     if (line === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a stopped turn left a command open with no command line to restate; no terminal frame is produced",
       );

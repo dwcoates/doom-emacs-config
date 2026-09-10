@@ -34,7 +34,7 @@ function actNameOf(call: PendingCall): "create" | "delete" | "list" | undefined 
   if (call.toolName === CREATE) return "create";
   if (call.toolName === DELETE) return "delete";
   if (call.toolName === LIST) return "list";
-  LOGGER.warn(
+  LOGGER.debug(
     { tool: call.toolName, tool_use_id: call.toolUseId },
     "a cron unit was built from a tool name that is none of the three cron calls",
   );
@@ -57,7 +57,7 @@ function actOf(call: PendingCall): conversationv1.AgentCronStart["act"] {
     case "delete": {
       const jobId = str(call.input, "id");
       if (jobId === undefined) {
-        LOGGER.warn(
+        LOGGER.debug(
           { tool_use_id: call.toolUseId },
           "a cron delete names no job id; the unit cannot restate which job is being removed",
         );
@@ -80,7 +80,7 @@ function jobOf(entry: unknown, toolUseId: string): conversationv1.AgentCronJob |
   const jobId = str(record, "id");
   if (jobId === undefined) {
     // An id-less row cannot be deleted, matched, or updated; it is not a job.
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: toolUseId },
       "a cron listing row named no job id; the row is dropped",
     );
@@ -140,7 +140,7 @@ export const cronConverter: ToolConverter = {
     const act = actNameOf(call);
     const output = asRecord(outcome.structured);
     if (act === undefined || output === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, act },
         "a settled cron call carried no act or no typed output; no success frame is produced",
       );
@@ -149,7 +149,7 @@ export const cronConverter: ToolConverter = {
     if (act === "list") {
       const jobs = arr(output, "jobs");
       if (jobs === undefined) {
-        LOGGER.warn(
+        LOGGER.debug(
           { tool_use_id: call.toolUseId },
           "a cron listing stated no jobs array; an empty listed arm would tell the reader to forget every job it knows",
         );
@@ -168,7 +168,7 @@ export const cronConverter: ToolConverter = {
     if (jobId === undefined) {
       // Both remaining arms are ABOUT one job; without its id neither names
       // anything the reader can act on.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, act },
         "a settled cron call named no job id; no success frame is produced",
       );

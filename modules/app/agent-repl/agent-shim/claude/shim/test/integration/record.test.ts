@@ -933,7 +933,7 @@ describe("R9: the identity the files carry", () => {
     const derived = await second.log.record(
       (record) => record.context.rule === "absent_file_adopts_resume_id",
     );
-    expect(derived.level).toBe("warn");
+    expect(derived.level).toBe("info");
     expect(derived.context.vendor_session_id).toBe(started.vendorSessionId);
     // And the derivation was PERSISTED, so the next reader does not derive again.
     const record = JSON.parse(

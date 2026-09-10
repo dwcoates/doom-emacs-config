@@ -473,7 +473,7 @@ export class PermissionGate {
     if (vendorAgentId === undefined || vendorAgentId === "") return this.deps.mainAgentId();
     const resolved = this.deps.agentFor(vendorAgentId);
     if (resolved !== undefined) return resolved;
-    LOGGER.warn(
+    LOGGER.debug(
       { vendor_agent_id: vendorAgentId },
       "the vendor raised an ask under an agent this session never announced; it lands on the main agent",
     );
@@ -563,10 +563,10 @@ export class PermissionGate {
     const openOfKind = [...this.pendingByToolUse.values()].some(
       (pending) => pending.kind === kind,
     );
-    LOGGER.warn(
+    LOGGER.debug(
       { ask_kind: kind, ask_id: id, another_open: openOfKind },
       openOfKind
-        ? "REFUSED an answer naming an ask the shim is not holding while another of its kind is open"
+        ? "refused an answer for an unknown ask while another ask of its kind is open"
         : "an answer arrived for an ask that is not open",
     );
     return openOfKind ? "answer_mismatch" : "no_open_ask";
@@ -630,9 +630,9 @@ export class PermissionGate {
     }
     const problem = validateAnswers(pending.batch, answers);
     if (problem !== undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { question_id: ask.value, problem },
-        "REFUSED an answer whose echo does not match the open question",
+        "refused an answer whose echo does not match the open question",
       );
       return "answer_mismatch";
     }
@@ -750,6 +750,7 @@ export class PermissionGate {
         if (scope.case === "standing") {
           const standing = scope.value.standing;
           if (standing === undefined) {
+            // warn: a defect because a standing permission decision omitted the standing it grants.
             LOGGER.warn({ permission_id: askId }, "a standing allow carries no standing");
             return "answer_mismatch";
           }
@@ -765,12 +766,12 @@ export class PermissionGate {
             pending.offeredStanding === undefined ||
             !equals(conversationv1.AgentPermissionStandingSchema, pending.offeredStanding, standing)
           ) {
-            LOGGER.warn(
+            LOGGER.debug(
               {
                 permission_id: askId,
                 offered: pending.offeredStanding !== undefined,
               },
-              "REFUSED a standing grant that is not the standing this ask offered",
+              "refused a standing grant that does not match the standing this ask offered",
             );
             return "answer_mismatch";
           }
@@ -822,6 +823,7 @@ export class PermissionGate {
         return "delivered";
       }
       default:
+        // warn: a defect because an arm-less permission decision cannot resolve the vendor callback faithfully.
         LOGGER.warn({ permission_id: askId }, "a permission decision carries no arm");
         return "answer_mismatch";
     }
@@ -882,9 +884,9 @@ export class PermissionGate {
       ask.resolve({ behavior: "deny", message: reason });
     }
     if (pending.length > 0) {
-      LOGGER.warn(
+      LOGGER.info(
         { reason, resolved: pending.length },
-        "resolved every pending permission callback as DENIED before tearing down; an unresolved one wedges the vendor",
+        "resolved every pending permission callback as denied before teardown",
       );
     }
     return pending.length;

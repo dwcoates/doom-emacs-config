@@ -70,6 +70,7 @@ export function diagnosticSeverity(literal: unknown): conversationv1.AgentDiagno
     case "hint":
       return conversationv1.AgentDiagnosticSeverity.HINT;
     default:
+      // warn: a defect because an unknown diagnostic severity cannot be represented on the wire.
       LOGGER.warn(
         { severity: String(literal) },
         "the vendor named a diagnostic severity this contract does not spell",
@@ -179,7 +180,7 @@ function convertContextInjected(
     const content = attachment.content as { path?: unknown; content?: unknown } | undefined;
     const path = typeof attachment.path === "string" ? attachment.path : content?.path;
     if (typeof path !== "string" || path === "") {
-      LOGGER.warn({}, "an injected memory file named no path; no unit is produced");
+      LOGGER.debug({}, "an injected memory file named no path; no unit is produced");
       return [];
     }
     injected = {
@@ -225,7 +226,7 @@ function convertContextInjected(
   }
 
   if (injected === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { attachment_type: String(type) },
       "no context-injection converter owns this attachment; it lands as residue",
     );
@@ -283,6 +284,7 @@ function convertContextBudgetWarning(
 ): readonly PersistEntry[] {
   const text = record.attachment?.content ?? record.attachment?.text;
   if (typeof text !== "string" || text === "") {
+    // warn: a defect because an incomplete context-budget warning is dropped from the conversation.
     LOGGER.warn({}, "a context-budget warning carried no text; no row is produced");
     return [];
   }
@@ -347,6 +349,7 @@ export function convertAttachment(
   if (type === "diagnostics") {
     const change = context.lastChange;
     if (change === undefined) {
+      // warn: a defect because orphaned IDE diagnostics cannot be attached to the edit that caused them.
       LOGGER.warn(
         {},
         "IDE diagnostics arrived with no preceding write or edit; nothing to attach them to",
@@ -375,7 +378,7 @@ export function convertAttachment(
   if (type === "nested_memory" || type === "invoked_skills" || type === "dynamic_skill") {
     return convertContextInjected(record, context, activityId);
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { attachment_type: type },
     "no attachment converter owns this record; it lands as vendor-specific residue",
   );

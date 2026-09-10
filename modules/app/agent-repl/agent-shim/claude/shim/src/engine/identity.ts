@@ -260,9 +260,9 @@ export class SessionIdentity {
   static async resume(store: AgentIdentityStore, resumeVendorSessionId: string): Promise<SessionIdentity> {
     const persisted = await store.read();
     if (persisted === undefined) {
-      LOGGER.warn(
+      LOGGER.info(
         { vendor_session_id: resumeVendorSessionId, binding: "resume", rule: "absent_file_adopts_resume_id" },
-        "no persisted identity on resume: adopting the resume id as the ORIGINAL vendor session id (R9 resume rule)",
+        "resumed without persisted identity and adopted the resume id as the original vendor session id",
       );
       await store.write(resumeVendorSessionId);
       const adopted = new SessionIdentity(resumeVendorSessionId, store);
@@ -270,7 +270,7 @@ export class SessionIdentity {
     }
     const identity = new SessionIdentity(persisted, store);
     identity.current = resumeVendorSessionId;
-    LOGGER.debug(
+    LOGGER.info(
       { original_vendor_session_id: persisted, vendor_session_id: resumeVendorSessionId, binding: "resume" },
       "resumed under the persisted main AgentId",
     );
@@ -298,13 +298,13 @@ export class SessionIdentity {
     const previous = this.current;
     this.current = newVendorSessionId;
     await this.store.link(newVendorSessionId);
-    LOGGER.warn(
+    LOGGER.info(
       {
         previous_vendor_session_id: previous,
         vendor_session_id: newVendorSessionId,
         original_vendor_session_id: this.originalVendorSessionId,
       },
-      "vendor session id ROTATED; the main AgentId is unchanged (R9)",
+      "the vendor session id rotated; the main agent identity is unchanged",
     );
     return create(conversationv1.SessionUpdateSchema, {
       update: {

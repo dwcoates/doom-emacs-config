@@ -480,7 +480,7 @@ export function createReader(options: ReaderOptions): Reader {
     const result = response.result;
     if (result.case === "success") return result.value;
     if (result.case === "failure") {
-      LOGGER.warn(
+      LOGGER.debug(
         { agent: agent.value, detail: result.value.detail },
         "the store refused to open an agent's book",
       );
@@ -596,6 +596,7 @@ export function createReader(options: ReaderOptions): Reader {
             // forgot the session (a restart, a consumed token). Re-open from
             // the last pointer actually served — the only thing that makes
             // the recovery lossless — and carry on.
+            // warn: a defect because the store invalidated a live watch token and forced a reopen.
             LOGGER.warn(
               { agent: agent.value, served_through: servedThrough?.value },
               "the store refused the watch token; re-opening the book from the last served pointer",
@@ -612,7 +613,7 @@ export function createReader(options: ReaderOptions): Reader {
             // before the tail continues.
             if (reopened.page?.boundary.case === "more") {
               LOGGER.error(
-                { agent: agent.value, budget: CATCHUP_PAGE_SIZE },
+                { agent: agent.value, budget: CATCHUP_PAGE_SIZE, detail: "entries exceeded the catch-up page budget" },
                 "the gap since the last served pointer exceeds the catch-up budget; entries were skipped",
               );
             }
@@ -946,7 +947,7 @@ export function createReader(options: ReaderOptions): Reader {
       }
       const result = response.result;
       if (result.case === "failure") {
-        LOGGER.warn(
+        LOGGER.debug(
           { agent: agent.value, detail: result.value.detail },
           "the store refused an older page",
         );
@@ -1055,7 +1056,7 @@ export function createReader(options: ReaderOptions): Reader {
               // announcement reached us before the run's first row did. It is
               // an `unknown_work` refusal, not a transport failure, so the
               // caller can say so rather than reporting the store as broken.
-              LOGGER.warn(
+              LOGGER.debug(
                 { run: runValue, work: work.value },
                 "the store holds no rows for this shell run yet",
               );
