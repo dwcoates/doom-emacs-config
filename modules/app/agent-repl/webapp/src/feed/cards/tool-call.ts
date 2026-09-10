@@ -45,6 +45,7 @@ import {
   type FeedToolCallLinkUrl,
   type FeedToolCallLinesOutput,
   type FeedToolCallLinksOutput,
+  type FeedToolCallMoved,
   type FeedToolCallName,
   type FeedToolCallNoOutput,
   type FeedToolCallOmitted,
@@ -127,6 +128,8 @@ function drawOutcome(
       return drawFeedToolCallReturned(outcome.value, rc, `${path}.returned`, card);
     case "denied":
       return drawFeedToolCallDenied(outcome.value, `${path}.denied`);
+    case "moved":
+      return drawFeedToolCallMoved(outcome.value, `${path}.moved`);
     default: {
       // The narrowed value is `never` here, which is the compile-time half of
       // the guarantee; the run-time half still needs the arm's NAME, and an arm
@@ -390,6 +393,27 @@ export function drawFeedToolCallDenied(_u: FeedToolCallDenied, path: string): Ou
   const badge = document.createElement("span");
   badge.className = "badge perm";
   badge.textContent = "denied";
+  return { badge, body: [] };
+}
+
+/**
+ * The MOVED state: the badge, and NO output section.
+ *
+ * A BACKGROUNDED CALL IS NOT AN ENDING, so the badge takes the muted register
+ * rather than a verdict's: `ok` would claim the command succeeded and `err`
+ * that it broke, and neither has happened yet. The run reports from the
+ * detached shell bubble the daemon draws beneath this card, which is why there
+ * is nothing else to draw here -- an output section would be an empty one, and
+ * an empty output section says the call printed nothing.
+ */
+export function drawFeedToolCallMoved(_u: FeedToolCallMoved, path: string): OutcomeParts {
+  log("debug", "drawing a tool call whose work moved to the background", {
+    operation: "feed.cards.tool-call.moved",
+    context: { path },
+  });
+  const badge = document.createElement("span");
+  badge.className = "badge muted";
+  badge.textContent = "moved";
   return { badge, body: [] };
 }
 
@@ -838,7 +862,7 @@ export function drawFeedToolCallDiagnostics(
  * proto fails HERE, in one place, instead of passing a test that enumerated the
  * old set by hand.
  */
-export const TOOL_CALL_OUTCOME_ARMS: readonly string[] = ["running", "returned", "denied"];
+export const TOOL_CALL_OUTCOME_ARMS: readonly string[] = ["running", "returned", "denied", "moved"];
 export const TOOL_CALL_VERDICT_ARMS: readonly string[] = ["succeeded", "failed"];
 export const TOOL_CALL_FORM_ARMS: readonly string[] = [
   "text",
