@@ -183,6 +183,16 @@ type FooterSink interface {
 	// OnSessionUpdate carries context usage, the rate-limit status and the
 	// terminals the footer reflects.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
+	// OnHistoryPage is a watch's opening catch-up page — the frame a RESUMED
+	// session's whole prior conversation arrives as.
+	//
+	// The footer reads ONE thing out of it: that this conversation has
+	// already run turns, so an idle strip reads `done` rather than `ready`.
+	// Nothing else can state that after a daemon relaunch — the turn-open
+	// edge and the turn's terminal both belong to a turn some EARLIER daemon
+	// process watched — and a rehydrated feed under a `ready` footer says the
+	// conversation never happened.
+	OnHistoryPage(ws ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage)
 	// OnLink is the connectivity change the footer reflects.
 	OnLink(ws ids.WorkspaceID, link LinkState)
 }

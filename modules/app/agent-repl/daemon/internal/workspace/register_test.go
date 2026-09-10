@@ -272,3 +272,154 @@ func TestPublishRegistryRefusesWhenASessionRecordCannotBeRead(t *testing.T) {
 		t.Fatalf("roster publications = %d, want no roster published from records that could not be read", len(f.sidebar.registries))
 	}
 }
+
+// registeredWithAConversation registers a directory once and files the
+// conversation the first daemon recorded for it, so a SECOND registration of
+// the same directory is the announcement a relaunched daemon receives.
+func registeredWithAConversation(t *testing.T, f *fixture, terminal *wsm.SessionTerminal) (string, wsm.Workspace) {
+	t.Helper()
+	dir := worktreeDir(t)
+	record, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+	if err != nil {
+		t.Fatalf("the first Register: %v", err)
+	}
+	f.db.sessions[record.ID] = wsm.Session{
+		Workspace:       record.ID,
+		HostSessionID:   "host-1",
+		VendorSessionID: "vendor-1",
+		Terminal:        terminal,
+	}
+	f.fleet.started = nil
+	delete(f.fleet.live, record.ID)
+	return dir, record
+}
+
+// TestRegisterRevivesAKnownWorkspacesRecordedConversation is THE RELAUNCH.
+// Emacs re-announces every workspace it holds when the link comes up, and for
+// a workspace whose panel was already mounted that announcement is the only
+// edge a fresh daemon gets — no OpenWorkspace follows it. Without the revival
+// the session never comes up, no watcher opens, and the feed serves nothing
+// for a conversation the store still holds whole.
+func TestRegisterRevivesAKnownWorkspacesRecordedConversation(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, record := registeredWithAConversation(t, f, nil)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 1 || got[0] != record.ID {
+		t.Fatalf("sessions started by the re-announcement = %v, want the known workspace %q brought back up", got, record.ID)
+	}
+}
+
+// TestRegisterSpawnsNothingForAFirstAnnouncement holds SPAWN ON MOUNT: a
+// directory this daemon has never seen has no conversation to lose, so its
+// announcement mints a roster row and nothing else. A registration that
+// spawned would put a shim behind every workspace Emacs happens to know about.
+func TestRegisterSpawnsNothingForAFirstAnnouncement(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir := worktreeDir(t)
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started by a first announcement = %v, want none", got)
+	}
+}
+
+// TestRegisterSpawnsNothingForAWorkspaceThatNeverHadAConversation covers the
+// known workspace with a session row but no vendor id: there is no
+// conversation to resume, and starting one FRESH is exactly the abandonment
+// the fresh-conversation invariant forbids being done unasked.
+func TestRegisterSpawnsNothingForAWorkspaceThatNeverHadAConversation(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, record := registeredWithAConversation(t, f, nil)
+	f.db.sessions[record.ID] = wsm.Session{Workspace: record.ID, HostSessionID: "host-1"}
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started for a workspace with no conversation = %v, want none", got)
+	}
+}
+
+// TestRegisterDoesNotReviveADeletedSession covers the one death that refuses
+// resurrection: an announcement must not resurrect what a delete ended.
+func TestRegisterDoesNotReviveADeletedSession(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, _ := registeredWithAConversation(t, f, &wsm.SessionTerminal{Kind: "deleted", Detail: "NukeWorkspace"})
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started for a deleted session = %v, want none", got)
+	}
+}
+
+// TestRegisterDoesNotReviveAHibernatedSession covers the deliberate
+// stand-down: the idle sweep parked this session on purpose and a PROMPT is
+// what revives it, so an announcement must not undo the policy.
+func TestRegisterDoesNotReviveAHibernatedSession(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, _ := registeredWithAConversation(t, f, &wsm.SessionTerminal{Kind: "hibernated", Detail: "idle past the cutoff"})
+
+	// Act.
+	if _, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{}); err != nil {
+		t.Fatalf("the re-announcement: %v", err)
+	}
+
+	// Assert.
+	if got := f.fleet.started; len(got) != 0 {
+		t.Fatalf("sessions started for a hibernated session = %v, want none", got)
+	}
+}
+
+// TestRegisterStillAnswersWhenTheRevivalFails covers the announcement's own
+// contract: the roster row is durable and must land whatever the bring-up
+// does, and the failure is recorded rather than absorbed.
+func TestRegisterStillAnswersWhenTheRevivalFails(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	dir, record := registeredWithAConversation(t, f, nil)
+	f.fleet.startErr = errors.New("the shim would not spawn")
+
+	// Act.
+	again, err := f.verbs.Register(context.Background(), dir, wsm.RegisterFacts{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Register = %v, want the roster row despite a failed revival", err)
+	}
+	if again.ID != record.ID {
+		t.Fatalf("Register = %q, want the known workspace %q", again.ID, record.ID)
+	}
+	recorded := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Operation == opRegister {
+			recorded = true
+		}
+	}
+	if !recorded {
+		t.Fatalf("records = %+v, want the failed revival recorded at error", f.log.logger.Records())
+	}
+}

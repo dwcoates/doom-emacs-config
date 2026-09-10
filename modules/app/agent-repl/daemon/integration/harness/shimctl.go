@@ -41,6 +41,26 @@ type ShimProfile struct {
 	// LiveWork is what the fake's SessionStarted states is already running,
 	// each element one binary-encoded conversation.v1 AgentDetachedWork.
 	LiveWork [][]byte `json:"live_work,omitempty"`
+	// ResumeHistory is the conversation a RESUMED session already holds, each
+	// element one binary-encoded conversation.v1 HistoryEntry stated NEWEST
+	// FIRST. Every WatchAgent stream of a resumed session opens with them;
+	// a fresh start still opens on an empty floor.
+	ResumeHistory [][]byte `json:"resume_history,omitempty"`
+}
+
+// EncodeHistory renders history entries for a ShimProfile's ResumeHistory
+// field. They are stated NEWEST FIRST, exactly as a producer serves a page.
+func EncodeHistory(t *testing.T, newestFirst ...*conversationv1.HistoryEntry) [][]byte {
+	t.Helper()
+	out := make([][]byte, 0, len(newestFirst))
+	for _, entry := range newestFirst {
+		raw, err := proto.Marshal(entry)
+		if err != nil {
+			t.Fatalf("harness: encode a history entry: %v", err)
+		}
+		out = append(out, raw)
+	}
+	return out
 }
 
 // EncodeLiveWork renders detached-work announcements for a ShimProfile's
