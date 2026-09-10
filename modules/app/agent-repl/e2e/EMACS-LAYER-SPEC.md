@@ -938,6 +938,51 @@ bounds from. A bound here cannot quietly drift back into a guess.
 | `evalBound` | **409ms** | 1.25s | ~3x | **New.** A scenario's own `emacsclient --eval` was bounded by `HeartbeatBound` — the same conflation `daemonLinkBound` was split out of `emacsBootBound` to fix. The heartbeat probe is `(emacs-pid)` and does nothing; a scenario's form opens panels and creates an xwidget webview. It lands on the same number today by coincidence of two similar measurements, not by sharing one. |
 | `xvfbReadyBound` | 121ms | 1s | ~8x | **New.** The 121ms is always the FIRST Xvfb in a fresh container, which pays once for creating `/tmp/.X11-unix`; the steady state is 21-62ms, and the multiple is taken against the slow first start. |
 
+### Subr trampolines are built once per container, not once per scenario
+
+**A boot bound that is missed by the harness's own waste is not a product
+finding.** Redefining a *primitive* — every `advice-add` on a subr — makes
+Emacs synthesize a "subr trampoline" so natively compiled callers see the
+redefinition. Synthesizing one is a synchronous `call-process` of a whole
+second Emacs, with the booting Emacs blocked in `read` until it returns.
+`sandbox/doom/init.el` turns JIT compilation off and that does **not** cover
+this: trampoline synthesis is governed by
+`native-comp-enable-subr-trampolines`, and runs whether or not the JIT is
+armed.
+
+Nine primitives are advised in a scenario's Emacs — six by this module
+(`status.el`, `close-panels-on-open.el`, `find-file-workspace.el`),
+`define-key` by Doom's `general-auto-unbind-keys`, and `yes-or-no-p` by the
+unanswerable-prompt guard the harness itself installs. Five of the nine happen
+to be produced by the image's `doom sync --aot`; the other four were compiled
+by **every scenario** into its own throwaway `~/.emacs.d` cache, forty-five
+times a run, concurrently. Measured 2026-09-10: four scenarios died of it in
+one run — `doomBootBound` missed with the breadcrumb stopping at "init.el
+finished", `emacsclient` then failing with "exit status 1" against a server
+that boot had not reached, and the scenario reported as a wedge. The `ps`
+listing in each failure named the child: `emacs -no-comp-spawn -Q --batch -l
+/tmp/emacs-int-comp-subr--trampoline-…`.
+
+Turning trampolines **off** would not be a speedup, it would be a hole: an
+Emacs without them is one where this module's own advice on
+`modify-frame-parameters` and `set-window-buffer` is bypassed by every
+natively compiled caller, and the layer would pass while testing something no
+user runs.
+
+So they are built **once per test binary**, before any scenario's Emacs
+exists, into a container-wide directory that `EMACSNATIVELOADPATH` puts on
+`native-comp-eln-load-path` — `comp--trampoline-search` consults that path
+before compiling, so every boot finds all nine already on disk.
+
+| Bound | Observed healthy max | Value | Multiple | Why that multiple |
+| --- | --- | --- | --- | --- |
+| `trampolinePrewarmBound` | 887ms (cold container, all nine compiled) | 20s | ~20x | The prewarm holds a parallelism slot and runs before any Emacs exists, so its measurement is always the idle one; the multiple is for a host carrying other agents' suites, and a miss here is a hard failure rather than a fallback to per-scenario compilation. |
+
+`assertTrampolinesWerePrewarmed` runs after **every** boot and reads where
+each installed trampoline was *loaded from*, so a primitive advised in future
+that nobody adds to `emacsAdvisedPrimitives` fails there, named, on its first
+scenario — instead of returning as a boot-bound flake on a busy machine.
+
 ### The parallelism bound, measured
 
 Every scenario is `t.Parallel()`. The isolation that permits it is per-test by
