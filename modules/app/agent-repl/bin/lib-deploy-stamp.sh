@@ -8,7 +8,7 @@
 # lib-deploy-stamp.sh — the stamp vocabulary shared by build-frontend.sh,
 # deploy-all.sh, and readiness-report.sh. Sourced, never executed.
 #
-# There are TWO INDEPENDENT stamp families here and conflating them is the
+# There are THREE INDEPENDENT stamp families here and conflating them is the
 # whole reason this file exists:
 #
 #   1. BUILT-SHA stamps (`.built-sha` beside each artifact) answer "which
@@ -23,8 +23,18 @@
 #      rewrite one from a build step, or a `--no-bounce` install would look
 #      deployed while the live process still serves the old image.
 #
+#   3. SOURCE-TREE stamps (`.source-tree` beside each artifact) answer "which
+#      SOURCE CONTENT is this artifact built from". They are what decides
+#      whether a build is stale, and they are read by BOTH build-frontend.sh
+#      (to decide whether to rebuild) and readiness-report.sh (to decide
+#      whether the artifact is ready), off ONE pathspec table that also lives
+#      here. That sharing is the point: a staleness rule and a readiness gate
+#      that computed their own source sets could — and did — disagree, leaving
+#      the gate reporting a system behind while the build insisted it was fresh
+#      and refused to rebuild it.
+#
 # Family 1 is additive; family 2 is pre-existing and must keep its exact
-# semantics. Both live here so the two scripts cannot drift apart on either.
+# semantics. All three live here so the scripts cannot drift apart on any.
 
 # ---- family 1: built-sha stamps -------------------------------------------
 
@@ -133,4 +143,148 @@ service_needs_bounce() {
 
 record_service_deployed() {
     binary_fingerprint "$1/$2" > "$1/.$2.deployed"
+}
+
+# ---- family 3: source-tree stamps ------------------------------------------
+#
+# WHY NOT MTIMES. Staleness used to be `make`'s rule done by hand: rebuild when
+# any file under a hand-listed source directory is newer than the artifact.
+# That rule has two independent ways to answer "fresh" about a stale artifact,
+# and on 2026-09-09 both fired at once on a real deploy:
+#
+#   - The hand-listed set was NARROWER than the set the readiness report
+#     attributes to the same system. The shim scanned only `shim/src` plus a
+#     few manifests, while the report counted all of `shim/`, `proto/` and
+#     `agent-shim/logging/`. Twelve merges landed changes under `shim/test/`
+#     and `agent-shim/logging/go/`; the build saw nothing newer in its narrow
+#     set and skipped, and the gate then reported the shim three commits
+#     behind — a state no un-forced rebuild could ever clear.
+#   - An mtime is wall-clock metadata, not content. A checkout, a rebase, a
+#     `git restore`, or a copy can hand a changed file an OLD mtime, and a
+#     staging step can hand an unchanged artifact a NEW one.
+#
+# So staleness is decided by SOURCE REVISION instead: the hash of the git index
+# entries for the system's pathspec — the very pathspec the readiness report
+# attributes to it — with a dirty working tree always reading as stale.
+
+# deploy_stamp_rel_root REPO_ROOT MODULE_ROOT — where the module sits inside the
+# checkout, as a repo-relative prefix ("" when the module IS the top level).
+#
+# Derived rather than hardcoded as "modules/app/agent-repl": the layout is the
+# repo's to change, and a stale hardcoded prefix would make every pathspec
+# silently match nothing — which reads as "fully deployed".
+deploy_stamp_rel_root() {
+    local repo="$1" mod="$2" rel
+    rel="${mod#"$repo"/}"
+    if [ "$rel" = "$mod" ]; then rel=""; fi
+    printf '%s' "$rel"
+}
+
+# deploy_stamp_prefix PATH REL_ROOT — a module-relative path as a repo-relative
+# pathspec.
+deploy_stamp_prefix() {
+    if [ -n "$2" ]; then printf '%s/%s' "$2" "$1"; else printf '%s' "$1"; fi
+}
+
+# deploy_stamp_proto_paths REL_ROOT — the proto tree as a BUILD input: the
+# schemas minus the review artifacts that live beside them. figma-idl-draft/
+# and the sketch are design documents no build reads, so a commit touching only
+# them must not make any system read as behind — that state is undeployable by
+# rebuilding, because the staleness check (correctly) sees no buildable input
+# change and the stamp can never catch up to the gate.
+deploy_stamp_proto_paths() {
+    printf '%s %s %s' "$(deploy_stamp_prefix proto "$1")" \
+        ":(exclude)$(deploy_stamp_prefix proto/figma-idl-draft "$1")" \
+        ":(exclude)$(deploy_stamp_prefix proto/SKETCH-figma-idl.md "$1")"
+}
+
+# deploy_stamp_system_paths NAME REL_ROOT — the repo-relative pathspec that IS
+# the system's source set, space separated. No path in this repo contains a
+# space, and keeping them in one string is what lets bash 3.2 (still /bin/bash
+# on macOS, no associative arrays) carry a per-system table.
+#
+# THIS TABLE IS THE SINGLE DEFINITION. build-frontend.sh decides staleness from
+# it and readiness-report.sh decides readiness from it; a second copy anywhere
+# reopens the drift this file exists to close.
+deploy_stamp_system_paths() {
+    local rel="$2"
+    case "$1" in
+        daemon)              printf '%s %s %s' "$(deploy_stamp_prefix daemon "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        shim)                printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/claude/shim "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        webapp)              printf '%s %s %s' "$(deploy_stamp_prefix webapp "$rel")" "$(deploy_stamp_proto_paths "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        shim-store)          printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/shim-store "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
+        shim-claude-sidecar) printf '%s %s %s' "$(deploy_stamp_prefix agent-shim/claude/shim-sidecar "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" "$(deploy_stamp_proto_paths "$rel")" ;;
+        # No proto: shim-lock speaks no wire at all. Its whole contract is argv,
+        # one stdout line, stdin's EOF and an exit code.
+        shim-lock)           printf '%s %s' "$(deploy_stamp_prefix agent-shim/shim-lock "$rel")" "$(deploy_stamp_prefix agent-shim/logging "$rel")" ;;
+        *) return 1 ;;
+    esac
+}
+
+# source_tree_id REPO_ROOT PATHSPEC... — echo a stable id for the CONTENT of
+# the given pathspec: a hash of the index entries (mode, blob sha, path), with
+# "-dirty" appended when the working tree disagrees with the index anywhere
+# under it.
+#
+# Returns 1 (printing nothing) when git is unavailable, REPO_ROOT is not a
+# checkout, or the pathspec matches NO tracked file. Every one of those means
+# "the source set could not be determined", and callers MUST treat it as stale
+# rather than as fresh: a pathspec that silently matches nothing is precisely
+# how a build talks itself out of work it owes.
+source_tree_id() {
+    local repo="$1"; shift
+    local listing hash
+    command -v git >/dev/null 2>&1 || return 1
+    listing="$(git -C "$repo" ls-files -s -- "$@" 2>/dev/null)" || return 1
+    [ -n "$listing" ] || return 1
+    hash="$(printf '%s\n' "$listing" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -c1-40)"
+    [ -n "$hash" ] || return 1
+    if [ -n "$(git -C "$repo" status --porcelain -- "$@" 2>/dev/null)" ]; then
+        printf '%s-dirty\n' "$hash"
+    else
+        printf '%s\n' "$hash"
+    fi
+}
+
+# source_tree_is_dirty VALUE — return 0 when a source-tree id carries the dirty
+# marker. A dirty id never matches a stamp, so a dirty tree always rebuilds.
+source_tree_is_dirty() {
+    case "$1" in *-dirty) return 0 ;; *) return 1 ;; esac
+}
+
+# source_tree_base VALUE — echo a source-tree id with the dirty marker stripped,
+# i.e. the COMMITTED content the id is anchored to.
+#
+# Comparing bases is what keeps a dirty tree deployable. A build off a dirty
+# tree is stale by definition (the id cannot describe uncommitted content, so
+# build-frontend.sh rebuilds every time), but a readiness gate that refused to
+# pass while a tree was dirty would refuse every deploy a developer makes from a
+# working checkout, and no rebuild could ever clear it. So staleness compares
+# full ids and readiness compares bases, and the uncertainty is REPORTED (as the
+# dirty flag) rather than turned into a block.
+source_tree_base() { printf '%s\n' "${1%-dirty}"; }
+
+# write_source_tree STAMP_FILE VALUE — record the source-tree id an artifact was
+# just built from. An empty VALUE removes any existing stamp, for the same
+# reason write_built_sha does: a stamp that no longer describes the artifact
+# beside it is worse than no stamp, because nothing downstream can tell the two
+# apart.
+write_source_tree() {
+    local stamp="$1" value="$2"
+    if [ -z "$value" ]; then
+        rm -f "$stamp"
+        return 0
+    fi
+    mkdir -p "$(dirname "$stamp")"
+    printf '%s\n' "$value" > "$stamp"
+}
+
+# read_source_tree STAMP_FILE — echo the recorded id, or return 1 when the stamp
+# is missing or empty.
+read_source_tree() {
+    local value
+    [ -f "$1" ] || return 1
+    IFS= read -r value < "$1" || true
+    [ -n "$value" ] || return 1
+    printf '%s\n' "$value"
 }

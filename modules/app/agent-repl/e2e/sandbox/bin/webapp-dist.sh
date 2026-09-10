@@ -27,8 +27,12 @@
 # inside the container runs THE SAME SCRIPT before handing the dist to the
 # daemon. A stale dist is never silently served: on the host it rebuilds, in
 # the container it fails loudly and names the command to run. The rule
-# mirrors bin/build-frontend.sh's `is_stale` -- artifact older than any
-# source means stale -- and covers a superset of that script's source set:
+# here is the older prerequisite-newer-than-target one -- artifact older than
+# any source means stale. bin/build-frontend.sh no longer decides staleness
+# that way (it compares source REVISIONS, because an mtime is wall-clock
+# metadata a checkout can set to anything); this script keeps the timestamp
+# rule because the container it also runs in has no checkout to compare
+# against. It covers a superset of that script's source set:
 # the generated protobuf TypeScript and the vocab JSON that `webapp/src`
 # imports from `../../proto/` are sources here, because an edit to them
 # changes the bundle and must therefore stale it.
