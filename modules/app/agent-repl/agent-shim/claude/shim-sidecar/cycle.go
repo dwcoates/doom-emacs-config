@@ -192,6 +192,10 @@ type sidecar struct {
 	// moment: keyed by path, a rename bought the same file a second rewind and
 	// a second re-read of its in-progress turn.
 	rewound map[string]bool
+	// Workspace attribution is read once per session's main transcript. Many
+	// sidechain files can share it, so rediscovery reuses the proven identity.
+	workspaceBySession map[string]workspaceAttribution
+	workspaceFailures  map[string]string
 
 	nextAttemptAt  time.Time
 	attempting     bool
@@ -223,17 +227,19 @@ type sidecar struct {
 
 func newSidecar(options Options, log *logging.Bound) *sidecar {
 	s := &sidecar{
-		options:  options,
-		store:    storeclient.New(options.StoreSocket, log.With(logging.Context{Component: "storeclient"})),
-		disc:     discover.New(options.ConfigRoots, options.SpoolRoot, log.With(logging.Context{Component: "discover"})),
-		tracker:  stale.New(options.Stale, log.With(logging.Context{Component: "stale"})),
-		log:      log,
-		watchers: map[string]*watched{},
-		settling: map[string]string{},
-		stopped:  map[string]int64{},
-		parked:   map[string]bool{},
-		defects:  map[string]*fileDefect{},
-		rewound:  map[string]bool{},
+		options:            options,
+		store:              storeclient.New(options.StoreSocket, log.With(logging.Context{Component: "storeclient"})),
+		disc:               discover.New(options.ConfigRoots, options.SpoolRoot, log.With(logging.Context{Component: "discover"})),
+		tracker:            stale.New(options.Stale, log.With(logging.Context{Component: "stale"})),
+		log:                log,
+		watchers:           map[string]*watched{},
+		settling:           map[string]string{},
+		stopped:            map[string]int64{},
+		parked:             map[string]bool{},
+		defects:            map[string]*fileDefect{},
+		rewound:            map[string]bool{},
+		workspaceBySession: map[string]workspaceAttribution{},
+		workspaceFailures:  map[string]string{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
 		now:        time.Now,
@@ -594,6 +600,12 @@ func (s *sidecar) rescan() {
 		if !ok {
 			continue
 		}
+		if resolved.WorkspaceDir != "" {
+			s.log.RegisterFile(logging.Context{
+				Path: resolved.Path, WorkspaceDir: resolved.WorkspaceDir,
+				WorkspaceID: resolved.WorkspaceID, ClaudeSessionID: resolved.ClaudeSessionID,
+			})
+		}
 		identity, err := tail.Identity(resolved.Path)
 		if err != nil {
 			// A FILE WHOSE IDENTITY CANNOT BE READ IS NOT WATCHED. Its cursor is
@@ -730,9 +742,14 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 	bound := s.log.With(logging.Context{
 		Component: "tail", Path: target.Path, TaskID: target.TaskID,
 		VendorSessionID: target.SessionID, AgentID: target.AgentID,
+		WorkspaceDir: target.WorkspaceDir, WorkspaceID: target.WorkspaceID,
+		ClaudeSessionID: target.ClaudeSessionID,
 	})
 	ctx := &tail.Context{
 		SessionID:         target.SessionID,
+		WorkspaceDir:      target.WorkspaceDir,
+		WorkspaceID:       target.WorkspaceID,
+		ClaudeSessionID:   target.ClaudeSessionID,
 		Path:              target.Path,
 		Kind:              target.Kind,
 		AgentID:           s.bookFor(target),

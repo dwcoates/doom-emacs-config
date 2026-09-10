@@ -23,8 +23,11 @@ import (
 // asked for nothing, which is silence rather than a defect; the reader states
 // its own expectations at the plumbing site.
 type seamObserver struct {
-	spawned func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)
-	stopped func(taskID string)
+	spawned         func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
+	stopped         func(taskID string)
+	workspaceDir    string
+	workspaceID     string
+	claudeSessionID string
 }
 
 // TaskSpawned implements convert.Observer.
@@ -32,7 +35,13 @@ func (o *seamObserver) TaskSpawned(taskID, toolUseID, agentID, outputPath string
 	if o.spawned == nil {
 		return
 	}
-	o.spawned(taskID, toolUseID, agentID, outputPath, backgrounded)
+	o.spawned(taskID, toolUseID, agentID, outputPath, backgrounded, o.workspaceDir, o.workspaceID, o.claudeSessionID)
+}
+
+func (o *seamObserver) bind(ctx *Context) {
+	o.workspaceDir = ctx.WorkspaceDir
+	o.workspaceID = ctx.WorkspaceID
+	o.claudeSessionID = ctx.ClaudeSessionID
 }
 
 // TaskStopped implements convert.Observer.
@@ -48,14 +57,14 @@ func (o *seamObserver) TaskStopped(taskID string) {
 // A LAUNCH IS THE ONLY PLACE THE VENDOR STATES WHICH CALL OPENED WHICH SPOOL, and
 // only this package reads tool results — so without this the reader cannot claim
 // a spool at all and every one of them waits out its hold and goes to residue.
-func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)) {
+func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)) {
 	h.obs.spawned = fn
 }
 
 // SetTaskObserver adopts the reader's spawn-observation sink. A sidechain can
 // itself launch detached work, so a subagent's transcript reports launches on the
 // same terms as a session's.
-func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)) {
+func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)) {
 	h.obs.spawned = fn
 }
 

@@ -422,11 +422,15 @@ func logProcessExit(logf *logging.Bound, err *error) {
 // sink now rolls at a byte cap with a fixed number of generations, and the
 // terminal keeps only the sink-emergency record it is the last channel for.
 func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
+	level, err := sharedlogging.ParseLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"))
+	if err != nil {
+		return nil, nil, bootstrapError{err}
+	}
 	file, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	logf := logging.NewDurableOnly(os.Stderr, file).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	logf := logging.NewDurableOnlyAtLevel(os.Stderr, file, level).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	return logf, func() { _ = file.Close() }, nil
 }
 
