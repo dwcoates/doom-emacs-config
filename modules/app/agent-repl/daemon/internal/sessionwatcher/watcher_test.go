@@ -675,7 +675,7 @@ func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
 	got := h.drainNow()
 
 	// Assert.
-	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage"})
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage", "footer.OnHistoryPage"})
 	turn := h.w.TurnInFlight()
 	if turn == nil || *turn != ids.TurnID("turn-9") {
 		t.Fatalf("turn in flight = %v, want turn-9", turn)

@@ -388,3 +388,31 @@ func TestAWalkThatReachesAFlooredReplayClaimsTheStart(t *testing.T) {
 		t.Fatalf("edge = %T, want at_start", success.Success.GetEdge())
 	}
 }
+
+// TestOpenPageAfterAReplayCarriesTheReplayedRows is THE RELAUNCH's page: a
+// daemon that resumed a conversation it never watched has only the opening
+// history page, and what a client that opens the feed then walks must be that
+// conversation — not the empty page a feed with no live frames would serve.
+func TestOpenPageAfterAReplayCarriesTheReplayedRows(t *testing.T) {
+	// Arrange: a page replayed as a resumed session's opening catch-up.
+	h := newHarness(t)
+	h.replay(historyPage(&conversationv1.HistoryFloor{},
+		promptEntry("turn-2", "second"),
+		promptEntry("turn-1", "first"),
+	))
+
+	// Act.
+	page, _ := h.openPage(rootFeed(), "reader-1")
+
+	// Assert: both prior prompts, oldest first.
+	got := rowIDs(pageRows(t, page))
+	want := []string{h.promptRowID("turn-1"), h.promptRowID("turn-2")}
+	if len(got) != len(want) {
+		t.Fatalf("page rows = %v, want the replayed conversation %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("page rows = %v, want %v", got, want)
+		}
+	}
+}
