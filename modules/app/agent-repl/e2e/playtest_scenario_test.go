@@ -347,6 +347,38 @@ func (s *playtestScenario) awaitInPageFor(t *testing.T, bound time.Duration, wha
 		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
 }
 
+// awaitTailClearsFooter waits until the feed's tail is actually on screen,
+// clear of the docked progress footer.
+//
+// PHOTOGRAPHED FIRST, ASSERTED SECOND. Plan B.15's `arm-revived` picture
+// caught the last bubble sliced off by the footer strip in two runs of three,
+// and a picture is the only thing that catches it: nothing about the arm, the
+// feed's rows or the daemon's view is wrong when it happens. The occlusion is
+// a SCROLL POSITION, not a layout — `#footer` is a flex sibling laid out below
+// `#feed-scroll`, so the box's height already excludes it, and a footer that
+// appears or grows AFTER the render that parked the tail shrinks the box under
+// a scrollTop nobody moved. The tail then sits that many pixels below the fold
+// and the fold is the strip's top edge.
+//
+// So the claim is exactly two numbers: nothing of the feed is left below the
+// fold, and the fold is above the footer. Both come off the live boxes, so
+// this says what the camera saw rather than what the markup intended.
+//
+// The 2px slack is subpixel layout, not tolerance for being wrong: browsers
+// round fractional heights and a box parked at its bottom can read a hair
+// short of it.
+func (s *playtestScenario) awaitTailClearsFooter(t *testing.T) {
+	t.Helper()
+	s.awaitInPage(t, "the feed's last row to sit clear of the progress footer",
+		`(function () {
+                   var box = document.getElementById('feed-scroll');
+                   var strip = document.querySelector('#footer .pfooter');
+                   if (!box || !strip) { return false; }
+                   var below = box.scrollHeight - box.scrollTop - box.clientHeight;
+                   var overlap = box.getBoundingClientRect().bottom - strip.getBoundingClientRect().top;
+                   return below <= 2 && overlap <= 0; })()`)
+}
+
 // clickInPage clicks one element inside the webview, the way a user does.
 //
 // The element is WAITED FOR first and the click's own answer is waited on,
