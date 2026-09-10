@@ -36,6 +36,57 @@ func TestOpenAnswersAPageAndAToken(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
+// TestPageOnlyOpenServesThePageAndMintsNoToken: a caller that says no watch
+// follows gets the page and nothing else. OpenAgentSession is unary and the
+// service has no close, so a token minted here could never be reclaimed — the
+// one-turn pair of one-shot reads (the turn's opening page, the teardown's book
+// head) grew the registry for the store's whole process lifetime.
+func TestPageOnlyOpenServesThePageAndMintsNoToken(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	shim.write(ctx, t,
+		shim.agentEntry("w-pageonly-1", "u-pageonly-1", frameLine(agentID("main"), responseFrame("main", "act-1", "only"))),
+	)
+
+	// Act. The pair one turn performs.
+	opening := openPageOnly(ctx, t, cli, "main", 10)
+	head := openPageOnly(ctx, t, cli, "main", 1)
+
+	// Assert. The page is served in full; only the token is withheld, and the
+	// registry is exactly as the turn found it.
+	assertTexts(t, "the page-only opening page", pageTexts(opening.GetPage()), []string{"only"})
+	assertTexts(t, "the page-only book head", pageTexts(head.GetPage()), []string{"only"})
+	store.assertNoErrorRecords()
+	assertOutstandingTokensAtShutdown(t, store, 0)
+}
+
+// TestWatchIsRefusedAfterAPageOnlyOpen: a page-only open leaves the caller no
+// token, so it cannot address a watch at all — the attempt meets the ordinary
+// refused-watch convention rather than an arm of its own.
+func TestWatchIsRefusedAfterAPageOnlyOpen(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	shim.write(ctx, t,
+		shim.agentEntry("w-pageonly-2", "u-pageonly-2", frameLine(agentID("main"), responseFrame("main", "act-1", "only"))),
+	)
+	openPageOnly(ctx, t, cli, "main", 10)
+
+	// Act.
+	stream := watchStream(ctx, t, cli, &storev1.AgentSessionToken{})
+	defer stream.Close()
+
+	// Assert.
+	assertWatchRefused(t, stream)
+}
+
 // TestEmptyBookIsALegalOpen: an agent the store KNOWS but that has said
 // nothing is an empty book, not an unknown agent — the page is empty, the
 // boundary is floor, the token is real. A freshly spawned subagent is exactly
