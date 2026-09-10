@@ -170,10 +170,33 @@ export function hunksOf(structuredPatch: unknown): conversationv1.FilePatchHunk[
  * actually takes (a replaced region), it is linear, and it never invents an
  * alignment inside the changed region that a reader would take for real.
  */
+/**
+ * A file version's lines. An EMPTY version has no lines at all, rather than
+ * one empty line a diff would draw as a change.
+ *
+ * A FILE'S TERMINATING NEWLINE IS NOT A LINE. Text files end with one, so a
+ * bare split leaves a final empty element that is the terminator rather than
+ * any content — and a creation then drew a one-line file as TWO additions, the
+ * second of them blank, and stated "+1,2" for it. `diff` itself counts "one\n"
+ * as one line, and so does the card now. A version that genuinely ends in a
+ * blank line is "a\n\n", which keeps its blank line here because only ONE
+ * trailing empty element is dropped.
+ *
+ * The transcript plane's own `splitLines` (shim-sidecar/internal/convert/
+ * diff.go) reads a version exactly this way, because the two planes must mint
+ * the identical patch for one write.
+ */
+function splitLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
 export function diffHunks(before: string, after: string): conversationv1.FilePatchHunk[] {
   if (before === after) return [];
-  const oldLines = before === "" ? [] : before.split("\n");
-  const newLines = after === "" ? [] : after.split("\n");
+  const oldLines = splitLines(before);
+  const newLines = splitLines(after);
 
   let prefix = 0;
   while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) {
