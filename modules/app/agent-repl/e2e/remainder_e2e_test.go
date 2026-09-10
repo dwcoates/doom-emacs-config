@@ -316,6 +316,29 @@ func TestArtifactPublishAndList(t *testing.T) {
 	}
 }
 
+// TestArtifactHeadingKeepsTheFavicon reads the published heading exactly.
+// #72 only asks that it is non-empty, which a heading that lost its glyph
+// satisfies — and the playtest photographed exactly that card, titled with no
+// favicon, against feed.proto's "favicon emoji + title". The fake's
+// `!artifact-publish` announces 📊 on the call and restates only the title on
+// the outcome, which is the shape every real publish has.
+func TestArtifactHeadingKeepsTheFavicon(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	publishTurn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "artifact-publish")
+
+	// Assert
+	row := rmAwaitFeedRow(t, w, ws, "the artifact-publish bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurn().GetValue() == publishTurn.GetValue() && r.GetActivity().GetArtifact().GetPublished() != nil
+	})
+	if got := row.GetActivity().GetArtifact().GetHeading().GetText(); got != "📊 Offline Report" {
+		t.Fatalf("artifact heading = %q, want %q", got, "📊 Offline Report")
+	}
+}
+
 // ===========================================================================
 // #73 ContextInjectedMemory — golden "context-injected-memory", registered
 // scenario name "memory" (`!memory`, skills.ts MEMORY_INJECTED).
