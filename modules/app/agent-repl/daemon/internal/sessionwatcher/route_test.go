@@ -365,7 +365,8 @@ func TestRouteMainTerminalEndsTheTurn(t *testing.T) {
 // TestTurnEndIsWithheldUntilTheMainAgentIsNamed covers the one thing the
 // watcher refuses to guess: with no main agent named, a terminal cannot be
 // attributed to the turn, and draining the prompt queue on a subagent's
-// terminal is worse than waiting.
+// terminal is worse than waiting. The WHOLE terminal waits, views included,
+// so its later replay is the routing it would have had all along.
 func TestTurnEndIsWithheldUntilTheMainAgentIsNamed(t *testing.T) {
 	// Arrange: an adoption with a turn already in flight and no StartTurn yet.
 	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
@@ -375,12 +376,72 @@ func TestTurnEndIsWithheldUntilTheMainAgentIsNamed(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal"})
-	if !h.hasRecord("warn", "daemon.sessionwatcher.turn_end_withheld") {
-		t.Fatal("the withheld turn end was not warned about")
+	assertNames(t, got, nil)
+	if !h.hasRecord("debug", "daemon.sessionwatcher.turn_end_withheld") {
+		t.Fatal("the withheld turn end was not recorded")
 	}
 	if h.w.TurnInFlight() == nil {
 		t.Fatal("the turn was closed without being attributed")
+	}
+}
+
+// TestAWithheldTerminalIsReleasedWhenTheMainAgentIsNamed covers the release:
+// the shim's stream plane and StartTurn's answer have no ordering between
+// them, so under load the terminal lands FIRST — and the turn it ends still
+// has to end, because no second terminal is ever coming for it.
+func TestAWithheldTerminalIsReleasedWhenTheMainAgentIsNamed(t *testing.T) {
+	// Arrange: the terminal arrives before anything has named the main agent.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Act: StartTurn's answer lands second, exactly as the queue hands it over.
+	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-1"},
+		Agent: agentID("main-1"),
+	}, nil)
+	// The release's lifecycle edge is dispatched OFF the caller's goroutine
+	// (see flushTurnEndsAsync); this is the join Close performs.
+	h.w.dispatching.Wait()
+	got := h.drainNow()
+
+	// Assert: the views see the turn OPEN before its terminal, which is the
+	// order they would have seen had the answer beaten the stream.
+	assertNames(t, got, []string{
+		"footer.OnTurnOpened", "feed.OnTurnOpened",
+		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal", "lifecycle.OnTurnEnded",
+	})
+	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
+	if ended.turn == nil || *ended.turn != ids.TurnID("turn-1") {
+		t.Fatalf("turn ended = %v, want turn-1", ended.turn)
+	}
+	if ended.close != wsm.CloseCompleted {
+		t.Fatalf("close = %v, want CloseCompleted", ended.close)
+	}
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("the turn is still in flight after its released terminal")
+	}
+}
+
+// TestAWithheldTerminalIsRoutedUnattributedWhenTheSessionDies covers the
+// release's other end: the query is dead, so the answer that would have named
+// the main agent is never coming, and the terminal is routed rather than lost.
+func TestAWithheldTerminalIsRoutedUnattributedWhenTheSessionDies(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Act.
+	got := h.routeNow(func(w *watcher) {
+		w.routeQueryDiedLocked(queryDiedUpdate())
+	})
+
+	// Assert.
+	requireEvent(t, got, "feed.OnAgentTerminal")
+	if h.w.TurnInFlight() != nil {
+		t.Fatal("the turn is still in flight after the session died")
 	}
 }
 

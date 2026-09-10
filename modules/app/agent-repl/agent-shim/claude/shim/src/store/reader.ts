@@ -503,9 +503,32 @@ export function createReader(options: ReaderOptions): Reader {
       "opened an agent's book and pinned its tail",
     );
 
-    // The caller's high-water mark, kept so a refused re-open is lossless.
+    // The caller's high-water mark, kept so a refused re-open is lossless. It
+    // is the LAST pointer served rather than the newest by position, because an
+    // upsert of an old row is new information about a line already read past:
+    // re-opening from the newer pointer would drop it.
     let servedThrough: conversationv1.HistoryPointer | undefined =
       page.entries[0]?.at ?? knownThrough;
+    /**
+     * EVERY pointer this session has handed the consumer.
+     *
+     * THE CONCLUSION ASKS "HAVE I SERVED THIS", WHICH THE LAST POINTER CANNOT
+     * ANSWER. The store streams an upsert of an old row AT ITS ORIGINAL
+     * POINTER, so `servedThrough` walks BACKWARD whenever a line already read
+     * past is updated — and a teardown concluding through the book's HEAD then
+     * names a row that was served earlier and will never be sent again. The
+     * tail stood on it and the shim's `KillSession` spent its whole
+     * `WATCHER_CONCLUSION_BUDGET_MS` on a stream that already owed nothing.
+     *
+     * A pointer names a POSITION, and an upsert reuses the position it already
+     * had, so this set is bounded by the book's LINES rather than by the frames
+     * written to them: a streaming unit upserts one row many times and adds one
+     * member. The pointers are opaque values this shim never parses, so
+     * membership is the only question it can ask of them.
+     */
+    const served = new Set<string>();
+    if (knownThrough !== undefined) served.add(knownThrough.value);
+    for (const entry of page.entries) if (entry.at !== undefined) served.add(entry.at.value);
     let token: storev1.AgentSessionToken = opened.watch;
     let stopped = false;
     /**
@@ -517,6 +540,9 @@ export function createReader(options: ReaderOptions): Reader {
      */
     let concludeAt: conversationv1.HistoryPointer | undefined;
     let concluding = false;
+    /** Whether the consumer has been handed everything the conclusion named. */
+    const settled = (): boolean =>
+      concluding && (concludeAt === undefined || served.has(concludeAt.value));
     // CANCELLING THE CALL IS HOW A STANDING TAIL ENDS. Connect's stream close
     // drains the body, which on a standing stream never completes — so
     // `close()` aborts the call rather than merely leaving the loop.
@@ -540,8 +566,9 @@ export function createReader(options: ReaderOptions): Reader {
               }
               const entry = toHistoryEntryAt(push.line);
               servedThrough = entry.at;
+              if (entry.at !== undefined) served.add(entry.at.value);
               yield entry;
-              if (concluding && entry.at?.value === concludeAt?.value) {
+              if (settled()) {
                 stopped = true;
                 abort.abort();
                 return;
@@ -580,7 +607,13 @@ export function createReader(options: ReaderOptions): Reader {
             for (const line of [...(reopened.page?.lines ?? [])].reverse()) {
               const entry = toHistoryEntryAt(line);
               servedThrough = entry.at;
+              if (entry.at !== undefined) served.add(entry.at.value);
               yield entry;
+              if (settled()) {
+                stopped = true;
+                abort.abort();
+                return;
+              }
             }
             token = reopened.watch;
             // A fresh controller per attempt: the aborted one stays aborted.
@@ -600,7 +633,7 @@ export function createReader(options: ReaderOptions): Reader {
         // Nothing left to wait for: either no pointer was named, or the tail
         // has already served it. Ending now is the honest answer, and holding
         // the stream open for a row that will never come would wedge the exit.
-        if (through === undefined || through.value === servedThrough?.value) {
+        if (settled()) {
           stopped = true;
           abort.abort();
         }
@@ -641,7 +674,7 @@ export function createReader(options: ReaderOptions): Reader {
     let concludeAt: conversationv1.HistoryPointer | undefined;
     let inner: AgentPageSession | undefined;
     /**
-     * The newest pointer THIS WRAPPER has handed the consumer.
+     * EVERY pointer THIS WRAPPER has handed the consumer.
      *
      * IT IS TRACKED HERE BECAUSE THE INNER SESSION CANNOT SEE IT. The rows that
      * landed while this book was deferred are served out of the real session's
@@ -656,8 +689,13 @@ export function createReader(options: ReaderOptions): Reader {
      * daemon's exit, against 5ms for the same stop on a session whose book was
      * never deferred, with `the WatchAgent tail on <agent> did not end within
      * its conclusion budget` at ERROR in the shim's log each time.
+     *
+     * IT IS A SET AND NOT THE LAST POINTER, for the reason the real session's
+     * own `served` states: the store streams an upsert of an old row at its
+     * ORIGINAL pointer, so the newest pointer handed over walks backward and
+     * cannot answer "have I served the head".
      */
-    let served: conversationv1.HistoryPointer | undefined;
+    const served = new Set<string>();
 
     /**
      * Whether the consumer has been handed everything the conclusion named.
@@ -666,7 +704,7 @@ export function createReader(options: ReaderOptions): Reader {
      * `concludeThrough` reads it: there is nothing left to wait for.
      */
     const settled = (): boolean =>
-      concluded && (concludeAt === undefined || concludeAt.value === served?.value);
+      concluded && (concludeAt === undefined || served.has(concludeAt.value));
 
     /** The real session, once the book exists. `undefined` if it never will. */
     const openWhenWritten = async (): Promise<AgentPageSession | undefined> => {
@@ -728,7 +766,7 @@ export function createReader(options: ReaderOptions): Reader {
           // session's page is entirely news. It is newest-first; the tail is
           // write order.
           for (const entry of [...session.page.entries].reverse()) {
-            served = entry.at;
+            if (entry.at !== undefined) served.add(entry.at.value);
             yield entry;
             // THE CONCLUSION IS HONORED BY WHOEVER SERVED THE ROW. These
             // entries never pass through the inner session's tail, so only
@@ -746,7 +784,7 @@ export function createReader(options: ReaderOptions): Reader {
             const next = await pending;
             if (next.done === true) return;
             pending = rows.next();
-            served = next.value.at;
+            if (next.value.at !== undefined) served.add(next.value.at.value);
             yield next.value;
             if (settled()) {
               session.close();

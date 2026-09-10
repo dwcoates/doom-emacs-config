@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -96,6 +97,18 @@ func mustParseXvfbGeometry(screen string) (int, int) {
 // hinting, a scrollbar, a clock, and every other honest difference between
 // two runs of the same product.
 const playtestBlankFloor = 64
+
+// playtestFrameFitBound is how long the frame may take to REACH the size
+// `fitFrameToDisplay` asked for.
+//
+// A pgtk resize is a request to GTK and lands on the configure event, so the
+// wait is a real round trip through the X server rather than a poll of
+// something already true. MEASURED, over the five boots of one run of the
+// frame substrate: 4, 21, 21, 23 and 24ms. 250ms is ~10x the worst of those
+// -- a wider multiple than this package's usual, because the box a playtest
+// runs on is shared with whatever other suite holds the other slot, and a
+// missed bound here fails a boot rather than reporting a slow one.
+const playtestFrameFitBound = 250 * time.Millisecond
 
 // playtestSettleBound is how long one capture waits for the screen to stop
 // changing before it takes the picture.
@@ -1164,11 +1177,56 @@ func (p *playbook) write(format string, args ...any) {
 // animating screen.
 func (p *playbook) prepareFrame() {
 	p.t.Helper()
-	p.e.Eval(fmt.Sprintf(`(progn
-             (blink-cursor-mode -1)
-             (set-frame-size (selected-frame) %d %d t)
-             (redisplay t)
-             t)`, playtestFrameWidth, playtestFrameHeight))
+	p.e.Eval(`(progn (blink-cursor-mode -1) t)`)
+	fitFrameToDisplay(p.t, p.e)
+}
+
+// fitFrameToDisplay sizes the frame so the WHOLE of it is on the screen the
+// capture photographs, and fails the test if it did not land there.
+//
+// WHAT WENT WRONG WHEN THIS WAS `(set-frame-size frame W H t)`, and it is a
+// measurement rather than a reading of the manual. `set-frame-size`'s
+// pixelwise size is the frame's TEXT AREA, which excludes the tab bar, the
+// fringes and the scroll bar — so asking for the screen's own 1280x1024 of
+// text produced a frame whose NATIVE size was 1296x1060 at position (0,0) on
+// a 1280x1024 display: 16px of scroll bar past the right edge, and 36px (the
+// two pinned tab-bar rows) past the bottom.
+//
+// The 36px is the whole of the frame's bottom furniture. Measured, with no
+// panel up: the sole window sat at pixel-top 36 with pixel-height 1006, so
+// its mode line drew at y=1024..1042 and the echo area at y=1042..1060 —
+// BOTH ENTIRELY OFF THE GLASS. Every picture in every playbook was therefore
+// taken of an editor with no mode line and no echo area anywhere in it, and
+// a reviewer reading those captures against a manifest cannot tell that from
+// a product that failed to draw them.
+//
+// So the size asked for here is the text size that makes the NATIVE size the
+// display's, computed from the frame's own chrome rather than from a guess
+// at what that chrome costs. The frame is then WAITED FOR at that size and
+// the size ASSERTED: a frame that still hangs off the screen would produce
+// exactly the same unreviewable pictures, only now with nothing to say so.
+func fitFrameToDisplay(t *testing.T, e *Emacs) {
+	t.Helper()
+	e.Eval(fmt.Sprintf(`(let* ((frame (selected-frame))
+             (chrome-width (- (frame-native-width frame) (frame-text-width frame)))
+             (chrome-height (- (frame-native-height frame) (frame-text-height frame))))
+           (set-frame-position frame 0 0)
+           (set-frame-size frame (- %d chrome-width) (- %d chrome-height) t)
+           (redisplay t)
+           t)`, playtestFrameWidth, playtestFrameHeight))
+	// THE SIZE IS WAITED FOR, NOT READ BACK. Under pgtk the resize is a
+	// request to GTK, and the frame reports its OLD native size until the
+	// configure event lands -- measured, the read immediately after the
+	// `set-frame-size` above still answered the 736x648 default frame. So
+	// this is a wait on the frame the X server actually has, and it is the
+	// point where a frame that never reaches the display's size fails.
+	want := fmt.Sprintf("%dx%d+0+0", playtestFrameWidth, playtestFrameHeight)
+	e.AwaitEvalFor(playtestFrameFitBound, "the frame to fill the display exactly",
+		`(let ((frame (selected-frame)))
+                   (format "%dx%d+%d+%d"
+                           (frame-native-width frame) (frame-native-height frame)
+                           (car (frame-position frame)) (cdr (frame-position frame))))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == want })
 }
 
 // note records a step that has NO picture.
