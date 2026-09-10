@@ -51,6 +51,7 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 			`(let (names) (maphash (lambda (k v) (when (plist-get v :project-dir) (push k names))) agent-repl--workspaces) names)`,
 			func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == want })
 		names = registryNames(raw)
+		awaitRegistrationLanding(e, repository.Dir)
 	}
 	// The registry is a hash, so its iteration order says nothing; the
 	// current workspace is what the panel verbs act on, and it is the one
@@ -59,7 +60,61 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 	if current == "" || current == "nil" {
 		t.Fatal("no current workspace after registering one")
 	}
+	putTheLandingAway(e, current)
 	return w, names
+}
+
+// awaitRegistrationLanding waits out the landing that REGISTERING a
+// workspace performs.
+//
+// A REGISTERED WORKSPACE COMES UP ON ITS OWN PANEL, by design: the daemon
+// mints the ref, `agent-repl-verbs-select-minted` switches to the minted
+// worktree, and the switch arms `:pending-show-panels` so the perspective
+// activation drain shows the workspace's view
+// (`agent-repl--arm-landing-panels`, `agent-repl--drain-pending-show-panels`).
+// That landing waits on the daemon's answer, so it is ASYNCHRONOUS: a
+// scenario that starts measuring windows as soon as the registry holds the
+// name is racing a panel show it never asked for. Under the soak the show
+// arrived mid-scenario — the frame already held both panels before the open
+// under test, and a work layout arranged before an open was collapsed by the
+// arriving show.
+//
+// Settled means BOTH: nothing is left armed, and the workspace's own webview
+// has a live window. The window is what makes the wait safe — the flag alone
+// reads as "settled" in the moment before the arm.
+func awaitRegistrationLanding(e *Emacs, dir string) {
+	e.t.Helper()
+	e.AwaitEvalFor(panelSettleBound, "the registration's landing to put the workspace's panel on the frame",
+		`(let ((ws (agent-repl--ws-name-for-dir `+elispString(dir)+`)))
+                   (and ws
+                        (not (agent-repl--ws-get ws :pending-show-panels))
+                        (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+                          (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)) t))))`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+}
+
+// putTheLandingAway leaves every scenario the same starting frame: the
+// workspaces exist and their panels are NOT on it.
+//
+// The panels go away through the module's own plain close rather than a
+// window delete, because that close is what RESTORES and clears the layout
+// the landing's own show saved (`agent-repl--restore-fullscreen-config`). A
+// hand-rolled teardown leaves `:fullscreen-config` standing, and a later open
+// keeps the standing one — so the close under test restores the frame as it
+// stood at the LANDING rather than as the scenario arranged it, which is
+// exactly how scenario 18 lost its work window.
+func putTheLandingAway(e *Emacs, current string) {
+	e.t.Helper()
+	frontendPrefix, panelPrefix := bufferNamePrefixes(e)
+	e.Eval(`(call-interactively #'agent-repl-simple)`)
+	e.AwaitEvalFor(panelSettleBound, "the landing's panels to go away",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			return panelBufferCount(decodeStrings(raw), frontendPrefix, panelPrefix) == 0
+		})
+	if e.EvalBool(`(and (agent-repl--ws-get ` + elispString(current) + ` :fullscreen-config) t)`) {
+		e.t.Fatalf("the close left workspace %q a saved layout; a later open would restore the landing's frame, not the scenario's", current)
+	}
 }
 
 func registryNames(raw json.RawMessage) []string { return decodeStrings(raw) }
@@ -311,9 +366,17 @@ func TestEmacsFocusInputSelectsTheComposer(t *testing.T) {
 		t.Fatalf("decode the input buffer name: %v", err)
 	}
 
-	// Select a window that is NOT the composer, so the command has somewhere
-	// to move point FROM.
-	e.Eval(`(progn (select-window (car (window-list))) t)`)
+	// Select the WEBVIEW window, which is the one window on the frame that is
+	// not the composer. `(car (window-list))` is the SELECTED window by
+	// definition, so the old arrangement moved nothing: once the open's own
+	// mount had selected the composer — which it does, and under load it wins
+	// the race — the press landed in the jump-back branch rather than the
+	// show-or-focus branch this scenario is about.
+	e.AwaitEvalFor(panelSettleBound, "the workspace's webview window to be on the frame",
+		`(let ((buf (agent-repl--ws-get `+elispString(current)+` :frontend-buffer)))
+                   (and (buffer-live-p buf) (window-live-p (get-buffer-window buf)) t))`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.Eval(`(progn (select-window (get-buffer-window (agent-repl--ws-get ` + elispString(current) + ` :frontend-buffer))) t)`)
 
 	if want, got := "agent-repl-focus-input", e.LeaderBinding("o v"); got != want {
 		t.Fatalf("SPC o v resolves to %q, want %q: the module's `map!' leader form did not take", got, want)
