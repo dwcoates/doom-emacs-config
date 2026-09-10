@@ -925,6 +925,7 @@ func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) {
 	}
 	return &fakeBorrowed{}, nil
 }
+func (s *fakeSurfaces) ShimRollRequests() <-chan dlog.ShimRollRequest { return nil }
 
 // fakeBorrowed is a non-closeable sink handle over the null device, which is
 // what a spawn is handed as fd 3.

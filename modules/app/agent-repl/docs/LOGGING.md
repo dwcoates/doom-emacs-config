@@ -43,19 +43,17 @@ audit found, which are the work.
 
 ## Gaps (audit 2026-09-10) → the work
 
-Daemon
-- verbosity is hardcoded off (`cmd/claude-repld/run.go` passes `false` to
-  `OpenSurfaces`); wire `AGENT_REPL_LOG_LEVEL`.
-- `sidecar.log` is dead: `ClientLog` persistence hardcodes the webapp runtime
-  (`internal/server/admin.go`, "SEAM GAP") and the sidecar never forwards;
-  honor the record's runtime and persist the sidecar's forwarded diagnostics.
-- the forwarded record's own `timestamp` and `verbose` (proto, landed) are
-  ignored; persist them instead of the arrival clock and a recomputed class.
-- per-workspace sinks truncate in place and poison at the cap
-  (`internal/dlog/sink.go`); rotate with generations. The run log rotates on
-  open, so a bounce loop evicts history; rotate on size.
-- a bypass lint (raw stderr/`fmt.Print`/`log.Print` outside the sanctioned
-  bootstrap sites).
+Daemon — landed
+- `AGENT_REPL_LOG_LEVEL` governs persisted and mirrored levels.
+- `ClientLogRecord.runtime` routes forwarded records to `webapp.log` or
+  `sidecar.log`; an unset arm preserves the historical webapp route.
+- forwarded records retain their client timestamp and verbosity class.
+- the run log and daemon-owned workspace sinks rotate on size with retained
+  generations. `shim.log` rotates only with a shim process roll because the
+  writer owns inherited descriptor `3`; a 110% hard ceiling emits one error
+  and forces the freeness-aware roll.
+- the bypass lint rejects raw stderr/`fmt.Print`/`log.Print` outside the
+  sanctioned bootstrap sites.
 
 Shim (TypeScript)
 - no explicit `debug` level at any site; 163 `warn` / 102 `error` / 10

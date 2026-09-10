@@ -297,6 +297,18 @@ inherited descriptor, and forwarded webapp and sidecar records go to
 a daemon-owned target under `<state>/logs/`. Failing to resolve a workspace is
 an invariant violation, never a global write.
 
+`daemon.log`, `webapp.log`, and `sidecar.log` rotate synchronously at 64 MiB
+through `agentrepl/logging.OpenRotating`, retain `logging.DefaultBackups`
+generations, and atomically refresh their canonical symlink after each roll.
+An already-open reader remains on the retired inode. `shim.log` cannot rotate
+under the shim because descriptor `3` is inherited and the shim never receives
+a path. The cap scanner therefore marks it at 64 MiB; `ShimSink` rotates the
+marked target when the next replacement shim is prelaunched. At 110% the
+daemon records one workspace error and sends a `ShimRollRequest` to the
+freeness-aware `rollout.Controller`, which forces that process roll at the next
+turn boundary. Reaching either threshold is not sink poison; failures while
+checking or rotating are.
+
 `logging_bypass_test.go` is the bypass lint. It fails any direct `fmt.Print*`,
 `log.Print*`, or `os.Stderr.Write*` call in production code outside the
 explicitly counted bootstrap, terminal-mirror self-report, and injected CLI
