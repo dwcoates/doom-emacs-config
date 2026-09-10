@@ -458,6 +458,53 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	}
 }
 
+func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newRegistered(t, harness.Opts{})
+	sentTimestamp := "2026-09-10T16:34:56.789Z"
+	instant, err := time.Parse(time.RFC3339, sentTimestamp)
+	if err != nil {
+		t.Fatalf("parse fixture timestamp: %v", err)
+	}
+	wantTimestamp := instant.In(time.Local).Format("2006-01-02T15:04:05.000000-07:00")
+
+	// Act.
+	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "sidecar.transcript.read",
+			Message:   "the sidecar read a transcript",
+			Timestamp: sentTimestamp,
+			Verbose:   true,
+			Runtime: &agentreplv1.ClientLogRecord_Sidecar{
+				Sidecar: &agentreplv1.ClientLogRuntimeSidecar{},
+			},
+		},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
+	}
+	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.ws.GetDir(), "sidecar"), "the sidecar's record", func(r harness.LogRecord) bool {
+		return r.Operation == "sidecar.transcript.read"
+	})
+	if rec.Runtime != "sidecar" {
+		t.Fatalf("the persisted record's runtime = %q, want sidecar", rec.Runtime)
+	}
+	if rec.Timestamp != wantTimestamp {
+		t.Fatalf("the persisted record's timestamp = %q, want the client's %q", rec.Timestamp, wantTimestamp)
+	}
+	if rec.Verbosity != "verbose" {
+		t.Fatalf("the persisted record's verbosity = %q, want verbose", rec.Verbosity)
+	}
+}
+
 func TestClientLogPersistsTheClientsVerboseClass(t *testing.T) {
 	t.Parallel()
 	// Arrange.

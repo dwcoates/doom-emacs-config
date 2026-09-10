@@ -170,11 +170,12 @@ func (s *server) ClientLog(
 		return answer(resp, cerr)
 	}
 	record := req.Msg.GetRecord()
-	// SEAM GAP (recorded in the report): ClientLogRecord names no CLIENT KIND,
-	// and dlog persists only the webapp and sidecar sinks. The webapp is the
-	// console-less client the rpc exists for, so its sink is the one used.
+	clientKind, err := clientRuntime(record)
+	if err != nil {
+		return nil, fail(subject.Log, rpc, err)
+	}
 	if err := s.deps.Log.ClientLog(subject.Record.Dir, dlog.ClientRecord{
-		ClientKind: dlog.RuntimeWebapp,
+		ClientKind: clientKind,
 		Level:      clientLevel(record),
 		Operation:  record.GetOperation(),
 		Message:    record.GetMessage(),
@@ -185,12 +186,27 @@ func (s *server) ClientLog(
 		return nil, fail(subject.Log, rpc, fmt.Errorf("persist a client record: %w", err))
 	}
 	subject.Log.Debug("daemon.server.client_log", "persisted a forwarded client record", dlog.Context{
-		"client_kind": dlog.RuntimeWebapp,
+		"client_kind": clientKind,
 		"operation":   record.GetOperation(),
 		"verbose":     record.GetVerbose(),
 	})
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
+}
+
+// clientRuntime maps the record's runtime arm onto the daemon-owned client
+// sink. UNSET intentionally means webapp: the browser was the historical
+// forwarder before the runtime oneof existed, so old senders retain their
+// declared routing while every set arm is handled explicitly.
+func clientRuntime(record *agentreplv1.ClientLogRecord) (string, error) {
+	switch record.GetRuntime().(type) {
+	case nil, *agentreplv1.ClientLogRecord_Webapp:
+		return dlog.RuntimeWebapp, nil
+	case *agentreplv1.ClientLogRecord_Sidecar:
+		return dlog.RuntimeSidecar, nil
+	default:
+		return "", fmt.Errorf("client log record carries an unsupported runtime arm %T", record.GetRuntime())
+	}
 }
 
 // clientLevel renders the record's level arm as the log level's name.
