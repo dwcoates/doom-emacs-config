@@ -18,7 +18,7 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { installClickExpand } from "../expand.js";
-import { TailFollow, observeScrollBox, revealNode } from "../scroll.js";
+import { TailFollow, feedReveal, observeScrollBox, revealNode } from "../scroll.js";
 import {
   OpenFeedResponseSchema,
   type OpenFeedResponse,
@@ -94,6 +94,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   // docked footer settling after a render shrinks this box, and a tail parked
   // before that shrink is left below the fold with the last bubble clipped.
   const unobserve = scrollBox === null || tail === null ? null : observeScrollBox(scrollBox, tail);
+  // The caret's view rule, bound ONCE for the whole universe of feeds: every
+  // bubble in it -- root-level, nested, merge or subagent -- is built by
+  // `bubbleFor` below, so they all obey the same one.
+  const reveal = scrollBox === null || tail === null ? undefined : feedReveal(scrollBox, tail);
   let watch: StreamHandle | null = null;
   let disposed = false;
 
@@ -248,6 +252,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       bubble: bubbleFor,
       composerFactory: deps.composerFactory,
       head: bubbleHead,
+      scroll: reveal,
     };
     if (unitCase(row) === "merge") {
       return mountBubble({
