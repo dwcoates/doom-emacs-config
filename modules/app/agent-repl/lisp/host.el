@@ -599,43 +599,76 @@ THE ONE WALK, shared by the `transferred' push and by a per-workspace
 rpc's `transferring_away' refusal — both say the same thing, and a second
 copy of this order would be a second contract.
 
-THE ORDER IS THE CONTRACT.  AdoptHostWorkspace on the NEW connection
-FIRST; then `:conn' is moved to NEW; then the webview is reloaded; then
-the old stream is cancelled; then the subscription is opened on NEW.
-`:conn' MUST move before the reload because frontend.el derives the page
-URL from `agent-repl-host-conn' — reloading first would navigate the
-webview straight back at the daemon that just released the workspace.
-The reloaded page adopts itself (AdoptWebWorkspace at boot); the webapp
-only draws a moved notice and stops its streams, so the HOST owns this
-redial and nothing on the web side retries it.
+THE ORDER IS THE CONTRACT.  `:conn' is moved to NEW and the webview is
+reloaded FIRST; then AdoptHostWorkspace is issued on the NEW connection;
+then, on its success, the old stream is cancelled and the subscription is
+opened on NEW.  `:conn' MUST move before the reload because frontend.el
+derives the page URL from `agent-repl-host-conn' — reloading first would
+navigate the webview straight back at the daemon that just released the
+workspace.
 
-The old stream is kept standing on every failure path, because a
-workspace whose old stream was dropped and whose adopt did not land would
-be served by nobody."
+THE REDIAL MUST NOT WAIT ON THE ADOPT'S ANSWER, AND THAT WAS A DEADLOCK.
+The successor's adopt is a RENDEZVOUS: it completes only when every
+participant its predecessor snapshotted at announcement has called, and
+for an OPEN workspace those are the host AND the web page
+\(`daemon/internal/rollout/adopt.go', `rendezvousCall').  The web
+participant is the RELOADED page — the webapp never redials a successor
+of its own, so the host is the only actor that can produce it.  Issuing
+AdoptHostWorkspace first and reloading only on its success therefore made
+the host's call wait for a page that only the host's call returning could
+create.  Measured in the sandbox, on a handover of a workspace with a
+live panel: `AdoptHostWorkspace timed out after 10s', the successor
+recorded `the caller gave up before the rendezvous completed', and the
+outgoing daemon then sat out its whole 30s adoption window before exiting
+— so the promotion Emacs makes on the primary stream's close never came.
+A headless workspace never showed it: it has no web participant, so the
+rendezvous was satisfied by the host's call alone.
+
+So the reload is issued BESIDE the adopt rather than after it, and the
+two participants call concurrently, which is what the rendezvous
+documents it requires.  `agent-repl-frontend-reload-webview' answers nil
+for a workspace with no live webview, so a headless adoption walks
+exactly as it did.
+
+NOTHING IS LEFT MOVED BY A FAILED ADOPT.  The old stream is kept standing
+on every failure path — a workspace whose old stream was dropped and
+whose adopt did not land would be served by nobody — and `:conn' and the
+webview are put back where they were, so a refusal or a transport failure
+leaves the workspace on the daemon that still serves it."
   (let ((ref (agent-repl-host-ref ws))
-        (address (agent-repl-connect-connection-address new)))
+        (address (agent-repl-connect-connection-address new))
+        (old (agent-repl-host-conn ws)))
     (if (null ref)
         (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws)
-      (agent-repl-rpc-adopt-host-workspace
-       new (list :workspace ref)
-       :on-response
-       (lambda (response)
-         (pcase (plist-get response :arm)
-           (:success
-            (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
-            (agent-repl-host--put ws :conn new)
-            (agent-repl-frontend-reload-webview ws)
-            (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
-                              ws address)
-            (agent-repl-host-unsubscribe ws)
-            (agent-repl-host-subscribe new ws ref))
-           (:error
-            (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
-           (arm
-            (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))
-       :on-failure
-       (lambda (detail)
-         (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S" ws detail))))))
+      (let ((restore
+             (lambda ()
+               (agent-repl-host--put ws :conn old)
+               (agent-repl-frontend-reload-webview ws)
+               (agent-repl--info ws "elisp.host.webview-restored ws=%s address=%S"
+                                 ws (and old (agent-repl-connect-connection-address old))))))
+        (agent-repl-host--put ws :conn new)
+        (agent-repl-frontend-reload-webview ws)
+        (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
+                          ws address)
+        (agent-repl-rpc-adopt-host-workspace
+         new (list :workspace ref)
+         :on-response
+         (lambda (response)
+           (pcase (plist-get response :arm)
+             (:success
+              (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
+              (agent-repl-host-unsubscribe ws)
+              (agent-repl-host-subscribe new ws ref))
+             (:error
+              (funcall restore)
+              (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
+             (arm
+              (funcall restore)
+              (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))
+         :on-failure
+         (lambda (detail)
+           (funcall restore)
+           (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S" ws detail)))))))
 
 (defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the successor daemon after the old one released it.
@@ -809,10 +842,28 @@ dired."
 ;;;; ---- Link lifecycle ----
 
 (defun agent-repl-host-on-link-up (conn)
-  "Re-register and re-subscribe every live workspace on CONN.
+  "Re-register, re-subscribe and re-point every live workspace on CONN.
 This is the NORMAL path after a daemon restart, not an error recovery:
 registration is idempotent by dir, streams are \"now\" and never \"since\",
-and no resume token exists anywhere."
+and no resume token exists anywhere.
+
+THE WEBVIEW IS RE-POINTED TOO, and leaving it out stranded every open
+panel.  A daemon Emacs launches listens on a FRESH PORT, and the page\='s
+url names the port it was opened at — so after a stop and an ensure the
+tab bar healed, the roster came back and the composer worked, while the
+webview went on dialing a daemon that had exited and drew a permanent
+`daemonUnreachable\=' card over the last feed it had.  Measured in the e2e
+sandbox: with both workspaces re-registered and the link up, the page
+still reported `failureArms=[daemonUnreachable]\=' at a url naming the
+dead daemon\='s port.  The only way out was the user reaching for
+`SPC o l\=' — a manual step for a recovery the product otherwise makes on
+its own.
+
+The reload runs AFTER the subscribe, because `agent-repl-host-subscribe\='
+is what moves `:conn\=' to the new daemon (`agent-repl-host--attach\=') and
+frontend.el derives the page url from `agent-repl-host-conn\='.  It is a
+no-op for a workspace with no live webview, so a headless one costs
+nothing."
   (let ((names (agent-repl--live-ws-names)))
     (agent-repl--info nil "elisp.host.link-up workspaces=%d" (length names))
     (dolist (ws names)
@@ -824,7 +875,10 @@ and no resume token exists anywhere."
            (lambda (ref)
              (if (null ref)
                  (agent-repl--error ws "elisp.host.link-up-register-failed ws=%s dir=%S" ws dir)
-               (agent-repl-host-subscribe conn ws ref)))))))))
+               (agent-repl-host-subscribe conn ws ref)
+               (agent-repl-frontend-reload-webview ws)
+               (agent-repl--info ws "elisp.host.link-up-webview-repointed ws=%s address=%S"
+                                 ws (agent-repl-connect-connection-address conn))))))))))
 
 (defun agent-repl-host-on-link-down (conn)
   "Forget the streams CONN carried, keeping every workspace's last state.
