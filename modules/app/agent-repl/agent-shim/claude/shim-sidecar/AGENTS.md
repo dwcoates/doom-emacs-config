@@ -178,6 +178,17 @@ which the proto documents as never switched on.
     store's `field`, the `write_ids` of the whole refused batch (a batch is
     refused whole, so naming one record would misreport it), the `path`,
     `file_id` and `offset`;
+  - A REPEAT OF THE SAME DEFECT FOR THE SAME FILE IS RESTATED ONLY ON POWERS
+    OF TWO, and every record carries `repeat_count`. A park normally states
+    the defect once and that is the end of it — but a park is not permanent:
+    the un-park below re-reads the file, and if the identity that decides its
+    book oscillates the same refusal returns on every poll. That is a record
+    per second for a condition that never changes, which is the exact drowning
+    the park exists to prevent arriving through the un-park door. The ladder
+    keeps such a defect visible (1, 2, 4, 8 ...) without letting it become the
+    log's entire content, and the count says "seen ten thousand times" without
+    ten thousand records. A defect naming a DIFFERENT `field` is a different
+    bug and is always stated, starting its own tally;
   - THAT FILE's tailer is PARKED for the life of the process. Nothing more is
     read from it, because re-reading the same durable bytes re-mints the same
     rejected batch forever — a tight identical replay loop that makes no
