@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -141,37 +142,62 @@ type record struct {
 
 // Snapshot is where every source stood before the run.
 //
-// It records the RESOLVED target behind each source path, not just the size,
-// because the per-workspace sources are the canonical symlinks the logging
-// contract defines and those links are REPLACED during a cold start: a fresh
-// Emacs mints a new `emacs.log` target, and a fresh daemon mints new
-// `daemon.log`, `shim.log`, `webapp.log` and `sidecar.log` targets. A reader
-// that remembered only a size against the link path would read the new target
-// from an offset that means nothing in it.
+// IT IS KEYED BY INODE, not by path, and that is the whole design. Two things
+// this module does routinely move a log's bytes from one path to another while
+// a run is in flight:
 //
-// Knowing the old target is what lets a run harvest BOTH: whatever the outgoing
-// runtime wrote just before the relink, and everything the incoming one wrote
-// after. A relink is expected on a cold start and is not itself a finding.
+//	The daemon ROTATES `daemon.run.log` ON OPEN (docs/LOGGING.md records this as
+//	a gap: a bounce loop evicts history). A cold start that spawns a daemon
+//	therefore renames the file this run snapshotted to `daemon.run.log.1` and
+//	creates a fresh one. Path-keyed offsets would read the new file's whole
+//	content as this run's — which it is — and ALSO report the old path as having
+//	shrunk, which is a fabricated finding about a file that is still intact one
+//	name over.
+//
+//	A restarting runtime REPLACES a workspace's canonical symlink with a new
+//	target, exactly as logging-contract.md specifies. The link's path is
+//	unchanged and its bytes are completely different.
+//
+// An inode is the identity of the BYTES. Keyed by it, a file that was renamed
+// is read from the offset it had under its old name, a file that is new is read
+// whole, and the only thing that reads as a loss is the one thing that IS one:
+// the same inode with fewer bytes in it than before, which is a truncation in
+// place.
 type Snapshot struct {
-	// Sizes is RESOLVED path -> byte size at snapshot time. A path absent
-	// from the map was not seen and is read from zero.
+	// Sizes is inode identity -> byte size at snapshot time. A key absent
+	// from the map names bytes this run has not seen before, read from zero.
 	Sizes map[string]int64
-	// Targets is source path -> the resolved path it named at snapshot time.
-	Targets map[string]string
-	Taken   time.Time
+	// Resolved is source path -> the path it resolved to at snapshot time,
+	// so a relinked source can still be read at its OLD target for whatever
+	// the outgoing runtime wrote just before the swap.
+	Resolved map[string]string
+	Taken    time.Time
 }
 
-// TakeSnapshot resolves every enumerated source and records its size.
+// inodeKey identifies a file by its bytes rather than by its name.
+//
+// Device and inode together, because an inode number is only unique within a
+// filesystem and this run reads across at least two — the state root on the
+// boot volume and the module log under the OS temporary directory.
+func inodeKey(info os.FileInfo) (string, bool) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), true
+}
+
+// TakeSnapshot records every enumerated source's identity and size.
 //
 // A source that does not exist is recorded as absent rather than as zero, and
 // the distinction matters: absent means "read the whole file, the run created
-// it", while a recorded zero means "the file existed and was empty" — and only
-// the second one makes a later shrink a truncation.
+// it", while a recorded zero means "these bytes existed and there were none of
+// them" — and only the second one makes a later shrink a truncation.
 func TakeSnapshot(sources []Source) Snapshot {
 	snap := Snapshot{
-		Sizes:   make(map[string]int64, len(sources)),
-		Targets: make(map[string]string, len(sources)),
-		Taken:   time.Now(),
+		Sizes:    make(map[string]int64, len(sources)),
+		Resolved: make(map[string]string, len(sources)),
+		Taken:    time.Now(),
 	}
 	for _, src := range sources {
 		resolved, err := filepath.EvalSymlinks(src.Path)
@@ -182,10 +208,35 @@ func TakeSnapshot(sources []Source) Snapshot {
 		if err != nil || info.IsDir() {
 			continue
 		}
-		snap.Targets[src.Path] = resolved
-		snap.Sizes[resolved] = info.Size()
+		snap.Resolved[src.Path] = resolved
+		if key, ok := inodeKey(info); ok {
+			snap.Sizes[key] = info.Size()
+		}
 	}
 	return snap
+}
+
+// OffsetFor is where a run's own records start in the file behind `path`.
+//
+// It is what a reader other than the harvester — the phase reader — needs, and
+// it resolves the same way the harvester does: through the path's current
+// target and that target's inode, so a log renamed or relinked since the
+// snapshot still answers with the offset belonging to its bytes. An unknown
+// file answers zero, which is the honest answer: none of it has been read yet.
+func (s Snapshot) OffsetFor(path string) int64 {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return 0
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return 0
+	}
+	key, ok := inodeKey(info)
+	if !ok {
+		return 0
+	}
+	return s.Sizes[key]
 }
 
 // Window is the interval a run's records must fall in.
@@ -260,63 +311,67 @@ type readPlan struct {
 }
 
 // plan decides which files stand behind one source and from what offset each is
-// read, and reports a shrink as its own finding.
+// read, and reports the one case that is a real loss.
 //
-// Three cases, and only the last one is a problem:
+// Two files can stand behind one source: whatever it resolves to now, and
+// whatever it resolved to at snapshot time when a relink has moved it. Both are
+// read, because a restarting runtime writes to the old target right up to the
+// swap.
 //
-//  1. The source resolves to the SAME target it did at snapshot time. Read from
-//     the recorded offset.
-//  2. It resolves to a DIFFERENT target: the owning runtime restarted and
-//     atomically replaced the link, exactly as the logging contract has it.
-//     Read the old target from its recorded offset AND the new one whole.
-//  3. The same target got SMALLER. It was rotated or truncated in place, so the
-//     records between the offset and the new end no longer exist. Report the
-//     loss and read what is there now from the beginning.
+// Each file's offset comes from its INODE, so a log that was RENAMED — the
+// daemon's rotate-on-open — is read from where this run left it under its old
+// name, with nothing reported. The only finding is the same inode holding fewer
+// bytes than before: a truncation in place, where the records between the
+// offset and the new end no longer exist anywhere.
 func plan(src Source, snap Snapshot, index *workspaceIndex) ([]readPlan, []Finding, error) {
+	candidates := make([]string, 0, 2)
+
 	resolved, err := filepath.EvalSymlinks(src.Path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, nil, fmt.Errorf("resolve the log %s: %w", src.Path, err)
-		}
-		// The path is gone. Whatever it named at snapshot time may still be
-		// on disk holding this run's records, so it is still read.
-		if prior, ok := snap.Targets[src.Path]; ok {
-			return []readPlan{{path: prior, offset: snap.Sizes[prior]}}, nil, nil
-		}
-		return nil, nil, nil
+	switch {
+	case err == nil:
+		candidates = append(candidates, resolved)
+	case os.IsNotExist(err):
+		// The path is gone. Whatever it named at snapshot time may still hold
+		// this run's records, so it is still read.
+	default:
+		return nil, nil, fmt.Errorf("resolve the log %s: %w", src.Path, err)
 	}
 
-	prior, hadPrior := snap.Targets[src.Path]
-	if hadPrior && prior != resolved {
-		return []readPlan{
-			{path: prior, offset: snap.Sizes[prior]},
-			{path: resolved, offset: 0},
-		}, nil, nil
+	if prior, ok := snap.Resolved[src.Path]; ok && prior != resolved {
+		candidates = append(candidates, prior)
 	}
 
-	offset, known := snap.Sizes[resolved]
-	if !known {
-		offset = 0
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil, nil
+	var plans []readPlan
+	var findings []Finding
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, nil, fmt.Errorf("stat the log %s: %w", candidate, err)
 		}
-		return nil, nil, fmt.Errorf("stat the log %s: %w", resolved, err)
+		offset := int64(0)
+		if key, ok := inodeKey(info); ok {
+			if known, seen := snap.Sizes[key]; seen {
+				offset = known
+				if info.Size() < known {
+					findings = append(findings, Finding{
+						Kind:      KindRotation,
+						Source:    src.Name,
+						Path:      candidate,
+						Workspace: sourceWorkspace(src, index),
+						Note: fmt.Sprintf(
+							"these bytes were %d long at snapshot and are %d long now, under the same inode: the file was truncated in place during the run, and the records it held past %d are gone from every path",
+							known, info.Size(), info.Size()),
+					})
+					offset = 0
+				}
+			}
+		}
+		plans = append(plans, readPlan{path: candidate, offset: offset})
 	}
-	if info.Size() < offset {
-		return []readPlan{{path: resolved, offset: 0}}, []Finding{{
-			Kind:      KindRotation,
-			Source:    src.Name,
-			Path:      resolved,
-			Workspace: sourceWorkspace(src, index),
-			Note: fmt.Sprintf(
-				"the file was %d bytes at snapshot and is %d bytes now, with the same path: it was rotated or truncated in place during the run, and the records it held at the snapshot offset are gone",
-				offset, info.Size()),
-		}}, nil
-	}
-	return []readPlan{{path: resolved, offset: offset}}, nil, nil
+	return plans, findings, nil
 }
 
 // harvestOne reads ONE source from offset to end.

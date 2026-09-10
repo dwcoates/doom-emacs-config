@@ -166,7 +166,7 @@ func TestRealtestStartTheEditor(t *testing.T) {
 	// everything before it belongs to whoever wrote it.
 	started := time.Now()
 	snapshot := TakeSnapshot(sources)
-	moduleLogOffset := snapshot.Sizes[resolvedOr(env.ModuleLog, snapshot)]
+	moduleLogOffset := snapshot.OffsetFor(env.ModuleLog)
 
 	manifest := Manifest{
 		Title:      "Realtest 1 — start the editor",
@@ -658,14 +658,6 @@ func waitUntil(ctx context.Context, t *testing.T, what string, ceiling time.Dura
 		case <-time.After(pollInterval):
 		}
 	}
-}
-
-// resolvedOr is the module log's resolved path if the snapshot saw one.
-func resolvedOr(path string, snap Snapshot) string {
-	if resolved, ok := snap.Targets[path]; ok {
-		return resolved
-	}
-	return path
 }
 
 func prefixEach(prefix string, values []string) []string {
