@@ -572,4 +572,40 @@ pair can drift.
 
 EMACS IS UNTOUCHED, deliberately: `lisp/` draws no feed.
 
+## Landing 17 (2026-09-09): a fork mints a new AgentId and ports the history under it
+
+OWNER-DELEGATED LEAD RULING. A comment correction on conversation.v1 AgentId's
+cross-plane minting rule, no field change: a resume or rotation keeps the
+original vendor session id; a FORK mints a new one and ports the history under
+it, re-minting every record identity the file plane derives upsert keys from
+(record uuid and every *uuid link, message.id, tool_use ids, sessionId, prompt
+and task ids, sidecar file names). A byte-copied fork re-keyed identical
+content under a second book and the store refused the move ("would move the
+row from book A to book B"), parking the fork's file plane. Built in
+daemon/internal/remint and account.PortTranscript.
+
+## Landing 18 (2026-09-10): a tool call whose work moved to the background says so
+
+OWNER-DELEGATED LEAD RULING, found by playtest owner 13 (F43). frontend.v1
+FeedSimpleToolCall.outcome gains `moved` (tag 6, FeedToolCallMoved, empty). A
+backgrounded shell drew two rows: the detached shell row that settles, and the
+Bash card above it stuck on `running` forever, because the card had no arm for
+work that MOVED. The arm carries no verdict and no output; the detached shell
+row is the record of the run.
+
+## Two plain-data presence fields (2026-09-10)
+
+- store.v1 OpenAgentSessionRequest gains `bool page_only` (tag 4). A one-shot
+  read says so at open, the store mints no watch token, and `watch` in the
+  success is unset. Why: OpenAgentSession is unary with no close, so a token
+  minted for a read that never watched lived for the store's process lifetime
+  (two per turn, measured). Five shim one-shot sites now open page-only.
+- conversation.v1 AgentTaskState `subject` and `description` become
+  `optional`. Presence lets a consumer tell "the act named no subject" from
+  "the subject is empty", as `owner` already could; the daemon's checklist
+  keeps what it holds when an act does not name one.
+
+Also this session, comment-only: frontend.v1 RosterRow.attention states both
+clears (selection, and the last open ask settling).
+
 Claude-Session: https://claude.ai/code/session_01MydqUQAkLfSwBAz9wL5scJ
