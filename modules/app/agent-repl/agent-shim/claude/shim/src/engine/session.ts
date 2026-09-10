@@ -1609,6 +1609,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // identity just settled — and a write attempted before this raises rather
     // than landing rows under a name no replay could absorb against.
     deps.persistence.setProducer(identity.originalVendorSessionId);
+    // THE REGISTRATION ORDER, STATED AT THE ONE POINT THAT KNOWS IT. A book is
+    // registered by the first write that names its agent, and a FRESH start's
+    // AgentId is a uuid minted moments ago — so the store provably holds no row
+    // for it, and will not until this session writes. The daemon opens the main
+    // agent's watch before any turn, exactly as the endpoint contract tells it
+    // to, so without this the record plane probed the store for an answer it
+    // already had and collected `unknown_agent` refusals on every healthy
+    // bring-up. Only a FRESH id qualifies: a resumed conversation's id was
+    // minted by an earlier session that may well have written under it.
+    if (source.case === "fresh") deps.persistence.noteAgentMinted(identity.agentId.value);
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.

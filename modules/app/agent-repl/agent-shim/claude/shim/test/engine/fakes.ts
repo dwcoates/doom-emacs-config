@@ -223,6 +223,12 @@ export class RecordingPersistence implements Persistence {
   /** The producer name StartSession handed it, if it did. */
   producer: string | undefined;
 
+  /** Every agent id StartSession declared this shim had MINTED, in order. */
+  readonly mintedAgents: string[] = [];
+
+  noteAgentMinted(agentValue: string): void {
+    this.mintedAgents.push(agentValue);
+  }
   setProducer(originalVendorSessionId: string): void {
     this.producer = originalVendorSessionId;
   }
