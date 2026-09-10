@@ -559,11 +559,13 @@ type tabPaint struct {
 	Selected bool
 	// SelectedBg is `agent-repl--color-selected-bg` when Selected, else "".
 	SelectedBg string
-	// BracketBg and NameBg are the backgrounds the rendered entry carries on
-	// its `[N]` bracket run and on its workspace-name run. Equal means the
-	// arm color reached the whole entry; different means it stopped at the
-	// badge.
+	// BracketBg and NameBg are the backgrounds the rendered entry's faces
+	// STATE THEMSELVES on its `[N]` bracket run and on its workspace-name
+	// run, and are empty when a face states none of its own. Equal and
+	// non-empty means the arm color reached the whole entry.
 	BracketBg, NameBg string
+	// NameFace is the face the entry put on the name region, printed.
+	NameFace string
 }
 
 // WholeEntry says the arm color reached the name region too.
@@ -586,11 +588,22 @@ func (p tabPaint) WholeEntry() bool { return p.BracketBg != "" && p.BracketBg ==
 // So both runs are read from the rendered string at their own positions, the
 // same way `tabFaceFor` reads the faces the module wrote: the bracket at the
 // `[` the entry opens its badge with, the name at the workspace's own name.
+//
+// AND A COLOR IS NAMED ONLY WHERE THE FACE STATES ONE ITSELF. An inherited
+// background cannot be resolved back to what was drawn: Doom's
+// `+workspace-tab-face` is `:inherit default`, and asking for its inherited
+// background on the graphical frame answered `white` for a name region the
+// decoded pixels put at `#14141a` -- 1100 of them. So the read follows no
+// inheritance, a face with no background of its own answers empty, and the
+// sentence then makes the claim a reviewer CAN check: that the name region is
+// not the arm color, and which of Doom's own faces it was drawn in.
 func (s *playtestScenario) tabEntryPaint(t *testing.T, ws string) tabPaint {
 	t.Helper()
 	got := s.E.EvalStrings(`(let* ((ws ` + elispString(ws) + `)
                                    (cur (agent-repl--ws-current-name))
                                    (line (agent-repl--render-tab-entry ws cur 1))
+                                   (frame (or (car (seq-filter #'display-graphic-p (frame-list)))
+                                              (selected-frame)))
                                    (bg-at
                                     (lambda (pos)
                                       (let ((f (and pos (get-text-property pos 'face line))))
@@ -599,21 +612,24 @@ func (s *playtestScenario) tabEntryPaint(t *testing.T, ws string) tabPaint {
                                          ((and (listp f) (plist-member f :background))
                                           (format "%s" (plist-get f :background)))
                                          ((symbolp f)
-                                          (format "%s" (or (face-attribute f :background nil t)
-                                                           'unspecified)))
+                                          (let ((bg (face-attribute f :background frame)))
+                                            (if (stringp bg) bg "")))
                                          (t "")))))
                                    (bracket (string-match (regexp-quote "[") line))
                                    (name (string-match (regexp-quote ws) line)))
-                              (list (funcall bg-at bracket) (funcall bg-at name)))`)
-	if len(got) != 2 {
-		t.Fatalf("reading the rendered tab entry for %s answered %v, want a bracket background and a "+
-			"name background", ws, got)
+                              (list (funcall bg-at bracket)
+                                    (funcall bg-at name)
+                                    (format "%S" (and name (get-text-property name 'face line)))))`)
+	if len(got) != 3 {
+		t.Fatalf("reading the rendered tab entry for %s answered %v, want a bracket background, a name "+
+			"background and the name's face", ws, got)
 	}
 	return tabPaint{
 		Selected:   s.E.EvalBool(`(equal ` + elispString(ws) + ` (agent-repl--ws-current-name))`),
 		SelectedBg: s.tabSelectedBackground(t, ws),
 		BracketBg:  got[0],
 		NameBg:     got[1],
+		NameFace:   got[2],
 	}
 }
 
@@ -674,11 +690,16 @@ func armSentence(ws, arm, color string, paint tabPaint) string {
 			"the module's own table gives that arm.",
 			ws, strings.ToUpper(color), tabBadgeShape, paint.BracketBg, arm, color)
 	}
-	name := fmt.Sprintf("the name beside it is NOT that color -- it is drawn on `%s`", paint.NameBg)
+	ground := fmt.Sprintf("`%s`", paint.NameBg)
+	if paint.NameBg == "" {
+		ground = fmt.Sprintf("whatever the theme gives Doom's own `%s`, which states no background of "+
+			"its own", paint.NameFace)
+	}
+	name := fmt.Sprintf("the name beside it is NOT that color -- it is drawn on %s", ground)
 	if paint.Selected {
-		name = fmt.Sprintf("the name beside it is drawn on the SELECTION's own ground (`%s`) instead, "+
+		name = fmt.Sprintf("the name beside it is drawn on the SELECTION's own ground (%s) instead, "+
 			"which is `agent-repl--tab-face` dimming the state to the badge on whichever tab is "+
-			"selected", paint.NameBg)
+			"selected", ground)
 	}
 	return fmt.Sprintf("The tab for %q carries %s on its %s index badge ALONE (`%s`): its arm is %s, "+
 		"and %s is the color the module's own table gives that arm, while %s.",
