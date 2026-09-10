@@ -56,8 +56,8 @@ export function createHookRegistry(): HookRegistry {
       if (hooks.size >= HOOK_REGISTRY_CAPACITY) {
         const oldest = hooks.keys().next();
         if (oldest.done !== true) {
-          LOGGER.log(
-            { level: "warn", hook_id: oldest.value },
+          LOGGER.warn(
+            { hook_id: oldest.value },
             "forgetting the oldest unanswered hook: the in-flight registry is full",
           );
           hooks.delete(oldest.value);
@@ -92,8 +92,8 @@ function hookEvent(literal: string): conversationv1.AgentHookEvent {
   const key = screaming as keyof typeof conversationv1.AgentHookEvent;
   const value = conversationv1.AgentHookEvent[key];
   if (typeof value !== "number" || value === conversationv1.AgentHookEvent.UNSPECIFIED) {
-    LOGGER.log(
-      { level: "warn", hook_event: literal },
+    LOGGER.warn(
+      { hook_event: literal },
       "the vendor named a hook event this contract does not spell",
     );
     return conversationv1.AgentHookEvent.UNSPECIFIED;
@@ -167,7 +167,7 @@ export function convertHookResponse(
 
   let result: conversationv1.AgentHook["result"];
   if (message.outcome === "cancelled") {
-    LOGGER.log({ level: "warn", hook_id: message.hook_id }, "a hook was cancelled before it finished");
+    LOGGER.warn({ hook_id: message.hook_id }, "a hook was cancelled before it finished");
     result = {
       case: "cancelled",
       value: create(conversationv1.AgentHookCancelledSchema, {}),
@@ -184,8 +184,8 @@ export function convertHookResponse(
     // failure as a refusal of a call that was never gated.
     const blockingText = message.output;
     if (blockingText !== "") {
-      LOGGER.log(
-        { level: "warn", hook_id: message.hook_id, hook: message.hook_name },
+      LOGGER.warn(
+        { hook_id: message.hook_id, hook: message.hook_name },
         "a hook BLOCKED the gated action",
       );
       result = {
@@ -193,8 +193,8 @@ export function convertHookResponse(
         value: create(conversationv1.AgentHookBlockingErrorSchema, { command, blockingText }),
       };
     } else {
-      LOGGER.log(
-        { level: "warn", hook_id: message.hook_id, hook: message.hook_name, exit_code: exitCode },
+      LOGGER.warn(
+        { hook_id: message.hook_id, hook: message.hook_name, exit_code: exitCode },
         "a hook failed without blocking anything",
       );
       result = {

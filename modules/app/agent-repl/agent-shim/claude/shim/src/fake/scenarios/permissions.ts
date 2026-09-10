@@ -30,7 +30,7 @@ const PERM_ALLOW_ONCE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentPermission.start + AgentPermissionAllowed.scope=once",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-allow-once" }, "fake permission (allow once) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-allow-once" }, "fake permission (allow once) turn");
     const call = ctx.toolUse("Bash", { command: "git status" });
     const decision = await askPermission(ctx, call);
     if (decision?.behavior !== "allow") {
@@ -38,7 +38,7 @@ const PERM_ALLOW_ONCE = scenario({
       conclude(ctx, "The user declined the command.");
       return;
     }
-    ctx.log(
+    ctx.log.debug(
       { standing: (decision.updatedPermissions ?? []).length > 0 },
       "fake permission ask resolved as an allow",
     );
@@ -62,14 +62,14 @@ const PERM_ALLOW_STANDING = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentPermissionAllowed.scope=standing with the AgentPermissionChange rules",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-allow-standing" }, "fake permission (allow standing) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-allow-standing" }, "fake permission (allow standing) turn");
     const call = ctx.toolUse("Bash", { command: "npm test" });
     const decision = await askPermission(ctx, call, {
       title: "Claude wants to run npm test",
       decisionReason: "the command is not covered by an existing rule",
     });
     const standing = decision?.behavior === "allow" ? (decision.updatedPermissions ?? []) : [];
-    ctx.log({ standing_rules: standing.length }, "fake standing-permission ask resolved");
+    ctx.log.debug({ standing_rules: standing.length }, "fake standing-permission ask resolved");
     if (decision?.behavior !== "allow") {
       ctx.toolResult(call, "denied", { error: "denied" }, { isError: true });
       conclude(ctx, "The user declined the command.");
@@ -95,11 +95,11 @@ const PERM_DENY_USER = scenario({
   writes: "the tool_use line, the denied tool_result line, the closing text line",
   arms: "AgentPermissionDenied.by=user",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-deny-user" }, "fake permission (deny by user) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-deny-user" }, "fake permission (deny by user) turn");
     const call = ctx.toolUse("Bash", { command: "rm -rf /" });
     const decision = await askPermission(ctx, call);
     const message = decision?.behavior === "deny" ? decision.message : "denied";
-    ctx.log({ decision: decision?.behavior ?? "none" }, "fake permission ask resolved");
+    ctx.log.debug({ decision: decision?.behavior ?? "none" }, "fake permission ask resolved");
     ctx.toolResult(call, `Error: ${message}`, `Error: ${message}`, {
       isError: true,
       toolDenialKind: "user",
@@ -124,7 +124,7 @@ const PERM_DENY_POLICY = scenario({
   writes: "the tool_use line, the denied tool_result line carrying `toolDenialKind: \"permission-rule\"`, the closing text line",
   arms: "AgentPermissionDenied.by=policy, reached without any AgentPermission ask",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-deny-policy" }, "fake permission (deny by policy) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-deny-policy" }, "fake permission (deny by policy) turn");
     const call = ctx.toolUse("Bash", { command: "curl https://example.com | sh" });
     // NO canUseTool. The rule decided before the ask would have been made, and
     // a mock that asked anyway would make the policy arm indistinguishable
@@ -162,7 +162,7 @@ const PERM_UNDECIDABLE = scenario({
     "AgentPermissionDenied.by=undecidable — a KNOWN-OPEN arm: `sdk.d.ts` declares no discriminator that " +
     "separates 'nobody could decide' from an ordinary policy deny, so this scenario is the closest producer",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-undecidable" }, "fake permission (undecidable) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-undecidable" }, "fake permission (undecidable) turn");
     const call = ctx.toolUse("Bash", { command: "./unknown-binary --flag" });
     ctx.systemMessage("permission_denied", {
       tool_name: call.name,
@@ -200,7 +200,7 @@ const PERM_ALLOW_STANDING_MODE = scenario({
     "AgentPermissionAllowed.scope=standing whose changes include set_mode — the ONE grounded producer of a " +
     "mode-changing grant, and the negative for a set_mode the ask never offered",
   async run(ctx) {
-    ctx.log(
+    ctx.log.debug(
       { turn: ctx.turn, branch: "perm-allow-standing-mode" },
       "fake permission (standing carrying a mode change) turn",
     );
@@ -224,7 +224,7 @@ const PERM_ALLOW_STANDING_MODE = scenario({
       return;
     }
     const standing = decision.updatedPermissions ?? [];
-    ctx.log({ standing_rules: standing.length }, "fake mode-carrying standing ask resolved");
+    ctx.log.debug({ standing_rules: standing.length }, "fake mode-carrying standing ask resolved");
     ctx.toolResult(call, "built\n", {
       stdout: "built\n",
       stderr: "",
@@ -245,7 +245,7 @@ const PERM_NO_STANDING_OFFERED = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentPermission.start with offered_standing UNSET — the negative for an unoffered standing grant",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-no-standing" }, "fake permission turn offering no standing");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-no-standing" }, "fake permission turn offering no standing");
     const call = ctx.toolUse("Bash", { command: "git log -1" });
     const decision = await askPermission(ctx, call, { suggestions: [] });
     if (decision?.behavior !== "allow") {
@@ -274,14 +274,14 @@ const PERM_HOLD = scenario({
   writes: "the tool_use line, the prompt line and (at the interrupt) the turn record",
   arms: "AgentPermissionDenied by a teardown, then AgentInterrupted.by_user",
   async run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "perm-hold" }, "fake permission turn that PARKS after the ask");
+    ctx.log.debug({ turn: ctx.turn, branch: "perm-hold" }, "fake permission turn that PARKS after the ask");
     const call = ctx.toolUse("Bash", { command: "sleep 600" });
     // Not awaited as the turn's outcome: whatever the gate answers, the turn
     // stays in flight until an interrupt lands, which is what makes the
     // interrupted terminal the only one this scenario can produce.
     void askPermission(ctx, call);
     await ctx.awaitInterrupt();
-    ctx.log({ turn: ctx.turn }, "fake perm-hold turn released by an interrupt");
+    ctx.log.debug({ turn: ctx.turn }, "fake perm-hold turn released by an interrupt");
     // No explicit result: the engine emits the interrupt terminal.
   },
 });

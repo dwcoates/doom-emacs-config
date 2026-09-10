@@ -151,7 +151,7 @@ export class SessionPushes {
       if (update !== undefined) subscriber.offer(update);
     }
     this.subscribers.add(subscriber);
-    LOGGER.log({ subscribers: this.subscribers.size }, "opened a WatchSession stream; diagnostics pushed first");
+    LOGGER.debug({ subscribers: this.subscribers.size }, "opened a WatchSession stream; diagnostics pushed first");
     if (this.standingDown) subscriber.close();
     return {
       // An ARROW, not a method: the teardown below has to reach this table's
@@ -162,7 +162,7 @@ export class SessionPushes {
           next: () => iterator.next(),
           return: async () => {
             this.subscribers.delete(subscriber);
-            LOGGER.log({ subscribers: this.subscribers.size }, "a WatchSession consumer went away");
+            LOGGER.debug({ subscribers: this.subscribers.size }, "a WatchSession consumer went away");
             return iterator.return === undefined
               ? { value: undefined, done: true as const }
               : iterator.return();
@@ -206,8 +206,8 @@ export class SessionPushes {
       if (subscriber.offer(update)) continue;
       // A subscriber that cannot take a session fact is REPORTED, never
       // silently skipped: the consumer needs to know its view has a hole.
-      LOGGER.log(
-        { level: "warn", arm, queue_limit: SUBSCRIBER_QUEUE_LIMIT },
+      LOGGER.warn(
+        { arm, queue_limit: SUBSCRIBER_QUEUE_LIMIT },
         "a WatchSession consumer's queue is full; the fact could not be delivered",
       );
       this.openDegradedWindow("shim-engine-pushes", `a WatchSession consumer could not take a ${arm} fact`);
@@ -239,8 +239,8 @@ export class SessionPushes {
   /** Record a fault and restate the diagnostics. */
   fault(fault: conversationv1.SessionFault): void {
     this.faults.push(fault);
-    LOGGER.log(
-      { level: "error", component: fault.component, kind: fault.kind.case ?? "", detail: fault.detail },
+    LOGGER.error(
+      { component: fault.component, kind: fault.kind.case ?? "", detail: fault.detail },
       "recorded a session fault",
     );
     this.push(this.diagnostics());
@@ -289,7 +289,7 @@ export class SessionPushes {
       changed = true;
     }
     if (!changed) return false;
-    LOGGER.log(
+    LOGGER.debug(
       { component, dropped_count: droppedCount },
       "a component recovered; its faults are cleared and its degraded window is closed",
     );
@@ -313,6 +313,6 @@ export class SessionPushes {
     this.standingDown = true;
     for (const subscriber of this.subscribers) subscriber.close();
     this.subscribers.clear();
-    LOGGER.log({}, "closed every WatchSession stream");
+    LOGGER.debug({}, "closed every WatchSession stream");
   }
 }

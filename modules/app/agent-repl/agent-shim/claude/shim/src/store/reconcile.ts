@@ -90,7 +90,7 @@ interface Reconciler {
 // ---------------------------------------------------------------------------
 
 export function closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry {
-  LOGGER.log(
+  LOGGER.debug(
     { agent: agent.value },
     "closing an agent the record holds no terminal for: the boot sweep found it open with no producer",
   );
@@ -120,7 +120,7 @@ export function closingSubagentTerminal(
   agent: conversationv1.AgentId,
   spawn: conversationv1.AgentActivityId,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.debug(
     { agent: agent.value, spawn: spawn.value },
     "closing a spawn unit the record holds no terminal for as lost",
   );
@@ -172,7 +172,7 @@ export function closingBashTerminal(
       `the recorded start for shell run ${JSON.stringify(run.value)} states no command`,
     );
   }
-  LOGGER.log(
+  LOGGER.debug(
     { agent: agent.value, run: run.value },
     "closing a shell run that did not survive the shim's restart as interrupted",
   );
@@ -238,7 +238,7 @@ export function stoppedBashTerminal(
   run: conversationv1.AgentActivityId,
   command: conversationv1.AgentBashCommand,
 ): PersistEntry {
-  LOGGER.log(
+  LOGGER.debug(
     { agent: agent.value, run: run.value },
     "closing a shell run the shim stopped, as interrupted by the user",
   );
@@ -391,8 +391,8 @@ export function announceLiveWork(
     const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
     const described = describeDetachable(findUnit(entries, unit));
     if (described === undefined) {
-      LOGGER.log(
-        { level: "warn", work: handle.value },
+      LOGGER.warn(
+        { work: handle.value },
         "the record holds no describable start for this live work; it is not announced",
       );
       continue;
@@ -407,7 +407,7 @@ export function announceLiveWork(
       }),
     );
   }
-  LOGGER.log(
+  LOGGER.debug(
     { announced: announcements.length, live: work.length },
     "described the live work a restarted consumer has never seen",
   );
@@ -421,16 +421,16 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       try {
         response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
       } catch (error) {
-        LOGGER.log(
-          { level: "error", detail: String(error) },
+        LOGGER.error(
+          { detail: String(error) },
           "the store could not be reached for the open obligations",
         );
         throw transportFailure(error);
       }
       const result = response.result;
       if (result.case === "failure") {
-        LOGGER.log(
-          { level: "warn", detail: result.value.detail },
+        LOGGER.warn(
+          { detail: result.value.detail },
           "the store refused to state the open obligations",
         );
         // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
@@ -444,7 +444,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
           "the store answered GetLiveWork with no result arm set",
         );
       }
-      LOGGER.log(
+      LOGGER.debug(
         {
           live_agents: result.value.liveAgents.length,
           live_detached: result.value.liveDetached.length,

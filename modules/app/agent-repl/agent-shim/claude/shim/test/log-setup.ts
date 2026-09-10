@@ -8,6 +8,11 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
+// Behavioral suites assert the remediation trace, including debug decisions.
+// Production still defaults to info; test/log.test.ts exercises that default
+// explicitly with a fresh logger module.
+process.env.AGENT_REPL_LOG_LEVEL = "debug";
+
 const { configureLog } = await import("../src/log.js");
 configureLog({ fd: 3, cwd: "/test/workspace", agentReplSessionId: "test-agent-session" });
 

@@ -21,6 +21,7 @@
  */
 import type { VendorFiles } from "./vendor-files.js";
 import type { CanUseToolLike, PermissionModeLike } from "../sdk/types.js";
+import type { ShimLogger } from "../log.js";
 
 /** One content block a fake assistant message can carry. */
 export type FakeBlock =
@@ -342,7 +343,7 @@ export interface ScenarioContext {
 
   // -- logging -------------------------------------------------------------
   /** Log through `src/log.ts`. Every branch of every scenario logs. */
-  log(fields: Record<string, unknown>, message: string): void;
+  log: ShimLogger;
 }
 
 /** Which shape `usage_EXPERIMENTAL…` answers with. */

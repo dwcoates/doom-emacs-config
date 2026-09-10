@@ -74,23 +74,23 @@ function readJsonField(file: string, field: string): string | undefined {
   try {
     raw = readFileSync(file, "utf8");
   } catch (err) {
-    LOGGER.log({ level: "warn", file, cause: err }, `build identity: ${file} is unreadable`);
+    LOGGER.warn({ file, cause: err }, `build identity: ${file} is unreadable`);
     return undefined;
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    LOGGER.log({ level: "warn", file, cause: err }, `build identity: ${file} is not valid JSON`);
+    LOGGER.warn({ file, cause: err }, `build identity: ${file} is not valid JSON`);
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) {
-    LOGGER.log({ level: "warn", file }, `build identity: ${file} is not a JSON object`);
+    LOGGER.warn({ file }, `build identity: ${file} is not a JSON object`);
     return undefined;
   }
   const value = (parsed as Record<string, unknown>)[field];
   if (typeof value !== "string" || value === "") {
-    LOGGER.log({ level: "warn", file, field }, `build identity: ${file} declares no usable ${field}`);
+    LOGGER.warn({ file, field }, `build identity: ${file} declares no usable ${field}`);
     return undefined;
   }
   return value;
@@ -144,7 +144,7 @@ export function recordAgentBinaryVersion(version: string): void {
     throw new Error("shim build identity: the session reported an empty agent binary version");
   }
   if (agentBinaryVersion === version && agentBinaryVersionSource === "session_init") return;
-  LOGGER.log(
+  LOGGER.debug(
     { previous: agentBinaryVersion ?? "", previous_source: agentBinaryVersionSource ?? "", version },
     "recording the agent binary version the live session reports",
   );
@@ -172,7 +172,7 @@ export function runtimeIdentity(): ShimRuntimeIdentity {
     if (bundled !== undefined) {
       agentBinaryVersion = bundled;
       agentBinaryVersionSource = "manifest";
-      LOGGER.log({ version: bundled }, "adopted the agent binary version from the SDK's bundled manifest");
+      LOGGER.debug({ version: bundled }, "adopted the agent binary version from the SDK's bundled manifest");
     }
   }
   return {

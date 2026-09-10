@@ -215,6 +215,9 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     SHIM_BUILD_SHA: ITEST_BUILD_SHA,
     AGENT_REPL_SESSION_ID: `host-itest-${++spawnCounter}`,
     AGENT_REPL_FORBID_VENDOR_CALLS: "1",
+    // Integration assertions consume the production remediation trace. The
+    // runtime default remains info and is pinned independently in log.test.ts.
+    AGENT_REPL_LOG_LEVEL: "debug",
     // THE TWO PRODUCTION WINDOWS, SCALED — not weakened. Both are `--fake`-only
     // overrides the shim refuses for a real session (`src/main.ts`), so the
     // production defaults are untouched; what changes is only how long a test

@@ -231,7 +231,7 @@ function acquireExclusiveLock(claim: {
   file: string;
   context: Record<string, unknown>;
 }): Promise<LockRelease> {
-  LOGGER.log({ ...claim.context, platform: process.platform }, `acquiring exclusive shim ${claim.kind} lock`);
+  LOGGER.debug({ ...claim.context, platform: process.platform }, `acquiring exclusive shim ${claim.kind} lock`);
   const file = claim.file;
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const binary = lockBinaryPath();
@@ -273,8 +273,8 @@ function acquireExclusiveLock(claim: {
     // this process was asking for, and an unhandled 'error' event would take
     // the shim down over a lock it no longer needs.
     child.stdin.on("error", (err: Error) => {
-      LOGGER.log(
-        { level: "warn", ...claim.context, lock_path: file, cause: err.message },
+      LOGGER.warn(
+        { ...claim.context, lock_path: file, cause: err.message },
         `the ${claim.kind} lock holder's stdin failed; the holder is gone and so is the lock`,
       );
     });
@@ -329,7 +329,7 @@ function acquireExclusiveLock(claim: {
         return;
       }
       settle(() => {
-        LOGGER.log(claim.context, `holding ${claim.kind} lock ${file}`);
+        LOGGER.debug(claim.context, `holding ${claim.kind} lock ${file}`);
         let released = false;
         resolve(async () => {
           if (released) return;
@@ -338,7 +338,7 @@ function acquireExclusiveLock(claim: {
           // lock provably gone by the time this resolves.
           child.stdin.end();
           await exited;
-          LOGGER.log(
+          LOGGER.debug(
             { ...claim.context, lock_path: file, holder_stderr: stderr.trim() },
             `released exclusive shim ${claim.kind} lock`,
           );
