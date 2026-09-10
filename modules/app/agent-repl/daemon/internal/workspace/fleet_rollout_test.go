@@ -315,11 +315,11 @@ func TestKillSessionTellsTheWatcherBeforeItEndsTheSession(t *testing.T) {
 	}
 }
 
-// TestClientAnswersALiveShimOnlyWhileItsProcessLives is the playtest defect at
-// its lowest seam: a shim SIGKILLed out from under the daemon leaves its row in
-// the fleet, and answering that row as a live client sends a submitted prompt
-// down the delivery path — StartTurn onto a socket nothing is listening on —
-// instead of the revival path a workspace with no client takes.
+// TestClientAnswersALiveShimOnlyWhileItsProcessLives is the headless-run
+// defect at its lowest seam: a shim SIGKILLed out from under the daemon leaves
+// its row in the fleet, and answering that row as a live client sends a
+// submitted prompt down the delivery path — StartTurn onto a socket nothing is
+// listening on — instead of the revival path a workspace with no client takes.
 func TestClientAnswersALiveShimOnlyWhileItsProcessLives(t *testing.T) {
 	tests := []struct {
 		name     string

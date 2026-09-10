@@ -281,7 +281,8 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			// The outcome's title WINS over the one the call announced, and the
 			// favicon still comes from the call: the publish is the only frame
 			// that carries one, so recomposing from the outcome alone dropped
-			// the glyph off the finished card (photographed by the playtest).
+			// the glyph off the finished card (photographed by a headless
+			// sandbox run).
 			heading = artifactHeading(u.artifactFavicon, title, "")
 		}
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: heading}

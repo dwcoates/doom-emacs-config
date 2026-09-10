@@ -1026,12 +1026,13 @@ func TestTheTerminalRowIsStampedWithItsTurn(t *testing.T) {
 }
 
 // TestATerminalDoesNotRestateTheApiFailureItEndedOn pins the fix for the race
-// the section-H playtest found: the SAME vendor failure reaches this resolver
-// twice — once as the sidecar's transcript-tailed mid-turn `system:api_error`,
-// once as the shim's own stream terminal — and whichever arrives first decided
-// whether the headline gained an evidence clause. Measured in one run of the
-// twelve `!api-*` arms, `api-429` lost that race by 17ms and `api-401` won it
-// by 3ms, so one run drew two headlines for one shape of failure.
+// a headless run of the real editor found in section H: the SAME vendor
+// failure reaches this resolver twice — once as the sidecar's
+// transcript-tailed mid-turn `system:api_error`, once as the shim's own stream
+// terminal — and whichever arrives first decided whether the headline gained
+// an evidence clause. Measured in one run of the twelve `!api-*` arms,
+// `api-429` lost that race by 17ms and `api-401` won it by 3ms, so one run
+// drew two headlines for one shape of failure.
 //
 // The evidence line's own words settle it: it says the turn WENT ON, which is
 // false of the failure that ended it.

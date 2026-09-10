@@ -247,7 +247,8 @@ than the one that carried the ack, and nothing orders the two.  A caller
 that reads the gate the instant it asked for a restart reads the arm the
 PREVIOUS generation left there -- `:open' -- and a prompt submitted on the
 strength of that reading is refused a few hundred milliseconds later when
-the real `:restarting' lands.  That is exactly the race playtest F.42 hit.
+the real `:restarting' lands.  That is exactly the race a headless run of
+the real editor hit.
 
 So the hold makes the local fact structural: the accepted restart CLOSES
 the gate here, and nothing reopens it but the daemon.  The generation

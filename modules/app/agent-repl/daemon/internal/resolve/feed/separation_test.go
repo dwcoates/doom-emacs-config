@@ -345,7 +345,8 @@ func TestARemovedTreeDrawsTheDiscardLineLoudWhenAnythingWasDiscarded(t *testing.
 
 func TestASingleDiscardedFileAndCommitAreNamedInTheSingular(t *testing.T) {
 	// Arrange, Act: the fake's `!worktree-remove` discards exactly one commit,
-	// and the playtest photographed the line reading "1 commits discarded".
+	// and a headless sandbox run photographed the line reading "1 commits
+	// discarded".
 	h := newHarness(t)
 	files, commits := uint32(1), uint32(1)
 	h.send(&conversationv1.AgentActivity{
