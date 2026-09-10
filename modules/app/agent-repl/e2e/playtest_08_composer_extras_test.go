@@ -386,8 +386,10 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	// answered `Error: target TARGETS not available` (exit 1); after
 	// `call-process' it answered `TARGETS\nimage/png` (exit 0).
 	//
-	// The forked owner is bound to this world's own Xvfb and goes when it
-	// goes, so there is nothing for a cleanup to reap.
+	// THE FORKED OWNER IS THIS PLAYBOOK'S TO REAP. It outlives the process
+	// that started it by design, and the layer's teardown -- rightly --
+	// refuses to leave a stray behind, so it is killed here rather than left
+	// to the container.
 	clipboardSource := filepath.Join(s.Box.Scratch(), "clipboard.png")
 	writePlaytestPNG(t, clipboardSource)
 	if code := e.EvalInt(`(call-process "xclip" nil nil nil
@@ -395,6 +397,7 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
                                         "-i" ` + elispString(clipboardSource) + `)`); code != 0 {
 		t.Fatalf("`xclip -i` exited %d, want 0 (the image never reached the clipboard)", code)
 	}
+	t.Cleanup(func() { reapClipboardOwner(t, e, clipboardSource) })
 	e.AwaitTrue("the X clipboard to offer the image/png target",
 		`(with-temp-buffer
            (and (eq 0 (call-process "xclip" nil t nil "-selection" "clipboard" "-t" "TARGETS" "-o"))
@@ -637,4 +640,40 @@ func TestPlaytestHistorySearchRecall(t *testing.T) {
 		fmt.Sprintf("the composer's text is exactly %q", submitted),
 		fmt.Sprintf("The composer window (beneath the webview) holds the recalled prompt %q, and the "+
 			"feed above it shows that same prompt's bubble followed by its prose answer.", submitted))
+}
+
+// reapClipboardOwner kills the `xclip` the capture forked to own the X
+// selection.
+//
+// IT IS FOUND BY THE FILE IT WAS GIVEN, not by name: this container carries
+// two Emacs slots, and a `pkill xclip` would take the other world's selection
+// owner with it. That path is under THIS world's own scratch root, so it names
+// exactly one process. `/proc` is read rather than shelled out to, because the
+// image carries neither `pgrep` nor `pkill` and an absent binary would make
+// this a silent no-op -- which is exactly the stray it exists to prevent.
+//
+// The reap is then AWAITED: a signal delivered is not a process reaped, and
+// the layer's teardown checks after this, so a kill that did not take must
+// fail here where it can be read.
+func reapClipboardOwner(t *testing.T, e *Emacs, ownedFile string) {
+	t.Helper()
+	e.Eval(`(defun agent-repl-playtest08--clipboard-owners (path)
+             "Return the pids whose argv names PATH."
+             (delq nil
+                   (mapcar
+                    (lambda (dir)
+                      (let ((cmdline (ignore-errors
+                                       (with-temp-buffer
+                                         (set-buffer-multibyte nil)
+                                         (insert-file-contents-literally
+                                          (expand-file-name "cmdline" dir))
+                                         (buffer-string)))))
+                        (and cmdline (string-match-p (regexp-quote path) cmdline)
+                             (string-to-number (file-name-nondirectory dir)))))
+                    (directory-files "/proc" t "^[0-9]+$"))))`)
+	e.Eval(`(dolist (pid (agent-repl-playtest08--clipboard-owners ` + elispString(ownedFile) + `))
+              (ignore-errors (signal-process pid 'TERM)))
+            t`)
+	e.AwaitTrue("the clipboard's selection owner to be reaped",
+		`(null (agent-repl-playtest08--clipboard-owners `+elispString(ownedFile)+`))`)
 }
