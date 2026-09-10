@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -474,6 +475,10 @@ func (s *footerSink) OnPermission(_ ids.WorkspaceID, agent *conversationv1.Agent
 
 func (s *footerSink) OnContextCut(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ContextCut) {
 	s.rec.emit(event{sink: "footer", method: "OnContextCut", agent: agent.GetValue()})
+}
+
+func (s *footerSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentId, page *conversationv1.HistoryPage) {
+	s.rec.emit(event{sink: "footer", method: "OnHistoryPage", agent: agent.GetValue(), detail: strconv.Itoa(len(page.GetEntries()))})
 }
 
 func (s *footerSink) OnApiError(_ ids.WorkspaceID, agent *conversationv1.AgentId, _ *conversationv1.ApiRequestFailed) {

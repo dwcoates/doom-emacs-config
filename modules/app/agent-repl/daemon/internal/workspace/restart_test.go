@@ -112,16 +112,14 @@ func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	}
 
 	// Assert.
+	//
+	// THE RECORD IS AWAITED, NOT READ ONCE. The fake fires its relaunch signal
+	// from INSIDE RelaunchShim, so `awaitRelaunch` returns while the engine's
+	// goroutine is still on its way to the log line this test is about; a
+	// single read of the buffer saw an empty one whenever that goroutine lost
+	// the race.
 	f.rollout.awaitRelaunch(t)
-	recorded := false
-	for _, r := range f.log.logger.Records() {
-		if r.Level == "error" && r.Operation == opRestart {
-			recorded = true
-		}
-	}
-	if !recorded {
-		t.Fatalf("records = %+v, want the relaunch failure recorded", f.log.logger.Records())
-	}
+	awaitRecord(t, f, "error", opRestart)
 	if got := f.rollout.reloadCalls(); len(got) != 0 {
 		t.Fatalf("webapp reloads = %v, want none after a failed relaunch", got)
 	}
