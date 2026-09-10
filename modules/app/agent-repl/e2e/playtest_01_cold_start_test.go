@@ -206,7 +206,13 @@ func TestPlaytestColdStartAndFirstTab(t *testing.T) {
 		"`agent-repl-add-project-workspace` (`SPC TAB C-n`) on a scripted fake-git worktree",
 		playtestUnwiredArm,
 		fmt.Sprintf("The tab bar must carry EXACTLY ONE workspace tab and it must be named %q: "+
-			"`agent-repl--ws-tabline-names` says the module knows about exactly that one.", name))
+			"`agent-repl--ws-tabline-names` says the module knows about exactly that one. AND THE "+
+			"MAIN AREA ALREADY CARRIES THIS WORKSPACE'S OWN PANEL -- registering a directory brings "+
+			"the workspace up on its panel, so the frame holds `*agent-frontend-%s*` above its "+
+			"composer `*agent-panel-input-%s*` rather than an empty editor. THE WEBVIEW IS EXPECTED "+
+			"TO BE BLANK IN THIS PICTURE: nothing has waited for the page's first draw yet -- that "+
+			"is the next step's open -- so a white pane here is the cold page loading, not a broken "+
+			"one.", name, name, name))
 
 	// THE TRAY IS EMPTY. The readback is the queue, never the tray's own
 	// text (EMACS-LAYER-SPEC.md's readback table); the tray having DRAWN is
@@ -482,5 +488,8 @@ func TestPlaytestBuildFailureSurfaces(t *testing.T) {
 		"the build script mended, `agent-repl-frontend-daemon-ensure` again, and one repository registered",
 		playtestUnwiredArm,
 		fmt.Sprintf("The mode line carries NO `daemon: build failed` segment any more, and the tab bar carries "+
-			"exactly one tab named %q.", name))
+			"exactly one tab named %q. The main area carries that workspace's own panel above its "+
+			"composer, because registering a directory brings the workspace up on its panel; the "+
+			"webview is expected to be BLANK here, since nothing in this playbook has waited for the "+
+			"page's first draw.", name))
 }

@@ -511,6 +511,9 @@ func (s *playtestScenario) pt05CreateChild(t *testing.T, label, name string) str
 	child := emHO40AddedName(t, before, after)
 	s.E.AwaitTrue("the child workspace to hold a daemon-minted ref",
 		`(and (agent-repl-host-ref `+elispString(child)+`) t)`)
+	// A CREATE SELECTS WHAT IT MADE, so the child lands on its own panel and
+	// this helper answers only once that has finished -- see landing_test.go.
+	awaitMintedLanding(s.E, child)
 	return child
 }
 
