@@ -1,0 +1,27 @@
+{
+  "scenario": "context-injected-memory",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "What does the CLAUDE.md in this directory tell you to do? Quote the rule verbatim.",
+  "prompts": [
+    {
+      "text": "What does the CLAUDE.md in this directory tell you to do? Quote the rule verbatim.",
+      "resume": false
+    }
+  ],
+  "world": "context-injected-memory",
+  "cwd_init": null,
+  "vendor_session_id": "21a10f5e-81cb-45bd-8873-27b8e1b4f5cf",
+  "manual": null,
+  "expect": [
+    "attachment:nested_memory",
+    "context_injected:memory"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-context-injected-memory-D7HWcP-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:48:21.375Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

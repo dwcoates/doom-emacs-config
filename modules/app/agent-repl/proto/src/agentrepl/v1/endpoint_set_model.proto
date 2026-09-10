@@ -1,0 +1,73 @@
+// endpoint_set_model.proto — SetModel: the topbar selector's pick. TOPBAR
+// section.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "conversation/v1/api.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetModelRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The chosen model — the typed echo token from one of the selector's own
+  // options (conversation.v1.ModelOption.model), handed back unchanged. A
+  // client never invents one.
+  conversation.v1.AgentModel model = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetModelResponse {
+  oneof result {
+    SetModelSuccess success = 1;
+    SetModelError error = 2;
+  }
+}
+
+// Done; the selector's new state arrives on the topbar stream.
+message SetModelSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SetModelError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetModelUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetModelWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetModelTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetModelNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session to set a model on.
+    SetModelNoSession no_session = 5;
+    // The model is not in the served catalog.
+    SetModelNotInCatalog not_in_catalog = 6;
+    // The vendor refused the change.
+    SetModelVendorRefused vendor_refused = 7;
+    // The switch would discard a warm cache above the threshold: the shim
+    // raised the cold gate instead (landing 10). The remediation menu
+    // (pay | clear | compact) is the gate row's; answer it with
+    // AnswerColdGate, then set the model again.
+    SetModelCold cold = 8;
+  }
+}
+message SetModelCold {}
+message SetModelUnknownWorkspace {}
+message SetModelWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetModelTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SetModelNotYetAdopted {}
+message SetModelNoSession {}
+message SetModelNotInCatalog {}
+message SetModelVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}

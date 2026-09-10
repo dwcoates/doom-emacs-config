@@ -1,0 +1,34 @@
+{
+  "scenario": "bash-detached",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Start `bash noisy.sh` in the background and immediately tell me its task id. Do not wait for it.",
+  "prompts": [
+    {
+      "text": "Start `bash noisy.sh` in the background and immediately tell me its task id. Do not wait for it.",
+      "resume": false
+    }
+  ],
+  "world": "bash-detached",
+  "cwd_init": null,
+  "vendor_session_id": "278bb962-9dc6-4756-b8c3-a23bfa54326c",
+  "manual": null,
+  "expect": [
+    "tool:Bash(run_in_background)",
+    "tool_result:bash with backgroundTaskId",
+    "task_started",
+    "file:spool b<hex>.output terminated by EXIT="
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-detached-mKzMKH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:03.726Z",
+  "controls": [
+    {
+      "verb": "backgroundTasks",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

@@ -1,0 +1,28 @@
+{
+  "scenario": "hook-succeeded",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `echo hook-ok`.",
+  "prompts": [
+    {
+      "text": "Run `echo hook-ok`.",
+      "resume": false
+    }
+  ],
+  "world": "hook-succeeded",
+  "cwd_init": null,
+  "vendor_session_id": "464fd75c-f9c4-4b8b-a124-9f41ff9bbae1",
+  "manual": null,
+  "expect": [
+    "hook_started",
+    "hook_response",
+    "attachment:hook_success"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-hook-succeeded-7S8gpl-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:26:25.328Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

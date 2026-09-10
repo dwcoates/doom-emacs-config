@@ -1,0 +1,42 @@
+// endpoint_watch_agent.proto — WatchAgent: ONE stream for any agent — the
+// prompt thread, a detached subagent, a workflow's agent. Opens with a page,
+// then tails. The consolidation the parity principle asks for: the daemon
+// learns an agent id (from StartTurn's answer, a spawn announcement, a
+// workflow level) and calls this; nothing else differs per kind.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "conversation/v1/history.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// Follow one agent.
+message WatchAgentRequest {
+  // WHOM. UNSET = the session's prompt thread, resolved by the shim.
+  optional conversation.v1.AgentId target = 1;
+  // The opening page's budget.
+  uint32 page_size = 2;
+  // The newest entry the caller already holds. UNSET = repaint: a full first
+  // page. SET = catch-up: the opening page carries only entries NEWER than
+  // this. The shim tracks nothing about what it previously served — the
+  // caller states its own high-water mark. A fresh agent simply yields an
+  // empty page.
+  optional conversation.v1.HistoryPointer known_through = 3;
+}
+
+// A STANDING stream: the opening page, then one frame per entry as written —
+// upserts included, each with its pointer so the caller always holds a
+// current mark. It does not conclude when the agent does: the terminal fact
+// rides the entries, and the caller closes the stream when it stops caring.
+message WatchAgentResponse {
+  oneof frame {
+    // The first frame of every watch: the opening page (bounded by
+    // known_through when given; `more` walks older via ReadHistory).
+    conversation.v1.HistoryPage page = 1;
+    // Every later frame: one entry as written.
+    conversation.v1.HistoryEntryAt entry = 2;
+  }
+}

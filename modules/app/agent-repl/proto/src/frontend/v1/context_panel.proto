@@ -1,0 +1,88 @@
+// context_panel.proto — THE /context PANEL: what occupies the context
+// window, resolved from the vendor's FULL structured breakdown
+// (conversation.v1 SessionContextUsage, the get_context_usage answer).
+// Daemon-resolved; the WEBAPP renders the panel CUSTOM — notably the
+// tool-call list arrives as its own encapsulated section and is drawn in
+// an AUTOMATICALLY FOLDED foldable render; the rest of the presentation is
+// the implementer's. Distinct from the topbar's session token breakdown —
+// a different fact and a different component.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+message ContextPanelView {
+  // The composed header line ("142k of 200k (71%) · claude-sonnet-…"),
+  // resolver-composed — the client never does the arithmetic.
+  string header = 1;
+  // The category overview, in served order (the at-a-glance rows).
+  repeated ContextPanelCategory categories = 2;
+  // Memory files in context.
+  repeated ContextPanelItem memory_files = 3;
+  // MCP tools in context (label carries tool + server, composed).
+  repeated ContextPanelItem mcp_tools = 4;
+  // Deferred built-in tools.
+  repeated ContextPanelItem deferred_builtin_tools = 5;
+  // Built-in system tools.
+  repeated ContextPanelItem system_tools = 6;
+  // The system prompt, by section.
+  repeated ContextPanelItem system_prompt_sections = 7;
+  // Available subagents (label carries type + source, composed).
+  repeated ContextPanelItem agents = 8;
+  // The slash-command roll-up line ("12 of 31 commands · 4.2k"),
+  // resolver-composed. UNSET when the fact was absent.
+  optional ContextPanelRollup slash_commands = 9;
+  // The skills roll-up line plus per-skill rows. UNSET when absent.
+  optional ContextPanelSkills skills = 10;
+  // The message-plane breakdown. UNSET when the fact was absent.
+  optional ContextPanelMessageBreakdown message_breakdown = 11;
+  // The auto-compaction line ("auto-compact at 160k" / "auto-compact
+  // off"), resolver-composed.
+  string auto_compact_line = 12;
+}
+
+// One category overview row.
+message ContextPanelCategory {
+  // The category label, verbatim from the vendor.
+  string label = 1;
+  // The composed figure ("38.1k · 19%").
+  string figure = 2;
+  // The vendor's display color for the category, verbatim.
+  string color = 3;
+}
+
+// One breakdown row: a composed label and a composed figure. The daemon
+// composes both; the client draws them.
+message ContextPanelItem {
+  string label = 1;
+  // The composed token figure ("2.1k").
+  string figure = 2;
+}
+
+// A roll-up line ("12 of 31 commands · 4.2k"), resolver-composed.
+message ContextPanelRollup {
+  string line = 1;
+}
+
+// The skills roll-up plus its per-skill rows.
+message ContextPanelSkills {
+  // The roll-up line ("8 of 19 skills · 6.4k").
+  string line = 1;
+  // Per-skill rows (label carries name + source, composed).
+  repeated ContextPanelItem skills = 2;
+}
+
+// The message-plane breakdown. The tool-call list is the ENCAPSULATED
+// section the webapp draws auto-folded.
+message ContextPanelMessageBreakdown {
+  // The plane rows (tool calls, tool results, attachments, assistant,
+  // user, redirected, unattributed — each a composed label + figure).
+  repeated ContextPanelItem planes = 1;
+  // Per-tool call/result rows — drawn in an AUTOMATICALLY FOLDED foldable
+  // render (label = tool name; figure = composed call/result split).
+  repeated ContextPanelItem tool_calls = 2;
+  // Per-attachment-type rows.
+  repeated ContextPanelItem attachments = 3;
+}

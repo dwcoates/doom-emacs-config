@@ -1,0 +1,47 @@
+# lifecycle — the web link (handover), the daemon stream (drain banner, shutdown quiet window)
+
+Read first, whole: /private/tmp/claude-501/-Users-dodgecoates--config-doom/6a1b0e3a-9be5-4fdb-b4f7-d5c97ccdec15/scratchpad/WEBAPP-AGENT-PREAMBLE.md (binding; §3 present — you EXTEND `src/rpc/streams.ts`'s reconnect behavior and `src/failure/overlay.ts` only where stated; §4 `startLifecycle` is yours).
+
+Read next: `docs/overhaul/webapp.md` (whole; "A drain-scheduled WatchDaemon push draws the standing page-wide restart banner"), the project lead's rulings you were given by the teamlead: R3 (every webview holds its own WatchDaemon subscription for the drain banner) and the daemon contract in `docs/overhaul/daemon.md` lines ~395–460 and ~495–515 (the handover: on `transferred{address}` the webview sends nothing more on the old connection for that workspace; connects to the new daemon FIRST; calls AdoptWebWorkspace there; only then drops the old streams; re-attach lands at the tail per the per-reader page rule; the new daemon refuses per-workspace rpcs with `not_yet_adopted` until adoption completes — arms not yet derived, so an `AdoptWebWorkspaceError`/refusal today is empty), `proto/src/agentrepl/v1/endpoint_watch_web_workspace.proto`, `endpoint_adopt_web_workspace.proto`, `endpoint_watch_daemon.proto`, `drain_reason.proto`, `endpoint_update_shutdown_schedule.proto` (for the reason vocabulary), `proto/src/frontend/v1/failure.proto` (daemon_unreachable, workspace_gone, stale_bundle). The rpc core (`src/rpc/streams.ts`, `context.ts`, `transport.ts`, `unary.ts`), `src/failure/overlay.ts`, `src/clock.ts`, `src/duration.ts`; legacy look: `legacy/drain.ts` and the "scheduled-shutdown drain banner" CSS section, `legacy/main.ts` (the old reconnect/quiet-window handling for reference of intent only).
+
+## Deliverables (`src/lifecycle/`, tests `test/lifecycle/`)
+
+1. `lifecycle.ts` — `startLifecycle(ctx, deps)`: opens `watchStream(WatchWebWorkspace{workspace})` and `watchStream(WatchDaemon{})` (R3: this webview's own subscription) and drives:
+   - HANDOVER on `transferred{address}`: (1) log; (2) mark the old client quiesced — no further unary calls for this workspace go out on it (add a `ctx`-level guard: `ctx.quiesce()` sets a flag `callUnary` checks and refuses locally with a logged warning and a `controlPlaneFailed{what, cause:"transferring"}`-free path — refusals during the window are retried automatically after the swap: keep a small in-memory queue of pending unary intents ONLY IF simple; otherwise refuse loudly at the call site and report it; choose and document); (3) `createDaemonTransport("http://" + address)` → `createAgentReplClient`; (4) `AdoptWebWorkspace{workspace}` on the NEW client via `callUnary`; on success (5) `ctx.replaceClient(newClient)` — the rpc core cancels every registered stream on the old client and reopens each on the new one (the feed's OpenFeed→WatchFeed re-attach lands at the tail: verify with feed-core's handle that its reopen path calls OpenFeed again — if `watchStream`'s reopen only re-invokes `open`, the feed's `open` must itself do OpenFeed then WatchFeed; state that requirement in your report for the wiring agent); (6) the WatchWebWorkspace stream itself is re-opened on the new daemon by the same mechanism. On an `AdoptWebWorkspaceError` or transport failure adopting: log error, report `controlPlaneFailed{what: "adopt web workspace", cause}`, keep the old client, retry the adoption with backoff (250 ms → 5 s cap) until it succeeds — the old daemon waits for adoption.
+   - DRAIN BANNER on `WatchDaemon.drain_scheduled{at_ms, reason}`: draw the page-wide standing banner into `deps.drainBannerHost` (`[data-component="drain-banner"]`): "daemon restart scheduled · <reason> · in 4m 12s" ticking to `at_ms` (past due → "any moment now"); the reason by arm: deploy → "deploy", maintenance → "maintenance", operator → the note verbatim; `drain_cancelled` → remove the banner. Re-pushed to late subscribers per the proto — idempotent redraw.
+   - SHUTDOWN ANNOUNCEMENT on `shutdown_announced{address?, cause, expected_outage_ms, minted_at_ms}`: compute the quiet window = `expected_outage_ms - (now - minted_at_ms)` (never negative); call the failure overlay's new `suppress("daemonUnreachable", untilMs)` so the disconnected overlay does not flash during the expected outage; draw the banner as "daemon restarting · <cause> · expected back in N s" (cause arms: self_merge_rollout → "rollout", scheduled_drain → its reason, immediate → its reason); with `address` SET this is a handover — the per-workspace `transferred` push drives the switch, so only the banner is drawn here; with `address` UNSET (plain bounce) the streams will die: the rpc core's reconnect handles it, and the banner clears on the first successful push after the window (subscribe to a `ctx.onClientReplaced`/first-push hook — add a tiny `ctx.onReconnected(fn)` to the context if the core lacks one, documented).
+2. `src/failure/overlay.ts` — ADD `suppress(arm, untilMs)`: a suppressed arm is not drawn (but still logged) until `untilMs`; a report after expiry draws normally; `retract` clears any suppression. Keep the file's existing tests green and add yours.
+3. `src/rpc/context.ts` — ADD `quiesce(): void` / `isQuiesced(): boolean` and have `callUnary` refuse while quiesced (a `ConnectError` with code `Unavailable` and message "transferring to the new daemon" so call sites render their ordinary refusal); `replaceClient` clears the flag. Keep the core's tests green; add yours.
+4. CSS: delimited `/* ---- lifecycle banners (src/lifecycle) ---- */` reusing the legacy drain banner look.
+
+## Tests (one per module; router transports for two fake daemons)
+Cover: transferred → new client created at the address, AdoptWebWorkspace called on the NEW client BEFORE any cancel on the old (assert ordering with call logs), streams reopened on the new client, the WatchWebWorkspace stream itself reopened on the new daemon; adoption failure → retry with backoff, old client kept, controlPlaneFailed reported; quiesce refuses unary calls with the Unavailable error and replaceClient clears it; drain banner draw/tick/past-due/cancel and each reason arm; shutdown announced: quiet window arithmetic (late receiver shortens; negative clamps to zero), suppression applied and expiry, each cause arm's text, plain bounce vs handover; overlay suppress semantics; malformed pushes (unset push oneof, unset cause) throw MalformedView and are reported as frameUndecodable by the core.
+
+Finish: `npx vitest run test/lifecycle test/failure test/rpc` + `npm run typecheck` green; commit atomically; report per preamble §9 — state precisely what the feed's stream `open` must do for the tail re-attach to be correct.
+
+
+LANDING 4: `AdoptWebWorkspaceError.cause` is typed {unknown_workspace | workspace_ref_mismatch{registry_dir} | transferring_away{address} | not_yet_adopted | no_transfer_announced | participant_not_expected}: `not_yet_adopted` and `no_transfer_announced` are the RETRY arms (the new daemon is not ready yet / the old has not announced); the others are terminal — log at error, report controlPlaneFailed with the arm's fact, keep the old client, no retry. Tests per arm.
+
+RULING (2026-08-29, supersedes the handover text above where they conflict): the webapp does NOT redial.
+`transferring_away{address}` on any refusal, and — pending the project lead's confirmation — the
+`transferred{address}` push: draw the page-wide notice "workspace moved to <address>" in the drain-banner
+host, `ctx.quiesce()`, cancel EVERY registered stream (no reconnect, no backoff), and stop. Re-pointing the
+webview at the successor daemon is Emacs's job (it reloads the webview URL). No `createDaemonTransport`
+to a new address anywhere in this wave. `AdoptWebWorkspace` is called ONCE AT BOOT by the fresh page
+(before opening any view stream): success or `no_transfer_announced` → proceed to open streams;
+`not_yet_adopted` → retry with backoff until success; other arms → boot failure. (If the lead rules the
+adopt-at-boot differently, the teamlead relays before dispatch.)
+
+CONFIRMED SEQUENCE (project lead, final): (a) `transferred{address}` push AND the `transferring_away{address}`
+refusal arm → draw "workspace moved to <address>" in the drain-banner host (`[data-restarting]`-style
+standing notice with `[data-moved="<address>"]`), `ctx.quiesce()`, cancel every registered stream, no
+redial, no backoff (Emacs reloads the webview at the new address; a different port is a different origin).
+(b) Export `adoptAtBoot(ctx): Promise<"adopted" | "no-transfer">` — the FRESH page calls
+`AdoptWebWorkspace{workspace}` ONCE before any view stream opens: success or `no_transfer_announced` →
+resolve (log at debug — `no_transfer_announced` is the ORDINARY answer, never loud); `not_yet_adopted` →
+retry with backoff 250 ms → 5 s cap, bounded to ~60 s total, then throw a boot failure; every other arm
+(unknown_workspace, workspace_ref_mismatch{registry_dir}, transferring_away{address},
+participant_not_expected) → throw a boot failure whose message names the arm and its fact — main.ts (the
+wiring agent) mints `bootFailed` into the overlay from it. Tests per arm, backoff under fake timers.
+Delete every earlier instruction in this file about creating a transport to a new address; `replaceClient`
+stays in the rpc core unused by the lifecycle (leave it; note it in your report).

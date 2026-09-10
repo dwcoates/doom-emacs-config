@@ -103,6 +103,41 @@ func TestOpenServesProfilesOnAUnixSocket(t *testing.T) {
 	}
 }
 
+func TestServedIsOpenUntilTheSurfaceAnswersARequest(t *testing.T) {
+	// Arrange. A bound but unvisited surface has served nothing.
+	surface, err := Open("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Open = %v, want a bound surface", err)
+	}
+	serve(t, surface)
+
+	// Act, Assert.
+	select {
+	case <-surface.Served():
+		t.Fatal("Served() is closed on a surface nobody has profiled")
+	default:
+	}
+}
+
+func TestServedClosesOnceTheSurfaceAnsweredARequest(t *testing.T) {
+	// Arrange. This is the signal a failed boot waits on before exiting.
+	surface, err := Open("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Open = %v, want a bound surface", err)
+	}
+	client := serve(t, surface)
+
+	// Act.
+	response, err := client.Get("http://" + surface.Address() + Path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", Path, err)
+	}
+	response.Body.Close()
+
+	// Assert. The response was fully read, so the handler has returned.
+	<-surface.Served()
+}
+
 func TestOpenRestrictsAUnixSocketToItsOwner(t *testing.T) {
 	// Arrange.
 	path := shortSock(t, "pprof.sock")

@@ -1,0 +1,45 @@
+{
+  "scenario": "fan-wide-cancel",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Start four background shells at once, each running `for i in $(seq 1 120); do echo tick $i; sleep 1; done`, and tell me their four task ids.",
+  "prompts": [
+    {
+      "text": "Start four background shells at once, each running `for i in $(seq 1 120); do echo tick $i; sleep 1; done`, and tell me their four task ids.",
+      "resume": false
+    }
+  ],
+  "world": "fan-wide-cancel",
+  "cwd_init": null,
+  "vendor_session_id": "20721279-3c55-4573-b024-ef62cf228996",
+  "manual": null,
+  "expect": [
+    "four task_started",
+    "background_tasks_changed shrinking to empty",
+    "the terminal each stopped spool carries"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-fan-wide-cancel-TKDDZO-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:14.930Z",
+  "controls": [
+    {
+      "verb": "stopTask",
+      "ok": true
+    },
+    {
+      "verb": "stopTask",
+      "ok": true
+    },
+    {
+      "verb": "stopTask",
+      "ok": true
+    },
+    {
+      "verb": "stopTask",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

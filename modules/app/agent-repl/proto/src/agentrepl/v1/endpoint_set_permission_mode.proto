@@ -1,0 +1,73 @@
+// endpoint_set_permission_mode.proto — SetPermissionMode: the session's
+// permission-mode switch, SetModel's sibling. TOPBAR section. The daemon
+// validates switchability and relays to the shim's
+// SetSessionPermissionMode; the authoritative new mode arrives on the
+// ordinary pushed surfaces (WatchSession's permission_mode_changed relayed
+// into the views).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetPermissionModeRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The requested mode, in the same spelling the session facts use (the
+  // shim's mode vocabulary); the daemon validates it against the
+  // switchable set. A client offers only modes it was served.
+  string mode = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetPermissionModeResponse {
+  oneof result {
+    SetPermissionModeSuccess success = 1;
+    SetPermissionModeError error = 2;
+  }
+}
+
+// Done; the new mode arrives on the pushed surfaces.
+message SetPermissionModeSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SetPermissionModeError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SetPermissionModeUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SetPermissionModeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SetPermissionModeTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SetPermissionModeNotYetAdopted not_yet_adopted = 4;
+    // The mode is not among the ones served.
+    SetPermissionModeModeNotServed mode_not_served = 5;
+    // An ungated mode was asked for without the explicit consent.
+    SetPermissionModeUngatedWithoutConsent ungated_without_consent = 6;
+    // The workspace has no session to set a mode on.
+    SetPermissionModeNoSession no_session = 7;
+    // The vendor refused the change.
+    SetPermissionModeVendorRefused vendor_refused = 8;
+  }
+}
+message SetPermissionModeUnknownWorkspace {}
+message SetPermissionModeWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SetPermissionModeTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SetPermissionModeNotYetAdopted {}
+message SetPermissionModeModeNotServed {}
+message SetPermissionModeUngatedWithoutConsent {}
+message SetPermissionModeNoSession {}
+message SetPermissionModeVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}

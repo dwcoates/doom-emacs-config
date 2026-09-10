@@ -1,0 +1,2108 @@
+// feed.proto — THE FEED: the conversation surface, and the ONE component
+// that is SELF-SIMILAR — a subagent bubble IS a feed (same row vocabulary,
+// its own pages and its own live tail), so "the feed" is really a UNIVERSE
+// of feeds per workspace: the root feed, plus one per agent bubble.
+//
+// THE ROW TAXONOMY — the row oneof's organizing principle, stated once:
+//
+//   user_prompt /  a prompt: user-authored, or agent-addressed (an agent
+//   agent_prompt   prompting another agent — same shape of thing, different
+//                  author; the agent one wears an orange border).
+//   activity       SYNCHRONOUS TURN PROGRESS, whoever drives it: the agent's
+//                  responses, tool calls, skills,
+//                  task-tracker acts — and the daemon-orchestrated MERGE,
+//                  because from the user's perspective the turn has not
+//                  concluded while a merge is in flight.
+//   turn_ended     how a turn ENDED. Not work — the terminal fact, a row so
+//                  that history replays it and liveness is structural: no
+//                  terminal row for the current turn = the turn is live. A
+//                  connection dying without one stays a transport failure.
+//   detached_*     ASYNC work, one wrapper per kind, each wrapping the SAME
+//                  drawn component its synchronous form uses where one
+//                  exists — sync-vs-detached is placement, never a second
+//                  drawing.
+//   permission /   the turn BLOCKED on the user: consent, or a choice. Two
+//   question       cards, mirroring the conversation-level split.
+//   separation     META: the session changed shape or place here.
+//
+// IDENTITY IS ONE OPAQUE STRING. FeedId is daemon-minted from the identity
+// of what the row DRAWS — a unit, a task, an agent, or a daemon fact for a
+// synthesized row — never from whichever frame delivered the update. The
+// typed identity spaces (unit, agent, task, ask) stop at the daemon; the
+// frontend holds only "which row" and "inside what". EVERY row upserts: a
+// push carrying an already-seen id replaces that row whole, which is how a
+// response grows in place and how many task acts feed one task bubble.
+//
+// EVERY ROW IS A RESOLVED ELEMENT — never an embedded conversation.v1
+// record (the figma→idl precedence). Typed identities do not appear here at
+// all, with ONE exception: the TurnId stamp, which a client matches against
+// the turn its own submission returned.
+//
+// NO WORKSPACE, NO FENCE, NO SCOPE ON THE PAGE: a feed connection is opened
+// per feed (OpenFeed → first page + watch token; WatchFeed → the tail), so
+// THE CONNECTION IS THE PLACEMENT — a subagent's rows never name a parent,
+// they arrive on the bubble's own feed. `parent` exists only for
+// PRESENTATION nesting within one feed (a merge phase's rows, work grouped
+// under a skill heading). The last breadcrumb is the container a page is of.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+import "conversation/v1/api.proto";
+import "conversation/v1/session.proto";
+import "conversation/v1/turn.proto";
+import "frontend/v1/failure.proto";
+import "frontend/v1/status_panel.proto";
+import "frontend/v1/todos_panel.proto";
+import "frontend/v1/mcp_panel.proto";
+import "frontend/v1/context_panel.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// ==========================================================================
+// THE CONTAINER: identity, a row, and a page of rows.
+// ==========================================================================
+
+// A feed row's identity — and, for a bubble row, the address of the sub-feed
+// within it (one id names both, so a footer jump target and an OpenFeed
+// address are the same value). Opaque and daemon-minted: the daemon encodes
+// the underlying identity of what the row draws and decodes it on echo, so
+// it keeps no id table and the same row gets the same id across pushes,
+// restarts and replays. Echoed by clients (navigation, parenting, OpenFeed),
+// never parsed, never constructed.
+message FeedId {
+  // The opaque value.
+  string value = 1;
+}
+
+// One row of the feed. THE ARM IS THE KIND — see the file header for the
+// taxonomy.
+message FeedRow {
+  // The row's identity: the UPSERT KEY (a later push with the same id
+  // replaces this row whole), and the value every reference carries — a
+  // parent, a breadcrumb, a footer jump target.
+  FeedId id = 1;
+  // PRESENTATION NESTING ONLY: the containing row, when this row is drawn
+  // inside one on the SAME feed (a merge phase's rows, work grouped under a
+  // skill heading). UNSET for a top-level row. A subagent's rows never carry
+  // this — they arrive on the bubble's OWN feed connection.
+  optional FeedRowParent parent = 2;
+  // The turn this row belongs to — the daemon's stamp; what a client matches
+  // its SubmitPromptSuccess.turn against to find its own prompt. Unset for a
+  // row that belongs to no turn (a separation divider).
+  optional conversation.v1.TurnId turn = 3;
+  // What the row is. Each kind is a daemon-resolved element family.
+  oneof row {
+    // What a person typed — or, on a subagent's feed, the commission or a
+    // message another agent delivered.
+    FeedUserPrompt user_prompt = 4;
+    // A prompt one AGENT addressed to another — conceptually the user kind's
+    // sibling, differing only in author. Drawn as a prompt bubble with an
+    // orange border. It appears on the SENDER's feed as the outgoing send
+    // and on the recipient's as the delivered prompt — one kind, both ends.
+    FeedAgentPrompt agent_prompt = 5;
+    // One unit of the turn's synchronous progress.
+    FeedTurnActivity activity = 6;
+    // How a turn ended. The terminal fact as a row, so history replays it
+    // and its ABSENCE for the current turn is what "live" means.
+    FeedTurnEnded turn_ended = 7;
+    // A detached subagent's bubble — the same drawn component as a sync
+    // spawn, placed by this wrapper because it outlives its turn.
+    FeedDetachedSubagent detached_subagent = 8;
+    // A detached shell's bubble.
+    FeedDetachedShell detached_shell = 9;
+    // The turn blocked on consent.
+    FeedPermission permission = 10;
+    // The turn blocked on a choice the agent posed.
+    FeedQuestion question = 11;
+    // A SEPARATION — the session changed shape or place here: a context
+    // clear, a compaction, or a worktree move. One divider row kind for
+    // all of them.
+    FeedSessionSeparation separation = 12;
+    // The cold-context gate: a resume or model switch was refused cold and
+    // the user must choose a remediation. While STANDING it owns the
+    // composer; once resolved it stays in history as the trace of the
+    // choice.
+    FeedColdGate cold_gate = 13;
+    // One TAB of a merge bubble's sub-feed — appears ONLY as a top-level
+    // row of a merge bubble's own feed, never on the root feed. The
+    // webapp draws one tab per tab row; an AGENTIC tab's content is the
+    // sub-feed rows parented to it, a RESOLVED tab's content rides the
+    // row itself, replaced whole.
+    FeedMergeTab merge_tab = 14;
+    // A recognized command's PANEL, mirrored into the feed (ruled
+    // 2026-08-29): the root composer is host-native, so the caller of
+    // SubmitPrompt cannot draw the panel its answer carries — the daemon
+    // emits it as a SYNTHESIZED, NON-DURABLE row on the root feed (resolver
+    // memory only: never stored, never replayed after a daemon restart).
+    FeedCommandPanel command_panel = 15;
+    // A recognized-but-unsupported command's REFUSAL card (/agents, /help,
+    // and any command the daemon recognizes and neither answers nor
+    // forwards), carrying the "engineer support for it" offer. Synthesized
+    // and non-durable, like command_panel.
+    FeedCommandRefused command_refused = 16;
+  }
+}
+
+// A recognized command's resolved panel, as a feed row. THE ARM IS WHICH
+// COMMAND was recognized; a new programmatically handled command is a new
+// arm, deployed daemon-side — clients render the arm and know no command
+// names. The same view SubmitPromptSuccess.command_panel answers the caller
+// with; the row is where it is DRAWN.
+message FeedCommandPanel {
+  oneof panel {
+    StatusPanelView status = 1;
+    TodosPanelView todos = 2;
+    McpPanelView mcp = 3;
+    ContextPanelView context = 4;
+  }
+}
+
+// The unsupported-command refusal card.
+message FeedCommandRefused {
+  // The command as typed ("/agents"), drawn verbatim.
+  FeedCommandRefusedCommand command = 1;
+  // The daemon's composed sentence ("/agents is not supported here"),
+  // drawn verbatim.
+  FeedCommandRefusedReason reason = 2;
+  // The "engineer support for it" offer. PRESENT iff the daemon offers
+  // it; the button calls RequestCommandSupport with this row's command.
+  optional FeedCommandAddSupportOffer add_support = 3;
+}
+// The command element.
+message FeedCommandRefusedCommand {
+  string text = 1;
+}
+// The reason element.
+message FeedCommandRefusedReason {
+  string text = 1;
+}
+// The offer marker. Empty: presence is the fact; the button's label is the
+// client's.
+message FeedCommandAddSupportOffer {}
+
+// The containing row's identity, for presentation nesting.
+message FeedRowParent {
+  // The container row's FeedId, exactly as that row carried it.
+  FeedId row = 1;
+}
+
+// A page of rows, as the daemon serves it for one feed. THE ARM IS THE
+// RESULT: the page, or why it could not be completed.
+message FeedPage {
+  oneof result {
+    FeedPageSuccess success = 1;
+    FeedPageError error = 2;
+  }
+}
+
+// The page.
+message FeedPageSuccess {
+  // Oldest → newest.
+  repeated FeedRow rows = 1;
+  // Whether older rows exist beyond this page. THE ARM IS THE EDGE.
+  oneof edge {
+    FeedPageHasMore has_more = 2;
+    FeedPageAtStart at_start = 3;
+  }
+  // The chain of containers ABOVE these rows, outermost first — what a cold
+  // open deep inside nesting draws for context, and how a client knows which
+  // container this page is OF (the last crumb). EMPTY = the feed's own top.
+  FeedBreadcrumbs breadcrumbs = 4;
+}
+
+// The page could not be completed. Drawn where the rows would be, with the
+// daemon's sentence and the typed evidence.
+message FeedPageError {
+  FeedPageErrorHeadline headline = 1;
+  oneof kind {
+    // The history re-pull ended before it reached the live window, so what
+    // is on screen has a gap in it.
+    FailureHistoryReplayTruncated history_replay_truncated = 2;
+  }
+}
+message FeedPageErrorHeadline {
+  string text = 1;
+  // A color-class name from proto/vocab/render-colors.json's `colors`
+  // section (the same names the topbar's tone uses); the client paints the
+  // class and holds no table.
+  string tone = 2;
+}
+
+// Older rows exist — ask for the next page. NO CURSOR: the daemon holds each
+// feed's walk position; this arm is purely the fact that the walk has not
+// reached the start.
+message FeedPageHasMore {}
+
+// This page reaches the beginning of the feed.
+message FeedPageAtStart {}
+
+// The breadcrumb trail above a nested page.
+message FeedBreadcrumbs {
+  // Outermost first; each is a jump target.
+  repeated FeedBreadcrumb crumbs = 1;
+}
+
+// One crumb: the container it names, and the label the daemon resolved for
+// it (the subagent's description, the merge's branch line).
+message FeedBreadcrumb {
+  // The container row's identity, echoed into navigation.
+  FeedId target = 1;
+  // The daemon-resolved label, drawn verbatim.
+  string label = 2;
+}
+
+// ==========================================================================
+// SYNCHRONOUS TURN PROGRESS — the activity kind and its unit presentations.
+// The unit bodies land at their own increments; each is declared here so the
+// carve is on disk.
+// ==========================================================================
+
+// One unit of the turn's synchronous progress, whoever drives it. The arm is
+// the drawn presentation.
+message FeedTurnActivity {
+  oneof unit {
+    // The left-rail prose bubble, fragment-fed while arriving; carries the
+    // response usage stamp. A turn holds SEVERAL — commentary between tool
+    // calls and the final answer are all this.
+    FeedResponse response = 1;
+    // The grey tool-call bubble: one shared shell (headline, badge,
+    // arguments, output), with a per-tool arm inside for what only that
+    // tool draws. Read, write, edit, grep, glob, and a FOREGROUND shell.
+    FeedSimpleToolCall simple_tool_call = 2;
+    // The teal skill card: name, document fold, allowances. Subsequent work
+    // may nest under it by `parent` — a presentation choice, since nothing
+    // delimits a skill's scope at the source.
+    FeedSkill skill = 3;
+    // Tag 4 is RETIRED: the task bubble left the feed — tracker tasks draw in
+    // the FOOTER's checklist only.
+    // The merge bubble. Daemon-orchestrated, but from the user's
+    // perspective the turn has not concluded while it runs — so it is
+    // activity, the one arm the agent does not author.
+    FeedMerge merge = 5;
+    // A SYNC subagent's bubble — the same drawn component the detached
+    // wrapper carries; a bubble is a sub-feed either way.
+    FeedSubagent subagent = 6;
+    // A FAILING hook's card — blocked (loud) or failed (ordinary). A
+    // succeeded hook draws NOTHING: quiet automation stays quiet.
+    FeedHook hook = 7;
+    // A published artifact page — purple response-styled, like a response
+    // bubble. Only a PUBLISH draws; a list act produces no row.
+    FeedArtifact artifact = 8;
+    // The plan bubble — purple response-styled, like the artifact. ONE
+    // bubble COALESCES the enter and exit plan-mode calls: the daemon keys
+    // both onto one FeedId (at most one open plan episode per agent), so
+    // entering draws the planning state and the exit fills the same bubble
+    // with the document.
+    FeedPlan plan = 9;
+    // The findings bubble — a review's typed defect list, purple
+    // response-styled.
+    FeedFindings findings = 10;
+  }
+}
+
+// The plan bubble: the agent's plan document, response-styled (purple),
+// READ-ONLY. One bubble per plan-mode episode; the row upserts through its
+// states. Revisions happen in the composer, never in the bubble.
+message FeedPlan {
+  oneof state {
+    // Plan mode is on and the plan has not been presented yet.
+    FeedPlanPlanning planning = 1;
+    // The plan, presented.
+    FeedPlanPlanned planned = 2;
+    // The episode broke — a plan-mode call failed, or the turn ended still
+    // in plan mode; the composed reason draws in the bubble.
+    FeedPlanFailed failed = 3;
+  }
+}
+// The in-progress state. Empty: the bubble draws its planning treatment.
+message FeedPlanPlanning {}
+// The presented state.
+message FeedPlanPlanned {
+  // The plan document. Markdown, rendered by the client's prose renderer —
+  // the same treatment as a response bubble's prose, never shown raw.
+  FeedPlanProse prose = 1;
+  // The edit affordance. PRESENT iff the vendor named the plan's file, and
+  // the button draws only when present. The CLICK is the HOST's: the Emacs
+  // client opens the file in a doom popup (right side, half width) — the
+  // webapp raises the click to the host and renders nothing itself.
+  optional FeedPlanEditTarget edit = 2;
+}
+// The plan's markdown element.
+message FeedPlanProse {
+  // Markdown, rendered by the client's prose renderer.
+  string markdown = 1;
+}
+// The edit affordance's target.
+message FeedPlanEditTarget {
+  // The plan file's path on the daemon's host, as the vendor named it.
+  // Handed to the editor verbatim; never drawn as prose.
+  string path = 1;
+}
+// The failed state.
+message FeedPlanFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
+}
+
+// The findings bubble: a review's typed findings, response-styled (purple).
+// Decoration — verdict badges, category chips, severity coloring — is the
+// webapp's treatment; the wire carries arms and text only, and no glyph
+// rides it.
+message FeedFindings {
+  // The heading line ("Findings · 3 · high"), composed by the daemon.
+  FeedFindingsHeading heading = 1;
+  // The rows, in the served order — most-severe first; the client never
+  // re-sorts. Empty draws the bubble's nothing-found treatment.
+  repeated FeedFindingsRow rows = 2;
+}
+// The heading element.
+message FeedFindingsHeading {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+
+// One finding's row.
+message FeedFindingsRow {
+  // The verdict badge. UNSET draws no badge — an unverified finding.
+  oneof verdict {
+    FeedFindingsVerdictConfirmed confirmed = 1;
+    FeedFindingsVerdictPlausible plausible = 2;
+  }
+  // The category chip ("correctness"), drawn verbatim. UNSET draws none.
+  optional FeedFindingsCategory category = 3;
+  // The location line ("daemon/server.go:214") — drawn verbatim AND a jump
+  // target: the click is HOST-raised, opening the file at the line through
+  // THE SAME editor-popup subroutine as the plan bubble's edit button (one
+  // shared webapp link component, one shared Emacs open routine — the two
+  // affordances are consistent at the CODE level, not merely lookalike).
+  FeedFindingsLocation location = 4;
+  // The one-sentence summary, drawn verbatim.
+  FeedFindingsSummary summary = 5;
+  // The failure scenario, FOLDED by default; the fold is the client's.
+  FeedFindingsScenario scenario = 6;
+  // The outcome badge, present only on a re-report after fixes.
+  oneof outcome {
+    FeedFindingsOutcomeFixed fixed = 7;
+    FeedFindingsOutcomeSkipped skipped = 8;
+    FeedFindingsOutcomeNoChange no_change = 9;
+  }
+}
+message FeedFindingsVerdictConfirmed {}
+message FeedFindingsVerdictPlausible {}
+// The category chip element.
+message FeedFindingsCategory {
+  // The chip's text, drawn verbatim.
+  string text = 1;
+}
+// The location element: a drawn line that is also a jump target.
+message FeedFindingsLocation {
+  // The drawn line.
+  string text = 1;
+  // The jump target's path on the daemon's host, handed to the editor
+  // verbatim; never drawn.
+  string path = 2;
+  // The 1-indexed line to land on. UNSET jumps to the file's top.
+  optional uint32 line = 3;
+}
+// The summary element.
+message FeedFindingsSummary {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// The folded scenario element.
+message FeedFindingsScenario {
+  // The scenario text, drawn verbatim when unfolded.
+  string text = 1;
+}
+message FeedFindingsOutcomeFixed {}
+message FeedFindingsOutcomeSkipped {}
+message FeedFindingsOutcomeNoChange {}
+
+// The artifact bubble: a page the agent published, response-styled. A
+// redeploy of the same page upserts this same bubble.
+message FeedArtifact {
+  // The heading: favicon emoji + title, composed by the daemon (falling
+  // back to the filename when the call named no title).
+  FeedArtifactHeading heading = 1;
+  // The bubble's state.
+  oneof state {
+    // The publish is in flight; the URL line is not yet drawn.
+    FeedArtifactPublishing publishing = 2;
+    // Published: the badge and the clickable URL.
+    FeedArtifactPublished published = 3;
+    // The publish failed; the composed reason draws where the URL would.
+    FeedArtifactFailed failed = 4;
+  }
+}
+// The heading element.
+message FeedArtifactHeading {
+  // The composed heading, drawn verbatim ("📊 Merge Queue Report").
+  string text = 1;
+}
+// The in-flight state. Empty: the arm is the badge.
+message FeedArtifactPublishing {}
+// The published state.
+message FeedArtifactPublished {
+  // The page's URL, drawn as a clickable hyperlink.
+  FeedArtifactUrl url = 1;
+}
+// The URL element.
+message FeedArtifactUrl {
+  // The URL, drawn verbatim and linked.
+  string url = 1;
+}
+// The failed state.
+message FeedArtifactFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
+}
+
+// The prose bubble — one response unit of this feed's agent, left-rail. A
+// turn holds several. THE ARM IS THE STATE, and the row upserts through it.
+message FeedResponse {
+  // The response's cost corner ("2.1k"), daemon-formatted, meaningful in
+  // EVERY state: interim while arriving (the vendor states usage when the
+  // response opens and restates it as it grows), final once settled, the
+  // last observed figure on a broken bubble. UNSET when no usage has been
+  // observed yet — absence draws no stamp, never a zero.
+  optional FeedResponseUsageStamp usage = 1;
+  oneof result {
+    // Still arriving: the prose so far. The DAEMON accumulates the shim's
+    // fragments and re-pushes the row; the client renders what arrives and
+    // accumulates nothing (a missed push self-corrects on the next one).
+    FeedResponseUpdate update = 2;
+    // Settled whole.
+    FeedResponseSuccess success = 3;
+    // Died mid-arrival: the prose that landed stays drawn, marked broken.
+    // WHY it died is the turn's terminal row (FeedTurnEnded.errored) — this
+    // arm only says this bubble is the one it cut short.
+    FeedResponseError error = 4;
+  }
+  // SET when the prose is a VENDOR-SYNTHESIZED NOTICE rather than the
+  // agent's own words (an interruption note, a system-inserted remark): the
+  // client draws the bubble in the notice register with `heading` above the
+  // prose. UNSET = ordinary agent prose. Daemon-composed; the client holds
+  // no notice vocabulary.
+  optional FeedResponseNotice notice = 5;
+}
+
+// The notice register's heading, daemon-composed.
+message FeedResponseNotice {
+  string heading = 1;
+}
+
+// The arriving state's prose.
+message FeedResponseUpdate {
+  // Markdown so far, drawn as it stands; type-out pacing is the client's.
+  FeedResponseProse prose = 1;
+}
+// The settled state.
+message FeedResponseSuccess {
+  // The whole markdown.
+  FeedResponseProse prose = 1;
+}
+// The broken state: what landed before the death.
+message FeedResponseError {
+  // The partial markdown, kept on screen.
+  FeedResponseProse prose = 1;
+}
+// The bubble's markdown element.
+message FeedResponseProse {
+  // Markdown, rendered by the client's prose renderer.
+  string markdown = 1;
+}
+// The cost-corner element.
+message FeedResponseUsageStamp {
+  // The formatted figure, drawn verbatim.
+  string text = 1;
+}
+
+// The grey tool-call bubble: one shared shell — head (name + badge), the
+// call as one composed input line, and an output section by DRAWN FORM. The
+// daemon composes every per-tool specific (the input line's phrasing, which
+// output form, the omitted floors), so the client holds NO per-tool
+// knowledge: a tool-specific affordance would be a new arm, which is the
+// figma→idl posture on purpose.
+message FeedSimpleToolCall {
+  // ① HEAD: the tool's name, drawn verbatim ("Bash", "Read", "Grep").
+  FeedToolCallName name = 1;
+  // ② INPUT: the call as ONE composed line — "$ go test ./...",
+  // "src/render.ts", "grep: FeedRow". The daemon owns the phrasing; a
+  // created-vs-updated write, say, is worded here.
+  FeedToolCallInput input = 2;
+  // The call's state; the badge and the output section ride the arms.
+  oneof outcome {
+    // Running — no output yet; the head's badge is the indicator, and the
+    // arm carries the last sign of life the daemon observed.
+    FeedToolCallRunning running = 3;
+    // Returned, with its verdict and output.
+    FeedToolCallReturned returned = 4;
+    // The permission gate refused it; it never ran. No output section.
+    FeedToolCallDenied denied = 5;
+    // The work MOVED: the call handed its command to the background (a
+    // timed-out or explicitly detached shell) and this card is not where it
+    // finishes. No output section, never a verdict — the detached shell row
+    // the daemon draws beneath it is the record of the run, and it alone
+    // settles. Without this arm a moved call sat on `running` forever above
+    // a row that had already reported `exit 0` (playtest F43, 2026-09-09).
+    FeedToolCallMoved moved = 6;
+  }
+}
+// The head's name element.
+message FeedToolCallName {
+  // The tool name, drawn verbatim.
+  string text = 1;
+}
+// The input line element.
+message FeedToolCallInput {
+  // The composed line, drawn verbatim.
+  string text = 1;
+  // UNSET = plain text; SET = the line is drawn as a hyperlink to this URL
+  // (a WebFetch card's fetched page, say).
+  optional FeedToolCallInputLink link = 2;
+  // THE DRAWN FORM of the line — the treatment the existing look gives it
+  // (a shell command line vs a muted file path vs a search query). The
+  // DAEMON states it because only it knows the tool; the client applies
+  // the treatment and still knows no tool. UNSET = plain text.
+  oneof form {
+    FeedToolCallInputCommand command = 3;
+    FeedToolCallInputPath path = 4;
+    FeedToolCallInputQuery query = 5;
+  }
+}
+// A shell command line ("$" chrome is the client's).
+message FeedToolCallInputCommand {}
+// A file or directory path, drawn muted.
+message FeedToolCallInputPath {}
+// A search pattern or query.
+message FeedToolCallInputQuery {}
+// The returned call produced no output. Empty: the arm is the fact.
+message FeedToolCallNoOutput {}
+
+// The input line's hyperlink target.
+message FeedToolCallInputLink {
+  // Where the line links when activated.
+  string url = 1;
+}
+// The running state. The daemon re-pushes the row on each vendor progress
+// beat; the client ticks "quiet for N s" locally from the instant — no
+// cadence timing, no client threshold. The wedge RULING stays the shim's:
+// a stalled call arrives as `returned.failed` with the shim's wedge text.
+message FeedToolCallRunning {
+  // The last sign of life the daemon observed. UNSET before the first beat.
+  optional FeedToolCallLastProgress last_progress = 1;
+}
+// The last-observed-progress element.
+message FeedToolCallLastProgress {
+  // When the vendor last reported this call alive, epoch ms.
+  int64 at_ms = 1;
+}
+// The denied state. Empty: the head's badge says denied, and the consent
+// story is the permission card's — this card only shows the call never ran.
+message FeedToolCallDenied {}
+// The call's work moved to the background; see the `moved` arm. The badge
+// reads as moved (neither ok nor err nor running), and the card draws no
+// output section.
+message FeedToolCallMoved {}
+
+// ③ OUTPUT, below the dashed divider, plus the badge's verdict.
+message FeedToolCallReturned {
+  // The ok / err badge. A failed call's output is its error text, drawn in
+  // the same forms.
+  oneof verdict {
+    FeedToolCallSucceeded succeeded = 1;
+    FeedToolCallFailed failed = 2;
+  }
+  // THE EXIT CODE A FOREGROUND SHELL REPORTED, when it reported one — the
+  // SAME element the detached shell's settled shape carries
+  // (FeedShellSettled.exit), and deliberately the same message rather than a
+  // second one, so a chip drawn on one card cannot drift from the chip drawn
+  // on the other.
+  //
+  // THE TWO MUST STAY PARALLEL. A foreground `Bash` and a detached one are the
+  // same command told twice, and the exit status is the command's own verdict
+  // on itself either way; a field added to, retyped on, or reworded for one of
+  // these two sites belongs on the other in the same edit. Without it a failing
+  // foreground shell drew `failed` and NO CODE, so the reader was told the
+  // command went wrong and never told how.
+  //
+  // UNSET when the producer stated no status — absence draws no chip, NEVER a
+  // zero, the rule FeedShellSettled.exit states for itself. Meaningful for a
+  // shell card; every other tool leaves it unset.
+  optional FeedShellExit exit = 12;
+  // WHAT THE OUTPUT IS, by drawn form — the only axis the tools genuinely
+  // differ on.
+  oneof form {
+    // Plain text: bash stdout/stderr, a count, a bare summary.
+    FeedToolCallTextOutput text = 3;
+    // Syntax-highlighted code (a read): daemon-resolved spans, client
+    // paints them.
+    FeedToolCallCodeOutput code = 4;
+    // A colored diff (a write or edit).
+    FeedToolCallDiffOutput diff = 5;
+    // A line list: grep matches, glob paths.
+    FeedToolCallLinesOutput lines = 6;
+    // A link list: web search results, each row a clickable title.
+    FeedToolCallLinksOutput links = 8;
+    // AN IMAGE the call produced instead of characters — a screenshot, a
+    // rendered chart. THE SHARED BLOCK, reused rather than restated: this is
+    // the very message a prompt body draws an image with, so the webview
+    // fetches a tool's image through the code path it already has and the
+    // daemon resolves the reference on the one end that can.
+    //
+    // WITHOUT THIS ARM an image-producing shell settled to `none` and the card
+    // drew nothing at all, which reads exactly like a command that printed
+    // nothing — the conversation tier has carried the fact from the start
+    // (AgentBashOutput.form = image); this is where it reaches a surface.
+    FeedImageBlock image = 11;
+    // The call returned NOTHING to draw (a write, an empty search): the
+    // output section is omitted. An arm, never an empty text — presence,
+    // not a sentinel.
+    FeedToolCallNoOutput none = 10;
+  }
+  // The settled clock — "ran 4.2 s" — composed by the daemon from the
+  // call's start and settle instants, drawn beside the badge. UNSET when
+  // either instant is missing; the card then shows no elapsed figure
+  // rather than a ticking or invented one.
+  optional FeedToolCallRuntime runtime = 9;
+  // The IDE's findings against this change, one composed line each, drawn
+  // below the output. Present iff the edit raised any — a later re-push of
+  // the settled card adds them when they arrive.
+  optional FeedToolCallDiagnostics diagnostics = 7;
+}
+// The diagnostics element.
+message FeedToolCallDiagnostics {
+  // The composed lines ("render.ts:214 · error · 'x' is never used"),
+  // client-capped.
+  repeated string lines = 1;
+}
+// The settled clock element.
+message FeedToolCallRuntime {
+  // The composed sentence, drawn verbatim.
+  string text = 1;
+}
+// The call succeeded. Empty: the arm is the badge.
+message FeedToolCallSucceeded {}
+// The call failed. Empty: the arm is the badge; the output carries the
+// error text.
+message FeedToolCallFailed {}
+
+// The plain-text output form.
+message FeedToolCallTextOutput {
+  // The text, drawn verbatim (the client caps visible height, not content).
+  string text = 1;
+}
+// The highlighted-code output form.
+message FeedToolCallCodeOutput {
+  // The code as paint spans, in order; concatenating their text is the code.
+  repeated FeedCodeSpan spans = 1;
+  // "showing 200 of 4,312" — present iff truncated. Always a HEAD of the
+  // file, never a middle slice, so the highlighting context is sound.
+  optional FeedToolCallOmitted omitted = 2;
+}
+// The diff output form.
+message FeedToolCallDiffOutput {
+  // The diff's lines, in order, each arm-typed for its color.
+  repeated FeedDiffLine lines = 1;
+}
+// The line-list output form.
+message FeedToolCallLinesOutput {
+  // The lines, drawn verbatim in order.
+  repeated string lines = 1;
+  // "42 more" / "at least 42 more" — the composed floor, present iff the
+  // list is short. Display only; implies no retrieval.
+  optional FeedToolCallOmitted omitted = 2;
+}
+// The link-list output form: web search results.
+message FeedToolCallLinksOutput {
+  // The rows, drawn in order.
+  repeated FeedToolCallLink links = 1;
+  // "9 more not shown" — the composed omitted line, present iff the list is
+  // capped. Display only; implies no retrieval.
+  optional FeedToolCallOmitted omitted = 2;
+}
+// One row of the link list.
+message FeedToolCallLink {
+  // The row's drawn text — the page title, or the engine's narration line.
+  string text = 1;
+  // UNSET = a narration row, not clickable; SET = the row links here.
+  optional FeedToolCallLinkUrl url = 2;
+}
+// A link row's hyperlink target.
+message FeedToolCallLinkUrl {
+  // Where the row links when activated.
+  string url = 1;
+}
+// The composed truncation line, shared by the forms that can be short.
+message FeedToolCallOmitted {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+
+// One paint span of highlighted code.
+message FeedCodeSpan {
+  // The span's text, verbatim.
+  string text = 1;
+  // The paint class the stylesheet keys on ("keyword", "string", "comment"):
+  // one of the names in proto/vocab/paint-classes.json (the closed inventory
+  // the daemon's highlighter and ANSI parser emit; `syntax` names for code,
+  // `ansi` names for terminal output). A client treats a name outside the
+  // inventory as unstyled text, never an error.
+  string paint_class = 2;
+}
+// One diff line; the arm is the color.
+message FeedDiffLine {
+  // Which kind of line, picking the treatment.
+  oneof kind {
+    FeedDiffLineHeader header = 1;    // a hunk header ("@@ -3,7 +3,9 @@")
+    FeedDiffLineAdded added = 2;      // an added line
+    FeedDiffLineRemoved removed = 3;  // a removed line
+    FeedDiffLineContext context = 4;  // an unchanged context line
+  }
+  // The line's text, without any +/- prefix — the arm carries that fact.
+  string text = 5;
+}
+message FeedDiffLineHeader {}
+message FeedDiffLineAdded {}
+message FeedDiffLineRemoved {}
+message FeedDiffLineContext {}
+
+// The teal skill card: the agent loading a skill. The card's substance is
+// the DOCUMENT the skill contributed (folded, capped); work the agent does
+// afterwards is ordinary activity, which the daemon MAY nest under this row
+// by `parent` — a presentation choice, since nothing delimits a skill's
+// scope at the source.
+message FeedSkill {
+  // The invocation as one composed line — "/graphify" or "/workspace merge
+  // DWC/fix-flaky" — the line a user would have typed. Daemon-composed.
+  FeedSkillInvocation invocation = 1;
+  // The card's state.
+  oneof outcome {
+    // Invoked; the document has not landed yet (it arrives after the
+    // tool's own acknowledgement — the unit settles on the document).
+    FeedSkillRunning running = 2;
+    // Loaded: the document and what it was permitted.
+    FeedSkillLoaded loaded = 3;
+    // The invocation failed; the text is the daemon's composed reason.
+    FeedSkillFailed failed = 4;
+    // The permission gate refused it; nothing was loaded.
+    FeedSkillDenied denied = 5;
+  }
+}
+// The invocation-line element.
+message FeedSkillInvocation {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// Invoked, document pending. Empty: the head badge is the indicator.
+message FeedSkillRunning {}
+// The loaded state.
+message FeedSkillLoaded {
+  // The skill's document, folded by default; markdown rendered by the
+  // client's prose renderer.
+  FeedSkillDocument document = 1;
+  // The consent line — which tools the skill brought allowances for
+  // ("allows: Bash, Write"), composed by the daemon. UNSET when the skill
+  // declared none; absence draws no line, never an empty one.
+  optional FeedSkillAllowances allowances = 2;
+}
+// The document element.
+message FeedSkillDocument {
+  // The SKILL.md body, markdown, verbatim.
+  string markdown = 1;
+}
+// The allowances element.
+message FeedSkillAllowances {
+  // The composed sentence, drawn verbatim.
+  string text = 1;
+}
+// The failed state.
+message FeedSkillFailed {
+  // The daemon's composed reason, drawn verbatim.
+  string text = 1;
+}
+// The denied state. Empty: the badge says it; consent is the permission
+// card's story.
+message FeedSkillDenied {}
+
+// A failing hook's card — the grey tool-card shell, hook-flavored. Only
+// failures draw; the tone rides the arm.
+message FeedHook {
+  // The head line, composed ("hook blocked: protect-master (PreToolUse)").
+  FeedHookHeadline headline = 1;
+  // A reference to the gated call's card, when the firing gated one —
+  // drawn as the "▸ gated:" link. UNSET for call-less events.
+  optional FeedHookGatedCall gated_call = 2;
+  // Which failure, picking the tone.
+  oneof outcome {
+    // The hook REFUSED the gated action — the loud treatment; the text is
+    // the hook's own stated reason, drawn verbatim.
+    FeedHookBlocked blocked = 3;
+    // The hook itself failed; ordinary card with the capped output.
+    FeedHookFailed failed = 4;
+  }
+}
+// The headline element.
+message FeedHookHeadline {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The gated-call link element.
+message FeedHookGatedCall {
+  // The gated call's row, exactly as the feed served it.
+  FeedId row = 1;
+}
+// The blocked (loud) outcome.
+message FeedHookBlocked {
+  // The hook's refusal text, drawn verbatim.
+  string reason = 1;
+}
+// The failed (ordinary) outcome.
+message FeedHookFailed {
+  // The exit chip ("exit 1").
+  int32 exit_code = 1;
+  // The capped output text, drawn verbatim. UNSET when none.
+  optional FeedHookOutput output = 2;
+}
+// The output element.
+message FeedHookOutput {
+  // The text, drawn verbatim; the client caps visible height.
+  string text = 1;
+}
+
+// ==========================================================================
+// THE TURN'S TERMINAL — a row, so history replays how every turn ended.
+// ==========================================================================
+
+// How a turn ended. THE ARM IS HOW; its absence for the current turn is what
+// "the turn is live" means — anchored on data, not on any connection's
+// lifetime. Every turn gets one, a quiet conclusion included: the row's
+// EXISTENCE is the liveness anchor, drawing is the arm's business.
+message FeedTurnEnded {
+  // When the turn ended, epoch ms — where the footer clock stopped.
+  int64 ended_at_ms = 1;
+  oneof outcome {
+    // The turn ran to its own conclusion.
+    FeedTurnEndedConcluded concluded = 2;
+    // The turn died; the arm inside names the cause.
+    FeedTurnEndedErrored errored = 3;
+    // The user stopped it — directly, or by a prompt that interrupted.
+    FeedTurnEndedInterrupted interrupted = 4;
+  }
+}
+
+// The turn ran to its own end. NO arms: a conclusion is a conclusion.
+message FeedTurnEndedConcluded {
+  // THE ANSWERING RESPONSE — the row the client draws the final-answer
+  // treatment on (the green border), named by the producer. UNSET when the
+  // turn ended with no answering prose; absence draws no border anywhere.
+  optional FeedId answer = 1;
+}
+
+// The turn died. THE ARM IS THE CAUSE — the vendor API taxonomy respelled
+// for drawing, plus the two vendor stops and the query's own death. Info is
+// per-arm: only the kinds that HAVE a fact carry one.
+message FeedTurnEndedErrored {
+  // The vendor's own sentence, when one was recorded. UNSET for causes with
+  // no vendor wording (a query death); the arm still names the cause.
+  optional FeedTurnErrorMessage message = 1;
+  // THE DRAWN HEADLINE, composed by the daemon from the arm ("rate limited",
+  // "cut short at the output ceiling", "the query died") — the client draws
+  // it verbatim and holds no per-arm sentence table. Only the countdown
+  // (rate_limited/overloaded's retry_after_ms) is client-ticked.
+  FeedTurnErrorHeadline headline = 18;
+  oneof error {
+    // 429 — rate limited; may carry the vendor's wait.
+    FeedTurnErrorRateLimited rate_limited = 2;
+    // 529 — the API overloaded; may carry the wait.
+    FeedTurnErrorOverloaded overloaded = 3;
+    // 401 — the credential was rejected; the user must re-authenticate.
+    FeedTurnErrorAuthenticationFailed authentication_failed = 4;
+    // 403 — the credential lacks permission for this request.
+    FeedTurnErrorPermissionDenied permission_denied = 5;
+    // 400 — the request itself was malformed or refused.
+    FeedTurnErrorInvalidRequest invalid_request = 6;
+    // 413 — the request exceeded the size limit.
+    FeedTurnErrorRequestTooLarge request_too_large = 7;
+    // 404 — the model or resource does not exist.
+    FeedTurnErrorNotFound not_found = 8;
+    // 500 — the API's own internal error.
+    FeedTurnErrorInternal internal = 9;
+    // An API error class this schema does not model, kept by name.
+    FeedTurnErrorVendorUnmodeled vendor_unmodeled = 10;
+    // The vendor stopped at its output ceiling; whatever prose landed may
+    // be cut short.
+    FeedTurnErrorMaxTokens max_tokens = 11;
+    // The vendor refused to continue; there is no answer prose.
+    FeedTurnErrorRefusal refusal = 12;
+    // The query process died out from under the turn.
+    FeedTurnErrorQueryDied query_died = 13;
+    // The account cannot be charged; the user must act on their billing.
+    FeedTurnErrorBillingError billing_error = 14;
+    // The requested model does not exist for this account; the remedy is
+    // picking another model.
+    FeedTurnErrorModelNotFound model_not_found = 15;
+    // The account's organization does not allow this OAuth access.
+    FeedTurnErrorOauthOrgNotAllowed oauth_org_not_allowed = 16;
+    // The request asked for more output tokens than the model will produce;
+    // retrying it unchanged cannot succeed.
+    FeedTurnErrorMaxOutputTokens max_output_tokens = 17;
+
+    // THE RUN'S OWN TERMINALS (conversation.v1 AgentFailure arms that are not
+    // API error classes), imported from failure.proto as that file's header
+    // prescribes. Landing 8, 2026-09-02, user-approved: until then these five
+    // ends had no wire path to any frontend stream.
+    // AgentFailure.max_turns — the round-trip ceiling the user set, reached.
+    FailureVendorMaxTurns max_turns = 19;
+    // AgentFailure.budget_exhausted — the spending ceiling, reached.
+    FailureVendorMaxBudget max_budget = 20;
+    // AgentFailure.execution_error — the run broke while executing.
+    FailureVendorExecutionError execution_error = 21;
+    // AgentFailure.structured_output_retry_exhausted and every other
+    // unclassified abnormal end; `stop_reason` names the vendor's own word.
+    FailureVendorTurnFailed turn_failed = 22;
+    // AgentFailure.stop_hook_prevented — a configured Stop hook forbade the
+    // agent from continuing: deliberate, not a fault, but not completion.
+    FeedTurnErrorStopHookPrevented stop_hook_prevented = 23;
+  }
+}
+// The Stop-hook class. Empty: the arm is the cause; the envelope's message
+// carries the hook's wording when the vendor recorded one.
+message FeedTurnErrorStopHookPrevented {}
+// The billing class. Empty: the arm is the cause; the envelope's message
+// carries the vendor's wording.
+message FeedTurnErrorBillingError {}
+// The missing-model class. Empty: the arm is the cause.
+message FeedTurnErrorModelNotFound {}
+// The OAuth-organization class. Empty: the arm is the cause.
+message FeedTurnErrorOauthOrgNotAllowed {}
+// The oversized-output-request class. Empty: the arm is the cause; the
+// envelope's message carries the vendor's wording. DISTINCT from max_tokens:
+// that response was cut at the ceiling, this request was refused outright.
+message FeedTurnErrorMaxOutputTokens {}
+// The composed headline element.
+message FeedTurnErrorHeadline {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// The vendor's sentence element.
+message FeedTurnErrorMessage {
+  // The wording, drawn verbatim.
+  string text = 1;
+}
+// Rate limited.
+message FeedTurnErrorRateLimited {
+  // The vendor's wait, when it gave one — the client counts down from it.
+  // UNSET = it said nothing, which is different from "retry now".
+  optional int64 retry_after_ms = 1;
+}
+// Overloaded.
+message FeedTurnErrorOverloaded {
+  // As rate_limited's wait.
+  optional int64 retry_after_ms = 1;
+}
+message FeedTurnErrorAuthenticationFailed {}
+message FeedTurnErrorPermissionDenied {}
+message FeedTurnErrorInvalidRequest {}
+message FeedTurnErrorRequestTooLarge {}
+message FeedTurnErrorNotFound {}
+message FeedTurnErrorInternal {}
+// The unmodeled class, kept by name so it is never silently mishandled.
+message FeedTurnErrorVendorUnmodeled {
+  // The vendor's type name, drawn verbatim.
+  string type = 1;
+}
+message FeedTurnErrorMaxTokens {}
+message FeedTurnErrorRefusal {}
+// The vendor query died under the turn (landing 10 carries the cause).
+message FeedTurnErrorQueryDied {
+  oneof cause {
+    // The agent binary's stream ended without a close.
+    FeedTurnErrorQueryUnexpectedEof unexpected_eof = 1;
+    // The SDK's iterator threw.
+    FeedTurnErrorQueryIteratorFailure iterator_failure = 2;
+  }
+}
+message FeedTurnErrorQueryUnexpectedEof {}
+message FeedTurnErrorQueryIteratorFailure {}
+
+// The user stopped the turn — directly, or by a prompt that interrupted.
+// An accusation with evidence: stated only on the acknowledged stop.
+message FeedTurnEndedInterrupted {}
+
+// ==========================================================================
+// ASYNC WORK — one wrapper per kind, adjacent to activity because it
+// OUTLIVES the turn; each wraps the same drawn component its sync form uses.
+// ==========================================================================
+
+// A detached subagent's placement wrapper.
+message FeedDetachedSubagent {
+  // The bubble — identical to the sync arm's; the wrapper carries the
+  // placement fact, never a second drawing.
+  FeedSubagent subagent = 1;
+}
+
+// A detached shell's placement wrapper.
+message FeedDetachedShell {
+  // The shell bubble: command head + spool body. Body at its own increment.
+  FeedShell shell = 1;
+}
+
+// A SUBAGENT BUBBLE — sync or detached, one component. THE BUBBLE IS A
+// FEED: its rows are never carried here — the client opens them as a
+// sub-feed addressed by THIS ROW's own FeedId (OpenFeed on expand, cancel
+// the watch on collapse). This message is the COLLAPSED HEAD, carried on
+// the parent feed so every bubble — settled history included — paints from
+// the parent's one connection; the child's own connection exists only
+// while expanded.
+message FeedSubagent {
+  // The subagent type ("Explore") — the head's leading label.
+  FeedSubagentLabel label = 1;
+  // The commission's description. UNSET when the spawn carried none; the
+  // head then draws the label alone, never a synthesized description.
+  optional FeedSubagentDescription description = 2;
+  // The running token sum ("12.4k tok"), daemon-formatted, re-pushed as it
+  // grows and final once settled. UNSET before any usage is observed.
+  optional FeedSubagentTokens tokens = 3;
+  // The head's clock. The client ticks from the instant.
+  FeedSubagentRuntime runtime = 4;
+  // The head's state: the live dot, or the settled treatment.
+  oneof state {
+    FeedSubagentLive live = 5;
+    FeedSubagentSettled settled = 6;
+  }
+}
+// The label element.
+message FeedSubagentLabel {
+  // The label text, drawn verbatim.
+  string text = 1;
+}
+// The description element.
+message FeedSubagentDescription {
+  // The description, drawn verbatim.
+  string text = 1;
+}
+// The token-sum element.
+message FeedSubagentTokens {
+  // The formatted figure, drawn verbatim.
+  string text = 1;
+}
+// The clock element.
+message FeedSubagentRuntime {
+  // When the run began, epoch ms — the ORIGINAL instant; detaching does not
+  // reset it. The client ticks.
+  int64 started_at_ms = 1;
+}
+// Live: the dot, plus the last sign of life (the same heartbeat feedback
+// the tool card carries — the subagent's progress channel produces it).
+message FeedSubagentLive {
+  // The last progress the daemon observed. UNSET before the first beat.
+  optional FeedSubagentLastProgress last_progress = 1;
+}
+// The last-progress element.
+message FeedSubagentLastProgress {
+  // Epoch ms; the client ticks "quiet for N s" locally.
+  int64 at_ms = 1;
+}
+// Settled: when, and how.
+message FeedSubagentSettled {
+  // When the run ended, epoch ms — the clock stops here.
+  int64 ended_at_ms = 1;
+  // How it ended; the arm picks the treatment.
+  oneof outcome {
+    // Ran to completion.
+    FeedSubagentSucceeded succeeded = 2;
+    // Ended on its own failure.
+    FeedSubagentFailed failed = 3;
+    // Stopped by hand (an interrupt, a kill naming it).
+    FeedSubagentCancelled cancelled = 4;
+    // We STOPPED BEING ABLE TO SEE IT — not known to have failed; the word
+    // carries the distinction, so it never draws as a plain failure.
+    FeedSubagentLost lost = 5;
+  }
+}
+message FeedSubagentSucceeded {}
+message FeedSubagentFailed {}
+message FeedSubagentCancelled {}
+// Why the run was lost — the sidecar's own staleness ruling, relayed by name
+// from conversation.v1 DetachedLost so the client can say WHICH lost it was.
+message FeedSubagentLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    FeedSubagentLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    FeedSubagentLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    FeedSubagentLostSweptUp swept_up = 3;
+  }
+}
+message FeedSubagentLostFileVanished {}
+message FeedSubagentLostWentSilent {}
+message FeedSubagentLostSweptUp {}
+
+// A SHELL BUBBLE: a background command and its spool. NOT a feed — a shell
+// has no rows, only output — so the body rides the row itself: the spool's
+// TAIL, capped by the daemon and replaced whole on every push (snapshot
+// semantics; the client renders what arrives and appends nothing).
+message FeedShell {
+  // The command line, drawn verbatim ("$" chrome is the client's).
+  FeedShellCommand command = 1;
+  // The head's clock. The client ticks from the instant.
+  FeedShellRuntime runtime = 2;
+  // The spool tail. Present from the first output; UNSET while the command
+  // has produced none.
+  optional FeedShellSpool spool = 3;
+  // The head's state.
+  oneof state {
+    FeedShellLive live = 4;
+    FeedShellSettled settled = 5;
+  }
+}
+// The command element.
+message FeedShellCommand {
+  // The command text, drawn verbatim.
+  string text = 1;
+}
+// The clock element.
+message FeedShellRuntime {
+  // When the command began, epoch ms — the ORIGINAL instant; detaching from
+  // the turn does not reset it. The client ticks.
+  int64 started_at_ms = 1;
+}
+// The spool element: the output's tail as it now stands.
+message FeedShellSpool {
+  // The tail text, drawn verbatim, daemon-capped.
+  string text = 1;
+  // "1,204 earlier lines not shown" — the composed truncation line,
+  // present iff the daemon capped. Display only; implies no retrieval.
+  optional FeedShellOmitted omitted = 2;
+}
+// The truncation-line element.
+message FeedShellOmitted {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// Live: the dot, plus the last sign of life (spool growth IS the beat —
+// the daemon stamps it on each append it observes).
+message FeedShellLive {
+  // The last output the daemon observed. UNSET before the first byte.
+  optional FeedShellLastProgress last_progress = 1;
+}
+// The last-progress element.
+message FeedShellLastProgress {
+  // Epoch ms; the client ticks "quiet for N s" locally.
+  int64 at_ms = 1;
+}
+// Settled: when, and how.
+message FeedShellSettled {
+  // When the command ended, epoch ms.
+  int64 ended_at_ms = 1;
+  // The exit code, when the spool's terminator carried one. UNSET when it
+  // did not — absence draws no chip, never a zero.
+  optional FeedShellExit exit = 2;
+  // How it ended; the arm picks the treatment.
+  oneof outcome {
+    // The process exited on its own; the exit chip says how it went — a
+    // non-zero exit still COMPLETED, and "failure" is the reader's judgment
+    // of the code, never an arm.
+    FeedShellCompleted completed = 3;
+    // Stopped by hand.
+    FeedShellCancelled cancelled = 4;
+    // We stopped being able to see it — spool gone or silent past the
+    // shim's ruling; not known to have failed.
+    FeedShellLost lost = 5;
+  }
+}
+// The exit-code chip element.
+message FeedShellExit {
+  // The code, drawn as the chip ("exit 0" / "exit 1"); tone is the
+  // client's mapping of zero vs non-zero.
+  int32 code = 1;
+}
+message FeedShellCompleted {}
+message FeedShellCancelled {}
+// Why the run was lost — the sidecar's own staleness ruling, relayed by name
+// from conversation.v1 DetachedLost so the client can say WHICH lost it was.
+message FeedShellLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    FeedShellLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    FeedShellLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    FeedShellLostSweptUp swept_up = 3;
+  }
+}
+message FeedShellLostFileVanished {}
+message FeedShellLostWentSilent {}
+message FeedShellLostSweptUp {}
+
+// ==========================================================================
+// BLOCKING THE TURN ON THE USER — consent, and a choice. Bodies re-derived
+// from conversation.v1's AgentPermission / AgentQuestion at their own
+// increments (the typed sources the earlier shapes predated).
+// ==========================================================================
+
+// The consent card: the turn blocked on the user's permission for one gated
+// call. Buttons (allow once / always allow / deny) are agentrepl verbs
+// echoing this row's FeedId; the card's state change arrives as this row's
+// re-push.
+message FeedPermission {
+  // The vendor's rendered sentence ("Claude wants to read foo.txt") —
+  // resolved end to end; no consumer composes it from the tool.
+  FeedPermissionHeadline headline = 1;
+  // The qualifying subtitle. UNSET when the vendor gave none.
+  optional FeedPermissionSubtitle subtitle = 2;
+  // Why the gate fired, composed ("path outside the allowed directories:
+  // /etc/hosts"). UNSET when it was simply the default for this tool.
+  optional FeedPermissionTriggerNote trigger = 3;
+  // The gated call's argument preview, one composed line per argument.
+  FeedPermissionArguments arguments = 4;
+  // PRESENT iff the vendor offered a standing form — presence is what makes
+  // the "always allow" button drawable. The standing's CONTENT (the typed
+  // echo token) never reaches the client: the daemon holds it and hands it
+  // back to the shim when the answer verb picks standing.
+  optional FeedPermissionStandingOffered standing_offered = 5;
+  // The ask's state.
+  oneof state {
+    FeedPermissionOpen open = 6;
+    FeedPermissionAnswered answered = 7;
+    FeedPermissionAbandoned abandoned = 8;
+  }
+}
+// The headline element.
+message FeedPermissionHeadline {
+  // The sentence, drawn verbatim.
+  string text = 1;
+}
+// The subtitle element.
+message FeedPermissionSubtitle {
+  // The subtitle, drawn verbatim.
+  string text = 1;
+}
+// The trigger-note element.
+message FeedPermissionTriggerNote {
+  // The composed note, drawn verbatim. An ask-rule trigger is worded so a
+  // reader knows the prompt was user-configured and must not be
+  // auto-approved.
+  string text = 1;
+}
+// The argument-preview element.
+message FeedPermissionArguments {
+  // The composed lines, in order, drawn verbatim.
+  repeated string lines = 1;
+}
+// The always-allow affordance marker. Empty: presence is the fact.
+message FeedPermissionStandingOffered {}
+// Open: awaiting the user. Empty — the card's chrome says waiting; how long
+// is the row's own clock concern (drawn from arrival, client-side).
+message FeedPermissionOpen {}
+// Answered: how, and when.
+message FeedPermissionAnswered {
+  // When the answer landed, epoch ms.
+  int64 at_ms = 1;
+  // The verdict line's treatment. A DENIAL IS AN ANSWER, not an error.
+  oneof answer {
+    // Allowed for this call alone.
+    FeedPermissionAllowedOnce allowed_once = 2;
+    // Allowed with standing — the vendor stops asking for this form.
+    FeedPermissionAllowedStanding allowed_standing = 3;
+    // The user said no; the agent proceeds without the call.
+    FeedPermissionDeniedByUser denied_by_user = 4;
+    // Policy said no with NO open ask (a rule, dontAsk); worded so it never
+    // reads as the user's act.
+    FeedPermissionDeniedByPolicy denied_by_policy = 5;
+    // Nobody could decide: the classifier reached no verdict and no rule
+    // applied, so the call was denied for want of a decider (landing 10).
+    // Distinct from a rule's deny, and never the user's act.
+    FeedPermissionDeniedUndecidable denied_undecidable = 6;
+  }
+}
+// The undecidable denial's composed wording.
+message FeedPermissionDeniedUndecidable {
+  // The reason, drawn verbatim ("denied for want of a decider").
+  string text = 1;
+}
+message FeedPermissionAllowedOnce {}
+message FeedPermissionAllowedStanding {}
+message FeedPermissionDeniedByUser {}
+// The policy denial's composed wording.
+message FeedPermissionDeniedByPolicy {
+  // The reason, drawn verbatim ("denied by rule").
+  string text = 1;
+}
+// The ask went away unanswered — the turn ended, the session stopped.
+message FeedPermissionAbandoned {
+  // When it went away, epoch ms.
+  int64 at_ms = 1;
+}
+
+// The question card: the turn blocked on a choice the agent posed — a batch
+// of one to four questions, radios or checkboxes per question. Answers are
+// an agentrepl verb echoing this row's FeedId plus the SERVED VALUES
+// (question text, option labels — the echo-the-value convention); the
+// card's state change arrives as this row's re-push. The free-text "Other"
+// escape is ALWAYS drawn, whether or not the agent asked for one.
+message FeedQuestion {
+  // The questions, in the batch's order (one to four).
+  repeated FeedQuestionItem questions = 1;
+  // The ask's state.
+  oneof state {
+    FeedQuestionOpen open = 2;
+    FeedQuestionAnswered answered = 3;
+    FeedQuestionExpired expired = 4;
+  }
+}
+// One question of the batch.
+message FeedQuestionItem {
+  // The question's short chip label ("Auth method").
+  FeedQuestionHeader header = 1;
+  // The question text — also the ECHO VALUE the answer names the question
+  // by, so it is drawn AND handed back verbatim.
+  FeedQuestionText text = 2;
+  // THE ARM IS THE SELECTION MODE: radios or checkboxes. Per question,
+  // because one batch can mix them.
+  oneof options {
+    FeedQuestionSingleSelect single_select = 3;
+    FeedQuestionMultiSelect multi_select = 4;
+  }
+}
+// The chip element.
+message FeedQuestionHeader {
+  // The chip text, drawn verbatim.
+  string text = 1;
+}
+// The question-text element.
+message FeedQuestionText {
+  // The text, drawn verbatim and echoed verbatim.
+  string text = 1;
+}
+// Radios: pick exactly one.
+message FeedQuestionSingleSelect {
+  // The options, in order.
+  repeated FeedQuestionOption options = 1;
+}
+// Checkboxes: tick any number — where an "at most N" cap lands later.
+message FeedQuestionMultiSelect {
+  // The options, in order.
+  repeated FeedQuestionOption options = 1;
+}
+// One option.
+message FeedQuestionOption {
+  // The option's label — drawn, and the ECHO VALUE a selection hands back.
+  FeedQuestionOptionLabel label = 1;
+  // The explanatory line under the label. UNSET when the agent gave none.
+  optional FeedQuestionOptionDescription description = 2;
+}
+// The label element.
+message FeedQuestionOptionLabel {
+  // The label, drawn verbatim and echoed verbatim.
+  string text = 1;
+}
+// The description element.
+message FeedQuestionOptionDescription {
+  // The description, drawn verbatim.
+  string text = 1;
+}
+// Open: awaiting the user's choices.
+message FeedQuestionOpen {}
+// Answered: what was given, per question, drawn as the verdict lines. The
+// answers ride the row because the settled card is drawn from the row alone
+// — a cold repaint has nothing else to draw the choices from.
+message FeedQuestionAnswered {
+  // When the answers landed, epoch ms.
+  int64 at_ms = 1;
+  // One per question, in the batch's order.
+  repeated FeedQuestionGivenAnswer answers = 2;
+}
+// One question's given answer.
+message FeedQuestionGivenAnswer {
+  // The question's chip, repeated here so the verdict line stands alone.
+  FeedQuestionHeader header = 1;
+  // The chosen labels, in choice order. Empty when the answer was free
+  // text alone.
+  repeated string chosen = 2;
+  // The free-text answer or note, when one was typed.
+  optional FeedQuestionOtherText other_text = 3;
+}
+// The free-text element.
+message FeedQuestionOtherText {
+  // The text, drawn verbatim.
+  string text = 1;
+}
+// The ask expired unanswered (the producer's idle timeout) — the agent
+// proceeded without a choice; drawn as expired, never as pending forever.
+message FeedQuestionExpired {
+  // When it expired, epoch ms.
+  int64 at_ms = 1;
+}
+
+// ① What a person typed — or, nested inside a detached bubble, the prompt
+// that work was given. The daemon resolves the row: the author label, and the
+// blocks the person composed, in order.
+//
+//   │  You  ▏fix the flaky reconnect test      │
+//   │       ▏[image: screenshot.png]           │
+//         author  body (blocks: text · image · unsupported)
+message FeedUserPrompt {
+  // The author label ("You" — or the spawning agent's name under a bubble).
+  FeedUserPromptAuthor author = 1;
+  // ONE ARM: a user row is never in flight and never fails.
+  oneof result {
+    FeedUserPromptSuccess success = 2;
+  }
+}
+
+// The row's content.
+message FeedUserPromptSuccess {
+  // The blocks the person composed.
+  FeedUserPromptBody body = 1;
+}
+
+// The author label of a user row.
+message FeedUserPromptAuthor {
+  string label = 1;
+}
+
+// The blocks the person composed, in order, resolved for drawing.
+message FeedUserPromptBody {
+  repeated FeedUserPromptBlock blocks = 1;
+}
+
+// One drawn block of a user row.
+message FeedUserPromptBlock {
+  oneof block {
+    FeedTextBlock text = 1;
+    FeedImageBlock image = 2;
+    FeedUnsupportedBlock unsupported = 3;
+  }
+}
+
+// ---- the feed's drawn block vocabulary, shared by every row kind in this
+// ---- file that draws content blocks --------------------------------------
+
+// Text, drawn as markdown.
+message FeedTextBlock {
+  string text = 1;
+}
+
+// An image the webview can fetch. The daemon RESOLVES the record's reference
+// (a host path, or a URL) into a `src` a browser can load — that resolution
+// is the daemon's, never the client's.
+message FeedImageBlock {
+  string src = 1;
+  // Alt text, resolved (a filename, a caption); may be empty.
+  string alt = 2;
+}
+
+// A block the schema does not model, drawn as "unsupported block: <kind>".
+// The raw stays in the record; the row never carries it.
+message FeedUnsupportedBlock {
+  string kind = 1;
+}
+
+// ①b A prompt one agent addressed to another — the user kind's sibling,
+// drawn as a prompt bubble with an ORANGE BORDER. ONE component, both ends:
+// on the sender's feed it is the outgoing send, on the recipient's the
+// delivered prompt; only the address line differs, and the daemon composes
+// it for whichever feed it resolves.
+message FeedAgentPrompt {
+  // The address line — "→ Explore" on the sender's feed, "from Plan" on
+  // the recipient's. Daemon-composed, drawn verbatim.
+  FeedAgentPromptAddress address = 1;
+  // The prompt's content, in composed order — the feed's shared drawn
+  // block vocabulary. Long bodies fold/cap as client presentation, like
+  // any long prompt.
+  FeedAgentPromptBody body = 2;
+  // How the send FARED, when the producer stated it (landing 10; the refusal
+  // arm, landing 14). UNSET on the recipient's copy and when the producer
+  // observed nothing; the row's presence already says the attempt happened.
+  oneof delivery {
+    // The recipient was already running; the message queued for it.
+    FeedAgentPromptQueuedToLive queued_to_live = 3;
+    // The recipient was not running and WAS RESUMED to receive it — the
+    // cause of that agent's renewed activity and renewed cost.
+    FeedAgentPromptResumedRecipient resumed_recipient = 4;
+    // The send was REFUSED: it reached nobody and never will.
+    //
+    // WHY THIS ARM EXISTS — A REFUSAL IS NOT AN ABSENCE. Without it the two
+    // landing arms are the whole vocabulary, so a refused send is drawn
+    // exactly as one whose producer merely stated nothing, and a reader is
+    // left to assume a message is still on its way to an agent that will
+    // never receive it. The conversation tier has carried this fact from the
+    // start (AgentSendMessage.failure); this is where it reaches a surface.
+    FeedAgentPromptRefused refused = 5;
+  }
+}
+message FeedAgentPromptQueuedToLive {}
+message FeedAgentPromptResumedRecipient {}
+// The send was refused. Nothing is implied about a retry: the row records the
+// attempt and its refusal, and no more.
+message FeedAgentPromptRefused {
+  // WHY the producer refused, resolved for drawing.
+  //
+  // A REASON AND NO KIND, because a reason is all the producer has. The
+  // vendor answers a refused send with `success: false` and a sentence
+  // written for the model to read; it declares no refusal code, and the
+  // distinction between a recipient the user stopped and one that never
+  // existed lives only inside that sentence. Recovering it would mean parsing
+  // prose, so this states the fact that is structurally available and no more
+  // — the rule FeedAgentPromptResumedRecipient's own sibling follows.
+  //
+  // UNSET when the producer observed a refusal carrying no content at all,
+  // which happens: the ARM is the refusal, the reason is only its detail.
+  optional FeedAgentPromptRefusalReason reason = 1;
+}
+// The refusal reason element.
+message FeedAgentPromptRefusalReason {
+  // The producer's own words, drawn verbatim.
+  string text = 1;
+}
+// The address element.
+message FeedAgentPromptAddress {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// The body element.
+message FeedAgentPromptBody {
+  // The blocks, in order.
+  repeated FeedAgentPromptBlock blocks = 1;
+}
+// One block of the prompt; the arm is what it is (the shared vocabulary).
+message FeedAgentPromptBlock {
+  oneof block {
+    FeedTextBlock text = 1;
+    FeedImageBlock image = 2;
+    FeedUnsupportedBlock unsupported = 3;
+  }
+}
+
+// ==========================================================================
+// THE COLD-CONTEXT GATE — a row beside the meta kinds. DATA, not prose: the
+// daemon relays the shim's SessionCold facts and the client owns the
+// wording, the formatting and the ticking (a deliberate departure from the
+// daemon-formats precedent, because the gate's facts are raw counts and
+// instants rather than resolved presentation).
+// ==========================================================================
+
+// The cold-context gate row.
+message FeedColdGate {
+  oneof state {
+    // Awaiting the user's choice; the composer is this gate's.
+    FeedColdGateStanding standing = 1;
+    // Chosen; drawn as the one-line trace of what was done.
+    FeedColdGateResolved resolved = 2;
+  }
+}
+// The standing gate's facts.
+message FeedColdGateStanding {
+  // How much context the resume would re-read at full price. Raw count;
+  // the client formats.
+  FeedColdGateContextTokens context_tokens = 1;
+  // When the session last spoke to the vendor — the client derives and
+  // ticks "lapsed 2h ago" from it.
+  FeedColdGateLastRequest last_request = 2;
+  // The session's model — what the re-read would run on.
+  FeedColdGateModel model = 3;
+  // The compact submenu: summarizers and the offered compaction types.
+  FeedColdGateCompactMenu compact = 4;
+}
+// The token-figure element.
+message FeedColdGateContextTokens {
+  // The count, raw.
+  int64 tokens = 1;
+}
+// The lapse element.
+message FeedColdGateLastRequest {
+  // Epoch ms of the last vendor request.
+  int64 at_ms = 1;
+}
+// The model element.
+message FeedColdGateModel {
+  // The typed identity, imported; the client draws its name.
+  conversation.v1.AgentModel model = 1;
+}
+// The compact submenu.
+message FeedColdGateCompactMenu {
+  // The summarizer choices, in display order — echo tokens.
+  repeated FeedColdGateModelOption models = 1;
+  // The offered compaction types, in display order (normally all three).
+  // The answer verb's scope must be one of these served values.
+  repeated conversation.v1.SessionCompactScope scopes = 2;
+}
+// One offered summarizer.
+message FeedColdGateModelOption {
+  // The token: served here, echoed verbatim by the answer's compact arm.
+  conversation.v1.AgentModel model = 1;
+}
+// The resolved trace: which remediation was chosen, and when.
+message FeedColdGateResolved {
+  // When the choice landed, epoch ms.
+  int64 at_ms = 1;
+  // Which remediation.
+  oneof choice {
+    FeedColdGateResolvedPay pay = 2;
+    FeedColdGateResolvedClear clear = 3;
+    FeedColdGateResolvedCompact compact = 4;
+  }
+}
+// Paid the cold read.
+message FeedColdGateResolvedPay {}
+// Cleared the context.
+message FeedColdGateResolvedClear {}
+// Compacted first.
+message FeedColdGateResolvedCompact {
+  // The summarizer that wrote it.
+  FeedColdGateModel model = 1;
+  // What was summarized — the scope the user chose, drawn on the trace.
+  conversation.v1.SessionCompactScope scope = 2;
+}
+
+// ⑤ THE SESSION-SEPARATION DIVIDER — the session changed shape or place
+// here, and a reader scrolling back must see where. Context cuts are drawn
+// from conversation.v1.ContextCut; worktree moves from AgentWorktree's
+// settled arms.
+//
+// STRUCTURAL INVARIANT FOR THE IMPLEMENTATION: ONE renderer subroutine
+// draws EVERY arm — the same rule (thickness, width, geometry) with the
+// label under it; an arm selects only its ACCENT COLOR (context arms keep
+// the existing treatment, worktree arms are BLUE) and its label/payload
+// text. A per-arm divider renderer is a defect, not a variation.
+message FeedSessionSeparation {
+  // The divider's label ("context compacted", "entered worktree …"),
+  // composed by the daemon, drawn under the rule.
+  FeedSessionSeparationLabel label = 1;
+  // ONE LEVEL: a separation is a recorded fact; it is never in flight (a
+  // compaction that read cold still compacted — see the cold-read notice; a
+  // worktree call that failed is a tool failure, not a divider). The one
+  // failed shape it records is `compaction_failed`: the divider that was
+  // offered (the /compact command, the cold gate's compact remedy) and did
+  // not happen, drawn in the slot the compacted divider would have taken.
+  oneof kind {
+    // The conversation was discarded outright.
+    FeedContextCutCleared cleared = 2;
+    // The conversation was compressed into a summary.
+    FeedContextCutCompacted compacted = 3;
+    // The session moved INTO an isolated git worktree.
+    FeedWorktreeEntered worktree_entered = 4;
+    // The session RETURNED from the worktree.
+    FeedWorktreeLeft worktree_left = 5;
+    // A compaction was attempted and FAILED; nothing was cut and the context
+    // is as it was (conversation.v1.ContextCompactionFailed relayed). `tokens`
+    // is UNSET. (Landing 8, 2026-09-02, user-approved.)
+    FeedContextCutCompactionFailed compaction_failed = 7;
+  }
+  // What the cut did to the context's size, drawn on the divider — SET ON
+  // THE CONTEXT ARMS ONLY (every cut has one; even a clear reloads the
+  // system prompt, skills and memory, so the after side is small rather
+  // than zero). UNSET on the worktree arms, which change no context.
+  optional FeedContextCutTokens tokens = 6;
+}
+
+// The divider's label, verbatim.
+message FeedSessionSeparationLabel {
+  string text = 1;
+}
+
+// The size change the divider draws, as "180k → 12k". Both sides are already
+// formatted by the daemon; the client renders them verbatim and does no
+// arithmetic and no unit rounding of its own.
+message FeedContextCutTokens {
+  // Tokens in context immediately before the cut, formatted for display.
+  string before_text = 1;
+  // Tokens in context immediately after the cut, formatted for display.
+  string after_text = 2;
+}
+
+// The history was discarded outright, with nothing left in its place — the
+// divider has nothing to expand.
+message FeedContextCutCleared {}
+
+// The history was COMPRESSED: what came before was replaced by the agent's
+// own condensed rendering of it, which the divider draws folded so the cut is
+// not a hole in the conversation.
+message FeedContextCutCompacted {
+  FeedContextCutSummary summary = 1;
+  FeedContextCutFold fold = 2;
+  // Set when the compaction re-read the whole conversation at the uncached
+  // rate — the cost compaction exists to avoid. A NOTICE on a compaction
+  // that happened, not a failure of it; drawn as a warning on the divider.
+  optional FeedContextCutColdRead cold_read = 3;
+}
+// The compaction read cold; the evidence, imported whole from failure.proto.
+message FeedContextCutColdRead {
+  FailureCompactionColdRead evidence = 1;
+}
+
+// The compression of the preceding conversation, drawn as markdown.
+message FeedContextCutSummary {
+  string markdown = 1;
+}
+
+// Whether the compression is drawn folded.
+message FeedContextCutFold {
+  bool folded = 1;
+}
+
+// The entered-worktree payload.
+message FeedWorktreeEntered {
+  // The worktree's path — drawn on the divider AND a jump target: the click
+  // is HOST-raised through the shared editor-popup subroutine (the plan and
+  // findings mechanism), opening the directory in the popup.
+  FeedWorktreePath path = 1;
+  // The branch checked out in it. UNSET when the vendor named none.
+  optional FeedWorktreeBranch branch = 2;
+}
+// The left-worktree payload.
+message FeedWorktreeLeft {
+  // WHAT BECAME OF THE TREE. The set arm is the outcome, and the two draw
+  // differently: a kept tree is somewhere to go, a removed one may have
+  // taken work with it.
+  oneof outcome {
+    FeedWorktreeKept kept = 1;
+    FeedWorktreeRemoved removed = 2;
+  }
+}
+// The tree is still on disk.
+message FeedWorktreeKept {
+  // Its path — drawn and a jump target, as on the entered divider.
+  FeedWorktreePath path = 1;
+}
+// The tree was removed.
+message FeedWorktreeRemoved {
+  // The composed discard line ("3 files, 2 commits discarded"), drawn LOUD
+  // when anything was discarded. UNSET when the vendor stated no discard —
+  // the divider then draws the label alone.
+  optional FeedWorktreeDiscarded discarded = 1;
+}
+// The discard line element.
+message FeedWorktreeDiscarded {
+  // The composed line, drawn verbatim.
+  string text = 1;
+}
+// A worktree path: drawn, and handed to the editor verbatim on click.
+message FeedWorktreePath {
+  string text = 1;
+}
+// The branch element.
+message FeedWorktreeBranch {
+  // The branch name, drawn verbatim.
+  string text = 1;
+}
+
+// ⑥ A WORKSPACE MERGE, coalesced into ONE bubble. The daemon orchestrates the
+// merge and DECIDES which records belong to it; the vendor knows nothing
+// about any of it. THIS ROW IS THE COLLAPSED HEAD ONLY: the bubble is a
+// SUB-FEED — its own FeedId is the feed address (OpenFeed → WatchFeed,
+// exactly the subagent bubble's mechanics; ONE shared plumbing path, a
+// merge-specific loader is a defect). The bubble's CONTENT rides that
+// sub-feed as FeedMergeTab rows plus, for agentic tabs, ordinary rows
+// parented to their tab. Content is therefore LAZY: a collapsed bubble
+// transfers nothing but this head, and a settled merge pages like any
+// settled bubble.
+//
+//   │ ⇄ merge  DWC/fix-flaky → master           6:31  ● merging  ▾      │
+//   │ ┌───────────────────────────────────────────────────────────────┐ │
+//   │ │ queue ✓ │ rebase ✓ │ tests (2) ● 8/12 │ remediation ⏸       │ │
+//   │ ├───────────────────────────────────────────────────────────────┤ │
+//   │ │  │ ⚙ agent ▏fixing TestReconnect…                            │ │
+//   │ └───────────────────────────────────────────────────────────────┘ │
+message FeedMerge {
+  FeedMergeHead head = 1;
+  // THE ARM IS THE STATE of the merge as a whole — the head's badge. WHAT it
+  // is doing right now is the last tab of the sub-feed, not a field here.
+  oneof result {
+    FeedMergeUpdate update = 2;
+    FeedMergeSuccess success = 3;
+    FeedMergeError error = 4;
+  }
+  // Tag 5 RETIRED (repeated FeedMergePhase phases): the tab strip moved to
+  // the bubble's sub-feed as FeedMergeTab rows.
+  reserved 5;
+}
+
+// The bubble's head line: the constant props.
+message FeedMergeHead {
+  FeedMergeGlyph glyph = 1;
+  FeedMergeLabel label = 2;
+  FeedMergeRuntime runtime = 3;
+  FeedMergeFold fold = 4;
+}
+
+// The kind glyph, a name from the shared vocabulary ("merge").
+message FeedMergeGlyph {
+  string icon = 1;
+}
+
+// The branch line, resolved ("DWC/fix-flaky-test → master").
+message FeedMergeLabel {
+  string text = 1;
+}
+
+// When the merge was enqueued — the head's running clock while live.
+message FeedMergeRuntime {
+  int64 started_at_ms = 1;
+}
+
+// Still in the queue or still merging.
+message FeedMergeUpdate {}
+
+// It landed: when, and the commit it produced. `ended_at_ms` lives on the
+// terminal arms because it means nothing while live.
+message FeedMergeSuccess {
+  int64 ended_at_ms = 1;
+  string commit = 2;
+}
+
+// It did not land: when, and why. THE ARM IS WHY.
+message FeedMergeError {
+  int64 ended_at_ms = 1;
+  oneof reason {
+    FeedMergeFailed failed = 2;
+    FeedMergeAbandoned abandoned = 3;
+  }
+}
+// The run gave up; a resolved sentence for the collapsed line.
+message FeedMergeFailed {
+  string summary = 1;
+}
+// Taken off the queue before it ever reached the front; a resolved sentence
+// for the collapsed line, as `failed` carries — the cause (user pause and
+// drop, workspace closed, daemon shutdown) otherwise survives only in the
+// daemon's log. (summary: landing 7, 2026-09-02.)
+message FeedMergeAbandoned {
+  string summary = 1;
+}
+
+// The failed-compaction divider. The producer's account, verbatim, is the
+// only evidence anyone has; the daemon composes the label.
+message FeedContextCutCompactionFailed {
+  string error = 1;
+}
+
+// The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
+message FeedMergeFold {
+  bool folded = 1;
+}
+
+// THE TAB FAMILY — one row per drawn tab of a merge bubble's sub-feed.
+// TWO TAB SHAPES: RESOLVED tabs (queue, merge, tests) carry their
+// content in this row, replaced whole per push; AGENTIC tabs
+// (pre_prompt, conflicts, fixes, post_prompt) are containers — their
+// content is the sub-feed rows parented to this row (the lease session's
+// conversation, routed by the daemon's output address). Tabs are
+// APPEND-ONLY and CONDITIONAL: a tab appears BECAUSE that work began —
+// no conflicts means no conflicts tab, no test failures means no fixes
+// tab, an unconfigured prompt means no prompt tab — and a tab never
+// reopens: a second round is a SECOND TAB with the round in its label
+// ("tests (2)"). The Emacs-repo run is queue | pre-prompt | merge |
+// conflicts | tests | fixes | post-prompt; every other repo's run is
+// queue | pre-prompt | post-prompt (landing, tests and PR work are the
+// prompts' job there).
+//
+// EACH KIND OWNS ITS STATE oneof, declaring exactly the states legal for
+// it: PARKED (stopped, awaiting the user's guidance) exists ONLY on
+// conflicts and fixes — the two loops with a give-up-to-human path; the
+// prompt tabs cannot park (pre-prompt failure fails the run, post-prompt
+// failure rides the terminal), and resolved tabs never can. The leaf
+// payloads (live, parked line, settled outcome) are SHARED messages
+// across the per-kind oneofs — one badge vocabulary, legality carried by
+// the oneof types.
+message FeedMergeTab {
+  FeedMergeTabLabel label = 1;
+  oneof kind {
+    FeedMergeTabQueue queue = 2;
+    FeedMergeTabPrePrompt pre_prompt = 3;
+    FeedMergeTabMerge merge = 4;
+    FeedMergeTabConflicts conflicts = 5;
+    FeedMergeTabTests tests = 6;
+    FeedMergeTabFixes fixes = 7;
+    FeedMergeTabPostPrompt post_prompt = 8;
+  }
+}
+
+// The tab's drawn label, resolved by the daemon.
+message FeedMergeTabLabel {
+  // The tab's word ("queue", "rebase", "tests", the action's name).
+  string text = 1;
+  // The 1-based round; the client decorates rounds beyond the first
+  // ("tests (2)") and draws nothing for round 1.
+  uint32 round = 2;
+}
+
+// SHARED STATE LEAVES — the badge vocabulary every kind's oneof selects
+// from.
+message FeedMergeTabLive {}
+// An agentic tab awaiting the USER: the resolution agent exhausted its
+// attempt and the merge parked. The composer is open (the host stream's
+// merge_parked arm); everything the user types while parked is delivered
+// to this tab's agent as guidance and lands here as ordinary rows.
+message FeedMergeTabParked {
+  // The daemon-composed standing line ("parked for your input — 2
+  // conflicts remain in daemon/server.go").
+  FeedMergeTabParkedLine line = 1;
+}
+message FeedMergeTabParkedLine {
+  string text = 1;
+}
+message FeedMergeTabSettled {
+  // When the tab settled, epoch ms.
+  int64 ended_at_ms = 1;
+  oneof outcome {
+    FeedMergeTabSucceeded succeeded = 2;
+    FeedMergeTabFailed failed = 3;
+  }
+}
+message FeedMergeTabSucceeded {}
+message FeedMergeTabFailed {
+  // The daemon-composed one-line account; the tab's own content carries
+  // the detail.
+  string summary = 1;
+}
+
+// RESOLVED: the repo queue as it stands, replaced whole on every queue
+// change and on any change to the front's active tab. Settles (succeeded)
+// when this merge reaches the front; failed covers eviction while queued.
+message FeedMergeTabQueue {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  FeedMergeQueue queue = 3;
+}
+
+// AGENTIC: the configured --before-ws-merge prompt running the
+// workspace's session under the lease. Absent unless configured; its
+// failure FAILS THE RUN. Content: sub-feed rows parented to this row.
+message FeedMergeTabPrePrompt {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+}
+
+// RESOLVED: the landing itself — a NO-FF MERGE COMMIT onto the default
+// branch (one commit to apply, one to revert), narrated thin as
+// daemon-composed lines. Replaced whole per push. A conflict during it
+// opens the conflicts tab; the commit completes there.
+message FeedMergeTabMerge {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  repeated FeedMergeMergeLine lines = 3;
+}
+message FeedMergeMergeLine {
+  // One daemon-composed narration line ("merged 4 commits · a1b2c3d").
+  string text = 1;
+}
+
+// AGENTIC: conflict resolution for the merge step's conflicts. Absent
+// unless the merge conflicted; parks when the agent exhausts its one
+// attempt per conflict. Content: sub-feed rows parented to this row.
+message FeedMergeTabConflicts {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabParked parked = 2;
+    FeedMergeTabSettled settled = 3;
+  }
+}
+
+// RESOLVED: the programmatic test run — suites, progress, and COLORED
+// output. Replaced whole per push.
+message FeedMergeTabTests {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+  repeated FeedMergeTestSuite suites = 3;
+}
+message FeedMergeTestSuite {
+  // The suite's name, verbatim.
+  string name = 1;
+  oneof state {
+    FeedMergeTestSuiteRunning running = 2;
+    FeedMergeTestSuitePassed passed = 3;
+    FeedMergeTestSuiteFailed failed = 4;
+  }
+  // The suite's capped output as DAEMON-RESOLVED COLORED SPANS: the
+  // daemon parses the terminal's ANSI escapes and ships paint classes;
+  // the client paints classes and never parses escapes (the code-span
+  // precedent, this component's own wrapper).
+  repeated FeedMergeTestSpan output = 5;
+}
+message FeedMergeTestSuiteRunning {}
+message FeedMergeTestSuitePassed {}
+message FeedMergeTestSuiteFailed {}
+message FeedMergeTestSpan {
+  string text = 1;
+  // A paint-class name from the shared render vocabulary; empty = plain.
+  string paint_class = 2;
+}
+
+// AGENTIC: test-failure fixes. Absent unless a tests tab failed; parks
+// when the remediation loop escalates to the user. Content: sub-feed
+// rows parented to this row. A round that fixes and re-tests produces
+// "tests (2)", never a reopened tab.
+message FeedMergeTabFixes {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabParked parked = 2;
+    FeedMergeTabSettled settled = 3;
+  }
+}
+
+// AGENTIC: the configured --post-processing-prompt running the
+// workspace's session under the lease. Absent unless configured; its
+// failure never fails the run (it rides the terminal). Content: sub-feed
+// rows parented to this row.
+message FeedMergeTabPostPrompt {
+  oneof state {
+    FeedMergeTabLive live = 1;
+    FeedMergeTabSettled settled = 2;
+  }
+}
+
+// The repo queue snapshot the queue tab draws: who is ahead, this
+// workspace, who is behind — structural, so "you are here" is never
+// derived by comparing ids. The head workspace is shown NOTHING about the
+// queue (its bubble is busy merging).
+message FeedMergeQueue {
+  // The entries ahead, front first.
+  repeated FeedMergeQueueEntry ahead = 1;
+  // This workspace's own entry.
+  FeedMergeQueueEntry current = 2;
+  // The entries behind, nearest first.
+  repeated FeedMergeQueueEntry behind = 3;
+}
+message FeedMergeQueueEntry {
+  FeedMergeQueueWorkspace workspace = 1;
+  FeedMergeQueueLabel label = 2;
+  // THE ARM IS THE ENTRY'S STANDING.
+  oneof status {
+    FeedMergeQueueMerging merging = 3;
+    FeedMergeQueueWaiting waiting = 4;
+  }
+}
+// The entry's workspace, a jump target across workspaces.
+message FeedMergeQueueWorkspace {
+  workspace.v1.WorkspaceRef ref = 1;
+}
+// The entry's drawn name, resolved by the daemon.
+message FeedMergeQueueLabel {
+  string text = 1;
+}
+// The FRONT entry only: what its run is doing right now — the front's
+// active tab label, the SAME message its own bubble draws, imported never
+// respelled, so a waiting user sees the front's progress.
+message FeedMergeQueueMerging {
+  FeedMergeTabLabel active_tab = 1;
+}
+message FeedMergeQueueWaiting {}
+
+// ==========================================================================
+// PENDING — old bodies, verbatim, judged one kind at a time.
+// ==========================================================================

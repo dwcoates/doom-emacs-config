@@ -1,0 +1,282 @@
+// endpoint_watch_host_workspace.proto — WatchHostWorkspace: the host-facing
+// view of ONE workspace. HOST section. Emacs opens one subscription per
+// workspace it has open; the daemon streams that workspace's host state,
+// whole-replaced per push. NOT DRAWN (the exempt non-GUI residue): Emacs
+// uses it to correlate processes, gate its composer, and manage buffers —
+// rendering fixed treatments per arm, never mapping values.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message WatchHostWorkspaceRequest {
+  // The workspace whose host state to watch — the daemon-minted identity,
+  // echoed from registration or the roster.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message WatchHostWorkspaceResponse {
+  oneof push {
+    // The workspace's host state, whole-replaced per push.
+    HostWorkspace host = 1;
+    // A notification EVENT for this workspace — fired, not state. EMACS
+    // OWNS PRESENTATION POLICY, because Emacs owns the knowledge:
+    //   Emacs unfocused           → post the OS desktop notification; its
+    //                               click raises the frame and selects this
+    //                               workspace's tab (plain elisp, no daemon
+    //                               round-trip);
+    //   focused, tab not selected → blink the tab-bar entry, per THE
+    //                               CANONICAL BLINK CADENCE specified on
+    //                               frontend.v1 RosterRowAttention;
+    //   tab selected              → nothing (the footer's activity line
+    //                               already shows it).
+    HostWorkspaceNotification notification = 2;
+    // DAEMON HANDOVER: this workspace has been released by this (old)
+    // daemon at freeness — from this push on, this daemon does NO work for
+    // the workspace. Emacs's obligation: call AdoptHostWorkspace on the NEW
+    // daemon's connection (address from WatchDaemon's shutdown
+    // announcement), then CANCEL this stream and re-subscribe there. The
+    // stream stays standing until the client cancels — this arm is a push,
+    // never a terminal frame.
+    HostWorkspaceTransferred transferred = 3;
+    // WEBAPP-ONLY ROLLOUT: rebuilt webapp assets are deployed and Emacs
+    // must reload this workspace's xwidget against the SAME daemon. Empty
+    // by design: no address rides it (the daemon is not changing), and a
+    // combined daemon+webapp rollout never sends it — the handover's fresh
+    // attach pulls the new assets as a side effect. The reloaded webview's
+    // default first-page load is the whole of the recovery.
+    HostWorkspaceReloadWebapp reload_webapp = 4;
+    // A HOST-RAISED CLICK relayed from the webview (OpenInEditor): open the
+    // path — at the line when given, dired for a directory — through the ONE
+    // shared editor-popup subroutine (right side, half width). A fact, not a
+    // command: nothing acks it.
+    HostOpenInEditor open_in_editor = 5;
+  }
+}
+
+// The relayed click's target, verbatim from the request.
+message HostOpenInEditor {
+  // The path on this host.
+  string path = 1;
+  // The 1-indexed line. UNSET = the file's top (or a directory).
+  optional uint32 line = 2;
+}
+
+message HostWorkspaceTransferred {}
+message HostWorkspaceReloadWebapp {}
+
+// A notification for this workspace's user. THE KIND IS TYPED — the
+// composed text is presentation; the kind arm is the programmatic
+// semantics.
+message HostWorkspaceNotification {
+  // The composed line, verbatim (agent-authored or daemon-composed).
+  string text = 1;
+  // When it fired, epoch ms.
+  int64 at_ms = 2;
+  // THE ARM IS THE KIND.
+  HostNotificationKind kind = 3;
+}
+
+// THE ARM IS THE KIND of notification.
+message HostNotificationKind {
+  oneof kind {
+    HostNotificationAgentAddressed agent_addressed = 1;
+    HostNotificationPermissionRequested permission_requested = 2;
+    // A question batch arrived and blocks the agent — the same attention
+    // treatment as a permission ask; the daemon also sets the attention
+    // marker.
+    HostNotificationQuestionAsked question_asked = 3;
+  }
+}
+
+// A question blocks the agent on the user's choice.
+message HostNotificationQuestionAsked {
+  // The first question's chip label, for the banner line.
+  string header = 1;
+}
+
+// The agent addressed the user directly.
+message HostNotificationAgentAddressed {
+}
+
+// A permission ask arrived and blocks the agent; the daemon also sets the
+// attention marker. The client's focus policy decides presentation.
+message HostNotificationPermissionRequested {
+  // The gated tool's name, for the banner line.
+  string tool_name = 1;
+}
+
+// The host-facing state of one workspace: what Emacs needs to correlate
+// processes, gate its composer, and manage buffers — nothing a webview draws.
+message HostWorkspace {
+  // The session axis. THE ARM IS WHETHER A SESSION EXISTS; the existing
+  // arm's own oneof is its standing. Everything that only means anything in
+  // one standing lives INSIDE that standing's arm.
+  oneof session {
+    // Registered, but no session was ever created for it.
+    HostSessionNone none = 1;
+    // A session exists (current: live or ended).
+    HostSessionExisting existing = 2;
+  }
+  // What Emacs names the workspace's buffers from — a sibling of the
+  // lifecycle because a buffer needs a name in every standing.
+  HostWorkspaceNaming naming = 3;
+}
+
+message HostSessionNone {}
+
+// A session that exists: its identity, and its standing.
+message HostSessionExisting {
+  // The session's identity — common to every standing, which is why it
+  // lives here rather than repeated per arm. Sessions rotate under one
+  // workspace; this is what distinguishes them, and what Emacs correlates
+  // transcripts, health probes and fault windows against.
+  HostSessionId id = 1;
+  // THE ARM IS THE STANDING.
+  oneof standing {
+    HostSessionLive live = 2;
+    HostSessionTerminal terminal = 3;
+  }
+}
+
+message HostSessionLive {
+  // The controller generation operating the session. Rotates on restart
+  // without the session id changing; fault windows are scoped to it.
+  HostGenerationId generation = 1;
+  // Whether the session's shim process is attached right now. False while
+  // the daemon is between shim starts (crash, restart under way) — what
+  // distinguishes "live but momentarily unwired" from "up".
+  bool shim_attached = 2;
+  // The vendor's own identifiers for the session's conversation. THE ARM IS
+  // THE VENDOR. Unset while no vendor conversation exists yet.
+  oneof vendor_info {
+    HostVendorClaude claude = 3;
+  }
+  // Whether the on-disk transcript has reached the store — the never-blue
+  // signal: a live session whose history never arrived is not ready to show.
+  HostBackfill backfill = 4;
+  // Whether prompting is allowed right now. THE ARM IS THE GATE — only a
+  // LIVE session has an open question here; the other lifecycle arms are
+  // blocked by their own nature, which the arm itself states. Emacs renders
+  // the arm verbatim.
+  oneof composer {
+    HostComposerOpen open = 5;
+    // A merge owns the session (the merge lease).
+    HostComposerMerging merging = 6;
+    // The daemon is draining toward a scheduled shutdown.
+    HostComposerDraining draining = 7;
+    // The workspace's shim is being restarted (graceful RestartWorkspace).
+    HostComposerRestarting restarting = 8;
+    // The merge PARKED for the user's guidance: the composer is OPEN with
+    // context — everything submitted while parked is delivered to the
+    // merge's resolution agent, never refused and never queued as the
+    // session's own turn.
+    HostComposerMergeParked merge_parked = 10;
+  }
+  // Standing faults scoped to `generation`, for doctor output; a fault
+  // window dies with its generation, which is why these live on the LIVE
+  // arm and nowhere else.
+  repeated HostFault faults = 9;
+}
+
+message HostSessionTerminal {
+  // Whether a new session can resume this one's vendor conversation. False
+  // means reopening starts a fresh conversation.
+  bool rehydratable = 1;
+}
+
+
+// A daemon-minted session identity — the echo token Emacs correlates by.
+message HostSessionId {
+  string value = 1;
+}
+
+// A daemon-minted controller-generation identity; rotates on restart within
+// one session. Scopes fault windows and health probes.
+message HostGenerationId {
+  string value = 1;
+}
+
+// The vendor conversation's identifiers, for transcripts and support reports.
+message HostVendorClaude {
+  // The vendor conversation id.
+  string session_id = 1;
+  // The account the session runs against (its CLAUDE_CONFIG_DIR) — which
+  // login this conversation belongs to.
+  string config_dir = 2;
+}
+
+// What Emacs names buffers from. Facts only — their DRAWN home is the
+// topbar's title elements.
+message HostWorkspaceNaming {
+  // The short machine-friendly name ("fix-flaky-reconnect"). UNSET until the
+  // daemon has derived one.
+  optional string slug = 1;
+  // The human title. UNSET until the vendor supplies one.
+  optional string title = 2;
+}
+
+// Whether the on-disk transcript has been backfilled into the store. THE ARM
+// IS THE STATE.
+message HostBackfill {
+  oneof state {
+    // No transcript exists on disk: a genuinely fresh workspace.
+    HostBackfillNone none = 1;
+    // A transcript exists, but no file-plane event has arrived yet.
+    HostBackfillPending pending = 2;
+    // The file plane delivered into the store.
+    HostBackfillDone done = 3;
+    // Part of the transcript could not be read.
+    HostBackfillFailed failed = 4;
+  }
+}
+message HostBackfillNone {}
+message HostBackfillPending {}
+message HostBackfillDone {}
+message HostBackfillFailed {
+  // The sidecar's account, verbatim. (Known evidence gap: a non-parse read
+  // error today manifests as pending-forever, not failed — carried from the
+  // old BackfillState comment, owed to the wave.)
+  string detail = 1;
+}
+
+message HostComposerOpen {}
+message HostComposerMerging {}
+message HostComposerDraining {}
+message HostComposerRestarting {}
+message HostComposerMergeParked {}
+
+// One standing fault — the same kinds SessionHealth's SessionFault carries,
+// the same messages: a session's fault classes do not change because the
+// host stream is what reports them. Kinds derived from the controller's real
+// fault sites (landing 4, 2026-08-29).
+message HostFault {
+  // The dynamic account, verbatim — supplements the kind, never replaces it.
+  string detail = 1;
+  // When the fault window opened, epoch ms.
+  int64 opened_at_ms = 2;
+  oneof kind {
+    // Starting the session's shim failed.
+    SessionFaultShimStartFailed shim_start_failed = 3;
+    // The shim exited while the session was live.
+    SessionFaultShimDied shim_died = 4;
+    // The daemon-shim link was severed.
+    SessionFaultLinkSevered link_severed = 5;
+    // Resuming the vendor session failed.
+    SessionFaultResumeFailed resume_failed = 6;
+    // A bounce's replacement shim died before it came up.
+    SessionFaultBounceDied bounce_died = 7;
+    // A bounce ended in a state the controller cannot name.
+    SessionFaultBounceUnknown bounce_unknown = 8;
+    // The turn classifier failed.
+    SessionFaultClassifierFailed classifier_failed = 9;
+    // A shim-side SessionFault, relayed.
+    SessionFaultShimReported shim_reported = 10;
+  }
+}
+

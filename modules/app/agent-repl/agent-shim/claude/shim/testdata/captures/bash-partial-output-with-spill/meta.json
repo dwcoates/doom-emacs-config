@@ -1,0 +1,28 @@
+{
+  "scenario": "bash-partial-output-with-spill",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `bash chatty.sh` and summarize what it printed.",
+  "prompts": [
+    {
+      "text": "Run `bash chatty.sh` and summarize what it printed.",
+      "resume": false
+    }
+  ],
+  "world": "bash-partial-output-with-spill",
+  "cwd_init": null,
+  "vendor_session_id": "00b7f6f3-034d-4347-8b04-9dbc2cc8c6fc",
+  "manual": null,
+  "expect": [
+    "tool:Bash",
+    "tool_result:bash(truncated)",
+    "file:spool"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-partial-output-with-spill-ZnTk12-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:25.368Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

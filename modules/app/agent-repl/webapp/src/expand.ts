@@ -170,11 +170,6 @@ export function applyExpanded(sections: ArrayLike<Section>, keys: readonly strin
   });
 }
 
-/** The capped sections inside one rendered feed item, in document order. */
-export function sectionsIn(item: HTMLElement): HTMLElement[] {
-  return [...item.querySelectorAll<HTMLElement>(CAPPED_SELECTOR)];
-}
-
 /**
  * True when CARD owns SECTION directly — the section is not a capped box
  * belonging to a child rendered inside an open activity panel. Reveal
@@ -185,17 +180,6 @@ export function ownsSection<
   T extends { parentElement: T | null; classList: ClassTest },
 >(section: T, card: T): boolean {
   return ancestorMatching(section, card, (n) => n.classList.contains(PANEL_CLASS)) === null;
-}
-
-/**
- * Lay out at full length every capped section CARD owns directly (input,
- * progress, output), leaving the sections nested in an open activity
- * panel alone. A section the user later clicks toggles back to its cap.
- */
-export function expandOwnSections(card: HTMLElement): void {
-  for (const section of sectionsIn(card)) {
-    if (ownsSection(section, card)) section.classList.add(EXPANDED_CLASS);
-  }
 }
 
 /**

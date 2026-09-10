@@ -1,0 +1,29 @@
+{
+  "scenario": "cron-create-list-delete",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Create a cron entry that runs every day at 09:00 and says 'capture probe'. Then list the cron entries. Then delete the one you created.",
+  "prompts": [
+    {
+      "text": "Create a cron entry that runs every day at 09:00 and says 'capture probe'. Then list the cron entries. Then delete the one you created.",
+      "resume": false
+    }
+  ],
+  "world": "cron-create-list-delete",
+  "cwd_init": null,
+  "vendor_session_id": "7fe70fc5-ecf0-46ac-8412-f18af9ae52a4",
+  "manual": null,
+  "expect": [
+    "tool:CronCreate",
+    "tool_result:cron_create",
+    "tool:CronList",
+    "tool:CronDelete"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-cron-create-list-delete-mFIPt8-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:24:26.637Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

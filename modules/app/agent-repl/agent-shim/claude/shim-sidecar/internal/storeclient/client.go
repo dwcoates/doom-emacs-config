@@ -1,273 +1,277 @@
-// Package storeclient is the sidecar's UDS client to the shim-store: it recovers
-// cursors plus authoritative open-task lifecycle state (CursorQuery →
-// CursorList), writes StoreWrite batches over a long-lived producer connection
-// (reading each StoreWriteAck), and heartbeats.
+// Package storeclient is the sidecar's Connect client to the store: it recovers
+// file cursors (GetSidecarCursors) and writes record batches (WriteBatch).
+// Those two verbs are the sidecar's WHOLE store surface — the read side
+// (OpenAgentSession/WatchAgentSession/ReadAgentPage/GetWorkflow/GetLiveWork)
+// belongs to the shim and is never called from here.
 //
-// Transport is the system-wide convention (agentrepl/wire WriteAny/ReadAny): a
-// 4-byte length prefix wrapping a serialized google.protobuf.Any whose type_url
-// discriminates the message. The store fixes a connection's role by its FIRST
-// frame, so the producer connection opens with a StoreWrite; cursor recovery uses
-// its own short-lived connection.
+// TRANSPORT. Plain Connect protocol with the binary (protobuf) codec over an
+// http.Transport whose DialContext opens the store's unix socket. Both verbs
+// are unary, so HTTP/1.1 carries them and no h2c upgrade is needed.
 //
-// THE CONNECTION IS NEVER OPENED IMPLICITLY. Connect is the only thing that
-// dials the producer connection, and every operation that needs it fails with
-// ErrNotConnected when it is down. That is deliberate and load-bearing: the
-// sidecar's link state machine (link.go) makes cursor recovery the first act of
-// every established connection, and a connection that sprang into existence
-// under a Write would have skipped that recovery — which is exactly the silent
-// cold start the state machine exists to make unreachable. Redialing is the
-// state machine's job, not this client's.
+// THERE IS NO CONNECTION TO HOLD, AND NO HEALTH VERB TO ASK. The old
+// length-prefixed Any-over-UDS framing, its Subscribe/Ack dial protocol, the
+// ConnectionHeartbeat and the Health probe are all deleted from the contract:
+// streams and the transport own liveness, so LIVENESS IS SIMPLY WHETHER THE
+// LAST RPC WORKED. A client value is therefore always usable; what varies is
+// whether a call succeeds.
 //
-// Sad path (§4.4/§8/§12): a write that cannot reach the store returns an error —
-// it is NEVER spilled or silently retried-forever here. The caller loud-logs the
-// dropped batch and does NOT commit the tailer cursor, so the batch replays on
-// recovery and the store's dedup absorbs the overlap.
+// THE RESPONSE IS ALWAYS READ. Every response is oneof{success|failure}, and a
+// failure is a REFUSAL on a healthy transport rather than a transport error —
+// the two are distinguished because the cycle reacts to both by suspending
+// production but reports them differently. A response carrying neither arm is
+// itself an error: an unset oneof is illegal, never an empty success.
+//
+// Sad path: nothing is buffered and nothing is spilled. A failed WriteBatch
+// means NOTHING was committed, so the caller simply does not advance its
+// cursor and re-reads the same durable bytes from the last committed position.
 package storeclient
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
-	"sync"
+	"net/http"
 	"time"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/logging"
-	"agentrepl/wire"
+	"connectrpc.com/connect"
 )
 
-// ErrNotConnected is returned by every operation needing the producer
-// connection while it is down. Callers distinguish it from a store REJECTION
-// (which arrives on a healthy connection) to decide whether the link is lost.
-var ErrNotConnected = errors.New("storeclient: no producer connection to the store")
+// Producer is the sidecar's fixed WriteBatchRequest producer identity.
+const Producer = "shim-claude-sidecar"
 
-// Client holds the (lazily-opened) producer connection to the store.
+// RPC names, carried in the `rpc` log key so a sidecar record joins against the
+// store's record for the same call.
+const (
+	rpcWriteBatch        = storev1connect.ShimStoreWriteBatchProcedure
+	rpcGetSidecarCursors = storev1connect.ShimStoreGetSidecarCursorsProcedure
+
+	// WriteBatchSite is the `refusal_site` a refused write is reported under.
+	// A caller that states the refusal itself — the cycle parking a file on an
+	// invalid_request — names the same site, so the two records join.
+	WriteBatchSite = rpcWriteBatch
+)
+
+// baseURL is a syntactic requirement of the Connect client: the unix socket is
+// selected by the transport's dialer, so the authority never reaches a network.
+const baseURL = "http://store"
+
+// dialTimeout bounds opening the store socket. A store that is not listening
+// fails immediately; this only bounds a socket that accepts and then stalls.
+const dialTimeout = 5 * time.Second
+
+// RefusalError is a store REFUSAL: the rpc completed and the store answered
+// with its failure arm. It is distinct from a transport error because the store
+// was reachable and said no, which is a different thing to investigate.
+//
+// THE KIND IS THE WHOLE POINT OF THE ARM (endpoint_write_batch.proto): a
+// storage_failure is a transaction that failed and a retry may succeed, while
+// an invalid_request is a batch the store can never accept — retrying the same
+// bytes is a tight identical loop that makes no progress and drowns the log.
+// The caller reacts differently to each, so the kind travels with the error
+// rather than being re-derived from the detail text, which is documented as
+// never switched on.
+type RefusalError struct {
+	RPC    string
+	Detail string
+	// Kind is the failure's oneof arm. It is empty ONLY for a store that sent
+	// no arm at all, which is itself a contract violation (see WriteBatch).
+	Kind RefusalKind
+	// Field is the offending field an invalid_request names, empty otherwise.
+	Field string
+}
+
+// RefusalKind names a WriteBatchFailure's oneof arm.
+type RefusalKind string
+
+const (
+	// RefusalStorageFailure: the transaction failed in the database. A retry may
+	// succeed, so it suspends production and is recovered like any outage.
+	RefusalStorageFailure RefusalKind = "storage_failure"
+	// RefusalInvalidRequest: the batch violated validation. Nothing was
+	// committed and a retry of the same bytes CANNOT help, so it is a producer
+	// defect rather than an outage.
+	RefusalInvalidRequest RefusalKind = "invalid_request"
+	// RefusalKindUnset is a failure carrying neither arm — illegal on this
+	// contract, and treated as a storage failure so the sidecar still recovers.
+	RefusalKindUnset RefusalKind = ""
+)
+
+func (e *RefusalError) Error() string {
+	if e.Kind == RefusalInvalidRequest && e.Field != "" {
+		return fmt.Sprintf("storeclient: store refused %s as invalid_request(field=%s): %s", e.RPC, e.Field, e.Detail)
+	}
+	if e.Kind != RefusalKindUnset {
+		return fmt.Sprintf("storeclient: store refused %s as %s: %s", e.RPC, e.Kind, e.Detail)
+	}
+	return fmt.Sprintf("storeclient: store refused %s: %s", e.RPC, e.Detail)
+}
+
+// IsRefusal reports whether err is a store refusal rather than a transport
+// failure.
+func IsRefusal(err error) bool {
+	var target *RefusalError
+	return errors.As(err, &target)
+}
+
+// InvalidRequest reports whether err is the refusal a RETRY CANNOT HELP WITH,
+// and answers the field the store named. It is what separates the producer
+// defect from the outage at every call site that has to choose.
+func InvalidRequest(err error) (string, bool) {
+	var target *RefusalError
+	if !errors.As(err, &target) || target.Kind != RefusalInvalidRequest {
+		return "", false
+	}
+	return target.Field, true
+}
+
+// Client is the sidecar's store surface. It is safe for concurrent use; the
+// underlying http.Client pools connections to the socket.
 type Client struct {
 	socket string
+	http   *http.Client
+	rpc    storev1connect.ShimStoreClient
 	log    *logging.Bound
-
-	mu   sync.Mutex
-	conn net.Conn
 }
 
-// New builds a Client for the store at socket.
+// New builds a Client for the store listening on socket.
 func New(socket string, log *logging.Bound) *Client {
-	log.With(logging.Context{Operation: "storeclient-new", StoreSocket: socket}).LogVerbose("constructing store client")
-	return &Client{socket: socket, log: log}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "unix", socket)
+		},
+	}
+	httpClient := &http.Client{Transport: transport}
+	log.With(logging.Context{Operation: "storeclient-new", StoreSocket: socket}).
+		LogVerbose("constructing store connect client producer=%s", Producer)
+	return &Client{
+		socket: socket,
+		http:   httpClient,
+		rpc:    storev1connect.NewShimStoreClient(httpClient, baseURL),
+		log:    log,
+	}
 }
 
-// Connect dials the producer connection. It is a no-op when one is already
-// open, and the ONLY thing in this package that dials it.
+// Cursors recovers the sidecar's persisted file cursors. An empty fileID asks
+// for every cursor.
 //
-// The store fixes a connection's role by its first frame, so no frame is sent
-// here: the socket is merely established, and the first Write is what declares
-// this a producer connection.
-func (c *Client) Connect() error {
-	c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).LogVerbose("connect requested")
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).LogVerbose("producer connection already established")
+// AN EMPTY SUCCESS IS THE FRESH-STORE ANSWER and is returned as such: the
+// caller starts every file from zero, honestly. A FAILURE is never softened
+// into that, because taking a refusal for an empty cursor set is exactly the
+// silent re-read of every watched file this client exists to prevent.
+func (c *Client) Cursors(ctx context.Context, fileID string) ([]*storev1.CursorState, error) {
+	bound := c.log.With(logging.Context{
+		Operation: "storeclient-cursors", StoreSocket: c.socket, RPC: rpcGetSidecarCursors, FileID: fileID,
+	})
+	bound.LogVerbose("cursor recovery requested")
+	request := &storev1.GetSidecarCursorsRequest{}
+	if fileID != "" {
+		request.FileId = &fileID
+	}
+	response, err := c.rpc.GetSidecarCursors(ctx, connect.NewRequest(request))
+	if err != nil {
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery transport failure: %v", err)
+		return nil, fmt.Errorf("storeclient: %s: %w", rpcGetSidecarCursors, err)
+	}
+	switch result := response.Msg.GetResult().(type) {
+	case *storev1.GetSidecarCursorsResponse_Success:
+		cursors := result.Success.GetCursors()
+		bound.LogVerbose("cursor recovery succeeded cursors=%d", len(cursors))
+		return cursors, nil
+	case *storev1.GetSidecarCursorsResponse_Failure:
+		refusal := &RefusalError{RPC: rpcGetSidecarCursors, Detail: result.Failure.GetDetail()}
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery refused: %s", refusal.Detail)
+		return nil, refusal
+	default:
+		// An unset oneof is illegal on this contract: it is neither an answer
+		// nor a refusal, so it is raised rather than read as an empty success.
+		bound.With(logging.Context{Level: "error"}).Log("cursor recovery answer carries neither success nor failure")
+		return nil, fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcGetSidecarCursors)
+	}
+}
+
+// WriteBatch writes one batch — the records plus the cursor advance that must
+// become durable WITH them.
+//
+// SUCCESS MEANS DURABLE: records and cursor committed in one transaction, and a
+// replayed batch fully absorbed by write_id is the SAME success arm. FAILURE
+// means nothing was committed, so the caller must not advance; it holds no
+// retry buffer and spills nothing, because its sources are durable files it
+// re-reads from the last committed cursor.
+func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) error {
+	if batch == nil {
+		return errors.New("storeclient: WriteBatch requires a batch")
+	}
+	bound := c.log.With(logging.Context{
+		Operation: "storeclient-write-batch", StoreSocket: c.socket, RPC: rpcWriteBatch, Producer: Producer,
+	})
+	if cursor := batch.GetCursorAdvance(); cursor != nil {
+		bound = bound.With(logging.Context{
+			FileID: cursor.GetFileId(), Path: cursor.GetPath(), Offset: logging.Off(cursor.GetOffset()),
+		})
+	}
+	bound.LogVerbose("write requested entries=%d cursor_advance=%t", len(batch.GetEntries()), batch.GetCursorAdvance() != nil)
+	response, err := c.rpc.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
+		Producer: Producer,
+		Batch:    batch,
+	}))
+	if err != nil {
+		bound.With(logging.Context{Level: "error"}).Log("write transport failure for %d entrie(s): %v", len(batch.GetEntries()), err)
+		return fmt.Errorf("storeclient: %s: %w", rpcWriteBatch, err)
+	}
+	switch result := response.Msg.GetResult().(type) {
+	case *storev1.WriteBatchResponse_Success:
+		bound.LogVerbose("write durable entries=%d", len(batch.GetEntries()))
 		return nil
-	}
-	conn, err := net.Dial("unix", c.socket)
-	if err != nil {
-		return fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
-	}
-	c.conn = conn
-	c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).Log("producer connection established")
-	return nil
-}
-
-// Connected reports whether the producer connection is currently established.
-// It goes false the moment a transport failure drops the connection, which is
-// how the caller tells a dead link from a store that merely rejected a batch.
-func (c *Client) Connected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.conn != nil
-}
-
-// RecoveryState is the store's durable startup snapshot. OpenTasks is the
-// authoritative live-task set: artifact existence is not lifecycle evidence.
-type RecoveryState struct {
-	Cursors   []*corev1.CursorState
-	OpenTasks []*corev1.OpenTaskState
-}
-
-// Recover asks the store for persisted startup state (§7.3). An empty fileID
-// recovers all cursors plus authoritative open tasks. It uses a dedicated
-// short-lived connection (CursorQuery is its own connection role).
-func (c *Client) Recover(fileID string) (RecoveryState, error) {
-	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).LogVerbose("recover requested file_id=%q", fileID)
-	conn, err := net.Dial("unix", c.socket)
-	if err != nil {
-		return RecoveryState{}, fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
-	}
-	defer conn.Close()
-	if err := wire.WriteAny(conn, &corev1.CursorQuery{FileId: fileID}); err != nil {
-		return RecoveryState{}, err
-	}
-	msg, err := wire.ReadAny(conn)
-	if err != nil {
-		return RecoveryState{}, fmt.Errorf("storeclient: reading CursorList: %w", err)
-	}
-	list, ok := msg.(*corev1.CursorList)
-	if !ok {
-		return RecoveryState{}, fmt.Errorf("storeclient: expected CursorList, got %T", msg)
-	}
-	if fileID == "" && !list.GetOpenTasksAuthoritative() {
-		return RecoveryState{}, fmt.Errorf("storeclient: CursorList lacks authoritative open-task state; refusing startup against an incompatible store")
-	}
-	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).LogVerbose("recovered file_id=%q cursors=%d open_tasks=%d authoritative=%t", fileID, len(list.GetCursors()), len(list.GetOpenTasks()), list.GetOpenTasksAuthoritative())
-	return RecoveryState{
-		Cursors:   list.GetCursors(),
-		OpenTasks: list.GetOpenTasks(),
-	}, nil
-}
-
-// RecoverCursors returns only the cursor portion for callers that do not own
-// task liveness.
-func (c *Client) RecoverCursors(fileID string) ([]*corev1.CursorState, error) {
-	recovery, err := c.Recover(fileID)
-	if err != nil {
-		return nil, err
-	}
-	return recovery.Cursors, nil
-}
-
-// Write sends one StoreWrite batch and returns the store's ack. It NEVER dials:
-// a down connection yields ErrNotConnected, because reopening one here would
-// bypass the cursor recovery the link state machine performs on every
-// connection. On any transport error the connection is dropped (so Connected
-// goes false and the state machine redials); the error is returned to the
-// caller, never swallowed.
-func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.StoreWriteAck, error) {
-	eventCount := 0
-	if batch != nil {
-		eventCount = len(batch.GetEvents())
-	}
-	c.log.With(logging.Context{Operation: "storeclient-write", StoreSocket: c.socket, Producer: producer}).LogVerbose("write requested events=%d cursor_advance=%t", eventCount, batch != nil && batch.GetCursorAdvance() != nil)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	conn := c.conn
-	if conn == nil {
-		return nil, ErrNotConnected
-	}
-	if err := wire.WriteAny(conn, &corev1.StoreWrite{Producer: producer, Batch: batch}); err != nil {
-		c.dropConn()
-		return nil, fmt.Errorf("storeclient: sending StoreWrite: %w", err)
-	}
-	msg, err := wire.ReadAny(conn)
-	if err != nil {
-		c.dropConn()
-		return nil, fmt.Errorf("storeclient: reading StoreWriteAck: %w", err)
-	}
-	ack, ok := msg.(*corev1.StoreWriteAck)
-	if !ok {
-		c.dropConn()
-		return nil, fmt.Errorf("storeclient: expected StoreWriteAck, got %T", msg)
-	}
-	if ack.GetError() != "" {
-		// The caller owns the diagnostic because it alone knows whether this
-		// batch belongs to a Claude session. Logging here would leak a
-		// session-owned rejection into the global sidecar file.
-		return ack, fmt.Errorf("storeclient: batch rejected: %s", ack.GetError())
-	}
-	c.log.With(logging.Context{Operation: "storeclient-write", StoreSocket: c.socket, Producer: producer}).LogVerbose("StoreWrite acknowledged events=%d", eventCount)
-	return ack, nil
-}
-
-// Heartbeat sends a liveness ping on the producer connection and waits for the
-// store's echo. A down connection is ErrNotConnected rather than a silent
-// no-op: the caller heartbeats precisely to learn the link is dead, so
-// answering "fine" for a connection that does not exist would hide the outage
-// this ping exists to find.
-func (c *Client) Heartbeat() error {
-	c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket}).LogVerbose("heartbeat requested")
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("heartbeat rejected because producer connection is down")
-		return ErrNotConnected
-	}
-	if err := wire.WriteAny(c.conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
-		c.dropConn()
-		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("Heartbeat send failed: %v", err)
-		return fmt.Errorf("storeclient: sending Heartbeat: %w", err)
-	}
-	if _, err := wire.ReadAny(c.conn); err != nil {
-		c.dropConn()
-		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("heartbeat echo read failed: %v", err)
-		return fmt.Errorf("storeclient: reading Heartbeat echo: %w", err)
-	}
-	return nil
-}
-
-// Health sends a correlated health probe over the recovered producer
-// connection.  Connected only means a file descriptor exists; this method
-// proves the store can parse and answer a protocol frame.  A failed assertion
-// drops the connection so link.go repeats its mandatory recovery before this
-// sidecar reads another file.
-func (c *Client) Health(requestID string) error {
-	c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, RequestID: requestID}).LogVerbose("health requested")
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return ErrNotConnected
-	}
-	if requestID == "" {
-		c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, Level: "error"}).Log("health rejected because request_id is empty")
-		return errors.New("storeclient: health check requires request_id")
-	}
-	if err := wire.WriteAny(c.conn, &corev1.HealthCheck{RequestId: requestID}); err != nil {
-		c.dropConn()
-		return fmt.Errorf("storeclient: sending HealthCheck: %w", err)
-	}
-	msg, err := wire.ReadAny(c.conn)
-	if err != nil {
-		c.dropConn()
-		return fmt.Errorf("storeclient: reading HealthStatus: %w", err)
-	}
-	status, ok := msg.(*corev1.HealthStatus)
-	if !ok {
-		c.dropConn()
-		return fmt.Errorf("storeclient: expected HealthStatus, got %T", msg)
-	}
-	if status.GetRequestId() != requestID {
-		c.dropConn()
-		return fmt.Errorf("storeclient: HealthStatus request_id=%q, want %q", status.GetRequestId(), requestID)
-	}
-	if !status.GetHealthy() {
-		c.dropConn()
-		return fmt.Errorf("storeclient: store health failed: %s", status.GetReason())
-	}
-	c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, RequestID: requestID}).LogVerbose("store reported healthy")
-	return nil
-}
-
-// Close closes the producer connection.
-func (c *Client) Close() error {
-	c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).LogVerbose("close requested")
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		err := c.conn.Close()
-		c.conn = nil
-		if err != nil {
-			c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket, Level: "error"}).Log("producer close failed: %v", err)
-		} else {
-			c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).Log("producer connection closed")
+	case *storev1.WriteBatchResponse_Failure:
+		refusal := writeRefusal(result.Failure)
+		if refusal.Kind == RefusalKindUnset {
+			// AN UNSET ONEOF IS ILLEGAL on this contract. The kind is the arm
+			// that says whether a retry can help, so a store that omits it has
+			// told the producer nothing actionable; that is a CONTRACT
+			// VIOLATION and is stated as one, then treated as the recoverable
+			// kind so the sidecar still tries rather than parking a file on a
+			// verdict the store never actually gave.
+			bound.With(logging.Context{Level: "error"}).Log(
+				"write refused with NO failure kind, which this contract forbids; treating it as %s so recovery still runs: %s",
+				RefusalStorageFailure, refusal.Detail)
+			refusal.Kind = RefusalStorageFailure
+			return refusal
 		}
-		return err
+		// THE SITE RIDES WITH THE KIND. The kind says whether a retry can help;
+		// the site says which call was refused, which is what a reader joins
+		// against the store's own refusal record for this batch.
+		bound.With(logging.Context{
+			Level: "error", RefusalKind: string(refusal.Kind),
+			RefusalSite: rpcWriteBatch, Field: refusal.Field,
+		}).Log(
+			"write refused as %s for %d entrie(s), nothing committed: %s", refusal.Kind, len(batch.GetEntries()), refusal.Detail)
+		return refusal
+	default:
+		bound.With(logging.Context{Level: "error"}).Log("write answer carries neither success nor failure; the batch's durability is unknown")
+		return fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcWriteBatch)
 	}
-	return nil
 }
 
-// dropConn closes and clears the producer connection. Caller holds mu.
-func (c *Client) dropConn() {
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
+// writeRefusal reads a WriteBatchFailure's arm into the typed refusal.
+func writeRefusal(failure *storev1.WriteBatchFailure) *RefusalError {
+	out := &RefusalError{RPC: rpcWriteBatch, Detail: failure.GetDetail()}
+	switch kind := failure.GetKind().(type) {
+	case *storev1.WriteBatchFailure_InvalidRequest:
+		out.Kind = RefusalInvalidRequest
+		out.Field = kind.InvalidRequest.GetField()
+	case *storev1.WriteBatchFailure_StorageFailure:
+		out.Kind = RefusalStorageFailure
 	}
+	return out
+}
+
+// Close releases pooled connections to the store socket. There is no session to
+// tear down: the client holds no store-side state.
+func (c *Client) Close() {
+	c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).LogVerbose("releasing pooled store connections")
+	c.http.CloseIdleConnections()
 }

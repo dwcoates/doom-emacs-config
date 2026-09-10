@@ -8,10 +8,8 @@
  * pointer is in its left- or right-most gutter (EDGE_PX wide). Anywhere
  * else over the section the wheel is redirected to the feed, so
  * scrolling past a section is the default and scrolling the section
- * itself is the deliberate act.
- *
- * installEdgeScroll is the only DOM-facing piece; every decision it
- * makes lives in the pure helpers above it.
+ * itself is the deliberate act. The pure helpers below decide; a DOM-facing
+ * caller wires the decision to real events and elements.
  *
  * The feed's own tail-following metric (isPinnedToBottom) lives here too:
  * it is the other half of the same question of who owns the scroll
@@ -21,21 +19,6 @@ import { ancestorMatching } from "./dom.js";
 
 /** Width of the left/right gutters that arm a section's own scrolling. */
 export const EDGE_PX = 32;
-
-/** Class marking the whole section whose gutters are lit while armed. */
-export const ZONE_CLASS = "scroll-zone";
-
-/** Class marking the armed scroll box itself, which carries the cursor. */
-export const BOX_CLASS = "scroll-zone-box";
-
-/**
- * Classes of the feed's sections: the bordered blocks that hold scroll
- * boxes. A tool card holds up to three (input, progress, output); a
- * permission card holds its preview; a response bubble holds its own
- * height-capped body, and naming the bubble here is what puts the lit
- * gutters on the bubble's edges rather than inset at its body's.
- */
-export const SECTION_CLASSES = ["tool-card", "permission", "bubble"];
 
 /** Slack below which the feed still counts as parked at its tail. */
 export const PIN_PX = 40;
@@ -188,6 +171,28 @@ export function restoreFeedAnchor(
   // ended. `place` moves the pixels and leaves the intent alone.
   tail.place(node.offsetTop - anchor.offsetPx);
   return true;
+}
+
+/**
+ * Did this render put a DIFFERENT item at the feed's top?
+ *
+ * The load-more prepend's whole hazard: a page of older messages lands above
+ * everything the reader is looking at, the feed grows by the height of ten
+ * messages, and without compensation the viewport is left showing content it
+ * was never showing. The reader asked for MORE of what they had, not to be
+ * moved off it.
+ *
+ * A key comparison rather than a height comparison, because height changes for
+ * reasons that are not a prepend at all — a card expanding, a deferred item
+ * settling — and compensating those would move the reader instead. Only the
+ * item AT THE TOP changing says content was inserted above.
+ *
+ * An empty feed on either side answers false: there was no reading position to
+ * preserve, and the caller's own tail rule owns where an empty feed lands.
+ */
+export function feedTopChanged(previousTopKey: string | null, nextTopKey: string | null): boolean {
+  if (previousTopKey === null || nextTopKey === null) return false;
+  return previousTopKey !== nextTopKey;
 }
 
 /**
@@ -406,6 +411,48 @@ export class TailFollow {
   }
 }
 
+/**
+ * Wire a REAL scroll box to its tail owner: the box's own scroll events, and
+ * the box's own size changes.
+ *
+ * THE SIZE HALF IS WHAT KEEPS THE LAST BUBBLE OUT FROM UNDER THE FOOTER.
+ * The progress footer is a flex sibling laid out BELOW the scroll box
+ * (index.html), so the box's height is the window's minus whatever the footer
+ * currently occupies. Every time the footer appears, gains a row, or opens its
+ * panel, the box loses exactly that much height — and losing height moves
+ * nothing on its own: `scrollTop` stays where it was, so the tail the reader
+ * was parked at now sits that many pixels below the fold and the last bubble
+ * is clipped by the footer's top edge. Reserving space would not help, because
+ * the space is already reserved by the layout; what is stale is the POSITION.
+ *
+ * It came and went between otherwise identical runs because it turns entirely
+ * on ORDER: a footer that settles BEFORE the render that parks the tail is
+ * already accounted for, and one that settles after is not. `TailFollow` was
+ * written for exactly this (`onResize`), but nothing in production had ever
+ * subscribed it to anything — the owner only ever heard about renders. This is
+ * the subscription.
+ *
+ * A ResizeObserver reports the box's new size before paint, so a following
+ * feed is re-parked on the settled viewport rather than a frame later; a
+ * reader who scrolled away is left where they are, which is `onResize`'s own
+ * rule and not re-decided here.
+ *
+ * Returns the unsubscriber. A mount that drops it leaks an observer onto an
+ * element the next workspace will mount over.
+ */
+export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void {
+  const observer = new ResizeObserver(() => tail.onResize());
+  const onScroll = (): void => tail.onScroll();
+  tail.observe(
+    () => box.addEventListener("scroll", onScroll, { passive: true }),
+    () => observer.observe(box),
+  );
+  return () => {
+    box.removeEventListener("scroll", onScroll);
+    observer.disconnect();
+  };
+}
+
 /** Where a revealed node lands: flush with the top, or as little as possible. */
 export type RevealBlock = "start" | "nearest";
 
@@ -428,6 +475,119 @@ export interface RevealTarget {
  */
 export function revealNode(node: RevealTarget, block: RevealBlock = "nearest"): void {
   node.scrollIntoView({ block });
+}
+
+/**
+ * The two boxes a reveal compares, in ONE coordinate system.
+ *
+ * Viewport coordinates (what `getBoundingClientRect` answers) rather than
+ * content-relative offsets, because the node whose reveal is asked for sits an
+ * arbitrary number of positioned ancestors below the scroll box — a sub-feed
+ * panel nested inside another bubble's panel — and `offsetTop` would then be
+ * measured against whichever of them happens to be the offset parent. The two
+ * rects are read off the same layout in the same units, so their difference is
+ * a scroll delta and nothing has to be reconstructed.
+ */
+export interface RevealGeometry {
+  /** The scroll box's own top edge. */
+  boxTop: number;
+  /** The scroll box's visible height. */
+  boxHeight: number;
+  /** The revealed node's top edge. */
+  nodeTop: number;
+  /** The revealed node's full height, however far past the fold it runs. */
+  nodeHeight: number;
+}
+
+/**
+ * How far the box must move for NODE to be as visible as it can be, WITHOUT
+ * pushing the node's own top off the viewport.
+ *
+ * This is "expanding a bubble reveals what it expands", as an arithmetic. The
+ * node is the sub-feed panel that just appeared beneath a bubble's head, so:
+ *
+ * - a panel already wholly on screen is not moved at all (0), because a reader
+ *   who can already see what they opened has nothing to be scrolled toward;
+ * - a panel running BELOW the fold is scrolled up by exactly its overhang,
+ *   capped at the panel's distance from the top of the viewport — the cap is
+ *   what keeps the bubble's HEAD where it was, and it binds whenever the panel
+ *   is taller than the viewport, where the best that fits is the panel's own
+ *   top edge flush with the box's;
+ * - a panel above the viewport top (a bubble opened while its head is scrolled
+ *   off) is brought down to it.
+ *
+ * Positive is downward, matching `scrollTop`.
+ */
+export function revealDelta(g: RevealGeometry): number {
+  const boxBottom = g.boxTop + g.boxHeight;
+  const nodeBottom = g.nodeTop + g.nodeHeight;
+  if (g.nodeTop < g.boxTop) return g.nodeTop - g.boxTop;
+  if (nodeBottom <= boxBottom) return 0;
+  return Math.min(nodeBottom - boxBottom, g.nodeTop - g.boxTop);
+}
+
+/** What a reveal needs of the tail owner, and nothing more. */
+export interface RevealWriter {
+  shift(delta: number): void;
+  release(): void;
+}
+
+/**
+ * WHAT A BUBBLE'S CARET DOES TO THE VIEW, as the one thing that may do it.
+ *
+ * Expanding a fold grows the feed BELOW the fold, and growth alone moves
+ * nothing: the reader clicked a caret and the sub-feed it opened unrolled
+ * entirely off the bottom of the screen (measured at the click: `below=208
+ * scrollTop=40`). Revealing what an expansion revealed is therefore part of
+ * expanding, not a separate courtesy — and it goes through the tail owner,
+ * because a second party writing `scrollTop` is exactly the arrangement
+ * `TailFollow` exists to prevent.
+ *
+ * TWO CASES, DECIDED BEFORE THE CLICK IS ACTED ON. A reader following the tail
+ * stays following it: the expansion's new rows are the newest content, so the
+ * tail re-lands and they are at the bottom of it. Anyone else is holding a
+ * place, so the view moves by the least that puts the opened panel on screen
+ * and the follow decision is left alone — `shift` is relative and decides
+ * nothing, which is precisely why it is what a reveal uses.
+ */
+export interface FeedReveal {
+  /** Was the feed following its tail when the caret was clicked? */
+  isFollowing(): boolean;
+  /** Re-land the tail, for a reader who was following it. */
+  park(): void;
+  /** Bring NODE as far into view as fits, for a reader who was not. */
+  reveal(node: HTMLElement): void;
+}
+
+/** Bind a REAL scroll box and its tail owner into the caret's view rule. */
+export function feedReveal(box: HTMLElement, tail: TailFollow): FeedReveal {
+  return {
+    isFollowing: () => tail.isFollowing(),
+    park: () => tail.park(),
+    reveal: (node) => revealInBox(box, node, tail),
+  };
+}
+
+/**
+ * Move BOX so NODE is as visible as it fits, through TAIL.
+ *
+ * `release` first, which is the state this reader is now in whatever the
+ * geometry says: they deliberately opened content to read, so streaming output
+ * arriving into the feed underneath them must not pull the view off it. That is
+ * the sentence `TailFollow.release` was written for, and until this call site
+ * existed nothing in production said it.
+ */
+export function revealInBox(box: HTMLElement, node: HTMLElement, tail: RevealWriter): void {
+  const b = box.getBoundingClientRect();
+  const n = node.getBoundingClientRect();
+  tail.release();
+  const delta = revealDelta({
+    boxTop: b.top,
+    boxHeight: b.height,
+    nodeTop: n.top,
+    nodeHeight: n.height,
+  });
+  if (delta !== 0) tail.shift(delta);
 }
 
 /** True when the element both clips its content and scrolls it vertically. */
@@ -522,62 +682,3 @@ export function sectionFor<T extends { parentElement: T | null }>(
   return box;
 }
 
-const domMetrics = (el: HTMLElement): ScrollMetrics => ({
-  scrollHeight: el.scrollHeight,
-  clientHeight: el.clientHeight,
-  overflowY: getComputedStyle(el).overflowY,
-});
-
-/**
- * Arm edge-gated scrolling on `feed`: a wheel over a section's middle
- * scrolls the feed, a wheel over its gutters scrolls the section.
- * Hovering a gutter marks the enclosing section `.scroll-zone` and the
- * scroll box `.scroll-zone-box`, so the armed state is visible before
- * the wheel turns — the bars on the section, the cursor on the box.
- */
-export function installEdgeScroll(feed: HTMLElement, edgePx: number = EDGE_PX): void {
-  const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
-    innerScrollerAt(target instanceof HTMLElement ? target : null, feed, domMetrics);
-
-  feed.addEventListener(
-    "wheel",
-    (e: WheelEvent) => {
-      const scroller = scrollerUnder(e.target);
-      const delta = wheelAction({
-        scroller: scroller ? scroller.getBoundingClientRect() : null,
-        clientX: e.clientX,
-        deltaY: e.deltaY,
-        deltaMode: e.deltaMode,
-        feedScrollable: feed.scrollHeight - feed.clientHeight > 1,
-        feedHeight: feed.clientHeight,
-        edgePx,
-      });
-      if (delta === null) return;
-      e.preventDefault();
-      // NOT through TailFollow, and deliberately so: this IS the reader's own
-      // wheel, merely redirected off a section onto the feed. The owner reads
-      // it as the gesture it is — up ends the follow, back to the tail resumes
-      // it — which is exactly the treatment a wheel on the feed itself gets.
-      feed.scrollTop += delta;
-    },
-    { capture: true, passive: false },
-  );
-
-  const isSection = (el: HTMLElement): boolean =>
-    SECTION_CLASSES.some((cls) => el.classList.contains(cls));
-
-  let armedBox: HTMLElement | null = null;
-  let armedSection: HTMLElement | null = null;
-  feed.addEventListener("pointermove", (e: PointerEvent) => {
-    const scroller = scrollerUnder(e.target);
-    const hit =
-      scroller && inEdgeZone(scroller.getBoundingClientRect(), e.clientX, edgePx) ? scroller : null;
-    if (hit === armedBox) return;
-    armedBox?.classList.remove(BOX_CLASS);
-    armedSection?.classList.remove(ZONE_CLASS);
-    armedBox = hit;
-    armedSection = hit ? sectionFor(hit, feed, isSection) : null;
-    armedBox?.classList.add(BOX_CLASS);
-    armedSection?.classList.add(ZONE_CLASS);
-  });
-}

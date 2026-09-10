@@ -1,207 +1,170 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-func heldTarget(id string, mod time.Time) HeldTarget {
-	return HeldTarget{Path: "/tmp/claude-501/project/runtime/tasks/" + id + ".output", Root: "/tmp/claude-501", TaskID: id, ModTime: mod}
-}
+func TestUnownedSpoolIsHeldNotTailed(t *testing.T) {
+	// Arrange: a spool nobody has claimed.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
 
-func heldEvidence(mod time.Time, active bool) HeldEvidence {
-	return HeldEvidence{
-		ModTime:         mod,
-		ActiveTaskKnown: true, ActiveTask: active,
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-}
 
-func unresolvedOwner(t HeldTarget) OwnerResolution {
-	return OwnerResolution{TaskID: t.TaskID, OutputPath: t.Path, Outcome: OwnerUnresolvedAwaitingOwner}
-}
-
-func heldLifecycle(t *testing.T) (*HeldLifecycle, *[]HeldLogRecord) {
-	t.Helper()
-	var records []HeldLogRecord
-	return NewHeldLifecycle(2, func(record HeldLogRecord) { records = append(records, record) }), &records
-}
-
-func TestHeldLifecycleTerminatesHistoricalSpoolDespiteAwaitingOwner(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-old", now.Add(-UnownedSpoolWindow-time.Millisecond))
-	l, _ := heldLifecycle(t)
-
-	decision, err := l.Observe(target, unresolvedOwner(target), heldEvidence(target.ModTime, false), now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decision.State != HeldStateTerminal || decision.Reason != HeldReasonHistorical || decision.SessionID != "" {
-		t.Fatalf("decision = %+v, want historical terminal without session", decision)
-	}
-	if got := l.Snapshot(now); got.ActiveCount != 0 || got.TerminalTotal != 1 || got.ByReason[HeldReasonHistorical] != 1 {
-		t.Fatalf("snapshot = %+v, want one historical terminal and no active holds", got)
+	// Assert: tailing it would mean inventing an owner or reading the spool
+	// path's runtime id as an identity.
+	if _, watched := h.sc.watchers[spool]; watched {
+		t.Fatal("an unclaimed spool was tailed")
 	}
 }
 
-func TestHeldLifecycleTerminalSpoolWarnsOutsideTheVerboseGate(t *testing.T) {
-	// Arrange — TERMINAL is final: the spool is never tailed again, so its
-	// bytes never reach the store and the record must persist unconditionally.
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-old", now.Add(-UnownedSpoolWindow-time.Millisecond))
-	l, records := heldLifecycle(t)
-	// Act
-	if _, err := l.Observe(target, unresolvedOwner(target), heldEvidence(target.ModTime, false), now); err != nil {
-		t.Fatal(err)
+func TestUnownedSpoolIsRetainedAcrossRescans(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-	// Assert
-	var terminal []HeldLogRecord
-	for _, record := range *records {
-		if record.State == HeldStateTerminal {
-			terminal = append(terminal, record)
-		}
-	}
-	if len(terminal) != 1 {
-		t.Fatalf("terminal records = %d, want 1", len(terminal))
-	}
-	if terminal[0].Level != "warn" || terminal[0].Verbose {
-		t.Fatalf("terminal record level = %q verbose = %v, want warn and non-verbose", terminal[0].Level, terminal[0].Verbose)
+
+	// Act: the spawning call arrives on a later pass.
+	h.sc.TaskSpawned("b1", "call-1", "", "", false)
+	h.sc.rescan()
+
+	// Assert: it was held, never dropped, so it is tailed the moment it is
+	// claimed.
+	if _, watched := h.sc.watchers[spool]; !watched {
+		t.Fatal("a held spool was not picked up once its owner arrived")
 	}
 }
 
-func TestHeldLifecycleRetriesUntilLateAuthoritativeOwnerArrives(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-late", now)
-	l, _ := heldLifecycle(t)
+func TestAgedUnownedSpoolIsIngestedAsResidue(t *testing.T) {
+	// Arrange: a spool whose owner never arrives.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
 
-	first, err := l.Observe(target, unresolvedOwner(target), heldEvidence(target.ModTime, true), now)
-	if err != nil || first.State != HeldStateActive || first.Reason != HeldReasonAwaitingOwner {
-		t.Fatalf("first = %+v, %v; want active awaiting owner", first, err)
+	// Act.
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Assert: an aged unowned spool is never dropped; its bytes go to residue.
+	watched, ok := h.sc.watchers[spool]
+	if !ok {
+		t.Fatal("an aged unclaimed spool was dropped instead of ingested as residue")
 	}
-	owner := OwnerResolution{TaskID: target.TaskID, OutputPath: target.Path, SessionID: "transcript-session", Outcome: OwnerResolvedTask}
-	second, err := l.Observe(target, owner, heldEvidence(target.ModTime, true), now.Add(time.Second))
-	if err != nil || second.State != HeldStateResolved || second.SessionID != "transcript-session" || second.Reason != "" {
-		t.Fatalf("second = %+v, %v; want resolved transcript owner", second, err)
-	}
-	if got := l.Snapshot(now); got.ActiveCount != 0 || got.TerminalTotal != 0 {
-		t.Fatalf("snapshot = %+v, want no remaining lifecycle entries", got)
+	if watched.target.Kind != tail.KindResidueSpool {
+		t.Fatalf("kind = %s, want the residue spool kind", watched.target.Kind)
 	}
 }
 
-func TestHeldLifecycleTerminalObservationIsIdempotent(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-terminal", now.Add(-UnownedSpoolWindow-time.Millisecond))
-	l, _ := heldLifecycle(t)
-	evidence := heldEvidence(target.ModTime, false)
-	first, err := l.Observe(target, unresolvedOwner(target), evidence, now)
-	if err != nil || first.State != HeldStateTerminal {
-		t.Fatalf("first = %+v, %v", first, err)
+func TestAgedUnownedSpoolKeepsBeingTailed(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-	second, err := l.Observe(target, unresolvedOwner(target), evidence, now.Add(time.Second))
-	if err != nil || second != first {
-		t.Fatalf("second = %+v, %v; want idempotent %+v", second, err, first)
+	h.advance(UnownedSpoolWindow)
+	h.sc.rescan()
+
+	// Act: bytes appended after the demotion.
+	h.sc.pollAll()
+	before := h.sc.watchers[spool].tailer.Offset()
+	h.write(t, spool, "hello\nmore\n")
+	h.sc.pollAll()
+
+	// Assert: nothing appended later is lost either.
+	if got := h.sc.watchers[spool].tailer.Offset(); got <= before {
+		t.Fatalf("offset = %d, want it past %d (a demoted spool keeps being tailed)", got, before)
 	}
 }
 
-func TestHeldLifecycleReadinessIgnoresTerminalHistoryAndBoundsSamples(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	l, _ := heldLifecycle(t)
-	for _, id := range []string{"b-1", "b-2", "b-3"} {
-		target := heldTarget(id, now.Add(-UnownedSpoolWindow-time.Millisecond))
-		if _, err := l.Observe(target, unresolvedOwner(target), heldEvidence(target.ModTime, false), now); err != nil {
-			t.Fatal(err)
-		}
+func TestAgedUnownedSpoolIsWarnedAboutOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.spoolFile(t, "b1", "hello\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-	readiness := l.Readiness(0, now)
-	if !readiness.Ready || readiness.ActiveUnresolved != 0 || readiness.HistoricalTerminal != 3 {
-		t.Fatalf("readiness = %+v, want terminal history excluded from readiness", readiness)
-	}
-	snapshot := l.Snapshot(now)
-	if len(snapshot.Samples) != 2 {
-		t.Fatalf("samples = %d, want bounded 2", len(snapshot.Samples))
-	}
-	for _, sample := range snapshot.Samples {
-		if strings.Contains(sample.PathHash, "/") || sample.PathHash == "" {
-			t.Fatalf("sample path hash = %q, must not expose path", sample.PathHash)
-		}
+	h.advance(UnownedSpoolWindow)
+
+	// Act.
+	h.sc.rescan()
+	h.sc.rescan()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "spool unclaimed after"); got != 1 {
+		t.Fatalf("the demotion was stated %d times, want once", got)
 	}
 }
 
-func TestHeldLifecycleKeepsRecentConflictActiveForExactPathResolution(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-conflict", now)
-	l, _ := heldLifecycle(t)
-	owner := OwnerResolution{TaskID: target.TaskID, OutputPath: target.Path, Outcome: OwnerUnresolvedConflict}
-	decision, err := l.Observe(target, owner, heldEvidence(target.ModTime, false), now)
-	if err != nil {
-		t.Fatal(err)
+func TestAResidueSpoolNeedsNoOwner(t *testing.T) {
+	// Arrange: a spool whose task-id prefix already failed classification.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "q1", "hello\n")
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-	if decision.State != HeldStateActive || decision.Reason != HeldReasonConflict {
-		t.Fatalf("decision = %+v, want active conflicting-owner anomaly", decision)
-	}
-	if readiness := l.Readiness(0, now); readiness.Ready || readiness.ActiveUnresolved != 1 {
-		t.Fatalf("readiness = %+v, want conflict counted as active unresolved", readiness)
+
+	// Assert: no owner would change what happens to it, so it is not held.
+	if _, watched := h.sc.watchers[spool]; !watched {
+		t.Fatal("an unclassifiable spool was held instead of ingested")
 	}
 }
 
-func TestHeldLifecycleRejectsMissingAuthoritativeTaskEvidenceLoudly(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	target := heldTarget("b-invalid", now)
-	l, records := heldLifecycle(t)
-	evidence := HeldEvidence{ModTime: target.ModTime}
-	if _, err := l.Observe(target, unresolvedOwner(target), evidence, now); err == nil {
-		t.Fatal("Observe accepted missing authoritative task evidence")
+func TestAConfigRootTargetNeedsNoOwner(t *testing.T) {
+	// Arrange: the transcript IS its session's record.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, "sess-1", promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
 	}
-	if len(*records) == 0 || (*records)[len(*records)-1].Level != "error" || !strings.Contains((*records)[len(*records)-1].Message, "error=") {
-		t.Fatalf("records = %+v, want canonical error report", *records)
+
+	// Assert.
+	if _, watched := h.sc.watchers[path]; !watched {
+		t.Fatal("a session transcript was held for an owner it names itself")
 	}
 }
 
-func TestHeldLifecycleRejectsInvalidInputsWithoutMutation(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	baseTarget := heldTarget("b-invalid-input", now)
-	baseOwner := unresolvedOwner(baseTarget)
-	baseEvidence := HeldEvidence{ModTime: baseTarget.ModTime, ActiveTaskKnown: true}
-	tests := []struct {
-		name     string
-		target   HeldTarget
-		owner    OwnerResolution
-		evidence HeldEvidence
-		now      time.Time
-	}{
-		{name: "missing root", target: func() HeldTarget { v := baseTarget; v.Root = ""; return v }(), owner: baseOwner, evidence: baseEvidence, now: now},
-		{name: "evidence modtime mismatch", target: baseTarget, owner: baseOwner, evidence: func() HeldEvidence { v := baseEvidence; v.ModTime = now.Add(-time.Second); return v }(), now: now},
-		{name: "future stat time", target: func() HeldTarget { v := baseTarget; v.ModTime = now.Add(time.Second); return v }(), owner: baseOwner, evidence: HeldEvidence{ActiveTaskKnown: true}, now: now},
-		{name: "owner task mismatch", target: baseTarget, owner: func() OwnerResolution { v := baseOwner; v.TaskID = "other"; return v }(), evidence: baseEvidence, now: now},
-		{name: "invalid owner metadata", target: baseTarget, owner: OwnerResolution{TaskID: baseTarget.TaskID, OutputPath: baseTarget.Path, Outcome: OwnerUnresolvedInvalid}, evidence: baseEvidence, now: now},
-		{name: "resolved owner missing session", target: baseTarget, owner: OwnerResolution{TaskID: baseTarget.TaskID, OutputPath: baseTarget.Path, Outcome: OwnerResolvedTask}, evidence: baseEvidence, now: now},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			l, records := heldLifecycle(t)
-			if _, err := l.Observe(tc.target, tc.owner, tc.evidence, tc.now); err == nil {
-				t.Fatal("Observe accepted invalid input")
-			}
-			if got := (*records)[len(*records)-1]; got.Level != "error" || !strings.Contains(got.Message, "error=") {
-				t.Fatalf("last record = %+v, want canonical error", got)
-			}
-			if len(l.active) != 0 || len(l.terminal) != 0 {
-				t.Fatalf("invalid input mutated lifecycle: active=%v terminal=%v", l.active, l.terminal)
-			}
-		})
+func TestAZeroHoldWindowKeepsTheDefault(t *testing.T) {
+	// Arrange: zero is how the caller says "unset".
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "held-test"})
+
+	// Act.
+	held := newHeldSpools(0, log)
+
+	// Assert.
+	if held.window != UnownedSpoolWindow {
+		t.Fatalf("hold window = %s, want the default %s", held.window, UnownedSpoolWindow)
 	}
 }
 
-func TestHeldReadinessRejectsNegativeThresholdLoudly(t *testing.T) {
-	now := time.UnixMilli(1_000_000)
-	l, records := heldLifecycle(t)
-	defer func() {
-		if recover() == nil {
-			t.Fatal("Readiness accepted a negative threshold")
-		}
-		if got := (*records)[len(*records)-1]; got.Operation != "held-readiness" || got.Level != "error" {
-			t.Fatalf("last record = %+v, want readiness error", got)
-		}
-	}()
-	l.Readiness(-1, now)
+func TestAConfiguredHoldWindowReplacesTheDefault(t *testing.T) {
+	// Arrange.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "held-test"})
+
+	// Act.
+	held := newHeldSpools(15*time.Millisecond, log)
+
+	// Assert.
+	if held.window != 15*time.Millisecond {
+		t.Fatalf("hold window = %s, want the configured 15ms", held.window)
+	}
 }

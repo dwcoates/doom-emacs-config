@@ -1,0 +1,6096 @@
+/**
+ * The session engine, end to end over a scripted vendor.
+ *
+ * WHAT THIS GUARDS: the acts that are irreversible or invisible. A cold resume
+ * is REFUSED with its cost before a token is spent; the session lock is taken
+ * BEFORE the SDK is touched, so two shims can never write one transcript; the
+ * teardown resolves every pending callback as denied before anything else,
+ * because an unresolved `canUseTool` wedges the vendor process outright.
+ */
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, writeSync } from "node:fs";
+import { nextPush } from "../next-push.js";
+import os from "node:os";
+import path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
+import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
+import { cwdSlug } from "../../src/engine/cold.js";
+import { bindLog, clearRequestId } from "../../src/log.js";
+import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import { agentIdPath } from "../../src/engine/identity.js";
+import { workspaceLockKey } from "../../src/locks.js";
+import { textSaid } from "../../src/engine/turn.js";
+import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
+import { toStanding } from "../../src/engine/permission-gate.js";
+import { SYNTHETIC_MODEL } from "../../src/model.js";
+import type {
+  AccountUsageLike,
+  ContextUsageLike,
+  McpServerStatusLike,
+  ModelInfoLike,
+} from "../../src/sdk/types.js";
+import { mainAgentId } from "../../src/convert/ids.js";
+// STATICALLY, NOT `await import(...)` AT THE CALL SITE: the engine recognizes
+// a store outage by `instanceof PersistenceError`, so a copy of the class
+// from a second module graph would sail past every one of those arms. The
+// static binding is the file's one copy and cannot drift from the engine's.
+import { PersistenceError, type PersistEntry } from "../../src/store/persistence.js";
+import type { SdkMessage } from "../../src/sdk/types.js";
+import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
+
+interface Harness {
+  readonly engine: SessionEngine;
+  readonly persistence: RecordingPersistence;
+  readonly fold: RecordingFold;
+  readonly scheduler: ManualScheduler;
+  readonly queries: { spec: QuerySpec; query: ScriptedQuery }[];
+  readonly stateDir: string;
+  readonly configDir: string;
+  readonly cwd: string;
+  readonly locks: string[];
+  /** Every workspace directory the engine claimed a kernel lock on. */
+  readonly workspaceLocks: string[];
+  readonly released: string[];
+  /** Every exit code the engine asked `main.ts` to end the process with. */
+  readonly exits: number[];
+}
+
+function scratch(): string {
+  return mkdtempSync(path.join(os.tmpdir(), "shim-session-"));
+}
+
+/** Write a transcript for `sessionId` where the vendor would have written it. */
+function writeTranscript(configDir: string, cwd: string, sessionId: string, lines: unknown[]): void {
+  const dir = path.join(configDir, "projects", cwdSlug(cwd));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    path.join(dir, `${sessionId}.jsonl`),
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+    "utf8",
+  );
+}
+
+function assistantLine(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    type: "assistant",
+    uuid: "u-1",
+    timestamp: new Date(1_000_000).toISOString(),
+    cwd: "/ws",
+    sessionId: "resume-1",
+    message: {
+      model: "claude-opus-5",
+      usage: {
+        input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 500,
+        cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
+      },
+    },
+    ...overrides,
+  };
+}
+
+function harness(
+  options: {
+    nowMs?: number;
+    lockThrows?: boolean;
+    /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
+    workspaceLockThrows?: boolean;
+    keepaliveIntervalMs?: number;
+    /** What every scripted query answers `backgroundTasks` with. */
+    backgroundTasks?: boolean;
+    /** Make `backgroundTasks` reject, so the fail-open path is exercised. */
+    backgroundTasksThrows?: boolean;
+    /** What the scripted query answers `mcpServerStatus` with. */
+    mcp?: McpServerStatusLike[];
+    /** What the scripted query answers the account-usage control verb with. */
+    accountUsage?: AccountUsageLike;
+    /** The teardown's per-wait budget, so a hang suite does not sit out five seconds. */
+    watcherConclusionBudgetMs?: number;
+    /** Leave every scripted query's stream standing after `close()`. */
+    closeLeavesStreamOpen?: boolean;
+    /** How long StartSession waits for the vendor's own `system:init`. */
+    initTimeoutMs?: number;
+    /** Refuse to create any query after this many have been created. */
+    createQueryFailsFrom?: number;
+    /**
+     * Reject EVERY `createQuery` with this exact value.
+     *
+     * Distinct from `createQueryFailsFrom`, which always rejects with an
+     * `Error`: the SDK is a foreign boundary and a rejection that is not an
+     * `Error` is exactly what the engine's `String(err)` arms exist for.
+     */
+    createQueryRejection?: unknown;
+    /** Throw this exact value out of the SESSION claim, Error or not. */
+    lockRefusal?: unknown;
+    /** Throw this exact value out of the WORKSPACE claim, Error or not. */
+    workspaceLockRefusal?: unknown;
+    /** Build the engine with NO scheduler, the way a real session does. */
+    withoutScheduler?: boolean;
+    /** Build the engine with NEITHER lock injected, the way `main.ts` does. */
+    withoutLockInjection?: boolean;
+    /** Build the engine with NO `endProcess`, the way an in-process build does. */
+    withoutEndProcess?: boolean;
+    /**
+     * Pull the prompt stream the engine hands the vendor, as the real SDK does.
+     *
+     * `ScriptedQuery` never touches `spec.prompt`, so nothing normally exercises
+     * the push-to-pull bridge the engine submits every prompt through.
+     */
+    drainPrompts?: string[];
+    /** Reach each scripted query the moment it is created, before it is returned. */
+    onQueryCreated?: (query: ScriptedQuery, spec: QuerySpec, index: number) => void;
+    /**
+     * Build the engine with a DIFFERENT module graph's `createEngine`.
+     *
+     * The one caller is the durable-log poisoning scenario: the shim's logger
+     * is a process-wide singleton and a poisoning is one-way, so that test
+     * takes its own `log.ts` and needs the engine that registers on it to come
+     * from the same graph. Everything else gets this file's own engine.
+     */
+    engineFactory?: typeof createEngine;
+  } = {},
+): Harness {
+  const stateDir = scratch();
+  const configDir = scratch();
+  const cwd = "/ws";
+  const persistence = new RecordingPersistence();
+  const fold = new RecordingFold();
+  const scheduler = new ManualScheduler();
+  const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
+  const locks: string[] = [];
+  const released: string[] = [];
+  const workspaceLocks: string[] = [];
+  const exits: number[] = [];
+  const engine = (options.engineFactory ?? createEngine)({
+    ...(options.withoutEndProcess === true ? {} : { endProcess: (code: number) => exits.push(code) }),
+    persistence,
+    fold,
+    createQuery: (spec) => {
+      if (options.createQueryRejection !== undefined) return Promise.reject(options.createQueryRejection);
+      if (options.createQueryFailsFrom !== undefined && queries.length >= options.createQueryFailsFrom) {
+        return Promise.reject(new Error("the vendor refused another query"));
+      }
+      const query = new ScriptedQuery();
+      if (options.backgroundTasks === true) query.backgroundTaskAnswer = true;
+      if (options.backgroundTasksThrows === true) {
+        query.backgroundTasks = () => Promise.reject(new Error("the vendor cannot answer"));
+      }
+      if (options.mcp !== undefined) query.mcp = options.mcp;
+      if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
+      if (options.closeLeavesStreamOpen === true) query.closeLeavesStreamOpen = true;
+      const index = queries.length;
+      queries.push({ spec, query });
+      options.onQueryCreated?.(query, spec, index);
+      const drained = options.drainPrompts;
+      if (drained !== undefined) {
+        void (async (): Promise<void> => {
+          for await (const message of spec.prompt) {
+            drained.push(typeof message.message.content === "string" ? message.message.content : "");
+          }
+          drained.push("<end>");
+        })();
+      }
+      return Promise.resolve(query);
+    },
+    runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+    env: { stateDir, configDir, cwd },
+    nowMs: () => options.nowMs ?? 1_000_100,
+    ...(options.withoutScheduler === true ? {} : { scheduler }),
+    ...(options.initTimeoutMs === undefined ? {} : { initTimeoutMs: options.initTimeoutMs }),
+    ...(options.keepaliveIntervalMs === undefined
+      ? {}
+      : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
+    ...(options.watcherConclusionBudgetMs === undefined
+      ? {}
+      : { watcherConclusionBudgetMs: options.watcherConclusionBudgetMs }),
+    ...(options.withoutLockInjection === true
+      ? {}
+      : {
+          acquireLock: (sessionId: string): (() => void) => {
+            if (options.lockThrows === true) throw new Error("locked by another shim");
+            if (options.lockRefusal !== undefined) throw options.lockRefusal;
+            locks.push(sessionId);
+            return () => {
+              released.push(sessionId);
+            };
+          },
+        }),
+    // STUBBED LIKE THE SESSION CLAIM. The workspace lock moved into
+    // StartSession, so a unit test that left it real would take a kernel lock
+    // on whatever directory the harness names.
+    ...(options.withoutLockInjection === true
+      ? {}
+      : {
+          acquireWorkspaceLock: (dir: string): (() => void) => {
+            if (options.workspaceLockThrows === true) throw new Error("locked by another shim");
+            if (options.workspaceLockRefusal !== undefined) throw options.workspaceLockRefusal;
+            workspaceLocks.push(dir);
+            return () => {
+              released.push(`workspace:${dir}`);
+            };
+          },
+        }),
+  });
+  return {
+    engine,
+    persistence,
+    fold,
+    scheduler,
+    queries,
+    stateDir,
+    configDir,
+    cwd,
+    locks,
+    workspaceLocks,
+    released,
+    exits,
+  };
+}
+
+function freshRequest(): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: {
+      case: "fresh",
+      value: create(shimv1.StartSessionFreshSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-opus-5" }),
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "default", value: create(conversationv1.AgentPermissionModeDefaultSchema, {}) },
+        }),
+      }),
+    },
+  });
+}
+
+/** A fresh start naming NO model: the SDK's own default takes effect. */
+function freshRequestNoModel(): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: {
+      case: "fresh",
+      value: create(shimv1.StartSessionFreshSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "default", value: create(conversationv1.AgentPermissionModeDefaultSchema, {}) },
+        }),
+      }),
+    },
+  });
+}
+
+function resumeRequest(
+  vendorSessionId: string,
+  remediation?: conversationv1.SessionColdRemediation,
+): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: {
+      case: "resume",
+      value: create(shimv1.StartSessionResumeSchema, {
+        vendorSessionId,
+        ...(remediation === undefined ? {} : { coldRemediation: remediation }),
+      }),
+    },
+  });
+}
+
+/**
+ * Wait for the engine to have asked for its nth query.
+ *
+ * StartSession awaits several things before it creates one (the identity file,
+ * the lock), so a single microtask tick is not enough — and polling a condition
+ * is the only honest way to wait for an async step with no completion signal of
+ * its own.
+ */
+async function untilQuery(h: Harness, index: number): Promise<{ spec: QuerySpec; query: ScriptedQuery }> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const created = h.queries[index];
+    if (created !== undefined) return created;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  throw new Error(`no query was created at index ${index}`);
+}
+
+/** Bring a fresh session up: start it, and answer the vendor's init. */
+async function started(h: Harness): Promise<shimv1.StartSessionResponse> {
+  const pending = h.engine.startSession(freshRequest());
+  const first = await untilQuery(h, 0);
+  const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+  first.query.emit(initMessage({ sessionId }));
+  return pending;
+}
+
+function failureCause(response: shimv1.StartSessionResponse): string | undefined {
+  return response.result.case === "failure" ? response.result.value.cause.case : undefined;
+}
+
+beforeEach(() => {
+  resetAgentBinaryVersionForTest();
+  recordAgentBinaryVersion("2.1.999");
+});
+
+describe("StartSession, fresh", () => {
+  it("pre-mints the vendor session id and binds fresh", async () => {
+    const h = harness();
+    await started(h);
+
+    expect(h.queries[0]?.spec.binding.kind).toBe("fresh");
+  });
+
+  it("declares the pre-minted AgentId absent from the store, so no book is asked for", async () => {
+    // Arrange.
+    const h = harness();
+
+    // Act.
+    await started(h);
+
+    // Assert. The id is a uuid minted moments ago; the store cannot hold a book
+    // for it until this session's first write lands.
+    expect(h.persistence.mintedAgents).toEqual([h.persistence.producer]);
+  });
+
+  it("adopts the pre-minted id as the main AgentId (R9)", async () => {
+    const h = harness();
+    const response = await started(h);
+    const minted = h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+
+    expect(
+      response.result.case === "success" ? response.result.value.session?.vendorSessionId : undefined,
+    ).toBe(minted);
+  });
+
+  it("takes the SESSION LOCK before the SDK is touched", async () => {
+    // Two shims that both started a query would already be two writers on one
+    // transcript by the time either discovered the other.
+    const h = harness();
+    await started(h);
+
+    expect(h.locks).toHaveLength(1);
+  });
+
+  it("refuses with conversation_owned when another shim holds the lock", async () => {
+    const h = harness({ lockThrows: true });
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("conversationOwned");
+  });
+
+  it("does not create a query when the lock is refused", async () => {
+    const h = harness({ lockThrows: true });
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries).toHaveLength(0);
+  });
+
+  it("reports the build identity the daemon compares against its deploy stamp", async () => {
+    const h = harness();
+    const response = await started(h);
+
+    expect(
+      response.result.case === "success" ? response.result.value.session?.runtime?.shimBuildSha : undefined,
+    ).toBe("sha");
+  });
+
+  it("reports the agent binary version the vendor's own init stated", async () => {
+    const h = harness();
+    const response = await started(h);
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.runtime?.agentBinaryVersion
+        : undefined,
+    ).toBe("2.1.999");
+  });
+
+  it("passes NO model to the SDK when the fresh start named none", async () => {
+    // Optional since landing 7: UNSET means the SDK's own default, and naming
+    // an empty model would override that default with nothing.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+
+  it("reports the model the SDK chose as effective_model when none was named", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.effectiveModel?.name
+        : undefined,
+    ).toBe("claude-sonnet-5");
+  });
+
+  it("reports the model catalog from the vendor", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.models = [
+      { value: "claude-opus-5", displayName: "Opus 5", description: "the big one", supportsEffort: true, supportedEffortLevels: ["low", "high"] },
+    ];
+    first.query.emit(
+      initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.modelCatalog.map((option) => option.model?.name)
+        : undefined,
+    ).toEqual(["claude-opus-5"]);
+  });
+
+  it("states declared model capabilities and leaves undeclared ones unstated", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.models = [{ value: "m", displayName: "M", description: "d" }];
+    first.query.emit(
+      initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.modelCatalog[0]?.capabilities
+        : undefined,
+    ).toBeUndefined();
+  });
+
+  it("STARTS the keep-alive cadence before success returns", async () => {
+    const h = harness();
+    await started(h);
+
+    expect(h.scheduler.handlers.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a SECOND StartSession — one shim serves exactly one session", async () => {
+    const h = harness();
+    await started(h);
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("alreadyStarted");
+  });
+
+  it("refuses with vendor_start_failed when the query cannot be created", async () => {
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("the mocked vendor is not implemented")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    expect(failureCause(await engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+  });
+
+  it("releases the session lock when the vendor start fails", async () => {
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: (id) => {
+        h.locks.push(id);
+        return () => {
+          h.released.push(id);
+        };
+      },
+      acquireWorkspaceLock: (dir) => {
+        h.workspaceLocks.push(dir);
+        return () => {
+          h.released.push(`workspace:${dir}`);
+        };
+      },
+    });
+    await engine.startSession(freshRequest());
+
+    expect(h.released).toEqual(expect.arrayContaining([expect.stringMatching(/^workspace:/)]));
+  });
+
+  it("UN-NAMES the record plane's writer when the vendor start fails", async () => {
+    // A failed start settled an identity and named the writer from it, then
+    // abandoned the attempt. Leaving the name behind made the NEXT StartSession
+    // — which settles a different identity — hit setProducer's re-key guard and
+    // escape as an unhandled Internal, on a verb that has a typed refusal for
+    // every real condition.
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(h.persistence.producer).toBeUndefined();
+  });
+
+  it("FORGETS the identity a failed start minted", async () => {
+    // The file is written before the query is created so a crash between the
+    // mint and the first record stays recoverable — but a start that never
+    // reached a query left no conversation for that identity to name, and
+    // keeping it would hand the next reader an AgentId for a conversation the
+    // vendor never opened.
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(existsSync(agentIdPath(h.stateDir, workspaceLockKey(h.cwd)))).toBe(false);
+  });
+
+  it("keeps an identity an EARLIER session established when a later start fails", async () => {
+    // The abandonment path may only discard what THIS attempt minted. An
+    // identity a previous session persisted names a real conversation, and
+    // discarding it would split that conversation's book at the failed start.
+    const h = harness();
+    const persistedBefore = {
+      original_vendor_session_id: "established-by-an-earlier-session",
+      workspace_key: workspaceLockKey(h.cwd),
+      minted_at_ms: 1,
+    };
+    mkdirSync(path.dirname(agentIdPath(h.stateDir, workspaceLockKey(h.cwd))), {
+      recursive: true,
+    });
+    writeFileSync(
+      agentIdPath(h.stateDir, workspaceLockKey(h.cwd)),
+      JSON.stringify(persistedBefore),
+      "utf8",
+    );
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(existsSync(agentIdPath(h.stateDir, workspaceLockKey(h.cwd)))).toBe(true);
+  });
+
+  it("a retry after a failed start succeeds, settling its own identity", async () => {
+    // THE WHOLE POINT of leaving the engine as it was found: the shim the
+    // daemon already has can serve the conversation once the condition clears.
+    const h = harness();
+    let starts = 0;
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: (spec) => {
+        starts += 1;
+        if (starts === 1) return Promise.reject(new Error("the vendor was not startable yet"));
+        const query = new ScriptedQuery();
+        h.queries.push({ spec, query });
+        return Promise.resolve(query);
+      },
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+    expect(failureCause(await engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+
+    const pending = engine.startSession(freshRequest());
+    const created = await untilQuery(h, 0);
+    const sessionId =
+      created.spec.binding.kind === "fresh" ? created.spec.binding.sessionId : "";
+    created.query.emit(initMessage({ sessionId }));
+    const retried = await pending;
+
+    expect(retried.result.case).toBe("success");
+    expect(h.persistence.producer).toBe(sessionId);
+  });
+
+  it("refuses conversation_owned when another shim holds the WORKSPACE lock", async () => {
+    // Both claims answer the SAME arm: from the daemon's side "someone else
+    // owns this conversation" is one fact, whichever kernel lock proved it.
+    const h = harness({ workspaceLockThrows: true });
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("conversationOwned");
+  });
+
+  it("a refused WORKSPACE claim releases the session lock it had already taken", async () => {
+    // The session claim is taken first, so a workspace refusal must hand it
+    // back; a shim that kept it would own a conversation it refused to serve.
+    const h = harness({ workspaceLockThrows: true });
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.released).toEqual(h.locks);
+  });
+
+  it("no lock of either kind is taken before StartSession", async () => {
+    // AN INERT SHIM HOLDS NOTHING. A prelaunched shim must be able to sit
+    // beside the live one it will replace, which it cannot do while holding
+    // the live shim's workspace lock.
+    const h = harness();
+
+    expect(h.locks).toEqual([]);
+    expect(h.workspaceLocks).toEqual([]);
+  });
+});
+
+describe("StartSession, resume", () => {
+  it("refuses an id with no transcript in this workspace", async () => {
+    const h = harness();
+
+    expect(failureCause(await h.engine.startSession(resumeRequest("nope")))).toBe("unknownSession");
+  });
+
+  it("REFUSES a lapsed resume with its cost, before a token is spent", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    expect(failureCause(await h.engine.startSession(resumeRequest("resume-1")))).toBe("cold");
+  });
+
+  it("states the context the refusal is protecting", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1"));
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect(failure?.cause.case === "cold" ? failure.cause.value.contextTokens : undefined).toBe(500n);
+  });
+
+  it("does not create a query for a refused cold resume", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    await h.engine.startSession(resumeRequest("resume-1"));
+
+    expect(h.queries).toHaveLength(0);
+  });
+
+  it("PROCEEDS on a warm resume", async () => {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("does NOT declare the AgentId minted here, because an earlier session may have written under it", async () => {
+    // Arrange.
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    // Act.
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    // Assert. Claiming absence here would serve an empty opening page over a
+    // book that holds the whole conversation.
+    expect(h.persistence.mintedAgents).toEqual([]);
+  });
+
+  it("binds resume, not fresh", async () => {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.binding).toEqual({ kind: "resume", resumeSessionId: "resume-1" });
+  });
+
+  it("RECOVERS the model the conversation was last running under", async () => {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1", model: "claude-opus-5" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBe("claude-opus-5");
+  });
+
+  it("RECOVERS the permission mode the last user record ran under", async () => {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      { type: "user", permissionMode: "acceptEdits", uuid: "u-0" },
+      assistantLine(),
+    ]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.permissionMode).toBe("acceptEdits");
+  });
+
+  it("pays for the read when the caller says pay", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pay = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "pay", value: create(conversationv1.SessionColdPaySchema, {}) },
+    });
+    const pending = h.engine.startSession(resumeRequest("resume-1", pay));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("CLEAR binds a newly minted vendor session id — no API call, context discarded", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const clear = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "clear", value: create(conversationv1.SessionColdClearSchema, {}) },
+    });
+    const pending = h.engine.startSession(resumeRequest("resume-1", clear));
+    const first = await untilQuery(h, 0);
+    const binding = first.spec.binding;
+    first.query.emit(initMessage({ sessionId: binding.kind === "fresh" ? binding.sessionId : "" }));
+    await pending;
+
+    expect(binding.kind).toBe("fresh");
+  });
+
+  it("CLEAR does not resume the old transcript", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const clear = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: { case: "clear", value: create(conversationv1.SessionColdClearSchema, {}) },
+    });
+    const pending = h.engine.startSession(resumeRequest("resume-1", clear));
+    const first = await untilQuery(h, 0);
+    const binding = first.spec.binding;
+    first.query.emit(initMessage({ sessionId: binding.kind === "fresh" ? binding.sessionId : "" }));
+    await pending;
+
+    expect(binding.kind === "fresh" ? binding.sessionId : "").not.toBe("resume-1");
+  });
+});
+
+describe("the vendor's own facts", () => {
+  it("pushes the model the vendor reported", async () => {
+    const h = harness();
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    await started(h);
+    const seen: string[] = [];
+    for (let index = 0; index < 4; index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      seen.push(step.value.update.case ?? "");
+    }
+
+    expect(seen).toContain("modelChanged");
+  });
+
+  it("does NOT rotate to conversation_reset's new_conversation_id", async () => {
+    // EVIDENCE, from the real /clear capture: `new_conversation_id` is a uuid
+    // NOTHING later uses -- no transcript is written under it, no init
+    // announces it, no resume takes it. Publishing it as the new identity would
+    // name an id that does not exist and hand the daemon a dead resume handle.
+    const h = harness();
+    const response = await started(h);
+    const original =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+    // A rotation would be pushed synchronously with the message; the init that
+    // follows is what carries the real one.
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+
+    const seen: string[] = [];
+    for (let index = 0; index < 6; index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      const update = step.value.update;
+      if (update.case !== "identityRotated") continue;
+      seen.push(update.value.vendorSessionId);
+      break;
+    }
+    expect(seen).not.toContain("an-id-nothing-uses");
+  });
+
+  it("rotates to the id the post-reset init announces", async () => {
+    const h = harness();
+    const response = await started(h);
+    const original =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+    // The rotation writes the link files, so the push lands a tick later.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    let rotatedTo = "";
+    for (let index = 0; index < 16; index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      const update = step.value.update;
+      if (update.case !== "identityRotated") continue;
+      rotatedTo = update.value.vendorSessionId;
+      break;
+    }
+    expect(rotatedTo).toBe("the-id-the-session-moved-to");
+  });
+
+  it("ROTATES the vendor id on a conversation reset while keeping the AgentId", async () => {
+    const h = harness();
+    const response = await started(h);
+    const original =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "rotated-2",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+
+    const history = await h.engine.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 1,
+        position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+      }),
+    );
+    expect(history.result.case).toBe("success");
+  });
+
+  it("CONCLUDES the open turn with a failure terminal when the query dies", async () => {
+    // query_died is a SESSION fact; a consumer watching the AGENT -- the one
+    // actually waiting on the turn -- would otherwise see its stream simply
+    // stop producing, unable to tell a dead query from a slow one.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const terminal = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "failure",
+    );
+    expect(terminal).toBeDefined();
+  });
+
+  it("writes NO terminal when the query dies between turns", async () => {
+    // A session that lost its query with nothing open has no turn to conclude.
+    const h = harness();
+    await started(h);
+
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const terminal = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "failure",
+    );
+    expect(terminal).toBeUndefined();
+  });
+
+  it("reports the query's death as an unexpected EOF", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    h.queries[0]?.query.end();
+
+    const seen: string[] = [];
+    for (let index = 0; index < 12 && !seen.includes("queryDied"); index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      seen.push(step.value.update.case ?? "");
+    }
+    expect(seen).toContain("queryDied");
+  });
+});
+
+describe("the turn loop", () => {
+  it("hands the fold every SDK message", async () => {
+    const h = harness();
+    await started(h);
+
+    expect(h.fold.seen.map((message) => message.type)).toEqual(["system"]);
+  });
+
+  it("tells the fold which turn is open", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.fold.contexts.at(-1)?.turnId?.value).toBe("turn-1");
+  });
+
+  it("CLOSES the turn on the fold's turnEnded", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // A second StartTurn now succeeds, which is only true if the first closed.
+    const second = await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-2" }),
+        said: textSaid("again"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    expect(second.result.case).toBe("success");
+  });
+
+  it("pushes context usage at the turn's end", async () => {
+    const h = harness();
+    await started(h);
+    const before = h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const after = h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("re-probes account usage at the turn's end", async () => {
+    // Account usage is PULLED from the vendor, so a session that probed once at
+    // StartSession would never notice a limit being approached.
+    const h = harness();
+    await started(h);
+    const usageCall = "usage";
+    const before = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const after = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("re-probes mcp server health at the turn's end", async () => {
+    // Same reason: a server going down between turns is invisible otherwise.
+    const h = harness();
+    await started(h);
+    const before = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const after = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
+});
+
+describe("the keep-alive turn", () => {
+  it("submits a marker-prefixed prompt when the session is idle", async () => {
+    const h = harness();
+    await started(h);
+
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const prompt = h.persistence.buffered.find((entry) => entry.item.kind === "prompt");
+    expect(prompt?.keepalive).toBe(true);
+  });
+
+  it("does NOT beat while a turn is in flight", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.persistence.buffered.length = 0;
+
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.persistence.buffered.filter((entry) => entry.item.kind === "prompt")).toEqual([]);
+  });
+
+  it("REWINDS the vendor context before the next real prompt", async () => {
+    const h = harness();
+    await started(h);
+    // A real record, then a keep-alive turn, then a real prompt.
+    await h.engine.onSdkMessage(resultMessage("real-uuid"));
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    h.queries.at(-1)?.query.emit(resultMessage("keepalive-uuid"));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    expect(h.queries.at(-1)?.spec.resumeSessionAt).toBe("real-uuid");
+  });
+});
+
+describe("SetSessionModel", () => {
+  it("refuses when no session has been started", async () => {
+    const h = harness();
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "m" }),
+      }),
+    );
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe(
+      "noSession",
+    );
+  });
+
+  it("refuses a model the catalog does not carry", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.models = [{ value: "claude-opus-5", displayName: "O", description: "d" }];
+    first.query.emit(
+      initMessage({ sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "" }),
+    );
+    await pending;
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "not-a-model" }),
+      }),
+    );
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe(
+      "modelNotInCatalog",
+    );
+  });
+
+  it("applies the model immediately when no turn is open", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+
+    expect(h.queries[0]?.query.calls).toContain("setModel:claude-sonnet-5");
+  });
+
+  it("DEFERS the model to the turn boundary while a turn is open", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    // NOT AWAITED: the call itself does not resolve until the turn boundary
+    // (B4), because an ack while the running turn still answers on the old
+    // model would be contradicted by that turn's own context_usage.
+    const pending = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.queries[0]?.query.calls).not.toContain("setModel:claude-sonnet-5");
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("does not RESOLVE the call until the turn ends (B4)", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    let settled = false;
+    const pending = h.engine
+      .setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+        }),
+      )
+      .then((response) => {
+        settled = true;
+        return response;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("answers a call still waiting on a turn boundary when the session stands down", async () => {
+    // Leaving the daemon holding a promise nothing can settle is worse than
+    // telling it the change did not land.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const pending = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+
+    await h.engine.standDown("KillSession");
+
+    expect((await pending).result.case).toBe("failure");
+  });
+
+  it("applies the deferred model once the turn ends", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const pending = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+
+    expect(h.queries[0]?.query.calls).toContain("setModel:claude-sonnet-5");
+  });
+
+  it("REFUSES a switch above the caller's cold threshold", async () => {
+    const h = harness({ nowMs: 1_000_100 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+        coldThresholdTokens: 100n,
+      }),
+    );
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe("cold");
+  });
+});
+
+describe("SetSessionPermissionMode", () => {
+  it("refuses when no session has been started", async () => {
+    const h = harness();
+
+    const response = await h.engine.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "plan", value: create(conversationv1.AgentPermissionModePlanSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe(
+      "noSession",
+    );
+  });
+
+  it("sets the vendor's mode", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "plan", value: create(conversationv1.AgentPermissionModePlanSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(h.queries[0]?.query.calls).toContain("setPermissionMode:plan");
+  });
+
+  it("surfaces a vendor refusal rather than reporting a mode that is not in force", async () => {
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query === undefined) throw new Error("no query");
+    query.setPermissionModeRejects = new Error("the binary said no");
+
+    const response = await h.engine.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "plan", value: create(conversationv1.AgentPermissionModePlanSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(response.result.case === "failure" ? response.result.value.kind.case : undefined).toBe(
+      "vendorRefused",
+    );
+  });
+});
+
+describe("Hibernate", () => {
+  it("refuses when no session has been started", async () => {
+    const h = harness();
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect(response.result.case === "error" ? response.result.value.kind.case : undefined).toBe(
+      "noSession",
+    );
+  });
+
+  it("REFUSES while a turn is in flight", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect(response.result.case === "error" ? response.result.value.kind.case : undefined).toBe(
+      "turnInFlight",
+    );
+  });
+
+  it("carries the failure's own wording when there is nothing to compact", async () => {
+    const h = harness();
+    await started(h);
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const error = response.result.case === "error" ? response.result.value : undefined;
+    expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
+      "there is no transcript to compact",
+    );
+  });
+
+  it("lets KillSession finish after a hibernation compacted the session", async () => {
+    // THE HANG THIS GUARDS. Hibernate runs a throwaway compaction query and
+    // closes it; the teardown then awaited `loop`, which by then was the
+    // THROWAWAY's loop and not the live query's -- a promise nothing the
+    // teardown does can settle, so KillSession never returned.
+    const h = harness();
+    await started(h);
+    const first = await untilQuery(h, 0);
+    const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+    writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
+    const hibernating = h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const throwaway = await untilQuery(h, 1);
+    throwaway.query.emit(resultMessage("33333333-3333-4333-8333-333333333333"));
+    await hibernating;
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+});
+
+describe("the teardown's waits are bounded", () => {
+  it("finishes KillSession when the vendor's message loop never ends after the close", async () => {
+    // THE HANG THIS GUARDS. `close()` is the vendor's end-of-stream signal, not
+    // a guarantee: a loop still parked in the iterator afterwards must not be
+    // the reason a stand-down never returns.
+    const h = harness({ closeLeavesStreamOpen: true, watcherConclusionBudgetMs: 5 });
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("finishes KillSession when the store never answers the head read a watcher's conclusion needs", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 5 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+    )[Symbol.asyncIterator]();
+    await watching.next();
+    h.persistence.openHangs = true;
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+});
+
+describe("the record plane's faults", () => {
+  it("restates the diagnostics as unhealthy when the store raises a fault", async () => {
+    // The record plane's faults are the SESSION's: nothing subscribing to them
+    // meant a store outage was visible only in the shim's own log while the
+    // daemon's diagnostics stayed healthy.
+    const h = harness();
+    await started(h);
+    const before = h.engine.pushes.faultCount;
+
+    h.persistence.raiseFault("the store is down");
+
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+
+  it("carries a degraded window the record plane opened into the diagnostics", async () => {
+    const h = harness();
+    await started(h);
+
+    h.persistence.raiseDegradedWindow("the store is down");
+
+    const update = h.engine.pushes.diagnostics().update;
+    expect(update.case === "diagnostics" ? update.value.degradedWindows.length : 0).toBe(1);
+  });
+});
+
+describe("KillSession", () => {
+  it("refuses when no session has been started", async () => {
+    const h = harness();
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe(
+      "noSession",
+    );
+  });
+
+  it("closes an idle session as idle", async () => {
+    const h = harness();
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("ends the process with 0 once an idle session is closed", async () => {
+    // KillSession is a PROCESS-level verb: the session it ends is the only one
+    // this shim will serve, so a shim that kept serving would hold its socket
+    // and its workspace lock against the next spawn.
+    const h = harness();
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([0]);
+  });
+
+  it("ends the process with 1 when the store never acked some rows", async () => {
+    // A23: reporting 0 would tell the daemon the session ended in good order
+    // when part of the conversation never landed.
+    const h = harness();
+    await started(h);
+    h.persistence.lostRows = 3;
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([1]);
+  });
+
+  it("does NOT end the process on a refused kill", async () => {
+    const h = harness();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([]);
+  });
+
+  it("REFUSES while a turn is in flight and force was not set", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "failure" ? response.result.value.cause.case : undefined).toBe("live");
+  });
+
+  it("NAMES the turn it refused over", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect(
+      failure?.cause.case === "live" ? failure.cause.value.turnInFlight?.value : undefined,
+    ).toBe("turn-1");
+  });
+
+  it("names the interrupted turn when forced", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const response = await h.engine.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+    const killed = response.result.case === "success" ? response.result.value.closed : undefined;
+    expect(
+      killed?.how.case === "forced" ? killed.how.value.interruptedTurn?.value : undefined,
+    ).toBe("turn-1");
+  });
+
+  it("FLUSHES every buffered write before answering", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.persistence.flushes).toBe(1);
+  });
+
+  it("releases BOTH kernel claims", async () => {
+    // The session claim and the workspace claim are both taken by StartSession
+    // and both belong to the session, so a kill that kept either would leave a
+    // dead conversation owning a lock the next shim probes.
+    const h = harness();
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.released).toEqual([...h.locks, `workspace:${h.cwd}`]);
+  });
+});
+
+describe("standing down", () => {
+  it("resolves every pending permission callback as DENIED first", async () => {
+    // An unresolved canUseTool promise wedges the vendor process outright.
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_1",
+      requestId: "r",
+    });
+    await Promise.resolve();
+
+    await h.engine.standDown("SIGTERM");
+
+    expect(await pending).toEqual({ behavior: "deny", message: "SIGTERM" });
+  });
+
+  it("closes the query", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.standDown("SIGTERM");
+
+    expect(h.queries[0]?.query.calls).toContain("close");
+  });
+
+  it("ends every WatchSession stream", async () => {
+    const h = harness();
+    await started(h);
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+
+    await h.engine.standDown("SIGTERM");
+
+    // The stream TERMINATES; the frames already queued for this consumer are
+    // still delivered, because a fact the shim stated is not un-stated by the
+    // shim going away.
+    for (let index = 0; index < 32; index++) {
+      const step = await iterator.next();
+      if (step.done === true) {
+        expect(step.done).toBe(true);
+        return;
+      }
+    }
+    throw new Error("the WatchSession stream did not terminate after the stand-down");
+  });
+
+  it("is idempotent, so a second SIGTERM cannot double-release either lock", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.standDown("SIGTERM");
+    await h.engine.standDown("SIGTERM");
+
+    expect(h.released).toEqual([...h.locks, `workspace:${h.cwd}`]);
+  });
+});
+
+describe("WatchSession", () => {
+  /** The arm names of the first `count` frames of a fresh watch. */
+  async function frames(h: Harness, count: number): Promise<string[]> {
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    const seen: string[] = [];
+    for (let taken = 0; taken < count; taken++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      const frame = next.value.frame;
+      seen.push(frame.case === "update" ? `update.${frame.value.update.case ?? "unset"}` : (frame.case ?? "unset"));
+    }
+    await iterator.return?.();
+    return seen;
+  }
+
+  it("delivers diagnostics as its FIRST frame", async () => {
+    const h = harness();
+
+    expect((await frames(h, 1))[0]).toBe("update.diagnostics");
+  });
+
+  it("re-announces nothing before a session has started", async () => {
+    // There is no opening to re-state, and the diagnostics already said so.
+    // A second frame is pushed so the assertion reads a real frame rather than
+    // waiting out a stream that would correctly never produce one.
+    const h = harness();
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "queryDied",
+          value: create(conversationv1.SessionQueryDiedSchema, {}),
+        },
+      }),
+    );
+
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(second.frame.case).toBe("update");
+  });
+
+  it("re-announces the session's opening right AFTER the diagnostics", async () => {
+    // Landing 7: a daemon adopting an already-started shim attaches purely.
+    const h = harness();
+    await started(h);
+
+    expect((await frames(h, 2))[1]).toBe("sessionStarted");
+  });
+
+  it("re-announces on EVERY new watch, not only the first", async () => {
+    const h = harness();
+    await started(h);
+    await frames(h, 2);
+
+    expect((await frames(h, 2))[1]).toBe("sessionStarted");
+  });
+
+  it("re-states the ORIGINAL identity, which is fixed for the session", async () => {
+    const h = harness();
+    const opening = await started(h);
+    const announced =
+      opening.result.case === "success" ? opening.result.value.session?.vendorSessionId : undefined;
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.vendorSessionId
+        : undefined,
+    ).toBe(announced);
+  });
+
+  it("re-states the turn in flight as it is NOW, not as the opening found it", async () => {
+    // The opening's live membership is the one thing that is not a fact at
+    // start: an adopting daemon needs what is live now.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.turnInFlight?.value !== undefined
+        : undefined,
+    ).toBe(true);
+  });
+});
+
+describe("GetLiveWork reconciliation", () => {
+  /** One recorded shell run in the main agent's book, as the store holds it. */
+  function recordedBashRun(unit: string): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item: {
+                      case: "bash",
+                      value: create(conversationv1.AgentBashSchema, {
+                        result: {
+                          case: "start",
+                          value: create(conversationv1.AgentBashStartSchema, {
+                            command: create(conversationv1.AgentBashCommandSchema, {
+                              line: "sleep 100",
+                            }),
+                            startedAt: create(conversationv1.AgentActivityStartedAtSchema, {
+                              atMs: 5n,
+                            }),
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  it("writes a closing terminal for detached work the vendor no longer has", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+  });
+
+  it("RE-ADOPTS work the vendor still holds, asked directly rather than waited for", async () => {
+    // The live table is built from messages the shim has already seen, and at
+    // StartSession it has seen almost none: a revived process announces its
+    // surviving tasks on its own schedule, after the init this reconciliation
+    // follows. Judging survival off that table alone swept up work the vendor
+    // still had.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
+  });
+
+  it("treats work the vendor could not be ASKED about as surviving", async () => {
+    // A vendor that cannot answer is not a vendor that said "gone": closing the
+    // run would write a terminal over something that may still be producing.
+    const h = harness({ backgroundTasksThrows: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
+  });
+
+  it("closes work the record cannot describe rather than leaving it open", async () => {
+    // RULING (landing 5): `live_detached` is the store's shell table, so a row
+    // there IS a shell run and its kind is known from where it was found. An
+    // obligation the shim declines to close never gets a terminal at all.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+  });
+
+  it("closes an undescribable run with lost.swept_up", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
+    const outcome =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.outcome
+        : undefined;
+    expect(
+      outcome?.case === "interrupted" && outcome.value.cause.case === "lost"
+        ? outcome.value.cause.value.how.case
+        : "",
+    ).toBe("sweptUp");
+  });
+
+  it("states no command for a run whose start the record never held", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
+    const command =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.command
+        : undefined;
+    expect(command?.line).toBe("");
+  });
+
+  it("re-announces the live membership as it is NOW on a new watch", async () => {
+    // Landing 7: everything else on the opening is a fact at start, but a
+    // daemon adopting a running shim needs the membership that is live now.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(
+      second.frame.case === "sessionStarted"
+        ? second.frame.value.liveWork.map(
+            (work: conversationv1.AgentDetachedWork) => work.work?.value,
+          )
+        : undefined,
+    ).toEqual(["b01"]);
+  });
+
+  it("REPORTS a book it could not read for a re-announcement as a session fault", async () => {
+    // A watch that opens is better than one that fails, but a record plane the
+    // shim cannot reach is a session-level fact, never a quiet empty list.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+    h.persistence.openError = new PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const unhealthy: boolean[] = [];
+    // The re-announcement and the replayed current view sit ahead of the
+    // restated diagnostics the fault produces; this drains past them and stops
+    // as soon as one is seen, so it never waits on a frame that will not come.
+    for (let taken = 0; taken < 8 && !unhealthy.includes(true); taken++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      const frame = next.value.frame;
+      if (frame.case !== "update") continue;
+      const update = frame.value.update;
+      if (update.case === "diagnostics") unhealthy.push(update.value.health.case === "unhealthy");
+    }
+    await iterator.return?.();
+
+    // A fault restates the diagnostics, which is how every consumer learns it.
+    expect(unhealthy).toContain(true);
+  });
+
+  it("writes a closing terminal for a subagent that did not survive", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveAgents: [create(conversationv1.AgentIdSchema, { value: "sub-1" })],
+    });
+
+    await started(h);
+
+    expect(
+      h.persistence.buffered.some((entry) => entry.agentId.value === "sub-1"),
+    ).toBe(true);
+  });
+
+  it("does not close the main agent's own book", async () => {
+    const h = harness();
+    const response = await started(h);
+    const agent =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+
+    expect(h.persistence.buffered.some((entry) => entry.agentId.value === agent && entry.item.kind === "frame")).toBe(
+      false,
+    );
+  });
+
+  it("reports a fault rather than failing the start when the store is unreachable", async () => {
+    const h = harness();
+    h.persistence.liveWorkError = new PersistenceError(
+      "store_unavailable",
+      "down",
+    );
+
+    expect((await started(h)).result.case).toBe("success");
+  });
+});
+
+describe("the converter's own health", () => {
+  /** The diagnostics the engine would state right now. */
+  function diagnostics(h: Harness): conversationv1.SessionDiagnostics {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("the engine stated no diagnostics");
+    return update.value;
+  }
+
+  const prose = (uuid: string): never =>
+    ({
+      type: "assistant",
+      uuid,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "claude-opus-5", content: [] },
+    }) as never;
+
+  it("reports a refused message as a converter_defect fault", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "the hook firing id is empty" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.kind.case : "").toBe("converterDefect");
+  });
+
+  it("names the converter as the faulting component", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.component : "").toBe("converter");
+  });
+
+  it("opens a degraded window for the converter", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
+  });
+
+  // THE TURN IS THE UNIT OF RECOVERY, not the message: the messages after a
+  // refusal are the same turn's own remainder, and the turn that lost a record
+  // stays degraded for its whole length. The `!fault-converter` /
+  // `!fault-recover` pair states exactly that — the defective turn leaves an
+  // OPEN window, and the clean turn after it is what closes it.
+  it("stays degraded for the rest of the turn a message was refused in", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid === "u-defect" ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(prose("u-good"));
+
+    expect(diagnostics(h).health.case).toBe("unhealthy");
+  });
+
+  it("returns to healthy at the end of a turn that refused nothing", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid === "u-defect" ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
+
+    expect(diagnostics(h).health.case).toBe("healthy");
+  });
+
+  it("closes the window with the number of messages it refused", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid?.startsWith("u-defect") === true ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
+
+    const window = diagnostics(h).degradedWindows[0];
+    expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : -1n).toBe(2n);
+  });
+
+  it("opens ONE window across consecutive refusals", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = () => "boom";
+
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+
+    expect(diagnostics(h).degradedWindows.length).toBe(1);
+  });
+
+  it("leaves the window OPEN at the end of the turn that refused a message", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
+  });
+
+  it("closes the window at the end of the next clean turn", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+    await h.engine.onSdkMessage(prose("u-defect"));
+    await h.engine.onSdkMessage(resultMessage("u-result-1"));
+    h.fold.faultFor = () => undefined;
+
+    await h.engine.onSdkMessage(resultMessage("u-result-2"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("closed");
+  });
+});
+
+describe("the model the vendor answers on", () => {
+  /** An assistant message reporting the model that produced it. */
+  const answeredOn = (model: string): never =>
+    ({
+      type: "assistant",
+      uuid: `u-${model}`,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model, content: [] },
+    }) as never;
+
+  /** Every model name the engine pushed, in order. */
+  async function pushedModels(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const names: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "modelChanged") names.push(update.value.effectiveModel?.name ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return names;
+  }
+
+  it("pushes model_changed for a model nothing asked for", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("pushes nothing when the reported model is the one in effect", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-opus-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-opus-5").length).toBe(1);
+  });
+
+  it("never adopts the synthetic marker as a model", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn(SYNTHETIC_MODEL));
+    });
+
+    expect(names).not.toContain(SYNTHETIC_MODEL);
+  });
+
+  /** The vendor's own announcement that it retried on another model. */
+  const refusalFallback = (original: string, fallback: string): never =>
+    ({
+      type: "system",
+      subtype: "model_refusal_fallback",
+      uuid: `u-fallback-${fallback}`,
+      session_id: "s",
+      trigger: "refusal",
+      direction: "retry",
+      original_model: original,
+      fallback_model: fallback,
+      request_id: "req_fallback",
+      api_refusal_category: "cyber",
+      api_refusal_explanation: null,
+      retracted_message_uuids: [],
+      refused_user_message_uuid: null,
+      content: `Switched to ${fallback}.`,
+    }) as never;
+
+  it("folds the vendor's refusal fallback into model_changed", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-haiku-4-5"));
+    });
+
+    expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("states nothing when the fallback names the model already in effect", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-opus-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-opus-5").length).toBe(1);
+  });
+
+  it("states the fallback once when the fallback leg's answer agrees with it", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", "claude-haiku-4-5"));
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
+  });
+
+  it("never adopts the synthetic marker from a fallback record", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(refusalFallback("claude-opus-5", SYNTHETIC_MODEL));
+    });
+
+    expect(names).not.toContain(SYNTHETIC_MODEL);
+  });
+
+  it("keeps the adopted model for the next message that agrees with it", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
+  });
+});
+
+describe("fast mode", () => {
+  /** A turn terminal restating the session's fast-mode state. */
+  const resultWithFastMode = (state: string, reason?: string): never =>
+    ({
+      ...(resultMessage("u-fast") as unknown as Record<string, unknown>),
+      fast_mode_state: state,
+      ...(reason === undefined ? {} : { fast_mode_disabled_reason: reason }),
+    }) as never;
+
+  /** Every fast-mode arm the engine pushed, in order. */
+  async function pushedFastMode(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const arms: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode") arms.push(update.value.state.case ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return arms;
+  }
+
+  it("pushes the state a result reports", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms).toContain("on");
+  });
+
+  it("carries the vendor's own reason on the off arm", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const reasons: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode" && update.value.state.case === "off") {
+          reasons.push(update.value.state.value.reason);
+        }
+      }
+    })();
+
+    await h.engine.onSdkMessage(resultWithFastMode("off", "preference"));
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(reasons).toContain("preference");
+  });
+
+  it("distinguishes a cooldown from off", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("cooldown"));
+    });
+
+    expect(arms).toContain("cooldown");
+  });
+
+  it("pushes an unchanged state only once", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms.filter((arm) => arm === "on").length).toBe(1);
+  });
+
+  it("pushes nothing for a result that states no fast-mode state", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultMessage("u-silent"));
+    });
+
+    expect(arms).toEqual([]);
+  });
+
+  it("replays the current state to a consumer that joins late", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(resultWithFastMode("on"));
+
+    const arms = await pushedFastMode(h, async () => undefined);
+
+    expect(arms).toEqual(["on"]);
+  });
+});
+
+describe("the keep-alive interval", () => {
+  it("beats on the module constant when nothing overrode it", async () => {
+    const h = harness();
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("beats on the interval the caller supplied", async () => {
+    const h = harness({ keepaliveIntervalMs: 200 });
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(200);
+  });
+});
+
+/**
+ * `engine`'s per-turn verbs are one-line delegations to `turns.*`
+ * (`watchAgent: (request) => turns.watchAgent(request)`, and so on) — the
+ * dispatch surface `service/server.ts` actually calls. `engine/turn.test.ts`
+ * covers `turns.*` directly and exhaustively; nothing calls them THROUGH
+ * `engine` in any unit test, which is why coverage saw these arrows as
+ * zero-hit. This pins that the delegation itself works, with the cheapest
+ * refusal each verb answers before a session exists.
+ */
+describe("the per-turn verbs, through the engine's own dispatch surface", () => {
+  it("watchAgent refuses (at iteration) with no session started", async () => {
+    const h = harness();
+
+    await expect(
+      (async () => {
+        for await (const _ of h.engine.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          // refused before anything is yielded
+        }
+      })(),
+    ).rejects.toThrow();
+  });
+
+  it("updateAgent refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.updateAgent(create(shimv1.UpdateAgentRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noSession");
+  });
+
+  it("killTurn refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.killTurn(create(shimv1.KillTurnRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.cause.case : undefined,
+    ).toBe("noSession");
+  });
+
+  it("watchBash refuses (at iteration) with no work id named", async () => {
+    const h = harness();
+
+    await expect(
+      (async () => {
+        for await (const _ of h.engine.watchBash(create(shimv1.WatchBashRequestSchema, {}))) {
+          // refused before anything is yielded
+        }
+      })(),
+    ).rejects.toThrow();
+  });
+
+  it("stopBash refuses unknownWork for a work id nothing announced", async () => {
+    const h = harness();
+
+    const response = await h.engine.stopBash(
+      create(shimv1.StopBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "b-nope" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("unknownWork");
+  });
+
+  it("detachForeground refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {}),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noSession");
+  });
+});
+
+/**
+ * A standing grant's mode change: engine/turn.ts's `answer`/`answerOutcome`
+ * (UpdateAgent's "answer" input arm, driven for both a question answer and a
+ * permission decision) and engine/session.ts's `onPermissionModeSet` gate
+ * callback (`permissionMode = mode; pushPermissionMode();`) were all zero-hit
+ * -- nothing in this suite ever resolves a canUseTool ask THROUGH the engine's
+ * own UpdateAgent RPC (permission-gate.test.ts exercises the gate directly, in
+ * isolation, and its own onPermissionModeSet is a throwaway test callback).
+ */
+describe("a standing grant's mode change, delivered through UpdateAgent", () => {
+  it("updates the session's own permission mode and pushes the change", async () => {
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const pushed: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "permissionModeChanged") {
+          pushed.push(update.value.permissionMode?.mode.case ?? "");
+        }
+      }
+    })();
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_1",
+      requestId: "req_1",
+      suggestions: [{ type: "setMode", destination: "session", mode: "acceptEdits" }],
+    } as never);
+    await Promise.resolve();
+
+    const response = await h.engine.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: {
+            case: "answer",
+            value: create(conversationv1.AgentAnswerSchema, {
+              answer: {
+                case: "permissionDecision",
+                value: create(conversationv1.AgentPermissionDecisionSchema, {
+                  ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+                  decision: {
+                    case: "allowed",
+                    value: create(conversationv1.AgentPermissionAllowedSchema, {
+                      scope: {
+                        case: "standing",
+                        value: create(conversationv1.AgentPermissionAllowedStandingSchema, {
+                          standing: toStanding([
+                            { type: "setMode", destination: "session", mode: "acceptEdits" },
+                          ]),
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+    await pending;
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(response.result.case).toBe("success");
+    expect(pushed).toEqual(["default", "acceptEdits"]);
+  });
+
+  it("answerOutcome refuses noOpenAsk when the ask id names nothing open", async () => {
+    const h = harness();
+    await started(h);
+
+    const response = await h.engine.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        input: create(conversationv1.AgentInputSchema, {
+          input: {
+            case: "answer",
+            value: create(conversationv1.AgentAnswerSchema, {
+              answer: {
+                case: "permissionDecision",
+                value: create(conversationv1.AgentPermissionDecisionSchema, {
+                  ask: create(conversationv1.AgentPermissionIdSchema, { value: "nope" }),
+                  decision: {
+                    case: "denied",
+                    value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: "no" }),
+                  },
+                }),
+              },
+            }),
+          },
+        }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noOpenAsk");
+  });
+});
+
+/**
+ * The account facts a scheduled beat pushes: mcpUpdate (pushMcpServerStatus,
+ * called once during StartSession) and usageWindow/optional
+ * (accountUsageUpdate, called on the account-usage interval's own beat).
+ * Neither had ever run: no test in this suite configures the scripted
+ * query's mcpServerStatus()/usage_EXPERIMENTAL... answers, or fires the
+ * account-usage interval ManualScheduler registers second (after the
+ * keepalive cadence).
+ */
+describe("mcp server status, pushed at StartSession", () => {
+  it("pushes one mcpServer update per declared server, each its own health arm", async () => {
+    const h = harness({
+      mcp: [
+        { name: "docs", status: "connected" },
+        { name: "search", status: "failed", error: "auth expired" },
+      ] as McpServerStatusLike[],
+    });
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const seen: { name: string; health: string }[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "mcpServer") {
+          seen.push({ name: update.value.name, health: update.value.health.case ?? "" });
+        }
+      }
+    })();
+
+    await started(h);
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(seen).toEqual([
+      { name: "docs", health: "connected" },
+      { name: "search", health: "failed" },
+    ]);
+  });
+});
+
+describe("account usage, pushed on the account-usage interval", () => {
+  it("reports the five-hour window and echoes the offered seven-day window", async () => {
+    const h = harness({
+      accountUsage: {
+        session: {
+          total_cost_usd: 0,
+          total_api_duration_ms: 0,
+          total_duration_ms: 0,
+          total_lines_added: 0,
+          total_lines_removed: 0,
+          model_usage: {},
+        },
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          seven_day: { utilization: 20, resets_at: "2026-01-02T00:00:00.000Z" },
+          seven_day_oauth_apps: null,
+          seven_day_opus: null,
+          seven_day_sonnet: null,
+          model_scoped: [],
+        },
+        behaviors: null,
+      },
+    });
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    let seen: conversationv1.SessionAccountUsage | undefined;
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "accountUsage") {
+          seen = update.value;
+          return;
+        }
+      }
+    })();
+
+    await started(h);
+    h.scheduler.fire(1);
+    await reading;
+
+    expect(seen?.outcome.case).toBe("available");
+    const available = seen?.outcome.value as conversationv1.SessionAccountUsageAvailable | undefined;
+    expect(available?.fiveHour?.utilizationPercent).toBe(10);
+    expect(available?.sevenDay?.utilizationPercent).toBe(20);
+    expect(available?.sevenDayOpus).toBeUndefined();
+  });
+});
+
+/**
+ * reportStoreUnreachable (ReadHistory's store_unavailable path) and
+ * concludeStoppedRuns (StopBash's write of the interrupted terminal).
+ */
+describe("ReadHistory reports a store outage", () => {
+  it("calls reportStoreUnreachable when the store answers store_unavailable", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.readError = new PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+    const before = h.engine.pushes.faultCount;
+
+    const response = await h.engine.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 5,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("storeUnavailable");
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+});
+
+describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () => {
+  it("closes a live shell run the shim itself stopped", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "toolu_1",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "",
+    } as never);
+
+    const response = await h.engine.stopBash(
+      create(shimv1.StopBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_1" }),
+      }),
+    );
+
+    expect(response.result.case).toBe("success");
+    const wrote = h.persistence.buffered.some((entry) => {
+      if (entry.item.kind !== "bash_run") return false;
+      const result = entry.item.frame.result;
+      if (result.case !== "success") return false;
+      return result.value.outcome.case === "interrupted";
+    });
+    expect(wrote).toBe(true);
+  });
+});
+
+/**
+ * A gated call raised INSIDE a subagent (engine/session.ts's `agentFor`).
+ *
+ * `canUseTool`'s `agentID` is the agent TASK id, verbatim -- the same string
+ * `task_started.task_id` states for the `local_agent` task (the capture corpus
+ * settles it: testdata/captures/ctrl-b-detach-of-foreground-subagent). The
+ * session ANNOUNCES the subagent under the spawning call's `tool_use_id`
+ * instead, so before this every permission and question raised under a
+ * subagent landed on the main agent's book with "the vendor raised an ask
+ * under an agent this session never announced".
+ */
+describe("an ask raised under a subagent's vendor agent id", () => {
+  /** Announce a live detached agent task spawned by `toolu_spawn`. */
+  const spawnSubagent = async (h: Harness): Promise<void> => {
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_spawn",
+      task_type: "agent",
+      subagent_type: "general-purpose",
+      description: "look something up",
+      uuid: "00000000-0000-4000-8000-00000000000a",
+      session_id: "s",
+    } as never);
+  };
+
+  /** The book the gate's permission frame landed on. */
+  const permissionBook = (h: Harness): string | undefined => {
+    for (const entry of h.persistence.buffered) {
+      if (entry.item.kind !== "frame") continue;
+      const result = entry.item.frame.result;
+      if (result.case !== "update") continue;
+      if (result.value.update.case !== "permission") continue;
+      return entry.agentId.value;
+    }
+    return undefined;
+  };
+
+  it("books an ask named by the vendor task id under the live subagent", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "a01",
+      requestId: "req_1",
+    });
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    expect(permissionBook(h)).toBe("toolu_spawn");
+  });
+
+  it("books an ask named by the spawning call under the live subagent", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "toolu_spawn",
+      requestId: "req_1",
+    });
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    expect(permissionBook(h)).toBe("toolu_spawn");
+  });
+
+  it("falls back to the main agent once the subagent has concluded", async () => {
+    const h = harness();
+    await started(h);
+    await spawnSubagent(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a01",
+      status: "completed",
+      output_file: "",
+      summary: "",
+      uuid: "00000000-0000-4000-8000-00000000000b",
+      session_id: "s",
+    } as never);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_inner",
+      agentID: "a01",
+      requestId: "req_1",
+    });
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    expect(permissionBook(h)).toBe(mainAgentId(sessionId).value);
+  });
+});
+
+/**
+ * Settledness for an item with NO `result` oneof (engine/session.ts's
+ * `noteForegroundUnits`).
+ *
+ * `AgentTaskAct` and its siblings carry an `act` rather than a lifecycle: the
+ * act IS the whole unit. Deriving settledness from a `result` they do not have
+ * left them in flight forever, and `DetachForeground` then answered
+ * `not_detachable` for a unit that had plainly concluded.
+ */
+describe("a foreground unit whose item has no lifecycle", () => {
+  it("is settled the moment its act is recorded", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: "task_act" } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_task",
+                          }),
+                          item: {
+                            case: "taskAct",
+                            value: create(conversationv1.AgentTaskActSchema, {
+                              act: { case: "created", value: create(conversationv1.AgentTaskCreatedSchema, {}) },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000c",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_task" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("alreadyConcluded");
+  });
+});
+
+
+/**
+ * The IDE-diagnostics adjacency join (engine/session.ts's `lastChange`).
+ *
+ * The vendor's `diagnostics` attachment carries no tool id, so
+ * convert/attachments.ts joins it to the change it concerns by the one
+ * remembered write-or-edit unit -- and nothing assigned it, so every
+ * diagnostics record fell to "IDE diagnostics arrived with no preceding write
+ * or edit" and landed as residue.
+ *
+ * The remembered value carries the KIND as well as the id, because the report
+ * lands on that unit's own arm and nothing else states which arm that is.
+ */
+describe("the last change the fold context carries", () => {
+  /** Fold one activity of the given kind, then a later message that reads the context. */
+  async function foldOneChange(
+    kind: "write" | "edit",
+    activityId: string,
+  ): Promise<ReturnType<typeof harness>> {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            {
+              agentId: mainAgentId("vendor-session"),
+              upsertKey: "k",
+              source: { producer: "p", vendorUuid: "u", arm: kind } as never,
+              keepalive: false,
+              item: {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: activityId,
+                          }),
+                          item:
+                            kind === "edit"
+                              ? { case: "edit", value: create(conversationv1.AgentEditSchema, {}) }
+                              : { case: "write", value: create(conversationv1.AgentWriteSchema, {}) },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+            },
+          ]
+        : [];
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-00000000000d",
+      session_id: "s",
+      message: { id: "msg_1", role: "assistant", content: [] },
+    } as never);
+
+    // The attachment is a LATER message, which is the whole point of the join.
+    await h.engine.onSdkMessage({
+      type: "user",
+      uuid: "00000000-0000-4000-8000-00000000000e",
+      session_id: "s",
+      message: { role: "user", content: [] },
+    } as never);
+    return h;
+  }
+
+  it("names the edit once one has been folded", async () => {
+    const h = await foldOneChange("edit", "toolu_edit");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.unit.value).toBe("toolu_edit");
+  });
+
+  it("states that an edit was an edit, so the report rides the edit arm", async () => {
+    const h = await foldOneChange("edit", "toolu_edit");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.kind).toBe("edit");
+  });
+
+  it("names the write once one has been folded", async () => {
+    const h = await foldOneChange("write", "toolu_write");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.unit.value).toBe("toolu_write");
+  });
+
+  it("states that a write was a write, so the report rides the write arm", async () => {
+    const h = await foldOneChange("write", "toolu_write");
+
+    expect(h.fold.contexts.at(-1)?.lastChange?.kind).toBe("write");
+  });
+});
+
+describe("the vendor request the turn runs under", () => {
+  /** An assistant message, with or without the vendor's request identity. */
+  const assistant = (requestId?: string): never =>
+    ({
+      type: "assistant",
+      uuid: "u-request-id",
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "claude-opus-5", content: [] },
+      ...(requestId === undefined ? {} : { request_id: requestId }),
+    }) as never;
+
+  /** The request_id the logger stamps right now, undefined when it stamps none. */
+  function stampedRequestId(): string | undefined {
+    const before = vi.mocked(writeSync).mock.calls.length;
+    bindLog({ operation: "shim.test.request-id" }).log({}, "probe");
+    const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+    const [, bytes, offset, length] = calls[before];
+    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as { request_id?: string };
+    return record.request_id;
+  }
+
+  beforeEach(() => {
+    // The logger is one process-wide singleton, so a previous turn's stamp is
+    // dropped the way the end of that turn drops it.
+    clearRequestId();
+  });
+
+  it("stamps the request the assistant message revealed", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage(assistant("req_revealed"));
+
+    expect(stampedRequestId()).toBe("req_revealed");
+  });
+
+  it("stamps nothing when the assistant message names no request", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage(assistant());
+
+    expect(stampedRequestId()).toBeUndefined();
+  });
+
+  it("drops the request id at the end of the turn that revealed it", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(assistant("req_ends_with_the_turn"));
+
+    await h.engine.onSdkMessage(resultMessage());
+
+    expect(stampedRequestId()).toBeUndefined();
+  });
+});
+
+/**
+ * Every push the engine produced while `act` ran, narrowed by `pick`.
+ *
+ * The same shape the model and fast-mode suites above use: subscribe first, do
+ * the thing, then stand the session down so the stream ends and the reader can
+ * be awaited rather than raced.
+ */
+async function pushedUpdates<T>(
+  h: Harness,
+  pick: (update: conversationv1.SessionUpdate["update"]) => T | undefined,
+  act: () => Promise<void>,
+): Promise<T[]> {
+  const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+  const seen: T[] = [];
+  const reading = (async () => {
+    for (;;) {
+      const step = await stream.next();
+      if (step.done === true) return;
+      const got = pick(step.value.update);
+      if (got !== undefined) seen.push(got);
+    }
+  })();
+  await act();
+  await h.engine.standDown("collected");
+  await reading;
+  return seen;
+}
+
+describe("the context usage the vendor states, mapped field by field", () => {
+  /** Every field of the vendor's answer populated, so each mapping is testable. */
+  function fullUsage(overrides: Partial<ContextUsageLike> = {}): ContextUsageLike {
+    return {
+      categories: [
+        { name: "messages", tokens: 10, color: "#111", isDeferred: true },
+        { name: "tools", tokens: 20, color: "#222" },
+      ],
+      totalTokens: 100,
+      maxTokens: 200,
+      rawMaxTokens: 300,
+      percentage: 50,
+      gridRows: [],
+      model: "claude-opus-5",
+      memoryFiles: [{ path: "/ws/CLAUDE.md", type: "project", tokens: 7 }],
+      mcpTools: [{ name: "search", serverName: "docs", tokens: 9, isLoaded: true }],
+      deferredBuiltinTools: [{ name: "WebFetch", tokens: 3, isLoaded: false }],
+      systemTools: [{ name: "Bash", tokens: 4 }],
+      systemPromptSections: [{ name: "identity", tokens: 5 }],
+      agents: [{ agentType: "Explore", source: "builtin", tokens: 6 }],
+      slashCommands: { totalCommands: 12, includedCommands: 8, tokens: 40 },
+      skills: {
+        totalSkills: 3,
+        includedSkills: 2,
+        tokens: 30,
+        skillFrontmatter: [{ name: "graphify", source: "user", tokens: 11 }],
+      },
+      autoCompactThreshold: 190,
+      isAutoCompactEnabled: true,
+      messageBreakdown: {
+        toolCallTokens: 1,
+        toolResultTokens: 2,
+        attachmentTokens: 3,
+        assistantMessageTokens: 4,
+        userMessageTokens: 5,
+        redirectedContextTokens: 6,
+        unattributedTokens: 7,
+        toolCallsByType: [{ name: "Bash", callTokens: 8, resultTokens: 9 }],
+        attachmentsByType: [{ name: "image", tokens: 10 }],
+      },
+      apiUsage: {
+        input_tokens: 21,
+        output_tokens: 22,
+        cache_creation_input_tokens: 23,
+        cache_read_input_tokens: 24,
+      },
+      ...overrides,
+    };
+  }
+
+  /** Start a session whose vendor answers `getContextUsage` with `usage`. */
+  async function usagePushedFor(usage: ContextUsageLike): Promise<conversationv1.SessionContextUsage> {
+    const h = harness({ onQueryCreated: (query) => (query.contextUsage = usage) });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "contextUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const first = seen[0];
+    if (first === undefined) throw new Error("the engine pushed no context usage");
+    return first;
+  }
+
+  it("carries each category the vendor named", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories.map((category) => category.label)).toEqual(["messages", "tools"]);
+  });
+
+  it("states a category the vendor marked deferred", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories[0]?.isDeferred).toBe(true);
+  });
+
+  it("leaves a category the vendor said nothing about UNSTATED, not false", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.categories[1]?.isDeferred).toBeUndefined();
+  });
+
+  it("ROUNDS a fractional figure rather than losing the whole push", async () => {
+    // `BigInt()` throws outright on a non-integer, which would turn one
+    // fractional vendor field into a lost context-usage push and a fault.
+    const usage = await usagePushedFor(fullUsage({ percentage: 84.6 }));
+
+    expect(usage.percentage).toBe(85n);
+  });
+
+  it("carries the memory files the context holds", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.memoryFiles.map((file) => [file.path, file.tokens])).toEqual([["/ws/CLAUDE.md", 7n]]);
+  });
+
+  it("carries the mcp tools and whether each is loaded", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.mcpTools.map((tool) => [tool.name, tool.serverName, tool.isLoaded])).toEqual([
+      ["search", "docs", true],
+    ]);
+  });
+
+  it("carries the deferred builtin tools", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.deferredBuiltinTools.map((tool) => [tool.name, tool.isLoaded])).toEqual([
+      ["WebFetch", false],
+    ]);
+  });
+
+  it("carries the system tools", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.systemTools.map((tool) => [tool.name, tool.tokens])).toEqual([["Bash", 4n]]);
+  });
+
+  it("carries the system prompt sections", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.systemPromptSections.map((section) => section.name)).toEqual(["identity"]);
+  });
+
+  it("carries the agent definitions in context", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.agents.map((agent) => [agent.agentType, agent.source])).toEqual([
+      ["Explore", "builtin"],
+    ]);
+  });
+
+  it("states the slash-command block when the vendor declared one", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.slashCommands?.includedCommands).toBe(8n);
+  });
+
+  it("states the skills block, frontmatter included", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.skills?.skillFrontmatter.map((skill) => skill.name)).toEqual(["graphify"]);
+  });
+
+  it("states the auto-compact threshold the vendor declared", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.autoCompactThreshold).toBe(190n);
+  });
+
+  it("states the per-message breakdown the vendor declared", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.messageBreakdown?.unattributedTokens).toBe(7n);
+  });
+
+  it("carries the breakdown's per-tool call and result figures", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(
+      usage.messageBreakdown?.toolCallsByType.map((entry) => [entry.name, entry.callTokens, entry.resultTokens]),
+    ).toEqual([["Bash", 8n, 9n]]);
+  });
+
+  it("carries the breakdown's per-attachment-type figures", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.messageBreakdown?.attachmentsByType.map((entry) => entry.name)).toEqual(["image"]);
+  });
+
+  it("states the API usage the vendor reported for the last request", async () => {
+    const usage = await usagePushedFor(fullUsage());
+
+    expect(usage.apiUsage?.cacheReadInputTokens).toBe(24n);
+  });
+
+  it("states NO api usage when the vendor reported none", async () => {
+    const usage = await usagePushedFor(fullUsage({ apiUsage: null }));
+
+    expect(usage.apiUsage).toBeUndefined();
+  });
+
+  it("reports a getContextUsage failure as a vendor_query_failed fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = () => Promise.reject(new Error("the vendor will not answer"));
+      },
+    });
+    const faults = await pushedUpdates(
+      h,
+      (update) =>
+        update.case === "diagnostics" ? update.value.health.case : undefined,
+      async () => {
+        await started(h);
+      },
+    );
+
+    expect(faults).toContain("unhealthy");
+  });
+});
+
+describe("the account's rate-limit windows", () => {
+  /** The vendor's usage answer, with only the rate-limit half varied. */
+  function usage(overrides: Partial<AccountUsageLike>): AccountUsageLike {
+    return {
+      session: {
+        total_cost_usd: 0,
+        total_api_duration_ms: 0,
+        total_duration_ms: 0,
+        total_lines_added: 0,
+        total_lines_removed: 0,
+        model_usage: {},
+      },
+      subscription_type: "max",
+      rate_limits_available: true,
+      rate_limits: null,
+      behaviors: null,
+      ...overrides,
+    };
+  }
+
+  /** The account-usage push a session with this vendor answer produces. */
+  async function accountUsagePushed(answer: AccountUsageLike): Promise<conversationv1.SessionAccountUsage> {
+    const h = harness({ accountUsage: answer });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const first = seen[0];
+    if (first === undefined) throw new Error("the engine pushed no account usage");
+    return first;
+  }
+
+  /** The unavailable reason on a push that carries one. */
+  function unavailableReason(pushed: conversationv1.SessionAccountUsage): string | undefined {
+    return pushed.outcome.case === "unavailable" ? (pushed.outcome.value.reason.case ?? "") : undefined;
+  }
+
+  it("reports service_unavailable when limits are claimed and none are given", async () => {
+    // The service said it had limits and produced none: still the service
+    // failing to answer, not a shape with a window missing from it.
+    const pushed = await accountUsagePushed(usage({ rate_limits: null }));
+
+    expect(unavailableReason(pushed)).toBe("serviceUnavailable");
+  });
+
+  it("reports window_unavailable when the answer carries no five-hour window", async () => {
+    const pushed = await accountUsagePushed(
+      usage({ rate_limits: { five_hour: null } }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("windowUnavailable");
+  });
+
+  it("reports utilization_unavailable when the five-hour window states no utilization", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: { five_hour: { utilization: null, resets_at: "2026-01-01T00:00:00.000Z" } },
+      }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
+  });
+
+  it("reports utilization_unavailable when the window's reset time cannot be read", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: { five_hour: { utilization: 10, resets_at: "not a timestamp" } },
+      }),
+    );
+
+    expect(unavailableReason(pushed)).toBe("utilizationUnavailable");
+  });
+
+  it("echoes each per-model window the vendor offered", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          model_scoped: [
+            { display_name: "Fable", utilization: 30, resets_at: "2026-01-03T00:00:00.000Z" },
+          ],
+        },
+      }),
+    );
+    const available =
+      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
+
+    expect(available?.modelScoped.map((scoped) => [scoped.model?.name, scoped.window?.utilizationPercent])).toEqual(
+      [["Fable", 30]],
+    );
+  });
+
+  it("DROPS a per-model window the vendor could not state", async () => {
+    const pushed = await accountUsagePushed(
+      usage({
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          model_scoped: [{ display_name: "Fable", utilization: null, resets_at: null }],
+        },
+      }),
+    );
+    const available =
+      pushed.outcome.case === "available" ? pushed.outcome.value : undefined;
+
+    expect(available?.modelScoped).toEqual([]);
+  });
+
+  it("reports a sampling failure when the vendor's usage verb throws", async () => {
+    // "We could not ask" is a different fact to a consumer than "the service is
+    // down", so it gets its own reason rather than an absent field.
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () =>
+          Promise.reject(new Error("the usage endpoint is down"));
+      },
+    });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const outcome = seen[0]?.outcome;
+
+    expect(
+      outcome?.case === "unavailable" && outcome.value.reason.case === "samplingFailure"
+        ? outcome.value.reason.value.cause
+        : undefined,
+    ).toBe("the usage endpoint is down");
+  });
+});
+
+describe("mcp server health, arm by arm", () => {
+  /** The health arm the engine pushed for one declared server. */
+  async function healthFor(status: McpServerStatusLike["status"]): Promise<string | undefined> {
+    const h = harness({ mcp: [{ name: "docs", status }] as McpServerStatusLike[] });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "mcpServer" ? (update.value.health.case ?? "") : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    return seen[0];
+  }
+
+  it("states a server awaiting authorization as needs_auth", async () => {
+    expect(await healthFor("needs-auth")).toBe("needsAuth");
+  });
+
+  it("states a server still connecting as pending", async () => {
+    expect(await healthFor("pending")).toBe("pending");
+  });
+
+  it("states a server the user turned off as disabled", async () => {
+    expect(await healthFor("disabled")).toBe("disabled");
+  });
+
+  it("reports an mcpServerStatus failure as a session fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.mcpServerStatus = () => Promise.reject(new Error("the vendor cannot probe its servers"));
+      },
+    });
+    const before = h.engine.pushes.faultCount;
+    await started(h);
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+  });
+});
+
+describe("the model catalog's capabilities", () => {
+  /** The catalog a session reports when the vendor declares `models`. */
+  async function catalogFor(models: ModelInfoLike[]): Promise<conversationv1.ModelOption[]> {
+    const h = harness({ onQueryCreated: (query) => (query.models = models) });
+    const response = await started(h);
+    return response.result.case === "success" ? (response.result.value.session?.modelCatalog ?? []) : [];
+  }
+
+  it("states the wire model an alias row resolves to", async () => {
+    const catalog = await catalogFor([
+      { value: "sonnet", displayName: "Sonnet", description: "alias", resolvedModel: "claude-sonnet-5" },
+    ]);
+
+    expect(catalog[0]?.capabilities?.resolvedModel?.name).toBe("claude-sonnet-5");
+  });
+
+  it("states effort UNSUPPORTED for a model that declares other capabilities but no effort", async () => {
+    const catalog = await catalogFor([
+      { value: "m", displayName: "M", description: "d", supportsAdaptiveThinking: true },
+    ]);
+
+    expect(catalog[0]?.capabilities?.effortSupport.case).toBe("effortUnsupported");
+  });
+
+  it("maps an effort level the shim does not know to UNSPECIFIED", async () => {
+    const catalog = await catalogFor([
+      {
+        value: "m",
+        displayName: "M",
+        description: "d",
+        supportsEffort: true,
+        supportedEffortLevels: ["ludicrous"] as unknown as ModelInfoLike["supportedEffortLevels"],
+      },
+    ]);
+    const support = catalog[0]?.capabilities?.effortSupport;
+
+    expect(support?.case === "effortSupported" ? support.value.levels : undefined).toEqual([
+      conversationv1.AgentEffortLevel.UNSPECIFIED,
+    ]);
+  });
+});
+
+/**
+ * The fold's own rows, and what the engine does with them.
+ *
+ * A `PersistEntry` the fold produced, wrapped so each test states only the row
+ * it cares about.
+ */
+function foldEntry(item: PersistEntry["item"], arm: string): PersistEntry {
+  return {
+    agentId: mainAgentId("vendor-session"),
+    upsertKey: `k-${arm}`,
+    source: { vendorUuid: `u-${arm}`, discriminator: arm },
+    keepalive: false,
+    item,
+  };
+}
+
+/** One assistant message, so a fold has something to answer. */
+function assistantMessage(uuid: string): SdkMessage {
+  return {
+    type: "assistant",
+    uuid,
+    session_id: "s",
+    parent_tool_use_id: null,
+    message: { id: "msg_1", role: "assistant", content: [] },
+  } as never;
+}
+
+/** One activity frame row, as the fold produces them. */
+function activityEntry(
+  activityId: string,
+  item: conversationv1.AgentActivity["item"],
+  arm: string,
+): PersistEntry {
+  return foldEntry(
+    {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: {
+              case: "activity",
+              value: create(conversationv1.AgentActivitySchema, {
+                activityId: create(conversationv1.AgentActivityIdSchema, { value: activityId }),
+                item,
+              }),
+            },
+          }),
+        },
+      }),
+    },
+    arm,
+  );
+}
+
+describe("the session updates the fold itself produced", () => {
+  it("fans out an arm the engine does not state itself", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "session_update",
+                update: create(conversationv1.SessionUpdateSchema, {
+                  update: {
+                    case: "rateLimitStatus",
+                    value: create(conversationv1.SessionRateLimitStatusSchema, {}),
+                  },
+                }),
+              },
+              "rate_limit_status",
+            ),
+          ]
+        : [];
+
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === "rateLimitStatus" ? "rateLimitStatus" : undefined),
+      async () => {
+        await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a1"));
+      },
+    );
+
+    expect(arms).toEqual(["rateLimitStatus"]);
+  });
+
+  it("DROPS a fold duplicate of an arm the engine owns", async () => {
+    // One producer per arm, or a consumer sees the same flip twice.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "session_update",
+                update: create(conversationv1.SessionUpdateSchema, {
+                  update: {
+                    case: "modelChanged",
+                    value: create(conversationv1.SessionModelChangedSchema, {
+                      effectiveModel: create(conversationv1.AgentModelSchema, {
+                        name: "the-fold-said-this",
+                      }),
+                    }),
+                  },
+                }),
+              },
+              "model_changed",
+            ),
+          ]
+        : [];
+
+    const names = await pushedUpdates(
+      h,
+      (update) => (update.case === "modelChanged" ? update.value.effectiveModel?.name : undefined),
+      async () => {
+        await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000a2"));
+      },
+    );
+
+    expect(names).not.toContain("the-fold-said-this");
+  });
+});
+
+describe("the vendor's init when it names no real model", () => {
+  it("keeps the model already in effect rather than adopting the synthetic marker", async () => {
+    // `<synthetic>` is the CLI's stand-in for "no nameable model"; adopting it
+    // would put an unspawnable id in the picker and every later field.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: SYNTHETIC_MODEL,
+      }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success" ? response.result.value.session?.effectiveModel?.name : undefined,
+    ).toBe("claude-opus-5");
+  });
+});
+
+describe("the vendor's own compaction, announced through system:status", () => {
+  /** Every context cut this session wrote, newest last. */
+  function contextCuts(h: Harness): conversationv1.ContextCut[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "frame") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "update") return [];
+      const update = result.value.update;
+      return update.case === "contextCut" ? [update.value] : [];
+    });
+  }
+
+  it("pushes `compacting` when the vendor says it started", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === "compacting" ? "compacting" : undefined),
+      async () => {
+        await h.engine.onSdkMessage({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "00000000-0000-4000-8000-0000000000b1",
+          session_id: "s",
+        } as never);
+      },
+    );
+
+    expect(arms).toEqual(["compacting"]);
+  });
+
+  it("writes a compaction_failed page line carrying the vendor's own wording", async () => {
+    // A failure has no `compact_boundary` record at all, so this is its ONLY
+    // producer.
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      compact_error: "the model refused to summarize",
+      uuid: "00000000-0000-4000-8000-0000000000b2",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.error : undefined).toBe(
+      "the model refused to summarize",
+    );
+  });
+
+  it("states its own wording when the vendor named no error", async () => {
+    const h = harness();
+    await started(h);
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "status",
+      compact_result: "failed",
+      uuid: "00000000-0000-4000-8000-0000000000b3",
+      session_id: "s",
+    } as never);
+
+    const cut = contextCuts(h).at(-1);
+    expect(cut?.cut.case === "compactionFailed" ? cut.cut.value.error : undefined).toBe(
+      "the vendor's compaction failed",
+    );
+  });
+});
+
+describe("what the engine remembers from the fold's own frames", () => {
+  it("RELAYS a denial the fold produced into the one memory of denied calls", async () => {
+    // The policy and undecidable arms never reach the gate's ask, so the
+    // `tool_result` that follows them must still be recognised as a relayed
+    // deny rather than a call that ran.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "permission",
+                        value: create(conversationv1.AgentPermissionSchema, {
+                          gatedCall: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_denied",
+                          }),
+                          result: {
+                            case: "success",
+                            value: create(conversationv1.AgentPermissionSuccessSchema, {
+                              decision: {
+                                case: "denied",
+                                value: create(conversationv1.AgentPermissionDeniedSchema, {
+                                  by: {
+                                    case: "policy",
+                                    value: create(
+                                      conversationv1.AgentPermissionDeniedByPolicySchema,
+                                      {},
+                                    ),
+                                  },
+                                }),
+                              },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "permission_denied",
+            ),
+          ]
+        : [];
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c1"));
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c2"));
+
+    expect(h.fold.contexts.at(-1)?.deniedCall("toolu_denied")).toBe(true);
+  });
+
+  it("ANNOUNCES the agent a spawn created, so a watch on it can be answered", async () => {
+    // The daemon opens its WatchAgent the instant it sees the spawn — before a
+    // single row of the child's exists.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            activityEntry(
+              "toolu_spawn",
+              {
+                case: "subagent",
+                value: create(conversationv1.AgentSubagentSchema, {
+                  result: {
+                    case: "start",
+                    value: create(conversationv1.AgentSubagentStartSchema, {
+                      createdAgentId: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+                    }),
+                  },
+                }),
+              },
+              "subagent_start",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000c3"));
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(first.frame.case).toBe("page");
+  });
+
+  it("REFUSES a watch on an agent this session never announced", async () => {
+    const h = harness();
+    await started(h);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "agent-nobody-minted" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(/never been announced|no agent by that id/);
+  });
+});
+
+describe("the live detached table, driven by the vendor's own messages", () => {
+  /** `task_started` for one shell run. */
+  const taskStarted = (overrides: Record<string, unknown> = {}): SdkMessage =>
+    ({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t01",
+      tool_use_id: "toolu_run",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000d0",
+      session_id: "s",
+      ...overrides,
+    }) as never;
+
+  /** The command lines of every interrupted shell terminal this session wrote. */
+  function interruptedCommands(h: Harness): string[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "bash_run") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "success" || result.value.outcome.case !== "interrupted") return [];
+      return [result.value.command?.line ?? ""];
+    });
+  }
+
+  it("PATCHES a live item from the vendor's task_updated", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "t01",
+      patch: { description: "sleep 900" },
+      uuid: "00000000-0000-4000-8000-0000000000d1",
+      session_id: "s",
+    } as never);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual(["sleep 900"]);
+  });
+
+  it("applies the vendor's LEVEL by replacement, retiring what it omits", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "background_tasks_changed",
+      tasks: [],
+      uuid: "00000000-0000-4000-8000-0000000000d2",
+      session_id: "s",
+    } as never);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("tells the fold which call a live task belongs to", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+
+    expect(h.fold.contexts.at(-1)?.liveTask("t01")).toEqual({ toolUseId: "toolu_run" });
+  });
+
+  it("tells the fold nothing for a task id it never saw start", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted());
+
+    expect(h.fold.contexts.at(-1)?.liveTask("t99")).toBeUndefined();
+  });
+
+  it("writes NO shell terminal for a stopped item that names no originating call", async () => {
+    // Tracked for liveness, addressable by nobody: there is no unit to settle,
+    // and inventing one would put work on a stream that never announced it.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted({ tool_use_id: undefined }));
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual([]);
+  });
+
+  it("writes NO shell terminal for a stopped SUBAGENT: its terminal is the spawn unit's", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(taskStarted({ task_type: "local_agent" }));
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(interruptedCommands(h)).toEqual([]);
+  });
+});
+
+describe("a model name the vendor could not really state", () => {
+  it("adopts nothing from a reported model that is only whitespace", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const names: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "modelChanged") names.push(update.value.effectiveModel?.name ?? "");
+      }
+    })();
+
+    await h.engine.onSdkMessage({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-0000000000e1",
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "   ", content: [] },
+    } as never);
+    await h.engine.standDown("done");
+    await reading;
+
+    expect(names.filter((name) => name.trim() === "")).toEqual([]);
+  });
+});
+
+describe("folding before the session has an identity", () => {
+  it("REFUSES to fold a vendor message, rather than keying rows to nothing", async () => {
+    const h = harness();
+
+    await expect(
+      h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-0000000000e2")),
+    ).rejects.toThrow(/identity is not established/);
+  });
+});
+
+describe("the vendor query dying under the loop", () => {
+  it("reports an iterator failure as query_died.iterator_failure", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const causes: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "queryDied") causes.push(update.value.cause.case ?? "");
+      }
+    })();
+
+    // The loop is PARKED in the iterator; a stream that merely ends under a
+    // parked reader is an EOF. A message first unparks it, so the failure is
+    // raised on the next pull, which is how a real iterator throws.
+    h.queries[0]?.query.emit(assistantMessage("00000000-0000-4000-8000-0000000000e3"));
+    h.queries[0]?.query.fail(new Error("the vendor stream broke"));
+    for (let attempt = 0; attempt < 50 && causes.length === 0; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await h.engine.standDown("done");
+    await reading;
+
+    expect(causes).toContain("iteratorFailure");
+  });
+});
+
+describe("StartSession's remaining refusals", () => {
+  it("refuses vendor_start_failed when the vendor never sends its init", async () => {
+    // The init is the only thing StartSession waits for; without a bound a
+    // silent vendor would hold the verb open forever.
+    const h = harness({ initTimeoutMs: 5 });
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+  });
+
+  it("throws when StartSession reaches the engine with no source at all", async () => {
+    const h = harness();
+
+    await expect(
+      h.engine.startSession(create(shimv1.StartSessionRequestSchema, {})),
+    ).rejects.toThrow(/no source/);
+  });
+
+  it("proceeds without remediation when the caller named an arm the shim does not know", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const unset = create(conversationv1.SessionColdRemediationSchema, {});
+    const pending = h.engine.startSession(resumeRequest("resume-1", unset));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+
+  it("reports a supportedModels failure as a session fault rather than failing the start", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject(new Error("the vendor cannot list its models"));
+      },
+    });
+    const before = h.engine.pushes.faultCount;
+
+    await started(h);
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(before);
+  });
+});
+
+describe("the cold gate's COMPACT remediation", () => {
+  /** A `compact` remediation over the whole conversation. */
+  const compactRemediation = (): conversationv1.SessionColdRemediation =>
+    create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, {
+          scope: conversationv1.SessionCompactScope.ALL,
+        }),
+      },
+    });
+
+  /** Every context cut this session wrote, in the order it wrote them. */
+  function contextCuts(h: Harness): conversationv1.ContextCut[] {
+    return h.persistence.buffered.flatMap((entry) => {
+      if (entry.item.kind !== "frame") return [];
+      const result = entry.item.frame.result;
+      if (result.case !== "update") return [];
+      const update = result.value.update;
+      return update.case === "contextCut" ? [update.value] : [];
+    });
+  }
+
+  it("WRITES the cut it held until the session had an identity", async () => {
+    // The remediation runs before the identity is settled, so its page line
+    // cannot be keyed yet — it waits rather than vanishing.
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("77777777-7777-4777-8777-777777777777"));
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(contextCuts(h).map((cut) => cut.cut.case)).toEqual(["compacted"]);
+  });
+
+  it("refuses vendor_start_failed when the summarizing session ends in a failure subtype", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) {
+          query.emit({
+            ...(resultMessage("88888888-8888-4888-8888-888888888888") as unknown as Record<string, unknown>),
+            subtype: "error_max_turns",
+          } as never);
+        }
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the summarizing session ended as error_max_turns");
+  });
+
+  it("refuses when the summarizing session produced no summary", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) {
+          query.emit({
+            ...(resultMessage("99999999-9999-4999-8999-999999999999") as unknown as Record<string, unknown>),
+            result: "",
+          } as never);
+        }
+      },
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the summarizing session produced no summary");
+  });
+
+  it("refuses with the vendor's own words when the throwaway query cannot be created", async () => {
+    const h = harness({ nowMs: 1_000_000 + 10 * 60 * 1000, createQueryFailsFrom: 0 });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(resumeRequest("resume-1", compactRemediation()));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor refused another query");
+  });
+});
+
+describe("Hibernate's compaction failing", () => {
+  it("carries the summarizing session's own failure into the refusal", async () => {
+    const h = harness({
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 1) {
+          query.emit({
+            ...(resultMessage("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") as unknown as Record<string, unknown>),
+            subtype: "error_during_execution",
+          } as never);
+        }
+      },
+    });
+    await started(h);
+    const first = h.queries[0];
+    const sessionId = first?.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+    writeTranscript(h.configDir, h.cwd, sessionId, [assistantLine({ sessionId })]);
+
+    const response = await h.engine.hibernate(create(shimv1.HibernateRequestSchema, {}));
+    const error = response.result.case === "error" ? response.result.value : undefined;
+
+    expect(error?.kind.case === "compactionFailed" ? error.kind.value.error : undefined).toBe(
+      "the summarizing session ended as error_during_execution",
+    );
+  });
+});
+
+describe("reconciliation when the record cannot describe the work", () => {
+  it("closes a live run as swept up with no command when the book cannot be read", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.openError = new PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+
+    await started(h);
+
+    const terminal = h.persistence.buffered.find((entry) => entry.upsertKey === "bash:b01:terminal");
+    expect(
+      terminal?.item.kind === "bash_run" && terminal.item.frame.result.case === "success"
+        ? terminal.item.frame.result.value.command?.line
+        : undefined,
+    ).toBe("");
+  });
+
+  it("closes a SPAWN the book describes as a subagent, not as a shell run", async () => {
+    // The kind comes from what the book says the unit was; closing a spawn as a
+    // shell would put a bash terminal on a subagent's own unit.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_spawn" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+          entry: create(conversationv1.HistoryEntrySchema, {
+            entry: {
+              case: "agentFrame",
+              value: create(conversationv1.AgentFrameSchema, {
+                result: {
+                  case: "update",
+                  value: create(conversationv1.AgentUpdateSchema, {
+                    update: {
+                      case: "activity",
+                      value: create(conversationv1.AgentActivitySchema, {
+                        activityId: create(conversationv1.AgentActivityIdSchema, {
+                          value: "toolu_spawn",
+                        }),
+                        item: {
+                          case: "subagent",
+                          value: create(conversationv1.AgentSubagentSchema, {
+                            result: {
+                              case: "start",
+                              value: create(conversationv1.AgentSubagentStartSchema, {}),
+                            },
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    expect(
+      h.persistence.buffered.some(
+        (entry) => entry.source.discriminator === "activity.subagent.failure.lost.swept_up",
+      ),
+    ).toBe(true);
+  });
+
+  it("neither re-adopts nor closes a live WORKFLOW run", async () => {
+    // WORKFLOW IS KICKED this wave: a terminal written for one would close an
+    // obligation nothing in this build owns.
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveWorkflows: [create(conversationv1.DetachedWorkIdSchema, { value: "w01" })],
+    });
+
+    const response = await started(h);
+
+    expect(h.persistence.buffered).toEqual([]);
+    expect(
+      response.result.case === "success" ? response.result.value.session?.liveWork : undefined,
+    ).toEqual([]);
+  });
+});
+
+describe("the keep-alive beat that could not be recorded", () => {
+  it("reports the failure as a keepalive_failed fault rather than losing the beat", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.write = (): void => {
+      throw new Error("the record plane refused the keep-alive prompt row");
+    };
+    const before = h.engine.pushes.faultCount;
+
+    h.scheduler.fire(0);
+    for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === before; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+});
+
+describe("what this session will answer a watch about", () => {
+  it("refuses a watch on the empty agent id", async () => {
+    const h = harness();
+    await started(h);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
+  });
+
+  it("answers a watch on a subagent the live table still holds", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_live_agent",
+      task_type: "local_agent",
+      description: "explore",
+      uuid: "00000000-0000-4000-8000-0000000000f1",
+      session_id: "s",
+    } as never);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "toolu_live_agent" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(first.frame.case).toBe("page");
+  });
+
+  it("answers a watch on a subagent that has since RETIRED", async () => {
+    // A retired handle was still announced; refusing it would deny a consumer
+    // the book of work that plainly happened.
+    const h = harness();
+    await started(h);
+    const spawn = {
+      type: "system",
+      subtype: "task_started",
+      task_id: "a02",
+      tool_use_id: "toolu_retired_agent",
+      task_type: "local_agent",
+      description: "explore",
+      uuid: "00000000-0000-4000-8000-0000000000f2",
+      session_id: "s",
+    } as never;
+    await h.engine.onSdkMessage(spawn);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "a02",
+      status: "completed",
+      uuid: "00000000-0000-4000-8000-0000000000f3",
+      session_id: "s",
+    } as never);
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "toolu_retired_agent" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+    const first = await nextPush(iterator);
+    await iterator.return?.();
+
+    expect(first.frame.case).toBe("page");
+  });
+});
+
+describe("the teardown's tails", () => {
+  /** A one-entry page whose head pointer a conclusion can name. */
+  function pageWithHead(pointer: string): conversationv1.HistoryPage {
+    return create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: pointer }),
+          entry: create(conversationv1.HistoryEntrySchema, {}),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+  }
+
+  it("CONCLUDES an open tail through the book's head before the process ends", async () => {
+    // The terminals are already durable, so the head names the last row the
+    // consumer is owed; cutting the tail instead reads as a transport failure.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.persistence.concludedThrough).toContain("p-9");
+  });
+
+  it("VOUCHES for the agent when reading the head, so a book never written is not asked for", async () => {
+    // Arrange. A session killed before its first turn has an agent with no book,
+    // and asking the store for one earns an `unknown_agent` refusal on every
+    // such teardown.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert. The head read carried the producer's own answer, and it holds.
+    expect(h.persistence.lastKnownAgent?.()).toBe(true);
+  });
+
+  it("reads the book's head with the ONE-SHOT verb, so no watch token is minted for it", async () => {
+    // Arrange. The head read stands no tail, and the store cannot learn that a
+    // page was abandoned — OpenAgentSession is unary and there is no close — so
+    // a reading session opened here would leave a token nothing ever spends.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+    const openedBeforeTeardown = h.persistence.pagesOpened;
+
+    // Act.
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    // Assert. The head arrived as a one-shot read, and the teardown opened no
+    // further reading session.
+    expect([h.persistence.firstPageReads, h.persistence.pagesOpened]).toEqual([
+      1,
+      openedBeforeTeardown,
+    ]);
+  });
+
+  it("concludes NOTHING for a tail that already ended on its own", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.page = pageWithHead("p-9");
+    const watching = h.engine.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }),
+    );
+    for await (const _frame of watching) {
+      // drained to completion, which is what disposes the watcher
+    }
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.persistence.concludedThrough).toEqual([]);
+  });
+
+  it("finishes KillSession when a WatchBash stream never ends", async () => {
+    // A LAST RESORT bound: a consumer that stopped pulling must not keep a
+    // killed shim alive forever.
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.openBashRun = () =>
+      Promise.resolve({
+        async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {
+          await new Promise<void>(() => undefined);
+        },
+      });
+    const watching = h.engine
+      .watchBash(
+        create(shimv1.WatchBashRequestSchema, {
+          work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_never_ends" }),
+        }),
+      )[Symbol.asyncIterator]();
+    void watching.next().catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
+      "idle",
+    );
+  });
+
+  it("continues the teardown when the vendor refuses the interrupt", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.interrupt = () => Promise.reject(new Error("the vendor will not be interrupted"));
+      },
+    });
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.queries[0]?.query.calls).toContain("close");
+  });
+
+  it("continues the teardown when a detached item cannot be stopped", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.stopTask = () => Promise.reject(new Error("the vendor cannot stop this task"));
+      },
+    });
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t02",
+      tool_use_id: "toolu_unstoppable",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000f4",
+      session_id: "s",
+    } as never);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_unstoppable:terminal"),
+    ).toBe(true);
+  });
+});
+
+describe("ending the process the session was serving", () => {
+  it("says so rather than exiting when this build has no process to end", async () => {
+    const h = harness({ withoutEndProcess: true });
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(response.result.case).toBe("success");
+    expect(h.exits).toEqual([]);
+  });
+
+  it("stands down NONZERO when the store never acked some rows", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.lostRows = 3;
+
+    expect(await h.engine.standDown("SIGTERM")).toBe(1);
+  });
+});
+
+describe("SetSessionModel and SetSessionPermissionMode, refused by the vendor", () => {
+  it("answers a deferred model change with the vendor's refusal at the turn boundary", async () => {
+    // The caller has been waiting for exactly this moment; swallowing the
+    // refusal would leave the daemon believing a change landed that never did.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModelRejects = new Error("the vendor refuses that model");
+    const deferred = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    query?.emit(resultMessage("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+    const response = await deferred;
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor refuses that model");
+  });
+
+  it("surfaces an immediate vendor refusal rather than reporting a model that is not in force", async () => {
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModelRejects = new Error("the vendor refuses that model");
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.cause.case : undefined,
+    ).toBe("vendorRefused");
+  });
+
+  it("throws when SetSessionPermissionMode reaches the engine with no mode", async () => {
+    const h = harness();
+    await started(h);
+
+    await expect(
+      h.engine.setSessionPermissionMode(create(shimv1.SetSessionPermissionModeRequestSchema, {})),
+    ).rejects.toThrow(/no mode/);
+  });
+});
+
+describe("the prompt stream the engine hands the vendor", () => {
+  it("DELIVERS a submitted prompt through the push-to-pull bridge", async () => {
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    for (let attempt = 0; attempt < 50 && delivered.length === 0; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(delivered).toEqual(["go"]);
+  });
+
+  it("ENDS the vendor's prompt stream when the session stands down", async () => {
+    const delivered: string[] = [];
+    const h = harness({ drainPrompts: delivered });
+    await started(h);
+
+    await h.engine.standDown("SIGTERM");
+    for (let attempt = 0; attempt < 50 && !delivered.includes("<end>"); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    expect(delivered).toEqual(["<end>"]);
+  });
+});
+
+describe("compaction when no model is in effect", () => {
+  it("passes NO model to the throwaway query, leaving the SDK's own default", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
+      },
+    });
+    // A transcript whose records never named a model: nothing to recover, so
+    // nothing to ask the summarizing query for either.
+    writeTranscript(h.configDir, h.cwd, "resume-1", [
+      assistantLine({
+        message: {
+          usage: {
+            input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 500,
+            cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 1 },
+          },
+        },
+      }),
+    ]);
+    const remediation = create(conversationv1.SessionColdRemediationSchema, {
+      remediation: {
+        case: "compact",
+        value: create(conversationv1.SessionColdCompactSchema, {
+          scope: conversationv1.SessionCompactScope.ALL,
+        }),
+      },
+    });
+    const pending = h.engine.startSession(resumeRequest("resume-1", remediation));
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+});
+
+describe("reconciliation against work the shim has already SEEN start", () => {
+  it("re-adopts it without asking the vendor at all", async () => {
+    // The live table already holds it, and a vendor round trip for something
+    // this process watched begin would be asking about its own knowledge.
+    const h = harness({
+      onQueryCreated: (query, spec) => {
+        query.emit(initMessage({ sessionId: spec.binding.kind === "fresh" ? spec.binding.sessionId : "" }));
+        query.emit({
+          type: "system",
+          subtype: "task_started",
+          task_id: "t10",
+          tool_use_id: "toolu_seen",
+          task_type: "local_bash",
+          description: "sleep 600",
+          uuid: "00000000-0000-4000-8000-000000000101",
+          session_id: "s",
+        } as never);
+      },
+    });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "toolu_seen" })],
+    });
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.queries[0]?.query.calls).not.toContain("backgroundTasks:toolu_seen");
+    expect(
+      h.persistence.buffered.some((entry) => entry.upsertKey === "bash:toolu_seen:terminal"),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The arms a first pass left open.
+// ---------------------------------------------------------------------------
+
+/** How many durable log records have been written so far. */
+function logCursor(): number {
+  return vi.mocked(writeSync).mock.calls.length;
+}
+
+/** The context of the first record since `from` whose message carries `needle`. */
+function logContextFor(from: number, needle: string): Record<string, unknown> | undefined {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  for (const [, bytes, offset, length] of calls.slice(from)) {
+    const record = JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as {
+      message: string;
+      context: Record<string, unknown>;
+    };
+    if (record.message.includes(needle)) return record.context;
+  }
+  return undefined;
+}
+
+/** Every fault detail the session's diagnostics carried while `act` ran. */
+async function faultDetailsWhile(h: Harness, act: () => Promise<void>): Promise<string[]> {
+  const seen = await pushedUpdates(
+    h,
+    (update) => (update.case === "diagnostics" ? update.value : undefined),
+    act,
+  );
+  const details: string[] = [];
+  for (const diagnostics of seen) {
+    if (diagnostics.health.case !== "unhealthy") continue;
+    for (const fault of diagnostics.health.value.faults) details.push(fault.detail);
+  }
+  return details;
+}
+
+/**
+ * A vendor failure that is not an `Error`.
+ *
+ * THE SDK IS A FOREIGN BOUNDARY. Nothing makes a rejected vendor promise carry
+ * an `Error`, and every place the engine states a cause reads
+ * `err instanceof Error ? err.message : String(err)` for exactly that reason.
+ * A rejection that is a bare string must reach the record and the wire whole,
+ * not as "[object Object]" and not as an empty detail.
+ */
+describe("a vendor failure that is not an Error", () => {
+  it("carries a bare-string getContextUsage rejection into the fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.getContextUsage = () => Promise.reject("the context socket went away");
+      },
+    });
+
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+
+    expect(details).toContain("getContextUsage failed: the context socket went away");
+  });
+
+  it("carries a bare-string mcpServerStatus rejection into the fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.mcpServerStatus = () => Promise.reject("the mcp probe went away");
+      },
+    });
+
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+
+    expect(details).toContain("mcpServerStatus failed: the mcp probe went away");
+  });
+
+  it("carries a bare-string usage rejection into the sampling failure", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = () =>
+          Promise.reject("the usage endpoint went away");
+      },
+    });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const outcome = seen[0]?.outcome;
+
+    expect(
+      outcome?.case === "unavailable" && outcome.value.reason.case === "samplingFailure"
+        ? outcome.value.reason.value.cause
+        : undefined,
+    ).toBe("the usage endpoint went away");
+  });
+
+  it("carries a bare-string supportedModels rejection into the fault", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = () => Promise.reject("the catalog endpoint went away");
+      },
+    });
+
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+
+    expect(details).toContain("supportedModels failed: the catalog endpoint went away");
+  });
+
+  it("carries a bare-string query-creation rejection into the StartSession refusal", async () => {
+    const h = harness({ createQueryRejection: "the vendor binary is not on this box" });
+
+    const response = await h.engine.startSession(freshRequest());
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor binary is not on this box");
+  });
+
+  it("logs a bare-string SESSION claim refusal with the words the claim used", async () => {
+    const h = harness({ lockRefusal: "the lock directory is gone" });
+    const before = logCursor();
+
+    await h.engine.startSession(freshRequest());
+
+    expect(
+      logContextFor(before, "holds this conversation's session lock")?.cause,
+    ).toBe("the lock directory is gone");
+  });
+
+  it("logs a bare-string WORKSPACE claim refusal with the words the claim used", async () => {
+    const h = harness({ workspaceLockRefusal: "the lock directory is gone" });
+    const before = logCursor();
+
+    await h.engine.startSession(freshRequest());
+
+    expect(logContextFor(before, "holds this workspace's lock")?.cause).toBe(
+      "the lock directory is gone",
+    );
+  });
+
+  it("carries a bare-string setModel rejection into the immediate refusal", async () => {
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModel = () => Promise.reject("the model service went away");
+
+    const response = await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the model service went away");
+  });
+
+  it("carries a bare-string setModel rejection into the deferred refusal", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const query = h.queries[0]?.query;
+    if (query !== undefined) query.setModel = () => Promise.reject("the model service went away");
+    const deferred = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    query?.emit(resultMessage("cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
+    const response = await deferred;
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the model service went away");
+  });
+
+  it("carries a bare-string setPermissionMode rejection into the refusal", async () => {
+    const h = harness();
+    await started(h);
+    const query = h.queries[0]?.query;
+    if (query !== undefined) {
+      query.setPermissionMode = () => Promise.reject("the permission service went away");
+    }
+
+    const response = await h.engine.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "plan", value: create(conversationv1.AgentPermissionModePlanSchema, {}) },
+        }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the permission service went away");
+  });
+
+  it("carries a bare-string iterator failure into query_died", async () => {
+    const h = harness();
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "queryDied" ? update.value : undefined),
+      async () => {
+        await started(h);
+        // The loop is PARKED in the iterator; a stream that merely ends under
+        // a parked reader is an EOF, so a message unparks it first.
+        h.queries[0]?.query.emit(assistantMessage("00000000-0000-4000-8000-0000000000f1"));
+        h.queries[0]?.query.fail("the vendor stream went away" as unknown as Error);
+        for (let attempt = 0; attempt < 50; attempt++) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      },
+    );
+    const cause = seen[0]?.cause;
+
+    expect(cause?.case === "iteratorFailure" ? cause.value.cause : undefined).toBe(
+      "the vendor stream went away",
+    );
+  });
+
+  it("carries a bare-string GetLiveWork rejection into the fault", async () => {
+    const h = harness();
+    h.persistence.liveWork = () => Promise.reject("the store socket went away");
+
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+    });
+
+    expect(details).toContain("GetLiveWork failed: the store socket went away");
+  });
+
+  it("logs a bare-string book-read rejection while reconciling", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
+    const before = logCursor();
+
+    await started(h);
+
+    expect(logContextFor(before, "could not be read for reconciliation")?.cause).toBe(
+      "the store socket went away",
+    );
+  });
+
+  it("logs a bare-string backgroundTasks rejection while reconciling", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.backgroundTasks = () => Promise.reject("the task registry went away");
+      },
+    });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    const before = logCursor();
+
+    await started(h);
+
+    expect(
+      logContextFor(before, "could not be asked whether it still holds this work")?.cause,
+    ).toBe("the task registry went away");
+  });
+
+  it("carries a bare-string keep-alive row failure into the fault", async () => {
+    const h = harness();
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+      const recorded = h.persistence.write.bind(h.persistence);
+      h.persistence.write = (): void => {
+        throw "the record plane went away";
+      };
+      const before = h.engine.pushes.faultCount;
+      h.scheduler.fire(0);
+      for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === before; attempt++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      // Restored before the stand-down, which writes the shutdown terminal
+      // through this same channel.
+      h.persistence.write = recorded;
+    });
+
+    expect(details).toContain("the record plane went away");
+  });
+
+  it("carries a bare-string book-read rejection into the re-announcement fault", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    const details = await faultDetailsWhile(h, async () => {
+      await started(h);
+      h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
+      const watching = h.engine
+        .watchSession(create(shimv1.WatchSessionRequestSchema, {}))[Symbol.asyncIterator]();
+      await watching.next();
+      await watching.next();
+      await watching.return?.();
+    });
+
+    expect(details).toContain(
+      "re-announcing live work for a new WatchSession failed: the store socket went away",
+    );
+  });
+
+  it("logs a bare-string interrupt rejection during the teardown", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.interrupt = () => Promise.reject("the vendor went away");
+      },
+    });
+    await started(h);
+    const before = logCursor();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(logContextFor(before, "refused the interrupt during teardown")?.cause).toBe(
+      "the vendor went away",
+    );
+  });
+
+  it("logs a bare-string stopTask rejection during the teardown", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.stopTask = () => Promise.reject("the vendor went away");
+      },
+    });
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t09",
+      tool_use_id: "toolu_unstoppable",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-0000000000f9",
+      session_id: "s",
+    } as never);
+    const before = logCursor();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(logContextFor(before, "could not stop a detached item during teardown")?.cause).toBe(
+      "the vendor went away",
+    );
+  });
+
+  it("logs a bare-string head-read rejection while concluding a watcher", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    h.persistence.standingTail = true;
+    const watching = h.engine
+      .watchAgent(create(shimv1.WatchAgentRequestSchema, { pageSize: 5 }))[Symbol.asyncIterator]();
+    await watching.next();
+    h.persistence.readFirstPage = () => Promise.reject("the store socket went away");
+    const before = logCursor();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(
+      logContextFor(before, "could not read a book's head while concluding its watcher")?.cause,
+    ).toBe("the store socket went away");
+  });
+
+  it("carries a bare-string throwaway-query rejection into the cold refusal", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      createQueryRejection: "the vendor binary is not on this box",
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+
+    const response = await h.engine.startSession(
+      resumeRequest(
+        "resume-1",
+        create(conversationv1.SessionColdRemediationSchema, {
+          remediation: {
+            case: "compact",
+            value: create(conversationv1.SessionColdCompactSchema, {
+              scope: conversationv1.SessionCompactScope.ALL,
+            }),
+          },
+        }),
+      ),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the vendor binary is not on this box");
+  });
+});
+
+/**
+ * The push-to-pull bridge when the vendor is not already parked on it.
+ *
+ * `drainPrompts` pulls continuously, so the queue's own buffer is never used;
+ * a real SDK pulls when it is ready, and what it is handed then is what these
+ * cover.
+ */
+describe("the prompt queue's own buffer", () => {
+  it("hands over a prompt submitted before the vendor pulled", async () => {
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const prompts = spec.prompt[Symbol.asyncIterator]();
+
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const first = await nextPush(prompts);
+
+    expect(first.message.content).toBe("go");
+  });
+
+  it("completes for a vendor that pulls only after the stand-down closed it", async () => {
+    const h = harness();
+    await started(h);
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const prompts = spec.prompt[Symbol.asyncIterator]();
+
+    await h.engine.standDown("SIGTERM");
+
+    expect((await prompts.next()).done).toBe(true);
+  });
+});
+
+describe("the claims a build that injects none falls back to", () => {
+  it("serves shim.v1 without taking either kernel claim before a session exists", async () => {
+    // An INERT shim holds neither lock, which is what lets a prelaunched
+    // replacement sit beside the live shim it is about to replace.
+    const h = harness({ withoutLockInjection: true });
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.cause.case : undefined,
+    ).toBe("noSession");
+  });
+});
+
+describe("the cadence a build that injects no scheduler beats on", () => {
+  it("starts and stops a session on the real scheduler", async () => {
+    const h = harness({ withoutScheduler: true });
+    await started(h);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(
+      response.result.case === "success" ? response.result.value.closed?.how.case : undefined,
+    ).toBe("idle");
+  });
+});
+
+describe("whose book a gated ask lands on", () => {
+  /** Raise one ask and let the stand-down resolve it as denied. */
+  const askUnder = async (h: Harness, agentID: string): Promise<void> => {
+    const spec = h.queries[0]?.spec;
+    if (spec === undefined) throw new Error("no query");
+    const pending = spec.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_asked",
+      agentID,
+      requestId: "req_1",
+    });
+    await Promise.resolve();
+    await h.engine.standDown("SIGTERM");
+    await pending;
+  };
+
+  /** The book the gate's permission frame landed on. */
+  const bookOf = (h: Harness): string | undefined => {
+    for (const entry of h.persistence.buffered) {
+      if (entry.item.kind !== "frame") continue;
+      const result = entry.item.frame.result;
+      if (result.case !== "update") continue;
+      if (result.value.update.case !== "permission") continue;
+      return entry.agentId.value;
+    }
+    return undefined;
+  };
+
+  it("takes the vendor at its word when it names the MAIN agent", async () => {
+    const h = harness();
+    await started(h);
+    const sessionId =
+      h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "";
+    const before = logCursor();
+
+    await askUnder(h, mainAgentId(sessionId).value);
+
+    expect(logContextFor(before, "an agent this session never announced")).toBeUndefined();
+  });
+
+  it("books an ask under a subagent this session ANNOUNCED, task table or not", async () => {
+    // A SYNCHRONOUS subagent runs inside the turn and is never a task, so the
+    // live table never holds it -- the announcement is the only record.
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            activityEntry(
+              "toolu_spawn",
+              {
+                case: "subagent",
+                value: create(conversationv1.AgentSubagentSchema, {
+                  result: {
+                    case: "start",
+                    value: create(conversationv1.AgentSubagentStartSchema, {
+                      createdAgentId: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+                    }),
+                  },
+                }),
+              },
+              "subagent_start",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000101"));
+    h.persistence.buffered.length = 0;
+
+    await askUnder(h, "agent-child");
+
+    expect(bookOf(h)).toBe("agent-child");
+  });
+
+  it("flags an ask raised inside a KEEP-ALIVE turn as keep-alive", async () => {
+    // A keep-alive turn's rows are recorded and never served, and the gate's
+    // own rows are no exception.
+    const h = harness();
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    h.persistence.buffered.length = 0;
+
+    await askUnder(h, "");
+
+    expect(
+      h.persistence.buffered.find((entry) => entry.source.discriminator.includes("permission"))
+        ?.keepalive,
+    ).toBe(true);
+  });
+});
+
+describe("what the fold is told about a live task", () => {
+  it("answers an empty originating call for a task that named none", async () => {
+    // Tracked for liveness, addressable by nobody: absence would read as "no
+    // such task", which is a different fact.
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t20",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-000000000102",
+      session_id: "s",
+    } as never);
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000103"));
+
+    expect(h.fold.contexts.at(-1)?.liveTask("t20")).toEqual({ toolUseId: "" });
+  });
+
+  it("names the turn a task started inside", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const before = logCursor();
+
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t21",
+      tool_use_id: "toolu_bg",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-000000000104",
+      session_id: "s",
+    } as never);
+
+    expect(logContextFor(before, "recorded a live detached-work item")?.turn_id).toBe("turn-1");
+  });
+});
+
+describe("the vendor answers the engine maps around an absent field", () => {
+  it("leaves an mcp tool the vendor said nothing about UNSTATED, not false", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.contextUsage = {
+          ...query.contextUsage,
+          mcpTools: [{ name: "search", serverName: "docs", tokens: 9 }],
+        };
+      },
+    });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "contextUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+
+    expect(seen[0]?.mcpTools[0]?.isLoaded).toBeUndefined();
+  });
+
+  it("states no per-model windows when the account named none", async () => {
+    const h = harness({
+      accountUsage: {
+        session: {
+          total_cost_usd: 0,
+          total_api_duration_ms: 0,
+          total_duration_ms: 0,
+          total_lines_added: 0,
+          total_lines_removed: 0,
+          model_usage: {},
+        },
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: { five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" } },
+        behaviors: null,
+      } as unknown as AccountUsageLike,
+    });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "accountUsage" ? update.value : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const outcome = seen[0]?.outcome;
+
+    expect(outcome?.case === "available" ? outcome.value.modelScoped : undefined).toEqual([]);
+  });
+
+  it("states an empty error for a failed server the vendor gave no words for", async () => {
+    const h = harness({ mcp: [{ name: "docs", status: "failed" }] as McpServerStatusLike[] });
+    const seen = await pushedUpdates(
+      h,
+      (update) => (update.case === "mcpServer" ? update.value.health : undefined),
+      async () => {
+        await started(h);
+      },
+    );
+    const health = seen[0];
+
+    expect(health?.case === "failed" ? health.value.error : undefined).toBe("");
+  });
+
+  it("states NO effort levels for a model that supports effort and lists none", async () => {
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.models = [{ value: "m", displayName: "M", description: "d", supportsEffort: true }];
+      },
+    });
+    const response = await started(h);
+    const support =
+      response.result.case === "success"
+        ? response.result.value.session?.modelCatalog[0]?.capabilities?.effortSupport
+        : undefined;
+
+    expect(support?.case === "effortSupported" ? support.value.levels : undefined).toEqual([]);
+  });
+
+  it("fans out a fold update whose arm is not set at all", async () => {
+    const h = harness();
+    const arms = await pushedUpdates(
+      h,
+      (update) => (update.case === undefined ? "unset" : undefined),
+      async () => {
+        await started(h);
+        h.fold.entriesFor = (message) =>
+          message.type === "assistant"
+            ? [foldEntry({ kind: "session_update", update: create(conversationv1.SessionUpdateSchema, {}) }, "unset_arm")]
+            : [];
+        await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000105"));
+      },
+    );
+
+    expect(arms).toContain("unset");
+  });
+
+  it("names no previous id when a reset arrives before the session has one", async () => {
+    const h = harness();
+    const before = logCursor();
+
+    // The fold refuses to key rows before an identity exists, so the message
+    // does not survive the call -- but the reset is noted before that point.
+    await expect(
+      h.engine.onSdkMessage({
+        type: "conversation_reset",
+        new_conversation_id: "33333333-3333-4333-8333-333333333333",
+        uuid: "00000000-0000-4000-8000-000000000106",
+        session_id: "s",
+      } as never),
+    ).rejects.toThrow(/identity is not established/);
+
+    expect(logContextFor(before, "the vendor reset the conversation")?.previous).toBe("");
+  });
+});
+
+describe("the fold rows the engine walks past", () => {
+  it("records a terminal frame without tracking it as a unit in flight", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "success",
+                    value: create(conversationv1.AgentSuccessSchema, {}),
+                  },
+                }),
+              },
+              "agent_success",
+            ),
+          ]
+        : [];
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000107"));
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "k-agent_success")).toBe(true);
+  });
+
+  it("records a frame update that is neither a permission nor an activity", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "contextCut",
+                        value: create(conversationv1.ContextCutSchema, {}),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "context_cut",
+            ),
+          ]
+        : [];
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000108"));
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "k-context_cut")).toBe(true);
+  });
+
+  it("remembers no denial for a fold denial that named no gated call", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "permission",
+                        value: create(conversationv1.AgentPermissionSchema, {
+                          result: {
+                            case: "success",
+                            value: create(conversationv1.AgentPermissionSuccessSchema, {
+                              decision: {
+                                case: "denied",
+                                value: create(conversationv1.AgentPermissionDeniedSchema, {
+                                  by: {
+                                    case: "policy",
+                                    value: create(
+                                      conversationv1.AgentPermissionDeniedByPolicySchema,
+                                      {},
+                                    ),
+                                  },
+                                }),
+                              },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "permission_denied_unnamed",
+            ),
+          ]
+        : [];
+
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-000000000109"));
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-00000000010a"));
+
+    // The empty handle addresses nothing, and inventing one would make the
+    // next tool_result read as a relayed deny of a call that never happened.
+    expect(h.fold.contexts.at(-1)?.deniedCall("")).toBe(false);
+  });
+
+  it("ANNOUNCES nothing for a spawn that named no created agent", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            activityEntry(
+              "toolu_spawn",
+              {
+                case: "subagent",
+                value: create(conversationv1.AgentSubagentSchema, {
+                  result: {
+                    case: "start",
+                    value: create(conversationv1.AgentSubagentStartSchema, {}),
+                  },
+                }),
+              },
+              "subagent_start_unnamed",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-00000000010b"));
+
+    const iterator = h.engine
+      .watchAgent(
+        create(shimv1.WatchAgentRequestSchema, {
+          target: create(conversationv1.AgentIdSchema, { value: "agent-child" }),
+          pageSize: 5,
+        }),
+      )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toThrow(/no agent by that id/);
+  });
+
+  it("tracks nothing for an activity that names no unit", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          item: {
+                            case: "bash",
+                            value: create(conversationv1.AgentBashSchema, {
+                              result: {
+                                case: "start",
+                                value: create(conversationv1.AgentBashStartSchema, {}),
+                              },
+                            }),
+                          },
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "unnamed_activity",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-00000000010c"));
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, {}),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("unknownUnit");
+  });
+
+  it("settles an activity that names a unit but no kind", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.entriesFor = (message) =>
+      message.type === "assistant"
+        ? [
+            foldEntry(
+              {
+                kind: "frame",
+                frame: create(conversationv1.AgentFrameSchema, {
+                  result: {
+                    case: "update",
+                    value: create(conversationv1.AgentUpdateSchema, {
+                      update: {
+                        case: "activity",
+                        value: create(conversationv1.AgentActivitySchema, {
+                          activityId: create(conversationv1.AgentActivityIdSchema, {
+                            value: "toolu_kindless",
+                          }),
+                        }),
+                      },
+                    }),
+                  },
+                }),
+              },
+              "kindless_activity",
+            ),
+          ]
+        : [];
+    await h.engine.onSdkMessage(assistantMessage("00000000-0000-4000-8000-00000000010d"));
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_kindless" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("alreadyConcluded");
+  });
+});
+
+describe("the session's own beats once the vendor query is gone", () => {
+  /** Bring a session up and then lose its query the way a broken stream does. */
+  const withDeadQuery = async (): Promise<Harness> => {
+    const h = harness();
+    await started(h);
+    h.queries[0]?.query.emit(assistantMessage("00000000-0000-4000-8000-00000000010e"));
+    h.queries[0]?.query.fail(new Error("the vendor stream broke"));
+    for (let attempt = 0; attempt < 50; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    h.persistence.buffered.length = 0;
+    return h;
+  };
+
+  it("submits no keep-alive prompt once there is nothing to submit to", async () => {
+    const h = await withDeadQuery();
+
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.persistence.buffered.filter((entry) => entry.item.kind === "prompt")).toEqual([]);
+  });
+
+  it("samples no account usage once there is nothing to sample", async () => {
+    const h = await withDeadQuery();
+    const before = h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
+
+    h.scheduler.fire(1);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.queries[0]?.query.calls.filter((call) => call === "usage").length).toBe(before);
+  });
+
+  it("accepts a model change without asking a vendor that is gone", async () => {
+    const h = await withDeadQuery();
+    const before = h.queries[0]?.query.calls.filter((call) => call.startsWith("setModel")).length ?? 0;
+    await h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+
+    expect(h.queries[0]?.query.calls.filter((call) => call.startsWith("setModel")).length).toBe(before);
+  });
+});
+
+describe("SetSessionModel's remaining arms", () => {
+  it("throws when it reaches the engine with no model at all", async () => {
+    const h = harness();
+    await started(h);
+
+    await expect(
+      h.engine.setSessionModel(create(shimv1.SetSessionModelRequestSchema, {})),
+    ).rejects.toThrow(/no model/);
+  });
+
+  it("tells the first caller when a later change replaced it mid-turn", async () => {
+    // Leaving the first caller holding a promise nothing will settle is worse
+    // than telling it the change did not land.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const first = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+      }),
+    );
+    await Promise.resolve();
+    const second = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage("dddddddd-dddd-4ddd-8ddd-dddddddddddd"));
+    const response = await first;
+    await second;
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("a later SetSessionModel replaced this one before the turn ended");
+  });
+});
+
+describe("KillSession refused over live work alone", () => {
+  it("says there is NO turn in flight when only detached work is live", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t30",
+      tool_use_id: "toolu_live",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-00000000010f",
+      session_id: "s",
+    } as never);
+
+    const response = await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toBe("the session has no turn in flight and 1 live item(s)");
+  });
+});
+
+describe("the cold gate's compact remediation, in detail", () => {
+  /** A cold resume, remediated by compaction under `remediation`. */
+  const compactWith = (
+    h: Harness,
+    remediation: conversationv1.SessionColdRemediation,
+  ): Promise<shimv1.StartSessionResponse> => {
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    return h.engine.startSession(resumeRequest("resume-1", remediation));
+  };
+
+  it("summarizes on the model the remediation named", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index === 0) query.emit(resultMessage("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"));
+      },
+    });
+    const pending = compactWith(
+      h,
+      create(conversationv1.SessionColdRemediationSchema, {
+        remediation: {
+          case: "compact",
+          value: create(conversationv1.SessionColdCompactSchema, {
+            scope: conversationv1.SessionCompactScope.ALL,
+            model: create(conversationv1.AgentModelSchema, { name: "claude-haiku-4-5" }),
+          }),
+        },
+      }),
+    );
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBe("claude-haiku-4-5");
+  });
+
+  it("ignores everything the summarizing session says before its result", async () => {
+    const h = harness({
+      nowMs: 1_000_000 + 10 * 60 * 1000,
+      onQueryCreated: (query, _spec, index) => {
+        if (index !== 0) return;
+        query.emit(assistantMessage("00000000-0000-4000-8000-000000000110"));
+        query.emit(resultMessage("ffffffff-ffff-4fff-8fff-ffffffffffff"));
+      },
+    });
+    const pending = compactWith(
+      h,
+      create(conversationv1.SessionColdRemediationSchema, {
+        remediation: {
+          case: "compact",
+          value: create(conversationv1.SessionColdCompactSchema, {
+            scope: conversationv1.SessionCompactScope.ALL,
+          }),
+        },
+      }),
+    );
+    (await untilQuery(h, 1)).query.emit(initMessage({ sessionId: "resume-1" }));
+
+    expect((await pending).result.case).toBe("success");
+  });
+});
+
+describe("reconciliation's remaining descriptions", () => {
+  it("states no command for a live run the book holds only a finished frame for", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b02" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+          entry: create(conversationv1.HistoryEntrySchema, {
+            entry: {
+              case: "agentFrame",
+              value: create(conversationv1.AgentFrameSchema, {
+                result: {
+                  case: "update",
+                  value: create(conversationv1.AgentUpdateSchema, {
+                    update: {
+                      case: "activity",
+                      value: create(conversationv1.AgentActivitySchema, {
+                        activityId: create(conversationv1.AgentActivityIdSchema, { value: "b02" }),
+                        item: {
+                          case: "bash",
+                          value: create(conversationv1.AgentBashSchema, {}),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    const before = logCursor();
+
+    await started(h);
+
+    expect(logContextFor(before, "no describable start for this live shell run")?.kind).toBe("bash");
+  });
+
+  it("does not close the MAIN agent's own book when the store lists it as live", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveAgents: [mainAgentId("resume-1")],
+    });
+    writeTranscript(h.configDir, h.cwd, "resume-1", [assistantLine()]);
+    const pending = h.engine.startSession(resumeRequest("resume-1"));
+    (await untilQuery(h, 0)).query.emit(initMessage({ sessionId: "resume-1" }));
+    await pending;
+
+    expect(
+      h.persistence.buffered.some((entry) => entry.agentId.value === mainAgentId("resume-1").value
+        && entry.source.discriminator.includes("swept_up")),
+    ).toBe(false);
+  });
+});
+
+describe("a WatchBash stream that ends on its own", () => {
+  it("leaves the teardown nothing to wait for", async () => {
+    const h = harness({ watcherConclusionBudgetMs: 25 });
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t40",
+      tool_use_id: "toolu_watched",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-000000000111",
+      session_id: "s",
+    } as never);
+    for await (const _frame of h.engine.watchBash(
+      create(shimv1.WatchBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_watched" }),
+      }),
+    )) {
+      // drained to completion, which is what disposes the watcher
+    }
+    const before = logCursor();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+
+    expect(logContextFor(before, "did not end within its conclusion budget")).toBeUndefined();
+  });
+});
+
+describe("a turn that ends while the session is standing down", () => {
+  it("does NOT re-probe the vendor it is about to close", async () => {
+    // The stand-down is already tearing the query down; a probe raced against
+    // it can only answer for a session that no longer exists.
+    let releaseInterrupt = (): void => undefined;
+    const interrupted = new Promise<void>((resolve) => {
+      releaseInterrupt = resolve;
+    });
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.interrupt = async () => {
+          query.calls.push("interrupt");
+          await interrupted;
+          return { still_queued: [] };
+        };
+      },
+    });
+    await started(h);
+    h.scheduler.fire(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    const standing = h.engine.standDown("SIGTERM");
+    for (let attempt = 0; attempt < 20 && !(h.queries[0]?.query.calls.includes("interrupt") ?? false); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const before = h.queries[0]?.query.calls.filter((call) => call === "usage").length ?? 0;
+
+    await h.engine.onSdkMessage(resultMessage("11111111-2222-4333-8444-555555555555"));
+    releaseInterrupt();
+    await standing;
+
+    expect(h.queries[0]?.query.calls.filter((call) => call === "usage").length).toBe(before);
+  });
+});
+
+/**
+ * StartSession finishing after the vendor query died under it.
+ *
+ * The opening probes and the reconciliation run AFTER the query is up, and
+ * nothing makes the vendor survive them: a query that dies while the catalog
+ * call is outstanding leaves the rest of StartSession with no vendor to ask.
+ * Each remaining step has to answer for a session with no query rather than
+ * raise on one.
+ */
+describe("StartSession's remaining steps when the query died under them", () => {
+  /**
+   * Start a session, lose the query while `supportedModels` is outstanding,
+   * then let StartSession run the rest of its opening.
+   */
+  async function startedWithQueryLostMidOpening(): Promise<Harness> {
+    let release = (): void => undefined;
+    const catalog = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = harness({
+      onQueryCreated: (query) => {
+        query.supportedModels = async (): Promise<ModelInfoLike[]> => {
+          query.calls.push("supportedModels");
+          await catalog;
+          return [];
+        };
+      },
+    });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    const pending = h.engine.startSession(freshRequest());
+    const first = await untilQuery(h, 0);
+    const sessionId = first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "";
+    first.query.emit(initMessage({ sessionId }));
+    for (let attempt = 0; attempt < 50 && !first.query.calls.includes("supportedModels"); attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    // The loop is PARKED in the iterator, so a message unparks it and the
+    // failure is raised on the next pull, exactly as a real iterator throws.
+    first.query.emit(assistantMessage("00000000-0000-4000-8000-000000000120"));
+    first.query.fail(new Error("the vendor stream broke"));
+    for (let attempt = 0; attempt < 50 && h.engine.pushes.faultCount === 0; attempt++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    release();
+    await pending;
+    return h;
+  }
+
+  it("probes no mcp server health without a vendor to probe", async () => {
+    const h = await startedWithQueryLostMidOpening();
+
+    expect(h.queries[0]?.query.calls).not.toContain("mcpServerStatus");
+  });
+
+  it("asks no context usage without a vendor to ask", async () => {
+    const h = await startedWithQueryLostMidOpening();
+
+    expect(h.queries[0]?.query.calls).not.toContain("getContextUsage");
+  });
+
+  it("closes live work it cannot ask the vendor about rather than re-adopting it", async () => {
+    // A dead vendor holds nothing. Leaving the obligation open would strand a
+    // run in the record with no process left that could ever conclude it.
+    const h = await startedWithQueryLostMidOpening();
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+  });
+});
+
+/**
+ * The shim's own durable log dying.
+ *
+ * IT OWNS ITS OWN LOGGER. The shim's log sink is ONE process-wide singleton
+ * and a poisoning is one-way -- a poisoned sink drops every later record --
+ * so poisoning the one this file shares would decide the verdict of every
+ * test that reads a log line, depending only on which ran first. Instead the
+ * scenario takes a FRESH module graph: its own `log.ts`, its own `node:fs`
+ * mock, and the `createEngine` bound to them, so the listener that must hear
+ * the poisoning is registered on the sink that was poisoned. The file's own
+ * logger is never touched, and this describe may run in any position.
+ */
+describe("the durable log sink being poisoned", () => {
+  it("states the loss on WatchSession, the only channel left once fd 3 is gone", async () => {
+    vi.resetModules();
+    const freshFs = await import("node:fs");
+    const freshLog = await import("../../src/log.js");
+    const { createEngine: freshCreateEngine } = await import("../../src/engine/session.js");
+    freshLog.configureLog({ fd: 3, cwd: "/ws", agentReplSessionId: "poison-suite" });
+    vi.mocked(freshFs.writeSync).mockImplementationOnce(() => {
+      throw new Error("fd 3 is gone");
+    });
+    freshLog.bindLog({ operation: "shim.test.poison" }).log({}, "the record this sink cannot take");
+
+    const h = harness({ engineFactory: freshCreateEngine });
+
+    expect(h.engine.pushes.faultCount).toBeGreaterThan(0);
+  });
+});

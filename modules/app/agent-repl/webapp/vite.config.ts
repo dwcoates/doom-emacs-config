@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
+import { viteCacheDir } from "./vite-cache";
 
 /**
  * Production build config. Tests read vitest.config.ts (which wins when both
@@ -10,6 +11,12 @@ import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
  * the browser can cache each independently of the app code.
  */
 export default defineConfig({
+  // OUT OF `node_modules`, WHICH IS A READ-ONLY SYMLINK IN THE E2E SANDBOX
+  // AND A GARBAGE-COLLECTED SHARED TREE ON THE HOST. Vite's default
+  // `cacheDir` is `node_modules/.vite`; see vite-cache.ts for the whole
+  // account, and test/vite-cache.test.ts for the check that keeps every
+  // config in this package on it.
+  cacheDir: viteCacheDir,
   resolve: { alias: protobufRuntimeAliases },
   build: {
     rollupOptions: {

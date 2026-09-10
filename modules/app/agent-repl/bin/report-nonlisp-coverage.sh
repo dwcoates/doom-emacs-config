@@ -21,7 +21,11 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 REPORT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-coverage.XXXXXX")"
 trap 'rm -rf "$REPORT_ROOT"' EXIT
 
-ALL_COMPONENTS=(daemon sidecar store wire logging webapp shim proto)
+ALL_COMPONENTS=(daemon sidecar store lock logging webapp shim proto)
+# OPT-IN ONLY. The cross-system e2e suite spawns four real systems per test
+# and is budgeted in tens of minutes, so it runs when it is NAMED and never as
+# part of the default sweep.
+OPTIONAL_COMPONENTS=(e2e)
 COMPONENTS=()
 
 log() {
@@ -40,7 +44,7 @@ require_command() {
 
 known_component_p() {
     local wanted="$1" component
-    for component in "${ALL_COMPONENTS[@]}"; do
+    for component in "${ALL_COMPONENTS[@]}" "${OPTIONAL_COMPONENTS[@]}"; do
         [ "$component" = "$wanted" ] && return 0
     done
     return 1
@@ -115,6 +119,19 @@ report_typescript() {
     fi
 }
 
+report_e2e() {
+    local dir="$ROOT/e2e"
+
+    require_command make
+    [ -f "$dir/Makefile" ] ||
+        die "e2e Makefile is missing at $dir/Makefile"
+
+    log "e2e: running the cross-system suite with spawned-system coverage"
+    if ! make -C "$dir" coverage; then
+        die "e2e coverage suite failed"
+    fi
+}
+
 report_proto() {
     local dir="$ROOT/proto"
 
@@ -133,11 +150,12 @@ for component in "${COMPONENTS[@]}"; do
         daemon)  report_go daemon daemon ;;
         sidecar) report_go sidecar agent-shim/claude/shim-sidecar ;;
         store)   report_go store agent-shim/shim-store ;;
-        wire)    report_go wire agent-shim/wire ;;
+        lock)    report_go lock agent-shim/shim-lock ;;
         logging) report_go logging agent-shim/logging/go ;;
         webapp)  report_typescript webapp webapp ;;
         shim)    report_typescript shim agent-shim/claude/shim ;;
         proto)   report_proto ;;
+        e2e)     report_e2e ;;
     esac
 done
 

@@ -1,117 +1,240 @@
 package handler
 
+// shell.go — the detached shell spool: unstructured bytes with exactly ONE
+// structured thing in them, the `EXIT=<code>` terminator the harness appends when
+// the wrapped command finishes.
+//
+// So the handler does two things: append the bytes to the run as a DELTA carrying
+// the offset they start at, and END the run when the marker arrives. Completion is
+// never GUESSED — absent the marker this handler infers nothing and the staleness
+// policy owns the outcome.
+
 import (
 	"bytes"
 	"strconv"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// exitMarkerPrefix opens the terminator line the harness appends to a shell
-// spool when the wrapped command exits: `EXIT=<code>` on its own line.
+// exitMarkerPrefix opens the terminator line the harness appends to a shell spool
+// when the wrapped command exits: `EXIT=<code>` on its own line.
 var exitMarkerPrefix = []byte("EXIT=")
 
-// maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit
-// code is 0-255, so anything longer is not the harness's marker and must not
-// be read as one.
+// maxRememberedOutput bounds what one spool handler holds of its run's output.
+// A terminal has to carry the run's output, so SOMETHING must be held; this is
+// how much, and everything past it is reported as omitted rather than silently
+// dropped or unboundedly accumulated.
+const maxRememberedOutput = 1 << 20
+
+// maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit code
+// is 0-255, so anything longer is not the harness's marker.
 const maxExitMarkerDigits = 3
 
-// ShellOutputHandler tracks a background shell spool (b*.output). Shell spools
-// carry no structure the sidecar interprets beyond ONE thing (§7.2): the
-// handler emits a byte-count TaskProgress per batch, plus a TaskEnded when the
-// spool's `EXIT=<code>` terminator arrives.
-//
-// The terminator used to be ignored, which meant a shell task that had plainly
-// finished — and said so, on disk — stayed "running" until the staleness sweep
-// eventually declared it LOST. That is the wrong status (LOST means "we never
-// found out", and here we did find out), and it arrives late. Reading the
-// marker is the total-ingestion mandate applied to the one structured byte a
-// shell spool has.
-//
-// Completion is still never GUESSED: absent the marker this handler infers
-// nothing and the staleness policy owns the outcome exactly as before (§7.4).
+// ShellOutputHandler tracks a background shell spool.
 type ShellOutputHandler struct {
-	log *logging.Bound
+	conv *convert.Converter
+	log  *logging.Bound
+	// seen is what this run has said SO FAR, bounded by maxRememberedOutput, and
+	// omitted counts the bytes past that bound.
+	//
+	// A TERMINAL STATES THE RUN'S OUTPUT, and the only place the whole of it
+	// exists is the spool this handler is the sole reader of. The deltas the
+	// consumer accumulates are not available to a terminal minted from a
+	// staleness conclusion, so without this a LOST or EXITed run settled with an
+	// EMPTY output claiming to be `whole` — which erases what the run actually
+	// said. The bound is what keeps the cost constant; past it the extent is
+	// stated as partial rather than misreported as whole.
+	seen    []byte
+	omitted uint64
+	// read reports that this handler has already converted a batch of this
+	// spool, and endedOnNewline whether that batch's last byte was one. Together
+	// they answer the only question the EXIT-marker parser cannot answer from
+	// one batch: whether the batch BEGINS a line.
+	//
+	// THE RAW CODEC CARRIES NOTHING (a spool has no record structure to carry
+	// on), so a batch may start mid-line — which is why a marker at the very
+	// start of a mid-file batch cannot be trusted on its own. It can be trusted
+	// when the previous batch ended on a newline, and only this handler knows
+	// that. Without it a spool whose `EXIT=` line simply arrived on its own poll
+	// -- the ordinary case for a command that finishes between two polls --
+	// never settled on evidence at all and waited out a staleness window.
+	read           bool
+	endedOnNewline bool
+	// coords are the FILE COORDINATES of the last batch this handler read, kept
+	// so a terminal minted from the READER'S conclusion — a LOST sweep, a
+	// person's stop — is stated at a real position in a real file.
+	//
+	// WITHOUT THEM THE WRITE IDENTITY COLLAPSES. A seam-minted terminal built
+	// from an attribution carrying no file id and no offset digests
+	// "producer||0|terminal" for EVERY run in the process, so the second spool
+	// concluded LOST mints the write id the first one already used and the store
+	// — whose absorption is write_id equality — swallows it as a replay. One of
+	// the two runs then has no terminal at all and stays open in every reader
+	// downstream. They are set on every Handle and are the same coordinates the
+	// cursor is stated in.
+	coords fileCoords
+	// onTerminal reports that this handler READ the run's own terminal off the
+	// file. The reader owns what that means for the LOST policy; all this side
+	// states is that the run ended on evidence rather than on silence.
+	onTerminal func(path, run string)
+}
+
+// fileCoords is where a handler last read: the cursor's own identity for the
+// file, and how far into it the handler has seen.
+type fileCoords struct {
+	Path   string
+	FileID string
+	Offset int64
 }
 
 // NewShellOutputHandler builds a handler.
 func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 	log.With(logging.Context{Operation: "shell-handler-new"}).LogVerbose("constructing shell output handler")
-	return &ShellOutputHandler{log: log}
+	return &ShellOutputHandler{conv: convert.New(log), log: log}
 }
 
-// Handle implements Handler.
-func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
+// Handle implements tail.Handler.
+func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
+	h.log.With(handleCtx("shell-handle", ctx)).
+		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no frames to convert")
+		h.log.With(handleCtx("shell-handle", ctx)).
+			LogVerbose("no frames to convert")
 		return nil
 	}
-	events := []*corev1.Event{taskProgressEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskProgress{
-		TaskId:        ctx.TaskID,
-		Kind:          corev1.TaskKind_TASK_KIND_SHELL,
-		BytesObserved: ctx.BytesObserved,
-	})}
+	// THE RUN IS THE SPAWNING CALL, NEVER THE VENDOR TASK ID. A detached command
+	// is announced under one identity on both planes — the tool_use_id of the
+	// call that launched it — so that is what the spool's frames are keyed by.
+	// The reader resolves it from the launch it observed and hands it over on the
+	// context; a spool whose owner is unresolved is HELD rather than tailed, so
+	// reaching here without one is a reader defect, stated as such.
+	run := ctx.RunActivityID
+	if run == "" {
+		// A spool with no run identity names no run, so its bytes have nowhere
+		// to accumulate. They are NEVER silently discarded: they land as residue
+		// naming the spool, which is what the aged-unowned-spool policy requires.
+		h.log.With(handleErr("shell-handle", ctx)).
+			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue")
+		at := attribute(ctx, frames[0].Offset)
+		h.rememberCoords(ctx)
+		var raw bytes.Buffer
+		for _, frame := range frames {
+			raw.Write(frame.Raw)
+		}
+		return []*storev1.StoreEntry{convert.VendorSpecificEntry(at, "unowned_spool", map[string]any{
+			"path":   ctx.Path,
+			"offset": float64(frames[0].Offset),
+			"output": raw.String(),
+		})}
+	}
 
-	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
+	at := attribute(ctx, frames[0].Offset)
+	h.rememberCoords(ctx)
+
+	var output bytes.Buffer
+	for _, frame := range frames {
+		output.Write(frame.Raw)
+	}
+	atLineStart := h.atLineStart(frames[0].Offset)
+	h.observe(output.Bytes())
+	h.remember(ctx, output.Bytes())
+	// The delta's from_offset is the file position these bytes START at, which is
+	// exactly the count the consumer must already hold for this run.
+	entries := []*storev1.StoreEntry{h.conv.BashDelta(at, run, output.String(), frames[0].Offset)}
+
+	code, ok := trailingExitCode(frames[0].Raw, atLineStart)
 	if !ok {
-		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no terminal exit marker in batch events=%d", len(events))
-		return events
+		h.log.With(handleCtx("shell-handle", ctx)).
+			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
+		return entries
 	}
-	status := corev1.TerminalStatus_TERMINAL_STATUS_DONE
-	if code != 0 {
-		status = corev1.TerminalStatus_TERMINAL_STATUS_ERROR
+	// The terminal states the RUN's output, not this batch's: a spool whose
+	// marker arrives on a later poll than its output would otherwise settle
+	// carrying only the last chunk while claiming to carry the whole.
+	entries = append(entries, h.conv.BashExited(at, run, string(h.seen), h.omitted, code))
+	if h.onTerminal != nil {
+		// A RUN THAT ENDED ON ITS OWN MARKER CAN NEVER BE LOST. Telling the
+		// reader here is what stops the staleness policy restating a finished
+		// run as LOST once its finished spool inevitably goes quiet.
+		h.onTerminal(ctx.Path, run)
 	}
-	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("EXIT=%d status=%s", code, status)
-	events = append(events, taskEndedEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskEnded{
-		TaskId:     ctx.TaskID,
-		Kind:       corev1.TaskKind_TASK_KIND_SHELL,
-		Status:     status,
-		OutputPath: ctx.Path,
-		Inference:  "exit-marker",
-	}))
-	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("terminal marker converted events=%d", len(events))
-	return events
+	return entries
 }
 
-// trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw
-// spool batch, returning the code and whether the marker was found.
+// rememberCoords records where this handler has read to, so a terminal the
+// READER concludes can be stated at a real file position rather than at the
+// zero value every such terminal would otherwise share.
+func (h *ShellOutputHandler) rememberCoords(ctx *Context) {
+	h.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
+}
+
+// atLineStart answers whether a batch beginning at offset starts a line.
+func (h *ShellOutputHandler) atLineStart(offset int64) bool {
+	if !h.read {
+		// A first batch at the file's start begins a line by construction; one
+		// that begins mid-file is a resumed cursor, and nothing here knows what
+		// preceded it.
+		return offset == 0
+	}
+	return h.endedOnNewline
+}
+
+// observe records what the batch says about the NEXT batch's line alignment.
+func (h *ShellOutputHandler) observe(raw []byte) {
+	h.read = true
+	h.endedOnNewline = len(raw) > 0 && raw[len(raw)-1] == '\n'
+}
+
+// remember accumulates the run's output up to the bound, counting the rest.
+func (h *ShellOutputHandler) remember(ctx *Context, raw []byte) {
+	room := maxRememberedOutput - len(h.seen)
+	if room <= 0 {
+		h.omitted += uint64(len(raw))
+		return
+	}
+	if len(raw) <= room {
+		h.seen = append(h.seen, raw...)
+		return
+	}
+	h.seen = append(h.seen, raw[:room]...)
+	h.omitted += uint64(len(raw) - room)
+	h.log.With(handleWarn("shell-output-bound", ctx)).Log(
+		"the run has said more than %d bytes; its terminal will state the first %d and report %d omitted rather than claiming to carry the whole",
+		maxRememberedOutput, maxRememberedOutput, h.omitted)
+}
+
+// trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw spool
+// batch, returning the code and whether the marker was found.
 //
 // The matching is deliberately strict, because `EXIT=` is COMMON as ordinary
 // command output. Measured over the SHELL spools this parser actually reads
-// (`b*.output`; the 1,049 `a*.output` agent transcripts alongside them are
-// never fed here, and an earlier version of this note wrongly counted them):
-// of 234 shell spools, 44 contain the substring `EXIT=` at all, 23 of those
-// carry it ONLY mid-line as script output (`BUILD_EXIT=0`, `WEBAPP_TEST_EXIT=`,
-// …), and 21 carry a line-start `EXIT=<digits>`. A loose match would end those
-// 23 tasks early and wrongly. So:
+// (`b*.output`): of 234 shell spools, 44 contain the substring `EXIT=` at all, 23
+// of those carry it ONLY mid-line as script output (`BUILD_EXIT=0`,
+// `WEBAPP_TEST_EXIT=`, …), and 21 carry a line-start `EXIT=<digits>`. A loose
+// match would end those 23 runs early and wrongly. So:
 //
 //   - The marker must be the LAST thing in the batch, newline-terminated. The
-//     tailer reads to the file's current EOF, so "end of batch" is "end of
-//     file as of this poll" — which is what "the spool ends with it" means.
-//     A marker does NOT always terminate its spool: of the 21 shell spools
-//     carrying a line-start marker, 19 end on it, 2 have further output after
-//     an early one, and 1 of the 19 carries two markers (an early one plus the
-//     terminating one) — so 3 of the 21 have a marker that is not the sole
-//     final line. The last-line-of-batch rule is what makes those safe: an
-//     early marker is not at the end of its batch, so it is not read, and the
-//     task ends on the real final marker or not at all.
+//     tailer reads to the file's current EOF, so "end of batch" is "end of file as
+//     of this poll". A marker does NOT always terminate its spool: of the 21 shell
+//     spools carrying a line-start marker, 19 end on it, 2 have further output
+//     after an early one, and 1 of the 19 carries two markers — so 3 of the 21 have
+//     a marker that is not the sole final line. The last-line-of-batch rule is what
+//     makes those safe.
 //   - Between `EXIT=` and the newline there must be ONLY digits, at most
 //     maxExitMarkerDigits of them. A stray `EXIT=abc` fails here.
-//   - The marker must start a LINE, which is what rejects `BUILD_EXIT=0`:
-//     either the preceding byte in the batch is a newline, or the batch begins
-//     at file offset 0 — a command that produced no output at all, which is a
-//     real observed case (a 7-byte spool that is exactly `EXIT=0\n`).
+//   - The marker must start a LINE, which is what rejects `BUILD_EXIT=0`: either
+//     the preceding byte in the batch is a newline, or the BATCH ITSELF begins a
+//     line — which it does at file offset 0 (a command that produced no output
+//     at all, a real observed case: a 7-byte spool that is exactly `EXIT=0\n`)
+//     and whenever the previous batch this handler read ended on a newline.
 //
-// A marker split across two polls is NOT matched, and is left to the staleness
-// policy. That needs a batch boundary to land inside the final ~7 bytes of the
-// file, which requires the spool to grow past the tailer's 4MiB per-poll read
-// bound in one interval. The result is the pre-existing no-marker behavior,
-// which is also the behavior of the ~91% of shell spools carrying no marker at
-// all (213 of 234) — not a new silent failure mode.
-func trailingExitCode(raw []byte, batchOffset int64) (int, bool) {
+// A marker split across two polls is NOT matched and is left to the staleness
+// policy, which is the pre-existing behavior of the ~91% of shell spools carrying
+// no marker at all — not a new silent failure mode.
+func trailingExitCode(raw []byte, batchAtLineStart bool) (int, bool) {
 	if !bytes.HasSuffix(raw, []byte("\n")) {
 		return 0, false
 	}
@@ -119,9 +242,9 @@ func trailingExitCode(raw []byte, batchOffset int64) (int, bool) {
 
 	// Locate the final line's start, and require it to genuinely BE one.
 	start := bytes.LastIndexByte(line, '\n') + 1
-	if start == 0 && batchOffset != 0 {
-		// The batch begins mid-file with no newline before this text, so it
-		// may be the tail of a line that began in an earlier batch.
+	if start == 0 && !batchAtLineStart {
+		// The batch does not begin a line and holds no newline before this text,
+		// so this may be the tail of a line that began in an earlier batch.
 		return 0, false
 	}
 	line = line[start:]

@@ -1,0 +1,1097 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { createRouterTransport } from "@connectrpc/connect";
+import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { OpenExternalResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import {
+  FeedCodeSpanSchema,
+  FeedToolCallInputSchema,
+  FeedToolCallNameSchema,
+  FeedDiffLineSchema,
+  FeedIdSchema,
+  FeedRowSchema,
+  FeedSimpleToolCallSchema,
+  FeedToolCallReturnedSchema,
+  type FeedSimpleToolCall,
+} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { createTicker } from "../../../src/clock.js";
+import type { FailureSink } from "../../../src/failure/sink.js";
+import { createAgentReplClient } from "../../../src/rpc/client.js";
+import { testAppContext } from "../../rpc/app-context.js";
+import { MalformedView } from "../../../src/rpc/malformed.js";
+import type { RowContext } from "../../../src/feed/cards/context.js";
+import {
+  DIAGNOSTICS_VISIBLE,
+  TOOL_CALL_FORM_ARMS,
+  TOOL_CALL_INPUT_FORM_ARMS,
+  TOOL_CALL_OUTCOME_ARMS,
+  TOOL_CALL_VERDICT_ARMS,
+  drawFeedSimpleToolCall,
+} from "../../../src/feed/cards/tool-call.js";
+
+const SINK: FailureSink = { report: () => {}, retract: () => {} };
+
+/** A row context whose only verb is the external open a link click makes. */
+function rowContext(): RowContext {
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      openExternal: () =>
+        create(OpenExternalResponseSchema, { result: { case: "success", value: {} } }),
+    });
+  });
+  return {
+    ctx: testAppContext({
+      client: createAgentReplClient(transport),
+      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
+      ticker: createTicker(1000),
+      failures: SINK,
+      composerEnabled: false,
+    }),
+    feed: "root",
+    row: create(FeedRowSchema, { id: create(FeedIdSchema, { value: "row-1" }) }),
+    revealRow: async () => true,
+  };
+}
+
+/**
+ * A card built from INIT, with a name and an input line filled in when the
+ * case under test does not care which they are.
+ *
+ * The defaults are applied to the CREATED message rather than spread into the
+ * initializer, so a test that deliberately leaves a field unset (the malformed
+ * cases) builds its own message and this helper never re-supplies it.
+ */
+function card(init: MessageInitShape<typeof FeedSimpleToolCallSchema>): FeedSimpleToolCall {
+  const built = create(FeedSimpleToolCallSchema, init);
+  built.name ??= create(FeedToolCallNameSchema, { text: "Bash" });
+  built.input ??= create(FeedToolCallInputSchema, { text: "$ go test ./..." });
+  return built;
+}
+
+/** The proto field names of one oneof, as generated arm case names. */
+function armsOf(oneofs: readonly { name: string; fields: readonly { name: string }[] }[], name: string): string[] {
+  const oneof = oneofs.find((o) => o.name === name);
+  if (oneof === undefined) throw new Error(`no oneof named ${name}`);
+  return oneof.fields.map((f) => f.name.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase()));
+}
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("the arms this module claims to draw", () => {
+  it("covers every outcome arm the schema declares", () => {
+    expect([...TOOL_CALL_OUTCOME_ARMS].sort()).toEqual(
+      armsOf(FeedSimpleToolCallSchema.oneofs, "outcome").sort(),
+    );
+  });
+
+  it("covers every verdict arm the schema declares", () => {
+    expect([...TOOL_CALL_VERDICT_ARMS].sort()).toEqual(
+      armsOf(FeedToolCallReturnedSchema.oneofs, "verdict").sort(),
+    );
+  });
+
+  it("covers every output-form arm the schema declares", () => {
+    expect([...TOOL_CALL_FORM_ARMS].sort()).toEqual(
+      armsOf(FeedToolCallReturnedSchema.oneofs, "form").sort(),
+    );
+  });
+
+  it("covers every input-form arm the schema declares", () => {
+    expect([...TOOL_CALL_INPUT_FORM_ARMS].sort()).toEqual(
+      armsOf(FeedToolCallInputSchema.oneofs, "form").sort(),
+    );
+  });
+});
+
+describe("the card shell", () => {
+  it("draws the tool name verbatim", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ name: { text: "Grep" }, outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-name")?.textContent).toBe("Grep");
+  });
+
+  it("carries the outcome arm as the card's state", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.getAttribute("data-state")).toBe("running");
+  });
+
+  it("draws an unformed input line verbatim as plain text", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ input: { text: "grep: FeedRow" }, outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-input")?.textContent).toBe("grep: FeedRow");
+  });
+
+  it("gives an unformed input line no shell treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ input: { text: "whatever" }, outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".bash-input")).toBeNull();
+  });
+
+  it("draws the input line as a hyperlink when the view carries a link", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "example.com/page", link: { url: "https://example.com/page" } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    const anchor = el.querySelector(".tool-input a.external-link");
+    expect(anchor?.getAttribute("href")).toBe("https://example.com/page");
+  });
+});
+
+describe("the input line's drawn form", () => {
+  it("draws a command in the shell treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "go test ./...", form: { case: "command", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.cmd.bash-input")).not.toBeNull();
+  });
+
+  it("puts the client's shell chrome in front of a command", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "go test ./...", form: { case: "command", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.bash-input")?.textContent).toBe("$ go test ./...");
+  });
+
+  it("draws a path in the muted file-path treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "src/render.ts", form: { case: "path", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("div.file-path")?.textContent).toBe("src/render.ts");
+  });
+
+  it("gives a path no shell chrome", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "src/render.ts", form: { case: "path", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".file-path")?.textContent?.startsWith("$")).toBe(false);
+  });
+
+  it("draws a query in the query treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: { text: "grep: FeedRow", form: { case: "query", value: {} } },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("pre.cmd.tool-query")?.textContent).toBe("grep: FeedRow");
+  });
+
+  it("keeps a linked line in its own form's treatment", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        input: {
+          text: "src/render.ts",
+          form: { case: "path", value: {} },
+          link: { url: "https://example.com/render.ts" },
+        },
+        outcome: { case: "running", value: {} },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector("div.file-path a.external-link")?.getAttribute("href")).toBe(
+      "https://example.com/render.ts",
+    );
+  });
+
+  it("refuses an input form arm this build does not know", () => {
+    const built = card({ outcome: { case: "running", value: {} } });
+    built.input = create(FeedToolCallInputSchema, { text: "x" });
+    (built.input as { form: unknown }).form = { case: "sonar", value: {} };
+    expect(() => drawFeedSimpleToolCall(built, rowContext())).toThrow(MalformedView);
+  });
+});
+
+describe("the running state", () => {
+  it("draws the run badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge.run")?.textContent).toContain("running");
+  });
+
+  it("draws no quiet-for clock before the first beat", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-quiet")).toBeNull();
+  });
+
+  it("draws the quiet-for clock from the beat's instant", () => {
+    vi.setSystemTime(10_000);
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 3s");
+  });
+
+  it("ticks the quiet-for clock on the shared ticker", () => {
+    vi.setSystemTime(10_000);
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(el);
+    vi.advanceTimersByTime(2000);
+    expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 5s");
+    el.remove();
+  });
+
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the beat does not share the shared ticker's phase.
+    vi.setSystemTime(11_920);
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    // Assert: five real seconds of silence reads 5s, not the lagging 4s.
+    expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 5s");
+  });
+
+  it("stops ticking once the card has left the document", () => {
+    vi.setSystemTime(10_000);
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    document.body.appendChild(el);
+    vi.advanceTimersByTime(1000);
+    el.remove();
+    vi.advanceTimersByTime(5000);
+    expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 4s");
+  });
+});
+
+describe("the denied state", () => {
+  it("draws the denied badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "denied", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge")?.textContent).toBe("denied");
+  });
+
+  it("draws no output section at all", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "denied", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")).toBeNull();
+  });
+});
+
+describe("the moved state", () => {
+  // A BACKGROUNDED CALL IS NOT AN ENDING. The detached shell bubble beneath the
+  // card is where the run reports, and this card said `running` forever above a
+  // row already reporting `exit 0` until the arm existed (playtest F43).
+
+  it("draws the moved badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "moved", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge")?.textContent).toBe("moved");
+  });
+
+  it("draws the badge in the muted register, neither a verdict nor running", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "moved", value: {} } }),
+      rowContext(),
+    );
+    const badge = el.querySelector(".badge");
+    expect(badge?.className).toBe("badge muted");
+  });
+
+  it("draws no output section at all", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "moved", value: {} } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")).toBeNull();
+  });
+
+  it("states the arm on the card, so a cold repaint says the work moved", () => {
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "moved", value: {} } }),
+      rowContext(),
+    );
+    expect(el.getAttribute("data-state")).toBe("moved");
+  });
+});
+
+describe("the returned state", () => {
+  it("draws the ok badge for a succeeded verdict", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "ok" } } },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge.ok")?.textContent).toBe("done");
+  });
+
+  it("draws the err badge for a failed verdict", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "failed", value: {} }, form: { case: "text", value: { text: "boom" } } },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge.err")?.textContent).toBe("error");
+  });
+
+  it("carries the verdict arm on the card", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "failed", value: {} }, form: { case: "text", value: { text: "boom" } } },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.getAttribute("data-verdict")).toBe("failed");
+  });
+
+  it("draws the composed runtime beside the badge when present", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok" } },
+            runtime: { text: "ran 4.2 s" },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-head .tool-runtime")?.textContent).toBe("ran 4.2 s");
+  });
+
+  it("draws no runtime figure when the view carries none", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: { verdict: { case: "succeeded", value: {} }, form: { case: "text", value: { text: "ok" } } },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-runtime")).toBeNull();
+  });
+});
+
+describe("the no-output form", () => {
+  it("omits the output section whole", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")).toBeNull();
+  });
+
+  it("draws no omitted line in place of the missing output", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-omitted")).toBeNull();
+  });
+
+  it("still draws the verdict badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge.ok")?.textContent).toBe("done");
+  });
+
+  it("still draws the settled runtime beside the badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+            runtime: { text: "ran 0.1 s" },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-head .tool-runtime")?.textContent).toBe("ran 0.1 s");
+  });
+
+  it("still draws the diagnostics an edit with no output raised", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+            diagnostics: { lines: ["render.ts:1 · error · nope"] },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-diagnostic")?.textContent).toBe("render.ts:1 · error · nope");
+  });
+});
+
+describe("the text output form", () => {
+  it("draws the text verbatim in the capped box", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "PASS\nok  1.2s" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const out = el.querySelector(".tool-output.bash-output");
+    expect(out?.textContent).toBe("PASS\nok  1.2s");
+  });
+
+  it("wears the error hue when the call failed", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "failed", value: {} },
+            form: { case: "text", value: { text: "boom" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")?.classList.contains("stderr")).toBe(true);
+  });
+});
+
+describe("the code output form", () => {
+  const spans = [
+    create(FeedCodeSpanSchema, { text: "const", paintClass: "keyword" }),
+    create(FeedCodeSpanSchema, { text: " x = 1", paintClass: "" }),
+  ];
+
+  function coded(omitted?: string): HTMLElement {
+    return drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "code",
+              value: {
+                spans,
+                omitted: omitted === undefined ? undefined : { text: omitted },
+              },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+  }
+
+  it("paints a span whose class is in the inventory", () => {
+    expect(coded().querySelector("code .paint-keyword")?.textContent).toBe("const");
+  });
+
+  it("draws a plain span with no class at all", () => {
+    const plain = [...coded().querySelectorAll("code span")][1];
+    expect(plain.className).toBe("");
+  });
+
+  it("draws a span whose class this build does not know as unstyled text", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "code",
+              value: { spans: [create(FeedCodeSpanSchema, { text: "x", paintClass: "kwyjibo" })] },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const span = el.querySelector("code span");
+    expect([span?.className, span?.textContent]).toEqual(["", "x"]);
+  });
+
+  it("concatenating the spans recovers the code", () => {
+    expect(coded().querySelector("code")?.textContent).toBe("const x = 1");
+  });
+
+  it("draws the omitted line when the head was truncated", () => {
+    expect(coded("showing 200 of 4,312").querySelector(".tool-omitted")?.textContent).toBe(
+      "showing 200 of 4,312",
+    );
+  });
+
+  it("draws no omitted line when nothing was omitted", () => {
+    expect(coded().querySelector(".tool-omitted")).toBeNull();
+  });
+});
+
+describe("the diff output form", () => {
+  const CASES = [
+    ["header", "hunk", "@@ -3,7 +3,9 @@", " @@ -3,7 +3,9 @@"],
+    ["added", "add", "a line", "+a line"],
+    ["removed", "del", "a line", "-a line"],
+    ["context", "ctx", "a line", " a line"],
+  ] as const;
+
+  it.each(CASES)("draws a %s line with the %s treatment", (kind, cls, text, drawn) => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "diff",
+              value: {
+                lines: [
+                  create(FeedDiffLineSchema, { kind: { case: kind, value: {} }, text }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const line = el.querySelector(`.diff .${cls}`);
+    expect([line?.getAttribute("data-diff-line"), line?.textContent]).toEqual([kind, drawn]);
+  });
+
+  it("keeps the lines in the order the view carried them", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "diff",
+              value: {
+                lines: [
+                  create(FeedDiffLineSchema, { kind: { case: "removed", value: {} }, text: "old" }),
+                  create(FeedDiffLineSchema, { kind: { case: "added", value: {} }, text: "new" }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".diff-output")?.textContent).toBe("-old\n+new");
+  });
+});
+
+describe("the lines output form", () => {
+  it("draws the lines verbatim, in order", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "lines", value: { lines: ["a.ts", "b.ts"] } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")?.textContent).toBe("a.ts\nb.ts");
+  });
+
+  it("draws the composed floor when the list is short", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "lines", value: { lines: ["a.ts"], omitted: { text: "42 more" } } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-omitted")?.textContent).toBe("42 more");
+  });
+});
+
+describe("the links output form", () => {
+  function linked(url?: string): HTMLElement {
+    return drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "links",
+              value: {
+                links: [
+                  {
+                    text: "A result",
+                    url: url === undefined ? undefined : { url },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+  }
+
+  it("draws a row with a url as a link", () => {
+    const anchor = linked("https://example.com").querySelector(".tool-link-row a.external-link");
+    expect([anchor?.getAttribute("href"), anchor?.textContent]).toEqual([
+      "https://example.com",
+      "A result",
+    ]);
+  });
+
+  it("draws a row without a url as narration text", () => {
+    const row = linked().querySelector(".tool-link-row");
+    expect([row?.querySelector("a"), row?.textContent]).toEqual([null, "A result"]);
+  });
+
+  it("delimits the rows with the one shared list rule", () => {
+    expect(linked().querySelector(".tool-links")?.classList.contains("list-rows")).toBe(true);
+  });
+
+  it("draws the composed floor when the list is capped", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "links",
+              value: { links: [{ text: "one" }], omitted: { text: "9 more not shown" } },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-omitted")?.textContent).toBe("9 more not shown");
+  });
+});
+
+describe("diagnostics", () => {
+  function withLines(count: number): HTMLElement {
+    return drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok" } },
+            diagnostics: {
+              lines: Array.from({ length: count }, (_v, i) => `render.ts:${i} · error · nope`),
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+  }
+
+  it("draws no diagnostics box when the view carries none", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-diagnostics")).toBeNull();
+  });
+
+  it("draws every line when they fit under the cap", () => {
+    const el = withLines(DIAGNOSTICS_VISIBLE);
+    const hidden = [...el.querySelectorAll<HTMLElement>(".tool-diagnostic")].filter((r) => r.hidden);
+    expect(hidden).toEqual([]);
+  });
+
+  it("offers no toggle when they fit under the cap", () => {
+    expect(withLines(DIAGNOSTICS_VISIBLE).querySelector(".tool-diagnostics-more")).toBeNull();
+  });
+
+  it("hides the overflow behind a toggle naming its count", () => {
+    const el = withLines(DIAGNOSTICS_VISIBLE + 2);
+    expect(el.querySelector(".tool-diagnostics-more")?.textContent).toBe("+2 more");
+  });
+
+  it("reveals the overflow in place when the toggle is pressed", () => {
+    const el = withLines(DIAGNOSTICS_VISIBLE + 2);
+    el.querySelector<HTMLButtonElement>(".tool-diagnostics-more")?.click();
+    const hidden = [...el.querySelectorAll<HTMLElement>(".tool-diagnostic")].filter((r) => r.hidden);
+    expect(hidden).toEqual([]);
+  });
+});
+
+describe("a malformed card", () => {
+  it("refuses an unset outcome", () => {
+    expect(() => drawFeedSimpleToolCall(card({}), rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses an unset name", () => {
+    const u = create(FeedSimpleToolCallSchema, {
+      input: { text: "x" },
+      outcome: { case: "running", value: {} },
+    });
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses an unset input", () => {
+    const u = create(FeedSimpleToolCallSchema, {
+      name: { text: "Bash" },
+      outcome: { case: "running", value: {} },
+    });
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a returned call with no verdict", () => {
+    const u = card({
+      outcome: { case: "returned", value: { form: { case: "text", value: { text: "x" } } } },
+    });
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a returned call with no output form", () => {
+    const u = card({
+      outcome: { case: "returned", value: { verdict: { case: "succeeded", value: {} } } },
+    });
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a diff line with no kind", () => {
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: {
+          verdict: { case: "succeeded", value: {} },
+          form: {
+            case: "diff",
+            value: { lines: [create(FeedDiffLineSchema, { text: "a line" })] },
+          },
+        },
+      },
+    });
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+
+  it("refuses an arm this build has no case for", () => {
+    const u = card({});
+    // Arrange: the shape a NEWER daemon's arm arrives in.
+    (u as { outcome: unknown }).outcome = { case: "teleported", value: {} };
+    expect(() => drawFeedSimpleToolCall(u, rowContext())).toThrow(MalformedView);
+  });
+});
+
+/**
+ * The three arms a NEWER daemon could set on a RETURNED card. Each is planted
+ * on the built fixture rather than passed to `create`, which would drop a case
+ * the frozen schema has no field for.
+ */
+describe("a returned card a newer daemon wrote", () => {
+  it("names the verdict arm it cannot draw", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "text", value: { text: "x" } },
+        }),
+      },
+    });
+    const returned = u.outcome.value as { verdict: unknown };
+    returned.verdict = { case: "partiallySucceeded", value: {} };
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'partiallySucceeded' is not one this build can draw"]);
+  });
+
+  it("names the output form arm it cannot draw", () => {
+    // Arrange
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "text", value: { text: "x" } },
+        }),
+      },
+    });
+    const returned = u.outcome.value as { form: unknown };
+    returned.form = { case: "spectrogram", value: {} };
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'spectrogram' is not one this build can draw"]);
+  });
+
+  it("names the diff line kind it cannot draw", () => {
+    // Arrange
+    const line = create(FeedDiffLineSchema, {
+      text: "a line",
+      kind: { case: "added", value: {} },
+    });
+    (line as { kind: unknown }).kind = { case: "moved", value: {} };
+    const u = card({
+      outcome: {
+        case: "returned",
+        value: create(FeedToolCallReturnedSchema, {
+          verdict: { case: "succeeded", value: {} },
+          form: { case: "diff", value: { lines: [line] } },
+        }),
+      },
+    });
+    // Act
+    const thrown = (() => {
+      try {
+        drawFeedSimpleToolCall(u, rowContext());
+        return undefined;
+      } catch (err) {
+        return err;
+      }
+    })();
+    // Assert
+    expect([
+      thrown instanceof MalformedView,
+      (thrown as MalformedView).detail,
+    ]).toEqual([true, "arm 'moved' is not one this build can draw"]);
+  });
+});
+
+describe("the image output form (landing 16)", () => {
+  it("draws the shared image block with the daemon's resolved src", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "image", value: { src: "data:image/png;base64,iVBORw==", alt: "" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const img = el.querySelector<HTMLImageElement>("img.prompt-block-image");
+    expect(img?.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+  });
+
+  it("draws the daemon's alt text on the image", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: {
+              case: "image",
+              value: { src: "data:image/png;base64,iVBORw==", alt: "screencapture -x -" },
+            },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector<HTMLImageElement>("img.prompt-block-image")?.alt).toBe(
+      "screencapture -x -",
+    );
+  });
+
+  it("states the image arm as the card's output form", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "image", value: { src: "data:image/png;base64,iVBORw==", alt: "" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.getAttribute("data-output-form")).toBe("image");
+  });
+});
+
+describe("the returned card's exit chip (landing 16)", () => {
+  it("draws the code the command reported, on the head", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "failed", value: {} },
+            form: { case: "text", value: { text: "boom" } },
+            exit: { code: 3 },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    const chip = el.querySelector(".tool-head .shell-exit");
+    expect(chip?.textContent).toBe("exit 3");
+    expect(chip?.getAttribute("data-exit-code")).toBe("3");
+  });
+
+  it("gives a zero exit the ok tone, as the detached shell's chip does", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "text", value: { text: "ok" } },
+            exit: { code: 0 },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".shell-exit")?.className).toBe("badge ok shell-exit");
+  });
+
+  it("draws NO chip when the producer stated no exit code", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "failed", value: {} },
+            form: { case: "text", value: { text: "boom" } },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".shell-exit")).toBeNull();
+  });
+});

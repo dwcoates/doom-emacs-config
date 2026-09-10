@@ -1,355 +1,129 @@
+// held.go decides what to do with a spool nobody has claimed yet.
+//
+// A spool materializes before — sometimes long before — the transcript line
+// naming the call that spawned it is read. Until that line arrives the spool's
+// owner is unknown, and tailing it would mean either inventing an owner or
+// reading the spool path's runtime id as an identity. So it is HELD: discovered,
+// re-checked every rescan, and not tailed.
+//
+// AN AGED UNOWNED SPOOL IS NEVER DROPPED. The launch line naming an owner is
+// written when the task starts, so a hold normally clears within a rescan tick;
+// one that outlives the bounded wait means the mapping is genuinely missing —
+// which is a REASON TO INGEST THE BYTES AS RESIDUE, not a reason to discard
+// them. After the window the spool is tailed as KindResidueSpool: its bytes land
+// whole as StoreUnparsed naming the spool as their source, with a warning, and
+// it KEEPS BEING TAILED so nothing appended later is lost either.
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-	"sort"
-	"strings"
 	"time"
+
+	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// HeldReason names the authoritative fact that prevented spool attribution.
-// These codes are deliberately diagnostic facts, never guessed identities.
-type HeldReason string
+// UnownedSpoolWindow is how long a spool may sit unclaimed before its bytes are
+// ingested as residue rather than waited on any longer. It is the DEFAULT:
+// --unowned-spool-window replaces it, so the residue path can be exercised in
+// milliseconds instead of waited out.
+const UnownedSpoolWindow = 60 * time.Second
 
-const (
-	HeldReasonAwaitingOwner HeldReason = "missing_live_launch_observation"
-	HeldReasonHistorical    HeldReason = "historical_or_closed_spool_absent_from_open_task_state"
-	HeldReasonConflict      HeldReason = "conflicting_authoritative_owner"
-)
-
-// HeldTarget is the file-plane evidence lifecycle classification needs. ModTime
-// must come from stat of the discovered file; lifecycle code never reads files.
-type HeldTarget struct {
-	Path    string
-	Root    string
-	TaskID  string
-	ModTime time.Time
+// heldSpools remembers when each unclaimed spool was first seen.
+type heldSpools struct {
+	firstSeen map[string]time.Time // by resolved path
+	demoted   map[string]bool      // paths already ingested as residue
+	window    time.Duration
+	log       *logging.Bound
 }
 
-// HeldEvidence contains only authoritative lifecycle facts. ActiveTask is
-// meaningful only when ActiveTaskKnown confirms that the durable open-task
-// snapshot was queried.
-type HeldEvidence struct {
-	ModTime         time.Time
-	ActiveTaskKnown bool
-	ActiveTask      bool
+func newHeldSpools(window time.Duration, log *logging.Bound) *heldSpools {
+	if window == 0 {
+		// Zero is how the caller says "unset", exactly as it is for the LOST
+		// windows; the default is filled here so there is one place that knows it.
+		window = UnownedSpoolWindow
+	}
+	return &heldSpools{
+		firstSeen: map[string]time.Time{},
+		demoted:   map[string]bool{},
+		window:    window,
+		log:       log,
+	}
 }
 
-// HeldState determines whether a spool is rechecked or permanently retired.
-type HeldState string
-
-const (
-	HeldStateResolved HeldState = "resolved"
-	HeldStateActive   HeldState = "active"
-	HeldStateTerminal HeldState = "terminal"
-)
-
-// HeldDecision reports the action the caller must take. Only Resolved carries
-// a session and lifecycle never derives that session from a path.
-type HeldDecision struct {
-	State     HeldState
-	Reason    HeldReason
-	SessionID string
+// hold records an unclaimed spool and reports whether its wait has expired.
+func (h *heldSpools) hold(path string, now time.Time) (expired bool) {
+	first, seen := h.firstSeen[path]
+	if !seen {
+		h.firstSeen[path] = now
+		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
+			Log("spool held: no spawning call has claimed it yet, so it is re-checked every rescan and not tailed")
+		return false
+	}
+	if now.Sub(first) < h.window {
+		h.log.With(logging.Context{Operation: "hold-spool", Path: path}).
+			LogVerbose("spool still held after %s", now.Sub(first))
+		return false
+	}
+	return true
 }
 
-// HeldSample is safe for bounded diagnostic reporting: PathHash never exposes
-// a cross-project temporary path, while task and root remain actionable.
-type HeldSample struct {
-	PathHash  string
-	TaskID    string
-	Root      string
-	Reason    HeldReason
-	AgeBucket string
+// release stops holding a spool whose owner arrived.
+func (h *heldSpools) release(path string) {
+	if _, held := h.firstSeen[path]; !held {
+		return
+	}
+	delete(h.firstSeen, path)
+	h.log.With(logging.Context{Operation: "hold-spool", Path: path}).Log("spool released: its spawning call was observed")
 }
 
-// HeldSnapshot separates active ingestion risk from terminal historical data.
-type HeldSnapshot struct {
-	ActiveCount   int
-	TerminalTotal int
-	ByReason      map[HeldReason]int
-	ByRoot        map[string]int
-	ByAgeBucket   map[string]int
-	Samples       []HeldSample
+// demote records that a spool's bytes are being ingested as residue, and
+// reports whether that is the first time it is being said.
+func (h *heldSpools) demote(path string) bool {
+	if h.demoted[path] {
+		return false
+	}
+	h.demoted[path] = true
+	return true
 }
 
-// HeldReadiness deliberately ignores terminal history. A large historical
-// population is visible in diagnostics but cannot keep a healthy live service
-// unready after all active unresolved spools have drained.
-type HeldReadiness struct {
-	Ready              bool
-	ActiveUnresolved   int
-	ActiveThreshold    int
-	HistoricalTerminal int
-	Reason             string
-}
-
-// HeldLogRecord is the canonical lifecycle reporting boundary. The sidecar
-// supplies a reporter backed by internal/logging; tests use an in-memory sink.
-type HeldLogRecord struct {
-	Operation string
-	Level     string
-	State     HeldState
-	Reason    HeldReason
-	PathHash  string
-	TaskID    string
-	Root      string
-	AgeBucket string
-	Message   string
-	Verbose   bool
-}
-
-type heldEntry struct {
-	target HeldTarget
-	reason HeldReason
-}
-
-// HeldLifecycle owns active and terminal spool classifications. Terminal
-// entries are never reconsidered: retrying them would recreate the backlog.
-type HeldLifecycle struct {
-	active      map[string]heldEntry
-	terminal    map[string]heldEntry
-	sampleLimit int
-	report      func(HeldLogRecord)
-	lastReport  string
-}
-
-// NewHeldLifecycle creates an empty lifecycle. A nil reporter violates the
-// sidecar logging contract and is rejected rather than silently disabling logs.
-func NewHeldLifecycle(sampleLimit int, report func(HeldLogRecord)) *HeldLifecycle {
-	if sampleLimit <= 0 {
-		panic("sidecar held lifecycle requires a positive sample limit")
+// resolveTarget decides whether a discovered target may be tailed, and as what.
+//
+// A CONFIG-ROOT PATH NAMES ITS OWN SESSION — the transcript IS that session's
+// record — so it answers immediately. A spool does not, and is held until its
+// spawning call is observed or the bounded wait expires.
+func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover.Target, bool) {
+	if target.SessionID != "" {
+		return target, true
 	}
-	if report == nil {
-		panic("sidecar held lifecycle requires canonical reporting")
+	if target.Kind == tail.KindResidueSpool {
+		// Its task-id prefix already failed classification, so no owner would
+		// change what happens to it: the bytes go to residue either way.
+		return target, true
 	}
-	l := &HeldLifecycle{active: map[string]heldEntry{}, terminal: map[string]heldEntry{}, sampleLimit: sampleLimit, report: report}
-	l.report(HeldLogRecord{Operation: "held-lifecycle-new", Message: fmt.Sprintf("sample_limit=%d", sampleLimit), Verbose: true})
-	return l
-}
-
-// Observe classifies one spool using an owner result supplied by owner.go.
-// Owner lookup is intentionally absent: lifecycle consumes its structured
-// outcome and proves terminality only from authoritative evidence.
-func (l *HeldLifecycle) Observe(target HeldTarget, owner OwnerResolution, evidence HeldEvidence, now time.Time) (HeldDecision, error) {
-	l.report(HeldLogRecord{Operation: "held-observe", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: fmt.Sprintf("owner_outcome=%s owner_source=%s active_task_known=%t active_task=%t target_modtime=%s evidence_modtime=%s now=%s", owner.Outcome, owner.Source, evidence.ActiveTaskKnown, evidence.ActiveTask, target.ModTime.Format(time.RFC3339Nano), evidence.ModTime.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)), Verbose: true})
-	if err := validateHeldInput(target, owner, evidence, now); err != nil {
-		l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
-		return HeldDecision{}, err
-	}
-	if terminal, ok := l.terminal[target.Path]; ok {
-		decision := HeldDecision{State: HeldStateTerminal, Reason: terminal.reason}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "already terminal", Verbose: true})
-		return decision, nil
-	}
-
-	if owner.Outcome == OwnerResolvedPath || owner.Outcome == OwnerResolvedTask {
-		if err := validateResolvedOwner(owner); err != nil {
-			l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
-			return HeldDecision{}, err
-		}
-		delete(l.active, target.Path)
-		decision := HeldDecision{State: HeldStateResolved, SessionID: owner.SessionID}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "authoritative owner resolved"})
-		return decision, nil
-	}
-	if err := validateUnresolvedEvidence(evidence); err != nil {
-		l.report(HeldLogRecord{Operation: "held-observe", Level: "error", PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, Message: "error=" + err.Error()})
-		return HeldDecision{}, err
-	}
-
-	if terminallyAbsent(target, evidence, now) {
-		reason := HeldReasonHistorical
-		entry := heldEntry{target: target, reason: reason}
-		l.terminal[target.Path] = entry
-		delete(l.active, target.Path)
-		decision := HeldDecision{State: HeldStateTerminal, Reason: reason}
-		// TERMINAL is final: the spool is never reconsidered or tailed again,
-		// so its bytes never reach the database. A permanent ingestion drop
-		// must not depend on the verbose gate to be persisted at all.
-		l.report(HeldLogRecord{Operation: "held-transition", Level: "warn", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "terminal historical or closed spool without session assignment; its bytes never reach the store"})
-		return decision, nil
-	}
-	if owner.Outcome == OwnerUnresolvedConflict {
-		reason := HeldReasonConflict
-		l.active[target.Path] = heldEntry{target: target, reason: reason}
-		decision := HeldDecision{State: HeldStateActive, Reason: reason}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "active ownership anomaly remains unassigned", Verbose: true})
-		return decision, nil
-	}
-
-	if owner.MayArrive() {
-		entry := heldEntry{target: target, reason: HeldReasonAwaitingOwner}
-		l.active[target.Path] = entry
-		decision := HeldDecision{State: HeldStateActive, Reason: entry.reason}
-		l.report(HeldLogRecord{Operation: "held-transition", State: decision.State, Reason: decision.Reason, PathHash: heldPathHash(target.Path), TaskID: target.TaskID, Root: target.Root, AgeBucket: heldAgeBucket(now.Sub(target.ModTime)), Message: "awaiting named authoritative owner source", Verbose: true})
-		return decision, nil
-	}
-
-	panic(fmt.Sprintf("sidecar held lifecycle received non-retryable owner outcome=%s after validation", owner.Outcome))
-}
-
-func validateHeldInput(target HeldTarget, owner OwnerResolution, evidence HeldEvidence, now time.Time) error {
-	if target.Path == "" || target.Root == "" || target.TaskID == "" || target.ModTime.IsZero() {
-		return fmt.Errorf("held target requires path root task_id and stat modtime")
-	}
-	if !evidence.ModTime.IsZero() && !evidence.ModTime.Equal(target.ModTime) {
-		return fmt.Errorf("held evidence modtime differs from stat modtime")
-	}
-	if target.ModTime.After(now) {
-		return fmt.Errorf("spool stat modtime is in the future")
-	}
-	if owner.TaskID != target.TaskID || owner.OutputPath != target.Path {
-		return fmt.Errorf("owner resolution does not identify observed task and output path")
-	}
-	if owner.Outcome == OwnerUnresolvedInvalid {
-		return fmt.Errorf("owner resolution reports invalid authoritative metadata")
-	}
-	return nil
-}
-
-func validateResolvedOwner(owner OwnerResolution) error {
-	if owner.SessionID == "" {
-		return fmt.Errorf("resolved owner outcome lacks session id")
-	}
-	return nil
-}
-
-func validateUnresolvedEvidence(evidence HeldEvidence) error {
-	if !evidence.ActiveTaskKnown {
-		return fmt.Errorf("unresolved lifecycle requires authoritative open-task evidence")
-	}
-	return nil
-}
-
-// terminallyAbsent retires an old spool only after the authoritative open-task
-// snapshot says its task is absent. That establishes a historical spool even
-// when the original launch's transcript cannot be identified for a cursor.
-func terminallyAbsent(target HeldTarget, evidence HeldEvidence, now time.Time) bool {
-	return now.Sub(target.ModTime) >= UnownedSpoolWindow && !evidence.ActiveTask
-}
-
-// Snapshot returns bounded diagnostics for a health endpoint or log report.
-func (l *HeldLifecycle) Snapshot(now time.Time) HeldSnapshot {
-	s := HeldSnapshot{ByReason: map[HeldReason]int{}, ByRoot: map[string]int{}, ByAgeBucket: map[string]int{}}
-	entries := make([]heldEntry, 0, len(l.active)+len(l.terminal))
-	for _, e := range l.active {
-		entries = append(entries, e)
-	}
-	for _, e := range l.terminal {
-		entries = append(entries, e)
-	}
-	s.ActiveCount, s.TerminalTotal = len(l.active), len(l.terminal)
-	sort.Slice(entries, func(i, j int) bool { return entries[i].target.Path < entries[j].target.Path })
-	for _, e := range entries {
-		bucket := heldAgeBucket(now.Sub(e.target.ModTime))
-		s.ByReason[e.reason]++
-		s.ByRoot[e.target.Root]++
-		s.ByAgeBucket[bucket]++
-		if len(s.Samples) < l.sampleLimit {
-			s.Samples = append(s.Samples, HeldSample{PathHash: heldPathHash(e.target.Path), TaskID: e.target.TaskID, Root: e.target.Root, Reason: e.reason, AgeBucket: bucket})
-		}
-	}
-	s.ByRoot = boundHeldRoots(s.ByRoot, l.sampleLimit)
-	fingerprint := heldSnapshotFingerprint(s)
-	if fingerprint != l.lastReport {
-		l.lastReport = fingerprint
-		level := "info"
-		if s.ActiveCount > 0 {
-			level = "warn"
-		}
-		l.report(HeldLogRecord{Operation: "held-report", Level: level, Message: fmt.Sprintf("active=%d terminal=%d reasons=%v roots=%v ages=%v samples=%v", s.ActiveCount, s.TerminalTotal, s.ByReason, s.ByRoot, s.ByAgeBucket, s.Samples)})
-	}
-	return s
-}
-
-func boundHeldRoots(counts map[string]int, limit int) map[string]int {
-	if len(counts) <= limit {
-		return counts
-	}
-	type rootCount struct {
-		root  string
-		count int
-	}
-	roots := make([]rootCount, 0, len(counts))
-	for root, count := range counts {
-		roots = append(roots, rootCount{root, count})
-	}
-	sort.Slice(roots, func(i, j int) bool {
-		if roots[i].count != roots[j].count {
-			return roots[i].count > roots[j].count
-		}
-		return roots[i].root < roots[j].root
-	})
-	bounded, other := map[string]int{}, 0
-	for i, entry := range roots {
-		if i < limit {
-			bounded[entry.root] = entry.count
+	if obs, ok := s.owners.resolve(target); ok {
+		s.held.release(target.Path)
+		// AN a* SPOOL IS AN AGENT'S OWN TRANSCRIPT, so its book is that agent —
+		// which IS the spawning call under the cross-plane minting rule. Every
+		// other spool carries a RUN rather than an agent, and its frames are
+		// attributed to the book the spawn happened in.
+		if target.Kind == tail.KindAgentTranscript {
+			target.AgentID = obs.activityID
 		} else {
-			other += entry.count
+			target.AgentID = obs.agentID
 		}
+		return target, true
 	}
-	bounded["other_roots"] = other
-	return bounded
-}
-
-func heldSnapshotFingerprint(s HeldSnapshot) string {
-	parts := []string{fmt.Sprintf("active=%d", s.ActiveCount), fmt.Sprintf("terminal=%d", s.TerminalTotal)}
-	appendCounts := func(counts map[string]int) {
-		keys := make([]string, 0, len(counts))
-		for key := range counts {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			parts = append(parts, key+"="+fmt.Sprint(counts[key]))
-		}
-		parts = append(parts, "|")
+	if !s.held.hold(target.Path, now) {
+		return discover.Target{}, false
 	}
-	reasons := map[string]int{}
-	for key, count := range s.ByReason {
-		reasons[string(key)] = count
+	// The wait expired. The bytes are ingested as residue rather than waited on
+	// forever, and the file keeps being tailed.
+	if s.held.demote(target.Path) {
+		s.log.With(logging.Context{Operation: "hold-expired", Path: target.Path, TaskID: target.TaskID, Level: "warn"}).
+			Log("spool unclaimed after %s: its bytes are ingested as unparsed residue naming the spool as their source, and it keeps being tailed", s.held.window)
 	}
-	appendCounts(reasons)
-	appendCounts(s.ByRoot)
-	appendCounts(s.ByAgeBucket)
-	for _, sample := range s.Samples {
-		parts = append(parts, string(sample.Reason)+":"+sample.PathHash+":"+sample.TaskID+":"+sample.Root+":"+sample.AgeBucket)
-	}
-	return strings.Join(parts, ",")
-}
-
-// Readiness evaluates only active unresolved work against its explicit limit.
-func (l *HeldLifecycle) Readiness(activeThreshold int, now time.Time) HeldReadiness {
-	if activeThreshold < 0 {
-		l.report(HeldLogRecord{Operation: "held-readiness", Level: "error", Message: fmt.Sprintf("invalid active threshold=%d", activeThreshold)})
-		panic("sidecar held lifecycle readiness threshold must not be negative")
-	}
-	s := l.Snapshot(now)
-	reason := "active unresolved spools are within threshold"
-	if s.ActiveCount > activeThreshold {
-		reason = "active unresolved spools exceed threshold"
-	}
-	r := HeldReadiness{Ready: s.ActiveCount <= activeThreshold, ActiveUnresolved: s.ActiveCount, ActiveThreshold: activeThreshold, HistoricalTerminal: s.TerminalTotal, Reason: reason}
-	l.report(HeldLogRecord{Operation: "held-readiness", Message: fmt.Sprintf("ready=%t active=%d threshold=%d terminal=%d", r.Ready, r.ActiveUnresolved, r.ActiveThreshold, r.HistoricalTerminal), Verbose: true})
-	return r
-}
-
-func heldPathHash(path string) string {
-	sum := sha256.Sum256([]byte(path))
-	return hex.EncodeToString(sum[:8])
-}
-
-func heldAgeBucket(age time.Duration) string {
-	switch {
-	case age < time.Minute:
-		return "under_1m"
-	case age < time.Hour:
-		return "under_1h"
-	case age < 24*time.Hour:
-		return "under_1d"
-	default:
-		return "over_1d"
-	}
+	target.Kind = tail.KindResidueSpool
+	target.Raw = true
+	return target, true
 }

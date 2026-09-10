@@ -1,0 +1,41 @@
+{
+  "scenario": "account-usage",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello.",
+  "prompts": [
+    {
+      "text": "Say hello.",
+      "resume": false
+    }
+  ],
+  "world": "account-usage",
+  "cwd_init": null,
+  "vendor_session_id": "795faea0-c844-498a-8c14-6b60316dfd67",
+  "manual": null,
+  "expect": [
+    "AccountInfo",
+    "SDKControlGetUsageResponse.session",
+    "SDKControlGetUsageResponse.rate_limits (five_hour / seven_day / model_scoped)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-account-usage-aLQub9-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:59.876Z",
+  "controls": [
+    {
+      "verb": "accountInfo",
+      "ok": true
+    },
+    {
+      "verb": "usage_EXPERIMENTAL",
+      "ok": true
+    },
+    {
+      "verb": "accountInfo",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

@@ -1,0 +1,52 @@
+// endpoint_close_login.proto — CloseLogin: end the account root's login
+// session (kill the pty child). WEB LINK section. Closing an absent login
+// is SUCCESS — the desired state already holds.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CloseLoginRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CloseLoginResponse {
+  oneof result {
+    CloseLoginSuccess success = 1;
+    CloseLoginError error = 2;
+  }
+}
+
+// The login session is gone (or never was).
+message CloseLoginSuccess {
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message CloseLoginError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    CloseLoginUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    CloseLoginWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    CloseLoginTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    CloseLoginNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message CloseLoginUnknownWorkspace {}
+message CloseLoginWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message CloseLoginTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message CloseLoginNotYetAdopted {}

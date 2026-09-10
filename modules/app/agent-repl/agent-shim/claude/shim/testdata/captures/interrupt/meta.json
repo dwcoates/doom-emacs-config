@@ -1,0 +1,34 @@
+{
+  "scenario": "interrupt",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Count from 1 to 200 out loud, one number per line, thinking briefly before each. Do not use any tools.",
+  "prompts": [
+    {
+      "text": "Count from 1 to 200 out loud, one number per line, thinking briefly before each. Do not use any tools.",
+      "resume": false
+    }
+  ],
+  "world": "interrupt",
+  "cwd_init": null,
+  "vendor_session_id": "9557a510-73e2-475d-8569-a83e1e0b32bd",
+  "manual": null,
+  "expect": [
+    "SDKControlInterruptResponse (still_queued, or undefined on an older CLI)",
+    "result:error_during_execution or the vendor's own interrupt terminal"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-interrupt-W3J5aA-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:32:56.915Z",
+  "controls": [
+    {
+      "verb": "interrupt",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": [],
+  "reclassified_at": "2026-09-01T21:56:29.682Z",
+  "reclassified_by": "project lead, declared error-subtype allowance (outcome.mjs)"
+}

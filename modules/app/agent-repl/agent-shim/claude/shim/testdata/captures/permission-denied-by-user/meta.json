@@ -1,0 +1,28 @@
+{
+  "scenario": "permission-denied-by-user",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `rm -f stale.log`.",
+  "prompts": [
+    {
+      "text": "Run `rm -f stale.log`.",
+      "resume": false
+    }
+  ],
+  "world": "permission-denied-by-user",
+  "cwd_init": null,
+  "vendor_session_id": "03c835c6-c31b-407d-9e4f-178d2c85d416",
+  "manual": null,
+  "expect": [
+    "can_use_tool request",
+    "PermissionResult deny",
+    "no activity frames for the denied call"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-denied-by-user-FJGf7y-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:32:37.645Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

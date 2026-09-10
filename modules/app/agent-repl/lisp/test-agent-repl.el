@@ -27,73 +27,72 @@
   ;; and nothing is: the aggregate is the only thing CI and the pre-commit gate
   ;; invoke, so an unlisted file's failures are invisible.
   ;;
-  ;; There is no exclusion any more. test-sidebar.el was held out while 14
-  ;; of its 81 tests were red — casualties of the SSM cutover, which moved
-  ;; render state onto the daemon-pushed :pushed-render-state while those
-  ;; tests still seeded the pre-cutover :repl-state / :agent-state. The
-  ;; five-color remap fixed the vocabulary half and re-seeded the rest, so
-  ;; the file is green and back in the list where its failures are visible.
-  (load (expand-file-name "test-ai-title.el" dir) nil t)
+  ;; There is no exclusion. During the overhaul many of these suites are RED by
+  ;; design — their modules are being rewritten against agentrepl.v1 — and that
+  ;; is the starting condition, not a reason to hide one.
   (load (expand-file-name "test-autosave.el" dir) nil t)
-  (load (expand-file-name "test-backend.el" dir) nil t)
   (load (expand-file-name "test-clipboard-image.el" dir) nil t)
   (load (expand-file-name "test-close-panels-on-open.el" dir) nil t)
-  (load (expand-file-name "test-codex.el" dir) nil t)
   (load (expand-file-name "test-commands.el" dir) nil t)
   (load (expand-file-name "test-config.el" dir) nil t)
-  (load (expand-file-name "test-connection-notice.el" dir) nil t)
-  (load (expand-file-name "test-context-cost.el" dir) nil t)
-  (load (expand-file-name "test-context.el" dir) nil t)
+  (load (expand-file-name "test-connect.el" dir) nil t)
   (load (expand-file-name "test-core.el" dir) nil t)
   (load (expand-file-name "test-daemon.el" dir) nil t)
+  (load (expand-file-name "test-daemon-link.el" dir) nil t)
+  (load (expand-file-name "test-declarations.el" dir) nil t)
   (load (expand-file-name "test-emoji.el" dir) nil t)
-  (load (expand-file-name "test-explain-config.el" dir) nil t)
-  (load (expand-file-name "test-external-browser.el" dir) nil t)
-  (load (expand-file-name "test-failure.el" dir) nil t)
-  (load (expand-file-name "test-frontend-client.el" dir) nil t)
-  (load (expand-file-name "test-frontend-state.el" dir) nil t)
-  (load (expand-file-name "test-frontend-uds.el" dir) nil t)
+  (load (expand-file-name "test-find-file-workspace.el" dir) nil t)
   (load (expand-file-name "test-frontend.el" dir) nil t)
   (load (expand-file-name "test-frontends.el" dir) nil t)
-  (load (expand-file-name "test-hide-project-dirs.el" dir) nil t)
   (load (expand-file-name "test-history.el" dir) nil t)
+  (load (expand-file-name "test-host.el" dir) nil t)
   (load (expand-file-name "test-input.el" dir) nil t)
-  (load (expand-file-name "test-install.el" dir) nil t)
   (load (expand-file-name "test-interaction-record.el" dir) nil t)
   (load (expand-file-name "test-keybindings.el" dir) nil t)
   (load (expand-file-name "test-log-timestamp.el" dir) nil t)
   (load (expand-file-name "test-magit.el" dir) nil t)
-  (load (expand-file-name "test-memory-state.el" dir) nil t)
-  (load (expand-file-name "test-merge-handlers.el" dir) nil t)
+  (load (expand-file-name "test-notes.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
-  (load (expand-file-name "test-open-fence.el" dir) nil t)
   (load (expand-file-name "test-open-progress.el" dir) nil t)
-  (load (expand-file-name "test-output-nav.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)
-  (load (expand-file-name "test-permission.el" dir) nil t)
+  (load (expand-file-name "test-popup.el" dir) nil t)
   (load (expand-file-name "test-prevent-select.el" dir) nil t)
   (load (expand-file-name "test-prompt-queue.el" dir) nil t)
   (load (expand-file-name "test-prompt-summary.el" dir) nil t)
-  (load (expand-file-name "test-prompts.el" dir) nil t)
-  (load (expand-file-name "test-readiness.el" dir) nil t)
-  (load (expand-file-name "test-recovery-slo.el" dir) nil t)
-  (load (expand-file-name "test-rename.el" dir) nil t)
   (load (expand-file-name "test-render-colors.el" dir) nil t)
-  (load (expand-file-name "test-sentinel.el" dir) nil t)
+  (load (expand-file-name "test-roster.el" dir) nil t)
+  (load (expand-file-name "test-rpc.el" dir) nil t)
   (load (expand-file-name "test-services.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
   (load (expand-file-name "test-sibling-popup.el" dir) nil t)
-  (load (expand-file-name "test-sidebar.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)
-  (load (expand-file-name "test-tasks.el" dir) nil t)
   (load (expand-file-name "test-test-helpers.el" dir) nil t)
-  (load (expand-file-name "test-transcripts.el" dir) nil t)
   (load (expand-file-name "test-webview-recovery.el" dir) nil t)
+  (load (expand-file-name "test-verbs.el" dir) nil t)
   (load (expand-file-name "test-window.el" dir) nil t)
-  (load (expand-file-name "test-workspace-create-client.el" dir) nil t)
-  (load (expand-file-name "test-workspace-status-export.el" dir) nil t)
+  (load (expand-file-name "test-wire-common.el" dir) nil t)
+  (load (expand-file-name "test-wire-host.el" dir) nil t)
+  (load (expand-file-name "test-wire-roster.el" dir) nil t)
+  (load (expand-file-name "test-wire-verbs.el" dir) nil t)
   (load (expand-file-name "test-workspace.el" dir) nil t)
-  (load (expand-file-name "test-worktree.el" dir) nil t))
+  (load (expand-file-name "test-worktree.el" dir) nil t)
+
+  ;; integration suites
+  ;;
+  ;; These drive the production transport against a REAL agentrepl.v1 server
+  ;; (lisp/testsupport/fakedaemon, built once per run) over a real loopback
+  ;; socket.  They mock Emacs's one NEIGHBOR and compose no other system, so
+  ;; they are integration tests, never end-to-end ones.  test-integration-
+  ;; helpers.el loads test-helpers.el itself and inherits its batch-only
+  ;; gating.
+  (load (expand-file-name "test-integration-connect.el" dir) nil t)
+  (load (expand-file-name "test-integration-host.el" dir) nil t)
+  (load (expand-file-name "test-integration-link.el" dir) nil t)
+  (load (expand-file-name "test-integration-roster.el" dir) nil t)
+  (load (expand-file-name "test-integration-composer.el" dir) nil t)
+  (load (expand-file-name "test-integration-verbs.el" dir) nil t)
+  (load (expand-file-name "test-integration-daemon.el" dir) nil t)
+  (load (expand-file-name "test-integration-fixture.el" dir) nil t))
 
 (provide 'test-agent-repl)
 

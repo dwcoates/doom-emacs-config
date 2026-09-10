@@ -1,0 +1,146 @@
+package commandfile
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestValidateAcceptsEveryAcceptedShape(t *testing.T) {
+	done := true
+	tests := []struct {
+		name  string
+		entry Entry
+	}{
+		{name: "create", entry: Entry{Type: TypeCreate, GitRoot: "/repo", Name: "n"}},
+		{name: "create with only a prompt", entry: Entry{Type: TypeCreate, GitRoot: "/repo", Prompt: "p"}},
+		{name: "prompt", entry: Entry{Type: TypePrompt, Workspace: "w1", Prompt: "p"}},
+		{name: "send", entry: Entry{Type: TypeSend, Dir: "/tree", Prompt: "p"}},
+		{name: "merge", entry: Entry{Type: TypeMerge, Workspace: "w1"}},
+		{name: "close", entry: Entry{Type: TypeClose, Dir: "/tree"}},
+		{name: "open", entry: Entry{Type: TypeOpen, Workspace: "w1"}},
+		{name: "switch", entry: Entry{Type: TypeSwitch, Dir: "/tree"}},
+		{name: "task create", entry: Entry{Type: TypeTaskCreate, Title: "t"}},
+		{name: "task toggle done", entry: Entry{Type: TypeTaskToggleDone, ID: "task-1", Done: &done}},
+		{name: "task add workspace", entry: Entry{Type: TypeTaskAddWorkspace, ID: "task-1", Workspace: "w1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := tt.entry.Validate()
+			// Assert.
+			if err != nil {
+				t.Fatalf("Validate(%s): %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestValidateRefusesEveryIncompleteShape(t *testing.T) {
+	blank := ""
+	tests := []struct {
+		name  string
+		entry Entry
+	}{
+		{name: "no type", entry: Entry{}},
+		{name: "unknown type", entry: Entry{Type: "teleport"}},
+		{name: "create with no repository", entry: Entry{Type: TypeCreate, Name: "n"}},
+		{name: "create naming nothing", entry: Entry{Type: TypeCreate, GitRoot: "/repo"}},
+		{name: "prompt with no target", entry: Entry{Type: TypePrompt, Prompt: "p"}},
+		{name: "prompt with no text", entry: Entry{Type: TypePrompt, Workspace: "w1"}},
+		{name: "merge with no target", entry: Entry{Type: TypeMerge}},
+		{name: "task create with no title", entry: Entry{Type: TypeTaskCreate, Title: blank}},
+		{name: "task toggle with no id", entry: Entry{Type: TypeTaskToggleDone}},
+		{name: "task toggle with no done", entry: Entry{Type: TypeTaskToggleDone, ID: "task-1"}},
+		{name: "task add workspace with no target", entry: Entry{Type: TypeTaskAddWorkspace, ID: "task-1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange in the table. Act.
+			err := tt.entry.Validate()
+			// Assert.
+			if err == nil {
+				t.Fatalf("Validate(%s) = nil error, want a refusal", tt.name)
+			}
+		})
+	}
+}
+
+func TestValidateDistinguishesAbsentFromFalseOnDone(t *testing.T) {
+	// Arrange: "done": false and no "done" at all are different requests.
+	notDone := false
+	entry := Entry{Type: TypeTaskToggleDone, ID: "task-1", Done: &notDone}
+
+	// Act.
+	err := entry.Validate()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Validate(explicit false): %v", err)
+	}
+}
+
+func TestParseDecodesTheWholeArray(t *testing.T) {
+	// Arrange.
+	body := `[{"type":"merge","workspace":"w1"},{"type":"close","workspace":"w1"}]`
+
+	// Act.
+	entries, err := parse([]byte(body))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Type != TypeMerge || entries[1].Type != TypeClose {
+		t.Fatalf("parse() = %+v, want the merge and close entries in order", entries)
+	}
+}
+
+func TestParseRefusesAnEmptyArray(t *testing.T) {
+	// Arrange: an empty array reads as success while asking for nothing.
+	// Act.
+	_, err := parse([]byte(`[]`))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("parse([]) = nil error, want a refusal")
+	}
+}
+
+func TestParseRefusesAHalfWrittenDocument(t *testing.T) {
+	// Arrange: a file still being written often ends mid-token.
+	// Act.
+	_, err := parse([]byte(`[{"type":"merge","workspa`))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("parse(truncated) = nil error, want a decode failure")
+	}
+}
+
+func TestParseRefusesTrailingBytesAfterTheArray(t *testing.T) {
+	// Arrange.
+	// Act.
+	_, err := parse([]byte(`[{"type":"merge","workspace":"w1"}] trailing`))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("parse(trailing bytes) = nil error, want a decode failure")
+	}
+}
+
+func TestParseRefusesTheWholeArrayForOneInvalidEntry(t *testing.T) {
+	// Arrange: the array is ONE request, and half of it is not a smaller
+	// request.
+	body := `[{"type":"merge","workspace":"w1"},{"type":"merge"}]`
+
+	// Act.
+	_, err := parse([]byte(body))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("parse(one invalid entry) = nil error, want the whole array refused")
+	}
+	if !strings.Contains(err.Error(), "entry 1") {
+		t.Fatalf("error = %v, want it to name the offending entry", err)
+	}
+}

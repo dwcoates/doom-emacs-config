@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// THE /help PANEL: the command list, from the vendor's structured
+// supported-commands answer. Daemon-resolved; the WEBAPP owns the rendering.
+message HelpPanelView {
+  // In the daemon's order.
+  repeated HelpPanelRow rows = 1;
+}
+// One command's line.
+message HelpPanelRow {
+  // The literal ("/compact").
+  string command = 1;
+  // What it does, one line. UNSET when the catalog carries none.
+  optional HelpPanelDescription description = 2;
+}
+// The description element.
+message HelpPanelDescription {
+  // The line, drawn verbatim.
+  string text = 1;
+}

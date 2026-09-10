@@ -1,0 +1,32 @@
+// endpoint_watch_bash_run.proto — WatchBashRun: follow one detached shell
+// run's lifecycle rows. The bash table is written by the sidecar (spool
+// bytes, deltas, the terminal) and by the shim; this is the ONE read path
+// through which those rows reach a consumer, so every byte of a detached
+// shell's output can come from the sidecar and still be served by the shim's
+// own WatchBash.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+import "store/v1/store.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Which run.
+message WatchBashRunRequest {
+  // The run's unit identity, exactly as the spawning stream announced it and
+  // as every StoreAgentBash row carries it.
+  conversation.v1.AgentActivityId run = 1;
+}
+
+// A stream with a natural end: every stored row of the run in write order
+// (the start, each delta, the terminal if already written), then rows as
+// they are written, ending after the terminal row is sent. A run with no
+// stored row is a refused open — closed at the transport, the store's
+// convention for every watch; no failure frame.
+message WatchBashRunResponse {
+  // One row, an item's whole latest state.
+  StoreAgentBash row = 1;
+}

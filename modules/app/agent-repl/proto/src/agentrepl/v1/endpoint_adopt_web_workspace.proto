@@ -1,0 +1,61 @@
+// endpoint_adopt_web_workspace.proto — AdoptWebWorkspace: the webview's half
+// of the per-workspace handover rendezvous. WEB LINK section, called on the
+// NEW daemon's connection after `transferred` arrived on WatchWebWorkspace.
+// The VERB identifies the participant; rendezvous semantics are stated on
+// AdoptHostWorkspace and are identical here: all expected participants'
+// calls succeed together when adoption completes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AdoptWebWorkspaceRequest {
+  // The workspace being adopted.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message AdoptWebWorkspaceResponse {
+  oneof result {
+    AdoptWebWorkspaceSuccess success = 1;
+    AdoptWebWorkspaceError error = 2;
+  }
+}
+
+// Adoption is COMPLETE: re-open the workspace's view streams here now; the
+// persisted feed page position makes the re-attach evidence-free.
+message AdoptWebWorkspaceSuccess {}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AdoptWebWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AdoptWebWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AdoptWebWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AdoptWebWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AdoptWebWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // No transfer was announced for this workspace.
+    AdoptWebWorkspaceNoTransferAnnounced no_transfer_announced = 5;
+    // The caller's stream was not open at announcement.
+    AdoptWebWorkspaceParticipantNotExpected participant_not_expected = 6;
+  }
+}
+message AdoptWebWorkspaceUnknownWorkspace {}
+message AdoptWebWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AdoptWebWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AdoptWebWorkspaceNotYetAdopted {}
+message AdoptWebWorkspaceNoTransferAnnounced {}
+message AdoptWebWorkspaceParticipantNotExpected {}

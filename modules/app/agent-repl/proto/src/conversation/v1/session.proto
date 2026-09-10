@@ -1,0 +1,768 @@
+// session.proto — THE SESSION'S START: what a session is once it can accept
+// a prompt, what a cold context costs, and what can be done about it.
+//
+// Declared here rather than in the shim's endpoint because these facts cross
+// every surface: a cold context is something the USER decides about — a
+// warning that resuming is expensive, and a choice of remediation the daemon
+// then carries into its next open — so the shapes are conversation vocabulary,
+// not the wire between two processes.
+
+syntax = "proto3";
+
+package conversation.v1;
+
+import "conversation/v1/api.proto";
+import "conversation/v1/detached_work.proto";
+import "conversation/v1/permission.proto";
+import "conversation/v1/turn.proto";
+
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
+
+// A session that can accept a prompt. Everything here is a FACT AT START;
+// anything that changes later arrives as session updates, never here twice.
+message SessionStarted {
+  // The vendor's identity for this session — what a later resume names and
+  // what the store scopes by. May differ from the one asked for when the
+  // vendor rotated it; the vendor's answer wins.
+  // THE RUNTIME'S OWN ANSWER, always: the vendor also spells a session id into
+  // its transcript records and the two spellings diverge; the transcript
+  // spelling stays shim-side and never rides this field.
+  string vendor_session_id = 1;
+  // Who is driving: the shim's build and the SDK it embeds.
+  SessionRuntime runtime = 2;
+  // The model actually in effect: the one asked for on a fresh start, or the
+  // one recovered from the transcript on a resume (the SDK records it per
+  // response but does NOT restore it; the shim reads it back and passes it).
+  AgentModel effective_model = 3;
+  // The permission mode in effect: asked for on a fresh start, recovered
+  // from the transcript on a resume (recorded per prompt, not restored).
+  AgentPermissionMode permission_mode = 7;
+  // The models this session may switch to, each an echo token a model change
+  // accepts.
+  repeated ModelOption model_catalog = 4;
+
+  // WHAT IS ALREADY RUNNING — why an opening states it at all: a daemon that
+  // restarted was not there for the announcements, so it is told the
+  // membership once, here. A fresh session has nothing live.
+  //
+  // The turn in flight, if one is. UNSET when the main thread is idle.
+  optional TurnId turn_in_flight = 5;
+  // Every detached item live now, each exactly as its spawning stream would
+  // have announced it, so a consumer opens the matching stream for each.
+  repeated AgentDetachedWork live_work = 6;
+
+  // Tag 8 is RETIRED: the vendor handshake block is deferred.
+}
+
+// The shim and the SDK it drives. Fixed for the process; stated once.
+message SessionRuntime {
+  // The shim's build commit. THE STALENESS-BOUNCE CARRIER: the daemon
+  // compares this against its current deploy stamp and relaunches a
+  // stale surviving shim at freeness (the rollout's build-staleness
+  // bounce).
+  string shim_build_sha = 1;
+  // The vendor SDK package version the shim embeds.
+  string sdk_version = 2;
+  // The AGENT BINARY's own version, which is a third thing again: the SDK is
+  // an npm package the shim links, and the binary is the CLI that package
+  // drives. They version independently, and a defect reproducible on one build
+  // of the binary cannot be reported without this.
+  string agent_binary_version = 3;
+}
+
+// A context whose prompt cache would not serve the next request: the cache
+// LAPSED (a resume after the TTL), or the MODEL IS CHANGING (a cache is per
+// model, so a switch re-reads everything whatever the TTL). Either way the
+// next request would re-read the whole context at full price. The facts a
+// decision needs, read from the transcript WITHOUT a model call.
+message SessionCold {
+  // Tokens the context held at the last request — what a cold read re-reads.
+  uint64 context_tokens = 1;
+  // When the last request was made, in unix millis.
+  int64 last_request_at_ms = 2;
+  // The model the request asked for, echoed so the choice is made against
+  // the price of THAT model's reads.
+  AgentModel requested_model = 3;
+  // WHY the cache would not serve. The set arm is the reason; only a lapse
+  // has a lifetime to report.
+  oneof reason {
+    // The cache lifetime passed since the last request.
+    SessionColdLapsed lapsed = 4;
+    // The model is changing, and a cache is per model. Fires ONLY when the
+    // model asked for DIFFERS from the transcript's last; a same-model resume
+    // is judged by the lifetime alone, and within it nothing fires.
+    SessionColdModelSwitch model_switch = 5;
+  }
+}
+
+// The cache lapsed.
+message SessionColdLapsed {
+  // The lifetime that lapsed, in millis (the vendor's 5-minute or 1-hour
+  // tier, whichever the last request used).
+  int64 cache_ttl_ms = 1;
+}
+
+// The model is changing.
+message SessionColdModelSwitch {}
+
+// What to do with a cold context. The set arm is the remediation; each costs
+// something different, and the choice is the user's or the daemon's policy,
+// never the shim's.
+message SessionColdRemediation {
+  oneof remediation {
+    // Resume as-is and accept the cold read.
+    SessionColdPay pay = 1;
+    // Discard the context; keep the session identity. The cheapest, and it
+    // forgets everything.
+    SessionColdClear clear = 2;
+    // Summarize the context into a fresh one. NOT CHEAP: the summary is a
+    // cold read plus output; its payoff is every turn after it.
+    SessionColdCompact compact = 3;
+  }
+}
+
+// Accept the cold read.
+message SessionColdPay {}
+
+// Discard the context.
+message SessionColdClear {}
+
+// Compact the context. IMPLEMENTED BY THE SHIM, not by the vendor's own
+// compaction: a throwaway session reads the transcript and writes the
+// summary, then the real session is initialized from the compacted
+// transcript. No consumer ever sees the throwaway.
+message SessionColdCompact {
+  // The model that writes the summary — chosen for this job, not the
+  // session's model; a cheaper model often suffices.
+  AgentModel model = 1;
+  // WHAT is summarized — each value a different trade between fidelity and
+  // size. Never UNSPECIFIED in a valid request.
+  SessionCompactScope scope = 2;
+}
+
+// The compaction scopes: a closed set of scalar choices (no state, no
+// per-value exclusive siblings), so an enum by the convention's own
+// carve-out. One canonical vocabulary — the frontend's cold-gate menu and
+// the answer verb import it, never respell it.
+enum SessionCompactScope {
+  SESSION_COMPACT_SCOPE_UNSPECIFIED = 0;
+  // The whole transcript: prompts, responses, tool calls and their results.
+  SESSION_COMPACT_SCOPE_ALL = 1;
+  // The user's prompts alone.
+  SESSION_COMPACT_SCOPE_PROMPTS = 2;
+  // The agent's responses alone.
+  SESSION_COMPACT_SCOPE_RESPONSES = 3;
+}
+
+// ---- The session's LIVE facts: what changes after opening ----
+
+// One frame of the session's standing stream: a session-level fact that
+// changed, AS IT MANIFESTS upstream. No terminal arm — the stream ends only
+// with the session. Every arm is a fact ABOUT the session; nothing about any
+// turn or unit rides here, because each of those has a stream of its own, and
+// nothing synthetic rides here either — the shim's own health is PULLED, not
+// pushed.
+message SessionUpdate {
+  oneof update {
+    // The vendor gave the session a new identity mid-session.
+    SessionIdentityRotated identity_rotated = 1;
+    // The query died. DUPLICATED ON PURPOSE: every open stream — a turn's, a
+    // subagent's, a run's — also concludes with its own failure, but a
+    // consumer with no stream open still needs to know the session is over.
+    SessionQueryDied query_died = 2;
+    // The effective model changed — by SetSessionModel, or by the vendor. Stated here
+    // even when the consumer asked for it, so one place is authoritative.
+    SessionModelChanged model_changed = 3;
+    // The vendor's fast mode switched.
+    SessionFastMode fast_mode = 4;
+    // One MCP server's health changed.
+    SessionMcpServer mcp_server = 5;
+    // The account's usage allowance was observed.
+    SessionAccountUsage account_usage = 6;
+    // The session's permission mode changed — by SetSessionPermissionMode, or by a
+    // standing permission grant that set it. Stated here even when the
+    // consumer asked for it, so one place is authoritative.
+    SessionPermissionModeChanged permission_mode_changed = 7;
+
+    // Tags 8-23 are RETIRED: the vendor-session event arms (retries, auth,
+    // busy periods, announced shutdown, notifications, transcript write
+    // failure, active goal, prompt suggestions, file uploads, incomplete
+    // interrupts, MCP policy, background tasks, model fallback, relocation
+    // and worktree state, tool-set churn, settings faults) are deferred.
+    // Tag 24 (context_budget_warning) is RETIRED: the warning is a transcript
+    // attachment with no live-stream producer, so it lives on the agent plane
+    // as AgentUpdate.context_budget_warning (ruled 2026-08-29).
+    // The vendor's RATE-LIMIT STATUS, a STREAM-ONLY event (never written to
+    // the transcript, so the shim is its only producer). Session-scoped;
+    // the footer's allowance cell draws it.
+    SessionRateLimitStatus rate_limit_status = 28;
+    // The shim's own health report, PUSHED at the shim's cadence and on
+    // change — the pulled GetSessionDiagnostics verb is superseded by
+    // this arm; the daemon's sessionwatcher routes it (topbar warnings).
+    SessionDiagnostics diagnostics = 25;
+    // The session's current context usage, PUSHED at the shim's cadence
+    // and at every turn end — the vendor's own get_context_usage answer,
+    // never an estimate; supersedes the pulled GetSessionContextUsage
+    // verb. Routed to the topbar resolver (the context chip and the
+    // /context panel both resolve from it).
+    SessionContextUsage context_usage = 26;
+    // Vendor-initiated auto-compaction BEGAN (the vendor's system
+    // status:compacting signal, relayed). The ContextCut record that
+    // follows is the end signal — no progress figure exists upstream.
+    SessionCompacting compacting = 27;
+  }
+}
+
+// Presence is the fact: the vendor is compacting the context right now.
+message SessionCompacting {
+}
+
+// The vendor's context-budget warning: its own signal that the context
+// window is filling, injected into the prompt as an attachment record.
+// The vendor's rate-limit status as its stream event carries it (SDK
+// `rate_limit_event`). Every optional field is ABSENT when the vendor omitted
+// it — presence, never a sentinel.
+message SessionRateLimitStatus {
+  // The vocabulary is in evidence (three values); the arm is the status.
+  oneof status {
+    SessionRateLimitAllowed allowed = 1;
+    SessionRateLimitAllowedWarning allowed_warning = 2;
+    SessionRateLimitRejected rejected = 3;
+  }
+  // When the window resets, unix millis (the vendor's seconds, converted).
+  optional int64 resets_at_ms = 4;
+  // Which window the status is about; declared six-value vocabulary.
+  optional SessionRateLimitType rate_limit_type = 5;
+  // How much of the window is used, 0–100 (the vendor's fraction, converted).
+  optional double utilization_percent = 6;
+  // The overage side of the account, when the vendor reported it.
+  optional SessionRateLimitOverage overage = 7;
+  optional bool is_using_overage = 8;
+  optional bool overage_in_use = 9;
+  // The threshold just crossed, 0–100 (the vendor's fraction, converted).
+  optional double surpassed_threshold_percent = 10;
+  // The vendor's error code, verbatim (e.g. "credits_required").
+  optional string error_code = 11;
+  optional bool can_user_purchase_credits = 12;
+  optional bool has_chargeable_saved_payment_method = 13;
+}
+message SessionRateLimitAllowed {}
+message SessionRateLimitAllowedWarning {}
+message SessionRateLimitRejected {}
+
+// The window a rate-limit status refers to. THE ARM IS THE WINDOW.
+message SessionRateLimitType {
+  oneof window {
+    SessionRateLimitWindowFiveHour five_hour = 1;
+    SessionRateLimitWindowSevenDay seven_day = 2;
+    SessionRateLimitWindowSevenDayOpus seven_day_opus = 3;
+    SessionRateLimitWindowSevenDaySonnet seven_day_sonnet = 4;
+    SessionRateLimitWindowSevenDayOverageIncluded seven_day_overage_included = 5;
+    SessionRateLimitWindowOverage overage = 6;
+  }
+}
+message SessionRateLimitWindowFiveHour {}
+message SessionRateLimitWindowSevenDay {}
+message SessionRateLimitWindowSevenDayOpus {}
+message SessionRateLimitWindowSevenDaySonnet {}
+message SessionRateLimitWindowSevenDayOverageIncluded {}
+message SessionRateLimitWindowOverage {}
+
+// The overage side of a rate-limit status.
+message SessionRateLimitOverage {
+  // Same three-value vocabulary as the main status.
+  oneof status {
+    SessionRateLimitAllowed allowed = 1;
+    SessionRateLimitAllowedWarning allowed_warning = 2;
+    SessionRateLimitRejected rejected = 3;
+  }
+  // When the overage window resets, unix millis.
+  optional int64 resets_at_ms = 4;
+  // Why overage is disabled, verbatim: the vendor declares thirteen values
+  // but none is observed, so no typed arms yet.
+  optional string disabled_reason = 5;
+}
+
+// The vendor rotated the session's identity. The store scopes by this id, so
+// a consumer re-keys; the previous id is carried so the two halves join.
+message SessionIdentityRotated {
+  // The identity before the rotation.
+  string previous_vendor_session_id = 1;
+  // The identity from now on.
+  string vendor_session_id = 2;
+  // Tag 3 is RETIRED: no producer states a rotation reason (vetting item 1).
+}
+
+// The query ended on its own. THE ARM IS HOW; an orderly close is
+// KillSession's success, and a failure to start is StartSession's failure.
+message SessionQueryDied {
+  oneof cause {
+    // The agent binary's stream ended without a close.
+    SessionQueryUnexpectedEof unexpected_eof = 1;
+    // The SDK's iterator threw.
+    SessionQueryIteratorFailure iterator_failure = 2;
+  }
+}
+
+// The agent binary's stream ended without a close.
+message SessionQueryUnexpectedEof {}
+
+// The SDK's iterator threw.
+message SessionQueryIteratorFailure {
+  // The thrown cause, verbatim.
+  string cause = 1;
+}
+
+// The permission mode now in effect for the session.
+message SessionPermissionModeChanged {
+  // The mode now in effect.
+  AgentPermissionMode permission_mode = 1;
+}
+
+// The model in effect for subsequent responses.
+message SessionModelChanged {
+  // The model now in effect.
+  AgentModel effective_model = 1;
+}
+
+// Fast mode. THE ARM IS THE STATE; off carries the vendor's reason.
+message SessionFastMode {
+  oneof state {
+    SessionFastModeOn on = 1;
+    SessionFastModeOff off = 2;
+    // Fast mode is unavailable for now and will return on its own. NOT the
+    // same as off: nothing needs doing and offering the user a way to turn it
+    // on would offer something that cannot take effect.
+    SessionFastModeCooldown cooldown = 3;
+  }
+}
+
+// Fast mode is temporarily unavailable and will return on its own.
+message SessionFastModeCooldown {}
+
+// Fast mode is in effect.
+message SessionFastModeOn {}
+
+// Fast mode is not in effect.
+message SessionFastModeOff {
+  // The vendor's reason, verbatim.
+  string reason = 1;
+}
+
+// One MCP server, by name, and its health now.
+message SessionMcpServer {
+  // The server's configured name.
+  string name = 1;
+  // THE ARM IS THE HEALTH.
+  oneof health {
+    SessionMcpServerConnected connected = 2;
+    SessionMcpServerFailed failed = 3;
+    // The server is reachable but REFUSES TO SERVE UNTIL SOMEONE
+    // AUTHENTICATES. User-actionable, and the only health here that is: drawn
+    // as a failure it looks like nothing can be done, when in fact one thing
+    // can.
+    SessionMcpServerNeedsAuth needs_auth = 4;
+    // The server has not finished connecting. Neither healthy nor broken —
+    // drawing it as either is a claim the producer has not made.
+    SessionMcpServerPending pending = 5;
+    // The server is configured but switched off, so it was never attempted.
+    SessionMcpServerDisabled disabled = 6;
+  }
+}
+
+// The server needs someone to authenticate before it will serve.
+message SessionMcpServerNeedsAuth {}
+
+// The server has not finished connecting.
+message SessionMcpServerPending {}
+
+// The server is configured but switched off.
+message SessionMcpServerDisabled {}
+
+// The server is connected.
+message SessionMcpServerConnected {}
+
+// The server failed to connect or dropped.
+message SessionMcpServerFailed {
+  // The error, verbatim.
+  string error = 1;
+}
+
+// What the account's allowance looked like when sampled. LIVE, whenever the
+// shim observes it — not pinned to a turn boundary.
+message SessionAccountUsage {
+  // When it was sampled, in unix millis.
+  int64 observed_at_ms = 1;
+  // The vendor's subscription word, verbatim; its vocabulary is not in
+  // evidence.
+  string subscription_type = 2;
+  // THE ARM IS WHETHER A FIGURE WAS READ.
+  oneof outcome {
+    SessionAccountUsageAvailable available = 3;
+    SessionAccountUsageUnavailable unavailable = 4;
+  }
+}
+
+// A figure was read.
+message SessionAccountUsageAvailable {
+  // The rolling five-hour window.
+  SessionUsageWindow five_hour = 1;
+
+  // THE LONGER WINDOWS, each UNSET when the account has no such allowance or
+  // the vendor reported none for it.
+  //
+  // SEPARATE FIELDS RATHER THAN A LIST, because a consumer draws a NAMED
+  // window ("weekly", "weekly on Opus") and a list keyed by a vendor string
+  // would put the naming back in the consumer's hands. A window the vendor
+  // adds later is a compiler-surfaced gap rather than an entry silently
+  // dropped.
+  //
+  // The rolling seven-day allowance across everything.
+  optional SessionUsageWindow seven_day = 2;
+  // The rolling seven-day allowance for OAuth-app traffic, which is metered
+  // apart from the account's own.
+  optional SessionUsageWindow seven_day_oauth_apps = 3;
+  // The rolling seven-day allowance for the Opus model family. EXHAUSTIBLE ON
+  // ITS OWN: this can run out while the overall weekly window has room, which
+  // is otherwise a refusal with no visible cause.
+  optional SessionUsageWindow seven_day_opus = 4;
+  // The rolling seven-day allowance for the Sonnet model family.
+  optional SessionUsageWindow seven_day_sonnet = 5;
+
+  // Allowances scoped to one model each, for models the vendor meters
+  // individually. Empty when it meters none that way.
+  repeated SessionModelUsageWindow model_scoped = 6;
+}
+
+// One allowance window that applies to a single model.
+message SessionModelUsageWindow {
+  // Which model the window meters.
+  AgentModel model = 1;
+  // The window's figures.
+  SessionUsageWindow window = 2;
+}
+
+// One allowance window's figures.
+message SessionUsageWindow {
+  // How much of the window is used, 0–100.
+  double utilization_percent = 1;
+  // When the window resets, in unix millis.
+  int64 resets_at_ms = 2;
+}
+
+// Why no figure could be read. THE ARM IS THE REASON.
+message SessionAccountUsageUnavailable {
+  oneof reason {
+    // The usage service did not answer.
+    SessionUsageServiceUnavailable service_unavailable = 1;
+    // The service answered without a five-hour window.
+    SessionUsageWindowUnavailable window_unavailable = 2;
+    // The window carried no utilization figure.
+    SessionUsageUtilizationUnavailable utilization_unavailable = 3;
+    // The shim's own sampling failed.
+    SessionUsageSamplingFailure sampling_failure = 4;
+  }
+}
+
+// The usage service did not answer.
+message SessionUsageServiceUnavailable {}
+// The service answered without a five-hour window.
+message SessionUsageWindowUnavailable {}
+// The window carried no utilization figure.
+message SessionUsageUtilizationUnavailable {}
+// The shim's own sampling failed.
+message SessionUsageSamplingFailure {
+  // The cause, verbatim.
+  string cause = 1;
+}
+
+// ---- The shim's own health: PULLED by the daemon, never pushed ----
+
+// The shim's account of its own health at the instant it was asked. A
+// SYNTHETIC fact — the shim reporting on itself at the daemon's cadence —
+// which is why it is pulled rather than mixed into the standing stream of
+// upstream happenings.
+message SessionDiagnostics {
+  // THE ARM IS THE VERDICT. Unhealthy is an ANSWER, never a failure of the
+  // call that asked.
+  oneof health {
+    SessionHealthy healthy = 1;
+    SessionUnhealthy unhealthy = 2;
+  }
+  // Every degraded window the shim has recorded since it started, open or
+  // closed, oldest first. Kept so a daemon that asks after the fact still
+  // learns what was lost.
+  repeated SessionDegradedWindow degraded_windows = 3;
+}
+
+// Nothing is wrong with the shim itself.
+message SessionHealthy {}
+
+// Something is wrong with the shim itself.
+message SessionUnhealthy {
+  // Each fault standing now.
+  repeated SessionFault faults = 1;
+}
+
+// One fault of the shim's own. THE KIND IS A TYPED ARM (the shim's real
+// fault sites) plus a dynamic detail for what only prose can carry.
+message SessionFault {
+  // Which part of the shim (its store client, its converter, its log sink, …).
+  string component = 1;
+  // The fault, for a human and for logs; supplements the kind.
+  string detail = 2;
+  oneof kind {
+    // The store cannot be reached; writes are buffering (or dropping).
+    SessionFaultStoreUnreachable store_unreachable = 3;
+    // The converter met a record it should model and could not.
+    SessionFaultConverterDefect converter_defect = 4;
+    // The log sink is poisoned; records are being lost.
+    SessionFaultLogSinkPoisoned log_sink_poisoned = 5;
+    // A keep-alive submission failed; the cache may lapse.
+    SessionFaultKeepaliveFailed keepalive_failed = 6;
+    // A vendor query failed in a way the stream's own terminals did not
+    // carry.
+    SessionFaultVendorQueryFailed vendor_query_failed = 7;
+  }
+}
+message SessionFaultStoreUnreachable {}
+message SessionFaultConverterDefect {}
+message SessionFaultLogSinkPoisoned {}
+message SessionFaultKeepaliveFailed {}
+message SessionFaultVendorQueryFailed {}
+
+// A window during which one component of the shim was degraded. THE ARM IS
+// WHETHER IT HAS CLOSED, and only a closed window knows what was lost.
+message SessionDegradedWindow {
+  // Which part of the shim.
+  string component = 1;
+  // Why it degraded, as the shim stated when the window opened.
+  string reason = 2;
+  // When the window opened, in unix millis.
+  int64 began_at_ms = 3;
+  oneof extent {
+    // Still degraded.
+    SessionDegradedOpen open = 4;
+    // Recovered.
+    SessionDegradedClosed closed = 5;
+  }
+}
+
+// The window is still open.
+message SessionDegradedOpen {}
+
+// The window closed.
+message SessionDegradedClosed {
+  // When it closed, in unix millis.
+  int64 ended_at_ms = 1;
+  // How many observations the component dropped while degraded — records
+  // that never reached the store, frames never sent.
+  uint64 dropped_count = 2;
+}
+
+// ---- Killing ----
+
+// The session was killed. THE ARM IS HOW: idle, or by force over live work.
+message SessionKilled {
+  oneof how {
+    // Nothing was live; the query ended cleanly.
+    SessionKilledIdle idle = 1;
+    // Live work was killed with it — the turn if one was open, and EVERY
+    // live task, whichever turn spawned it. Names what died, so the consumer
+    // can conclude the elements it was drawing for them.
+    SessionKilledForced forced = 2;
+  }
+}
+
+// Killed with nothing live.
+message SessionKilledIdle {}
+
+// Killed by force.
+message SessionKilledForced {
+  // The turn that was interrupted, if one was in flight.
+  optional TurnId interrupted_turn = 1;
+  // Every detached item that was stopped.
+  // PRODUCER NOTE: named from the shim's own tracking at the kill; the
+  // vendor's record carries no ids.
+  repeated DetachedWorkId stopped_work = 2;
+}
+
+// The session could not be killed because work is live and force was not
+// asked. Names the work, so the consumer can stop it itself or ask for force.
+message SessionLive {
+  // The turn in flight, if one is.
+  optional TurnId turn_in_flight = 1;
+  // Every detached item live now.
+  // PRODUCER NOTE: filled from the shim's OWN live-work tracking (its open
+  // detached-work streams), never from any vendor record.
+  repeated DetachedWorkId live_work = 2;
+}
+
+// The session's CURRENT CONTEXT USAGE, as the vendor's own control answer
+// states it (the get_context_usage verb — the one stable, typed source;
+// never derived from usage frames). Pulled by the daemon; the topbar's
+// context chip and the /context panel both resolve from THIS one fact.
+// The vendor's FULL get_context_usage answer, typed field for field (the
+// fidelity principle; verified against the SDK's declared response type).
+// The one deliberate omission is the vendor's gridRows — pure presentation
+// data (pre-rendered grid squares) the resolvers compose for themselves.
+message SessionContextUsage {
+  // Tokens currently in context — the topbar chip's number. Shrinks on a
+  // compaction or clear; can never exceed max_tokens.
+  int64 total_tokens = 1;
+  // The usable context window — the bound the percentage is against.
+  int64 max_tokens = 2;
+  // The model's raw window before any usable-window adjustment.
+  int64 raw_max_tokens = 4;
+  // The vendor's own percent-used figure, verbatim (never re-derived).
+  int64 percentage = 5;
+  // The model the window belongs to, the vendor's spelling.
+  string model = 6;
+  // The vendor's category breakdown, in served order.
+  repeated SessionContextCategory categories = 3;
+  // Memory files loaded into context (CLAUDE.md and friends).
+  repeated SessionContextMemoryFile memory_files = 7;
+  // MCP tools in context, per tool.
+  repeated SessionContextMcpTool mcp_tools = 8;
+  // Deferred built-in tools (schema loaded on demand).
+  repeated SessionContextDeferredBuiltinTool deferred_builtin_tools = 9;
+  // Built-in system tools in context.
+  repeated SessionContextSystemTool system_tools = 10;
+  // The system prompt, by section.
+  repeated SessionContextSystemPromptSection system_prompt_sections = 11;
+  // Available subagents loaded into context.
+  repeated SessionContextAgent agents = 12;
+  // The slash-command roll-up. UNSET when the vendor omitted it.
+  optional SessionContextSlashCommands slash_commands = 13;
+  // The skills roll-up. UNSET when the vendor omitted it.
+  optional SessionContextSkills skills = 14;
+  // The auto-compact trigger threshold. UNSET when the vendor omitted it.
+  optional int64 auto_compact_threshold = 15;
+  // Whether vendor auto-compaction is enabled.
+  bool is_auto_compact_enabled = 16;
+  // The message-plane breakdown. UNSET when the vendor omitted it.
+  optional SessionContextMessageBreakdown message_breakdown = 17;
+  // The API-side usage figures. UNSET when the vendor answered null.
+  optional SessionContextApiUsage api_usage = 18;
+}
+
+// One category of the context breakdown.
+message SessionContextCategory {
+  // The vendor's category label, verbatim.
+  string label = 1;
+  // The category's token count.
+  int64 tokens = 2;
+  // The vendor's display color for the category, verbatim.
+  string color = 3;
+  // Whether the category is deferred (loaded on demand). UNSET when the
+  // vendor omitted the flag.
+  optional bool is_deferred = 4;
+}
+
+// One memory file in context.
+message SessionContextMemoryFile {
+  // The file's path, the vendor's spelling.
+  string path = 1;
+  // The vendor's memory-file type label, verbatim.
+  string type = 2;
+  int64 tokens = 3;
+}
+
+// One MCP tool in context.
+message SessionContextMcpTool {
+  string name = 1;
+  // The owning MCP server's name.
+  string server_name = 2;
+  int64 tokens = 3;
+  // Whether the tool's schema is currently loaded. UNSET when the vendor
+  // omitted the flag.
+  optional bool is_loaded = 4;
+}
+
+// One deferred built-in tool.
+message SessionContextDeferredBuiltinTool {
+  string name = 1;
+  int64 tokens = 2;
+  bool is_loaded = 3;
+}
+
+// One built-in system tool.
+message SessionContextSystemTool {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// One system-prompt section.
+message SessionContextSystemPromptSection {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// One available subagent in context.
+message SessionContextAgent {
+  // The agent type name.
+  string agent_type = 1;
+  // Where the agent definition came from, the vendor's spelling.
+  string source = 2;
+  int64 tokens = 3;
+}
+
+// The slash-command roll-up.
+message SessionContextSlashCommands {
+  int64 total_commands = 1;
+  int64 included_commands = 2;
+  int64 tokens = 3;
+}
+
+// The skills roll-up, with per-skill frontmatter figures.
+message SessionContextSkills {
+  int64 total_skills = 1;
+  int64 included_skills = 2;
+  int64 tokens = 3;
+  repeated SessionContextSkillFrontmatter skill_frontmatter = 4;
+}
+
+// One skill's loaded frontmatter.
+message SessionContextSkillFrontmatter {
+  string name = 1;
+  // Where the skill came from, the vendor's spelling.
+  string source = 2;
+  int64 tokens = 3;
+}
+
+// The message-plane breakdown — where the conversation's tokens went.
+message SessionContextMessageBreakdown {
+  int64 tool_call_tokens = 1;
+  int64 tool_result_tokens = 2;
+  int64 attachment_tokens = 3;
+  int64 assistant_message_tokens = 4;
+  int64 user_message_tokens = 5;
+  int64 redirected_context_tokens = 6;
+  int64 unattributed_tokens = 7;
+  // Per-tool call/result figures — the ENCAPSULATED tool-call list the
+  // /context panel folds.
+  repeated SessionContextToolCallsByType tool_calls_by_type = 8;
+  // Per-attachment-type figures.
+  repeated SessionContextAttachmentsByType attachments_by_type = 9;
+}
+
+// One tool's call/result token split.
+message SessionContextToolCallsByType {
+  string name = 1;
+  int64 call_tokens = 2;
+  int64 result_tokens = 3;
+}
+
+// One attachment type's tokens.
+message SessionContextAttachmentsByType {
+  string name = 1;
+  int64 tokens = 2;
+}
+
+// The API-side usage figures riding the vendor's answer.
+message SessionContextApiUsage {
+  int64 input_tokens = 1;
+  int64 output_tokens = 2;
+  int64 cache_creation_input_tokens = 3;
+  int64 cache_read_input_tokens = 4;
+}

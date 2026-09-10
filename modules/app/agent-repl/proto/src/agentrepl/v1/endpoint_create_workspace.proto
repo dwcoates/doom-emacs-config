@@ -1,0 +1,189 @@
+// endpoint_create_workspace.proto — CreateWorkspace: a new workspace in a
+// repository. SIDEBAR section. THE DAEMON DOES THE CREATING — it derives or
+// adopts the name (slug → branch → worktree dir), creates the branch and
+// worktree, records the merge layout facts and every creation fact below in
+// WSM, and registers the workspace; no host materialization round-trip
+// exists. Callers learn the identity from the response; everything else
+// (roster row, status) arrives on the roster stream.
+//
+// TWO CREATION FORMS, one request: the form arm IS the kind of create. A
+// STANDARD create is the ordinary workspace; a ONE-SHOT is a
+// fire-and-forget workspace whose whole sequence the daemon owns — naming,
+// worktree, prompt decoration, and the finish action (self-merge or PR).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_priority.proto";
+import "conversation/v1/user.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CreateWorkspaceRequest {
+  // The repository to create in.
+  workspace.v1.RepositoryRef repository = 1;
+
+  // THE ARM IS THE CREATION FORM.
+  oneof form {
+    CreateWorkspaceStandard standard = 2;
+    CreateWorkspaceOneShot one_shot = 3;
+  }
+
+  // The parent workspace, when this create is spawned FROM one. UNSET = a
+  // TOP-LEVEL workspace: its merge target is the repo's MAIN worktree and
+  // default branch. PRESENT = a child: its merge target is the PARENT's
+  // worktree and branch, and the roster nests it under the parent. The
+  // choice is recorded into the merge layout facts at creation.
+  optional CreateWorkspaceParent parent = 4;
+
+  // The session model at creation. UNSET = the daemon's default; presence,
+  // never an empty-string sentinel.
+  optional string model = 5;
+
+  // The workspace's priority. UNSET = unprioritized. The roster resolver
+  // orders by it; changeable later via SetWorkspacePriority.
+  optional WorkspacePriority priority = 6;
+
+  // Explicit consent to a session whose permission mode disables the
+  // permission gate. A creation that would produce an ungated session is
+  // REFUSED unless this is present — presence IS the consent.
+  optional CreateWorkspaceUngatedConsent allow_ungated = 7;
+}
+
+// The ordinary workspace create.
+message CreateWorkspaceStandard {
+  // The initial prompt the new workspace's session starts with. UNSET = an
+  // empty workspace; presence, never an empty UserSaid. Also the naming
+  // input: the daemon derives the slug from it when no name is supplied.
+  optional conversation.v1.UserSaid initial_prompt = 1;
+  // The ref to branch from. UNSET = the repo's default branch resolution;
+  // presence, not an empty-string sentinel.
+  optional string base_ref = 2;
+  // A user-supplied workspace name. UNSET = the daemon mints the name
+  // (slug from the initial prompt when present).
+  optional string name = 3;
+  // Configured merge actions, recorded in WSM at creation and read back by
+  // EVERY merge of this workspace on every ingress.
+  optional CreateWorkspaceMergeActions merge_actions = 4;
+}
+
+// A one-shot: repo-pinned, off the repo's default branch, daemon-named —
+// the caller supplies only the prompt (and the shared facts outside the
+// form arm); the daemon owns decoration and the finish action.
+message CreateWorkspaceOneShot {
+  // The one-shot's commission. A one-shot IS its prompt — always set.
+  conversation.v1.UserSaid prompt = 1;
+
+  // THE ARM IS THE FINISH ACTION — what happens when the work concludes.
+  oneof finish {
+    CreateWorkspaceOneShotSelfMerge self_merge = 2;
+    CreateWorkspaceOneShotOpenPr open_pr = 3;
+  }
+}
+
+// Finish by merging the one-shot back via the ordinary merge engine.
+message CreateWorkspaceOneShotSelfMerge {
+}
+
+// Finish by opening a pull request from the one-shot's branch.
+message CreateWorkspaceOneShotOpenPr {
+  // The PR is opened self-certified (no review round demanded). Default
+  // false.
+  bool self_certified = 1;
+  // The PR is added to the repository's merge queue after opening. Default
+  // false.
+  bool add_to_merge_queue = 2;
+}
+
+// The spawning parent and, optionally, a conversation fork from it.
+message CreateWorkspaceParent {
+  // The parent workspace. The child's merge target is this workspace's
+  // worktree and branch.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Fork the parent's conversation into the new workspace's session
+  // (resume the parent's transcript in the new worktree). UNSET = the new
+  // workspace starts a fresh conversation. Confined here by construction:
+  // a fork without a parent is unrepresentable.
+  optional CreateWorkspaceFork fork = 2;
+}
+
+// Presence is the fact: fork the parent's conversation.
+message CreateWorkspaceFork {
+}
+
+// Presence is the fact: the caller consents to an ungated session.
+message CreateWorkspaceUngatedConsent {
+}
+
+// The configured merge actions. Both run under the merge lease for EVERY
+// merge of this workspace: before_ws_merge BEFORE the landing (its failure
+// fails the run); postprocessing_prompt AFTER every commit lands (can
+// never fail the run; its error rides the terminal status).
+message CreateWorkspaceMergeActions {
+  // The pre-merge prompt. UNSET = no configured pre-merge action.
+  optional conversation.v1.UserSaid before_ws_merge = 1;
+  // The post-merge prompt. UNSET = no configured post-merge action.
+  optional conversation.v1.UserSaid postprocessing_prompt = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message CreateWorkspaceResponse {
+  oneof result {
+    CreateWorkspaceSuccess success = 1;
+    CreateWorkspaceError error = 2;
+  }
+}
+
+// The created workspace's identity — the dir the daemon minted. Everything
+// else arrives on the roster stream.
+message CreateWorkspaceSuccess {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message CreateWorkspaceError {
+  oneof cause {
+    // An ungated permission mode was asked for without the explicit consent.
+    CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
+    // No slug could be derived for the workspace's branch and dir.
+    CreateWorkspaceNoSlug no_slug = 2;
+    // A one-shot form arrived with no finish action chosen.
+    CreateWorkspaceFinishRequired finish_required = 3;
+    // A finish action arrived on a form that is not one-shot.
+    CreateWorkspaceFinishNotOneShot finish_not_one_shot = 4;
+    // A fork was asked for from a parent that has no conversation to fork.
+    CreateWorkspaceForkParentHasNoConversation fork_parent_has_no_conversation = 5;
+    // The named brief file is absent.
+    CreateWorkspaceBriefMissing brief_missing = 6;
+    // The repository the form names is not one the daemon knows.
+    CreateWorkspaceUnknownRepository unknown_repository = 7;
+    // The parent workspace is not in the daemon's registry.
+    CreateWorkspaceUnknownParent unknown_parent = 8;
+    // The base ref does not resolve in the repository.
+    CreateWorkspaceBaseRefUnresolved base_ref_unresolved = 9;
+    // Creating the worktree failed.
+    CreateWorkspaceWorktreeCreationFailed worktree_creation_failed = 10;
+  }
+}
+message CreateWorkspaceUngatedWithoutConsent {}
+message CreateWorkspaceNoSlug {}
+message CreateWorkspaceFinishRequired {}
+message CreateWorkspaceFinishNotOneShot {}
+message CreateWorkspaceForkParentHasNoConversation {}
+message CreateWorkspaceBriefMissing {
+  // The brief's name, as asked for.
+  string name = 1;
+}
+message CreateWorkspaceUnknownRepository {}
+message CreateWorkspaceUnknownParent {}
+message CreateWorkspaceBaseRefUnresolved {
+  // The ref that did not resolve.
+  string ref = 1;
+}
+message CreateWorkspaceWorktreeCreationFailed {
+  // Git's own account of the failure.
+  string detail = 1;
+}

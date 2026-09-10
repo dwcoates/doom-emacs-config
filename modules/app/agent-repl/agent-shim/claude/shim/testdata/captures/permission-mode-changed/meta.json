@@ -1,0 +1,40 @@
+{
+  "scenario": "permission-mode-changed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello.",
+  "prompts": [
+    {
+      "text": "Say hello.",
+      "resume": false
+    }
+  ],
+  "world": "permission-mode-changed",
+  "cwd_init": null,
+  "vendor_session_id": "1adf7f61-eb6e-4ff7-ba39-00439e5e0330",
+  "manual": null,
+  "expect": [
+    "session_state_changed",
+    "transcript-lines:permission-mode"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-mode-changed-QtdPtl-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:34.639Z",
+  "controls": [
+    {
+      "verb": "setPermissionMode",
+      "ok": true
+    },
+    {
+      "verb": "setPermissionMode",
+      "ok": true
+    },
+    {
+      "verb": "setPermissionMode",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

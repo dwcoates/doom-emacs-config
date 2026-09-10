@@ -1,0 +1,38 @@
+// endpoint_watch_feed.proto — WatchFeed: one feed's live tail. FEED section.
+// ONE connection per OPEN feed — the root feed while the workspace view is
+// up, plus one per expanded subagent bubble — so THE CONNECTION IS THE
+// PLACEMENT: every row on a stream belongs to the feed its token named, and
+// no frame carries a feed address. History is OpenFeed's page and
+// GetFeedPage's walk; this stream is what changes NOW.
+//
+// THE STREAM IS STANDING: it spans turns (a turn's end arrives as the
+// FeedTurnEnded ROW, never as this stream concluding), and it ends only when
+// the client cancels it (collapsing a bubble, closing the view). A stream
+// ending any other way is a TRANSPORT FAILURE — re-entered by re-opening the
+// feed — which is exactly what keeps a dropped pipe distinguishable from
+// every real ending. Views only ride streams — there is no keepalive frame,
+// and a refused open closes the stream at the transport.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "frontend/v1/feed.proto";
+import "agentrepl/v1/feed_token.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Opens the tail of the ONE feed the token names.
+message WatchFeedRequest {
+  // The token OpenFeed minted, echoed verbatim. Workspace-scoped by mint, so
+  // the request carries no WorkspaceRef of its own.
+  FeedWatchToken watch = 1;
+}
+
+// One feed row upsert, delivered live: a new row, or a whole replacement of
+// one already shown (a growing response's re-push, a settled tool card, a
+// task bubble another act touched). The client upserts by FeedRow.id.
+message WatchFeedResponse {
+  // The upserted row, whole.
+  frontend.v1.FeedRow row = 1;
+}

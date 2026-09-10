@@ -1,0 +1,87 @@
+// endpoint_daemon_health.proto — DaemonHealth: is the daemon itself healthy?
+// DAEMON ADMIN section. The health ANSWER deleted from frontend.v1 at the
+// topbar step — a response, never a view. Asked by doctor tooling and the
+// host's probes.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Nothing to ask beyond "you?".
+message DaemonHealthRequest {}
+
+// THE ARM IS THE OUTCOME. error = the question could not be ANSWERED;
+// UNHEALTHY IS AN ANSWER, never an error.
+message DaemonHealthResponse {
+  oneof result {
+    DaemonHealthSuccess success = 1;
+    DaemonHealthError error = 2;
+  }
+}
+
+// THE ARM IS THE VERDICT.
+message DaemonHealthSuccess {
+  oneof health {
+    DaemonHealthy healthy = 1;
+    DaemonUnhealthy unhealthy = 2;
+  }
+}
+message DaemonHealthy {}
+
+// Unhealthy: the standing faults, each typed.
+message DaemonUnhealthy {
+  repeated DaemonFault faults = 1;
+}
+
+// One standing fault. THE KIND IS A TYPED ARM — classes as messages,
+// recursively, as far as readily doable — PLUS a dynamic detail for what
+// only prose can carry.
+message DaemonFault {
+  // The dynamic account, verbatim — supplements the kind, never replaces it.
+  string detail = 1;
+  // Kinds derived from the daemon's real fault sites (landing 4, 2026-08-29).
+  oneof kind {
+    // A workspace's adoption window closed before the joining daemon
+    // adopted it.
+    DaemonFaultAdoptionWindowExpired adoption_window_expired = 2;
+    // A log sink can no longer be written.
+    DaemonFaultLogSinkPoisoned log_sink_poisoned = 3;
+    // The deploy script failed.
+    DaemonFaultDeployScriptFailed deploy_script_failed = 4;
+    // Spawning the successor daemon failed.
+    DaemonFaultSuccessorSpawnFailed successor_spawn_failed = 5;
+    // The prompts directory is not on disk.
+    DaemonFaultPromptsDirMissing prompts_dir_missing = 6;
+    // The workspace-state store is read-only.
+    DaemonFaultWsmReadOnly wsm_read_only = 7;
+  }
+}
+message DaemonFaultAdoptionWindowExpired {
+  // The workspace whose window expired.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+message DaemonFaultLogSinkPoisoned {
+  // Which sink.
+  string sink = 1;
+}
+message DaemonFaultDeployScriptFailed {
+  // The script's own account of the failure.
+  string detail = 1;
+}
+message DaemonFaultSuccessorSpawnFailed {
+  // The spawn's own account of the failure.
+  string detail = 1;
+}
+message DaemonFaultPromptsDirMissing {
+  // The path that is not there.
+  string path = 1;
+}
+message DaemonFaultWsmReadOnly {}
+
+// No arms: DaemonHealth has no refusal site (landing 4).
+message DaemonHealthError {
+}

@@ -1,0 +1,43 @@
+// endpoint_set_session_permission_mode.proto — SetSessionPermissionMode: change the
+// session's permission mode for every gate from now on.
+
+syntax = "proto3";
+
+package shim.v1;
+
+import "conversation/v1/permission.proto";
+
+option go_package = "agentrepl/proto/shim/v1;shimv1";
+
+// The mode to set.
+message SetSessionPermissionModeRequest {
+  // The mode for the session from now on. Applies to the next gate that
+  // opens; a gate already open keeps the mode it opened under.
+  conversation.v1.AgentPermissionMode permission_mode = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetSessionPermissionModeResponse {
+  oneof result {
+    SetSessionPermissionModeSuccess success = 1;
+    SetSessionPermissionModeFailure failure = 2;
+  }
+}
+
+// Set. Empty: the mode now in effect arrives as
+// SessionUpdate.permission_mode_changed, the one authoritative statement.
+message SetSessionPermissionModeSuccess {}
+
+// Not set. THE ARM IS WHY.
+message SetSessionPermissionModeFailure {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // No session is open on this shim.
+    SetSessionPermissionModeNoSession no_session = 2;
+    // The vendor refused the mode; `detail` carries its wording.
+    SetSessionPermissionModeVendorRefused vendor_refused = 3;
+  }
+}
+message SetSessionPermissionModeNoSession {}
+message SetSessionPermissionModeVendorRefused {}

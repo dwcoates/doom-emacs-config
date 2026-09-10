@@ -1,168 +1,134 @@
 package server
 
-import (
-	"fmt"
-	"sync"
+import "sync"
 
-	corev1 "agentrepl/proto/agentshim/core/v1"
-	"agentrepl/shim-store/internal/logging"
-)
+// DefaultWatchBuffer is the per-subscriber frame buffer when --watch-buffer is
+// not given. It is SUBSTANTIALLY above the ~1k a daemon bounce can burst,
+// because the alternative to buffering a burst is ending a healthy watch.
+const DefaultWatchBuffer = 8192
 
-// defaultSubBuffer bounds per-subscriber server-side buffering before a slow
-// consumer is hard-disconnected (§6.5). A disconnected subscriber reconnects
-// and replays from its last seq, so buffering is bounded with no data loss by
-// construction.
-const defaultSubBuffer = 1024
-
-// subscriber is one live-tail consumer registered with a fanout. Delivery is a
-// buffered channel; done is closed exactly once when the subscriber is dropped
-// (explicit unsubscribe or slow-consumer disconnect).
-type subscriber struct {
-	id        uint64
-	sessionID string
-	ch        chan *corev1.Event
-	done      chan struct{}
-	closeOnce sync.Once
-	onDrop    func(subscriberDropReason)
+// sink is one standing watch: the key it follows (a book for a page-line
+// watch, a run for a bash watch), the bounded channel the fan-out hands items
+// to, and the overflow signal that ends it.
+type sink[T any] struct {
+	key       string
+	tokenHash string
+	items     chan T
+	// overflow is CLOSED, never sent on, when this subscriber could not keep
+	// up. A closed channel is readable forever, so the watch loop cannot miss
+	// the signal no matter which branch of its select won a race.
+	overflow chan struct{}
+	// dropped is the item count lost at the moment of overflow, for the
+	// warning record. Written once, under the fan-out's lock, before overflow
+	// is closed; read only after observing that close.
+	dropped int
 }
 
-type subscriberDropReason string
-
-const (
-	subscriberDropUnsubscribed subscriberDropReason = "unsubscribed"
-	subscriberDropSlowConsumer subscriberDropReason = "slow-consumer"
-)
-
-// drop reports a candidate terminal cause to the connection-owned terminal
-// state machine.  Fanout owns only registry membership and never closes a
-// subscriber socket itself.
-func (s *subscriber) drop(reason subscriberDropReason) {
-	dropped := false
-	s.closeOnce.Do(func() {
-		close(s.done)
-		dropped = true
-	})
-	if dropped {
-		s.onDrop(reason)
-	}
-}
-
-func (s *subscriber) stop() {
-	s.closeOnce.Do(func() { close(s.done) })
-}
-
-// fanout is the live-tail subscriber registry (§6.5). It broadcasts every
-// published event to the registered subscribers of that event's session in
-// arrival order, and disconnects any subscriber whose bounded buffer overflows.
-// It is class-agnostic: EPHEMERAL events published here pass through to live
-// subscribers without ever being persisted (the DB never sees them).
-type fanout struct {
+// fanout is the registry of standing watchers of one item kind.
+//
+// IT IS GENERIC OVER THE ITEM because the store now has two standing streams —
+// page lines keyed by book, bash rows keyed by run — with identical
+// backpressure semantics. Two hand-copied registries would be two places for
+// the non-blocking-publish rule to drift out of agreement.
+//
+// PUBLISHING NEVER BLOCKS. Every send is non-blocking under the registry lock:
+// a subscriber that cannot keep up is unsubscribed and signalled, so one slow
+// reader can never stall a writer's transaction acknowledgement.
+type fanout[T any] struct {
 	mu     sync.Mutex
-	nextID uint64
-	subs   map[string]map[uint64]*subscriber
 	buffer int
-	log    *logging.Logger
+	subs   map[*sink[T]]struct{}
+	// keyOf reads the routing key off one item — the only thing that differs
+	// between the two registries.
+	keyOf func(T) string
 }
 
-func newFanout(buffer int, log *logging.Logger) *fanout {
-	if log == nil {
-		panic("shim-store fanout: nil logger")
+func newFanout[T any](buffer int, keyOf func(T) string) *fanout[T] {
+	if keyOf == nil {
+		panic("shim-store server: fan-out with no key function")
 	}
 	if buffer <= 0 {
-		buffer = defaultSubBuffer
+		buffer = DefaultWatchBuffer
 	}
-	log.Log(logging.Fields{Operation: "fanout-init"}, "live-tail registry initialized buffer=%d", buffer)
-	return &fanout{
-		subs:   make(map[string]map[uint64]*subscriber),
-		buffer: buffer,
-		log:    log,
-	}
+	return &fanout[T]{buffer: buffer, subs: map[*sink[T]]struct{}{}, keyOf: keyOf}
 }
 
-// subscribe registers a new live-tail subscriber for sessionID.
-func (f *fanout) subscribe(sessionID string, onDrop func(subscriberDropReason), prepare func(*subscriber)) *subscriber {
-	if onDrop == nil {
-		panic("shim-store fanout: nil subscriber drop owner")
-	}
-	if prepare == nil {
-		panic("shim-store fanout: nil subscriber prepare owner")
+// subscribe registers a watcher for one key.
+//
+// IT IS CALLED BEFORE THE REPLAY QUERY, under this lock, which is what makes
+// the replay-to-live handoff gapless: any item committed after this point is
+// either found by the replay, delivered on this channel, or both — and the
+// watch loop dedupes the "both" case by write ordinal.
+func (f *fanout[T]) subscribe(key, tokenHash string) *sink[T] {
+	sub := &sink[T]{
+		key:       key,
+		tokenHash: tokenHash,
+		items:     make(chan T, f.buffer),
+		overflow:  make(chan struct{}),
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nextID++
-	s := &subscriber{
-		id:        f.nextID,
-		sessionID: sessionID,
-		ch:        make(chan *corev1.Event, f.buffer),
-		done:      make(chan struct{}),
-		onDrop:    onDrop,
-	}
-	prepare(s)
-	m := f.subs[sessionID]
-	if m == nil {
-		m = make(map[uint64]*subscriber)
-		f.subs[sessionID] = m
-	}
-	m[s.id] = s
-	f.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: subscriberName(s.id)}, "live-tail subscriber registered buffer=%d", f.buffer)
-	return s
+	f.subs[sub] = struct{}{}
+	return sub
 }
 
-// unsubscribe removes a subscriber and closes its done channel.
-func (f *fanout) unsubscribe(s *subscriber) {
-	removed := f.remove(s)
-	s.drop(subscriberDropUnsubscribed)
-	if removed {
-		f.log.LogVerbose(logging.Fields{Operation: "unsubscribe", Session: s.sessionID, Subscriber: subscriberName(s.id)}, "live-tail subscriber removed")
-	}
-}
-
-// remove atomically retires s from the registry.  Terminal ownership lives at
-// the connection, so registry removal deliberately does not report a cause.
-func (f *fanout) remove(s *subscriber) bool {
+// unsubscribe removes a watcher. It is idempotent, so the watch loop's defer
+// is safe after an overflow already removed the subscriber.
+func (f *fanout[T]) unsubscribe(sub *sink[T]) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m := f.subs[s.sessionID]
-	if _, ok := m[s.id]; !ok {
-		return false
-	}
-	delete(m, s.id)
-	if len(m) == 0 {
-		delete(f.subs, s.sessionID)
-	}
-	return true
+	delete(f.subs, sub)
 }
 
-// publish broadcasts ev to every subscriber of its session in arrival order.
-// A subscriber whose buffer is full is disconnected rather than blocking the
-// publisher; the workspace-aware requester reconnects and replays.
-func (f *fanout) publish(ev *corev1.Event) {
-	sid := ev.GetSessionId()
-
+// publish hands each item to every subscriber of its key and returns the
+// subscribers that overflowed, so the caller logs one warning per victim.
+func (f *fanout[T]) publish(items []T) []*sink[T] {
+	if len(items) == 0 {
+		return nil
+	}
+	var overflowed []*sink[T]
 	f.mu.Lock()
-	var slow []*subscriber
-	for _, s := range f.subs[sid] {
-		select {
-		case s.ch <- ev:
-		default:
-			slow = append(slow, s)
+	defer f.mu.Unlock()
+	for sub := range f.subs {
+		remaining := 0
+		for i, item := range items {
+			if f.keyOf(item) != sub.key {
+				continue
+			}
+			select {
+			case sub.items <- item:
+			default:
+				// The buffer is full. Count what this batch could not place,
+				// signal the subscriber, and drop it from the registry: a
+				// watcher that fell behind recovers by re-opening, never by
+				// being silently thinned.
+				for _, rest := range items[i:] {
+					if f.keyOf(rest) == sub.key {
+						remaining++
+					}
+				}
+				sub.dropped = remaining
+				close(sub.overflow)
+				delete(f.subs, sub)
+				overflowed = append(overflowed, sub)
+			}
+			if remaining > 0 {
+				break
+			}
 		}
 	}
-	f.mu.Unlock()
-
-	for _, s := range slow {
-		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d event_seq=%d event_class=%s", f.buffer, ev.GetSeq(), ev.GetClass())
-		f.remove(s)
-		s.drop(subscriberDropSlowConsumer)
-	}
+	return overflowed
 }
 
-// subscriberCount reports the number of live subscribers for a session
-// (test/introspection helper).
-func (f *fanout) subscriberCount(sessionID string) int {
+// subscribers is the number of standing watchers. Diagnostics only.
+func (f *fanout[T]) subscribers() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.subs[sessionID])
+	return len(f.subs)
 }
 
-func subscriberName(id uint64) string { return fmt.Sprintf("%d", id) }
+// lineKey routes a written page line by the book it belongs to.
+func lineKey(line LineWritten) string { return line.AgentID }
+
+// bashRowKey routes a written bash row by the run it belongs to.
+func bashRowKey(row BashRowWritten) string { return row.RunID }

@@ -1,0 +1,31 @@
+{
+  "scenario": "task-acts-create-change-reject",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Using the task tools, create three tasks: 'design the schema', 'write the migration' (which depends on the first), and 'backfill the rows' (which depends on the second). Then mark the first one in progress. Then reject the third one as out of scope, giving a reason.",
+  "prompts": [
+    {
+      "text": "Using the task tools, create three tasks: 'design the schema', 'write the migration' (which depends on the first), and 'backfill the rows' (which depends on the second). Then mark the first one in progress. Then reject the third one as out of scope, giving a reason.",
+      "resume": false
+    }
+  ],
+  "world": "task-acts-create-change-reject",
+  "cwd_init": null,
+  "vendor_session_id": "4b4ec993-60f3-4c7d-8c69-ec8402f5f459",
+  "manual": null,
+  "expect": [
+    "tool:TaskCreate",
+    "tool_result:task_create",
+    "tool:TaskUpdate",
+    "tool_result:task_update",
+    "task dependency links",
+    "rejected task with reason"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-task-acts-create-change-reject-NkS0cH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:21:25.115Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

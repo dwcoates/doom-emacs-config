@@ -8,6 +8,45 @@
 
 ;;; Code:
 
+;; magit is an external package and is not installable under `emacs -Q', so
+;; its functions and special variables are declared here for the
+;; byte-compiler.  The `defvar's matter beyond silencing a warning:
+;; `agent-repl--magit-status-same-window' let-binds
+;; `magit-display-buffer-function' to force same-window display, and without
+;; the special declaration that binding compiles LEXICALLY and never reaches
+;; `magit-status'.
+(declare-function magit--insert-log "magit-log")
+(declare-function magit-add-section-hook "magit-section")
+(declare-function magit-diff-visit-file "magit-diff")
+(declare-function magit-diff-visit-file-other-window "magit-diff")
+(declare-function magit-diff-visit-worktree-file "magit-diff")
+(declare-function magit-insert-heading "magit-section")
+(declare-function magit-insert-unpushed-to-upstream-or-recent "magit-status")
+(declare-function magit-refresh "magit-mode")
+(declare-function magit-status-setup-buffer "magit-status")
+(defvar magit-diff-visit-previous-blob)
+(defvar magit-display-buffer-function)
+(defvar magit-file-section-map)
+(defvar magit-hunk-section-map)
+(defvar magit-no-confirm)
+(defvar magit-section-initial-visibility-alist)
+
+;; Cross-file forward declarations.  These sources load in the dependency
+;; order config.el establishes and resolve each other's calls at call time,
+;; so the declarations below exist for the byte-compiler alone.
+(declare-function agent-repl--close-buffer-window "panels")
+(declare-function agent-repl--gh-string-quiet "core")
+(declare-function agent-repl--git-string "core")
+(declare-function agent-repl--git-string-quiet "core")
+(declare-function agent-repl--hide-panels "panels")
+(declare-function agent-repl--log "core")
+(declare-function agent-repl--log-verbose "core")
+(declare-function agent-repl--panels-visible-p "panels")
+(declare-function agent-repl--ws-current-name "workspace")
+(declare-function agent-repl--ws-dir "status")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--ws-put "workspace")
+
 (declare-function magit-commit-at-point "magit-git")
 
 (defcustom agent-repl-magit-no-confirm-extras '(abort-revert abort-rebase abort-merge)
@@ -20,8 +59,12 @@
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-magit-github-base-url "https://github.com"
-  "Base URL for GitHub, used when converting SSH remote URLs to HTTPS."
+(defcustom agent-repl-magit-github-base-url "https://github.com/"
+  "Base URL for GitHub, used when converting SSH remote URLs to HTTPS.
+Carries the trailing slash `agent-repl-magit-github-ssh-prefix-regexp'
+consumes along with the SSH prefix's colon — without it, substituting
+this in place of \"git@github.com:\" would glue the owner/repo path
+directly onto \"github.com\" with no separator at all."
   :type 'string
   :group 'agent-repl)
 
@@ -336,7 +379,8 @@ replaces the selected window's buffer rather than splitting.
 
 This is the canonical door every workspace-bring-up path opens magit
 through (restore via `+workspaces-switch-project-function', worktree
-create via `agent-repl--drain-pending-magit').  Without the same-window binding, Doom's
+create via `agent-repl--drain-pending-magit').  Without the same-window
+binding, Doom's
 `+magit-display-buffer-fn' routes a `magit-status-mode' buffer through
 `+magit--display-buffer-in-direction' (a SPLIT) whenever the selected
 window already shows a DIFFERENT repo's `magit-status' buffer — so a
@@ -354,18 +398,45 @@ session's first workspace came up with no magit (Doom splash instead)
 and its snapshot-load await burned the full ready-watchdog timeout.
 
 The `require' is NOERROR on purpose: when magit is genuinely
-unavailable the `magit-status' call below is the canonical entry point
-and still signals loudly, so no failure is swallowed — the quiet
-require only exists to get magit's `defvar' evaluated before the
+unavailable the `magit-status-setup-buffer' call below is the canonical
+entry point and still signals loudly, so no failure is swallowed — the
+quiet require only exists to get magit's `defvar' evaluated before the
 `let'.  (In the batch test harness magit is not installable at all;
-test-helpers.el declares the variable special instead.)"
+test-helpers.el declares the variable special instead.)
+
+IT IS `magit-status-setup-buffer', NOT `magit-status', AND THAT IS A
+FIX, NOT A STYLE CHOICE.  magit marks `magit-status' `interactive-only'
+and names `magit-status-setup-buffer' as the entry point Lisp callers
+are to use, because `magit-status' carries the INTERACTIVE fallback: it
+re-derives the toplevel, compares it to DIR with `file-equal-p', and on
+a mismatch ASKS \\=`y-or-n-p' whether to create a repository there.
+
+That question is unanswerable here and the comparison behind it is
+racy.  `file-equal-p' does not compare device and inode; it stats each
+path separately and compares the WHOLE `file-attributes' list, mtime,
+ctime and size included (files.el, which already documents the same
+fragility for Haiku's atime).  Every workspace bring-up opens magit on
+a directory the daemon's registration is concurrently writing into
+— `.claude/emacs/' lands in the project root — so a write landing
+BETWEEN those two stats makes one identical path compare unequal to
+itself.  Measured in the e2e Emacs layer at roughly one bring-up in
+sixteen: magit then asked \"<dir> is a repository.  Create another in
+<dir>? \" of the same directory twice, nothing could answer, the reader
+entered a recursive edit and Emacs stopped answering its server socket
+entirely — a permanent stall whose only witness was a native backtrace
+(see e2e/EMACS-LAYER-SPEC.md).
+
+`magit-status-setup-buffer' has no prompt in it, so the question cannot
+be asked at all; a directory that is genuinely not a repository signals
+loudly from magit's own refresh instead, which is what this module
+wants anyway."
   (let* ((ws (agent-repl--ws-current-name))
          (require-result (require 'magit nil t)))
     (agent-repl--log ws "magit-status-same-window: ws=%s dir=%s require-result=%S magit-loaded=%s selected-window=%S"
                       ws dir require-result (featurep 'magit) (selected-window))
     (let ((magit-display-buffer-function
            #'agent-repl--magit-display-buffer-same-window))
-      (magit-status dir)
+      (magit-status-setup-buffer (file-name-as-directory (expand-file-name dir)))
       (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
                         ws dir (selected-window)))))
 
@@ -386,7 +457,7 @@ workspace's `:project-dir' and clears any saved `:fullscreen-config'
 (the saved pre-panel layout is moot once magit replaces the current
 window).  When the workspace is NOT tracked by agent-repl (e.g.,
 the main \"doom\" workspace, or a workspace whose entry has been
-nuked), falls back to `default-directory' so magit still opens and
+killed), falls back to `default-directory' so magit still opens and
 skips the `:fullscreen-config' write to avoid creating a stub entry
 (see `agent-repl--ws-put' STUB-CREATE warning).
 

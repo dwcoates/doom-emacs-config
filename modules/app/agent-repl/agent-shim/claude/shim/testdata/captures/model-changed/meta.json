@@ -1,0 +1,41 @@
+{
+  "scenario": "model-changed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello.",
+  "prompts": [
+    {
+      "text": "Say hello.",
+      "resume": false
+    }
+  ],
+  "world": "model-changed",
+  "cwd_init": null,
+  "vendor_session_id": "c645bb5b-153b-4524-b798-b6977bdbe52e",
+  "manual": null,
+  "expect": [
+    "ModelInfo list",
+    "the vendor's own model-change acknowledgement",
+    "transcript-lines:mode"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-model-changed-JP69NS-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:33:31.940Z",
+  "controls": [
+    {
+      "verb": "supportedModels",
+      "ok": true
+    },
+    {
+      "verb": "setModel",
+      "ok": true
+    },
+    {
+      "verb": "getContextUsage",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}
