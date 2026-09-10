@@ -344,11 +344,17 @@ func (r *resolver) blockedActivity(s *wsState) *frontendv1.FooterStatusBlockedAc
 				Authenticating: &frontendv1.FooterStatusActivityAuthenticating{Line: s.authLine.text}},
 		}
 	}
-	if s.blocked != nil && s.blocked.kind == blockedQueryDied {
+	// THE DEAD-QUERY LINE OUTLIVES THE SUBSTATUS THE TERMINAL PICKS. The turn's
+	// terminal arrives after the session's query_died update and respells the
+	// block from the FAILURE alone, which is a line-less vendor error; reading
+	// the line off the block therefore left the strip saying `blocked · vendor
+	// error` and nothing else. The line is the session's fact, so it stands
+	// under whichever blocked step the terminal chose.
+	if s.queryDied != nil {
 		return &frontendv1.FooterStatusBlockedActivity{
-			At: stamp(s.blocked.at),
+			At: stamp(s.queryDied.at),
 			Kind: &frontendv1.FooterStatusBlockedActivity_QueryDied{
-				QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.blocked.line}},
+				QueryDied: &frontendv1.FooterStatusActivityQueryDied{Text: s.queryDied.text}},
 		}
 	}
 	if line := r.rateLine(s); line != nil {
