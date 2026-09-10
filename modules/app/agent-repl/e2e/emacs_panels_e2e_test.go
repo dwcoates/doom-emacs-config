@@ -82,9 +82,14 @@ func emacsPanelWorld(t *testing.T, count int) (*EmacsWorld, []string) {
 // Settled means BOTH: nothing is left armed, and the workspace's own webview
 // has a live window. The window is what makes the wait safe — the flag alone
 // reads as "settled" in the moment before the arm.
+//
+// The bound is `emacsVerbBound`, not `panelSettleBound`: this wait spans a
+// WHOLE VERB — the register call out of Emacs, the daemon's minted ref, and
+// the landing that ref triggers — rather than a panel's own settling on a
+// frame that already holds the workspace.
 func awaitRegistrationLanding(e *Emacs, dir string) {
 	e.t.Helper()
-	e.AwaitEvalFor(panelSettleBound, "the registration's landing to put the workspace's panel on the frame",
+	e.AwaitEvalFor(emacsVerbBound, "the registration's landing to put the workspace's panel on the frame",
 		`(let ((ws (agent-repl--ws-name-for-dir `+elispString(dir)+`)))
                    (and ws
                         (not (agent-repl--ws-get ws :pending-show-panels))
