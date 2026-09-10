@@ -31,6 +31,11 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/readiness-report.sh"
 LIB_UNDER_TEST="$THIS_DIR/lib-deploy-stamp.sh"
 
+# The fixtures stamp with the SAME functions the report reads with, so a
+# hand-rolled id here can never agree with a broken script.
+# shellcheck source=lib-deploy-stamp.sh
+. "$LIB_UNDER_TEST"
+
 command -v python3 >/dev/null 2>&1 || {
     echo "test-readiness-report.sh: python3 is required to validate the JSON" >&2
     exit 2
@@ -66,6 +71,10 @@ make_repo() {
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
 
+    # Mirror the real repo, where every build output is ignored. Without this a
+    # fixture commit would SWEEP THE STAMPS INTO THE HISTORY, and a later revert
+    # would delete the very stamps the test just wrote.
+    printf 'bin/\ndist/\nhome/\nstubs/\nout.json\nerr.txt\n' > "$root/.gitignore"
     git_c "$root" init -q
     for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
@@ -163,6 +172,27 @@ stamp() { # FILE VALUE
     printf '%s\n' "$2" > "$1"
 }
 
+# tree_stamp_path ROOT SYSTEM — where the system's `.source-tree` stamp lives in
+# a fixture whose top level IS the module root and whose HOME is redirected.
+tree_stamp_path() {
+    case "$2" in
+        daemon)  printf '%s' "$1/daemon/bin/.source-tree" ;;
+        shim)    printf '%s' "$1/agent-shim/claude/shim/dist/.source-tree" ;;
+        webapp)  printf '%s' "$1/webapp/dist/.source-tree" ;;
+        *)       printf '%s' "$1/home/.cache/agent-repl/bin/.$2.source-tree" ;;
+    esac
+}
+
+# stamp_tree ROOT SYSTEM — record that the system's artifact was built from the
+# revision the fixture is standing at RIGHT NOW. This is the stamp the verdict
+# turns on, and it is the same file build-frontend.sh writes and reads.
+stamp_tree() {
+    local paths
+    paths="$(deploy_stamp_system_paths "$2" "")"
+    # shellcheck disable=SC2086
+    write_source_tree "$(tree_stamp_path "$1" "$2")" "$(source_tree_id "$1" $paths)"
+}
+
 # --- 1. a missing stamp reports unknown, never a guess ----------------------
 t_missing_stamp_is_unknown() {
     local root; root="$(new_root)"
@@ -184,6 +214,7 @@ t_current_stamp_is_ready() {
     local root; root="$(new_root)"
     stamp "$root/webapp/dist/.built-sha" \
           "$(git_c "$root" log -1 --format=%H -- webapp proto)"
+    stamp_tree "$root" webapp
     run_report "$root"
     if [ "$(jq_get "$OUT" 'sysmap["webapp"]["commits_behind"]')" = "0" ] \
        && [ "$(jq_get "$OUT" 'sysmap["webapp"]["minutes_behind"]')" = "0" ] \
@@ -338,6 +369,7 @@ t_daemon_binary_newer_than_process_is_stale() {
 t_daemon_started_after_binary_is_fresh() {
     local root; root="$(new_root)"
     stamp "$root/daemon/bin/.built-sha" "$(head_sha "$root")"
+    stamp_tree "$root" daemon
     echo binary > "$root/daemon/bin/claude-repld"
     touch -t 202001010000 "$root/daemon/bin/claude-repld"
     set +e
@@ -386,6 +418,7 @@ t_service_fingerprint_match_is_fresh() {
     local root cache; root="$(new_root)"
     cache="$root/home/.cache/agent-repl/bin"
     stamp "$cache/.shim-store.built-sha" "$(head_sha "$root")"
+    stamp_tree "$root" shim-store
     printf 'installed-v2' > "$cache/shim-store"
     shasum -a 256 "$cache/shim-store" | cut -d' ' -f1 > "$cache/.shim-store.deployed"
     set +e
@@ -476,6 +509,7 @@ t_required_ready_gate_passes_with_revisions() {
     local root sha; root="$(new_root)"
     sha="$(git_c "$root" log -1 --format=%H -- webapp proto)"
     stamp "$root/webapp/dist/.built-sha" "$sha"
+    stamp_tree "$root" webapp
     run_required_report "$root" webapp
     if [ "$RC" -eq 0 ] \
        && [ "$(jq_get "$OUT" 'd["gate"]["ready"]')" = "True" ] \
@@ -494,6 +528,7 @@ t_required_ready_gate_fails_with_revisions_on_drift() {
     local root deployed source; root="$(new_root)"
     deployed="$(git_c "$root" log -1 --format=%H -- webapp proto)"
     stamp "$root/webapp/dist/.built-sha" "$deployed"
+    stamp_tree "$root" webapp
     touch_system "$root" webapp "webapp gate drift"
     source="$(head_sha "$root")"
     run_required_report "$root" webapp
@@ -501,7 +536,7 @@ t_required_ready_gate_fails_with_revisions_on_drift() {
        && [ "$(jq_get "$OUT" 'd["gate"]["ready"]')" = "False" ] \
        && [ "$(jq_get "$OUT" 'd["gate"]["deployed_sha"]')" = "$deployed" ] \
        && [ "$(jq_get "$OUT" 'd["gate"]["source_sha"]')" = "$source" ] \
-       && [ "$(jq_get "$OUT" 'd["gate"]["error"]')" = "required system is not ready" ]; then
+       && [ "$(jq_get "$OUT" '"built from source revision" in d["gate"]["error"]')" = "True" ]; then
         pass "a drifting required system exits nonzero with both revisions in valid JSON"
     else
         fail "a drifting required system exits nonzero with both revisions in valid JSON" \
@@ -528,6 +563,102 @@ t_no_git_checkout_exits_nonzero
 t_unknown_argument_exits_two
 t_required_ready_gate_passes_with_revisions
 t_required_ready_gate_fails_with_revisions_on_drift
+
+# --- the verdict is the BUILD's staleness answer, off the same stamp --------
+#
+# On 2026-09-09 these were two separate computations — the build scanning
+# hand-listed mtimes, the report counting commits over a pathspec — and they
+# disagreed: the gate said the shim was three commits behind while every
+# un-forced build said fresh and refused to rebuild it. These pin the four
+# shapes of that disagreement shut.
+
+# The defect itself: a commit under a path the old mtime scan never looked at.
+# The report must call it not-ready, and the reason must name both revisions so
+# the state is actionable from the JSON alone.
+t_source_tree_drift_is_not_ready() {
+    local root; root="$(new_root)"
+    stamp "$root/webapp/dist/.built-sha" "$(head_sha "$root")"
+    stamp_tree "$root" webapp
+    touch_system "$root" webapp "webapp source moved on"
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["webapp"]["source_tree_stale"]')" = "True" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["webapp"]["ready"]')" = "False" ] \
+       && [ "$(jq_get "$OUT" '"built from source revision" in sysmap["webapp"]["error"]')" = "True" ]; then
+        pass "a source set that moved past the artifact's stamp is not ready"
+    else
+        fail "a source set that moved past the artifact's stamp is not ready" \
+             "out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
+# The mirror image, and the one that makes the gate CLEARABLE: a change and its
+# own revert leave the system two commits behind with identical content. The
+# build (correctly) will not rebuild that, so a gate that failed on the commit
+# count would be a gate no rebuild could ever clear — exactly the trap `--force`
+# had to be reached for. Distance is reported; readiness is not decided by it.
+t_reverted_change_is_ready_though_commits_behind() {
+    local root; root="$(new_root)"
+    local deployed
+    deployed="$(head_sha "$root")"
+    touch_system "$root" webapp "webapp change"
+    git_c "$root" revert --no-edit HEAD >/dev/null
+    # Stamped from the state the artifact was built at, which the revert has
+    # restored: same content, two commits later.
+    stamp "$root/webapp/dist/.built-sha" "$deployed"
+    stamp_tree "$root" webapp
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["webapp"]["commits_behind"]')" = "2" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["webapp"]["source_tree_stale"]')" = "False" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["webapp"]["ready"]')" = "True" ]; then
+        pass "a change and its revert are reported as distance but do not fail readiness"
+    else
+        fail "a change and its revert are reported as distance but do not fail readiness" \
+             "out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
+# A dirty tree is REPORTED, never blocking. Refusing while a checkout has
+# uncommitted work would refuse every deploy a developer makes from a working
+# tree, and no rebuild could clear that either.
+t_dirty_tree_is_flagged_but_still_ready() {
+    local root; root="$(new_root)"
+    stamp "$root/webapp/dist/.built-sha" "$(head_sha "$root")"
+    stamp_tree "$root" webapp
+    echo "uncommitted" >> "$root/webapp/file.txt"
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["webapp"]["source_dirty"]')" = "True" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["webapp"]["ready"]')" = "True" ]; then
+        pass "an uncommitted edit is flagged as dirty without failing readiness"
+    else
+        fail "an uncommitted edit is flagged as dirty without failing readiness" \
+             "out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
+# A built-sha with no source-tree beside it is an artifact from a build that
+# predates the stamp, and nothing can say what it was built from.
+t_missing_source_tree_stamp_is_not_ready() {
+    local root; root="$(new_root)"
+    stamp "$root/webapp/dist/.built-sha" "$(head_sha "$root")"
+    run_report "$root"
+    if [ "$(jq_get "$OUT" 'sysmap["webapp"]["built_tree"]')" = "None" ] \
+       && [ "$(jq_get "$OUT" 'sysmap["webapp"]["ready"]')" = "False" ] \
+       && [ "$(jq_get "$OUT" '"source-tree" in sysmap["webapp"]["error"]')" = "True" ]; then
+        pass "a built-sha with no .source-tree beside it is not ready"
+    else
+        fail "a built-sha with no .source-tree beside it is not ready" \
+             "out: $(cat "$OUT")"
+    fi
+    rm -rf "$root"
+}
+
+t_source_tree_drift_is_not_ready
+t_reverted_change_is_ready_though_commits_behind
+t_dirty_tree_is_flagged_but_still_ready
+t_missing_source_tree_stamp_is_not_ready
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
