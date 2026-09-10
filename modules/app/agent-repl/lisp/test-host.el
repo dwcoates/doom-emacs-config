@@ -1349,6 +1349,56 @@ neither the dedup nor the self-reference swallows the second one."
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.adopt-refused"))))
 
+(ert-deftest agent-repl-test-host-adopt-transport-failure-retries-off-a-timer ()
+  "THE DEFECT: a lost adopt cost the outgoing daemon its whole adoption window.
+The adopt rides a 10s unary timeout while the rendezvous it joins ends
+only when every participant has called, so a loaded box expires this call
+on a handover that is merely still waiting — and with no retry the
+workspace was adopted by nobody, the outgoing daemon sat out its 30s
+window, and the promotion Emacs makes on the primary stream's close came
+far too late."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :failure (list :kind :timeout :message "no answer")))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest args)
+                   (setq scheduled (cons delay (cons fn args))))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (eq (nth 1 scheduled) #'agent-repl-host--adopt-onto))))))
+
+(ert-deftest agent-repl-test-host-adopt-transport-failure-does-not-retry-a-gone-successor ()
+  "A successor that is no longer standing has nothing left to adopt onto.
+The promotion clears the successor slot, so a retry armed against it
+would adopt onto a connection the link has let go of."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :failure (list :kind :transport :message "no route")))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest args)
+                   (setq scheduled (cons delay (cons fn args)))))
+                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
+                 (lambda (_conn _request &rest keys)
+                   ;; The successor is let go of BEFORE the answer lands, which
+                   ;; is the order a promotion makes.
+                   (setq agent-repl-test-host--successor nil)
+                   (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
+                                                 (plist-get keys :on-response)
+                                                 (plist-get keys :on-failure)))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (null scheduled))))))
+
 (ert-deftest agent-repl-test-host-adopt-transport-failure-keeps-the-old-stream ()
   "A successor that cannot be reached is not a reason to strand a workspace."
   (agent-repl-test-host--with-harness
