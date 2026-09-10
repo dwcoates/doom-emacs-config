@@ -22,6 +22,7 @@ import {
   type ExpandedInit,
   type Harness,
 } from "./harness.js";
+import { createStopControls } from "../../src/footer/stop.js";
 
 const NOW = 1_800_000_000_000;
 
@@ -48,8 +49,7 @@ function drawPanel(
 ): Drawn {
   const revealed: FeedId[] = [];
   const h = harness();
-  const panel = drawFooterExpanded(view ?? expanded(init), selection, {
-    ctx: h.ctx,
+  const panel = drawFooterExpanded(view ?? expanded(init), selection, { ctx: h.ctx, stops: createStopControls(h.ctx),
     revealRow: async (id) => {
       revealed.push(id);
       return reached;
@@ -70,8 +70,7 @@ function activity(kindCase: string, kindValue: Record<string, unknown>): FooterA
 /** The tokens panel, drawn with ACTIVITY standing on the strip. */
 function drawTokensPanelWith(kind: FooterActivity): HTMLElement {
   const h = harness();
-  const panel = drawFooterExpanded(expanded(), "tokens", {
-    ctx: h.ctx,
+  const panel = drawFooterExpanded(expanded(), "tokens", { ctx: h.ctx, stops: createStopControls(h.ctx),
     revealRow: async () => true,
     activity: kind,
   });
@@ -151,7 +150,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("draws NOTHING when no strip element is selected", () => {
     const h = harness();
     expect(
-      drawFooterExpanded(expanded(), null, { ctx: h.ctx, revealRow: async () => true }),
+      drawFooterExpanded(expanded(), null, { ctx: h.ctx, stops: createStopControls(h.ctx), revealRow: async () => true }),
     ).toBeNull();
   });
 
@@ -166,8 +165,7 @@ describe("drawFooterExpanded: the selection picks the panel", () => {
   it("refuses a view whose selected panel message is unset", () => {
     const h = harness();
     expect(() =>
-      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", {
-        ctx: h.ctx,
+      drawFooterExpanded(create(FooterExpandedSchema, {}), "agents", { ctx: h.ctx, stops: createStopControls(h.ctx),
         revealRow: async () => true,
       }),
     ).toThrow(MalformedView);
@@ -621,8 +619,7 @@ describe("an arm this build has no case for", () => {
     const h = harness();
     // ACT / ASSERT
     expect(() =>
-      drawFooterExpanded(expanded(), "sessions" as FooterPanel, {
-        ctx: h.ctx,
+      drawFooterExpanded(expanded(), "sessions" as FooterPanel, { ctx: h.ctx, stops: createStopControls(h.ctx),
         revealRow: async () => true,
       }),
     ).toThrow(MalformedView);
