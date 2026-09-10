@@ -19,6 +19,15 @@ import type { FakeQueryOpts } from "../../src/fake/index.js";
 import { cwdSlug } from "../../src/fake/vendor-files.js";
 import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 
+/**
+ * The harness's fixed clock, in epoch millis.
+ *
+ * Exported because a fixture stated as an OFFSET from the fake's own now (the
+ * account-usage reset instants) can only be asserted against the clock the
+ * fake was handed.
+ */
+export const HARNESS_NOW_MS = 1_800_000_000_000;
+
 /** A record on either plane, as a plain object. */
 export type Line = Record<string, unknown>;
 
@@ -149,7 +158,7 @@ export async function driveScenario(
       spoolRoot,
       sessionId: "sess-fake-1",
       newUuid: () => `u${++counter}`,
-      nowMs: () => 1_800_000_000_000,
+      nowMs: () => HARNESS_NOW_MS,
       gitBranch: "offline",
       ...(options.resume === undefined ? {} : { resume: options.resume }),
       ...options.opts,
