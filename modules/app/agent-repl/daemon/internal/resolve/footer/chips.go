@@ -118,8 +118,15 @@ func (r *resolver) applyHook(s *wsState, hook *conversationv1.AgentHook) {
 	s.hook = nil
 }
 
-// applySubagent maintains the ⚙ chip's rows. A row leaves the list when the
-// spawn reaches a terminal, which is what makes the chip mean "live".
+// applySubagent maintains the ⚙ chip's rows from the SPAWNING CALL's own
+// activity stream. A row leaves the list when the spawn reaches a terminal,
+// which is what makes the chip mean "live".
+//
+// A DETACHED RUN IS NOT RETIRED HERE. Once the work has left the turn it is
+// addressed by its handle and its terminal arrives on whichever stream carries
+// the work -- the caller's book or the agent's own -- so the retirement is the
+// handle's (OnSubagent), never an inference from the call that spawned it. The
+// spawning call returning is a LAUNCH RECEIPT and says nothing about the run.
 func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.AgentSubagent) {
 	switch item := sub.GetResult().(type) {
 	case *conversationv1.AgentSubagent_Start:
@@ -140,6 +147,9 @@ func (r *resolver) applySubagent(s *wsState, unit string, sub *conversationv1.Ag
 			}
 		}
 	default:
+		if row, ok := s.agents[unit]; ok && row.work != "" {
+			return
+		}
 		delete(s.agents, unit)
 	}
 }
@@ -508,6 +518,7 @@ func (r *resolver) applyDetached(s *wsState, id string, work *conversationv1.Age
 			// A detached subagent keeps the row it already has: one identity
 			// spans the move, so the chip continues rather than duplicating.
 			row.spawnUnit = unit
+			row.work = id
 			return
 		}
 	case *conversationv1.AgentDetachedWork_Created:
@@ -531,6 +542,7 @@ func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversation
 	case *conversationv1.DetachableWork_Subagent:
 		if start, ok := item.Subagent.GetResult().(*conversationv1.AgentSubagent_Start); ok {
 			s.agents[id] = &agentRow{
+				work:         id,
 				spawnUnit:    id,
 				createdAgent: start.Start.GetCreatedAgentId().GetValue(),
 				label:        subagentLabel(start.Start.GetPrompt()),
@@ -541,6 +553,69 @@ func (r *resolver) applyCreatedWork(s *wsState, id string, created *conversation
 		}
 	case *conversationv1.DetachableWork_Monitor:
 		r.applyMonitor(s, id, item.Monitor)
+	}
+}
+
+// OnSubagent advances a DETACHED subagent's chip row and retires it at that
+// run's own terminal.
+//
+// THE COUNTERPART OF OnBash, and for the same reason. A shell chip retires at
+// its command's terminal because the terminal is addressed to the WORK; a
+// detached subagent's terminal is addressed to the work too, and reaches this
+// daemon on whichever stream carries the run -- the spawning agent's book when
+// the producer settles the unit there, the run's OWN book when the frames
+// arrive on it. Reading only the spawning call's stream left a settled run
+// counted as live for the rest of the session, which is what the G50 playbook
+// read beside two settled placements.
+//
+// A start or an update leaves the row live; ANY terminal arm retires it,
+// however it settled, exactly as a shell's does.
+func (r *resolver) OnSubagent(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, sub *conversationv1.AgentSubagent) {
+	if work == nil || sub == nil {
+		return
+	}
+	id := work.GetValue()
+	r.mutate(ws, "daemon.footer.on_subagent", "the footer took a detached subagent frame",
+		dlog.Context{"work_id": id}, func(s *wsState) {
+			switch item := sub.GetResult().(type) {
+			case *conversationv1.AgentSubagent_Start:
+				row, ok := s.agents[id]
+				if !ok {
+					row = &agentRow{spawnUnit: id, order: s.nextOrder()}
+					s.agents[id] = row
+				}
+				row.work = id
+				row.createdAgent = item.Start.GetCreatedAgentId().GetValue()
+				row.label = subagentLabel(item.Start.GetPrompt())
+				row.description = item.Start.GetPrompt().GetDescription()
+				row.startedAt = time.UnixMilli(item.Start.GetStartedAt().GetAtMs())
+			case *conversationv1.AgentSubagent_Update:
+				if row, ok := s.agents[id]; ok {
+					row.tokens = item.Update.GetProgress().GetTotalTokens()
+					if desc := item.Update.GetPrompt().GetDescription(); desc != "" {
+						row.description = desc
+					}
+				}
+			default:
+				retireWork(s, id)
+			}
+		})
+}
+
+// retireWork drops the row the detached handle addresses. The handle, the
+// spawn unit and the created agent are ONE value by the contract's own ruling
+// (`DetachedWorkId.value == AgentActivityId.value`, and for a subagent that is
+// its `AgentId` too), so all three are matched rather than the map key alone:
+// a row opened from a `created` announcement is keyed by the handle, one that
+// detached mid-turn by the spawn unit, and neither reading may miss.
+func retireWork(s *wsState, id string) {
+	if id == "" {
+		return
+	}
+	for unit, row := range s.agents {
+		if unit == id || row.work == id || row.spawnUnit == id || row.createdAgent == id {
+			delete(s.agents, unit)
+		}
 	}
 }
 

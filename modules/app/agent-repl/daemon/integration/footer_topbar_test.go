@@ -442,6 +442,90 @@ func TestFooterChecklistTakesASubjectAnActStatesEmpty(t *testing.T) {
 	})
 }
 
+// movedSubagent announces that an in-turn SPAWN's work left for the
+// background. The handle IS the spawning call's own id, so one identity
+// addresses the run, the unit it moved out of, and the book it writes.
+func movedSubagent(unit string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: activityID(unit),
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+}
+
+// ftSubagentSpawn is a spawn on the CALLER's own activity stream.
+func ftSubagentSpawn(unit, created, label string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: activityID(unit),
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
+				CreatedAgentId: &conversationv1.AgentId{Value: created},
+				Prompt:         &conversationv1.AgentSubagentPrompt{Text: label},
+				StartedAt:      startedAt(1_700_000_000_000),
+			}},
+		}},
+	}
+}
+
+// ftSubagentSettled is a spawn's terminal, whichever unit id carries it.
+func ftSubagentSettled(unit string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: activityID(unit),
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+		}},
+	}
+}
+
+// A DETACHED RUN'S TERMINAL ARRIVES ON ITS OWN BOOK, under an activity id of
+// that book's own minting -- nothing joins it back to the spawn unit the chip
+// row is keyed by. The row outlived the run for the rest of the session, which
+// is what the G50 playbook read: two settled placements, one live, chip of 3.
+func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
+	t.Parallel()
+	// Arrange: one spawn, detached under its own handle.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+	})
+
+	// Act: the run settles on ITS OWN stream, under that book's own unit id.
+	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9")))
+
+	// Assert
+	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents() == nil
+	})
+}
+
+// AND THE OTHER DELIVERY, which is the one the vendor's task notification
+// takes: the same run's terminal settled on the SPAWNING agent's book, under
+// the spawn unit. Both are the handle's terminal and both must retire the chip.
+func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
+	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
+	})
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1")))
+
+	// Assert
+	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetLiveWork().GetAgents() == nil
+	})
+}
+
 func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
