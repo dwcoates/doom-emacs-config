@@ -1362,31 +1362,28 @@ func (e *Emacs) stop() {
 	// "EMACS NEVER KILLS A DAEMON". A wedged Emacs cannot honor this, which
 	// is exactly why the kill below is unconditional.
 	asked := false
+	stopAsked := false
 	if !e.isWedged() {
-		ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
-		out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
-			"--eval", daemonStopForm)
-		cancel()
-		if err != nil {
-			// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
-			// exit, and every daemon, shim and shim-lock the reaper then
-			// reports as a stray is downstream of it. Swallowing the error
-			// left the reap looking like an unexplained leak.
-			e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
-		}
-		// The OUTCOME, not merely the transport. `agent-repl-frontend-daemon-stop`
-		// answers its callback with nil on a REFUSAL as well as on a transport
-		// failure, and a refused stop is exactly the case whose leaked tree the
-		// reaper below then reports with no cause attached.
-		if outcome := strings.TrimSpace(out); !strings.Contains(outcome, ":accepted t") {
-			e.t.Logf("emacs's daemon stop was not accepted: %s", outcome)
+		// ONLY A WORLD WITH A DAEMON IS ASKED TO STOP ONE. Several worlds in
+		// this layer never spawn a daemon at all -- the substrate pages put a
+		// bare webview in a bare Emacs -- and `agent-repl-frontend-daemon-stop`
+		// answers those with a REFUSAL (`elisp.daemon.stop-skipped
+		// reason=no-link`), which the report below then files as an unaccepted
+		// stop. A refusal that every daemon-less teardown produces is noise
+		// covering the refusals that mean something, so the question is asked
+		// only where there is something to answer it.
+		if e.holdsDaemonLink() {
+			e.askDaemonToStop()
+			stopAsked = true
+		} else {
+			e.noteTeardownStep("no daemon link was held, so no daemon stop was asked")
 		}
 
-		ctx, cancel = context.WithTimeout(context.Background(), DefaultTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 		// `kill-emacs' never answers by design -- Emacs exits with the client
 		// still waiting -- so only a TIMEOUT is worth reporting: it means
 		// Emacs neither answered nor died, and the reaper is about to find it.
-		_, err = e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		_, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
 			"--eval", "(kill-emacs)")
 		if err != nil && ctx.Err() != nil {
 			e.t.Logf("emacs did not act on (kill-emacs) within %s: %v", DefaultTimeout, err)
@@ -1397,7 +1394,49 @@ func (e *Emacs) stop() {
 	// AND THEN WAIT FOR IT. Asking is not stopping.
 	e.awaitEmacsExit(asked)
 	e.proc.Kill()
-	e.awaitDaemonExit(asked)
+	e.awaitDaemonExit(stopAsked)
+}
+
+// holdsDaemonLink answers whether this Emacs has a daemon to be asked to
+// stop -- the same link `agent-repl-frontend-daemon-stop` refuses without.
+//
+// AN UNANSWERED QUESTION IS A YES. An Emacs that could not answer may still
+// hold a live daemon, and skipping the stop on an unanswered question would
+// strand exactly the tree the stop exists to take down; the failure is
+// reported and the stop is asked anyway.
+func (e *Emacs) holdsDaemonLink() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
+	defer cancel()
+	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		"--eval", "(if (agent-repl-link-primary) t nil)")
+	if err != nil {
+		e.t.Logf("emacs was asked whether it holds a daemon link and did not answer: %v", err)
+		return true
+	}
+	return strings.TrimSpace(out) == "t"
+}
+
+// askDaemonToStop asks the daemon to exit through Emacs's own command and
+// reports what came back.
+func (e *Emacs) askDaemonToStop() {
+	ctx, cancel := context.WithTimeout(context.Background(), teardownStopBound)
+	out, err := e.box.Exec(ctx, "emacsclient", "--socket-name", e.ServerSocket,
+		"--eval", daemonStopForm)
+	cancel()
+	if err != nil {
+		// NOT DISCARDED. This is the ONE place Emacs asks the daemon to
+		// exit, and every daemon, shim and shim-lock the reaper then
+		// reports as a stray is downstream of it. Swallowing the error
+		// left the reap looking like an unexplained leak.
+		e.t.Logf("emacs was asked to stop its daemon and did not answer: %v", err)
+	}
+	// The OUTCOME, not merely the transport. `agent-repl-frontend-daemon-stop`
+	// answers its callback with nil on a REFUSAL as well as on a transport
+	// failure, and a refused stop is exactly the case whose leaked tree the
+	// reaper below then reports with no cause attached.
+	if outcome := strings.TrimSpace(out); !strings.Contains(outcome, ":accepted t") {
+		e.t.Logf("emacs's daemon stop was not accepted: %s", outcome)
+	}
 }
 
 // daemonExitBound is how long the daemon this scenario asked Emacs to stop
