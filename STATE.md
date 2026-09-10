@@ -1,37 +1,33 @@
 # STATE — owner 5 (plan B14–B16: failed, hibernated, merging/done/parked)
 
-Branch `overhaul/int-play-05`, rebased onto overhaul/integration at 9b23085c6. Tree clean at pause.
+Branch `overhaul/int-play-05`, rebased onto overhaul/integration at 359f08557.
 
-## Authored (all committed)
-- `modules/app/agent-repl/e2e/playtest_05_tab_arm_failed_test.go` — three playbooks:
-  `TestPlaytestTabArmFailed` (B.14), `TestPlaytestTabArmHibernated` (B.15),
-  `TestPlaytestTabArmMergingDoneParked` (B.16). Artifacts under `playtest/05-tab-arms-lifecycle/`.
-- Substrate: my `armPaint` fix was dropped at rebase in favor of owner 20's identical fix (a229e634a).
+## Twice-green
+Runs 7 and 8 on the current tree, both green, every picture read against its
+manifest sentence and matching. Logs `play05-run7.log`, `play05-run8.log` in the
+owner-05 scratch dir; pictures under `out-run7/`, `out-run8/`.
+Each run also passes the three `TestPlaytestSandbox*` font checks, which is the
+lead's own confirmation that the image in use is the rebuilt one.
 
-## Production defects fixed (daemon), each with unit + integration tests
-- dfb0fae53 fix(daemon/drain): host view republished after the hibernation lease is released
-  (Emacs composer gate stayed `:draining` after a park, so a revival prompt was refused).
-- 174063281 fix(daemon/workspace): `sidebar.Registry.Sessions` was never populated in production,
-  so the resolver's parked branch was unreachable and a parked row resolved `dead`.
-- 0291abc84 fix(daemon/drain): roster republished after the hibernation stand-down record.
-- 642e0883c, c1eb912b7 integration tests for the above.
-- b8218be5c fix(daemon/footer): a parked session is idle on the footer strip and topbar dot
-  (was `disconnected · dead`, which also closed the webapp composer); 8f1a0d4a2 its integration test.
-  Gates reported green by the landing agent (gofmt, vet, make test, make integration twice); one
-  unrelated shimclient flake (`TestSocketPeerPIDNamesTheServingProcess`, LOCAL_PEERPID race) seen once
-  under load, to file. The topbar dot got the same park exemption (hollow dot was `dead`).
+## Production defect fixed this session
+- `fix(shim/compaction): a summarizer's plan mode is not the session's posture`
+  The compaction's throwaway `plan`-mode query resumes the user's own vendor
+  session id, so `plan` became the last `permissionMode` the transcript stated,
+  and `engine/cold.ts` restores a resume's posture from exactly that field. A
+  parked session revived in plan mode. The compaction's summary line — the last
+  record it appends — now states the session's own mode.
+  - unit: two in `shim/test/engine/compaction.test.ts` (the field; and the
+    read-back through `readTranscriptFacts` after a plan-mode throwaway line).
+  - integration: `TestRevivalRunsInTheSessionsModeNotTheSummarizers` in
+    `e2e/hibernation_e2e_test.go`. Verified to FAIL with the fix reverted,
+    reporting `[mode=plan]`.
 
-## Runs
-- Run 4 (before the footer fix): all three playbooks PASS (`play05-run4.log` in the session scratchpad);
-  every picture inspected and matches its manifest. Run 1 pictures (B.14, B.16) also matched.
-- Needed next: two consecutive green section runs on the current tree
-  (`bin/suite-slot.sh bin/playtest.sh -run 'TestPlaytestTabArm(Failed|Hibernated|MergingDoneParked)$'`),
-  inspection of B.15's pictures for the footer now reading idle (not `disconnected · dead`),
-  ordinary host e2e package green, daemon suites green, `gofmt -l .` / `go vet -tags playtest ./...` in e2e.
+## Playbook corrections
+- B.15's revival sentence named "nothing between them"; the product draws the
+  park's own context cut there, and a second one after the revived turn because
+  this playbook compresses the idle cutoff. Both are named, and both the
+  compaction row and the topbar's mode are now page assertions.
 
-## To file / open
-- daemon.md ~line 1074 says "a hibernated session REFUSES input", which conflicts with
-  "implicit revive on prompt" (~975) and SPAWN ON MOUNT; read as the lease's refusal during the
-  stand-down only. Lead to rule.
-- Owner 4's `playtest_04_tab_arms_test.go` carries a stale dangling B.14 comment (mine to own).
-- Fix agent noted the ACQUIRE side of drain/hibernation leases also does not republish the host view.
+## Earlier session (already committed on this branch)
+The four daemon fixes and their integration tests (drain republish x2,
+workspace session records, footer/topbar park exemption) — see git log.
