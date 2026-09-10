@@ -119,6 +119,11 @@ type watcher struct {
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
+	// held is a main-watch terminal that arrived BEFORE the main agent was
+	// named — the stream plane outrunning StartTurn's answer. It is replayed
+	// in full at the naming, so a turn is never left standing in flight with
+	// its only ending edge already spent. See routeTerminalLocked.
+	held *heldTerminal
 
 	// freeWaiters are the standing AwaitFree calls. They are answered by the
 	// stream edges — a turn end and a live-work change — never by a poll.
@@ -372,8 +377,11 @@ func (w *watcher) SetMainAgent(agent *conversationv1.AgentId) {
 		return
 	}
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.adoptMainAgentLocked(agent, "start_turn")
+	w.mu.Unlock()
+	// THE NAMING CAN END A TURN, by releasing a terminal that was held for it,
+	// and a turn end recorded under mu reaches the lifecycle sink only here.
+	w.flushTurnEnds()
 }
 
 // adoptMainAgentLocked latches the main agent's identity the first time it is
@@ -388,6 +396,9 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
 			"agent_id": agent.GetValue(), "source": source,
 		})
+		// THE NAME IS WHAT THE HELD TERMINAL WAS WAITING FOR. A terminal that
+		// beat the naming here is routed now, with the turn it belongs to.
+		w.releaseHeldTerminalLocked()
 		return
 	}
 	if w.mainAgent.GetValue() != agent.GetValue() {
@@ -427,19 +438,33 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 // wins, and so does a later turn.
 func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if ws != w.ws || w.turn == nil || *w.turn != turn {
+		w.mu.Unlock()
 		return
 	}
 	w.turn = nil
 	w.log.Debug("daemon.sessionwatcher.turn_open_failed", "the shim refused a turn; it no longer stands in flight", dlog.Context{
 		"turn_id": string(turn),
 	})
+	// The refusal IS the answer that would have named the main agent, so a
+	// terminal held for that name has nothing left to wait on.
+	w.flushHeldTerminalLocked()
 	w.signalFreenessLocked()
+	w.mu.Unlock()
+	w.flushTurnEnds()
 }
 
 // OnTurnOpened is the prompt queue handing over an accepted turn.
 func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
+	w.onTurnOpenedUnderLock(ws, prompt, page)
+	// ACCEPTANCE CAN END THE TURN IT ACCEPTS: naming the main agent releases a
+	// terminal held for that name, and the turn end it records reaches the
+	// lifecycle sink only off the lock, here.
+	w.flushTurnEnds()
+}
+
+// onTurnOpenedUnderLock is OnTurnOpened's body; it takes and releases mu.
+func (w *watcher) onTurnOpenedUnderLock(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
