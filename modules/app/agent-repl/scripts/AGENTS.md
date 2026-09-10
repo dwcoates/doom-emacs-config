@@ -57,3 +57,8 @@ the running services' sockets under `~/.cache/agent-repl/sock/`, global logs
 under `~/.cache/agent-repl/log/`, `~/.claude-emacs/`, and Emacs's
 UID-qualified OS-temporary log directory, plus workspace symlinks under
 `<workspace>/.claude/emacs/`.
+
+For merged, level- and time-filtered records across rotation generations, or
+for a realtest warn/error harvest, use the canonical reader documented in
+`../AGENTS.md` and run `../bin/logs.sh`; this directory's discovery script
+remains the focused session/PID/span/gap diagnostic.

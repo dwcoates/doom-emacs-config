@@ -64,6 +64,7 @@ ALL_SUITES=(
     deploy-harness
     suite-slot-harness
     readiness-harness
+    logs-harness
     doctor-harness
     precommit-harness
     ert
@@ -392,6 +393,7 @@ run_timed build-frontend-harness "$THIS_DIR/test-build-frontend.sh"
 run_timed deploy-harness "$THIS_DIR/test-deploy-all.sh"
 run_timed suite-slot-harness "$THIS_DIR/test-suite-slot.sh"
 run_timed readiness-harness "$THIS_DIR/test-readiness-report.sh"
+run_timed logs-harness "$THIS_DIR/test-logs.sh"
 run_timed doctor-harness "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 run_timed precommit-harness "$REPO_ROOT/.githooks/test-pre-commit.sh"
 run_timed ert "$REPO_ROOT/.claude/safe-test-run.sh"
