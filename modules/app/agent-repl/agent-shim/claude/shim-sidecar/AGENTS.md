@@ -14,7 +14,9 @@ Dual-plane relationship with the shim: `StoreEntry.plane` names the producer.
 The SHIM (stream plane) watches the SDK live — first to know, authoritative for
 session and turn LIFECYCLE, and the only source for anything not yet on disk.
 The SIDECAR (file plane) reads what the vendor itself recorded — authoritative
-for conversation CONTENT. Both write through the same envelope, into one
+for conversation CONTENT, EXCEPT where the transcript's rendering of a unit is
+lossy against what the stream plane already holds; that unit is stream-owned and
+the file plane writes no part of it (`internal/convert/streamowned.go`). Both write through the same envelope, into one
 upsert-key space, over one write path.
 
 The sidecar is 100% specific to Claude's file formats BY DESIGN; its entire job
@@ -786,7 +788,13 @@ the suite rather than quietly shrinking what the feed can show.
   mint the IDENTICAL key for the same unit:
   - `activity:<AgentActivityId>` — the vendor `tool_use_id` for a tool call;
     `<message.id>:<block ordinal>` for a text or thinking block.
-  - `question:<tool_use_id of the AskUserQuestion call>` — its own identity space.
+  - NOT `question:<tool_use_id>`: an ask is STREAM-OWNED (`internal/convert/
+    streamowned.go`). Both planes can name it, which is exactly why only one
+    may write it — the shim gates the ask and holds the answer as a repeated
+    `chosen`, while the transcript states it only as the vendor's
+    comma-joined string, which question.proto's retired tag 4 says cannot be
+    split back. So this reader converts neither the AskUserQuestion call nor
+    its result, and drops both (a decision, never residue).
   - `terminal:<AgentId>:<record uuid>`, the bash row keys below,
     `session:context_cut:<uuid>`, `session:api_error:<uuid>`.
   - Residue with no unit identity is keyed `residue:<write_id>`, so a re-read

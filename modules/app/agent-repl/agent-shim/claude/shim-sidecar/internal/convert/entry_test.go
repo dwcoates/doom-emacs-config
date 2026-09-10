@@ -200,7 +200,6 @@ func TestUpsertKeySpellingsTable(t *testing.T) {
 	}{
 		{name: "a tool call is its vendor id", got: ActivityKey("toolu_abc"), want: "activity:toolu_abc"},
 		{name: "a content block is message id plus index", got: ActivityKey(BlockActivityID("msg_1", 2)), want: "activity:msg_1:2"},
-		{name: "an ask has its own space", got: QuestionKey("toolu_ask"), want: "question:toolu_ask"},
 		{name: "a terminal is per agent and record", got: TerminalKey("agent-1", "uuid-9"), want: "terminal:agent-1:uuid-9"},
 		{name: "a detached run's delta is keyed by its call and its offset", got: BashDeltaKey("toolu_run", 512), want: "bash:toolu_run:512"},
 		{name: "a detached run's terminal has one key however often it is restated", got: BashTerminalKey("toolu_run"), want: "bash:toolu_run:terminal"},
