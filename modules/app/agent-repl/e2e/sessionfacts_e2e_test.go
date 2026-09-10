@@ -677,6 +677,47 @@ func TestAccountUsageUnreadArmsAreNamedOnTheFooter(t *testing.T) {
 	}
 }
 
+// A SAMPLED WINDOW RESETS IN THE FUTURE, so the drawn countdown runs.
+//
+// THE DEFECT THIS PINS: catalogs.ts fakeAccountUsage used to state its reset
+// instants absolutely (2026-08-29T20:00Z / 2026-09-02T00:00Z). Once those fell
+// into the past every countdown the footer drew off a SAMPLE read `resets in
+// 0m`, while one drawn off a rate-limit EVENT (minted at `now + 3600s`)
+// counted down properly — two sources of the same cell disagreeing, for no
+// reason the vendor has. The fixture now states both windows as offsets from
+// the fake's own clock, and this asserts the ordering the countdown needs:
+// the drawn reset is AFTER the moment the footer was read.
+//
+// The unread arm is the vehicle because 41% / 63% are under the 0.8
+// newsworthiness gate, so an available sample alone draws no line at all; an
+// unread one draws the line carrying exactly the standing figures.
+func TestSampledAllowanceResetsAfterItWasRead(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws, _ := sfNewWorkspace(t)
+	readable := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-available")
+	sfAwaitConclusion(t, w, ws, readable,
+		"The account-usage probe now answers with the available shape.")
+
+	// Act
+	turn := driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "usage-service-unavailable")
+	sfAwaitConclusion(t, w, ws, turn,
+		"The account-usage probe now answers with the service_unavailable shape.")
+	view := sfAwaitSampleArm(t, w, ws, "service_unavailable")
+	readAt := time.Now().Unix()
+
+	// Assert
+	line := sfRateLimited(view)
+	if got := line.GetSession().GetResetsAtS(); got <= readAt {
+		t.Errorf("FooterAllowance(session).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
+			got, readAt)
+	}
+	if got := line.GetWeekly().GetResetsAtS(); got <= readAt {
+		t.Errorf("FooterAllowance(weekly).resets_at_s = %d, want an instant after the read at %d: a sampled window must reset in the FUTURE, never at `resets in 0m`",
+			got, readAt)
+	}
+}
+
 // THE SAMPLE THE SESSION PROBES AT ITS OWN START REACHES THE FOOTER, and it
 // did not before. The shim probes the account's usage once inside StartSession
 // (engine/session.ts, the `void pushAccountUsage()` beside the keepalive
