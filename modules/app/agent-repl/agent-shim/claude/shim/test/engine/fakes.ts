@@ -252,6 +252,16 @@ export class RecordingPersistence implements Persistence {
   }
   /** The `known` predicate the caller passed on its last openAgentPage, if any. */
   lastKnownAgent: (() => boolean) | undefined;
+  /**
+   * Reading sessions opened, and one-shot pages read, counted apart.
+   *
+   * THE TWO VERBS ARE NOT INTERCHANGEABLE at the store: an open stands a tail
+   * and is answered with a watch token, while a one-shot read says `page_only`
+   * and is answered with none. A caller that opens where it meant to read
+   * leaves the store holding a token nothing will ever spend.
+   */
+  pagesOpened = 0;
+  firstPageReads = 0;
   openAgentPage(
     _agent?: conversationv1.AgentId,
     _pageSize?: number,
@@ -259,6 +269,7 @@ export class RecordingPersistence implements Persistence {
     known?: () => boolean,
   ): Promise<AgentPageSession> {
     this.lastKnownAgent = known;
+    this.pagesOpened++;
     if (this.openHangs) return new Promise<AgentPageSession>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     const entries = this.tail;
@@ -292,6 +303,7 @@ export class RecordingPersistence implements Persistence {
     known?: () => boolean,
   ): Promise<conversationv1.HistoryPage> {
     this.lastKnownAgent = known;
+    this.firstPageReads++;
     if (this.openHangs) return new Promise<conversationv1.HistoryPage>(() => undefined);
     if (this.openError !== undefined) return Promise.reject(this.openError);
     this.closedPages++;

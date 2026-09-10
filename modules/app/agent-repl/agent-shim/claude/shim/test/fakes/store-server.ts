@@ -472,13 +472,19 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         const lines = [...window].reverse().map(lineAt);
         const olderExist = eligible.length > window.length;
         const oldestInPage = window[0];
-        const token = `watch-${nextToken++}`;
-        watches.set(token, {
-          book: bookId,
-          pending: [],
-          waiters: [],
-          closed: false,
-        });
+        // A PAGE-ONLY OPEN MINTS NOTHING, exactly as the real store does: the
+        // caller said no watch follows, so there is no token to hand back and
+        // none left behind. The fake must run this or a shim that stopped
+        // reading `watch` would look correct against a fake that still sent one.
+        const token = request.pageOnly ? undefined : `watch-${nextToken++}`;
+        if (token !== undefined) {
+          watches.set(token, {
+            book: bookId,
+            pending: [],
+            waiters: [],
+            closed: false,
+          });
+        }
         return create(storev1.OpenAgentSessionResponseSchema, {
           result: {
             case: "success",
@@ -495,7 +501,10 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
                       }
                     : { case: "floor", value: create(storev1.ReadAgentPageFloorSchema, {}) },
               }),
-              watch: create(storev1.AgentSessionTokenSchema, { value: token }),
+              watch:
+                token === undefined
+                  ? undefined
+                  : create(storev1.AgentSessionTokenSchema, { value: token }),
             }),
           },
         });
