@@ -319,6 +319,24 @@ func TestPlaytestAddProjectFromDirectory(t *testing.T) {
 	// sentence says which tab is highlighted.
 	playtestAwaitCurrent(t, s, secondName)
 
+	// AND WHAT IT SELECTED COMES UP ON ITS OWN PANEL, NOT ON MAGIT.
+	// Registering a workspace is the same "you just made a workspace"
+	// behavior as creating one (A.5 asserts the create half with this same
+	// readback), so the main area must carry the new workspace's agent. A
+	// magit status buffer here is the register having switched to a
+	// directory the daemon had not accepted yet: no workspace at the path,
+	// no landing panels armed, and Doom's empty-project fallback filling the
+	// frame instead.
+	selected, mode := playtestAwaitSelectedPanel(t, s, secondName)
+	if strings.HasPrefix(mode, "magit-") {
+		t.Fatalf("registering %q left the selected window on %q in %s: a directory the daemon just "+
+			"accepted must come up on its OWN PANEL, not on magit status", secondName, selected, mode)
+	}
+	p.note("`SPC TAB C-n` answered and Emacs was asked what it is standing on",
+		fmt.Sprintf("`agent-repl--ws-current-name` is %q and the selected window shows that workspace's "+
+			"own panel %q: the register SELECTED the workspace it minted and landed on its agent",
+			secondName, selected))
+
 	names := s.tabNames()
 	if len(names) != 2 || names[0] != firstName || names[1] != secondName {
 		t.Fatalf("the tab bar draws %v, want exactly [%s %s]", names, firstName, secondName)
