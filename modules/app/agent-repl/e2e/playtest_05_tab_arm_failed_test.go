@@ -212,12 +212,33 @@ func TestPlaytestTabArmHibernated(t *testing.T) {
 			return live != nil && live.GetShimAttached()
 		})
 	revived := s.awaitArm(t, name, "the revived turn to settle", emGHISettledArms...)
+	// THE PARK'S OWN ROW, ASSERTED BEFORE IT IS PHOTOGRAPHED. The daemon
+	// compacts before it stands a shim down (`daemon.md`'s Hibernate
+	// directive), so the feed across this boundary is not two turns and
+	// nothing else: it carries the context cut that park paid, drawn as the
+	// compaction separator and its foldable summary. The manifest sentence
+	// below says so because the picture shows it, and this is what makes
+	// that sentence a claim rather than a description.
+	s.awaitInPage(t, "the pre-park compaction's own row in the feed",
+		`document.querySelector('[data-fold="compaction-summary"]')`)
 	s.captureArm(t, "arm-revived", name,
 		"a second prose prompt submitted with composer RET revived the parked session and its turn concluded",
 		revived,
 		"The tab is painted exactly as it was before the park: the revival paid nothing the user "+
-			"can see on the bracket. The webapp's feed carries BOTH turns in order, with nothing "+
-			"between them.")
+			"can see on the bracket. The webapp's feed carries BOTH turns in order with the PARK'S OWN "+
+			"CONTEXT CUT between them -- an orange separator reading `context compacted on request` and "+
+			"a foldable summary card -- because the daemon compacts before it stands a shim down. "+
+			"THE TOPBAR'S PERMISSION MODE STILL READS `default`: the summarizing query runs under plan "+
+			"and a revival that came back in plan mode would be that throwaway leaking into the user's "+
+			"session.")
+
+	// THE POSTURE SURVIVED THE PARK. The mode is read from the module's own
+	// topbar rather than inferred from the picture, so the sentence above is
+	// backed: a revival must restore the session as the user left it, and the
+	// compaction's plan-mode summarizer is the one thing that had moved it.
+	s.awaitInPage(t, "the topbar's mode button to still name the session's own permission mode",
+		`(function () { var el = document.querySelector('.topbar-mode-button[data-mode]');
+                        return !!el && el.getAttribute('data-mode') === 'default'; })()`)
 }
 
 // ---------------------------------------------------------------------------
