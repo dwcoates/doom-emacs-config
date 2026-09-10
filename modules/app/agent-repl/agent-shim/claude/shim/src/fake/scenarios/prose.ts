@@ -30,8 +30,32 @@ export const MARKDOWN_SHOWCASE = [
   "",
   "---",
   "",
+  "## A numbered tree",
+  "",
+  // DOTLESS LABELS, because that is the metaprompt's own tree shape: `1 🌳 …`,
+  // `├── 1.1 …`. A trailing dot leaves the root line no longer an emoji root
+  // to the webapp's own detector — `dottedLabelEnd` in
+  // webapp/src/metaprompt-tree.ts stops at a dot no digit follows — and the
+  // showcase then draws as an ordinary markdown list rather than the tree it
+  // exists to demonstrate.
+  "1 🌳 A bare Unicode tree, the shape the metaprompt answers in.",
+  "├── 1.1 This branch is deliberately longer than the daemon's 105-column limit, so it is wrapped " +
+    "before it is served, and every continuation line must still carry the rails of the branches around it.",
+  "│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.",
+  "└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too " +
+    "runs past the daemon's limit and wraps onto a second line.",
+  "",
   "That is the whole demo.",
 ].join("\n");
+
+/**
+ * The column limit the daemon wraps a settled response's tree to
+ * (daemon/internal/resolve/feed/tree.go's `responseTreeWidth`, which is
+ * treefmt's `DefaultWidth`). The showcase carries branches WIDER than this so
+ * that the wrap is exercised by every consumer that draws `!md`; the test
+ * beside this scenario pins that the showcase still does.
+ */
+export const DAEMON_TREE_WRAP_COLUMNS = 105;
 
 /**
  * The default turn: several blocks, both thinking arms, one settled answer.

@@ -3,7 +3,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { MARKDOWN_SHOWCASE } from "../../../src/fake/scenarios/prose.js";
+import { DAEMON_TREE_WRAP_COLUMNS, MARKDOWN_SHOWCASE } from "../../../src/fake/scenarios/prose.js";
 import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 const blockTypes = (driven: Awaited<ReturnType<typeof driveScenario>>): string[] =>
@@ -92,6 +92,42 @@ describe("the markdown showcase", () => {
 
     // Assert
     expect(theResult(driven).result).toBe(MARKDOWN_SHOWCASE);
+  });
+
+  it("carries a tree branch wider than the daemon's wrap width, so the wrap is exercised", () => {
+    // Arrange — the branch lines are the ones opening with a connector.
+    const branches = MARKDOWN_SHOWCASE.split("\n").filter((line) => /^[│ ]*[├└]── /u.test(line));
+
+    // Act
+    const widest = Math.max(...branches.map((line) => [...line].length));
+
+    // Assert — a showcase every branch of which fits would never make the
+    // daemon wrap anything, and the wrapped tree is what the webapp is
+    // photographed drawing.
+    expect(branches.length).toBeGreaterThan(0);
+    expect(widest).toBeGreaterThan(DAEMON_TREE_WRAP_COLUMNS);
+  });
+
+  it("gives the tree the metaprompt's own DOTLESS labels, root line included", () => {
+    // WHY: the webapp's root detector (`dottedLabelEnd` in
+    // webapp/src/metaprompt-tree.ts) ends a label at a dot no digit follows, so
+    // a dotted root `1. 🌳` is not an emoji root at all and the whole tree
+    // falls back to a markdown ordered list. The showcase exists to be drawn AS
+    // A TREE, so its labels carry the metaprompt's own dotless shape.
+    // Arrange
+    const lines = MARKDOWN_SHOWCASE.split("\n");
+
+    // Act — the tree's root is the first line under its own heading; the
+    // showcase's ordinary ordered list ("1. first") sits above it.
+    const root = lines[lines.indexOf("## A numbered tree") + 2] ?? "";
+    const branches = lines.filter((line) => /^[│ ]*[├└]── /u.test(line));
+
+    // Assert
+    expect(root).toMatch(/^\d+ \p{Extended_Pictographic}/u);
+    expect(branches.length).toBeGreaterThan(0);
+    for (const branch of branches) {
+      expect(branch).toMatch(/[├└]── \d+(\.\d+)* /u);
+    }
   });
 
   it("emits one PROSE block, behind the reasoning every turn opens with", async () => {
