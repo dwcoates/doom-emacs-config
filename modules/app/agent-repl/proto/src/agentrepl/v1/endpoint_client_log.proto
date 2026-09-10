@@ -42,6 +42,18 @@ message ClientLogRecord {
   // sites. Nothing routes on it, nothing renders it; it is written to the
   // log verbatim for a human debugger.
   google.protobuf.Struct context = 7;
+  // The instant the CLIENT wrote the record, RFC 3339 with offset. UNSET =
+  // the daemon stamps its own arrival clock and says so
+  // (`timestamp_source: daemon_arrival`); SET = the daemon persists this
+  // instant, so a record is ordered by when it happened, not by when the
+  // rpc landed (measured 2026-09-10: every webapp record persisted with the
+  // arrival clock because nothing carried the client's).
+  string timestamp = 8;
+  // The record's own verbosity class: false = normal (the run's story);
+  // true = verbose (wanted only when tracing). The daemon persists it as
+  // stated rather than recomputing it from the level, so a client's verbose
+  // info record stays verbose on disk.
+  bool verbose = 9;
 }
 message ClientLogLevelDebug {}
 message ClientLogLevelInfo {}
