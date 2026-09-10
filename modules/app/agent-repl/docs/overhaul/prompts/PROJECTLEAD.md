@@ -294,6 +294,12 @@ classes, with different freedom to depart from it:
 
 ## Runtime playtesting (after the e2e suite settles)
 
+RETIRED 2026-09-10 by the owner's ruling. Everything in this section is
+superseded by `docs/REALTEST-PLAN.md`, which is now the only reference for
+a run against the real application; the layer this section planned, and its
+screenshot review, no longer exist. The rest of the section is kept as the
+record of what was asked for at the time.
+
 - Once e2e is green, proceed to ACTUAL RUNTIME PLAYTESTING in Emacs
   using the /debug-emacs-agent-repl skill (it may need some refinement,
   but it specifies how to send code to Emacs and watch logs).

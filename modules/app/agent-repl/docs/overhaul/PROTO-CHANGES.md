@@ -505,8 +505,8 @@ stamps are the ones the other four runtimes are already grepped by.
 ## Landing 16 (2026-09-09): a tool call can return a picture, and a shell says how it exited
 
 OWNER-DELEGATED LEAD RULING (the project lead ruled this in on the owner's
-behalf). Two plain-data fields, both found by playtest owner 13 in the real
-webview, both on the ONE message the whole grey tool card settles into.
+behalf). Two plain-data fields, both found by owner 13 in the real webview,
+both on the ONE message the whole grey tool card settles into.
 
 - frontend.v1 FeedToolCallReturned.form gains `image` (tag 11), carrying the
   EXISTING FeedImageBlock. FeedToolCallReturned also gains
@@ -586,7 +586,7 @@ daemon/internal/remint and account.PortTranscript.
 
 ## Landing 18 (2026-09-10): a tool call whose work moved to the background says so
 
-OWNER-DELEGATED LEAD RULING, found by playtest owner 13 (F43). frontend.v1
+OWNER-DELEGATED LEAD RULING, found by owner 13 (F43). frontend.v1
 FeedSimpleToolCall.outcome gains `moved` (tag 6, FeedToolCallMoved, empty). A
 backgrounded shell drew two rows: the detached shell row that settles, and the
 Bash card above it stuck on `running` forever, because the card had no arm for

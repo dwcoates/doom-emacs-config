@@ -193,6 +193,10 @@ confirmed as ruled (daemon.md wording to update).
 
 ## USER RULING 2026-09-02: no playtests; e2e coverage hardening instead
 
+SETTLED 2026-09-10: the layer that later ran anyway is retired entirely, and
+`docs/REALTEST-PLAN.md` is the reference for every run against the real
+application from here. The rest of this section is the record of the ruling.
+
 The final playtest step is DROPPED. After the cross-system e2e suite passes
 on overhaul/integration, a HARDENING step runs: measure coverage of the e2e
 run (daemon `-coverpkg=./... -coverprofile` restricted to ./e2e; shim
