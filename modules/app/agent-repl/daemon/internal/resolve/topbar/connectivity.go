@@ -35,8 +35,18 @@ const (
 // connected only while all three hops are live, so a serving shim link with a
 // client hop down is `severed` and never `connected`: the route to the reader
 // is broken even though the route to the session is not.
-func connectivityKey(seen bool, link shimclient.LinkState, peers bool) string {
+//
+// parked is the idle sweep's deliberate stand-down. A PARKED SESSION IS IDLE,
+// NOT BROKEN (resolve/sidebar/status.go), so the route being gone is not a
+// fault to draw: `no_session` — "there is no session to have a route to" — is
+// literally the state, and it is the only key the vocabulary already carries
+// for it. Drawing `dead` there hollowed the indicator ("the session's process
+// is gone") for a session the daemon parked on purpose.
+func connectivityKey(seen bool, link shimclient.LinkState, peers, parked bool) string {
 	if !seen {
+		return linkNoSession
+	}
+	if parked && link == shimclient.LinkDead {
 		return linkNoSession
 	}
 	switch link {

@@ -99,6 +99,13 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 		if c.deps.LeaseChanged != nil {
 			c.deps.LeaseChanged(ws)
 		}
+		// AND THE HOST VIEW IS STALE UNTIL SOMETHING RECOMPOSES IT. The
+		// composer arm was `draining` for as long as this lease stood, the
+		// last push every host client received was taken while it was held,
+		// and no other flow republishes after a hibernation. Emacs refuses a
+		// submission while its gate reads draining, so the republish is what
+		// makes the hibernated workspace revivable by a prompt.
+		c.publishHost(ws)
 	}()
 
 	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
@@ -144,6 +151,37 @@ func (c *controller) hibernate(ctx context.Context, log dlog.Logger, ws ids.Work
 	if err := c.deps.DB.SetShimPID(ctx, ws, nil); err != nil {
 		log.Error(opSweep, "could not clear the hibernated session's shim pid", withCause(fields, err))
 		return false
+	}
+	// AND SO IS THE FOOTER'S, AND THE CONNECTIVITY INDICATOR'S. Both are
+	// in-memory accumulations fed by events, so unlike the roster they cannot
+	// read the terminal back -- they are told here, after the record exists,
+	// so no surface can report the park before the record that justifies it.
+	//
+	// A failure is not possible to report: these setters publish rather than
+	// answer. What they change is that the footer's `disconnected` step stops
+	// calling the deliberate stand-down a dead link, which is what reopens the
+	// webapp's composer for the prompt that revives the session.
+	if c.deps.SetParked != nil {
+		c.deps.SetParked(ws, true)
+	}
+	// THE ROSTER'S ARM FOR THIS ROW IS A FUNCTION OF THE RECORD ABOVE. The
+	// roster resolver reads the session terminal to know a park from a fault,
+	// and it publishes on the events it is handed -- the last of which, the
+	// shim link going dead, arrived during the KillSession above, before this
+	// terminal existed. The row resolved on that event says `dead`, which
+	// Emacs paints as "something on this machine broke" for a session the
+	// daemon stood down on purpose. Nothing else republishes the roster after
+	// a hibernation, so this is the republish that makes the park READ as one.
+	//
+	// A failure here is recorded and nothing more: the hibernation HAPPENED,
+	// and reporting it as refused would leave the sweep retrying a session
+	// that is already stood down. The stale view is the defect, and the
+	// record is what names it.
+	if c.deps.PublishRegistry != nil {
+		if err := c.deps.PublishRegistry(ctx); err != nil {
+			log.Error(opSweep, "could not republish the roster after the hibernation",
+				withCause(fields, err))
+		}
 	}
 	log.Info(opSweep, "hibernated an idle session", fields)
 	return true

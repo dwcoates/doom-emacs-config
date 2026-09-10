@@ -246,9 +246,15 @@ func (v *verbs) PublishRegistry(ctx context.Context) error {
 			return fmt.Errorf("publish the opening roster: %w", err)
 		}
 	}
-	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, current))
+	sessions, err := sessionRecords(ctx, v.deps.DB, workspaces)
+	if err != nil {
+		log.Error(opRegister, "could not read the session records for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: %w", err)
+	}
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, sessions, current))
 	log.Debug(opRegister, "published the opening roster", dlog.Context{
 		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
+		"sessions": len(sessions),
 	})
 	return nil
 }

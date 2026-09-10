@@ -146,7 +146,7 @@ func (r *resolver) mutate(ws ids.WorkspaceID, operation, message string, ctx dlo
 // NEVER builds a partial view: the contract's non-optional fields are
 // semantically non-optional, and a push that left one empty would violate them.
 func (r *resolver) render(s *wsState) (*frontendv1.TopbarView, error) {
-	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream))
+	connectivity, err := r.connectivity(connectivityKey(s.linkSeen, s.link, s.hostStream && s.webStream, s.parked))
 	if err != nil {
 		return nil, err
 	}
@@ -429,10 +429,22 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 // OnLink drives the connectivity glyph and its tone.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.topbar.on_link", "the topbar took a link state",
-		dlog.Context{"shim_link": connectivityKey(true, link, true)}, func(s *wsState) {
+		dlog.Context{"shim_link": connectivityKey(true, link, true, false)}, func(s *wsState) {
 			s.link = link
 			s.linkSeen = true
+			// THE REVIVAL ENDS THE PARK, for the same reason the footer clears
+			// it here: the watcher latches a dead link and publishes nothing
+			// more on it, so the next link state belongs to the shim the
+			// reviving prompt spawned, and a spawn that then dies must hollow
+			// the indicator like any other death.
+			s.parked = false
 		})
+}
+
+// SetParked installs, or lifts, the idle sweep's park.
+func (r *resolver) SetParked(ws ids.WorkspaceID, parked bool) {
+	r.mutate(ws, "daemon.topbar.set_parked", "the topbar took the idle sweep's park",
+		dlog.Context{"parked": parked}, func(s *wsState) { s.parked = parked })
 }
 
 // SetParticipants states the liveness of this workspace's host and web
