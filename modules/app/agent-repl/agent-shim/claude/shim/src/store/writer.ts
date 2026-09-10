@@ -674,9 +674,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     readFirstPage(
       agent: conversationv1.AgentId,
       pageSize: number,
+      knownThrough?: conversationv1.HistoryPointer,
       known?: () => boolean,
     ): Promise<conversationv1.HistoryPage> {
-      return reader.readFirstPage(agent, pageSize, known);
+      return reader.readFirstPage(agent, pageSize, knownThrough, known);
     },
 
     readAgentPage(
