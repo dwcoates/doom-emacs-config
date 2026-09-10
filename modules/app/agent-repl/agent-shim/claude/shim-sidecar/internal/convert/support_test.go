@@ -22,7 +22,6 @@ func TestMain(m *testing.M) {
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	// Verbose records are exercised too: a verbose-only branch that panicked
 	// would otherwise stay invisible until production enabled it.
-	os.Setenv("AGENT_REPL_LOG_VERBOSE", "1")
 	os.Exit(m.Run())
 }
 

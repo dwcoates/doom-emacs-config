@@ -714,10 +714,25 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		args = append(args, window.flag, window.value.String())
 	}
 	cmd := exec.Command(sidecarBin, args...)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = make([]string, 0, len(os.Environ())+len(opts.ExtraEnv)+3)
+	for _, value := range os.Environ() {
+		if !strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") {
+			cmd.Env = append(cmd.Env, value)
+		}
+	}
+	cmd.Env = append(cmd.Env,
 		"AGENT_REPL_STORE_SOCKET="+opts.StoreSocket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	hasLogLevel := false
+	for _, value := range opts.ExtraEnv {
+		if strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") {
+			hasLogLevel = true
+		}
+	}
+	if !hasLogLevel {
+		cmd.Env = append(cmd.Env, "AGENT_REPL_LOG_LEVEL=info")
+	}
 	cmd.Env = append(cmd.Env, opts.ExtraEnv...)
 	captured := captureChild(t, "the sidecar (log: "+opts.LogPath+")")
 	cmd.Stdout = captured

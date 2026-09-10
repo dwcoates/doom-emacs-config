@@ -66,13 +66,21 @@ Shim (TypeScript)
   `AGENT_REPL_LOG_LEVEL`.
 
 Store and sidecar (Go)
-- records carry no workspace attribution. The sidecar knows the transcript's
-  project dir; stamp `workspace_dir`/`workspace_id`/`claude_session_id` on
-  every file-scoped record and forward file-scoped diagnostics to
-  `sidecar.log` through `ClientLog` (the dead seam). The store stamps the
-  `agent_id`/book on every request-scoped record so the reader can join it.
-- no meaningful `debug` population; `AGENT_REPL_LOG_LEVEL`.
-- bypass lint.
+- DONE: sidecar config-root files resolve the transcript's authoritative `cwd`
+  without decoding the lossy project slug, stamp
+  `workspace_dir`/`workspace_id`/`claude_session_id`, and carry that scope over
+  spawn observations to claimed spools. Store request loggers stamp the
+  `agent_id`/book they concern (sorted plural keys for a mixed batch).
+- BLOCKED ON PROTO: `agentrepl.v1.ClientLogRecord` has the landed `timestamp`
+  and `verbose` fields but no runtime discriminator; the daemon still labels
+  every forwarded record `webapp`. Sidecar records remain in the global
+  rotating sink until that message can say `sidecar`, rather than being
+  forwarded under a false runtime.
+- DONE: both processes honor `AGENT_REPL_LOG_LEVEL`; verbose request/state
+  records are `debug`, lifecycle remains `info`, decisions/refusals are `warn`,
+  and owned failures are `error`.
+- DONE: one AST-backed bypass lint per Go process names the sanctioned
+  bootstrap and canonical-sink writers.
 
 Emacs (lisp)
 - 332 of ~1,027 sites pass a nil workspace; resolve the workspace from the

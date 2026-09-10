@@ -38,7 +38,7 @@ type Observer interface {
 	// the launch result that states it, and the reader's own alternative — an a*
 	// task id, or a spool target carrying a task id — is a second reading of the
 	// same fact, which is how the two halves of the seam come to disagree.
-	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool)
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string)
 
 	// TaskStopped reports that a person stopped a task. The reader owns what
 	// that means: the terminal is minted by the spool's handler, which is the
@@ -49,14 +49,31 @@ type Observer interface {
 var _ Observer = (*sidecar)(nil)
 
 // TaskSpawned implements Observer for the sidecar.
-func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool) {
+func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool, workspaceDir, workspaceID, claudeSessionID string) {
+	if workspaceDir == "" || workspaceID == "" || claudeSessionID == "" {
+		s.log.With(logging.Context{
+			Operation: "record-spawn", TaskID: taskID, ActivityID: toolUseID,
+			AgentID: ownerAgentID, Path: outputPath, Level: "error",
+		}).Log("spawn observation rejected: workspace directory, workspace id, and transcript session are all required")
+		return
+	}
+	normalizedOutput := discover.Normalize(outputPath)
+	if normalizedOutput != "" {
+		s.log.RegisterFile(logging.Context{
+			Path: normalizedOutput, WorkspaceDir: workspaceDir,
+			WorkspaceID: workspaceID, ClaudeSessionID: claudeSessionID,
+		})
+	}
 	s.owners.observe(observation{
-		taskID:       taskID,
-		activityID:   toolUseID,
-		agentID:      ownerAgentID,
-		mainAgentID:  ownerAgentID,
-		outputPath:   discover.Normalize(outputPath),
-		backgrounded: backgrounded,
+		taskID:          taskID,
+		activityID:      toolUseID,
+		agentID:         ownerAgentID,
+		mainAgentID:     ownerAgentID,
+		outputPath:      normalizedOutput,
+		backgrounded:    backgrounded,
+		workspaceDir:    workspaceDir,
+		workspaceID:     workspaceID,
+		claudeSessionID: claudeSessionID,
 	})
 }
 
@@ -152,7 +169,10 @@ type observation struct {
 	mainAgentID string
 	// backgrounded reports that the spawn ran in the background, which is what
 	// makes a subagent its own top_level rather than the spawner's.
-	backgrounded bool
+	backgrounded    bool
+	workspaceDir    string
+	workspaceID     string
+	claudeSessionID string
 }
 
 // ownerIndex maps a task id to the call that spawned it.
@@ -201,6 +221,8 @@ func (o *ownerIndex) observe(obs observation) {
 	bound := o.log.With(logging.Context{
 		Operation: "record-spawn", TaskID: obs.taskID, ActivityID: obs.activityID,
 		AgentID: obs.agentID, Path: obs.outputPath,
+		WorkspaceDir: obs.workspaceDir, WorkspaceID: obs.workspaceID,
+		ClaudeSessionID: obs.claudeSessionID,
 	})
 	if obs.taskID == "" || obs.activityID == "" {
 		bound.With(logging.Context{Level: "error"}).Log("spawn observation rejected: it names no task or no spawning call")

@@ -152,7 +152,13 @@ func currentSandboxStamp(t *testing.T) string {
 }
 
 func sandboxEnv(f *fakeDocker, lockDir string, extra ...string) []string {
-	env := append(os.Environ(),
+	env := make([]string, 0, len(os.Environ())+3+len(extra))
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "AGENT_REPL_SANDBOX_ALLOW_STALE=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env,
 		"PATH="+f.bin+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"AGENT_REPL_SANDBOX_RUNTIME=docker",
 		"AGENT_REPL_SANDBOX_BUILD_LOCK_DIR="+lockDir,

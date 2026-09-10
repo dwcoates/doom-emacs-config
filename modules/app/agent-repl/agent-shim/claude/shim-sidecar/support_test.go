@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	sharedlogging "agentrepl/logging"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 	"agentrepl/shim-claude-sidecar/internal/discover"
@@ -113,12 +114,13 @@ func (w sliceWriter) Write(p []byte) (int, error) {
 // harness is one sidecar wired to a fake store over a real unix socket, with a
 // fake clock. Nothing here sleeps: the cycle is driven by calling its steps.
 type harness struct {
-	sc    *sidecar
-	store *fakeStore
-	logs  *[]string
-	base  string
-	rootA string
-	spool string
+	sc        *sidecar
+	store     *fakeStore
+	logs      *[]string
+	base      string
+	rootA     string
+	spool     string
+	workspace string
 	// state is the agent-repl state root the shim writes its identity records
 	// under. It exists for every harness so a subject can drop a record into it
 	// without rebuilding the sidecar; an empty one resolves nothing, which is
@@ -145,13 +147,14 @@ func newHarness(t *testing.T, store *fakeStore) *harness {
 	t.Helper()
 	base := t.TempDir()
 	h := &harness{
-		store:  store,
-		base:   base,
-		rootA:  filepath.Join(base, "config-a"),
-		spool:  filepath.Join(base, "spool"),
-		state:  filepath.Join(base, "state"),
-		clock:  time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC),
-		socket: shortSocket(t),
+		store:     store,
+		base:      base,
+		rootA:     filepath.Join(base, "config-a"),
+		spool:     filepath.Join(base, "spool"),
+		workspace: filepath.Join(base, "workspace"),
+		state:     filepath.Join(base, "state"),
+		clock:     time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC),
+		socket:    shortSocket(t),
 	}
 	for _, dir := range []string{h.rootA, h.spool, h.state} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -206,6 +209,11 @@ func (h *harness) transcript(t *testing.T, session string, lines ...string) stri
 	t.Helper()
 	path := filepath.Join(h.rootA, "projects", "proj", session+".jsonl")
 	h.write(t, path, strings.Join(lines, "\n")+"\n")
+	workspaceID, err := sharedlogging.WorkspaceID(h.workspace)
+	if err != nil {
+		t.Fatalf("derive fixture workspace id: %v", err)
+	}
+	h.sc.workspaceBySession[discover.Normalize(h.rootA)+"\x00proj\x00"+session] = workspaceAttribution{dir: h.workspace, id: workspaceID}
 	return normalized(path)
 }
 

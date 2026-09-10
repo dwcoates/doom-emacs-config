@@ -742,8 +742,11 @@ func (s *Store) awaitReady() {
 			return
 		}
 		select {
+		case <-s.exit.done:
+			s.t.Fatalf("e2e: store exited before readiness (%s):\n%s", s.exit.status(), tailStoreLog(s.t, s))
 		case <-ctx.Done():
-			s.t.Fatalf("e2e: store never answered GetSidecarCursors within %s", DefaultTimeout)
+			s.t.Fatalf("e2e: store never answered GetSidecarCursors within %s; process is %s:\n%s",
+				DefaultTimeout, s.exit.status(), tailStoreLog(s.t, s))
 		case <-ticker.C:
 		}
 	}

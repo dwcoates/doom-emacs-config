@@ -123,6 +123,7 @@ func TestRunWithLoggerRefusesAnUnsafePprofAddressBeforeTouchingTheDatabase(t *te
 
 func TestOpenLoggerReturnsABootstrapErrorBeforeThePersistentSinkExists(t *testing.T) {
 	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
 	parent := t.TempDir()
 	blocked := filepath.Join(parent, "blocked")
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
@@ -141,8 +142,30 @@ func TestOpenLoggerReturnsABootstrapErrorBeforeThePersistentSinkExists(t *testin
 	}
 }
 
+func TestOpenLoggerRejectsAnInvalidLogLevelBeforeCreatingTheSink(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "verbose")
+	root := t.TempDir()
+	logPath := filepath.Join(root, "log", "shim-store.log")
+
+	// Act.
+	_, _, err := openLogger(filepath.Join(root, "store.sock"), filepath.Join(root, "events.db"), logPath)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("openLogger succeeded with an invalid AGENT_REPL_LOG_LEVEL")
+	}
+	if !isBootstrapError(err) {
+		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(logPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("log directory stat = %v, want no state created", statErr)
+	}
+}
+
 func TestOpenLoggerCreatesTheDurableSink(t *testing.T) {
 	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
 	root := t.TempDir()
 	logPath := filepath.Join(root, "log", "shim-store.log")
 
@@ -168,6 +191,7 @@ func TestOpenLoggerLeavesTheDatabaseDirectoryToTheDatabase(t *testing.T) {
 	// Arrange. Creating the --db parent here would make an unopenable database
 	// a BOOTSTRAP failure, ahead of the profiling surface that exists to make
 	// exactly that failure diagnosable.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "store", "events.db")
 

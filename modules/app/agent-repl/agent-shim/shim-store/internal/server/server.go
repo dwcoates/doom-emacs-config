@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -227,8 +228,8 @@ func (s *Server) logOwnFailure(log *logging.Logger, operation string, ref *refus
 // ---- WriteBatch ----
 
 func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
-	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header())
 	msg := req.Msg
+	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header()).With(batchAttribution(msg.GetBatch()))
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
 		"write batch entries=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), msg.GetBatch().GetCursorAdvance() != nil)
 
@@ -250,6 +251,43 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
+}
+
+// batchAttribution names every agent and book the aggregate write concerns.
+// The ordinary singular keys remain available when a request is unambiguous;
+// a mixed-agent batch uses arrays rather than lying about one arbitrary entry.
+func batchAttribution(batch *storev1.EntryBatch) logging.Fields {
+	agents := map[string]struct{}{}
+	books := map[string]struct{}{}
+	for _, entry := range batch.GetEntries() {
+		update := entry.GetAgentUpdate()
+		if update == nil {
+			continue
+		}
+		agentID := update.GetTopLevel().GetValue()
+		if bookID := update.GetServeableFrame().GetPageAgentId().GetValue(); bookID != "" {
+			books[bookID] = struct{}{}
+		}
+		if agentID != "" {
+			agents[agentID] = struct{}{}
+		}
+	}
+	fields := logging.Fields{}
+	fields.AgentID, fields.AgentIDs = oneOrMany(agents)
+	fields.BookAgentID, fields.BookAgentIDs = oneOrMany(books)
+	return fields
+}
+
+func oneOrMany(values map[string]struct{}) (string, []string) {
+	items := make([]string, 0, len(values))
+	for value := range values {
+		items = append(items, value)
+	}
+	sort.Strings(items)
+	if len(items) == 1 {
+		return items[0], nil
+	}
+	return "", items
 }
 
 // writeBatchFailure builds the typed failure. THE ARM IS WHY, and it is never
@@ -293,9 +331,9 @@ func (s *Server) publish(log *logging.Logger, producer string, lines []LineWritt
 // ---- OpenAgentSession ----
 
 func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[storev1.OpenAgentSessionRequest]) (*connect.Response[storev1.OpenAgentSessionResponse], error) {
-	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header())
 	msg := req.Msg
 	agentID := msg.GetAgent().GetValue()
+	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
 		"open page_size=%d known_through=%t page_only=%t", msg.GetPageSize(), msg.KnownThrough != nil, msg.GetPageOnly())
 
@@ -322,7 +360,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	// open answers with `watch` UNSET — there is nothing to present later, and a
 	// watch attempted from it meets the ordinary unknown-token refusal.
 	if msg.GetPageOnly() {
-		log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WriteSeq: opened.PinSeq},
+		log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WriteSeq: opened.PinSeq},
 			"page-only read served; no watch token minted lines=%d", len(opened.Page.GetLines()))
 		return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 			Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
@@ -337,7 +375,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
-	log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
 		"reading session opened lines=%d", len(opened.Page.GetLines()))
 	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
 		Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
@@ -417,7 +455,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 	if err := s.openStream(ctx, log, "store.rpc.watch-agent-session"); err != nil {
 		return err
 	}
-	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
 		"watch live after replay replayed=%d", len(replay))
 
 	for {
@@ -433,7 +471,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 		case <-sub.overflow:
 			return s.endOverflowed(log, sub)
 		case <-s.done:
-			log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down")
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down")
 			return nil
 		case <-ctx.Done():
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away")
@@ -475,9 +513,9 @@ func (s *Server) endOverflowed(log *logging.Logger, sub *sink[LineWritten]) erro
 // ---- ReadAgentPage ----
 
 func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1.ReadAgentPageRequest]) (*connect.Response[storev1.ReadAgentPageResponse], error) {
-	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header())
 	msg := req.Msg
 	agentID := msg.GetBook().GetValue()
+	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header()).With(logging.Fields{AgentID: agentID, BookAgentID: agentID})
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
 		"read page page_size=%d", msg.GetPageSize())
 

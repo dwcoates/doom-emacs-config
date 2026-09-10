@@ -215,6 +215,7 @@ func TestAPostBootstrapFailureIsNotReReported(t *testing.T) {
 
 func TestOpenLoggerCreatesItsDirectory(t *testing.T) {
 	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
 	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
 
 	// Act.
@@ -237,6 +238,7 @@ func TestOpenLoggerCreatesItsDirectory(t *testing.T) {
 
 func TestOpenLoggerFailureIsABootstrapError(t *testing.T) {
 	// Arrange: a log path under a regular file cannot be created.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
 	base := t.TempDir()
 	blocker := filepath.Join(base, "blocker")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
@@ -249,6 +251,23 @@ func TestOpenLoggerFailureIsABootstrapError(t *testing.T) {
 	// Assert.
 	if !isBootstrapError(err) {
 		t.Fatalf("openLogger error = %v, want a bootstrap error", err)
+	}
+}
+
+func TestOpenLoggerRejectsAnInvalidLevelBeforeCreatingItsDirectory(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "verbose")
+	path := filepath.Join(t.TempDir(), "nested", "sidecar.log")
+
+	// Act.
+	_, _, err := openLogger("/private/tmp/store.sock", path)
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("openLogger error = %v, want a bootstrap error", err)
+	}
+	if _, statErr := os.Stat(filepath.Dir(path)); !os.IsNotExist(statErr) {
+		t.Fatalf("log directory stat = %v, want no state created", statErr)
 	}
 }
 

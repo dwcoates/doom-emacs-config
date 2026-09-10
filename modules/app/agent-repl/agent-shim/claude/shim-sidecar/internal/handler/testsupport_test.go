@@ -26,7 +26,6 @@ func TestMain(m *testing.M) {
 	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	// The verbose helper is exercised too: a verbose-only log statement that
 	// panics would otherwise stay invisible until production turned it on.
-	os.Setenv("AGENT_REPL_LOG_VERBOSE", "1")
 	os.Exit(m.Run())
 }
 

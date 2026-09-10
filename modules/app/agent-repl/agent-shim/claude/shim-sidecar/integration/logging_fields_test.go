@@ -254,7 +254,7 @@ func TestAStoreOutageStatesOneSuspensionHoweverManyAttemptsFail(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_VERBOSE=1"}
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	fake.FailCursors("the store cannot read its cursors")
 
 	// Act: wait until the ladder has failed SEVERAL times, which is the event
@@ -322,7 +322,7 @@ func TestARefusedCursorReadConvergesOnOneRecordPerLayer(t *testing.T) {
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
 	opts := defaultSidecarOptions(t, fake.Socket, tree)
-	opts.ExtraEnv = []string{"AGENT_REPL_LOG_VERBOSE=1"}
+	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	fake.FailCursors("the store cannot read its cursors")
 
 	// Act: several attempts must have failed, or "it is not restated" is a claim

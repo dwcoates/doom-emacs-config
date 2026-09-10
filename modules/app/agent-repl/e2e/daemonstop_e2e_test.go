@@ -147,7 +147,8 @@ const stopAfterTurnBound = 250 * time.Millisecond
 // measures the same stop against the fake shim. Only this one exercises the
 // real shim's teardown, which is where the tail conclusion lives.
 func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
-	t.Parallel()
+	// This assertion is a latency measurement. Run it outside the suite's
+	// parallel world burst so the interval stays attributable to the stop path.
 	// Arrange: a live session whose turn has run and ended.
 	w, ws := pmNewPermissionWorld(t)
 	// Standing a live session down on purpose is what the whole test is

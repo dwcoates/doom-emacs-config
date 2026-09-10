@@ -528,6 +528,14 @@ filtering — curation is a downstream concern, never an ingestion concern.
 `internal/logging` is the ONLY diagnostic API. Direct output through `fmt`,
 `log`, `slog` or an ad hoc logger is forbidden, except the documented
 pre-logger bootstrap failure and the sink-emergency path.
+`logging_bypass_test.go` enforces that boundary; its only sanctioned writers
+are `main.go:reportFatal` and `internal/logging/logging.go:writeAll`.
+
+`AGENT_REPL_LOG_LEVEL` is the ONE process-wide threshold:
+`debug|info|warn|error`, default `info`. An invalid value is a bootstrap
+failure before the rotating sink is opened. Production passes the parsed
+`agentrepl/logging.Level` to `logging.NewDurableOnlyAtLevel`; focused tests and
+foreground harnesses may use `logging.NewAtLevel`.
 
 - Every logical branch of production code logs: verbose for the ordinary path,
   `warn` for degraded-but-handled, `error` for failures. Every error is logged
@@ -549,12 +557,19 @@ pre-logger bootstrap failure and the sink-emergency path.
   with exactly one `info` record.
 - Numeric keys carry PRESENCE (`logging.Off`, `logging.Seq`), so an unset
   offset is absent rather than a zero that reads as the start of the file.
-- RETIRED KEYS ARE GONE AND STAY GONE: `claude_session_id`,
-  `agent_repl_session_id`, `seq`, `from_seq`, `replay_*_seq`. They named the
-  retired (session_id, seq) addressing; the spine is agent-keyed now.
-- Hot per-record and per-batch success diagnostics use `LogVerbose` (gated by
-  `AGENT_REPL_LOG_VERBOSE`); lifecycle, invariant violations, refusals and
-  failures are normal-verbosity records.
+- Every config-root file resolves `workspace_dir` from an authoritative
+  transcript `cwd`, never by decoding the lossy project slug,
+  and derives `workspace_id` with the shared workspace digest. Spawn
+  observations carry that identity plus `claude_session_id` to task spools.
+  These three identifiers are promoted top-level record fields and every
+  downstream tail/handler/converter logger inherits them.
+- RETIRED ADDRESSING KEYS ARE GONE AND STAY GONE: `seq`, `from_seq`,
+  `replay_*_seq`. `claude_session_id` is attribution, not addressing, and is
+  required on file-scoped records when the owning transcript is known.
+- Request boundaries, state decisions, and per-record/per-batch success
+  diagnostics use `logging.Bound.LogVerbose`, which emits `level=debug` and
+  `verbosity=verbose`. Lifecycle edges are `info`; invariant violations and
+  refusals are `warn`; owned failures are `error`.
 - A PER-FILE RECORD IS A HOT RECORD HERE, and `watch` is one. Discovery has no
   age bound: every transcript ever written under either config root is watched
   for the life of the process, which on a working machine is thousands of files
@@ -563,9 +578,13 @@ pre-logger bootstrap failure and the sink-emergency path.
   lifecycle fact, so `rescan` states it once per pass — how many files the pass
   started watching and how many are watched now — and a pass that changed
   nothing states nothing. WHICH file, and of what kind, is verbose detail.
-- R10: SIDECAR SELF-DIAGNOSTICS HAVE NO WIRE HOME. They are structured logs
-  only. The diagnostic outbox that wrote them to the store is deleted; do not
-  aim them at an approximate arm.
+- SIDECAR SELF-DIAGNOSTICS REMAIN IN THE GLOBAL ROTATING SINK UNTIL THE WIRE CAN
+  NAME THEIR RUNTIME. `agentrepl.v1.ClientLogRecord` now carries the originating
+  `timestamp` and `verbose` class, but still has no `runtime` field; the daemon
+  therefore hardcodes forwarded records as `webapp`. Do not forward sidecar
+  records through `ClientLog` and mislabel them. The required proto change is a
+  runtime discriminator, after which file-scoped records can be forwarded to
+  each workspace's `sidecar.log` with their original timestamp and verbosity.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
 - THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened

@@ -121,6 +121,32 @@ function captureTheReRaise(): void {
   };
 }
 
+// Compile the composition root's dependency graph during file collection,
+// outside every behavioral timeout. The timed import below still evaluates a
+// fresh real entry point; this only keeps Vite's transform cost from consuming
+// that bound when the coverage run is contending with its worker pool.
+await Promise.all([
+  import("../src/clock.js"),
+  import("../src/composer/composer.js"),
+  import("../src/feed/renderers.js"),
+  import("../src/feed/feed.js"),
+  import("../src/footer/footer.js"),
+  import("../src/lifecycle/lifecycle.js"),
+  import("../src/login/login.js"),
+  import("../src/panels/panels.js"),
+  import("../src/sidebar/sidebar.js"),
+  import("../src/topbar/topbar.js"),
+  import("../src/tray/tray.js"),
+  import("../src/failure/sink.js"),
+  import("../src/failure/overlay.js"),
+  import("../src/rpc/client.js"),
+  import("../src/rpc/context.js"),
+  import("../src/rpc/page-address.js"),
+  import("../src/rpc/transport.js"),
+  import("../src/rpc/workspace-ref.js"),
+  import("../src/shell.js"),
+]);
+
 describe("the webapp's boot against a real page", () => {
   let realFetch: typeof globalThis.fetch;
   let realQueueMicrotask: typeof globalThis.queueMicrotask;

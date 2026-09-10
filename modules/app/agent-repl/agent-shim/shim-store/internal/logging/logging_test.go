@@ -129,6 +129,32 @@ func TestLogOmitsEmptyCorrelationAndTerminalAttribution(t *testing.T) {
 	}
 }
 
+func TestLogMarshalsAggregateAgentAttribution(t *testing.T) {
+	// Arrange.
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+
+	// Act.
+	log.Log(Fields{
+		Operation:    "store.rpc.write-batch",
+		AgentIDs:     []string{"agent-a", "agent-b"},
+		BookAgentIDs: []string{"book-a", "book-b"},
+	}, "accepted")
+
+	// Assert.
+	var got map[string]any
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("record is not JSON: %v: %q", err, file.String())
+	}
+	context := got["context"].(map[string]any)
+	if fmt.Sprint(context["agent_ids"]) != "[agent-a agent-b]" {
+		t.Fatalf("agent_ids = %#v, want both agents", context["agent_ids"])
+	}
+	if fmt.Sprint(context["book_agent_ids"]) != "[book-a book-b]" {
+		t.Fatalf("book_agent_ids = %#v, want both books", context["book_agent_ids"])
+	}
+}
+
 func TestLogMarshalsZeroDeliveredForTerminalRecordExactly(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
@@ -185,11 +211,48 @@ func TestLogVerboseRequiresEnabledModeForBothSinks(t *testing.T) {
 	if err := json.Unmarshal(file.Bytes(), &verboseRecord); err != nil {
 		t.Fatalf("persistent verbose record is not JSON: %v", err)
 	}
-	if verboseRecord.Verbosity != "verbose" || verboseRecord.Operation != "tail" || verboseRecord.Message != "queued=4" {
+	if verboseRecord.Level != "debug" || verboseRecord.Verbosity != "verbose" || verboseRecord.Operation != "tail" || verboseRecord.Message != "queued=4" {
 		t.Fatalf("persistent verbose record = %#v", verboseRecord)
 	}
 	if file.String() != stderr.String() {
 		t.Fatalf("enabled verbose routing differs: file=%q stderr=%q", file.String(), stderr.String())
+	}
+}
+
+func TestLogLevelFiltersPersistentAndInteractiveSinksTogether(t *testing.T) {
+	tests := []struct {
+		name      string
+		threshold sharedlogging.Level
+		record    Fields
+		want      bool
+	}{
+		{name: "debug excludes verbose", threshold: sharedlogging.LevelInfo, record: Fields{Operation: "tail"}, want: false},
+		{name: "warn excludes info", threshold: sharedlogging.LevelWarn, record: Fields{Operation: "serve"}, want: false},
+		{name: "warn includes warn", threshold: sharedlogging.LevelWarn, record: Fields{Operation: "retry", Level: "warn"}, want: true},
+		{name: "error includes error", threshold: sharedlogging.LevelError, record: Fields{Operation: "abort", Level: "error"}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			var file, stderr bytes.Buffer
+			log := NewAtLevel(&file, &stderr, tt.threshold)
+
+			// Act.
+			if tt.record.Level == "" && tt.record.Operation == "tail" {
+				log.LogVerbose(tt.record, "record")
+			} else {
+				log.Log(tt.record, "record")
+			}
+
+			// Assert.
+			if got := file.Len() > 0; got != tt.want {
+				t.Fatalf("persistent record present = %t, want %t: %q", got, tt.want, file.String())
+			}
+			if got := stderr.Len() > 0; got != tt.want {
+				t.Fatalf("interactive record present = %t, want %t: %q", got, tt.want, stderr.String())
+			}
+		})
 	}
 }
 
