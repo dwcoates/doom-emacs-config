@@ -944,10 +944,17 @@ func createRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *w
 	return nil
 }
 
-// createProjectDir mirrors the vendor CLI's project-directory convention: the
-// absolute worktree path with every "/" replaced by "-".
+// createProjectDir answers the vendor CLI's project directory for one
+// workspace, through the harness's single spelling of that rule.
+//
+// IT DELEGATES ON PURPOSE. The rule is "every byte that is not [A-Za-z0-9]
+// becomes a dash", not "every slash becomes a dash", and the two coincide only
+// while the temp root happens to be alphanumeric. Under macOS's per-user
+// /var/folders/<hash>/T root it has an underscore in it, so a slashes-only
+// spelling seeded the parent's transcript at a path the daemon never probes
+// and the fork's port silently had nothing to carry.
 func createProjectDir(configDir, workspaceDir string) string {
-	return filepath.Join(configDir, "projects", strings.ReplaceAll(workspaceDir, "/", "-"))
+	return harness.ProjectDir(configDir, workspaceDir)
 }
 
 // createArgsContain reports whether a git call's args contain an exact token.
