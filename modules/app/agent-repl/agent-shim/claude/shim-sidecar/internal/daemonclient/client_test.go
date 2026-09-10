@@ -132,6 +132,28 @@ func TestForwardCachesTheRosterRefForTheSameDaemonAndWorkspace(t *testing.T) {
 	}
 }
 
+func TestNormalizeWorkspaceDirResolvesTheDeepestExistingAncestor(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	requested := filepath.Join(base, "deleted", "workspace")
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		t.Fatalf("resolve fixture base: %v", err)
+	}
+
+	// Act.
+	got, err := normalizeWorkspaceDir(requested)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("normalizeWorkspaceDir returned %v", err)
+	}
+	want := filepath.Join(resolvedBase, "deleted", "workspace")
+	if got != want {
+		t.Fatalf("normalizeWorkspaceDir = %q, want %q", got, want)
+	}
+}
+
 func TestForwardRejectsANonLoopbackDaemonAddress(t *testing.T) {
 	// Arrange.
 	stateDir := t.TempDir()

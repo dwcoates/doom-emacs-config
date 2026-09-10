@@ -122,11 +122,10 @@ func (f *fakeClientLog) workspaceRefs() ([]*workspacev1.WorkspaceRef, error) {
 				if json.Unmarshal(line, &record) != nil || record.CWD == "" {
 					continue
 				}
-				dir, err := filepath.EvalSymlinks(record.CWD)
+				dir, err := normalizeFakeWorkspaceDir(record.CWD)
 				if err != nil {
-					continue
+					return err
 				}
-				dir = filepath.Clean(dir)
 				id, err := sharedlogging.WorkspaceID(dir)
 				if err != nil {
 					return err
@@ -150,6 +149,27 @@ func (f *fakeClientLog) workspaceRefs() ([]*workspacev1.WorkspaceRef, error) {
 		refs = append(refs, byDir[dir])
 	}
 	return refs, nil
+}
+
+func normalizeFakeWorkspaceDir(dir string) (string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	rest := ""
+	head := abs
+	for {
+		if resolved, err := filepath.EvalSymlinks(head); err == nil {
+			return filepath.Clean(filepath.Join(resolved, rest)), nil
+		}
+		parent := filepath.Dir(head)
+		if parent == head {
+			return "", fmt.Errorf("no existing ancestor for %q", dir)
+		}
+		rest = filepath.Join(filepath.Base(head), rest)
+		head = parent
+	}
 }
 
 func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
