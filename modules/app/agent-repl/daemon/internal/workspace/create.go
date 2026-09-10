@@ -347,7 +347,8 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		return "", fmt.Errorf("fork from %q: locate the transcript: %w", parent, err)
 	}
 	forked := wsm.NewVendorSessionID()
-	if err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked); err != nil {
+	minted, err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked)
+	if err != nil {
 		log.Error(opCreate, "could not port the parent transcript", dlog.Context{
 			"parent": string(parent), "transcript": transcript.Path,
 			"from_config_dir": transcript.ConfigDir, "cause": err.Error(),
@@ -359,6 +360,9 @@ func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.
 		"parent_vendor_session_id": parentSession.VendorSessionID,
 		"child_vendor_session_id":  forked,
 	})
+	if err := v.forkConversation(ctx, log, parent, child.ID, minted); err != nil {
+		return "", err
+	}
 	return forked, nil
 }
 
