@@ -17,6 +17,7 @@ func TestAFileScopedDiagnosticReachesClientLogWithItsCompleteShape(t *testing.T)
 	store := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
+	workspaceDir := t.TempDir()
 	opts := defaultSidecarOptions(t, store.Socket, tree)
 	opts.ExtraEnv = []string{"AGENT_REPL_LOG_LEVEL=debug"}
 	process := startSidecar(t, opts)
@@ -24,7 +25,8 @@ func TestAFileScopedDiagnosticReachesClientLogWithItsCompleteShape(t *testing.T)
 
 	// Act.
 	for _, line := range captured.Lines {
-		transcript.AppendLine(line)
+		transcript.AppendLine(encodeRecord(t,
+			retargetSession(t, decodeRecord(t, line), captured.Session, workspaceDir)))
 	}
 	awaitCursorInBatches(ctx, t, store, transcript.Path(), transcript.Offset())
 	request := process.Daemon.awaitRequest(ctx, func(req *agentreplv1.ClientLogRequest) bool {
@@ -44,6 +46,18 @@ func TestAFileScopedDiagnosticReachesClientLogWithItsCompleteShape(t *testing.T)
 	}
 	if request.GetWorkspace().GetId() == "" || request.GetWorkspace().GetDir() == "" {
 		t.Fatalf("ClientLog workspace ref = %v, want id and dir", request.GetWorkspace())
+	}
+	normalizedWorkspaceDir, err := filepath.EvalSymlinks(workspaceDir)
+	if err != nil {
+		t.Fatalf("normalize workspace dir: %v", err)
+	}
+	correlationID, err := sharedlogging.WorkspaceID(normalizedWorkspaceDir)
+	if err != nil {
+		t.Fatalf("compute workspace correlation id: %v", err)
+	}
+	if request.GetWorkspace().GetId() != "daemon-"+correlationID {
+		t.Fatalf("ClientLog workspace id = %q, want the fake daemon's roster id %q",
+			request.GetWorkspace().GetId(), "daemon-"+correlationID)
 	}
 	context := record.GetContext().AsMap()
 	if context["claude_session_id"] != captured.Session || context["pid"] == nil {

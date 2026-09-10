@@ -8,10 +8,10 @@
 // to the daemon's ClientLog RPC for persistence in workspace sidecar.log.
 //
 // It is a COPIER. It has no view of liveness and no session semantics. Its
-// daemon interactions are the idempotent RegisterWorkspace lookup needed to
-// obtain a daemon-minted ref and the ClientLog forwarding that uses it; the only
-// thing it concludes on its own is that it STOPPED SEEING a detached run (see
-// internal/stale).
+// daemon interactions are the read-only workspace-roster lookup needed to
+// obtain a daemon-minted ref and the ClientLog forwarding that uses it; the
+// only thing it concludes on its own is that it STOPPED SEEING a detached run
+// (see internal/stale).
 //
 // Flags (the launchd plists reference these):
 //

@@ -1,8 +1,8 @@
 // Package daemonclient owns the shim-claude-sidecar's ClientLog integration
 // boundary. It resolves the daemon's current loopback address from the shared
-// state root and idempotently registers the workspace directory for every
-// forwarded record, so a daemon handover changes both the destination and the
-// daemon-minted workspace ref without restarting the launchd-managed sidecar.
+// state root and reads the daemon-minted ref from the global workspace roster,
+// so a daemon handover changes both the destination and the authoritative ref
+// without restarting the launchd-managed sidecar.
 package daemonclient
 
 import (
@@ -13,10 +13,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
@@ -32,6 +34,11 @@ const requestTimeout = 2 * time.Second
 type Client struct {
 	addrPath string
 	http     *http.Client
+
+	mu            sync.Mutex
+	cachedAddress string
+	cachedDir     string
+	cachedRef     *workspacev1.WorkspaceRef
 }
 
 // New constructs the forwarding boundary for one resolved agent-repl state
@@ -81,39 +88,151 @@ func (c *Client) Forward(record logging.ForwardRecord) (string, error) {
 	client := agentreplv1connect.NewAgentReplClient(c.http, "http://"+address)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
-	registered, err := client.RegisterWorkspace(ctx, connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{
-		Dir: record.WorkspaceDir,
-	}))
+	workspace, err := c.resolveWorkspace(ctx, client, address, record.WorkspaceDir)
 	if err != nil {
-		return address, fmt.Errorf("RegisterWorkspace at %s: %w", address, err)
-	}
-	var workspace *workspacev1.WorkspaceRef
-	switch registered.Msg.GetResult().(type) {
-	case *agentreplv1.RegisterWorkspaceResponse_Success:
-		workspace = registered.Msg.GetSuccess().GetWorkspace()
-		if workspace.GetId() == "" || workspace.GetDir() == "" {
-			return address, fmt.Errorf("RegisterWorkspace at %s returned an incomplete workspace ref", address)
-		}
-	case *agentreplv1.RegisterWorkspaceResponse_Error:
-		return address, fmt.Errorf("RegisterWorkspace at %s was refused", address)
-	default:
-		return address, fmt.Errorf("RegisterWorkspace at %s returned neither success nor error", address)
+		return address, err
 	}
 	response, err := client.ClientLog(ctx, connect.NewRequest(&agentreplv1.ClientLogRequest{
 		Workspace: workspace,
 		Record:    requestRecord,
 	}))
 	if err != nil {
+		c.invalidateWorkspace(address, workspace.GetId())
 		return address, fmt.Errorf("ClientLog at %s: %w", address, err)
 	}
 	switch response.Msg.GetResult().(type) {
 	case *agentreplv1.ClientLogResponse_Success:
 		return address, nil
 	case *agentreplv1.ClientLogResponse_Error:
+		c.invalidateWorkspace(address, workspace.GetId())
 		return address, fmt.Errorf("ClientLog at %s was refused", address)
 	default:
+		c.invalidateWorkspace(address, workspace.GetId())
 		return address, fmt.Errorf("ClientLog at %s returned neither success nor error", address)
 	}
+}
+
+func (c *Client) resolveWorkspace(
+	ctx context.Context,
+	client agentreplv1connect.AgentReplClient,
+	address string,
+	dir string,
+) (*workspacev1.WorkspaceRef, error) {
+	wanted, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace directory %q: %w", dir, err)
+	}
+	wanted, err = filepath.EvalSymlinks(wanted)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace directory symlinks %q: %w", dir, err)
+	}
+	wanted = filepath.Clean(wanted)
+	if cached := c.cachedWorkspace(address, wanted); cached != nil {
+		return cached, nil
+	}
+
+	streamCtx, stopStream := context.WithCancel(ctx)
+	stream, err := client.WatchWorkspaceRoster(streamCtx,
+		connect.NewRequest(&agentreplv1.WatchWorkspaceRosterRequest{}))
+	if err != nil {
+		stopStream()
+		return nil, fmt.Errorf("WatchWorkspaceRoster at %s: %w", address, err)
+	}
+	defer func() {
+		stopStream()
+		_ = stream.Close()
+	}()
+	for stream.Receive() {
+		ref, err := workspaceRefInRoster(stream.Msg().GetRoster(), wanted)
+		if err != nil {
+			return nil, fmt.Errorf("resolve workspace ref from roster at %s: %w", address, err)
+		}
+		if ref != nil {
+			c.cacheWorkspace(address, wanted, ref)
+			return copyWorkspaceRef(ref), nil
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared: %w", address, wanted, err)
+	}
+	return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before workspace %q appeared", address, wanted)
+}
+
+func workspaceRefInRoster(roster *frontendv1.WorkspaceRoster, wantedDir string) (*workspacev1.WorkspaceRef, error) {
+	var found *workspacev1.WorkspaceRef
+	visit := func(ref *workspacev1.WorkspaceRef) error {
+		if ref == nil || filepath.Clean(ref.GetDir()) != wantedDir {
+			return nil
+		}
+		if ref.GetId() == "" || ref.GetDir() == "" {
+			return fmt.Errorf("the matching roster row carries an incomplete workspace ref")
+		}
+		if found != nil && found.GetId() != ref.GetId() {
+			return fmt.Errorf("workspace dir %q appears under both %q and %q", wantedDir, found.GetId(), ref.GetId())
+		}
+		found = ref
+		return nil
+	}
+	var walk func([]*frontendv1.RosterRow) error
+	walk = func(rows []*frontendv1.RosterRow) error {
+		for _, row := range rows {
+			if err := visit(row.GetWorkspace().GetWorkspace()); err != nil {
+				return err
+			}
+			if err := walk(row.GetChildren()); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, section := range roster.GetRepository().GetSections() {
+		if err := walk(section.GetRows().GetRows()); err != nil {
+			return nil, err
+		}
+	}
+	for _, section := range roster.GetTask().GetSections() {
+		if err := walk(section.GetRows().GetRows()); err != nil {
+			return nil, err
+		}
+	}
+	if err := walk(roster.GetRecentlyMerged().GetRows().GetRows()); err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
+func (c *Client) cachedWorkspace(address, dir string) *workspacev1.WorkspaceRef {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cachedAddress != address || c.cachedDir != dir || c.cachedRef == nil {
+		return nil
+	}
+	return copyWorkspaceRef(c.cachedRef)
+}
+
+func (c *Client) cacheWorkspace(address, dir string, ref *workspacev1.WorkspaceRef) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cachedAddress = address
+	c.cachedDir = dir
+	c.cachedRef = copyWorkspaceRef(ref)
+}
+
+func (c *Client) invalidateWorkspace(address, id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cachedAddress == address && c.cachedRef != nil && c.cachedRef.GetId() == id {
+		c.cachedAddress = ""
+		c.cachedDir = ""
+		c.cachedRef = nil
+	}
+}
+
+func copyWorkspaceRef(ref *workspacev1.WorkspaceRef) *workspacev1.WorkspaceRef {
+	if ref == nil {
+		return nil
+	}
+	return &workspacev1.WorkspaceRef{Id: ref.GetId(), Dir: ref.GetDir()}
 }
 
 // wireContext translates the logger's typed list values into Struct's JSON

@@ -1,17 +1,25 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	sharedlogging "agentrepl/logging"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -29,11 +37,12 @@ type fakeClientLog struct {
 	requests []*agentreplv1.ClientLogRequest
 	records  []logRecord
 	received chan struct{}
+	roots    []string
 }
 
 var clientLogsByGlobalPath sync.Map
 
-func startFakeClientLog(t *testing.T, stateDir, globalLogPath string) *fakeClientLog {
+func startFakeClientLog(t *testing.T, stateDir, globalLogPath string, roots []string) *fakeClientLog {
 	t.Helper()
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		t.Fatalf("create fake daemon state dir: %v", err)
@@ -42,10 +51,13 @@ func startFakeClientLog(t *testing.T, stateDir, globalLogPath string) *fakeClien
 	if err != nil {
 		t.Fatalf("listen for fake ClientLog: %v", err)
 	}
-	fake := &fakeClientLog{t: t, listener: listener, received: make(chan struct{}, 4096)}
+	fake := &fakeClientLog{
+		t: t, listener: listener, received: make(chan struct{}, 4096),
+		roots: append([]string(nil), roots...),
+	}
 	mux := http.NewServeMux()
-	mux.Handle(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
-		connect.NewUnaryHandler(agentreplv1connect.AgentReplRegisterWorkspaceProcedure, fake.registerWorkspace))
+	mux.Handle(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+		connect.NewServerStreamHandler(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure, fake.watchWorkspaceRoster))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure, fake.handle))
 	fake.server = &http.Server{Handler: mux}
@@ -64,15 +76,94 @@ func startFakeClientLog(t *testing.T, stateDir, globalLogPath string) *fakeClien
 	return fake
 }
 
-func (f *fakeClientLog) registerWorkspace(
-	_ context.Context,
-	req *connect.Request[agentreplv1.RegisterWorkspaceRequest],
-) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
-	return connect.NewResponse(&agentreplv1.RegisterWorkspaceResponse{
-		Result: &agentreplv1.RegisterWorkspaceResponse_Success{Success: &agentreplv1.RegisterWorkspaceSuccess{
-			Workspace: &workspacev1.WorkspaceRef{Id: "daemon-workspace-id", Dir: req.Msg.GetDir()},
-		}},
-	}), nil
+func (f *fakeClientLog) watchWorkspaceRoster(
+	ctx context.Context,
+	_ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
+	stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse],
+) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		refs, err := f.workspaceRefs()
+		if err != nil {
+			return err
+		}
+		if len(refs) > 0 {
+			if err := stream.Send(fakeRoster(refs)); err != nil {
+				return err
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func (f *fakeClientLog) workspaceRefs() ([]*workspacev1.WorkspaceRef, error) {
+	byDir := map[string]*workspacev1.WorkspaceRef{}
+	for _, root := range f.roots {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, line := range bytes.Split(raw, []byte{'\n'}) {
+				var record struct {
+					CWD string `json:"cwd"`
+				}
+				if json.Unmarshal(line, &record) != nil || record.CWD == "" {
+					continue
+				}
+				dir, err := filepath.EvalSymlinks(record.CWD)
+				if err != nil {
+					continue
+				}
+				dir = filepath.Clean(dir)
+				id, err := sharedlogging.WorkspaceID(dir)
+				if err != nil {
+					return err
+				}
+				byDir[dir] = &workspacev1.WorkspaceRef{Id: "daemon-" + id, Dir: dir}
+				break
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("scan fake daemon roster beneath %q: %w", root, err)
+		}
+	}
+	dirs := make([]string, 0, len(byDir))
+	for dir := range byDir {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	refs := make([]*workspacev1.WorkspaceRef, 0, len(dirs))
+	for _, dir := range dirs {
+		refs = append(refs, byDir[dir])
+	}
+	return refs, nil
+}
+
+func fakeRoster(refs []*workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
+	rows := make([]*frontendv1.RosterRow, 0, len(refs))
+	for _, ref := range refs {
+		rows = append(rows, &frontendv1.RosterRow{
+			Workspace: &frontendv1.RosterRowWorkspace{Workspace: ref},
+		})
+	}
+	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
+			Rows: &frontendv1.RosterRows{Rows: rows},
+		}}},
+	}}
 }
 
 func (f *fakeClientLog) handle(
