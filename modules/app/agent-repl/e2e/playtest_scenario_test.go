@@ -184,6 +184,14 @@ func (s *playtestScenario) repoAt(t *testing.T, name string) *harness.Repo {
 
 // register registers one worktree through the ordinary command, asserting
 // the binding the user reaches it by first.
+//
+// IT RETURNS ON A SETTLED FRAME. Registering a directory MINTS a workspace,
+// and a minted workspace lands on its own panel -- see landing_test.go for
+// the whole of that mechanism. The registry holding the name is only the
+// tab's arrival, which is the FIRST of the landing's steps rather than its
+// last, so a playbook that arranged windows or photographed right here was
+// racing a panel show it never asked for. Waiting for it once, here, settles
+// it for every playbook rather than for the two that noticed.
 func (s *playtestScenario) register(t *testing.T, dir string) string {
 	t.Helper()
 	// `SPC TAB C-n` prompts for the directory, so the binding is a LOOKUP and
@@ -193,6 +201,7 @@ func (s *playtestScenario) register(t *testing.T, dir string) string {
 		t.Fatalf("SPC TAB C-n resolves to %q, want %q", got, want)
 	}
 	name := addProjectWorkspace(t, s.E, dir)
+	awaitMintedLanding(s.E, name)
 	if s.Name == "" {
 		s.Name = name
 	}
