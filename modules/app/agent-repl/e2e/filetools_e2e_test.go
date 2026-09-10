@@ -42,6 +42,7 @@
 package e2e
 
 import (
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -133,8 +134,15 @@ func TestGlob(t *testing.T) {
 	if got := len(lines.GetLines()); got != 2 {
 		t.Fatalf("Glob tool call's lines output has %d lines, want the two matched paths", got)
 	}
-	if lines.GetOmitted() == nil {
-		t.Fatal("Glob tool call's lines output carries no omitted floor, want one composed (7 total, 2 shown)")
+	// THE SENTENCE, not merely its presence. `countIsComplete: true` in the
+	// fixture selects AgentGlobOmittedExact over AgentGlobOmittedAtLeast, and
+	// the two arms are DIFFERENT CLAIMS a reader acts on differently — an
+	// exact remainder against a floor. Only the composed text distinguishes
+	// them once the row is on the wire, so the text is what is asserted.
+	const wantOmitted = "5 more paths not shown"
+	if got := lines.GetOmitted().GetText(); got != wantOmitted {
+		t.Fatalf("Glob tool call's omitted line = %q, want %q composed from the exact arm (7 total, 2 shown); %q would be the FLOOR arm and a different claim",
+			got, wantOmitted, "at least "+wantOmitted)
 	}
 }
 
@@ -149,15 +157,20 @@ func TestGrepContentFilesCount(t *testing.T) {
 	w, ws := newFileToolsWorkspace(t)
 
 	cases := []struct {
-		name         string
-		scenario     string
-		wantOmitted  bool // AgentGrepContentPartial/AgentGrepFilesPartial present
+		name        string
+		scenario    string
+		wantOmitted bool // AgentGrepContentPartial/AgentGrepFilesPartial present
+		// omittedText is the exact line the daemon composes for that partial
+		// arm. The remainder is SUBTRACTED shim-side (the vendor reports a
+		// total and never the omission), so the figure in this sentence is
+		// the only place that arithmetic is visible on the wire.
+		omittedText  string
 		wantLines    bool // rendered as FeedToolCallLinesOutput
 		wantText     bool // rendered as FeedToolCallTextOutput ("a count, a bare summary")
 		minLineCount int
 	}{
 		// grep-content: 2 lines returned, totalLines 5 > numLines 2 — partial.
-		{name: "content", scenario: "grep-content", wantOmitted: true, wantLines: true, minLineCount: 1},
+		{name: "content", scenario: "grep-content", wantOmitted: true, omittedText: "3 more lines not shown", wantLines: true, minLineCount: 1},
 		// grep-files: 1 file returned, totalFiles 1 == numFiles 1 — all, no omission.
 		{name: "files", scenario: "grep-files", wantOmitted: false, wantLines: true, minLineCount: 1},
 		// grep-count: no line/file list at all, only a total — the frontend's
@@ -185,6 +198,11 @@ func TestGrepContentFilesCount(t *testing.T) {
 				}
 				if tc.wantOmitted && lines.GetOmitted() == nil {
 					t.Fatalf("grep-%s tool call's lines output carries no omitted floor, want one composed", tc.name)
+				}
+				if tc.omittedText != "" {
+					if got := lines.GetOmitted().GetText(); got != tc.omittedText {
+						t.Fatalf("grep-%s tool call's omitted line = %q, want %q composed from the shim's subtraction", tc.name, got, tc.omittedText)
+					}
 				}
 				if !tc.wantOmitted && lines.GetOmitted() != nil {
 					t.Fatalf("grep-%s tool call's lines output carries an omitted floor %v, want none (every match is present)", tc.name, lines.GetOmitted())
@@ -231,10 +249,16 @@ func TestReadWholeHeadRange(t *testing.T) {
 		name        string
 		scenario    string
 		wantOmitted bool
+		// omittedText is the exact line the extent composes. A head and a
+		// range both say they are short of the file, but they say DIFFERENT
+		// THINGS: a head counts what it showed against the total, a range
+		// names the window it drew. Asserting only presence would let either
+		// wording stand in for the other.
+		omittedText string
 	}{
 		{name: "whole", scenario: "read", wantOmitted: false},
-		{name: "head", scenario: "read-head", wantOmitted: true},
-		{name: "range", scenario: "read-range", wantOmitted: true},
+		{name: "head", scenario: "read-head", wantOmitted: true, omittedText: "showing 2 of 4 lines"},
+		{name: "range", scenario: "read-range", wantOmitted: true, omittedText: "lines 2-3 of 4"},
 	}
 
 	for _, tc := range cases {
@@ -254,6 +278,11 @@ func TestReadWholeHeadRange(t *testing.T) {
 			}
 			if tc.wantOmitted && code.GetOmitted() == nil {
 				t.Fatalf("read-%s tool call's code output carries no omitted line, want one composed for the cut", tc.name)
+			}
+			if tc.omittedText != "" {
+				if got := code.GetOmitted().GetText(); got != tc.omittedText {
+					t.Fatalf("read-%s tool call's omitted line = %q, want %q -- the wording this extent composes, not the other extent's", tc.name, got, tc.omittedText)
+				}
 			}
 			if !tc.wantOmitted && code.GetOmitted() != nil {
 				t.Fatalf("read-%s tool call's code output carries an omitted line %v, want none", tc.name, code.GetOmitted())
@@ -283,9 +312,34 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 	cases := []struct {
 		name     string
 		scenario string
+		// wantLines is the drawn diff, line for line: the composed hunk
+		// header first, then each line's text with its marker already
+		// stripped onto the arm.
+		wantLines []string
+		// wantAdded is how many of those lines carry the ADDED arm. A
+		// creation's every content line is an addition, and the count is
+		// asserted because a terminating newline once produced a further,
+		// BLANK addition -- an empty green row under the written line,
+		// with the header stating "+1,2" for a one-line file.
+		wantAdded int
 	}{
-		{name: "created", scenario: "write-create"},
-		{name: "updated", scenario: "write-update"},
+		{
+			name:      "created",
+			scenario:  "write-create",
+			wantLines: []string{"@@ -1,0 +1,1 @@", "export const fresh = true;"},
+			wantAdded: 1,
+		},
+		{
+			// THE PRODUCER'S OWN DIFF, not the patch the fixture states.
+			// agent_activity.proto: "The producer diffs after the fact
+			// precisely so a card can show the CHANGE". Both planes diff, so
+			// this hunk is the same whichever of them settles the unit --
+			// which is what stops the drawn card from depending on a race.
+			name:      "updated",
+			scenario:  "write-update",
+			wantLines: []string{"@@ -2,3 +2,4 @@", "export const two = 2;", "export const three = 3;", "export const four = 4;", "export const five = 5;"},
+			wantAdded: 1,
+		},
 	}
 
 	for _, tc := range cases {
@@ -302,6 +356,21 @@ func TestWriteCreatedAndUpdated(t *testing.T) {
 			}
 			if len(diff.GetLines()) == 0 {
 				t.Fatalf("write-%s tool call's diff output carries no lines, want the write's hunk", tc.name)
+			}
+			var got []string
+			added := 0
+			for _, line := range diff.GetLines() {
+				got = append(got, line.GetText())
+				if line.GetAdded() != nil {
+					added++
+				}
+			}
+			if !slices.Equal(got, tc.wantLines) {
+				t.Fatalf("write-%s tool call's drawn diff = %q, want %q", tc.name, got, tc.wantLines)
+			}
+			if added != tc.wantAdded {
+				t.Fatalf("write-%s tool call's drawn diff carries %d added lines, want %d: a file's terminating newline is not a further, blank addition",
+					tc.name, added, tc.wantAdded)
 			}
 		})
 	}
