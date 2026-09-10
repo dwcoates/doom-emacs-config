@@ -377,11 +377,8 @@ func (w *watcher) SetMainAgent(agent *conversationv1.AgentId) {
 		return
 	}
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.adoptMainAgentLocked(agent, "start_turn")
-	w.mu.Unlock()
-	// THE NAMING CAN END A TURN, by releasing a terminal that was held for it,
-	// and a turn end recorded under mu reaches the lifecycle sink only here.
-	w.flushTurnEnds()
 }
 
 // adoptMainAgentLocked latches the main agent's identity the first time it is
@@ -396,9 +393,11 @@ func (w *watcher) adoptMainAgentLocked(agent *conversationv1.AgentId, source str
 		w.log.Debug("daemon.sessionwatcher.main_agent", "main agent named", dlog.Context{
 			"agent_id": agent.GetValue(), "source": source,
 		})
-		// THE NAME IS WHAT THE HELD TERMINAL WAS WAITING FOR. A terminal that
-		// beat the naming here is routed now, with the turn it belongs to.
-		w.releaseHeldTerminalLocked()
+		// THE RELEASE IS NOT DONE HERE. Naming is a precondition for it, not
+		// the moment for it: the caller may still owe the views the turn's
+		// OPEN edge, and a terminal replayed before that edge leaves the
+		// footer with a turn it never saw start. Each naming site releases
+		// when it has finished handing over what it knows.
 		return
 	}
 	if w.mainAgent.GetValue() != agent.GetValue() {
@@ -438,8 +437,8 @@ func (w *watcher) OnTurnOpening(ws ids.WorkspaceID, turn ids.TurnID) {
 // wins, and so does a later turn.
 func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	if ws != w.ws || w.turn == nil || *w.turn != turn {
-		w.mu.Unlock()
 		return
 	}
 	w.turn = nil
@@ -450,21 +449,10 @@ func (w *watcher) OnTurnOpenFailed(ws ids.WorkspaceID, turn ids.TurnID) {
 	// terminal held for that name has nothing left to wait on.
 	w.flushHeldTerminalLocked()
 	w.signalFreenessLocked()
-	w.mu.Unlock()
-	w.flushTurnEnds()
 }
 
 // OnTurnOpened is the prompt queue handing over an accepted turn.
 func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
-	w.onTurnOpenedUnderLock(ws, prompt, page)
-	// ACCEPTANCE CAN END THE TURN IT ACCEPTS: naming the main agent releases a
-	// terminal held for that name, and the turn end it records reaches the
-	// lifecycle sink only off the lock, here.
-	w.flushTurnEnds()
-}
-
-// onTurnOpenedUnderLock is OnTurnOpened's body; it takes and releases mu.
-func (w *watcher) onTurnOpenedUnderLock(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -511,6 +499,13 @@ func (w *watcher) onTurnOpenedUnderLock(ws ids.WorkspaceID, prompt *conversation
 	if page != nil {
 		w.routeOpeningPageLocked(w.main, page)
 	}
+	// THE HAND-OVER IS COMPLETE, so a terminal held for this turn's naming is
+	// released HERE and not a line earlier: the views have just been given the
+	// turn's OPEN edge, and the replay now reaches them in the order they
+	// would have seen had the answer beaten the stream. Released at the
+	// naming instead, the footer took a terminal for a turn it had never seen
+	// start and never came back to idle.
+	w.releaseHeldTerminalLocked()
 }
 
 // SessionEnding records that the daemon itself is ending this session, so the
@@ -1094,6 +1089,25 @@ func (w *watcher) flushTurnEnds() {
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 	}
+}
+
+// flushTurnEndsAsync hands the recorded turn ends to the lifecycle sink on a
+// goroutine of its own, joinable through the same WaitGroup the inline flush
+// uses.
+//
+// IT EXISTS FOR EXACTLY ONE CALLER: the release of a HELD terminal. That
+// release runs on the PROMPT QUEUE'S OWN call into this watcher — the queue is
+// what names the main agent, from StartTurn's answer, while it holds that
+// workspace's delivery lock — and the lifecycle sink IS the prompt queue,
+// whose OnTurnEnded takes the same lock. Told inline it is a self-deadlock,
+// and the turn's delivery never returns. Every other turn end is recorded by a
+// stream goroutine, which flushes inline the moment it drops mu.
+func (w *watcher) flushTurnEndsAsync() {
+	w.dispatching.Add(1)
+	go func() {
+		defer w.dispatching.Done()
+		w.flushTurnEnds()
+	}()
 }
 
 // stale reports whether a goroutine's generation has been superseded, which

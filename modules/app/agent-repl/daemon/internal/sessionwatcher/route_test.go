@@ -395,12 +395,21 @@ func TestAWithheldTerminalIsReleasedWhenTheMainAgentIsNamed(t *testing.T) {
 	h.quiet()
 	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
 
-	// Act: the naming lands second.
+	// Act: StartTurn's answer lands second, exactly as the queue hands it over.
 	h.w.SetMainAgent(agentID("main-1"))
+	h.w.OnTurnOpened("ws-1", &conversationv1.AgentPrompt{
+		Id:    &conversationv1.TurnId{Value: "turn-1"},
+		Agent: agentID("main-1"),
+	}, nil)
+	// The release's lifecycle edge is dispatched OFF the caller's goroutine
+	// (see flushTurnEndsAsync); this is the join Close performs.
+	h.w.dispatching.Wait()
 	got := h.drainNow()
 
-	// Assert.
+	// Assert: the views see the turn OPEN before its terminal, which is the
+	// order they would have seen had the answer beaten the stream.
 	assertNames(t, got, []string{
+		"footer.OnTurnOpened", "feed.OnTurnOpened",
 		"feed.OnAgentTerminal", "footer.OnAgentTerminal", "sidebar.OnAgentTerminal", "lifecycle.OnTurnEnded",
 	})
 	ended := requireEvent(t, got, "lifecycle.OnTurnEnded")
