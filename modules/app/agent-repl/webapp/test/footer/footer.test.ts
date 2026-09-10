@@ -326,3 +326,58 @@ describe("mountFooter: dispose", () => {
     expect(() => footer.dispose()).not.toThrow();
   });
 });
+
+describe("mountFooter: a stop's own answer outlives the push it caused", () => {
+  // THE VIEW IS DRAWN WHOLE ON EVERY PUSH, and a stop is the one thing on the
+  // footer whose answer is NOT pushed: the note, the refusal and the confirm
+  // challenge are the click's own, drawn at the control. A stop always causes
+  // the next push -- the live set it just emptied is in the view -- so a
+  // control rebuilt per draw loses its answer within milliseconds. Measured in
+  // the G51 playbook: the daemon answered `interrupted_detached count=3` and
+  // the footer that came back carried a bare "stop all", which is the only
+  // place that count is ever stated.
+
+  it("keeps the SAME turn-stop element across a redraw", async () => {
+    // Arrange: a live turn, so the strip mounts the stop.
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    await settle();
+    const before = host.querySelector(".footer-stop-turn");
+    // Act: another push, which redraws the whole view.
+    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) })));
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-stop-turn")).toBe(before);
+  });
+
+  it("carries whatever the stop drew at the control through that redraw", async () => {
+    // Arrange
+    const { host, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    await settle();
+    const note = document.createElement("span");
+    note.className = "footer-stop-note";
+    note.setAttribute("data-stop-outcome", "interruptedDetached");
+    note.textContent = "stopped 3 agents";
+    host.querySelector(".footer-stop-turn")?.appendChild(note);
+    // Act
+    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 2000) }) })));
+    await settle();
+    // Assert
+    expect(host.querySelector(".footer-stop-note")?.textContent).toBe("stopped 3 agents");
+  });
+
+  it("drops the controls with the footer, so nothing outlives the mount", async () => {
+    // Arrange
+    const { host, footer, h } = mount();
+    await settle();
+    h.tail.push(pushView(footerView({ strip: strip({ turnStartedAtMs: BigInt(NOW - 1000) }) })));
+    await settle();
+    // Act
+    footer.dispose();
+    // Assert
+    expect(host.querySelector(".footer-stop-turn")).toBeNull();
+  });
+});

@@ -22,6 +22,7 @@ import {
 } from "../../src/footer/strip.js";
 import type { FooterPanel } from "../../src/footer/expanded.js";
 import { harness, strip, type Harness, type StripInit } from "./harness.js";
+import { createStopControls } from "../../src/footer/stop.js";
 
 /** Every test's clock reads from here, so a countdown's arithmetic is exact. */
 const NOW = 1_800_000_000_000;
@@ -43,8 +44,7 @@ interface Drawn {
 /** Draw a strip, recording every panel the user's clicks would open. */
 function drawStrip(init: StripInit = {}, selection: FooterPanel | null = null, h = harness()): Drawn {
   const selected: FooterPanel[] = [];
-  const row = drawFooterStrip(strip(init), {
-    ctx: h.ctx,
+  const row = drawFooterStrip(strip(init), { ctx: h.ctx, stops: createStopControls(h.ctx),
     selection,
     onSelect: (panel) => selected.push(panel),
   });
@@ -151,7 +151,7 @@ describe("drawFooterStatus: every arm the contract declares", () => {
     });
     const h = harness();
     expect(() =>
-      drawFooterStrip(bare, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+      drawFooterStrip(bare, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });
@@ -237,7 +237,7 @@ describe("drawFooterStatusActivity", () => {
     expect(() =>
       drawFooterStrip(
         strip({ status: status("waiting", { substatus: { case: "permission", value: {} } }) }),
-        { ctx: h.ctx, selection: null, onSelect: () => {} },
+        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
       ),
     ).toThrow(MalformedView);
   });
@@ -247,7 +247,7 @@ describe("drawFooterStatusActivity", () => {
     expect(() =>
       drawFooterStrip(
         strip({ status: status("loading", { substatus: { case: "memory", value: {} } }) }),
-        { ctx: h.ctx, selection: null, onSelect: () => {} },
+        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
       ),
     ).toThrow(MalformedView);
   });
@@ -257,7 +257,7 @@ describe("drawFooterStatusActivity", () => {
     expect(() =>
       drawFooterStrip(
         strip({ status: status("idle", { activity: { at: { atMs: BigInt(NOW) } } }) }),
-        { ctx: h.ctx, selection: null, onSelect: () => {} },
+        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
       ),
     ).toThrow(MalformedView);
   });
@@ -271,7 +271,7 @@ describe("drawFooterStatusActivity", () => {
             activity: { kind: { case: "notification", value: { text: "hi" } } },
           }),
         }),
-        { ctx: h.ctx, selection: null, onSelect: () => {} },
+        { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} },
       ),
     ).toThrow(MalformedView);
   });
@@ -743,8 +743,7 @@ describe("drawFooterTokensCell", () => {
   it("refuses a verdict badge whose oneof sets no arm", () => {
     const h = harness();
     expect(() =>
-      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), {
-        ctx: h.ctx,
+      drawFooterStrip(strip({ tokens: { input: { text: "x" }, verdict: {} } }), { ctx: h.ctx, stops: createStopControls(h.ctx),
         selection: null,
         onSelect: () => {},
       }),
@@ -842,7 +841,7 @@ describe("an arm this build has no case for", () => {
     };
     // ACT / ASSERT
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 
@@ -858,7 +857,7 @@ describe("an arm this build has no case for", () => {
     ).status.value.activity;
     activity.kind = { case: "teleporting", value: {} };
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 
@@ -871,7 +870,7 @@ describe("an arm this build has no case for", () => {
       view.tokens as unknown as { verdict: { verdict: { case: string; value: unknown } } }
     ).verdict.verdict = { case: "unaudited", value: {} };
     expect(() =>
-      drawFooterStrip(view, { ctx: h.ctx, selection: null, onSelect: () => {} }),
+      drawFooterStrip(view, { ctx: h.ctx, stops: createStopControls(h.ctx), selection: null, onSelect: () => {} }),
     ).toThrow(MalformedView);
   });
 });

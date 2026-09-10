@@ -849,6 +849,44 @@ describe("the agents panel's stop-all", () => {
     expect(harness.refusalArms()).toEqual([]);
   });
 
+  // THE PUSH THE STOP CAUSED MUST NOT ERASE THE STOP'S ANSWER. The footer draws
+  // its whole view per push and a stop always changes the view -- the live set
+  // it just emptied is in it -- so a control rebuilt per draw loses the one
+  // statement of the count anywhere in the product. Measured in the G51
+  // playbook: the daemon answered `interrupted_detached count=3` and the
+  // footer that came back carried a bare "stop all" with no note on it.
+  it("keeps the count on the control when the next footer push lands", async () => {
+    // Arrange
+    await openAgents();
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "interruptedDetached", value: { count: 3n } } },
+        },
+      }),
+    );
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Act: the push the stop caused -- nothing is live any more.
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "done" }));
+    await harness.settle();
+    // Assert
+    expect(harness.text('[data-stop-outcome="interruptedDetached"]')).toContain("3");
+  });
+
+  it("keeps a refusal on the control when the next footer push lands", async () => {
+    // Arrange: the same guarantee for the other thing a click can be told.
+    await openAgents();
+    harness.fake.refuse("interrupt", "confirmRequired");
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Act
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "done" }));
+    await harness.settle();
+    // Assert
+    expect(harness.$('.footer-stop-all .refusal[data-arm="confirmRequired"]')).not.toBeNull();
+  });
+
   it("offers no confirm step on the fan-wide target", async () => {
     // Arrange: `confirm_agents` is meaningless on all_agents, so the challenge
     // arm arriving there is a dead end rather than a second button.
