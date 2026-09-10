@@ -130,7 +130,7 @@ function evidenceRows(kind: FailureKind): ReadonlyArray<readonly [string, string
  * overlay costs nothing until something files a card.
  */
 export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
-  log("debug", "mounting the failure overlay", { operation: "failure-overlay.mount" });
+  log.debug("mounting the failure overlay", { operation: "failure-overlay.mount" });
   const cards = new Map<ClientFailureArm, HTMLElement>();
   /** Per arm, the instant its suppression window ends. */
   const suppressedUntil = new Map<ClientFailureArm, number>();
@@ -149,7 +149,7 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
         // The daemon never mints one of these, and a frontend never mints the
         // daemon's. Refusing loudly is the whole point of splitting the
         // vocabulary by producer.
-        log("error", `the failure overlay was handed the non-client arm '${arm}'`, {
+        log.error(`the failure overlay was handed the non-client arm '${arm}'`, {
           operation: "failure-overlay.foreign-arm",
           context: { arm },
         });
@@ -160,14 +160,15 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
         // LOGGED, NOT DRAWN. The failure is real and the record of it must
         // survive; what is withheld is the alarm, for the window the daemon
         // itself named.
-        log("info", `the ${arm} failure card is suppressed for an announced outage`, {
+        log.info(`the ${arm} failure card is suppressed for an announced outage`, {
           operation: "failure-overlay.suppressed",
           context: { arm, until_ms: until },
         });
         return;
       }
       const replacing = cards.has(arm);
-      log(replacing ? "debug" : "error", `${replacing ? "replacing" : "filing"} the ${arm} failure card`, {
+      const write = replacing ? log.debug : log.error;
+      write(`${replacing ? "replacing" : "filing"} the ${arm} failure card`, {
         operation: replacing ? "failure-overlay.replace" : "failure-overlay.report",
         context: { arm },
       });
@@ -176,7 +177,7 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
     },
 
     suppress(arm: ClientFailureArm, untilMs: number): void {
-      log("info", `suppressing the ${arm} failure card until an announced instant`, {
+      log.info(`suppressing the ${arm} failure card until an announced instant`, {
         operation: "failure-overlay.suppress",
         context: { arm, until_ms: untilMs },
       });
@@ -193,7 +194,7 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
       // for the remainder of an outage that did not happen.
       suppressedUntil.delete(arm);
       if (!cards.delete(arm)) return;
-      log("info", `retracting the ${arm} failure card`, {
+      log.info(`retracting the ${arm} failure card`, {
         operation: "failure-overlay.retract",
         context: { arm },
       });
@@ -201,7 +202,7 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
     },
 
     dispose(): void {
-      log("debug", "disposing the failure overlay", { operation: "failure-overlay.dispose" });
+      log.debug("disposing the failure overlay", { operation: "failure-overlay.dispose" });
       cards.clear();
       suppressedUntil.clear();
       host.replaceChildren();

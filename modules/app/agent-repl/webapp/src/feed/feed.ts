@@ -84,7 +84,7 @@ export interface FeedHandle extends Handle {
 
 /** Mount the root feed into HOST. */
 export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): FeedHandle {
-  log("info", "mounting the feed", { operation: "feed.mount", context: {} });
+  log.info("mounting the feed", { operation: "feed.mount", context: {} });
 
   const scrollBox = deps.scrollBox ?? host.parentElement ?? null;
   const tail = scrollBox === null ? null : new TailFollow(scrollBox);
@@ -194,7 +194,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         return;
       }
       case "error":
-        log("error", "the daemon refused to open the workspace's root feed", {
+        log.error("the daemon refused to open the workspace's root feed", {
           operation: "feed.root-open-refused",
           context: { arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case },
         });
@@ -292,7 +292,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       land(here);
       return true;
     }
-    log("debug", "the reveal target is not drawn; asking the daemon where it lives", {
+    log.debug("the reveal target is not drawn; asking the daemon where it lives", {
       operation: "feed.reveal-probe",
       context: { row: id.value },
     });
@@ -312,7 +312,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       // The target is not a feed of its own — a shell bubble's row is the case
       // the ruling names — so the jump degrades to scroll-if-rendered, which is
       // exactly what the search above already tried.
-      log("warn", "the daemon refused to open the reveal target's feed", {
+      log.warn("the daemon refused to open the reveal target's feed", {
         operation: "feed.reveal-refused",
         context: { row: id.value },
       });
@@ -331,7 +331,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     if (!walked) return false;
     const found = findAcrossOpenFeeds(root, id);
     if (found === null) {
-      log("warn", "the breadcrumb walk finished without the reveal target appearing", {
+      log.warn("the breadcrumb walk finished without the reveal target appearing", {
         operation: "feed.reveal-lost",
         context: { row: id.value, crumbs: crumbs.length },
       });
@@ -348,7 +348,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       const target = requireMessage(crumb.target, "FeedBreadcrumb.target");
       const bubble = bubbleOn(controller, target);
       if (bubble === null) {
-        log("warn", "a breadcrumb names a bubble this feed does not hold", {
+        log.warn("a breadcrumb names a bubble this feed does not hold", {
           operation: "feed.reveal-crumb-absent",
           context: { crumb: target.value },
         });

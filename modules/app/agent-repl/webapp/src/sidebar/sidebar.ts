@@ -66,7 +66,7 @@ export function createSidebarPrefs(storage: Storage | null = pageStorage()): Sid
     try {
       storage.setItem(PREFS_KEY, JSON.stringify(state));
     } catch (err) {
-      log("warn", `the sidebar could not persist its preferences: ${String(err)}`, {
+      log.warn(`the sidebar could not persist its preferences: ${String(err)}`, {
         operation: "sidebar.prefs.write-failed",
         context: { cause: err },
       });
@@ -103,7 +103,7 @@ function pageStorage(): Storage | null {
   try {
     return globalThis.localStorage;
   } catch (err) {
-    log("warn", `the sidebar has no usable local storage: ${String(err)}`, {
+    log.warn(`the sidebar has no usable local storage: ${String(err)}`, {
       operation: "sidebar.prefs.unavailable",
       context: { cause: err },
     });
@@ -121,7 +121,7 @@ function read(storage: Storage | null): StoredPrefs {
     if (typeof parsed !== "object" || parsed === null) return {};
     return parsed;
   } catch (err) {
-    log("warn", `the sidebar could not read its preferences: ${String(err)}`, {
+    log.warn(`the sidebar could not read its preferences: ${String(err)}`, {
       operation: "sidebar.prefs.read-failed",
       context: { cause: err },
     });
@@ -137,7 +137,7 @@ function read(storage: Storage | null): StoredPrefs {
  * the roster is the daemon's whether anyone is watching or not.
  */
 export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDeps = {}): Handle {
-  log("debug", "mounting the workspaces rail", { operation: "sidebar.mount" });
+  log.debug("mounting the workspaces rail", { operation: "sidebar.mount" });
 
   const prefs = createSidebarPrefs(deps.storage === undefined ? pageStorage() : deps.storage);
   const attention = new AttentionRegistry(deps.timers);
@@ -186,7 +186,7 @@ export function mountSidebar(host: HTMLElement, ctx: AppContext, deps: SidebarDe
 
   return {
     dispose(): void {
-      log("debug", "disposing the workspaces rail", { operation: "sidebar.dispose" });
+      log.debug("disposing the workspaces rail", { operation: "sidebar.dispose" });
       stream.cancel();
       clear();
       attention.dispose();
@@ -240,7 +240,7 @@ function selectGrouping(
   body: HTMLElement,
   buttons: ReadonlyMap<Grouping, HTMLButtonElement>,
 ): void {
-  log("info", "switching the rail's grouping", {
+  log.info("switching the rail's grouping", {
     operation: "sidebar.grouping",
     context: { grouping },
   });

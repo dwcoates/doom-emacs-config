@@ -28,7 +28,7 @@ export function drawFeedMergeTabRow(
   rc: RowContext,
 ): HTMLElement {
   const tab = readMergeTab(row, u);
-  log("debug", "drawing a merge tab as a row of its own", {
+  log.debug("drawing a merge tab as a row of its own", {
     operation: "feed.merge.tab-row",
     context: { kind: tab.kind, state: tab.state, row: tab.id },
   });

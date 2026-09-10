@@ -10,6 +10,11 @@
  * and cannot mount anything, which is a BOOT FAILURE — hence a throw rather
  * than a "no workspace" state nothing downstream could draw.
  *
+ * `&log_level=<level>` carries the daemon process's effective
+ * `AGENT_REPL_LOG_LEVEL` into the browser, whose JavaScript cannot read process
+ * environment directly. A missing value uses the contract's `info` level for
+ * ordinary browser development; an invalid value is a boot failure.
+ *
  * `&composer=1` turns on the browser-local composer. Production runs
  * composer-less: the root composer is host-native (Emacs), and this flag
  * exists for developing the composer surface in an ordinary browser tab.
@@ -18,6 +23,8 @@
  * page reads out of the URL, and an unrecognized parameter is somebody else's
  * (a cache buster, a host's own bookkeeping), never a view instruction.
  */
+import { parseClientLogLevel, type ClientLogLevel } from "../log.js";
+
 export interface PageAddress {
   /** The daemon-minted workspace id, URL-decoded and echoed verbatim after. */
   workspaceId: string;
@@ -25,6 +32,8 @@ export interface PageAddress {
   workspaceDir: string;
   /** Whether the browser-local dev composer is enabled. */
   composer: boolean;
+  /** The effective `AGENT_REPL_LOG_LEVEL` delivered by the host. */
+  logLevel: ClientLogLevel;
 }
 
 /** Read the page address out of a `location.search` string. */
@@ -38,5 +47,10 @@ export function pageAddress(search: string): PageAddress {
   if (workspaceDir === null || workspaceDir === "") {
     throw new Error("the page address carries no &dir=<dir>; the workspace ref cannot be built");
   }
-  return { workspaceId, workspaceDir, composer: params.get("composer") === "1" };
+  return {
+    workspaceId,
+    workspaceDir,
+    composer: params.get("composer") === "1",
+    logLevel: parseClientLogLevel(params.get("log_level")),
+  };
 }

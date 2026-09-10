@@ -45,7 +45,7 @@ export type QueuePlace = "ahead" | "current" | "behind";
 
 /** The whole snapshot: ahead front-first, this workspace, behind nearest-first. */
 export function drawFeedMergeQueue(queue: FeedMergeQueue, rc: RowContext): HTMLElement {
-  log("debug", "drawing a merge queue snapshot", {
+  log.debug("drawing a merge queue snapshot", {
     operation: "merge.draw-queue",
     context: { ahead: queue.ahead.length, behind: queue.behind.length },
   });
@@ -135,7 +135,7 @@ export async function selectQueueEntryWorkspace(
   workspace: WorkspaceRef,
 ): Promise<void> {
   clearRefusal(entry);
-  log("info", "selecting a workspace from a merge queue entry", {
+  log.info("selecting a workspace from a merge queue entry", {
     operation: "merge.queue-select",
     context: { workspace: workspace.id },
   });
@@ -161,7 +161,7 @@ export async function selectQueueEntryWorkspace(
       const cause = requireCase(result.value.cause, "SelectWorkspaceError.cause");
       const sentence =
         crossCuttingSentence("SelectWorkspace", cause) ?? "that workspace could not be selected";
-      log("warn", `SelectWorkspace was refused: ${sentence}`, {
+      log.warn(`SelectWorkspace was refused: ${sentence}`, {
         operation: "merge.queue-select-refused",
         context: { arm: cause.case, workspace: workspace.id },
       });

@@ -42,24 +42,17 @@ interface LoggedCall {
 const recorded = (): LoggedCall[] => harness.fake.calls<LoggedCall>("clientLog");
 
 /** Boot quiet, then install production's log sink for the record under test. */
-async function withLogSink(): Promise<void> {
+async function withLogSink(logLevel: "debug" | "info" | "warn" | "error" = "info"): Promise<void> {
   // BOOTED QUIET, SINK INSTALLED AFTER. The wiring is main.ts's own either
   // way (`installClientLogSink` is exactly what `clientLog: true` calls); what
   // changes is that the boot's own diagnostics never reach the wire.
   //
   // Each forwarded record is its own unary round trip to the fake by design
-  // (`ClientLogRecord` carries one record, so there is no batch arm). The boot
-  // emits ~56, which crosses the throttle's `maxBatch` of 50 and so flushes
-  // fifty of them as fifty real socket trips DURING the boot, with the
-  // remainder draining on the first window: measured, a `clientLog: true` boot
-  // costs ~283ms against a quiet one's ~105ms, and every one of those trips is
-  // real I/O that stretches under parallel load. That was ~180ms of each
-  // case's 900ms budget spent on records the case does not assert about, which
-  // is why this group straddled the bound.
+  // (`ClientLogRecord` carries one record, so there is no batch arm).
   //
   // The records under test are the ones a case emits after this point, so the
   // boot's are not merely cleared, they are never sent.
-  harness = await startHarness();
+  harness = await startHarness({ logLevel });
   harness.installClientLogSink();
   harness.fake.clearCalls();
 }
@@ -84,7 +77,7 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
     expect(recorded().length).toBeGreaterThan(0);
@@ -94,7 +87,7 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.record?.level.case).toBe("warn");
@@ -104,7 +97,7 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.record?.operation).toBe("harness.warn-case");
@@ -114,7 +107,7 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.record?.message).toBe("the view arrived thin");
@@ -124,7 +117,7 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.workspace?.id).toBe(WORKSPACE_ID);
@@ -134,22 +127,20 @@ describe("a warning", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("warn", "the view arrived thin", {
+    log.warn("the view arrived thin", {
       operation: "harness.warn-case",
       context: { rows: 3 },
     });
     await flush();
     // Assert
-    // The record's context is the routing identity plus the call site's own
-    // evidence, which travels under its own `context` key.
-    expect(recorded().at(-1)?.record?.context).toMatchObject({ context: { rows: 3 } });
+    expect(recorded().at(-1)?.record?.context).toMatchObject({ rows: 3 });
   });
 
   it("waits for the throttle's window rather than calling per record", async () => {
     // Arrange
     await withLogSink();
     // Act: nothing is flushed yet.
-    log("warn", "the view arrived thin", { operation: "harness.warn-case" });
+    log.warn("the view arrived thin", { operation: "harness.warn-case" });
     await harness.settle();
     // Assert
     expect(recorded()).toHaveLength(0);
@@ -161,7 +152,7 @@ describe("an error", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("error", "the stream died", { operation: "harness.error-case" });
+    log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
     expect(recorded().at(-1)?.record?.level.case).toBe("error");
@@ -171,7 +162,7 @@ describe("an error", () => {
     // Arrange: an error is the record someone will go looking for.
     await withLogSink();
     // Act
-    log("error", "the stream died", { operation: "harness.error-case" });
+    log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
     expect(recorded().length).toBeGreaterThan(0);
@@ -181,7 +172,7 @@ describe("an error", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("error", "the stream died", { operation: "harness.error-case" });
+    log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
     expect(recorded().at(-1)?.record?.operation).toBe("harness.error-case");
@@ -191,7 +182,7 @@ describe("an error", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("error", "the stream died", { operation: "harness.error-case" });
+    log.error("the stream died", { operation: "harness.error-case" });
     await harness.settle();
     // Assert
     expect(recorded().at(-1)?.workspace?.id).toBe(WORKSPACE_ID);
@@ -203,19 +194,53 @@ describe("an info record", () => {
     // Arrange
     await withLogSink();
     // Act
-    log("info", "the reader opened a bubble", { operation: "harness.info-case" });
+    log.info("the reader opened a bubble", { operation: "harness.info-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.record?.level.case).toBe("info");
+  });
+
+  it("carries the client instant from before the throttle window", async () => {
+    // Arrange
+    await withLogSink();
+    const emittedAt = Date.now();
+    // Act
+    log.info("the reader opened a bubble", { operation: "harness.timestamp-case" });
+    await flush();
+    // Assert
+    expect(new Date(recordFor("harness.timestamp-case").timestamp).getTime()).toBe(emittedAt);
+  });
+
+  it("marks a normal record non-verbose", async () => {
+    // Arrange
+    await withLogSink();
+    // Act
+    log.info("the reader opened a bubble", { operation: "harness.normal-case" });
+    await flush();
+    // Assert
+    expect(recordFor("harness.normal-case").verbose).toBe(false);
+  });
+
+  it("marks a verbose record verbose", async () => {
+    // Arrange
+    await withLogSink();
+    // Act
+    log.info("the reader opened a bubble", {
+      operation: "harness.verbose-case",
+      verbosity: "verbose",
+    });
+    await flush();
+    // Assert
+    expect(recordFor("harness.verbose-case").verbose).toBe(true);
   });
 });
 
 describe("a debug record", () => {
   it("carries the debug level arm", async () => {
     // Arrange
-    await withLogSink();
+    await withLogSink("debug");
     // Act
-    log("debug", "drawing a row", { operation: "harness.debug-case" });
+    log.debug("drawing a row", { operation: "harness.debug-case" });
     await flush();
     // Assert
     expect(recorded().at(-1)?.record?.level.case).toBe("debug");
@@ -262,7 +287,7 @@ describe("the session identity", () => {
     harness.fake.pushSessionIdentity(WORKSPACE_ID, { agentReplSessionId: "sess-1" });
     await harness.settle();
     // Act
-    log("error", "the view arrived thin", { operation: "harness.identity-case" });
+    log.error("the view arrived thin", { operation: "harness.identity-case" });
     await harness.settle();
     // Assert
     expect(recordFor("harness.identity-case").context).toMatchObject({
@@ -280,7 +305,7 @@ describe("the session identity", () => {
     });
     await harness.settle();
     // Act
-    log("error", "the view arrived thin", { operation: "harness.vendor-case" });
+    log.error("the view arrived thin", { operation: "harness.vendor-case" });
     await harness.settle();
     // Assert
     expect(recordFor("harness.vendor-case").context).toMatchObject({
@@ -297,7 +322,7 @@ describe("the session identity", () => {
     harness.fake.pushSessionIdentity(WORKSPACE_ID, { agentReplSessionId: "sess-2" });
     await harness.settle();
     // Act
-    log("error", "the view arrived thin", { operation: "harness.rotation-case" });
+    log.error("the view arrived thin", { operation: "harness.rotation-case" });
     await harness.settle();
     // Assert
     expect(recordFor("harness.rotation-case").context).toMatchObject({
@@ -310,7 +335,7 @@ describe("the session identity", () => {
     await withLogSink();
     await harness.fake.awaitStream("watchWebWorkspace");
     // Act
-    log("error", "the view arrived thin", { operation: "harness.unattributed-case" });
+    log.error("the view arrived thin", { operation: "harness.unattributed-case" });
     await harness.settle();
     // Assert
     expect(recordFor("harness.unattributed-case").context).not.toHaveProperty("agent_repl_session_id");

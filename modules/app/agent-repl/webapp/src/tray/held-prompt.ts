@@ -106,7 +106,7 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
   const said = requireMessage(u.said, `${path}.said`);
   const classification = requireCase(u.classification, `${path}.classification`);
   const hold = u.hold.case === undefined ? null : requireCase(u.hold, `${path}.hold`);
-  log("debug", "drawing a held prompt", {
+  log.debug("drawing a held prompt", {
     operation: "tray.held-prompt",
     context: {
       turn: turn.value,
@@ -178,7 +178,7 @@ export function drawHeldPromptQueuedAt(
   path: string,
 ): HTMLElement {
   const atMs = msOf(u.atMs, `${path}.at_ms`);
-  log("debug", "drawing a held prompt's queued age", {
+  log.debug("drawing a held prompt's queued age", {
     operation: "tray.held-prompt.queued-at",
     context: { path, at_ms: atMs },
   });
@@ -242,7 +242,7 @@ function drawClassification(
  * verdict to confirm. The pulse is what says the state is transient.
  */
 export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: string): Verdict {
-  log("debug", "drawing a classifying held prompt", {
+  log.debug("drawing a classifying held prompt", {
     operation: "tray.held-prompt.classifying",
     context: { path },
   });
@@ -257,7 +257,7 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
 
 /** Interjects: the in-flight orange, because this verdict preempts the turn. */
 export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): Verdict {
-  log("debug", "drawing an interjecting held prompt", {
+  log.debug("drawing an interjecting held prompt", {
     operation: "tray.held-prompt.interject",
     context: { path },
   });
@@ -280,7 +280,7 @@ export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): V
  */
 export function drawHeldPromptHoldForTurnEnd(u: HeldPromptHoldForTurnEnd, path: string): Verdict {
   const confirmed = u.accepted?.accepted === true;
-  log("debug", "drawing a hold-for-turn-end held prompt", {
+  log.debug("drawing a hold-for-turn-end held prompt", {
     operation: "tray.held-prompt.hold-for-turn-end",
     context: { path, accepted: confirmed },
   });
@@ -312,7 +312,7 @@ export function drawHeldPromptUninterruptibleTurn(
   path: string,
 ): Verdict {
   const literal = sessionCommandLiteral(u.command, `${path}.command`);
-  log("debug", "drawing an uninterruptible-turn held prompt", {
+  log.debug("drawing an uninterruptible-turn held prompt", {
     operation: "tray.held-prompt.uninterruptible-turn",
     context: { path, command: literal },
   });
@@ -330,7 +330,7 @@ export function drawHeldPromptClassificationError(
   u: HeldPromptClassificationError,
   path: string,
 ): Verdict {
-  log("warn", "drawing an unclassified held prompt", {
+  log.warn("drawing an unclassified held prompt", {
     operation: "tray.held-prompt.classification-error",
     context: { path, detail: u.detail },
   });
@@ -412,7 +412,7 @@ function drawHold(
  * to the shutdown it should explain, and it is a token, not prose.
  */
 export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: string): HTMLElement {
-  log("debug", "drawing a shutdown hold", {
+  log.debug("drawing a shutdown hold", {
     operation: "tray.held-prompt.shutdown-hold",
     context: { path, schedule_id: u.scheduleId },
   });
@@ -426,7 +426,7 @@ export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: stri
 /** Held behind a keep-alive turn; the turn it waits on rides a title. */
 export function drawHeldPromptKeepAliveHold(u: HeldPromptKeepAliveHold, path: string): HTMLElement {
   const turn = requireMessage(u.turn, `${path}.turn`);
-  log("debug", "drawing a keep-alive hold", {
+  log.debug("drawing a keep-alive hold", {
     operation: "tray.held-prompt.keep-alive-hold",
     context: { path, turn: turn.value },
   });
@@ -440,7 +440,7 @@ export function drawHeldPromptSessionStartingHold(
   _u: HeldPromptSessionStartingHold,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a session-starting hold", {
+  log.debug("drawing a session-starting hold", {
     operation: "tray.held-prompt.session-starting-hold",
     context: { path },
   });
@@ -452,7 +452,7 @@ export function drawHeldPromptBuildRefreshHold(
   _u: HeldPromptBuildRefreshHold,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a build-refresh hold", {
+  log.debug("drawing a build-refresh hold", {
     operation: "tray.held-prompt.build-refresh-hold",
     context: { path },
   });
@@ -482,7 +482,7 @@ export type HeldAction = "release" | "drop" | "accept";
 export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
   const forbids = spec.classification === "uninterruptibleTurn" ? spec.classification : spec.hold;
   const noReleaseTitle = forbids === null ? undefined : NO_RELEASE_TITLES[forbids];
-  log("debug", "drawing a held prompt's actions", {
+  log.debug("drawing a held prompt's actions", {
     operation: "tray.held-prompt.actions",
     context: {
       turn: spec.turn.value,
@@ -550,7 +550,7 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
       const say =
         crossCuttingSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
       drawRowRefusal(row, cause.case, say);
-      log("warn", `UpdateHeldPrompt refused a ${action}`, {
+      log.warn(`UpdateHeldPrompt refused a ${action}`, {
         operation: "tray.held-prompt.action-refused",
         context: { turn: spec.turn.value, action, arm: cause.case, sentence: say },
       });
@@ -567,7 +567,7 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
     drawRowRefusal(row, "error", "the daemon could not be reached");
-    log("error", `UpdateHeldPrompt failed for a ${action}: ${String(err)}`, {
+    log.error(`UpdateHeldPrompt failed for a ${action}: ${String(err)}`, {
       operation: "tray.held-prompt.action-failed",
       context: { turn: spec.turn.value, action, cause: err },
     });
@@ -634,7 +634,7 @@ function heldAction(
 
 /** Hand the dropped words back, bubbling, so a composer can restore them. */
 function handBackDroppedText(button: HTMLElement, text: string, turn: string): void {
-  log("info", "handing a dropped prompt's text back", {
+  log.info("handing a dropped prompt's text back", {
     operation: "tray.held-prompt.dropped",
     context: { turn, length: text.length },
   });
@@ -695,7 +695,7 @@ function holdLine(text: string): HTMLElement {
  */
 export function drawUserSaid(u: UserSaid, path: string): HTMLElement {
   const content = requireMessage(u.content, `${path}.content`);
-  log("debug", "drawing what a user said", {
+  log.debug("drawing what a user said", {
     operation: "tray.held-prompt.said",
     context: { path, blocks: content.blocks.length },
   });
@@ -727,7 +727,7 @@ export function drawUserContentBlock(u: UserContentBlock, path: string): HTMLEle
 
 /** Words, as markdown — the same reading the feed gives a prompt. */
 export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
-  log("debug", "drawing a text block", {
+  log.debug("drawing a text block", {
     operation: "tray.held-prompt.text-block",
     context: { path, length: u.text.length },
   });
@@ -746,7 +746,7 @@ export function drawTextBlock(u: TextBlock, path: string): HTMLElement {
  */
 export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
   const location = requireCase(u.location, `${path}.location`);
-  log("debug", "drawing an image block", {
+  log.debug("drawing an image block", {
     operation: "tray.held-prompt.image-block",
     context: { path, location: location.case, media_type: u.mediaType },
   });
@@ -781,7 +781,7 @@ export function drawImageBlock(u: ImageBlock, path: string): HTMLElement {
  * whoever would model it, and the card's own words are unaffected.
  */
 export function drawUnsupportedBlock(u: UnsupportedBlock, path: string): null {
-  log("warn", `a held prompt carried an unmodeled ${u.kind} block`, {
+  log.warn(`a held prompt carried an unmodeled ${u.kind} block`, {
     operation: "tray.held-prompt.unsupported-block",
     context: { path, kind: u.kind },
   });

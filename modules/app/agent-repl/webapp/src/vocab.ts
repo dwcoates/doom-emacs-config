@@ -173,7 +173,7 @@ export const PAINT_CLASS_NAMES: readonly string[] = [...PAINT_SYNTAX, ...PAINT_A
 export function paintClass(name: string): string | null {
   if (name === "") return null;
   if (PAINT_CLASS_NAMES.includes(name)) return `paint-${name}`;
-  log("warn", `paint class '${name}' is not in the shared inventory; drawing the span unstyled`, {
+  log.warn(`paint class '${name}' is not in the shared inventory; drawing the span unstyled`, {
     operation: "vocab.unknown-paint-class",
     context: { paint_class: name },
     dedupKey: `vocab.paint-class:${name}`,

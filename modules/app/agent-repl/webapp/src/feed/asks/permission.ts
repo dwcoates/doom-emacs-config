@@ -94,7 +94,7 @@ export const VERDICT_ATTRIBUTE = "data-permission-verdict";
 /** The consent card. */
 export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing a permission card", {
+  log.debug("drawing a permission card", {
     operation: "feed.asks.permission",
     context: { state: state.case, standing: u.standingOffered !== undefined },
   });
@@ -151,7 +151,7 @@ export function drawFeedPermissionHeadline(
   u: FeedPermissionHeadline,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a permission headline", {
+  log.debug("drawing a permission headline", {
     operation: "feed.asks.permission.headline",
     context: { path },
   });
@@ -166,7 +166,7 @@ export function drawFeedPermissionSubtitle(
   u: FeedPermissionSubtitle,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a permission subtitle", {
+  log.debug("drawing a permission subtitle", {
     operation: "feed.asks.permission.subtitle",
     context: { path },
   });
@@ -187,7 +187,7 @@ export function drawFeedPermissionTriggerNote(
   u: FeedPermissionTriggerNote,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a permission trigger note", {
+  log.debug("drawing a permission trigger note", {
     operation: "feed.asks.permission.trigger",
     context: { path },
   });
@@ -202,7 +202,7 @@ export function drawFeedPermissionArguments(
   u: FeedPermissionArguments,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a permission argument preview", {
+  log.debug("drawing a permission argument preview", {
     operation: "feed.asks.permission.arguments",
     context: { path, lines: u.lines.length },
   });
@@ -224,7 +224,7 @@ export function drawFeedPermissionAnswered(
   path: string,
 ): HTMLElement {
   const answer = requireCase(u.answer, `${path}.answer`);
-  log("debug", "drawing an answered permission", {
+  log.debug("drawing an answered permission", {
     operation: "feed.asks.permission.answered",
     context: { path, answer: answer.case },
   });
@@ -270,7 +270,7 @@ export function drawFeedPermissionAbandoned(
   rc: RowContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing an abandoned permission", {
+  log.debug("drawing an abandoned permission", {
     operation: "feed.asks.permission.abandoned",
     context: { path },
   });
@@ -341,7 +341,7 @@ async function answer(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(actions);
-  log("info", `answering a permission card with ${chosen.kind}`, {
+  log.info(`answering a permission card with ${chosen.kind}`, {
     operation: "feed.asks.permission.answer",
     context: { row: id.value, answer: chosen.kind, reason: "reason" in chosen },
   });

@@ -24,6 +24,18 @@ describe("pageAddress", () => {
     expect(pageAddress(`${BOTH}&composer=1`).composer).toBe(true);
   });
 
+  it("uses the logging contract's info level when the host supplies none", () => {
+    expect(pageAddress(BOTH).logLevel).toBe("info");
+  });
+
+  it("reads the host-delivered AGENT_REPL_LOG_LEVEL value", () => {
+    expect(pageAddress(`${BOTH}&log_level=debug`).logLevel).toBe("debug");
+  });
+
+  it("refuses an unknown host-delivered log level", () => {
+    expect(() => pageAddress(`${BOTH}&log_level=trace`)).toThrow(/log_level/);
+  });
+
   it("treats any composer value but 1 as off, rather than as truthy", () => {
     expect(pageAddress(`${BOTH}&composer=true`).composer).toBe(false);
   });
