@@ -234,7 +234,7 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 // WHAT THE BAR DECIDED, WHAT IT WROTE, AND WHETHER IT CAN BE READ
 // ---------------------------------------------------------------------------
 
-// tabPaint answers what the module DECIDED about WS's tab and what it then
+// tabPaintSentence answers what the module DECIDED about WS's tab and what it then
 // WROTE for it, in ONE form, as a sentence a manifest can carry.
 //
 // WHY BOTH HALVES, AND WHY IN ONE FORM. A picture of the bar can disagree
@@ -260,7 +260,7 @@ func enterWorkspace(t *testing.T, s *playtestScenario, ws string) {
 // reported: a workspace on `agent-repl--ws-tabline-names` whose name the
 // rendered line does not carry is a bar that lost a tab, which is a defect in
 // `status.el` before any picture is taken.
-func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
+func tabPaintSentence(t *testing.T, s *playtestScenario, ws string) string {
 	t.Helper()
 	parts := s.E.EvalStrings(`(let* ((line (agent-repl-workspace-tabline-formatted))
                                      (plain (substring-no-properties line))
@@ -283,14 +283,14 @@ func tabPaint(t *testing.T, s *playtestScenario, ws string) string {
 		"and the face on its name run is %s", ws, parts[1], parts[2], parts[3], parts[4], parts[5])
 }
 
-// tabPaints answers `tabPaint` for every name on the bar, joined, so a
+// tabPaintSentences answers `tabPaintSentence` for every name on the bar, joined, so a
 // capture's assertion cell says what EVERY tab was decided and written as
 // rather than only the one the step moved.
-func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
+func tabPaintSentences(t *testing.T, s *playtestScenario, names []string) string {
 	t.Helper()
 	out := make([]string, 0, len(names))
 	for _, name := range names {
-		out = append(out, tabPaint(t, s, name))
+		out = append(out, tabPaintSentence(t, s, name))
 	}
 	return strings.Join(out, "; ")
 }
@@ -298,7 +298,7 @@ func tabPaints(t *testing.T, s *playtestScenario, names []string) string {
 // barFaceColors answers the BACKGROUNDS the frame currently resolves the tab
 // bar's faces to, at the instant of a capture.
 //
-// WHY THIS SITS BESIDE `tabPaint`. That one says which FACE the module wrote
+// WHY THIS SITS BESIDE `tabPaintSentence`. That one says which FACE the module wrote
 // on a tab's name run; this says what that face is worth on this frame right
 // now. A run where two captures carry the SAME face and DIFFERENT pixels is
 // otherwise unattributable, and this is the read that attributes it.
@@ -384,7 +384,7 @@ func assertHighlightFollowsSelection(t *testing.T, s *playtestScenario, after st
 //     tab-sized field of the tab-bar band, and the stated foreground must be
 //     drawn on it. A face whose colors are right and whose pixels are some
 //     other pair is the display failing to take a string that was correct,
-//     which is the OTHER half of the split `tabPaint` sets up.
+//     which is the OTHER half of the split `tabPaintSentence` sets up.
 //
 // IT IS NOT A HEURISTIC OVER GLYPH PIXELS, and that was tried first: reading
 // the "best contrast any ink achieves on each ground" catches the defect, but
@@ -630,7 +630,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 			"sidebar draws %q's row as the current one. The bar wrote %s, on a frame resolving %s, and "+
 			"every run of text it draws clears `agent-repl-tab-contrast-floor` in the picture itself",
 			names, secondName, secondName, firstName, secondName,
-			tabPaints(t, s, names), barFaceColors(t, s)),
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The tab bar must carry TWO workspace tabs, %q and %q, in that order, and the "+
 			"SECOND must be the highlighted one — registering selects it.", names[0], names[1]))
 	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
@@ -665,7 +665,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 			"The bar wrote %s, on a frame resolving %s, and every run of text it draws clears the floor "+
 			"in the picture itself",
 			firstName, firstName, secondName, firstName,
-			tabPaints(t, s, names), barFaceColors(t, s)),
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The SAME two tabs in the SAME order, with the highlight moved back to %q. "+
 			"The selection moved; the roster did not.", firstName))
 	// AND THE BAR IS READABLE IN THE PICTURE THAT WAS JUST TAKEN.
@@ -692,7 +692,7 @@ func TestPlaytestSwitchBetweenWorkspaces(t *testing.T) {
 			"row as the current one. The bar wrote %s, on a frame resolving %s, and every run of text it "+
 			"draws clears the floor in the picture itself",
 			secondName, secondName, firstName, secondName,
-			tabPaints(t, s, names), barFaceColors(t, s)),
+			tabPaintSentences(t, s, names), barFaceColors(t, s)),
 		fmt.Sprintf("The SAME two tabs in the SAME order once more, with the highlight back on %q. "+
 			"`SPC TAB R` walks the roster's when-column, so it lands on the OTHER workspace and the bar "+
 			"looks exactly as it did in the first capture.", secondName))
@@ -830,7 +830,7 @@ func TestPlaytestClosingATabLandsOnALivePanel(t *testing.T) {
 		fmt.Sprintf("the closed tab is gone from `agent-repl--ws-tabline-names`, "+
 			"`agent-repl--ws-current-name` is %q, %q's own webview and composer buffers are both in "+
 			"windows of the frame, and the selected window holds one of them. The bar wrote %s",
-			survivorName, survivorName, tabPaints(t, s, s.tabNames())),
+			survivorName, survivorName, tabPaintSentences(t, s, s.tabNames())),
 		fmt.Sprintf("The tab bar carries ONE tab, %q, and it is highlighted. The main area shows that "+
 			"workspace's WEBAPP with its composer beneath it — a sidebar, a hold tray and a footer, and "+
 			"a mode line under them. What this picture must NOT be is an empty frame: a single blank "+
