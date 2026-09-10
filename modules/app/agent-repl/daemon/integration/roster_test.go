@@ -960,7 +960,7 @@ func rosterStatusName(row *frontendv1.RosterRow) string {
 // init -> submitting -> thinking, each step no earlier than the one before,
 // and never `ready`.
 //
-// Two defects sat in that walk, both found by the playtest's cold start. The
+// Two defects sat in that walk, both found in a headless run's cold start. The
 // rpc mints the turn and parks it under the revival hold, and the roster
 // learned of the turn only when the hold was released -- so between the shim's
 // SessionStarted and the release it read a live idle session with no turn and

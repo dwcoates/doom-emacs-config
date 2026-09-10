@@ -897,11 +897,11 @@ func TestTheContextCutClearsCompacting(t *testing.T) {
 // of "A PARKED SESSION IS IDLE, NOT BROKEN" (resolve/sidebar/status.go), whose
 // `linkArm` promises to mirror the disconnected step below fact for fact.
 //
-// Measured in the playtest world (05-tab-arms-lifecycle/15-arm-hibernated): the
-// strip read `disconnected · dead` after the idle sweep parked a settled
-// session, and because the webapp's composer gate IS that word
-// (webapp/src/main.ts — a `disconnected` status closes the composer) the page
-// could not submit the prompt that revives the session.
+// Measured in a headless run of the real editor (05-tab-arms-lifecycle/
+// 15-arm-hibernated): the strip read `disconnected · dead` after the idle
+// sweep parked a settled session, and because the webapp's composer gate IS
+// that word (webapp/src/main.ts — a `disconnected` status closes the composer)
+// the page could not submit the prompt that revives the session.
 func TestAParkedSessionWithADeadLinkIsIdleAndNeverDisconnected(t *testing.T) {
 	// Arrange: a session that served, then the sweep's stand-down — the link
 	// dies inside KillSession and the park record lands after it.

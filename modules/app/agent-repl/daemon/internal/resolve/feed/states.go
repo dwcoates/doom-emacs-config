@@ -43,7 +43,7 @@ type unitState struct {
 	// other plane, the next turn's live-work reconciliation), and none of them
 	// says the work moved. Drawn from the frame alone the card sat on
 	// `running` forever above a detached row already reporting `exit 0`
-	// (playtest F43, 2026-09-09).
+	// (observed 2026-09-09).
 	moved bool
 	// diagnostics are the IDE findings raised against this change, composed.
 	diagnostics []string
@@ -149,7 +149,7 @@ type planState struct {
 	// onto one row instead of drawing twice. The plan bubble alone numbered
 	// its episodes, so the file plane's replay of one `!plan` turn found no
 	// open episode, took the next number, and drew a SECOND identical plan
-	// card: observed in the playtest's own picture and pinned by
+	// card: observed in a headless sandbox run's own picture and pinned by
 	// TestPlanModeCoalescesOntoOneBubble. Keyed on the opener's activity id,
 	// a re-delivery of the same call lands on the same FeedId by construction.
 	opener string
