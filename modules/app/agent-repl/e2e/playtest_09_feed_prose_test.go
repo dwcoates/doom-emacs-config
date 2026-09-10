@@ -423,26 +423,6 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				s.submit(t, row.prompt)
 				s.awaitInPage(t, "the rotation to draw its separation row",
 					`document.querySelector('`+p09SeparationRow+` [data-arm="cleared"]')`)
-				// ONE ROTATION IS ONE DIVIDER. "At least one" is what the
-				// wait above proves and it is not enough: run 6's picture
-				// carried TWO identical `context cleared` rules, one above
-				// the answer and one below it, which is a conversation drawn
-				// as though it had been cleared twice. The census is read
-				// rather than merely counted so that a red says WHICH rows
-				// they were -- the row id carries the divider's key, which is
-				// the store pointer the cut arrived at.
-				census := p09ReadInPage(t, s, "the census of the separation rows the rotation drew",
-					`(function () {
-                       var rows = document.querySelectorAll('`+p09SeparationRow+`');
-                       return "count=" + rows.length + " ids=[" +
-                         Array.prototype.map.call(rows, function (r) {
-                           return r.getAttribute("data-feed-row");
-                         }).join(" | ") + "]";
-                     })()`)
-				if !strings.HasPrefix(census, "count=1 ") {
-					t.Fatalf("the rotation drew %s, want exactly one divider: one context cut is one "+
-						"divider however many planes deliver it", census)
-				}
 				// A NEW IDENTITY, not merely a redrawn line. The rotation's
 				// whole claim is that the session the page now speaks for is
 				// a DIFFERENT one, so the line is held to being non-empty
@@ -455,6 +435,34 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
                        return now !== "" && now !== `+jsString(before)+`;
                      })()`)
 				s.awaitArm(t, ws, "the rotating turn to settle", emGHISettledArms...)
+				// ONE ROTATION IS ONE DIVIDER, and the census is taken
+				// AFTER the turn has settled. "At least one" is what the wait
+				// above proves and it is not enough: runs 6 and 8 both
+				// photographed TWO identical `context cleared` rules, one
+				// above the answer and one below it, which is a conversation
+				// drawn as though it had been cleared twice. Taken before the
+				// settle the census read one and passed, because the second
+				// divider had not arrived yet -- so where it is asked is part
+				// of what it asserts.
+				//
+				// It is read rather than merely counted so that a red says
+				// WHICH rows they were: the row id carries the divider's key,
+				// which is the store pointer the cut arrived at, and an
+				// `unpositioned:` key is the daemon saying the producer gave
+				// it no position to identify the cut by.
+				census := p09ReadInPage(t, s, "the census of the separation rows the rotation drew",
+					`(function () {
+                       var rows = document.querySelectorAll('`+p09SeparationRow+`');
+                       return "count=" + rows.length + " ids=[" +
+                         Array.prototype.map.call(rows, function (r) {
+                           return r.getAttribute("data-feed-row");
+                         }).join(" | ") + "]";
+                     })()`)
+				t.Logf("the rotation's separation census: %s", census)
+				if !strings.HasPrefix(census, "count=1 ") {
+					t.Fatalf("the rotation drew %s, want exactly one divider: one context cut is one "+
+						"divider however many planes deliver it", census)
+				}
 			},
 			asserted: "the feed drew a `separation` row whose body carries `[data-arm=\"cleared\"]`; the " +
 				"session reveal opened by clicking `[data-reveal-anchor=\"session\"]` is still open and " +
