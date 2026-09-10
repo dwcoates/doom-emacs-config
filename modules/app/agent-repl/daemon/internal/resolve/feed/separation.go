@@ -227,10 +227,10 @@ func worktreeLeft(exited *conversationv1.AgentWorktreeExited) *frontendv1.FeedWo
 func discardLine(removed *conversationv1.AgentWorktreeRemoved) string {
 	var parts []string
 	if removed.DiscardedFiles != nil && removed.GetDiscardedFiles() > 0 {
-		parts = append(parts, fmt.Sprintf("%d files", removed.GetDiscardedFiles()))
+		parts = append(parts, countOf(removed.GetDiscardedFiles(), "file"))
 	}
 	if removed.DiscardedCommits != nil && removed.GetDiscardedCommits() > 0 {
-		parts = append(parts, fmt.Sprintf("%d commits", removed.GetDiscardedCommits()))
+		parts = append(parts, countOf(removed.GetDiscardedCommits(), "commit"))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -240,4 +240,14 @@ func discardLine(removed *conversationv1.AgentWorktreeRemoved) string {
 		line = line + ", " + part
 	}
 	return line + " discarded"
+}
+
+// countOf renders "1 file" / "3 files". A discard line is a loud one and it is
+// read by a person, so a single file does not lose a commit's worth of trust to
+// "1 files".
+func countOf(n uint32, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

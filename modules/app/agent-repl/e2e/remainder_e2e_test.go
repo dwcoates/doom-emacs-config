@@ -1159,6 +1159,28 @@ func TestWorktreeEnterExitKeptAndRemoved(t *testing.T) {
 	}
 }
 
+// TestWorktreeDiscardLineIsGrammatical reads the loud discard line the removal
+// composes. The fake's `!worktree-remove` discards THREE files and ONE commit,
+// and the playtest photographed that line as "3 files, 1 commits discarded" —
+// the one figure a reader is most likely to be alarmed by, misspelled.
+func TestWorktreeDiscardLineIsGrammatical(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "worktree-remove")
+
+	// Assert
+	left := rmAwaitFeedRow(t, w, ws, "the worktree-left divider (removed)", func(r *frontendv1.FeedRow) bool {
+		return r.GetSeparation().GetWorktreeLeft().GetRemoved() != nil
+	})
+	got := left.GetSeparation().GetWorktreeLeft().GetRemoved().GetDiscarded().GetText()
+	if got != "3 files, 1 commit discarded" {
+		t.Fatalf("discard line = %q, want %q", got, "3 files, 1 commit discarded")
+	}
+}
+
 // ===========================================================================
 // Coverage extension — `!send-message-refused`: an undeliverable send.
 // ===========================================================================
