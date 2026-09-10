@@ -63,6 +63,13 @@ import (
 // The playbook therefore accepts either for the FIRST push and then waits for
 // `:dead` by name, which is the state the route settles in. Both are BLUE in
 // the module's own color table, so the picture is the same picture either way.
+//
+// WHY THE RECOVERY IS READ AS AN OUTCOME AND NOT AS A MOMENT. The revived
+// turn's running half is a ~107ms transient behind a ~350ms shim spawn, and a
+// poll that samples through an emacsclient round trip cannot be promised to
+// land inside it -- so the recovery is asserted from the RECORDED arm walk,
+// the feed's own concluded-turn count and the shim's pid, none of which can
+// be missed by being looked at late. The reason is written out at the site.
 
 // detachGatePathEnv names the fake SDK's detached-work gate.
 //
@@ -212,6 +219,50 @@ func playtestShimPID(t *testing.T, e *Emacs) int {
 	return found[0].pid
 }
 
+// assertRevivedArmWalk asserts that AFTER the route died the roster published
+// a running arm and then `:done` for WS.
+//
+// It reads the walk rather than a moment, and the two halves are the two ways
+// the recovery can be wrong. A walk whose tail never carries a running arm is
+// a turn the tab never said was running -- the user watched a dead route sit
+// there and an answer appear out of nothing. A tail with a running arm and no
+// `:done` after it is a turn that never settled. `:done` ALONE is the one
+// reading a moment could not rule out: it is also what the FIRST turn left
+// behind, so a submit that never ran would have shown exactly that.
+//
+// Everything between is deliberately unconstrained. `:init` sits in the tail
+// while the fresh shim spawns, and which running arm is published depends on
+// how much of the turn the daemon saw before the fake answered.
+func assertRevivedArmWalk(t *testing.T, ws string, walk []string) {
+	t.Helper()
+	died := -1
+	for i, arm := range walk {
+		if arm == playtestDeadArm {
+			died = i
+		}
+	}
+	if died < 0 {
+		t.Fatalf("the roster never published %s for %s, so there is no recovery to read; the whole walk was %v",
+			playtestDeadArm, ws, walk)
+	}
+	tail := walk[died+1:]
+	running := -1
+	for i, arm := range tail {
+		if containsString(emGHIRunningArms, arm) {
+			running = i
+			break
+		}
+	}
+	if running < 0 {
+		t.Fatalf("after the route died the roster never published a running arm for %s: the tab went %v with no turn ever shown as in flight, and the whole walk was %v",
+			ws, tail, walk)
+	}
+	if !containsString(tail[running+1:], playtestDoneArm) {
+		t.Fatalf("after the route died %s was published as running and never settled on %s: the tail was %v, and the whole walk was %v",
+			ws, playtestDoneArm, tail, walk)
+	}
+}
+
 // TestPlaytestTabArmLinkSeveredAndRecovered is plan B.18: the shim killed out
 // from under the daemon, the BLUE paint of a compromised route, and the
 // recovery when the next prompt brings a fresh shim up.
@@ -226,6 +277,12 @@ func TestPlaytestTabArmLinkSeveredAndRecovered(t *testing.T) {
 	repository := s.repoAt(t, "repo")
 	name := s.register(t, repository.Dir)
 	s.openPanel(t)
+
+	// THE ARM WALK IS RECORDED, because the recovery below is a walk and not
+	// a state. See `assertRevivedArmWalk`: the running half of a revived turn
+	// is a ~100ms transient this playbook once tried to photograph with a
+	// poll, and the recorder is what turns it from a race into a fact.
+	e.Eval(playtestArmRecorderSetup)
 
 	// A REAL SHIM IS PROVEN UP BEFORE ANYTHING IS CUT. The subject is a route
 	// that WAS serving, so this playbook does not kill a shim it merely
@@ -296,9 +353,44 @@ func TestPlaytestTabArmLinkSeveredAndRecovered(t *testing.T) {
 	// not what happens, the submit is refused or never runs and this step
 	// fails RIGHT HERE, which is the design.
 	s.submit(t, "wake the link back up")
-	s.awaitArm(t, name, "the tab's arm to be running again on a fresh shim", emGHIRunningArms...)
+	// THE OUTCOME IS AWAITED, NEVER THE MOMENT.
+	//
+	// This step once awaited a RUNNING arm here and then `:done`. Both are
+	// satisfied by a turn that ran, and the first is a race: the revived
+	// walk is `:dead` -> `:init` while the fresh shim spawns (measured at
+	// ~350ms) -> a running arm -> `:done`, and the running half is ~107ms
+	// wide on this fake vendor. `AwaitEval` samples every 20ms through an
+	// emacsclient round trip whose own healthy maximum is ~95ms, so under
+	// load one sample can straddle the whole running window -- and the wait
+	// then fails with `:done` as its last value, which is the CORRECT
+	// outcome reported as a failure. Widening the bound cannot help: the
+	// window is not late, it is narrow, and the poll is not there.
+	//
+	// Worse, the two awaits together asserted nothing about the turn: had
+	// the submit never run, the arm would have stayed on the FIRST turn's
+	// `:done` and the second await would have passed on it. So the walk is
+	// read off the recorder -- which sees every roster push in publication
+	// order, skipping none (`daemon/internal/publish/topic.go`) -- and the
+	// turn's own terminal row is counted in the feed.
 	s.awaitArm(t, name, "the second turn to settle on the route the daemon brought back",
 		playtestDoneArm)
+	// TWO CONCLUDED TURNS: the baseline turn's terminal row and the revived
+	// one's. The TERMINAL row is counted rather than the answer bubbles
+	// because a turn draws as many answer rows as the vendor sent units --
+	// this fake sends two per prose turn -- while `turnEnded` is exactly one
+	// row per turn and carries that turn's own settled outcome on
+	// `data-state`. So this counts turns that ENDED, which is the claim.
+	s.awaitInPage(t, "the revived turn to have concluded in the feed",
+		`document.querySelectorAll('[data-feed-row][data-row-kind="turnEnded"][data-state="concluded"]').length === 2`)
+	assertRevivedArmWalk(t, name, s.recordedArmWalk(t, name))
+	// AND THE SHIM IS A DIFFERENT PROCESS. `playtestShimPID` fails unless
+	// this world holds EXACTLY ONE shim, so this asserts both halves of "a
+	// fresh shim": the killed one did not answer the prompt (it is gone, and
+	// a second live shim would fail the lookup) and the one that did is not
+	// it.
+	if revived := playtestShimPID(t, e); revived == shimPID {
+		t.Fatalf("the revived turn ran on pid %d, which is the shim this playbook SIGKILLed; the daemon answered the prompt on a dead route rather than bringing a fresh shim up", revived)
+	}
 	s.captureArm(t, "arm-recovered", name,
 		"a second prompt submitted against the dead route, which the daemon answered by bringing a fresh shim up",
 		playtestDoneArm,
