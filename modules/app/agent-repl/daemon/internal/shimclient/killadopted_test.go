@@ -61,13 +61,24 @@ func TestShimclientHelperProcess(t *testing.T) {
 		fmt.Fprintln(os.Stderr, "helper: listen:", err)
 		os.Exit(1)
 	}
+	// THE ACCEPTED CONNECTIONS ARE HELD, never closed on arrival. A shim
+	// serves its socket: it holds the connection for the session's life, and
+	// the daemon's peer-credential read happens against a peer that is still
+	// there. A helper that closed on accept would instead be racing every
+	// reader, and on Darwin a peer credential read after the peer's close
+	// answers ENOTCONN -- so the harness, not the code, would decide whether
+	// the pid could be learned.
 	go func() {
+		var held []net.Conn
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
+				for _, c := range held {
+					_ = c.Close()
+				}
 				return
 			}
-			_ = conn.Close()
+			held = append(held, conn)
 		}
 	}()
 
@@ -310,5 +321,39 @@ func TestSocketPeerPIDNamesTheServingProcess(t *testing.T) {
 	}
 	if pid != p.pid {
 		t.Fatalf("socketPeerPID() = %d, want the serving process's %d", pid, p.pid)
+	}
+}
+
+// TestSocketGoneReadsALostPeerAsGone asserts the arm that keeps a shim which
+// exits DURING the credential read from being reported as unstoppable: a dial
+// can win the race with the exit and hand back a socket whose peer has already
+// gone, and every question about that peer then answers ENOTCONN.
+func TestSocketGoneReadsALostPeerAsGone(t *testing.T) {
+	// Arrange: the error exactly as `socketPeerPID' wraps it.
+	err := fmt.Errorf("shimclient: peer credential of %q: %w", "/tmp/peer.sock",
+		fmt.Errorf("getsockopt LOCAL_PEERPID: %w", syscall.ENOTCONN))
+
+	// Act.
+	got := isSocketGone(err)
+
+	// Assert.
+	if !got {
+		t.Fatalf("isSocketGone(%v) = false, want true: a peer that dropped the connection is not serving the socket", err)
+	}
+}
+
+// TestSocketGoneReadsALostPeerAsGoneThroughAnOpError asserts the same arm on
+// the shape the net package produces, so a connection-level ENOTCONN is read
+// the same way as a getsockopt's.
+func TestSocketGoneReadsALostPeerAsGoneThroughAnOpError(t *testing.T) {
+	// Arrange.
+	err := &net.OpError{Op: "read", Net: "unix", Err: syscall.ENOTCONN}
+
+	// Act.
+	got := isSocketGone(err)
+
+	// Assert.
+	if !got {
+		t.Fatalf("isSocketGone(%v) = false, want true for a net.OpError carrying ENOTCONN", err)
 	}
 }
