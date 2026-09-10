@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -20,15 +21,10 @@ import (
 //     the canned verb (`agent-repl-explain`) and the prompting one
 //     (`agent-repl-explain-prompt`), with the file reference carried in
 //     the prompt bubble.
-//   - C23: an image attached to the composer, the thumbnail marker it
-//     draws there, and the attachment travelling as its own `ImageBlock`
-//     beside the words.
-//     The first capture in this world was measured blank -- 481 distinct
-//     colors, the webview unpainted and the composer text undrawn -- in three
-//     consecutive runs, while the next capture some 100ms later was fully
-//     painted. The roster await after `openPanel` is the one arrangement
-//     difference from owner 4's painted first capture, adopted here and
-//     measured by the next run.
+//   - C23: an image put on the X clipboard and attached to the composer by
+//     the real verb, the thumbnail marker it draws there, the attachment
+//     travelling as its own `ImageBlock` beside the words, and the chip the
+//     feed draws for it.
 //   - C24: `agent-repl-history-search` recalling the last accepted prompt
 //     into the composer.
 //
@@ -318,22 +314,22 @@ func writePlaytestPNG(t *testing.T, path string) {
 
 // TestPlaytestClipboardImageAttachment is plan C.23.
 //
-// HOW THE IMAGE GETS IN. `agent-repl-attach-clipboard-image` captures the
-// clipboard through `osascript` -- a macOS pasteboard read -- and this world
-// is a Linux container with no X clipboard tool in its image (no xclip, no
-// xsel), so the verb's own capture step has nothing it can read here. The
-// playbook therefore drives the verb's own entry point BELOW the capture:
-// `agent-repl-input-attach-image` registers the file on the composer and
-// `agent-repl--image-insert-marker` draws the thumbnail marker, which is
-// exactly what the verb does once its capture has produced a file. The
-// binding to the verb is asserted so the door the user knocks on is known
-// to be there.
+// HOW THE IMAGE GETS IN, AND IT IS THE REAL VERB. The image is put on this
+// world's own X clipboard with `xclip` -- the display server here is Xvfb, so
+// X11 is what `agent-repl--image-linux-reader` selects, and the sandbox image
+// carries `xclip` for exactly this (its Dockerfile asserts the binary at
+// build time, so an image without it cannot exist). The verb is then invoked
+// as a command, the way a user invokes it, and its own capture reads the
+// clipboard. Nothing below the verb is driven: the file the composer attaches
+// is the one the VERB wrote, its name is the one the verb minted, and the
+// bytes are compared against what was put on the clipboard -- so the whole
+// clipboard hop is under test rather than stubbed past.
 func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	t.Parallel()
 	s := newPlaytestScenario(t, "08-composer-extras-clipboard-image",
-		"Plan C.23. A PNG attached to the composer through the attach verb's own entry point, the "+
-			"thumbnail marker the composer draws, the `ImageBlock` that travels beside the words, "+
-			"and the prompt bubble the feed draws for it.")
+		"Plan C.23. A PNG put on this world's X clipboard and attached to the composer by "+
+			"`agent-repl-attach-clipboard-image` itself, the thumbnail marker the composer draws, "+
+			"the `ImageBlock` that travels beside the words, and the image chip the feed draws for it.")
 	p, e := s.Book, s.E
 
 	repository := s.repoAt(t, "repo")
@@ -349,13 +345,47 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	p.note("the attach binding looked up in the composer",
 		"`C-c C-i` in the composer resolves to `agent-repl-attach-clipboard-image`")
 
-	// The file lands where the verb's own capture would put it: the
-	// workspace's image directory, made by the module.
-	imageDir := e.EvalString(`(agent-repl--image-dir ` + elispString(name) + `)`)
-	imagePath := filepath.Join(imageDir, "clip-playtest.png")
-	writePlaytestPNG(t, imagePath)
-	mediaType := e.EvalString(`agent-repl--image-media-type`)
-	marker := e.EvalString(`(agent-repl--image-marker-text ` + elispString(imagePath) + `)`)
+	// THE READER THE PRODUCT WILL CHOOSE IS ASSERTED BEFORE THE CLIPBOARD IS
+	// LOADED, through the module's own selection, so a world whose image lost
+	// `xclip` says THAT rather than failing later as "no image on the
+	// clipboard".
+	if want, got := "x11", e.EvalString(`(symbol-name (agent-repl--image-display-type))`); got != want {
+		t.Fatalf("the module reads this world's display server as %q, want %q", got, want)
+	}
+	if e.EvalString(`(or (agent-repl--image-executable-find "xclip") "")`) == "" {
+		t.Fatal("the sandbox image has no `xclip`, so the clipboard verb has no reader here")
+	}
+	p.note("the module's own clipboard reader selection read",
+		"the display server is `x11` and `xclip` is on PATH, so `agent-repl--image-linux-reader` has the reader it wants")
+
+	// THE IMAGE IS PUT ON THE X CLIPBOARD, by the tool a pasting application
+	// would use. `xclip -i` becomes the selection OWNER and must stay alive
+	// to answer a paste, so it is started rather than run to completion --
+	// and the clipboard is then READ BACK until it answers, which is the
+	// programmatic proof the selection was taken rather than a wait on a
+	// clock.
+	clipboardSource := filepath.Join(s.Box.Scratch(), "clipboard.png")
+	writePlaytestPNG(t, clipboardSource)
+	e.Eval(`(progn
+             (defvar agent-repl-playtest08--xclip nil)
+             (setq agent-repl-playtest08--xclip
+                   (start-process "playtest-xclip" nil "xclip"
+                                  "-selection" "clipboard" "-t" "image/png"
+                                  "-i" ` + elispString(clipboardSource) + `))
+             t)`)
+	t.Cleanup(func() {
+		e.Eval(`(when (and (boundp 'agent-repl-playtest08--xclip)
+                            (process-live-p agent-repl-playtest08--xclip))
+                   (delete-process agent-repl-playtest08--xclip))
+                 t`)
+	})
+	e.AwaitTrue("the X clipboard to offer the image/png target",
+		`(with-temp-buffer
+           (and (eq 0 (call-process "xclip" nil t nil "-selection" "clipboard" "-t" "TARGETS" "-o"))
+                (save-excursion (goto-char (point-min))
+                                (and (search-forward "image/png" nil t) t))))`)
+	p.note("a PNG put on this world's X clipboard with `xclip`",
+		"the clipboard's TARGETS list carries `image/png`, so a reader has an image to take")
 
 	// The words first, then the attachment, the way a person composes.
 	const words = "what is in this picture?"
@@ -369,10 +399,44 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	p.note("the words typed into the composer, nothing attached yet",
 		"the composer text is exactly the typed words")
 
-	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
-              (agent-repl-input-attach-image ` + elispString(imagePath) + ` ` + elispString(mediaType) + `)
-              (agent-repl--image-insert-marker ` + elispString(imagePath) + ` ` + elispString(name) + `)
-              t)`)
+	// THE VERB READS THE CURRENT WORKSPACE from persp-mode, not from the
+	// buffer it is invoked in, so the ambient workspace is asserted here --
+	// a verb that captured into some other workspace's image directory would
+	// otherwise surface as a confusing path mismatch below.
+	if got := e.EvalString(`(or (agent-repl--ws-current-name) "")`); got != name {
+		t.Fatalf("the current workspace is %q, want the registered %q", got, name)
+	}
+
+	// THE VERB ITSELF, invoked as a command in the composer. It captures the
+	// clipboard, mints its own destination under the workspace's image
+	// directory, registers the attachment and draws the marker; the path it
+	// answers is the file it wrote and is not one this playbook chose.
+	imagePath := e.EvalString(`(with-current-buffer ` + elispString(s.Input) + `
+                                 (call-interactively #'agent-repl-attach-clipboard-image))`)
+	if imagePath == "" {
+		t.Fatal("`agent-repl-attach-clipboard-image` answered no path")
+	}
+	imageDir := e.EvalString(`(agent-repl--image-dir ` + elispString(name) + `)`)
+	if got := filepath.Dir(imagePath); got != strings.TrimSuffix(imageDir, "/") {
+		t.Errorf("the verb wrote the capture to %s, want it under the workspace image dir %s", got, imageDir)
+	}
+	// THE BYTES THAT CAME BACK ARE THE BYTES THAT WENT ON THE CLIPBOARD.
+	// Nothing else proves the clipboard hop happened: a verb that wrote an
+	// empty file, or some other file, would satisfy every assertion above.
+	wanted, err := os.ReadFile(clipboardSource)
+	if err != nil {
+		t.Fatalf("read the image put on the clipboard: %v", err)
+	}
+	captured, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatalf("read the image the verb captured at %s: %v", imagePath, err)
+	}
+	if !bytes.Equal(captured, wanted) {
+		t.Fatalf("the verb captured %d bytes at %s, want the %d bytes put on the clipboard",
+			len(captured), imagePath, len(wanted))
+	}
+	mediaType := e.EvalString(`agent-repl--image-media-type`)
+	marker := e.EvalString(`(agent-repl--image-marker-text ` + elispString(imagePath) + `)`)
 
 	// The attachment is REGISTERED, the text carries the MARKER and never
 	// the path, and a thumbnail overlay is on the marker.
@@ -411,7 +475,7 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
                          (redisplay t)))`) {
 		t.Fatalf("the composer has no live window showing its buffer from the top before the thumbnail capture")
 	}
-	p.capture("composer-thumbnail", "the words typed, then the image attached through `agent-repl-input-attach-image` and its marker inserted",
+	p.capture("composer-thumbnail", "the words typed, then `agent-repl-attach-clipboard-image` (`C-c C-i`) invoked with the PNG on the X clipboard",
 		fmt.Sprintf("`agent-repl-input-attachments` holds exactly {%s, %s}; the composer text carries the marker %q and not the path; an overlay with `agent-repl-image` and a `display` image is on the marker",
 			imagePath, mediaType, marker),
 		"The composer window (beneath the webview) shows the typed words on the first line and, on "+
@@ -472,17 +536,30 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 	s.awaitInPage(t, "the prompt bubble to carry a second block beside the words",
 		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body').querySelectorAll('.prompt-block').length >= 2`)
 	s.awaitInPage(t, "the turn's response to settle", settledResponsesAtLeast(1))
-	imageBlockClass := s.pageString(t, "the class of the bubble's image block",
-		`(function () { var blocks = document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body').querySelectorAll('.prompt-block');
-                       return blocks[blocks.length - 1].className; })()`)
+	// THE CHIP IS ASSERTED, NOT MERELY PHOTOGRAPHED. `.prompt-block-image` is
+	// the `<img>` the webapp draws for a resolved image block and
+	// `.prompt-block-unsupported` is the `unsupported block: image`
+	// placeholder it draws when the daemon could not resolve one, so the
+	// class alone tells the two apart -- and the picture is then only about
+	// whether the right PICTURE is in the chip.
+	s.awaitInPage(t, "the bubble's image block to be the resolved chip",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image') !== null`)
+	imageBlockSrc := s.pageString(t, "the src of the bubble's image chip",
+		`document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image').getAttribute("src")`)
+	// The chip must have LOADED, not merely be in the DOM: a broken `<img>`
+	// is an element too, and it is exactly what a wrong src would leave.
+	s.awaitInPage(t, "the bubble's image chip to have loaded its bytes",
+		`(function () { var i = document.querySelector('[data-feed-row][data-row-kind="userPrompt"] .bubble-body img.prompt-block-image');
+                       return i !== null && i.complete && i.naturalWidth === `+fmt.Sprint(playtestImageWidth)+`; })()`)
 	p.capture("bubble-attachment", "the accepted prompt drawn in the feed",
-		fmt.Sprintf("a user prompt bubble carries %q and a second `.prompt-block` for the image, whose class the page reports as %q",
-			words, imageBlockClass),
+		fmt.Sprintf("a user prompt bubble carries %q and a second `.prompt-block`; that block is an "+
+			"`img.prompt-block-image` whose src is %q and which has LOADED at the attachment's own "+
+			"natural width of %dpx",
+			words, imageBlockSrc, playtestImageWidth),
 		fmt.Sprintf("The feed's user prompt bubble shows the words %q and, beneath them, the ATTACHED "+
-			"IMAGE itself drawn as a chip: the blue field with the red block, loaded from the "+
-			"daemon's resolution of the image reference (a `.prompt-block-image` element). A "+
-			"placeholder reading `unsupported block: image` in its place is NOT the chip and is a "+
-			"defect. A prose response bubble sits beneath.", words))
+			"IMAGE itself: the blue field with the red block in its middle, served by the daemon's "+
+			"own image origin. A placeholder reading `unsupported block: image` in its place is NOT "+
+			"the chip and is a defect. A prose response bubble sits beneath.", words))
 }
 
 // pageString reads one JavaScript string expression out of the page.
