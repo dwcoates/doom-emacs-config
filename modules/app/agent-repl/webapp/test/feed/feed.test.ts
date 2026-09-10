@@ -496,6 +496,50 @@ describe("mountFeed: a bubble row re-pushed as another kind", () => {
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
   });
 
+  // A PLACEMENT MOVE IS NOT A KIND CHANGE, and the two must not be confused.
+  // The daemon announces a background spawn as a SYNCHRONOUS `subagent` unit
+  // and re-pushes the SAME row as `detached_subagent` the moment the vendor
+  // answers `async_launched` ("daemon.feed.detached_subagent -- a subagent
+  // bubble moved to its detached placement"). The bubble is deliberately kept
+  // across that push, so its HEAD has to be chosen from the row in hand rather
+  // than from the arm the bubble was first mounted with -- which it was, and
+  // every detached spawn was refused with `frameUndecodable` and froze on the
+  // state it was announced with. Caught by the G51 playbook.
+  it("redraws the head when a spawn moves to its detached placement", async () => {
+    // Arrange: the announcement, as a synchronous subagent unit.
+    const { h, channel } = withTail(subagentRow("b1"));
+    const { host } = mount(h);
+    await settle();
+    // Act: the SAME row, re-pushed in its detached placement and settled.
+    channel.push(
+      push(
+        subagentRow("b1", {
+          detached: true,
+          settled: { endedAtMs: 5_000n, outcome: "succeeded" },
+        }),
+      ),
+    );
+    await settle();
+    // Assert: nothing was refused, and the head moved with the row.
+    expect(h.sink.reported).toEqual([]);
+    expect(
+      host.querySelector('[data-feed-row="b1"] .subagent-head')?.getAttribute("data-state"),
+    ).toBe("succeeded");
+  });
+
+  it("keeps the bubble across a placement move rather than rebuilding it", async () => {
+    // Arrange
+    const { h, channel } = withTail(subagentRow("b1"));
+    const { host } = mount(h);
+    await settle();
+    const before = host.querySelector('[data-feed-row="b1"] .bubble');
+    // Act
+    channel.push(push(subagentRow("b1", { detached: true })));
+    await settle();
+    // Assert: the same element, so an open sub-feed survives the move.
+    expect(host.querySelector('[data-feed-row="b1"] .bubble')).toBe(before);
+  });
+
   it.each(KINDS)("keeps %s's drawn head rather than tearing the feed down", async (_n, row) => {
     // Arrange
     const { h, channel } = withTail(row);

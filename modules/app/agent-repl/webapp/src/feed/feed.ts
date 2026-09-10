@@ -201,11 +201,42 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   }
 
   /**
+   * The collapsed head of whatever the row IS AT THIS PUSH.
+   *
+   * A BUBBLE ROW CAN CHANGE ARM UNDER ITS OWN FeedId, and that is the contract
+   * rather than an oddity: a spawn is announced as a SYNCHRONOUS `subagent`
+   * unit and, the moment the vendor answers `async_launched`, the daemon
+   * re-pushes the SAME row as the `detached_subagent` placement
+   * ("daemon.feed.detached_subagent -- a subagent bubble moved to its detached
+   * placement"). The bubble itself is deliberately kept across that push, since
+   * tearing it down would drop an open sub-feed under a reader.
+   *
+   * So the head is chosen per DRAW, from the current row, never captured at
+   * mount. It was captured at mount, and every detached spawn paid for it: the
+   * head renderer refused the re-pushed row with `MalformedView`
+   * ("FeedTurnActivity.unit: the row is not a subagent bubble"), the shared
+   * stream machinery skipped the frame, and the page filed a
+   * `frameUndecodable` failure card -- so a detached subagent's head froze on
+   * the state it was announced with and never moved again. Caught by the G51
+   * playbook, whose fan-wide cancel launches two of them.
+   */
+  function bubbleHead(current: FeedRow, context: RowContext): HTMLElement {
+    if (current.row.case === "detachedSubagent") {
+      return drawFeedDetachedSubagent(detachedSubagentOf(current), context);
+    }
+    if (unitCase(current) === "merge") {
+      return deps.renderers.mergeHead(mergeOf(current), context);
+    }
+    return drawFeedSubagent(subagentOf(current), context);
+  }
+
+  /**
    * Build the bubble for one bubble row.
    *
-   * THE ONLY DIFFERENCES BETWEEN THE KINDS live here: which head renderer draws
-   * the collapsed line, which body renderer lays the sub-feed out, and what the
-   * fold starts at. Everything below is the one shared plumbing path.
+   * THE ONLY DIFFERENCES BETWEEN THE KINDS live here: which body renderer lays
+   * the sub-feed out and what the fold starts at. The HEAD is not one of them
+   * -- see `bubbleHead` -- because the arm a row wears is not fixed for the
+   * row's life. Everything below is the one shared plumbing path.
    */
   function bubbleFor(row: FeedRow, rc: RowContext): BubbleLike {
     const shared = {
@@ -216,21 +247,11 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
       revealRow,
       bubble: bubbleFor,
       composerFactory: deps.composerFactory,
+      head: bubbleHead,
     };
-    if (row.row.case === "detachedSubagent") {
-      return mountBubble({
-        ...shared,
-        head: (current, context) => drawFeedDetachedSubagent(detachedSubagentOf(current), context),
-        body: defaultBubbleBody,
-        // A subagent row ships no fold, so it starts collapsed and transfers
-        // nothing but its head until the reader asks for more.
-        initialFolded: true,
-      });
-    }
     if (unitCase(row) === "merge") {
       return mountBubble({
         ...shared,
-        head: (current, context) => deps.renderers.mergeHead(mergeOf(current), context),
         body: deps.renderers.mergeBody,
         initialFolded: requireMessage(
           requireMessage(mergeOf(row).head, "FeedMerge.head").fold,
@@ -238,12 +259,10 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
         ).folded,
       });
     }
-    return mountBubble({
-      ...shared,
-      head: (current, context) => drawFeedSubagent(subagentOf(current), context),
-      body: defaultBubbleBody,
-      initialFolded: true,
-    });
+    // A subagent row ships no fold, so it starts collapsed and transfers
+    // nothing but its head until the reader asks for more -- synchronous and
+    // detached alike, since the two are one bubble that moved placement.
+    return mountBubble({ ...shared, body: defaultBubbleBody, initialFolded: true });
   }
 
   // ---- reveal -----------------------------------------------------------

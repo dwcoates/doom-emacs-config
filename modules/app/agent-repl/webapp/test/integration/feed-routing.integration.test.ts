@@ -16,6 +16,7 @@ import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
   activityRow,
+  detachedSubagentRow,
   feedId,
   feedPageError,
   feedPageSuccess,
@@ -352,6 +353,64 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     await harness.settle();
     // Assert: the inner row is inside the bubble, not a sibling of it.
     expect(harness.feedContainer()?.children).not.toContain(harness.row("inner"));
+  });
+});
+
+// A BACKGROUND SPAWN CHANGES PLACEMENT UNDER ITS OWN FeedId. The daemon
+// announces it as a synchronous `subagent` unit and re-pushes the SAME row as
+// `detached_subagent` once the vendor answers `async_launched`. The bubble is
+// kept across that push so an open sub-feed survives it, which means the head
+// must be chosen from the row in hand -- it was chosen once at mount, and every
+// detached spawn was then refused as an unreadable frame and froze on the state
+// it was announced with. Caught by the G51 playbook, whose `!cancel-all`
+// launches two of them.
+describe("a spawn that moves to its detached placement", () => {
+  const startSync = async (): Promise<Harness> =>
+    startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+
+  it("reads the re-pushed row rather than refusing it", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("succeeded", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("redraws the head in its new placement", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("succeeded", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(
+      harness.row("bubble")?.querySelector(".subagent-head")?.getAttribute("data-state"),
+    ).toBe("succeeded");
+  });
+
+  it("keeps the reader's open sub-feed across the move", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("live", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(harness.row("bubble")?.dataset.expanded).toBe("true");
   });
 });
 
