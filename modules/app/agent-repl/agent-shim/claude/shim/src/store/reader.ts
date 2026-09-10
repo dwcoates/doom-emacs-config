@@ -222,6 +222,18 @@ interface Reader {
     knownThrough?: conversationv1.HistoryPointer,
     known?: () => boolean,
   ): Promise<AgentPageSession>;
+  /**
+   * The newest page of one book, for a read that stands no tail.
+   *
+   * Always asks the store, so an unreachable store is a refusal and never an
+   * empty page. `known` is the producer's own vouching, and it turns the
+   * store's `unknown_agent` into the empty page a fresh session's book is.
+   */
+  readFirstPage(
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage>;
   readAgentPage(
     agent: conversationv1.AgentId,
     pageSize: number,
@@ -743,9 +755,61 @@ export function createReader(options: ReaderOptions): Reader {
     }
   };
 
+  /**
+   * The NEWEST page of one book, with no tail behind it.
+   *
+   * THE STORE IS ALWAYS ASKED, and that is the whole point. A watch defers a
+   * minted-but-unwritten book without asking, because the answer is known and
+   * what the open is worth is the TAIL it stands. A one-shot read stands no
+   * tail: everything it has to say is the store's answer, so skipping the ask
+   * saves no refusal — it invents one of the three outcomes this read must tell
+   * apart. Asking separates them:
+   *
+   *   - the store answers → the page it served;
+   *   - the store refuses the BOOK, while the producer still vouches for the
+   *     agent → an empty page, because a session whose first row has not landed
+   *     has an empty past and not an unknown one;
+   *   - the store cannot be reached, or fails the read → that refusal, surfaced
+   *     as it stands for the engine's typed arm.
+   *
+   * An `unknown_agent` in the store's log on a cold read is the cost, and it is
+   * the right one: an empty page invented over an unreachable store tells a
+   * consumer this conversation has no history.
+   */
+  const readFirstPage = async (
+    agent: conversationv1.AgentId,
+    pageSize: number,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage> => {
+    let opened: AgentPageSession;
+    try {
+      opened = await openBookNow(agent, pageSize, undefined);
+    } catch (error) {
+      if (known === undefined || !(error instanceof PersistenceError)) throw error;
+      if (error.kind !== "unknown_agent" || !known()) throw error;
+      LOGGER.log(
+        { agent: agent.value },
+        "the store holds no rows for this announced agent yet; serving an empty page for a read that stands no tail",
+      );
+      // AN EMPTY BOOK IS AT ITS FLOOR: there are no older entries to walk to.
+      return create(conversationv1.HistoryPageSchema, {
+        entries: [],
+        boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+      });
+    }
+    // One page and no tail: the reading session opened to get the page is
+    // closed at once rather than leaked for a tail nobody reads.
+    opened.close();
+    return opened.page;
+  };
+
   return {
     openAgentPage(agent, pageSize, knownThrough, known) {
       return openBook(agent, pageSize, knownThrough, known);
+    },
+
+    readFirstPage(agent, pageSize, known) {
+      return readFirstPage(agent, pageSize, known);
     },
 
     async readAgentPage(agent, pageSize, after) {
