@@ -196,8 +196,8 @@ func p09QueryDeathExpected(causeWords string) string {
 	return "Beneath the prompt bubble the turn's TERMINAL ROW is drawn as an ERRORED end — the error " +
 		"hue, not the green of a conclusion. Its headline says THE QUERY DIED and names the fault, and " +
 		"on a smaller line directly BENEATH the headline is the cause sentence \"" + causeWords +
-		"\". The footer's leftmost cells read BLOCKED and QUERY DIED, and its status line says the " +
-		"next prompt restarts the session."
+		"\", and beneath THAT the vendor's own sentence about the death. The footer's leftmost cells " +
+		"say the session is BLOCKED and name the fault a VENDOR ERROR."
 }
 
 // TestPlaytestFeedProseFamilies is plan D25-D28.
