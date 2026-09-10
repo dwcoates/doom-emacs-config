@@ -20,39 +20,43 @@ import (
 // with two identities and offers no pairing key; the daemon coalesces them by
 // the EPISODE INVARIANT — an agent has at most one open plan episode at a time
 // — so entering draws the planning state and the exit fills the same bubble.
+//
+// THE BUBBLE'S IDENTITY IS THE OPENING CALL'S ACTIVITY ID, exactly as every
+// other unit here keys on `act.GetActivityId()`. That is what makes the two
+// planes — the shim's stream and the sidecar's file tail, which convert the
+// SAME vendor record — collapse onto one row instead of drawing it twice.
 func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, plan *conversationv1.AgentPlanMode) (*frontendv1.FeedRow, error) {
 	agentID := agent.GetValue()
 	episode := s.plans[agentID]
+	// open answers the episode this call belongs to, opening one keyed on THIS
+	// call's activity id when the agent has none. Both planes convert the same
+	// vendor record, so the same call re-delivered opens the same episode.
+	open := func() *planState {
+		if episode != nil {
+			return episode
+		}
+		episode = &planState{opener: act.GetActivityId().GetValue(), feed: at}
+		s.plans[agentID] = episode
+		return episode
+	}
 
 	bubble := &frontendv1.FeedPlan{}
 	switch frame := plan.GetState().(type) {
 	case *conversationv1.AgentPlanMode_Start:
 		switch frame.Start.GetAct().(type) {
 		case *conversationv1.AgentPlanModeStart_Enter:
-			if episode == nil {
-				s.planEpisodes[agentID]++
-				episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-				s.plans[agentID] = episode
-			}
+			open()
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		case *conversationv1.AgentPlanModeStart_Exit:
 			// AN EXIT WITH NO ENTER IS LEGAL: a session started in the plan
 			// permission mode never calls EnterPlanMode at all.
-			if episode == nil {
-				s.planEpisodes[agentID]++
-				episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-				s.plans[agentID] = episode
-			}
+			open()
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		default:
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Success:
-		if episode == nil {
-			s.planEpisodes[agentID]++
-			episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-			s.plans[agentID] = episode
-		}
+		open()
 		switch outcome := frame.Success.GetAct().(type) {
 		case *conversationv1.AgentPlanModeSuccess_Entered:
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
@@ -71,10 +75,7 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Failure:
-		if episode == nil {
-			s.planEpisodes[agentID]++
-			episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-		}
+		open()
 		bubble.State = &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{
 			Text: planFailureText(frame.Failure.GetError()),
 		}}
@@ -85,12 +86,12 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 
 	id := r.rowID(s.id, episode.feed.feed, feedid.RowKey{
 		Kind: feedid.KindActivity,
-		ID:   fmt.Sprintf("plan:%s:%d", agentID, episode.episode),
+		ID:   "plan:" + episode.opener,
 	})
 	episode.row = id
 	r.logger(s.id).Debug("daemon.feed.plan",
 		"a plan-mode call was coalesced onto its episode's bubble",
-		dlog.Context{"agent": agentID, "episode": episode.episode, "row": id.GetValue()})
+		dlog.Context{"agent": agentID, "episode": episode.opener, "row": id.GetValue()})
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
@@ -107,7 +108,7 @@ func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 		row := &frontendv1.FeedRow{
 			Id: r.rowID(s.id, episode.feed.feed, feedid.RowKey{
 				Kind: feedid.KindActivity,
-				ID:   fmt.Sprintf("plan:%s:%d", agentID, episode.episode),
+				ID:   "plan:" + episode.opener,
 			}),
 			Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 				Unit: &frontendv1.FeedTurnActivity_Plan{Plan: &frontendv1.FeedPlan{
@@ -117,7 +118,7 @@ func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 		}
 		r.logger(s.id).Debug("daemon.feed.plan_episode_broken",
 			"a plan episode broke and its bubble was failed",
-			dlog.Context{"agent": agentID, "episode": episode.episode, "reason": reason})
+			dlog.Context{"agent": agentID, "episode": episode.opener, "reason": reason})
 		r.stampTurn(s, row, nil)
 		r.upsert(s, episode.feed, row, true)
 		delete(s.plans, agentID)

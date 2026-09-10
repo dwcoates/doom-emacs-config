@@ -156,6 +156,42 @@ func TestASecondEpisodeGetsItsOwnBubble(t *testing.T) {
 	}
 }
 
+func TestAnEpisodeReDeliveredDrawsOntoTheSameBubble(t *testing.T) {
+	// Arrange: one episode, opened and closed. The SAME vendor record reaches
+	// this resolver twice — the shim's stream plane converts it, and the
+	// sidecar's file tail converts it again from the transcript — so the exit
+	// having closed the episode must not let the re-delivery mint a new one.
+	h := newHarness(t)
+	episode := func(markdown string) {
+		h.t.Helper()
+		h.planFrame("unit-1", &conversationv1.AgentPlanModeStart{
+			Act:       &conversationv1.AgentPlanModeStart_Enter{Enter: &conversationv1.AgentPlanModeEnter{}},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		})
+		h.planFrame("unit-2", &conversationv1.AgentPlanModeSuccess{
+			Act: &conversationv1.AgentPlanModeSuccess_Exited{Exited: &conversationv1.AgentPlanModeExited{
+				Plan: &conversationv1.AgentResponseProse{Markdown: markdown},
+			}},
+		})
+	}
+	episode("## the plan")
+
+	// Act: the other plane delivers the same two calls.
+	episode("## the plan")
+
+	// Assert: ONE bubble. A second one is the duplicate plan card the playtest
+	// photographed, drawn from the same record twice.
+	bubbles := 0
+	for _, row := range h.rows(rootFeed()) {
+		if row.GetActivity().GetPlan() != nil {
+			bubbles++
+		}
+	}
+	if bubbles != 1 {
+		t.Fatalf("plan bubbles = %d, want 1 — the same record re-delivered keys onto the same FeedId", bubbles)
+	}
+}
+
 func TestATurnThatEndsInPlanModeBreaksTheEpisode(t *testing.T) {
 	// Arrange: an open episode.
 	h := newHarness(t)
