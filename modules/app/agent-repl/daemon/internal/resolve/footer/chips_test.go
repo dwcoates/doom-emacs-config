@@ -1061,3 +1061,25 @@ func TestADetachedWorkAnnouncementAfterItsTerminalDoesNotCountItLiveAgain(t *tes
 			got.GetCount())
 	}
 }
+
+// AND THE CALLER'S OWN STREAM REPLAYS TOO. The spawn unit and the handle are
+// one value, so a spawn frame re-read off the calling agent's activity stream
+// after the run settled re-opened the row the terminal had taken away -- the
+// second half of the ⚙ chip reading 3 in the G50 playbook.
+func TestASpawnUnitReplayedAfterItsRunSettledDoesNotCountItLiveAgain(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+	h.r.OnDetachedWork(testWS, mainAgent, movedSubagent("spawn-1"))
+	h.r.OnSubagent(testWS, workID("spawn-1"), subagentSettled(false))
+
+	// Act: the caller's stream re-read from its own start.
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", "agent-2", "Explore", ""))
+
+	// Assert
+	if got := h.view(t).GetStrip().GetLiveWork().GetAgents(); got != nil {
+		t.Fatalf("agents chip = %d after the spawn unit replayed behind the run's own terminal, want the run to stay retired",
+			got.GetCount())
+	}
+}
