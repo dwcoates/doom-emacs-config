@@ -395,13 +395,15 @@
 ;; and the persp-mode session/buffer settings) moved into the agent-repl
 ;; module's workspace.el, which owns the persp boundary.
 
-;; Cmd+<numeral> AND Meta+<numeral> workspace switching live in
-;; `modules/app/agent-repl/lisp/keybindings.el' via
-;; `agent-repl--install-workspace-jump-overrides', so the merge-sentinel
-;; reload (which only reloads the agent-repl module's `config.el') picks
-;; them up automatically.  See that installer for the cross-talk
-;; rationale (Doom's `:n s-9' -> `+workspace/switch-to-final', `s-0' ->
-;; `doom/reset-font-size', etc.).
+;; Meta+<numeral> workspace switching lives in
+;; `modules/app/agent-repl/lisp/keybindings.el': `M-1' .. `M-9' are bound on
+;; `agent-repl-workspace-numerals-mode-map' to the
+;; `agent-repl-switch-to-workspace-N' commands, which index the DRAWN TAB BAR
+;; (`agent-repl-roster-tab-order') rather than persp-mode's perspective list
+;; the way Doom's own `+workspace/switch-to-N' does.  `M-0' is left to Doom.
+;; `s-{' / `s-}' walk that same drawn order left and right.  All of it is in
+;; the module, so the merge-sentinel reload (which only reloads the agent-repl
+;; module's `config.el') picks it up automatically.
 
 ;; Open-most-recent-workspace moved into the agent-repl module
 ;; (`agent-repl-open-most-recent-workspace' in commands.el, with
