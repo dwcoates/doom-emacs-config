@@ -56,6 +56,7 @@
 (declare-function agent-repl--ws-add-buffer "agent-repl-workspace" (buf persp &optional no-display))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--ws-name-for-dir "agent-repl-worktree" (dir))
+(declare-function agent-repl--arm-landing-panels "agent-repl-workspace" (target))
 (declare-function agent-repl--async-git "agent-repl-worktree" (label root args callback))
 (declare-function agent-repl--send "agent-repl-input" (origin &optional prompt ws force))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
@@ -586,6 +587,39 @@ naming and status -- the daemon derives and pushes."
 
 ;;;; ---- Workspace navigation ---------------------------------------------
 
+(defun agent-repl--switch-project-arm-panels (project)
+  "Arm the workspace at PROJECT so this switch lands on ITS OWN panel.
+
+A WORKSPACE YOU ARE ABOUT TO STAND ON MUST SHOW ITSELF.  The gui
+frontend pre-creates a workspace's page without displaying it
+\(`agent-repl--gui-boot'), so the view arrives only when the
+`:pending-show-panels' drain shows it on arrival
+\(`agent-repl--drain-pending-show-panels').  Nothing armed that flag on
+this path, so `SPC TAB n' -- which stands on the workspace it just made
+by switching projectile to the minted worktree -- landed the user on an
+EMPTY frame: no webview, no composer, only the tab bar to say the
+workspace existed at all.
+
+The flag is armed BEFORE the switch, exactly as
+`agent-repl--land-after-teardown' arms it, so the panel arrives through
+the persp activation hook's own drain rather than through a second show
+mechanism.
+
+NOTHING IS ARMED WHEN THE TARGET IS ALREADY CURRENT: no perspective
+activates, so no drain is coming, and a flag left standing would re-show
+panels the user had dismissed the NEXT time they came back.  A directory
+that is not a workspace arms nothing either -- there is no panel to show."
+  (let ((ws (agent-repl--ws-name-for-dir project))
+        (current (ignore-errors (agent-repl--ws-current-name))))
+    (cond
+     ((null ws)
+      (agent-repl--log (agent-repl--ws-current-log-name)
+                       "switch-project-arm-panels: path=%s branch=not-a-workspace" project))
+     ((equal ws current)
+      (agent-repl--log ws "switch-project-arm-panels: ws=%s branch=already-current" ws))
+     (t
+      (agent-repl--arm-landing-panels ws)))))
+
 (defun agent-repl-switch-to-project (&optional project)
   "Switch to a live workspace, or to PROJECT.
 
@@ -605,6 +639,7 @@ two timers."
       (progn
         (agent-repl--log (agent-repl--ws-current-log-name)
                          "elisp.commands.switch-to-project path=%s" project)
+        (agent-repl--switch-project-arm-panels project)
         (agent-repl--ws-switch-project project)
         (run-at-time
          0 nil
