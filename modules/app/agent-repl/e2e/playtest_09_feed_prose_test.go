@@ -479,25 +479,31 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 					t.Fatalf("the rotation drew %s, want every divider drawn as `cleared` under the "+
 						"label \"context cleared\"", census)
 				}
-				// HOW MANY of them there are is NOT this section's to settle,
-				// and it is FILED rather than asserted here. Measured in run
-				// 10: one `/clear` drew TWO identical dividers, at row keys
-				// `context_cut:sip1-33` and `context_cut:sip1-3k` -- two
-				// DIFFERENT store pointers for one cut, because the shim's
-				// stream plane and the sidecar's file plane each write an
-				// entry for it and `drawContextCut` keys a divider on the
-				// pointer it arrived at. The daemon's rule is "one cut is one
-				// divider however many planes deliver it"
-				// (`TestOneCutDeliveredTwiceDrawsOneDivider`), and its dedupe
-				// only reaches the case where both planes write the SAME
-				// entry. Which plane owns a clear's identity is the daemon's
-				// and the producers' to settle, it is the same question for
-				// `/compact` (D30, another owner), and a guess at it here
-				// would be this playbook legislating another system's
-				// contract. The census above is logged on every run so the
-				// count is on the record either way.
+				// ONE CLEAR IS ONE DIVIDER, and it is ASSERTED here now that
+				// the contract behind it is settled. Run 10 measured the
+				// defect: one `/clear` drew TWO identical dividers at row keys
+				// `context_cut:sip1-33` and `context_cut:sip1-3k` -- two store
+				// pointers for one cut, because the shim's stream plane and
+				// the sidecar's file plane each wrote an entry for it under a
+				// key of its own, and `drawContextCut` keys a divider on the
+				// pointer it arrived at. The producers now mint ONE key for a
+				// clear -- `session:context_cut:<the session it rotated to>`,
+				// the one identity BOTH planes can spell -- so the two writes
+				// land on one row at one position and the late plane upserts
+				// the first's divider instead of drawing a second.
+				//
+				// COUNTED AFTER THE SETTLE, which is what makes the count
+				// mean anything: the late divider used to arrive after the
+				// turn had ended, so a census taken any earlier read one and
+				// passed while the picture showed two.
+				if !strings.Contains(census, "count=1 ") {
+					t.Fatalf("the rotation drew %s, want exactly ONE divider: one cut is one divider "+
+						"however many planes deliver it", census)
+				}
 			},
-			asserted: "the feed drew a `separation` row whose body carries `[data-arm=\"cleared\"]`; the " +
+			asserted: "the feed drew EXACTLY ONE `separation`, whose body carries `[data-arm=\"cleared\"]` " +
+				"under the label \"context cleared\", censused after the turn settled so a late second " +
+				"delivery would be counted; the " +
 				"session reveal opened by clicking `[data-reveal-anchor=\"session\"]` is still open and " +
 				"its `.topbar-session-line` is non-empty and no longer the text read before the rotate; " +
 				"and the arm settled",
@@ -508,13 +514,10 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				"the rotate and still open, carrying one line of the form " +
 				"`<vendor session id> · <account root> · <model>`, CLIPPED at the panel's right edge so " +
 				"the model at its end is off the panel; the session id it begins with is the NEW one " +
-				"the rotation minted, not the one the panel opened with. KNOWN DEFECT, filed and not " +
-				"this section's to fix: a SECOND identical \"context cleared\" rule is drawn BELOW the " +
-				"response. One `/clear` reaches the daemon on two store entries — run 10 measured the " +
-				"row keys `context_cut:sip1-33` and `context_cut:sip1-3k` — and a divider is keyed on " +
-				"the pointer it arrived at, so the two planes draw two rules. The second one arrives " +
-				"LATE, after the census this row logs, which is why the log can say one while the " +
-				"picture shows two.",
+				"the rotation minted, not the one the panel opened with. There is EXACTLY ONE such " +
+				"rule in the picture: a clear reaches the daemon on both planes and they now write " +
+				"one store row for it, so the second delivery redraws the first rule rather than " +
+				"adding one below the response.",
 		},
 	}
 
