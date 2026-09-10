@@ -119,6 +119,9 @@ const p09ResponseRow = `[data-feed-row][data-row-kind="activity"][data-unit="res
 // is two parts.
 const p09TerminalRow = `[data-feed-row][data-row-kind="turnEnded"]`
 
+// p09SeparationRow is the divider a context cut leaves behind.
+const p09SeparationRow = `[data-feed-row][data-row-kind="separation"]`
+
 // p09SessionLine is the topbar's session identity line -- which vendor
 // session, which account root, which model
 // (`daemon/internal/resolve/topbar/resolver.go`'s `sessionLine`).
@@ -298,7 +301,22 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// read the old document or none at all, and the failure
 				// would look like a product that never draws an interrupted
 				// row.
-				s.awaitPageMounted(t)
+				//
+				// THE PANEL IS RE-OPENED, not merely re-probed. The restart
+				// destroys the webview and builds another, and
+				// `awaitPageMounted` alone proves only that the NEW page's
+				// DOM mounted -- it says nothing about which xwidget the
+				// panel's window is showing or whether the probe was ever
+				// installed in the new page. Run 6 photographed the
+				// consequence: every DOM assertion below passed and the
+				// picture was a BLANK WHITE window with 545 distinct colors,
+				// Emacs's own chrome drawn around nothing.
+				//
+				// Opening the panel is the act a reader performs after
+				// restarting a workspace, and it is also what re-asserts the
+				// live widget, re-binds the composer this row no longer types
+				// into, and re-installs the page probe.
+				s.openPanel(t)
 				s.awaitInPage(t, "the turn's end to be drawn as an INTERRUPTION rather than a conclusion",
 					`document.querySelector('`+p09TerminalRow+` [data-arm="interrupted"]')`)
 			},
@@ -396,7 +414,27 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 
 				s.submit(t, row.prompt)
 				s.awaitInPage(t, "the rotation to draw its separation row",
-					`document.querySelector('[data-feed-row][data-row-kind="separation"] [data-arm="cleared"]')`)
+					`document.querySelector('`+p09SeparationRow+` [data-arm="cleared"]')`)
+				// ONE ROTATION IS ONE DIVIDER. "At least one" is what the
+				// wait above proves and it is not enough: run 6's picture
+				// carried TWO identical `context cleared` rules, one above
+				// the answer and one below it, which is a conversation drawn
+				// as though it had been cleared twice. The census is read
+				// rather than merely counted so that a red says WHICH rows
+				// they were -- the row id carries the divider's key, which is
+				// the store pointer the cut arrived at.
+				census := p09ReadInPage(t, s, "the census of the separation rows the rotation drew",
+					`(function () {
+                       var rows = document.querySelectorAll('`+p09SeparationRow+`');
+                       return "count=" + rows.length + " ids=[" +
+                         Array.prototype.map.call(rows, function (r) {
+                           return r.getAttribute("data-feed-row");
+                         }).join(" | ") + "]";
+                     })()`)
+				if !strings.HasPrefix(census, "count=1 ") {
+					t.Fatalf("the rotation drew %s, want exactly one divider: one context cut is one "+
+						"divider however many planes deliver it", census)
+				}
 				// A NEW IDENTITY, not merely a redrawn line. The rotation's
 				// whole claim is that the session the page now speaks for is
 				// a DIFFERENT one, so the line is held to being non-empty
