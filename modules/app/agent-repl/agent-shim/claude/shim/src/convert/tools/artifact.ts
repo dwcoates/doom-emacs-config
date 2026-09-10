@@ -39,7 +39,7 @@ function actOf(call: PendingCall): conversationv1.AgentArtifactStart["act"] {
   }
   const filePath = str(call.input, "file_path");
   if (filePath === undefined) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "an artifact publish names no file to render; the unit cannot restate what is being published",
     );
@@ -93,7 +93,7 @@ export const artifactConverter: ToolConverter = {
     }
     const output = asRecord(outcome.structured);
     if (output === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a settled artifact call carried no typed output; the answered act cannot be told from nothing",
       );
@@ -115,7 +115,7 @@ export const artifactConverter: ToolConverter = {
     if (url === undefined) {
       // The url IS the published page; a publish arm without one would draw a
       // link to nowhere.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a settled artifact publish named no url; the page it claims to have published is unreachable",
       );

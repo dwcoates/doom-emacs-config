@@ -217,7 +217,7 @@ function resolveFakeMsOverride(
   const raw = env[variable];
   if (raw === undefined || raw === "") return undefined;
   if (!fake) {
-    MAIN_LIFECYCLE_LOGGER.warn(
+    MAIN_LIFECYCLE_LOGGER.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_refused` },
       `the ${subject} override is honored only under --fake; ignoring it for this real session`,
     );
@@ -225,7 +225,7 @@ function resolveFakeMsOverride(
   }
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    MAIN_LIFECYCLE_LOGGER.warn(
+    MAIN_LIFECYCLE_LOGGER.debug(
       { env: variable, value: raw, outcome: `${outcomePrefix}_invalid` },
       `the ${subject} override is not a positive whole number of milliseconds; ignoring it`,
     );
@@ -322,7 +322,7 @@ export function resolveRetryPolicy(
   const raw = env[FAKE_STORE_BACKOFF_ENV];
   if (raw === undefined || raw === "") return DEFAULT_RETRY_POLICY;
   if (!fake) {
-    MAIN_LIFECYCLE_LOGGER.warn(
+    MAIN_LIFECYCLE_LOGGER.debug(
       {
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
@@ -337,7 +337,7 @@ export function resolveRetryPolicy(
   // An empty slot is checked SEPARATELY because `Number("")` is 0, so a
   // malformed "1,,2" would otherwise be read silently as a valid "1,0,2".
   if (parts.some((part) => part === "") || parsed.some((ms) => !Number.isInteger(ms) || ms < 0)) {
-    MAIN_LIFECYCLE_LOGGER.warn(
+    MAIN_LIFECYCLE_LOGGER.debug(
       {
         env: FAKE_STORE_BACKOFF_ENV,
         value: raw,
@@ -549,7 +549,7 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
               ? "stood down cleanly"
               : "stood down with writes the store never acked; exiting nonzero";
           if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
-          else MAIN_LIFECYCLE_LOGGER.error(fields, message);
+          else MAIN_LIFECYCLE_LOGGER.error({ ...fields, detail: message }, message);
           targets.exit(code);
         } catch (err) {
           // A failed stand-down is still an exit, but NOT a clean one: reporting
@@ -561,13 +561,14 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
       })();
     },
     onSigint(): void {
+      // warn: a decision because SIGINT must not terminate a live vendor turn.
       MAIN_LIFECYCLE_LOGGER.warn(
         {
           signal: "SIGINT",
           outcome: "refused_shutdown",
           query_preserved: true,
         },
-        "REFUSED SIGINT as a shutdown condition: an attached terminal's Ctrl-C must not end a live turn",
+        "refused SIGINT as a shutdown condition because an attached terminal must not end a live turn",
       );
     },
     standingDown: () => standDown,
@@ -728,7 +729,7 @@ export async function main(): Promise<void> {
   // then, because it arrives over that listener.
   let endProcess: (code: number) => void = (code) => {
     MAIN_LIFECYCLE_LOGGER.error(
-      { outcome: "exit_before_serving", exit_code: code },
+      { outcome: "exit_before_serving", exit_code: code, detail: "the listener did not exist when process exit was requested" },
       "a session end was requested before the listener existed; exiting immediately",
     );
     process.exit(code);
@@ -775,7 +776,7 @@ export async function main(): Promise<void> {
             ? "the session was killed over the wire; the process is ending"
             : "the session was killed with writes the store never acked; exiting nonzero";
         if (code === 0) MAIN_LIFECYCLE_LOGGER.info(fields, message);
-        else MAIN_LIFECYCLE_LOGGER.error(fields, message);
+        else MAIN_LIFECYCLE_LOGGER.error({ ...fields, detail: message }, message);
       } catch (err) {
         reportFatal(err);
         process.exit(1);

@@ -69,7 +69,7 @@ const QUERY_EOF = scenario({
   writes: "the prompt line only; there is no turn record because there was no turn end",
   arms: "SessionQueryDied.cause=unexpected_eof",
   run(ctx) {
-    ctx.log.warn({ turn: ctx.turn, branch: "query-eof" }, "fake query ENDING with no result");
+    ctx.log.debug({ turn: ctx.turn, branch: "query-eof" }, "the fake query ends with no result");
     ctx.endStream();
   },
 });
@@ -81,7 +81,7 @@ const QUERY_FAIL = scenario({
   writes: "the prompt line only",
   arms: "SessionQueryDied.cause=iterator_failure",
   run(ctx) {
-    ctx.log.warn({ turn: ctx.turn, branch: "query-fail" }, "fake query FAILING its iterable");
+    ctx.log.debug({ turn: ctx.turn, branch: "query-fail" }, "the fake query fails its iterable");
     ctx.failStream(new Error("fake vendor query died mid-turn"));
   },
 });
@@ -97,9 +97,9 @@ const QUERY_EOF_MID_ASK = scenario({
   writes: "the tool_use line and the prompt line; there is no turn record because there was no turn end",
   arms: "SessionQueryDied.cause=unexpected_eof with an AgentPermission settling denied",
   async run(ctx) {
-    ctx.log.warn(
+    ctx.log.debug(
       { turn: ctx.turn, branch: "query-eof-mid-ask" },
-      "fake query ENDING with a permission ask still open",
+      "the fake query ends with a permission ask still open",
     );
     const call = ctx.toolUse("Bash", { command: "git status" });
     // The gate OPENS and PERSISTS the ask synchronously before it hands back

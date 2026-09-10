@@ -74,6 +74,7 @@ function readJsonField(file: string, field: string): string | undefined {
   try {
     raw = readFileSync(file, "utf8");
   } catch (err) {
+    // warn: a defect because an unreadable package manifest leaves runtime identity incomplete.
     LOGGER.warn({ file, cause: err }, `build identity: ${file} is unreadable`);
     return undefined;
   }
@@ -81,15 +82,18 @@ function readJsonField(file: string, field: string): string | undefined {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
+    // warn: a defect because malformed package metadata leaves runtime identity incomplete.
     LOGGER.warn({ file, cause: err }, `build identity: ${file} is not valid JSON`);
     return undefined;
   }
   if (typeof parsed !== "object" || parsed === null) {
+    // warn: a defect because non-object package metadata leaves runtime identity incomplete.
     LOGGER.warn({ file }, `build identity: ${file} is not a JSON object`);
     return undefined;
   }
   const value = (parsed as Record<string, unknown>)[field];
   if (typeof value !== "string" || value === "") {
+    // warn: a defect because required package metadata is absent from runtime identity.
     LOGGER.warn({ file, field }, `build identity: ${file} declares no usable ${field}`);
     return undefined;
   }

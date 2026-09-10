@@ -35,7 +35,7 @@ const LOGGER = bindLog({ component: "shim-convert-skill", operation: "shim.conve
 function skillNameOf(call: PendingCall): conversationv1.AgentSkillName | undefined {
   const name = str(call.input, "skill") ?? str(call.input, "command") ?? str(call.input, "name");
   if (name === undefined || name === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: call.toolUseId },
       "a skill invocation names no skill; no frame is produced, since the unit IS the skill",
     );
@@ -146,7 +146,7 @@ export const skillUseConverter: ToolConverter = {
     if (declared === undefined) return call;
     const toolNames = declared.filter((name): name is string => typeof name === "string");
     if (toolNames.length !== declared.length) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId, declared: declared.length, read: toolNames.length },
         "a skill's acknowledgement declared allowances that are not tool names; only the named ones are carried",
       );

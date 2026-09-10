@@ -57,7 +57,7 @@ function reasonOf(
     default:
       // The DELIVERY fact is still stated — it was not sent — and only the
       // vendor's reason for it is lost, which is what the log records.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: toolUseId, disabled_reason: disabledReason },
         "a push notification was declined for a reason outside the vendor's declared set; the reason is left unstated",
       );
@@ -71,7 +71,7 @@ function sentAtMsOf(output: Record<string, unknown>, toolUseId: string): bigint 
   if (sentAt === undefined) return undefined;
   const parsed = Date.parse(sentAt);
   if (!Number.isFinite(parsed)) {
-    LOGGER.warn(
+    LOGGER.debug(
       { tool_use_id: toolUseId, sent_at: sentAt },
       "a push notification stated a send instant that is not a parsable timestamp; it is left unstated",
     );
@@ -98,7 +98,7 @@ export const pushNotificationConverter: ToolConverter = {
   start(call) {
     const message = str(call.input, "message");
     if (message === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a push notification names no message; there is nothing to tell the user",
       );
@@ -127,7 +127,7 @@ export const pushNotificationConverter: ToolConverter = {
     if (output === undefined) {
       // Sent and not-sent are opposite claims, and only the typed output tells
       // them apart; neither can be asserted from nothing.
-      LOGGER.warn(
+      LOGGER.debug(
         { tool_use_id: call.toolUseId },
         "a settled push notification carried no typed output; whether it was delivered cannot be told",
       );

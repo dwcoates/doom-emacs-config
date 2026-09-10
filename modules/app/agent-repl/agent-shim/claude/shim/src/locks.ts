@@ -273,6 +273,7 @@ function acquireExclusiveLock(claim: {
     // this process was asking for, and an unhandled 'error' event would take
     // the shim down over a lock it no longer needs.
     child.stdin.on("error", (err: Error) => {
+      // warn: a defect because the lock holder disappeared while the shim kept running.
       LOGGER.warn(
         { ...claim.context, lock_path: file, cause: err.message },
         `the ${claim.kind} lock holder's stdin failed; the holder is gone and so is the lock`,

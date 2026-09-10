@@ -6,13 +6,23 @@
  * diffed into a retained set — one missed message then wedges an indicator
  * permanently, and no later message can unwedge it.
  */
-import { describe, expect, it } from "vitest";
+import { writeSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import { LiveWorkTable } from "../../src/engine/detached.js";
 import type {
   SdkBackgroundTasksChangedMessage,
   SdkTaskNotificationMessage,
   SdkTaskStartedMessage,
 } from "../../src/sdk/types.js";
+
+const mockedWriteSync = vi.mocked(writeSync);
+
+function logRecordsSince(before: number): Array<Record<string, unknown>> {
+  const calls = mockedWriteSync.mock.calls.slice(before) as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
+}
 
 function started(overrides: Partial<SdkTaskStartedMessage> = {}): SdkTaskStartedMessage {
   return {
@@ -116,6 +126,30 @@ describe("a task update", () => {
     });
 
     expect(table.get("b01")?.backgrounded).toBe(true);
+  });
+
+  it("records the applied state transition at debug", () => {
+    // Arrange.
+    const table = new LiveWorkTable();
+    table.onTaskStarted(started());
+    const before = mockedWriteSync.mock.calls.length;
+
+    // Act.
+    table.onTaskUpdated({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "b01",
+      patch: { status: "running" },
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    });
+
+    // Assert.
+    expect(
+      logRecordsSince(before)
+        .filter((record) => record.message === "applied a detached-work state transition")
+        .map((record) => ({ level: record.level, status: (record.context as Record<string, unknown>).status })),
+    ).toEqual([{ level: "debug", status: "running" }]);
   });
 
   it("ignores a patch for a task it never saw start", () => {

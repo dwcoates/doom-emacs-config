@@ -55,6 +55,7 @@ export function rawStruct(record: unknown): JsonObject | undefined {
     }
     return cloned as JsonObject;
   } catch (error) {
+    // warn: a defect because a vendor record could not be represented even as structured residue.
     LOGGER.warn(
       { detail: error instanceof Error ? error.message : String(error) },
       "a vendor record could not be represented as a Struct; it lands unparsed instead",
@@ -86,7 +87,7 @@ export function unknownResidue(
   if (raw === undefined) {
     return unparsedResidue(discriminator, "the record could not be represented", record);
   }
-  LOGGER.warn(
+  LOGGER.debug(
     { discriminator, discriminator_field: discriminatorField },
     "recording an unmodelled record as residue",
   );
@@ -189,7 +190,7 @@ export function residueEntry(
   const upsertKey =
     vendorUuid === "" ? streamResidueUpsertKey(nextStreamResidue()) : residueUpsertKey(vendorUuid);
   if (vendorUuid === "") {
-    LOGGER.warn(
+    LOGGER.debug(
       { kind: residueKind(record), upsert_key: upsertKey },
       "the vendor stated no uuid for this record; its residue is keyed by this process's own stream sequence",
     );

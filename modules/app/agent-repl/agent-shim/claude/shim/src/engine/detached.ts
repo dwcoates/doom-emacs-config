@@ -149,7 +149,7 @@ export class LiveWorkTable {
   onTaskUpdated(message: SdkTaskUpdatedMessage): LiveWorkEntry | undefined {
     const existing = this.entries.get(message.task_id);
     if (existing === undefined) {
-      LOGGER.warn(
+      LOGGER.debug(
         { task_id: message.task_id },
         "task_updated for a task this shim never saw start; ignored",
       );
@@ -164,6 +164,14 @@ export class LiveWorkTable {
         : { backgrounded: message.patch.is_backgrounded }),
     };
     this.entries.set(updated.taskId, updated);
+    LOGGER.debug(
+      {
+        task_id: updated.taskId,
+        status: updated.status ?? "",
+        backgrounded: updated.backgrounded ?? false,
+      },
+      "applied a detached-work state transition",
+    );
     return updated;
   }
 
@@ -255,7 +263,7 @@ export class LiveWorkTable {
     const ids: conversationv1.DetachedWorkId[] = [];
     for (const entry of entries) {
       if (entry.toolUseId === undefined || entry.toolUseId === "") {
-        LOGGER.warn(
+        LOGGER.debug(
           { task_id: entry.taskId },
           "live work with no originating call has no wire handle; omitted from the named set",
         );
