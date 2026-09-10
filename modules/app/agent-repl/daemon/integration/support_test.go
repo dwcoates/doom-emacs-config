@@ -580,6 +580,21 @@ func detachedShell(work, command string) *conversationv1.AgentDetachedWork {
 	}
 }
 
+// movedShell announces that an in-turn shell unit's work LEFT for the
+// background. The handle IS the spawning call's own id (ruling, landing 3), so
+// one identity addresses the work and the unit it moved out of.
+func movedShell(unit string) *conversationv1.AgentDetachedWork {
+	return &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: unit},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: unit},
+			Cause: &conversationv1.DetachedWorkDetached_TimedOut{TimedOut: &conversationv1.DetachedCauseTimedOut{
+				TimeoutMs: 120_000,
+			}},
+		}},
+	}
+}
+
 // detachedSubagent announces a detached subagent unit.
 func detachedSubagent(work, agent, label string) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
