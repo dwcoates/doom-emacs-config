@@ -332,29 +332,39 @@ func TestPlaytest16SubagentPlacements(t *testing.T) {
 		fmt.Sprintf("the root feed carries exactly %d `detachedSubagent` rows -- one per commission, "+
 			"none doubled", len(rows)))
 
-	// A REMAINDER THIS PLAYBOOK RECORDS RATHER THAN ASSERTS, in the shape
-	// `00-feed-tail` used for the caret it handed this owner.
+	// AND THE CHIP AGAINST THE ARMS, which this playbook once only READ.
 	//
-	// The footer's ⚙ chip is the count of LIVE agent-spawned subagents and its
-	// panel is titled "live agents". By this point one of the three spawns is
-	// live and two have settled -- their heads read `done` and `failed` -- and
-	// the chip is read here rather than asserted, because what the chip counts
-	// is the footer's own business (owner 11's section) and not a claim about
-	// the placements this playbook is photographing.
+	// The footer's ⚙ chip is the count of LIVE agent-spawned subagents. By this
+	// point one of the three spawns is live and two have settled -- their heads
+	// read `done` and `failed` -- so the chip must read ONE. It read three: a
+	// detached run's terminal is addressed to its handle and reaches the daemon
+	// on whichever book carries it, and the footer retired a row only from the
+	// SPAWNING call's own activity stream, so every settled placement stayed
+	// counted as live. Filed by owner 16, fixed in the footer's sink
+	// (`OnSubagent`, the counterpart of `OnBash`), and asserted here because
+	// the chip and the heads are ONE fact seen twice: whatever settled a head
+	// is what must have retired the row.
+	s.awaitInPageFor(t, playtestAskBound, "the ⚙ chip to count only the placement still live",
+		fmt.Sprintf(`(function () {
+                   var chip = document.querySelector('.footer-chip[data-chip="agents"]');
+                   return chip !== null && chip.textContent.trim().indexOf("%d") >= 0;
+                 })()`, pt16LivePlacements))
 	live := s.readInPage(t, "the footer's agents chip",
 		`(function () { var c = document.querySelector('.footer-chip[data-chip="agents"]');
                    return c ? c.textContent.trim() : "<no agents chip>"; })()`)
 	states := s.readInPage(t, "the placements' settled arms",
 		`Array.prototype.map.call(document.querySelectorAll('`+pt16DetachedBubble+` .subagent-head'),
                    function (h) { return h.getAttribute("data-state"); }).join(",")`)
-	p.note("the ⚙ chip read beside the placements' own arms",
-		fmt.Sprintf("the bubbles' heads read [%s] and the footer's agents chip reads %q. WHAT THIS DOES "+
-			"NOT SETTLE: whether a DETACHED subagent's terminal retires its ⚙ row. The footer's sink "+
-			"carries `OnBash`, which retires a shell chip at its command's terminal, and nothing "+
-			"equivalent for a subagent -- `applySubagent` only ever hears the SPAWNING call's own "+
-			"activity stream. Filed by owner 16 for the footer's owner rather than fixed here",
+	p.note("the ⚙ chip counted beside the placements' own arms",
+		fmt.Sprintf("the bubbles' heads read [%s] and the footer's agents chip reads %q -- one live "+
+			"placement, and the two settled ones retired from the count at their own terminals",
 			states, live))
 }
+
+// pt16LivePlacements is how many of G50's three placements are still live once
+// every turn is over: the settled one and the failed one are done, and only
+// `!subagent-detached-live` outlives its turn. It is what the ⚙ chip must read.
+const pt16LivePlacements = 1
 
 // ---------------------------------------------------------------------------
 // G51 -- `!cancel-all`: the fan-wide stop, and the count it names.
