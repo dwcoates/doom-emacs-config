@@ -5,6 +5,16 @@ import {
   resetLoggingForTests,
   setLogger,
 } from "../src/log.js";
+import { installResizeObserver } from "./resize-observer.js";
+
+/**
+ * jsdom implements no `ResizeObserver` (it performs no layout), and the feed
+ * mount subscribes one to its scroll box so a footer settling after a render
+ * cannot leave the tail below the fold. Installed here, once per environment,
+ * because it is a missing CAPABILITY of the environment rather than a seam in
+ * the app -- the same standing the harness gives `Element.scrollIntoView`.
+ */
+installResizeObserver();
 
 /**
  * Production installs the ClientLog-forwarding logger before runtime work

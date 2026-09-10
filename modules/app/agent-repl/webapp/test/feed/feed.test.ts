@@ -24,6 +24,7 @@ import {
   userPromptRow,
   type Harness,
 } from "./harness.js";
+import { fireResize } from "../resize-observer.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -399,6 +400,67 @@ describe("mountFeed: the scroll box", () => {
     // Assert
     expect(host.querySelector('[data-feed-row="p1"]')).not.toBeNull();
     feed.dispose();
+  });
+
+  /**
+   * Script the scroll box's geometry, which jsdom lays out not at all, and
+   * clamp `scrollTop` into range on write the way a browser does.
+   */
+  function withGeometry(
+    box: HTMLElement,
+    init: { scrollHeight: number; clientHeight: number; scrollTop: number },
+  ) {
+    let clientHeight = init.clientHeight;
+    let scrollTop = init.scrollTop;
+    Object.defineProperties(box, {
+      scrollHeight: { get: () => init.scrollHeight },
+      clientHeight: { get: () => clientHeight },
+      scrollTop: {
+        get: () => scrollTop,
+        set: (next: number) => {
+          scrollTop = Math.max(0, Math.min(next, init.scrollHeight - clientHeight));
+        },
+      },
+    });
+    return { loseHeight: (px: number) => { clientHeight -= px; }, top: () => scrollTop };
+  }
+
+  it("re-lands the tail when the docked footer takes height after the render", async () => {
+    // Arrange — THE OCCLUSION. The mount must subscribe the scroll box's own
+    // size, or a footer settling after the tail render leaves the last bubble
+    // below the fold, clipped by the strip.
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const geometry = withGeometry(scroll, { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const h = harness({
+      openFeed: (req) => openSuccess(page([userPromptRow("p1", "hello")]), tokenFor(req)),
+    });
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    // Act — the footer appears and eats 48px of the scroll box.
+    geometry.loseHeight(48);
+    fireResize(scroll);
+    // Assert
+    expect(geometry.top()).toBe(748);
+    feed.dispose();
+  });
+
+  it("stops observing the scroll box's size when the feed is disposed", async () => {
+    // Arrange
+    const scroll = document.createElement("div");
+    const host = document.createElement("div");
+    scroll.append(host);
+    document.body.replaceChildren(scroll);
+    const h = harness();
+    const feed = mountFeed(host, h.ctx, { renderers: stubRenderers(), scrollBox: scroll });
+    await settle();
+    // Act
+    feed.dispose();
+    // Assert — nothing watches it, so the next workspace mounts onto a clean
+    // element rather than one a dead owner still re-parks.
+    expect(() => fireResize(scroll)).toThrow(/no ResizeObserver/);
   });
 });
 
