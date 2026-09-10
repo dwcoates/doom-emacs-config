@@ -191,6 +191,7 @@ type ShimControl struct {
 	c   net.Conn
 	dec *bufio.Scanner
 	enc *json.Encoder
+	pid int
 }
 
 // Shim answers the control client for a workspace's fake shim, waiting for the
@@ -238,6 +239,11 @@ func (s *ShimControl) connect() {
 			s.dec = bufio.NewScanner(conn)
 			s.dec.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 			s.enc = json.NewEncoder(conn)
+			reply := s.send(controlCommand{Op: "info"})
+			if reply.Info == nil || reply.Info.PID == 0 {
+				s.t.Fatalf("fake shim control %s: opening info carried no process identity", s.Socket)
+			}
+			s.pid = reply.Info.PID
 			return
 		}
 		select {
@@ -551,14 +557,11 @@ func (s *ShimControl) Exit(code int, stderr string) {
 // how the harness knows the process is really reaped.
 func (s *ShimControl) AwaitGone() {
 	s.t.Helper()
-	info := ShimInfo{}
-	if reply, ok := s.sendAllowingRefusal(controlCommand{Op: "info"}); ok && reply.Info != nil {
-		info = *reply.Info
-	}
-	if info.PID == 0 {
-		return
-	}
-	AwaitProcessGone(s.t, s.d.Ctx(), info.PID)
+	// The stand-down can close the control connection before this call begins.
+	// connect captured the process identity while the socket was known-live, so
+	// waiting never silently succeeds merely because the dying fake cannot
+	// answer one last info request.
+	AwaitProcessGone(s.t, s.d.Ctx(), s.pid)
 }
 
 func encode(t *testing.T, m proto.Message) string {
