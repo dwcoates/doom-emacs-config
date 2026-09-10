@@ -202,7 +202,13 @@ func (w *watcher) routeOpeningPageLocked(a *agentWatch, page *conversationv1.His
 	w.log.Debug("daemon.sessionwatcher.history_page", "opening page routed to the feed", dlog.Context{
 		"agent_id": a.id.GetValue(), "entries": len(page.GetEntries()),
 	})
-	w.sinks.Feed.OnHistoryPage(w.ws, w.watchAgentLocked(a), page, w.addr)
+	agent := w.watchAgentLocked(a)
+	w.sinks.Feed.OnHistoryPage(w.ws, agent, page, w.addr)
+	// THE FOOTER SEES THE PAGE TOO, and for one reason only: a resumed
+	// session's prior turns are facts no edge on this daemon's streams will
+	// ever restate, so without the page the strip reports a rehydrated
+	// conversation as one that has never run.
+	w.sinks.Footer.OnHistoryPage(w.ws, agent, page)
 }
 
 // routeEntryLocked routes one live history entry.
