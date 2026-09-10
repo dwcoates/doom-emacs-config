@@ -47,9 +47,23 @@ read them at the symbol you are implementing. Nothing here ever changes a
 | --- | --- |
 | `--socket` | `$AGENT_REPL_STORE_SOCKET`, else `~/.cache/agent-repl/sock/store.sock` (`XDG_CACHE_HOME` honored) |
 | `--db` | `…/store/events.db` |
-| `--log` | `…/log/shim-store.log` (also mirrored to stderr) |
+| `--log` | `…/log/shim-store.log` (size-capped, N generations; NOT mirrored to stderr) |
 | `--pprof` | `$AGENT_REPL_STORE_PPROF_ADDR`, else OFF |
 | `--watch-buffer` | `8192` frames per subscriber |
+
+`--log` is opened through `agentrepl/logging`.`OpenRotating`: it appends to
+what it finds and ROLLS AT A BYTE CAP into a fixed number of generations
+(`<path>.1` newest through `<path>.N` oldest), so the store's disk footprint is
+`(N+1) x cap` however long the process runs. It does NOT roll on open, because
+a launchd service is bounced by every deploy and every crash.
+
+THE TERMINAL IS NOT A SECOND LOG. Production builds the logger with
+`logging.NewDurableOnly`, so ordinary records reach the durable sink ALONE.
+Under launchd stderr is an append-only file the process neither owns nor can
+roll, and mirroring every record there is an unbounded second copy of an
+already-rotated log. The terminal keeps the BOOTSTRAP errors written before a
+logger exists and the SINK-FAILURE record, which is the one thing the durable
+sink cannot report about itself.
 
 `AGENT_REPL_STORE_SOCKET` is only the flag's DEFAULT, so an explicit `--socket`
 always beats it. That is how a test harness points every participant at a

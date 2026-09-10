@@ -547,6 +547,23 @@ pre-logger bootstrap failure and the sink-emergency path.
   aim them at an approximate arm.
 - Lifecycle records persist in
   `~/.cache/agent-repl/log/shim-claude-sidecar.log` (`--log`).
+- THE DURABLE LOG IS THE ONLY COPY, AND IT IS BOUNDED. `--log` is opened
+  through `agentrepl/logging`.`OpenRotating`: it appends to what it finds and
+  ROLLS AT A BYTE CAP into a fixed number of generations (`<path>.1` newest
+  through `<path>.N` oldest), so the file plane's disk footprint is
+  `(N+1) x cap` no matter how long the process runs. It does NOT roll on open —
+  this is a launchd service bounced by every deploy and every crash, and
+  rolling per boot would evict every generation of real history.
+- THE TERMINAL IS NOT A SECOND LOG. Production builds the logger with
+  `logging.NewDurableOnly`, so ordinary records go to the durable sink ALONE.
+  Under launchd stderr is a plain append-only file the process neither owns nor
+  can roll; mirroring every record there was an unbounded second copy of an
+  already-rotated log, and it reached 6.2 GB beside a 666 MB `--log` on the
+  owner's machine. The terminal keeps exactly two things: the BOOTSTRAP errors
+  written before a logger exists (a malformed window, an unopenable log), and
+  the SINK-EMERGENCY record, which must not re-enter the failed durable sink.
+  `logging.New`'s two-sink mirroring stays for tests and foreground runs, where
+  both sinks are the caller's to manage.
 
 ## Standing policies
 
