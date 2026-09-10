@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import stylesheet from "../../../src/styles.css?raw";
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -22,6 +23,26 @@ describe("drawFeedTextBlock", () => {
 
   it("draws an empty block as an empty body rather than refusing", () => {
     expect(drawFeedTextBlock(create(FeedTextBlockSchema, { text: "" })).textContent).toBe("");
+  });
+});
+
+describe("the attached image's own rule in the stylesheet", () => {
+  it("caps an attached image at the width of the bubble it sits in", () => {
+    // Arrange: the rule as the stylesheet declares it. An unconstrained <img>
+    // of a screenshot is a couple of thousand pixels wide and would push the
+    // bubble, and with it the feed's column, off the panel.
+    const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
+
+    // Act / Assert.
+    expect(rule).toContain("max-width: 100%");
+  });
+
+  it("leaves the height to follow the capped width, so the picture is not squashed", () => {
+    // Arrange.
+    const rule = stylesheet.match(/\.prompt-block-image\s*\{[^}]*\}/)?.[0] ?? "";
+
+    // Act / Assert.
+    expect(rule).toContain("height: auto");
   });
 });
 

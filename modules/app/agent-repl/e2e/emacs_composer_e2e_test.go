@@ -2,7 +2,12 @@ package e2e
 
 import (
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,7 +19,7 @@ import (
 // Scenario 20 (SubmitFromComposerYieldsAResponseRow) is NOT here: it is the
 // layer's proof-of-life test and lives in `emacs_e2e_test.go` as
 // TestEmacsProofOfLife, per the spec's "The proof-of-life test" section.
-// This file carries scenarios 21 through 25.
+// This file carries scenarios 21 through 25, plus 25a.
 //
 // Every scenario here drives an ORDINARY interactive command through
 // `call-interactively` (or presses its key), and reads what Emacs actually
@@ -478,4 +483,149 @@ func installArmObserver(t *testing.T, e *Emacs) {
                           agent-repl-roster--rows-by-id)
                  arm))
              t)`)
+}
+
+// ---------------------------------------------------------------------------
+// 25a. AttachedImageMarkerNeverRidesAsWords
+// ---------------------------------------------------------------------------
+
+// armSaidObserver advises the module's OWN outbound RPC verb to record the
+// WHOLE submitted `UserSaid' -- every block and its arm -- rather than the
+// concatenated text `armSubmissionObserver' keeps.
+//
+// The composer's attachment marker is the one claim the concatenated form
+// cannot make: the question is which BLOCK a run of characters ended up in,
+// and a join over the blocks has already thrown that away.
+func armSaidObserver(t *testing.T, e *Emacs) {
+	t.Helper()
+	e.Eval(`(progn
+             (defvar agent-repl-e2e--said nil)
+             (defvar agent-repl-e2e--said-printed nil)
+             (setq agent-repl-e2e--said nil)
+             (setq agent-repl-e2e--said-printed "")
+             (defun agent-repl-e2e--record-said (_conn request &rest _)
+               (setq agent-repl-e2e--said (plist-get request :said))
+               (setq agent-repl-e2e--said-printed
+                     (format "%S" (plist-get request :said))))
+             (defun agent-repl-e2e--said-blocks ()
+               (plist-get (plist-get agent-repl-e2e--said :content) :blocks))
+             (defun agent-repl-e2e--said-field (n field)
+               (let* ((block (nth n (agent-repl-e2e--said-blocks)))
+                      (value (plist-get block :value)))
+                 (pcase field
+                   (:arm (format "%s" (plist-get block :arm)))
+                   (:text (or (plist-get value :text) ""))
+                   (:media-type (or (plist-get value :media-type) ""))
+                   (:path (or (plist-get (plist-get (plist-get value :location) :value)
+                                         :path)
+                              "")))))
+             (unless (advice-member-p 'agent-repl-e2e--record-said
+                                      'agent-repl-rpc-submit-prompt)
+               (advice-add 'agent-repl-rpc-submit-prompt :before
+                           #'agent-repl-e2e--record-said))
+             t)`)
+}
+
+// saidField reads one field of the Nth block of the recorded `UserSaid'.
+func saidField(e *Emacs, n int, field string) string {
+	return e.EvalString(`(agent-repl-e2e--said-field ` + strconv.Itoa(n) + ` ` + field + `)`)
+}
+
+// writeScenarioPNG writes a real PNG at PATH, so the attachment names a file
+// that exists the way a capture leaves one. NOTHING SHELLS OUT: the bytes are
+// encoded here, the way every other fixture in this suite is scripted.
+func writeScenarioPNG(t *testing.T, path string) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for x := 0; x < 2; x++ {
+		for y := 0; y < 2; y++ {
+			img.Set(x, y, color.RGBA{R: 0x8b, G: 0x5c, B: 0xf6, A: 0xff})
+		}
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("e2e: create fixture png %s: %v", path, err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, img); err != nil {
+		t.Fatalf("e2e: encode fixture png %s: %v", path, err)
+	}
+}
+
+// TestEmacsAttachedImageMarkerNeverRidesAsWords is scenario 25a.
+//
+// `agent-repl--image-insert-marker' draws `[image attached: NAME]' so the
+// user can SEE what they attached, and clipboard-image.el's own contract is
+// that "nothing about the image rides the words": the image travels as its
+// own `ImageBlock{path, media_type}', stated by ARM, and the agent is never
+// left inferring an attachment from a filename in the prose.
+//
+// The marker used to travel inside the text block anyway, because the
+// composer read its buffer verbatim. The claim is only observable in the
+// SUBMITTED `UserSaid' -- the drawn feed row shows one bubble either way --
+// so it is read at the module's own RPC boundary, and the daemon's
+// acceptance is still awaited through the composer clearing.
+func TestEmacsAttachedImageMarkerNeverRidesAsWords(t *testing.T) {
+	t.Parallel()
+	// ARRANGE.
+	s := newEmacsScenario(t)
+	e := s.E
+	armSaidObserver(t, e)
+
+	// The capture directory is the MODULE's own answer, not a path spelled
+	// twice: a second spelling would be a second contract.
+	imageDir := e.EvalString(`(agent-repl--image-dir ` + elispString(s.Name) + `)`)
+	if imageDir == "" {
+		t.Fatal("e2e: the module reported no capture directory for the workspace")
+	}
+	imagePath := filepath.Join(imageDir, "clip-playtest.png")
+	writeScenarioPNG(t, imagePath)
+
+	const words = "what is in this picture?"
+	e.Eval(`(with-current-buffer ` + elispString(s.Input) + `
+              (erase-buffer)
+              (insert ` + elispString(words) + `)
+              (agent-repl-input-attach-image ` + elispString(imagePath) + ` "image/png")
+              (agent-repl--image-insert-marker ` + elispString(imagePath) + ` ` +
+		elispString(s.Name) + `)
+              t)`)
+	if got := composerText(e, s.Input); !strings.Contains(got, "[image attached") {
+		t.Fatalf("the composer draws no attachment marker, so the scenario proves nothing:\n%q", got)
+	}
+
+	// ACT: the composer's own RET, the way a user submits.
+	if want, got := "agent-repl-send", e.BindingForIn(s.Input, "RET"); got != want {
+		t.Fatalf("composer RET resolves to %q, want %q", got, want)
+	}
+	e.KeysIn(s.Input, "RET")
+
+	// ASSERT. The daemon's acceptance is what clears the composer.
+	e.AwaitEval("the daemon's acceptance to clear the composer",
+		`(with-current-buffer `+elispString(s.Input)+` (buffer-string))`,
+		func(raw json.RawMessage) bool { return decodeString(raw) == "" })
+
+	if got := e.EvalInt(`(length (agent-repl-e2e--said-blocks))`); got != 2 {
+		t.Fatalf("the submission carried %d blocks, want the words and the image", got)
+	}
+	if got := saidField(e, 0, ":arm"); got != ":text" {
+		t.Errorf("the first block's arm is %q, want %q", got, ":text")
+	}
+	if got := saidField(e, 0, ":text"); got != words {
+		t.Errorf("the submitted text is\n%q\nwant exactly the typed words\n%q", got, words)
+	}
+	if got := saidField(e, 1, ":arm"); got != ":image" {
+		t.Errorf("the second block's arm is %q, want %q", got, ":image")
+	}
+	if got := saidField(e, 1, ":path"); got != imagePath {
+		t.Errorf("the image block names %q, want the attached file %q", got, imagePath)
+	}
+	if got := saidField(e, 1, ":media-type"); got != "image/png" {
+		t.Errorf("the image block's media type is %q, want %q", got, "image/png")
+	}
+	// The whole UserSaid, printed: the marker is nowhere in it, not in the
+	// text block and not smuggled into any other one.
+	printed := e.EvalString(`agent-repl-e2e--said-printed`)
+	if strings.Contains(printed, "[image attached") {
+		t.Errorf("the attachment marker rode along inside the submitted UserSaid:\n%s", printed)
+	}
 }

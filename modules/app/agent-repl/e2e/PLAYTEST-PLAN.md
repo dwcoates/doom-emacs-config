@@ -80,7 +80,7 @@ C. Composer and delivery
 19. type/submit → prompt bubble; SPC o v focuses; discard clears
 20. held prompt during live turn → tray; discard from tray
 21. deferred prompt drains on finish edge
-22. line/region/hunk prompt (SPC TAB e) and canned (E) → reference in prompt
+22. line/region/hunk prompt (SPC j e e) and canned (SPC j e E) → reference in prompt
 23. attach clipboard image → attachment chip
 24. history search recall → last prompt restored
 

@@ -158,6 +158,58 @@
                                (buffer-string)))
         (should-not (string-match-p (regexp-quote dest) (buffer-string)))))))
 
+(ert-deftest agent-repl-image-marker-span-carries-the-marker-property ()
+  "The whole inserted span -- marker line AND newline -- is named a marker."
+  (agent-repl-test-image--with
+    ;; Arrange.
+    (let ((path "/tmp/x/clip-1.png"))
+      ;; Act.
+      (agent-repl--image-insert-marker path "ws-one")
+      ;; Assert.
+      (should (equal (buffer-string) "[image attached: clip-1.png]\n"))
+      (should (equal (mapcar (lambda (i)
+                               (get-text-property i agent-repl--input-image-marker-property))
+                             (number-sequence (point-min) (1- (point-max))))
+                     (make-list (1- (point-max)) path))))))
+
+(ert-deftest agent-repl-image-marker-is-not-read-back-as-words ()
+  "An attached image leaves the composer's TEXT exactly what was typed."
+  (agent-repl-test-image--with
+    ;; Arrange.
+    (insert "what is in this picture?")
+    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
+               (lambda (dest &optional _ws) dest)))
+      ;; Act.
+      (agent-repl-attach-clipboard-image)
+      ;; Assert.
+      (should (equal (agent-repl--read-input-buffer "ws-one")
+                     "what is in this picture?")))))
+
+(ert-deftest agent-repl-image-marker-opening-newline-is-part-of-the-marker ()
+  "The newline the marker opens a line with was never typed, so it goes too."
+  (agent-repl-test-image--with
+    ;; Arrange.
+    (insert "mid-line")
+    ;; Act.
+    (agent-repl--image-insert-marker "/tmp/x/clip-1.png" "ws-one")
+    ;; Assert.
+    (should (equal (agent-repl--read-input-buffer "ws-one") "mid-line"))))
+
+(ert-deftest agent-repl-image-two-markers-are-both-stripped ()
+  "Two attachments strip two markers and leave the words between them."
+  (agent-repl-test-image--with
+    ;; Arrange.
+    (cl-letf (((symbol-function 'agent-repl--image-capture-clipboard)
+               (lambda (dest &optional _ws) dest)))
+      (insert "before\n")
+      (agent-repl-attach-clipboard-image)
+      ;; Act.
+      (insert "between\n")
+      (agent-repl-attach-clipboard-image)
+      ;; Assert.
+      (should (equal (agent-repl--read-input-buffer "ws-one")
+                     "before\nbetween\n")))))
+
 (ert-deftest agent-repl-image-marker-names-the-file ()
   "The marker names the file so the user can tell two attachments apart."
   (should (equal (agent-repl--image-marker-text "/tmp/x/clip-1.png")

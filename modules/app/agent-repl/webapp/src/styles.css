@@ -3979,6 +3979,19 @@ body.draining #composer-input::placeholder {
 /* An AGENT-addressed prompt wears the orange border the schema names for it. */
 .bubble.user.prompt-agent { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
+/* An ATTACHED IMAGE is drawn at its own size, but never wider than the bubble
+   it sits in: an unconstrained `<img>` of a screenshot is a couple of thousand
+   pixels wide and would push the bubble -- and with it the feed's column --
+   off the panel. `height: auto` keeps the aspect ratio while the width is
+   capped, and the block display puts it on its own line beneath the words
+   rather than in their flow. */
+.prompt-block-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-top: 0.35rem;
+  border-radius: 3px;
+}
 
 /* ---- hold tray (src/tray) ---------------------------------------------- */
 

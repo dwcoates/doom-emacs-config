@@ -399,7 +399,12 @@ inert → wait freeness → restart-pending hold → stand down old (Hibernate i
 NOT used here; graceful KillSession{force:false} then reap) → reap gate →
 StartSession(resume) → drain holds), `ReloadWebapp(ws)` push. Asset origin:
 `server` serves `webapp/dist` with the entry point re-stat'd per request
-and `Cache-Control: no-store` on it only.
+and `Cache-Control: no-store` on it only. Image origin (`internal/imageorigin`,
+mounted at `/feed-images/`): a prompt's `ImageBlock{path}` names a file on
+THIS host, so the feed resolver registers the path and draws the origin's URL
+as the `src`. Registering is the only way a path becomes servable, so the
+origin serves exactly the images some conversation carried and an arbitrary
+host path has no id a client could ask for.
 
 ### workspace (`internal/workspace`)
 
