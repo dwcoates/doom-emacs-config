@@ -9,7 +9,7 @@
  *
  * The chain here is entirely real:
  *
- *   log() in the page -> ForwardingLogger -> ClientLog over the real transport
+ *   log.error() in the page -> ForwardingLogger -> ClientLog over the real transport
  *     -> real claude-repld -> dlog -> <workspace>/.claude/emacs/webapp.log
  *
  * This file therefore mounts with production's own sink
@@ -150,7 +150,7 @@ beforeAll(async () => {
   // Act — one record, through the page's canonical API. `error` is the level
   // the throttle releases immediately, so the record does not wait on a window
   // this file would then have to advance past.
-  log("error", MESSAGE, { operation: OPERATION, context: { planted_by: "client-log.layer" } });
+  log.error(MESSAGE, { operation: OPERATION, context: { planted_by: "client-log.layer" } });
 
   planted = await awaitForwarded("the planted record", (record) => record.operation === OPERATION);
 }, ARRANGE_MS);

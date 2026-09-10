@@ -133,7 +133,7 @@ export function watchStream<Res extends Message>(
   /** Resolves the current backoff wait early when the stream is cancelled. */
   let wakeFromBackoff: (() => void) | null = null;
 
-  log("debug", `opening the ${opts.name} stream`, {
+  log.debug(`opening the ${opts.name} stream`, {
     operation: "rpc.stream-open",
     context: { rpc: opts.name },
   });
@@ -145,7 +145,7 @@ export function watchStream<Res extends Message>(
   const unsubscribeFromQuiesce = ctx.onQuiesced(() => {
     if (cancelled) return;
     quiesceRequested = true;
-    log("info", `${opts.name} is stopping: the workspace moved to another daemon`, {
+    log.info(`${opts.name} is stopping: the workspace moved to another daemon`, {
       operation: "rpc.stream-quiesced",
       context: { rpc: opts.name },
     });
@@ -173,7 +173,7 @@ export function watchStream<Res extends Message>(
     // re-arm the backoff, or a link that flaps every few minutes would creep
     // to the ceiling and stay there.
     if (unreachableFiled) {
-      log("info", `${opts.name} is receiving again; retracting the unreachable card`, {
+      log.info(`${opts.name} is receiving again; retracting the unreachable card`, {
         operation: "rpc.stream-recovered",
         context: { rpc: opts.name },
       });
@@ -185,7 +185,7 @@ export function watchStream<Res extends Message>(
   };
 
   const reportUndecodable = (err: MalformedView): void => {
-    log("error", `a ${opts.name} push could not be read and was skipped: ${err.detail}`, {
+    log.error(`a ${opts.name} push could not be read and was skipped: ${err.detail}`, {
       operation: "rpc.stream-frame-undecodable",
       context: { rpc: opts.name, path: err.path, cause: err.detail },
     });
@@ -196,7 +196,7 @@ export function watchStream<Res extends Message>(
 
   const reportUnreachable = (end: StreamEnd): void => {
     const { closeCode, closeReason } = closeEvidence(end);
-    log("error", `the ${opts.name} stream ended without being cancelled; reopening`, {
+    log.error(`the ${opts.name} stream ended without being cancelled; reopening`, {
       operation: "rpc.stream-transport-failure",
       context: { rpc: opts.name, end: end.kind, close_code: closeCode, close_reason: closeReason, backoff_ms: backoffMs },
     });
@@ -247,7 +247,7 @@ export function watchStream<Res extends Message>(
     cancel(): void {
       if (cancelled) return;
       cancelled = true;
-      log("debug", `cancelling the ${opts.name} stream`, {
+      log.debug(`cancelling the ${opts.name} stream`, {
         operation: "rpc.stream-cancel",
         context: { rpc: opts.name },
       });

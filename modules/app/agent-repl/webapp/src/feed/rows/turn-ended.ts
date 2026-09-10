@@ -68,7 +68,7 @@ export const TURN_ERROR_WAIT_ARMS: readonly string[] = ["rateLimited", "overload
 /** The terminal row. */
 export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLElement {
   const outcome = requireCase(msg.outcome, `${PATH}.outcome`);
-  log("debug", `drawing a turn_ended row as ${outcome.case}`, {
+  log.debug(`drawing a turn_ended row as ${outcome.case}`, {
     operation: "feed.draw-turn-ended",
     context: { outcome: outcome.case },
   });
@@ -107,7 +107,7 @@ export function drawFeedTurnEndedConcluded(
   el.className = "turn-ended turn-ended-concluded";
   el.setAttribute("data-arm", "concluded");
   if (concluded.answer === undefined) {
-    log("debug", "the turn concluded with no answering response to mark", {
+    log.debug("the turn concluded with no answering response to mark", {
       operation: "feed.turn-concluded-unanswered",
       context: {},
     });
@@ -128,7 +128,7 @@ export function drawFeedTurnEndedConcluded(
 function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   const row = rc.findRowElement?.(answer) ?? null;
   if (row === null) {
-    log("warn", "the concluded turn names an answering row this feed has not drawn", {
+    log.warn("the concluded turn names an answering row this feed has not drawn", {
       operation: "feed.final-answer-row-absent",
       context: { answer: answer.value },
     });
@@ -140,7 +140,7 @@ function markFinalAnswer(answer: FeedId, rc: RowContext): void {
   // carries the row-level marker above.
   const bubble = row.querySelector(".bubble.assistant");
   if (bubble !== null) bubble.classList.add(FINAL_RESPONSE_CLASS);
-  log("debug", "marked the answering row with the final-answer treatment", {
+  log.debug("marked the answering row with the final-answer treatment", {
     operation: "feed.final-answer-marked",
     context: { answer: answer.value, styled_bubble: bubble !== null },
   });
@@ -174,7 +174,7 @@ export function drawFeedTurnEndedErrored(
   const wait = retryWait(error);
   if (wait !== null) el.append(drawRetryCountdown(endedAtMs, wait, rc));
 
-  log("debug", `drew the turn error arm ${error.case}`, {
+  log.debug(`drew the turn error arm ${error.case}`, {
     operation: "feed.draw-turn-error",
     context: {
       arm: error.case,
@@ -258,7 +258,7 @@ export function drawFeedTurnErrorQueryCause(
         armName(cause as unknown as { case: string }),
       );
   }
-  log("debug", `the query died: ${cause.case}`, {
+  log.debug(`the query died: ${cause.case}`, {
     operation: "feed.turn-error-query-cause",
     context: { cause: cause.case },
   });

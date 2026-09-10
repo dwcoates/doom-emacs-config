@@ -44,7 +44,7 @@ export type MergeDequeueDecision = "keep" | "release";
 export function drawHeldOffer(u: HeldOffer, tc: TrayContext): HTMLElement {
   const path = "HeldOffer";
   const offer = requireCase(u.offer, `${path}.offer`);
-  log("debug", "drawing a held offer", {
+  log.debug("drawing a held offer", {
     operation: "tray.held-offer",
     context: { offer: offer.case },
   });
@@ -70,7 +70,7 @@ export function drawHeldOfferMergeDequeue(
   tc: TrayContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a merge-dequeue offer", {
+  log.debug("drawing a merge-dequeue offer", {
     operation: "tray.held-offer.merge-dequeue",
     context: { path },
   });
@@ -93,7 +93,7 @@ export function drawHeldOfferMergeDequeue(
 
 /** The composed sentence, verbatim. */
 export function drawHeldOfferHeadline(u: HeldOfferHeadline, path: string): HTMLElement {
-  log("debug", "drawing a held offer headline", {
+  log.debug("drawing a held offer headline", {
     operation: "tray.held-offer.headline",
     context: { path },
   });
@@ -158,7 +158,7 @@ async function answer(
     );
     const say = crossCuttingSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);
     drawRefusal(actions, cause.case, say);
-    log("warn", `AnswerHeldOffer refused a ${decision}`, {
+    log.warn(`AnswerHeldOffer refused a ${decision}`, {
       operation: "tray.held-offer.refused",
       context: { decision, arm: cause.case, sentence: say },
     });
@@ -168,7 +168,7 @@ async function answer(
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
     drawRefusal(actions, "error", "the daemon could not be reached");
-    log("error", `AnswerHeldOffer failed for a ${decision}: ${String(err)}`, {
+    log.error(`AnswerHeldOffer failed for a ${decision}: ${String(err)}`, {
       operation: "tray.held-offer.failed",
       context: { decision, cause: err },
     });

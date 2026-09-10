@@ -1076,12 +1076,22 @@ function identityPush(agentReplSessionId: string, claudeSessionId = "") {
 }
 
 describe("bindSessionIdentity", () => {
+  it("records the identity lifecycle edge at the default info threshold", async () => {
+    // ARRANGE
+    const h = captureLogger();
+    // ACT
+    bindSessionIdentity(identityPush("sess-1"));
+    // ASSERT
+    const record = forwardedRecord(await forwarded(h), "lifecycle.session_identity");
+    expect(record.level.case).toBe("info");
+  });
+
   it("stamps the session on a record logged after the frame", async () => {
     // ARRANGE
     const h = captureLogger();
     // ACT
     bindSessionIdentity(identityPush("sess-1"));
-    log("info", "after", { operation: "test.after" });
+    log.info("after", { operation: "test.after" });
     // ASSERT
     const records = await forwarded(h);
     const after = forwardedRecord(records, "test.after");
@@ -1093,7 +1103,7 @@ describe("bindSessionIdentity", () => {
     const h = captureLogger();
     // ACT
     bindSessionIdentity(identityPush("sess-1", "claude-1"));
-    log("info", "after", { operation: "test.after" });
+    log.info("after", { operation: "test.after" });
     // ASSERT
     const records = await forwarded(h);
     const after = forwardedRecord(records, "test.after");
@@ -1104,7 +1114,7 @@ describe("bindSessionIdentity", () => {
     // ARRANGE
     const h = captureLogger();
     // ACT: the record is forwarded while nothing is bound.
-    log("info", "before", { operation: "test.before" });
+    log.info("before", { operation: "test.before" });
     const records = await forwarded(h);
     // ASSERT
     const before = forwardedRecord(records, "test.before");
@@ -1117,7 +1127,7 @@ describe("bindSessionIdentity", () => {
     bindSessionIdentity(identityPush("sess-1"));
     // ACT
     bindSessionIdentity(identityPush("sess-2"));
-    log("info", "after the rotation", { operation: "test.rotated" });
+    log.info("after the rotation", { operation: "test.rotated" });
     // ASSERT
     const records = await forwarded(h);
     const rotated = forwardedRecord(records, "test.rotated");
@@ -1130,7 +1140,7 @@ describe("bindSessionIdentity", () => {
     bindSessionIdentity(identityPush("sess-1"));
     // ACT: the workspace's session went away.
     bindSessionIdentity(identityPush(""));
-    log("info", "after the session went away", { operation: "test.sessionless" });
+    log.info("after the session went away", { operation: "test.sessionless" });
     // ASSERT
     const records = await forwarded(h);
     const sessionless = forwardedRecord(records, "test.sessionless");
@@ -1164,7 +1174,7 @@ describe("startLifecycle: the session identity", () => {
     // ACT
     const handle = startLifecycle(ctx, { drainBannerHost: host });
     await settle();
-    log("info", "after the push", { operation: "test.after-push" });
+    log.info("after the push", { operation: "test.after-push" });
     // ASSERT
     h.logger.flush();
     await settle();

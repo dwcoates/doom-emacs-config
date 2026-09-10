@@ -51,7 +51,7 @@ export const ARTIFACT_STATE_ARMS: readonly string[] = Object.keys(STATE_BADGES);
 /** The artifact bubble. */
 export function drawFeedArtifact(u: FeedArtifact, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing an artifact bubble", {
+  log.debug("drawing an artifact bubble", {
     operation: "feed.cards.artifact",
     context: { state: state.case },
   });
@@ -86,7 +86,7 @@ export function drawFeedArtifact(u: FeedArtifact, rc: RowContext): HTMLElement {
 
 /** The composed heading, drawn verbatim. */
 export function drawFeedArtifactHeading(u: FeedArtifactHeading, path: string): string {
-  log("debug", "reading an artifact heading", {
+  log.debug("reading an artifact heading", {
     operation: "feed.cards.artifact.heading",
     context: { path },
   });
@@ -99,7 +99,7 @@ export function drawFeedArtifactPublished(
   ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a published artifact", {
+  log.debug("drawing a published artifact", {
     operation: "feed.cards.artifact.published",
     context: { path },
   });
@@ -115,7 +115,7 @@ export function drawFeedArtifactUrl(
   ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing an artifact url", {
+  log.debug("drawing an artifact url", {
     operation: "feed.cards.artifact.url",
     context: { path, url: u.url },
   });
@@ -124,7 +124,7 @@ export function drawFeedArtifactUrl(
 
 /** The failed state's composed reason, where the URL would have been. */
 export function drawFeedArtifactFailed(u: FeedArtifactFailed, path: string): HTMLElement {
-  log("debug", "drawing a failed artifact publish", {
+  log.debug("drawing a failed artifact publish", {
     operation: "feed.cards.artifact.failed",
     context: { path },
   });

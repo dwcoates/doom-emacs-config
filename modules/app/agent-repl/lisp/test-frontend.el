@@ -1081,7 +1081,9 @@ A REAL connection object rather than a stubbed accessor: cl-defstruct
 accessors are inlined into their callers at load time, so stubbing the
 accessor would not reach the code under test."
   (declare (indent 2))
-  `(let ((conn (agent-repl-connect-connection-create :address ,address)))
+  `(let ((conn (agent-repl-connect-connection-create :address ,address))
+         (process-environment
+          (cons "AGENT_REPL_LOG_LEVEL" process-environment)))
      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) ,ref))
                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) conn)))
        ,@body)))
@@ -1093,7 +1095,7 @@ accessor would not reach the code under test."
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w/one") "127.0.0.1:7777"
       ;; Act / Assert
       (should (equal (agent-repl-frontend-webview-url "alpha")
-                     "http://127.0.0.1:7777/?workspace=ws-1&dir=%2Fw%2Fone")))))
+                     "http://127.0.0.1:7777/?workspace=ws-1&dir=%2Fw%2Fone&log_level=info")))))
 
 (ert-deftest agent-repl-test-frontend-url-hexifies-the-id ()
   "An opaque id is echoed verbatim, URL-encoded — never parsed or rebuilt."
@@ -1122,15 +1124,28 @@ accessor would not reach the code under test."
       (should-not (string-match-p "composer"
                                   (agent-repl-frontend-webview-url "alpha"))))))
 
-(ert-deftest agent-repl-test-frontend-url-carries-nothing-but-the-two-values ()
-  "Nothing else rides the URL: a third parameter would be a second channel
-for facts the daemon already pushes."
+(ert-deftest agent-repl-test-frontend-url-carries-the-configured-log-level ()
+  "The page receives the daemon process's effective logging threshold."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      ;; Re-introduce the test's configured value after the helper removes
+      ;; ambient host configuration for every ordinary URL case.
+      (let ((process-environment
+             (cons "AGENT_REPL_LOG_LEVEL=debug" process-environment)))
+        ;; Act / Assert
+        (should (string-match-p "log_level=debug"
+                                (agent-repl-frontend-webview-url "alpha")))))))
+
+(ert-deftest agent-repl-test-frontend-url-refuses-an-invalid-log-level ()
+  "A misspelled threshold aborts before a webview can hide the defect."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-frontend--with-ref '(:id "ws-1" :dir "/w") "127.0.0.1:1"
+      (let ((process-environment
+             (cons "AGENT_REPL_LOG_LEVEL=trace" process-environment)))
       ;; Act / Assert
-      (should (equal (length (split-string (agent-repl-frontend-webview-url "alpha") "&"))
-                     2)))))
+        (should-error (agent-repl-frontend-webview-url "alpha"))))))
 
 (ert-deftest agent-repl-test-frontend-url-refuses-a-workspace-with-no-ref ()
   "A URL invented without a ref would address the wrong workspace."
@@ -1171,7 +1186,7 @@ for facts the daemon already pushes."
                 (agent-repl-frontend-reload-webview "alpha")
                 ;; Assert
                 (should (equal navigated
-                               "http://127.0.0.1:9/?workspace=ws-1&dir=%2Fw")))))
+                               "http://127.0.0.1:9/?workspace=ws-1&dir=%2Fw&log_level=info")))))
         (kill-buffer buf)))))
 
 (ert-deftest agent-repl-test-frontend-reload-does-not-remount-the-buffer ()

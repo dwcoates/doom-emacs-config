@@ -61,7 +61,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 export function drawCommandPanel(u: SubmitPromptCommandPanel, ctx: AppContext): HTMLElement {
   const path = "SubmitPromptCommandPanel";
   const panel = requireCase(u.panel, `${path}.panel`);
-  log("debug", "drawing a command panel", {
+  log.debug("drawing a command panel", {
     operation: "panels.command-panel",
     context: { panel: panel.case },
   });
@@ -95,7 +95,7 @@ export function drawCommandPanel(u: SubmitPromptCommandPanel, ctx: AppContext): 
 export function drawFeedCommandPanel(u: FeedCommandPanel, rc: RowContext): HTMLElement {
   const path = "FeedCommandPanel";
   const panel = requireCase(u.panel, `${path}.panel`);
-  log("debug", "drawing a command panel row", {
+  log.debug("drawing a command panel row", {
     operation: "panels.feed-command-panel",
     context: { panel: panel.case },
   });
@@ -158,7 +158,7 @@ function labelValueRow(label: string, value: string): HTMLElement {
 
 /** The /status panel: thin label/value rows, and honestly thin. */
 export function drawStatusPanelView(u: StatusPanelView, path: string): HTMLElement {
-  log("debug", "drawing the status panel", {
+  log.debug("drawing the status panel", {
     operation: "panels.status",
     context: { path, rows: u.rows.length },
   });
@@ -174,7 +174,7 @@ export function drawStatusPanelView(u: StatusPanelView, path: string): HTMLEleme
 
 /** One /status row. The value is a word or a phrase; nothing reformats it. */
 export function drawStatusPanelRow(u: StatusPanelRow, path: string): HTMLElement {
-  log("debug", "drawing a status row", {
+  log.debug("drawing a status row", {
     operation: "panels.status.row",
     context: { path, label: u.label },
   });
@@ -185,7 +185,7 @@ export function drawStatusPanelRow(u: StatusPanelRow, path: string): HTMLElement
 
 /** The /todos panel: the tracker's checklist, printed. */
 export function drawTodosPanelView(u: TodosPanelView, path: string): HTMLElement {
-  log("debug", "drawing the todos panel", {
+  log.debug("drawing the todos panel", {
     operation: "panels.todos",
     context: { path, rows: u.rows.length },
   });
@@ -208,7 +208,7 @@ export function drawTodosPanelView(u: TodosPanelView, path: string): HTMLElement
  */
 export function drawTodosPanelRow(u: TodosPanelRow, path: string): HTMLElement {
   const status = requireCase(u.status, `${path}.status`);
-  log("debug", "drawing a todos row", {
+  log.debug("drawing a todos row", {
     operation: "panels.todos.row",
     context: { path, status: status.case },
   });
@@ -249,7 +249,7 @@ export function drawTodosPanelRow(u: TodosPanelRow, path: string): HTMLElement {
 
 /** The /agents panel: the configured agent types. */
 export function drawAgentsPanelView(u: AgentsPanelView, path: string): HTMLElement {
-  log("debug", "drawing the agents panel", {
+  log.debug("drawing the agents panel", {
     operation: "panels.agents",
     context: { path, rows: u.rows.length },
   });
@@ -265,7 +265,7 @@ export function drawAgentsPanelView(u: AgentsPanelView, path: string): HTMLEleme
 
 /** One agent type. The description is optional; absent draws nothing. */
 export function drawAgentsPanelRow(u: AgentsPanelRow, path: string): HTMLElement {
-  log("debug", "drawing an agents row", {
+  log.debug("drawing an agents row", {
     operation: "panels.agents.row",
     context: { path, name: u.name, described: u.description !== undefined },
   });
@@ -289,7 +289,7 @@ export function drawAgentsPanelRow(u: AgentsPanelRow, path: string): HTMLElement
 
 /** The /mcp panel: each server and where it stands. */
 export function drawMcpPanelView(u: McpPanelView, path: string): HTMLElement {
-  log("debug", "drawing the mcp panel", {
+  log.debug("drawing the mcp panel", {
     operation: "panels.mcp",
     context: { path, rows: u.rows.length },
   });
@@ -321,7 +321,7 @@ const MCP_BADGE_LABELS: Readonly<Record<string, string>> = {
  */
 export function drawMcpPanelRow(u: McpPanelRow, path: string): HTMLElement {
   const status = requireCase(u.status, `${path}.status`);
-  log("debug", "drawing an mcp row", {
+  log.debug("drawing an mcp row", {
     operation: "panels.mcp.row",
     context: { path, name: u.name, status: status.case },
   });
@@ -360,7 +360,7 @@ export function drawMcpPanelRow(u: McpPanelRow, path: string): HTMLElement {
 
 /** The /help panel: the command list. */
 export function drawHelpPanelView(u: HelpPanelView, path: string): HTMLElement {
-  log("debug", "drawing the help panel", {
+  log.debug("drawing the help panel", {
     operation: "panels.help",
     context: { path, rows: u.rows.length },
   });
@@ -376,7 +376,7 @@ export function drawHelpPanelView(u: HelpPanelView, path: string): HTMLElement {
 
 /** One command's line. The description is optional. */
 export function drawHelpPanelRow(u: HelpPanelRow, path: string): HTMLElement {
-  log("debug", "drawing a help row", {
+  log.debug("drawing a help row", {
     operation: "panels.help.row",
     context: { path, command: u.command, described: u.description !== undefined },
   });
@@ -416,7 +416,7 @@ export function drawContextPanelView(
   _ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing the context panel", {
+  log.debug("drawing the context panel", {
     operation: "panels.context",
     context: { path, categories: u.categories.length },
   });
@@ -487,12 +487,12 @@ export function drawContextPanelView(
 export function drawContextPanelCategory(u: ContextPanelCategory, path: string): HTMLElement {
   const color = cssColor(u.color);
   if (u.color !== "" && color === null) {
-    log("warn", `the context panel category ${u.label} carried an unusable color`, {
+    log.warn(`the context panel category ${u.label} carried an unusable color`, {
       operation: "panels.context.category-color",
       context: { path, color: u.color },
     });
   }
-  log("debug", "drawing a context category", {
+  log.debug("drawing a context category", {
     operation: "panels.context.category",
     context: { path, label: u.label },
   });
@@ -544,7 +544,7 @@ function sectionHeading(title: string): HTMLElement {
 
 /** One composed label/figure row. */
 export function drawContextPanelItem(u: ContextPanelItem, path: string): HTMLElement {
-  log("debug", "drawing a context item", {
+  log.debug("drawing a context item", {
     operation: "panels.context.item",
     context: { path, label: u.label },
   });
@@ -559,7 +559,7 @@ export function drawContextPanelRollup(
   which: string,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a context roll-up", {
+  log.debug("drawing a context roll-up", {
     operation: "panels.context.rollup",
     context: { path, which },
   });
@@ -572,7 +572,7 @@ export function drawContextPanelRollup(
 
 /** The skills roll-up line, plus its per-skill rows. */
 export function drawContextPanelSkills(u: ContextPanelSkills, path: string): HTMLElement {
-  log("debug", "drawing the context skills section", {
+  log.debug("drawing the context skills section", {
     operation: "panels.context.skills",
     context: { path, skills: u.skills.length },
   });
@@ -608,7 +608,7 @@ export function drawContextPanelMessageBreakdown(
   u: ContextPanelMessageBreakdown,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing the context message breakdown", {
+  log.debug("drawing the context message breakdown", {
     operation: "panels.context.message-breakdown",
     context: { path, planes: u.planes.length, tool_calls: u.toolCalls.length },
   });
@@ -681,7 +681,7 @@ export function drawContextToolCallsFold(
     fold.setAttribute("data-folded", folded ? "false" : "true");
     body.hidden = !folded;
     caret.textContent = folded ? "▾" : "▸";
-    log("debug", `the context tool-call fold is ${folded ? "open" : "closed"}`, {
+    log.debug(`the context tool-call fold is ${folded ? "open" : "closed"}`, {
       operation: "panels.context.tool-calls-fold",
       context: { open: folded },
     });

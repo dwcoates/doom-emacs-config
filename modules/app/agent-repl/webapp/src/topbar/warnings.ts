@@ -48,12 +48,12 @@ export function drawTopbarWarningStrip(
   tc: TopbarContext,
 ): HTMLElement | null {
   if (u.warnings.length === 0) {
-    log("debug", "the daemon reports nothing to warn about; drawing no chip", {
+    log.debug("the daemon reports nothing to warn about; drawing no chip", {
       operation: "topbar.warnings-empty",
     });
     return null;
   }
-  log("debug", "drawing the topbar warning chip", {
+  log.debug("drawing the topbar warning chip", {
     operation: "topbar.warnings",
     context: { warnings: u.warnings.length },
   });
