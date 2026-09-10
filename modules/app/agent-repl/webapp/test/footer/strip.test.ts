@@ -542,6 +542,20 @@ describe("the ticking activity figures", () => {
     ).toBe("weekly");
   });
 
+  // THE CELL'S HOVER IS THE WHOLE LINE. The cell ellipsizes by design, so the
+  // title is what a reader who cannot open the sheet still has.
+  it("titles the activity cell with the full line it may be cutting", () => {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: true, utilization: 0.82, resetsAtS: BigInt((NOW + 3_540_000) / 1000) },
+        weekly: { newsworthy: false, utilization: 0.63, resetsAtS: BigInt((NOW + 259_200_000) / 1000) },
+        sample: { outcome: { case: "serviceUnavailable", value: {} } as never },
+      }),
+    });
+    const cell = row.querySelector<HTMLElement>(".footer-activity");
+    expect(cell?.title).toBe(row.querySelector(".footer-activity-rate-limited")?.textContent);
+  });
+
   it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the cell", (arm) => {
     expect(allowanceRow(arm).querySelector('[data-allowance="session"]')?.getAttribute("data-arm")).toBe(
       arm,

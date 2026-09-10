@@ -330,11 +330,22 @@ export function drawFooterStatusActivity(
   cell.className = "pfooter-cell pfooter-grow footer-activity";
   const kind = requireCase(activity.kind, `${path}.kind`);
   cell.setAttribute("data-arm", kind.case);
-  cell.appendChild(drawActivityKind(kind, deps, `${path}.${kind.case}`));
+  const line = drawActivityKind(kind, deps, `${path}.${kind.case}`);
+  cell.appendChild(line);
   cell.appendChild(
     drawFooterStatusActivityAt(requireMessage(activity.at, `${path}.at`), deps, `${path}.at`),
   );
   cell.appendChild(grabber());
+  // THE WHOLE LINE AS THE CELL'S HOVER. The cell is the strip's one elastic
+  // segment and ellipsizes by design, so whatever it cannot fit is otherwise
+  // reachable only by opening a sheet. The title is read off the DRAWN line
+  // rather than recomposed, so it can never say something the cell does not,
+  // and it rides the shared ticker so a countdown in it stays honest as it
+  // counts. Registered AFTER the line's own clocks, so it reads their newest
+  // text and not the previous second's.
+  tick(cell, deps.ctx.ticker, () => {
+    cell.title = line.textContent ?? "";
+  });
   return cell;
 }
 
