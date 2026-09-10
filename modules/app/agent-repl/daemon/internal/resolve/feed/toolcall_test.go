@@ -212,6 +212,81 @@ func TestAFailedReadDrawsItsErrorTextWithTheFailedBadge(t *testing.T) {
 	}
 }
 
+// failedReadWith is a failed Read whose account is the given blocks.
+func failedReadWith(blocks ...*conversationv1.ToolResultContentBlock) *conversationv1.AgentActivity {
+	return activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{
+			Error: &conversationv1.AgentToolFailure{
+				Content:   &conversationv1.ToolResultContent{Blocks: blocks},
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000},
+			},
+		}},
+	})
+}
+
+// imageResultBlock is an image a tool returned.
+func imageResultBlock() *conversationv1.ToolResultContentBlock {
+	return &conversationv1.ToolResultContentBlock{
+		Block: &conversationv1.ToolResultContentBlock_Image{Image: &conversationv1.ImageBlock{
+			Location: &conversationv1.ImageBlock_Url{Url: &conversationv1.ImageBlockUrl{
+				Url: "data:image/png;base64,aGk=",
+			}},
+			MediaType: "image/png",
+		}},
+	}
+}
+
+// textResultBlock is a word a tool returned.
+func textResultBlock(text string) *conversationv1.ToolResultContentBlock {
+	return &conversationv1.ToolResultContentBlock{
+		Block: &conversationv1.ToolResultContentBlock_Text{Text: &conversationv1.TextBlock{Text: text}},
+	}
+}
+
+func TestAWordlessToolFailureDrawsTheImageItAnsweredWith(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(failedReadWith(imageResultBlock()))
+
+	// Assert: the image reaches the card through the feed's shared block.
+	returned := h.card().GetReturned()
+	if returned.GetImage().GetSrc() != "https://host/img" {
+		t.Fatalf("form = %T, want the image the failure answered with", returned.GetForm())
+	}
+}
+
+func TestAToolFailureWithWordsDrawsTheAccountRatherThanTheImage(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(failedReadWith(textResultBlock("no such file"), imageResultBlock()))
+
+	// Assert: the sentence that explains the failure is what the reader came
+	// for, and `form` holds one arm.
+	if got := h.card().GetReturned().GetText().GetText(); got != "no such file" {
+		t.Fatalf("output = %q, want the error text over the image", got)
+	}
+}
+
+func TestAnUnresolvableToolFailureImageDrawsNoBodyAndIsWarned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.resolver.deps.ResolveImage = func(*conversationv1.ImageBlock) (string, string, error) {
+		return "", "", fmt.Errorf("the reference names nothing servable")
+	}
+
+	// Act.
+	h.send(failedReadWith(imageResultBlock()))
+
+	// Assert: no invented src, and the loss is loud.
+	if h.card().GetReturned().GetNone() == nil {
+		t.Fatalf("form = %T, want the none arm for an unresolvable image",
+			h.card().GetReturned().GetForm())
+	}
+	if !h.hasRecord("warn", "daemon.feed.tool_failure_image_unresolved") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.tool_failure_image_unresolved", h.records())
+	}
+}
+
 // ---- WRITE and EDIT ----
 
 func TestAWriteDrawsTheBarePathAsItsInputLine(t *testing.T) {
