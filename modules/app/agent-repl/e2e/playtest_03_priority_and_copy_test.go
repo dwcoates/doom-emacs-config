@@ -5,6 +5,7 @@ package e2e
 import (
 	"encoding/json"
 	"fmt"
+	"image"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -370,10 +371,27 @@ func TestPlaytestCopyNameAndReference(t *testing.T) {
                                   (with-temp-file f (insert "one\ntwo\nthree\n"))
                                   (find-file f)
                                   (goto-char (point-min))
-                                  (forward-line ` + fmt.Sprint(playtestCopyLine-1) + `)
                                   (buffer-name))`)
 	if fileBuffer == "" {
 		t.Fatalf("visiting %s answered no buffer name", path)
+	}
+	// POINT IS MOVED BY A KEY PRESS, and that is what makes the negative
+	// capture below a true negative rather than a comparison of two different
+	// setups.
+	//
+	// Moved by an eval instead, point lands on line 2 while every hook a
+	// COMMAND runs -- `post-command-hook`, and therefore `hl-line`'s repaint
+	// -- never fires. The baseline picture then carries the current-line
+	// highlight on line ONE, where point used to be; the first copy verb
+	// arrives as a real press, the highlight catches up to line two, and the
+	// negative capture differs from its baseline in a band 1,271 pixels wide.
+	// Measured: that band was the ONLY difference between the two pictures,
+	// which is to say the copy verbs changed nothing and the SETUP did.
+	//
+	// `j` is evil's own down-line in normal state, which is how a user gets
+	// to line two, and this buffer already takes leader presses below.
+	for i := 1; i < playtestCopyLine; i++ {
+		e.KeysIn(fileBuffer, "j")
 	}
 	e.AwaitEval("the workspace's own file to be the visited buffer with point on its second line",
 		`(with-current-buffer `+elispString(fileBuffer)+`
@@ -382,7 +400,7 @@ func TestPlaytestCopyNameAndReference(t *testing.T) {
                         t))`,
 		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
 	baseline := s.tabNames()
-	p.capture("before-the-copies", "a file inside the workspace visited, with point on its second line",
+	beforeShot := p.capture("before-the-copies", "a file inside the workspace visited, with point on its second line",
 		fmt.Sprintf("`agent-repl--buffer-relative-path` is %q and point is on line %d; "+
 			"`agent-repl--ws-tabline-names` is %v", playtestCopyFile, playtestCopyLine, baseline),
 		fmt.Sprintf("THIS IS THE BASELINE THE NEXT PICTURE IS COMPARED AGAINST. The frame carries the "+
@@ -430,7 +448,7 @@ func TestPlaytestCopyNameAndReference(t *testing.T) {
 		fmt.Sprintf("`(current-kill 0)` is %q — the `file:line` shape — `*Messages*` carries "+
 			"\"Copied: %s\", and the tab names and the current workspace are UNCHANGED", wantRef, wantRef))
 
-	p.capture("after-the-copies-unchanged", "nothing further done; the two copy verbs are the only acts since the baseline",
+	afterShot := p.capture("after-the-copies-unchanged", "nothing further done; the two copy verbs are the only acts since the baseline",
 		fmt.Sprintf("the kill ring's head moved to %q and `*Messages*` gained two lines, while "+
 			"`agent-repl--ws-tabline-names` is still %v and `agent-repl--ws-current-name` is still %q",
 			wantRef, baseline, name),
@@ -439,6 +457,43 @@ func TestPlaytestCopyNameAndReference(t *testing.T) {
 			"same places, and the same file on screen. The only thing either copy verb may change is "+
 			"the kill ring and one echo-area line, and the echo area has already been redrawn. ANY "+
 			"visible difference between these two pictures is a defect.")
+	// AND THE NEGATIVE CAPTURE IS ASSERTED, not merely asked for. The
+	// manifest's last sentence says any visible difference between these two
+	// pictures is a defect, and a sentence is a thing a reviewer may or may
+	// not check: the pictures are compared here, so the claim holds whether
+	// or not anyone looks.
+	assertPicturesIdentical(t, beforeShot, afterShot, "before-the-copies", "after-the-copies-unchanged")
+}
+
+// assertPicturesIdentical requires two captures to be the same picture, pixel
+// for pixel, and says WHERE they first differ when they are not.
+//
+// EXACT EQUALITY IS THE RIGHT BOUND HERE and nowhere else in this suite. The
+// spec refuses pixel-golden comparison BETWEEN RUNS, because font hinting, a
+// scrollbar and a clock are honest differences between two runs of one
+// product. This compares two captures of ONE run taken seconds apart with
+// only two pure-read verbs between them, and the cursor's blink is switched
+// off in the playbook's setup. Under those conditions a single changed pixel
+// is something one of the two verbs did, which is exactly what A.10 says
+// neither of them may do.
+func assertPicturesIdentical(t *testing.T, a, b *image.RGBA, nameA, nameB string) {
+	t.Helper()
+	if a.Bounds() != b.Bounds() {
+		t.Fatalf("%s is %v and %s is %v: two captures of one run are the same geometry, so a "+
+			"difference here is the frame having been resized between them", nameA, a.Bounds(), nameB, b.Bounds())
+	}
+	for y := a.Bounds().Min.Y; y < a.Bounds().Max.Y; y++ {
+		for x := a.Bounds().Min.X; x < a.Bounds().Max.X; x++ {
+			pa, pb := a.RGBAAt(x, y), b.RGBAAt(x, y)
+			if pa != pb {
+				t.Fatalf("%s and %s differ, first at (%d,%d): %#v against %#v. Copying a workspace "+
+					"name and copying a file reference are READS -- their whole visible effect is one "+
+					"echo-area line, which has already been redrawn -- so any other difference between "+
+					"these two pictures is something one of them changed.",
+					nameA, nameB, x, y, pa, pb)
+			}
+		}
+	}
 }
 
 // assertCopyChangedNothing is A.10's negative assertion, made after each copy
