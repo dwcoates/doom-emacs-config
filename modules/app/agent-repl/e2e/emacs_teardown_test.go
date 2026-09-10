@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"claude-repld/integration/harness"
 )
 
 // TEARDOWN'S OWN TESTS.
@@ -345,5 +347,68 @@ func awaitFindable(t *testing.T, root string, pid int) {
 			t.Fatalf("the stand-in pid %d never became visible to the reaper's /proc walk", pid)
 		}
 		time.Sleep(strayPollInterval)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE SCENARIO'S OWN PROCESSES ARE NOT STRAYS.
+//
+// The reaper keys on the scenario ROOT, and the scenario's own infrastructure
+// names it: the Xvfb's `-fbdir` and the sidecar's `--state-dir`,
+// `--config-roots` and `--log` are all under it. Each is started by the test,
+// stopped by the test, and asserted alive at the end -- so a finder that
+// counts them can never come up empty, and `awaitDaemonExit`, whose whole job
+// is to wait for that set to empty, spent its entire 6s bound on every
+// scenario. MEASURED: 7 of 7 playtest observations reported `emacs phase
+// daemon-exit took 6.0Xs (bound 6s)` against a daemon a host e2e measures
+// leaving 5ms after the same stop; a world that started no daemon at all
+// reported the same 6s.
+// ---------------------------------------------------------------------------
+
+func TestEmacsTeardownDoesNotCountASparedProcessAsAStray(t *testing.T) {
+	requireProcfs(t)
+	// Arrange: a process of this scenario -- it names the root, so the finder
+	// matches it -- that the TEST owns and declares as its own.
+	e, root := teardownFixture(t)
+	bin := fakeEmacsBinary(t, root, "/bin/sleep")
+	cmd := startFakeEmacs(t, root, bin, "60")
+	if len(e.findStrays()) != 1 {
+		t.Fatalf("arrange: want the undeclared process to be found as a stray, got %s", pidList(e.findStrays()))
+	}
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+
+	// Act.
+	found := e.findStrays()
+
+	// Assert.
+	if len(found) != 0 {
+		t.Fatalf("findStrays answered %s for a pid declared the test's own; a process the scenario stops itself is never a stray",
+			pidList(found))
+	}
+}
+
+func TestEmacsTeardownDaemonExitDoesNotWaitOutTheBoundOnASparedProcess(t *testing.T) {
+	requireProcfs(t)
+	// Arrange: the ONLY process naming this scenario is one the test owns and
+	// will outlive the teardown -- an Xvfb and a sidecar are exactly this
+	// shape. Nothing of the daemon's is left, so the wait has nothing to wait
+	// for.
+	e, root := teardownFixture(t)
+	bin := fakeEmacsBinary(t, root, "/bin/sleep")
+	cmd := startFakeEmacs(t, root, bin, "60")
+	harness.SpareFromStrayReaping(t, cmd.Process.Pid)
+
+	// Act.
+	started := time.Now()
+	e.awaitDaemonExit(true)
+	took := time.Since(started)
+
+	// Assert: it returned on the FIRST read rather than on the bound. The
+	// margin is a whole second under `daemonExitBound` so a loaded box cannot
+	// turn a single /proc walk into a failure, while an implementation that
+	// waits the bound out fails by five.
+	if took > time.Second {
+		t.Fatalf("awaitDaemonExit took %s with only the test's own process alive (bound %s): it waited out a process that was never the daemon's",
+			took.Round(time.Millisecond), daemonExitBound)
 	}
 }
