@@ -1,5 +1,9 @@
 # Playtest stand-down — 2026-09-09
 
+RETIRED 2026-09-10 by the owner's ruling: the layer this manifest resumes no
+longer exists, and `docs/REALTEST-PLAN.md` replaces it. Nothing here is to be
+resumed. It is kept as the record of where the stand-down left things.
+
 All playtest owners are STOPPED. None was alive at stand-down (TaskStop'd during
 the pause; owners 8–11 died on the vendor's 429). Every owner's state lives in a
 `STATE.md` at its worktree root; four were reconstructed by the lead from git

@@ -407,7 +407,7 @@ export const toolCallDeniedUnit = (): ActivityUnit => ({
  *
  * The detached shell bubble the daemon draws beneath the card is where the run
  * reports, and it alone settles. Without this arm the card sat on `running`
- * forever above a row already saying `exit 0` (playtest F43, 2026-09-09).
+ * forever above a row already saying `exit 0` (observed 2026-09-09).
  */
 export const toolCallMovedUnit = (): ActivityUnit => ({
   case: "simpleToolCall",

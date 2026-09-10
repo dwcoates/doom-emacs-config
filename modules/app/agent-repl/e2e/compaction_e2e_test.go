@@ -221,8 +221,8 @@ func TestCompactionDirected(t *testing.T) {
 	// them (`daemon/internal/resolve/feed/separation.go` compactionLabel:
 	// "drawing the two identically is the most misleading thing this divider
 	// can do"). It was pinned only in that package's own unit test, so nothing
-	// said the wording survived the whole stack; a playtest capture of two
-	// dividers in one feed is what raised the question.
+	// said the wording survived the whole stack; a screenshot of two dividers
+	// in one feed is what raised the question.
 	if got := sep.GetLabel().GetText(); !strings.HasPrefix(got, "context compacted on request") {
 		t.Errorf("separation.label.text = %q, want it to open with %q -- a compaction the user asked for",
 			got, "context compacted on request")

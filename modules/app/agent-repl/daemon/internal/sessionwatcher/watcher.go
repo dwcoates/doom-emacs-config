@@ -684,7 +684,7 @@ func (w *watcher) setLinkLocked(state LinkState) {
 	// bring-up's own `dialing` and `connected`, already outrun by the moment
 	// it was created. Applying that `dialing` walked the published link back
 	// to `init` for a workspace whose turn was already accepted -- MEASURED
-	// in the playtest's cold start, where the roster's arm went `submitting`
+	// in a headless run's cold start, where the roster's arm went `submitting`
 	// -> `init` -> `submitting` within 1ms of the first StartTurn -- and a
 	// lost link is never spelled `dialing`: that is `redialing` or `dead`.
 	if state == shimclient.LinkDialing {

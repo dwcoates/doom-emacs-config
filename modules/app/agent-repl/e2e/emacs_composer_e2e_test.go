@@ -578,7 +578,7 @@ func TestEmacsAttachedImageMarkerNeverRidesAsWords(t *testing.T) {
 	if imageDir == "" {
 		t.Fatal("e2e: the module reported no capture directory for the workspace")
 	}
-	imagePath := filepath.Join(imageDir, "clip-playtest.png")
+	imagePath := filepath.Join(imageDir, "clip-e2e.png")
 	writeScenarioPNG(t, imagePath)
 
 	const words = "what is in this picture?"

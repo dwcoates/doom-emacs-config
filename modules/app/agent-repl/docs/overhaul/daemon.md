@@ -1239,7 +1239,7 @@ its own file only when >1 endpoint needs it.
 - /status DEGRADES BY DESIGN: with the handshake deferred, the panel
   resolves version + spliced account/model/mode rows ONLY (cwd, auth,
   plugins, memory return if the handshake deferral ever lands) — a
-  playtest seeing the thin panel is seeing the settled consequence, not
+  viewer seeing the thin panel is seeing the settled consequence, not
   a bug.
 - WORKFLOW IS KICKED: workflow watch/store/ingest APIs stay in the
   contract but are NOT implemented in this wave; no frontend surface

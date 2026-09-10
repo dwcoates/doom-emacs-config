@@ -674,8 +674,8 @@ have to break for that to happen."
 ;;
 ;; The second rule is the one the un-armed tab used to break outright: it
 ;; stated neither half of its pair and drew black glyphs on `#14141a' (about
-;; 1.06:1) with a white numeral on `#d9d9d9' (about 1.3:1) on the playtest's
-;; own frame.  The stated dark grey that first answered it is GONE — an
+;; 1.06:1) with a white numeral on `#d9d9d9' (about 1.3:1) on a headless
+;; sandbox frame.  The stated dark grey that first answered it is GONE — an
 ;; unselected tab that paints its own ground is a ground the bar does not
 ;; have — so the tests that held that grey clear of the state colors and of
 ;; the selection grey went with it: there is no such constant to hold, and
@@ -770,7 +770,7 @@ inherited foreground drew black on near-black at about 1.06:1."
 
 (ert-deftest agent-repl-test-unselected-foreground-clears-the-floor-with-no-theme ()
   "With NO theme loaded the chosen foreground clears the floor as well.
-This is the sandbox frame the playtests run on, where `tab-bar\=' falls
+This is the sandbox frame the headless suite runs on, where `tab-bar\=' falls
 through to its own defface and the whole defect first appeared."
   ;; Arrange / Act
   (let* ((bg (agent-repl--tab-bar-background))
@@ -789,7 +789,7 @@ invented here would let an illegible pair pass the floor check."
 (ert-deftest agent-repl-test-default-spec-unselected-bracket-meets-the-contrast-floor ()
   "The default spec's unselected NUMERAL is readable on its own background.
 It was `agent-repl--color-default-bracket' — white — over an inherited
-background, which resolved to about 1.3:1 on the playtest's frame."
+background, which resolved to about 1.3:1 on a headless sandbox frame."
   ;; Arrange
   (let* ((spec (plist-get (agent-repl--tab-default) :unselected))
          (bg   (or (plist-get spec :bracket-bg) (plist-get spec :bg)))
