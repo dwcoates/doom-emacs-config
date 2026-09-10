@@ -18,14 +18,18 @@ package convert
 // and this reader keys its hook attachments into the RESIDUE space by the
 // record's own uuid (ResidueKey) as unserved items. There is deliberately no
 // HookKey here: minting one would re-create the second, unjoinable row.
+//
+// AN ASK IS THE SECOND SUCH ROW, for the opposite reason: both planes CAN name
+// it (`question:<tool_use_id>`), and that is exactly why only one may write it.
+// The stream plane gates the ask and receives the answer as a repeated `chosen`;
+// the transcript carries only the vendor's comma-joined rendering of it, which
+// question.proto's retired tag 4 says cannot be split back. So the ask is
+// STREAM-OWNED (streamowned.go) and there is deliberately no QuestionKey here:
+// minting one would let a lossy file-plane frame supersede the true one.
 
 // ActivityKey names one unit of work for its whole life: a tool call by the
 // vendor's tool_use_id, a text or thinking block by message id + block index.
 func ActivityKey(id string) string { return "activity:" + id }
-
-// QuestionKey names an ask. Its OWN identity space, keyed by the AskUserQuestion
-// call that posed it — a question joins to no unit of work.
-func QuestionKey(toolUseID string) string { return "question:" + toolUseID }
 
 // TerminalKey names one agent's stream terminal, which is per RECORD rather
 // than per agent: a transcript can carry several terminals for one agent over a
