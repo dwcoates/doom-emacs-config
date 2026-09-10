@@ -360,33 +360,34 @@ func TestPlaytestClipboardImageAttachment(t *testing.T) {
 		"the display server is `x11` and `xclip` is on PATH, so `agent-repl--image-linux-reader` has the reader it wants")
 
 	// THE IMAGE IS PUT ON THE X CLIPBOARD, by the tool a pasting application
-	// would use. `xclip -i` becomes the selection OWNER and must stay alive
-	// to answer a paste, so it is started rather than run to completion --
-	// and the clipboard is then READ BACK until it answers, which is the
-	// programmatic proof the selection was taken rather than a wait on a
-	// clock.
+	// would use. `xclip -i` RUNS TO COMPLETION: it reads the file, forks a
+	// child that owns the selection for as long as the display lives, and
+	// exits. So it is a `call-process' whose exit code is checked.
+	//
+	// IT IS NOT A `start-process', and that was measured rather than assumed.
+	// `start-process' gives the child a PTY, and Emacs closing that pty when
+	// the parent exits SIGHUPs the forked selection owner with it -- so the
+	// clipboard came back empty every time. Measured in this image, one Emacs,
+	// both ways in the same batch: after `start-process' the clipboard
+	// answered `Error: target TARGETS not available` (exit 1); after
+	// `call-process' it answered `TARGETS\nimage/png` (exit 0).
+	//
+	// The forked owner is bound to this world's own Xvfb and goes when it
+	// goes, so there is nothing for a cleanup to reap.
 	clipboardSource := filepath.Join(s.Box.Scratch(), "clipboard.png")
 	writePlaytestPNG(t, clipboardSource)
-	e.Eval(`(progn
-             (defvar agent-repl-playtest08--xclip nil)
-             (setq agent-repl-playtest08--xclip
-                   (start-process "playtest-xclip" nil "xclip"
-                                  "-selection" "clipboard" "-t" "image/png"
-                                  "-i" ` + elispString(clipboardSource) + `))
-             t)`)
-	t.Cleanup(func() {
-		e.Eval(`(when (and (boundp 'agent-repl-playtest08--xclip)
-                            (process-live-p agent-repl-playtest08--xclip))
-                   (delete-process agent-repl-playtest08--xclip))
-                 t`)
-	})
+	if code := e.EvalInt(`(call-process "xclip" nil nil nil
+                                        "-selection" "clipboard" "-t" "image/png"
+                                        "-i" ` + elispString(clipboardSource) + `)`); code != 0 {
+		t.Fatalf("`xclip -i` exited %d, want 0 (the image never reached the clipboard)", code)
+	}
 	e.AwaitTrue("the X clipboard to offer the image/png target",
 		`(with-temp-buffer
            (and (eq 0 (call-process "xclip" nil t nil "-selection" "clipboard" "-t" "TARGETS" "-o"))
                 (save-excursion (goto-char (point-min))
                                 (and (search-forward "image/png" nil t) t))))`)
 	p.note("a PNG put on this world's X clipboard with `xclip`",
-		"the clipboard's TARGETS list carries `image/png`, so a reader has an image to take")
+		"`xclip -i` exited 0 and the clipboard's TARGETS list carries `image/png`, so a reader has an image to take")
 
 	// The words first, then the attachment, the way a person composes.
 	const words = "what is in this picture?"
