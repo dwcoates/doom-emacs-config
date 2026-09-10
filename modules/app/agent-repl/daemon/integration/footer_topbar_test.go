@@ -469,12 +469,16 @@ func ftSubagentSpawn(unit, created, label string) *conversationv1.AgentActivity 
 	}
 }
 
-// ftSubagentSettled is a spawn's terminal, whichever unit id carries it.
-func ftSubagentSettled(unit string) *conversationv1.AgentActivity {
+// ftSubagentSettled is a spawn's terminal, whichever unit id carries it. The
+// terminal names the created agent so the fixture does not also manufacture a
+// producer-fault warning unrelated to the chip lifecycle under test.
+func ftSubagentSettled(unit, created string) *conversationv1.AgentActivity {
 	return &conversationv1.AgentActivity{
 		ActivityId: activityID(unit),
 		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
-			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{}},
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				CreatedAgentId: &conversationv1.AgentId{Value: created},
+			}},
 		}},
 	}
 }
@@ -495,7 +499,7 @@ func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
 	})
 
 	// Act: the run settles on ITS OWN stream, under that book's own unit id.
-	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9")))
+	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
 
 	// Assert
 	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
@@ -518,7 +522,7 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 	})
 
 	// Act
-	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1")))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSettled("toolu-1", "toolu-1")))
 
 	// Assert
 	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {

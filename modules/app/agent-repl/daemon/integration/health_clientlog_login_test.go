@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -144,21 +145,10 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	// Arrange: open then close the prompts-dir fault, on a state root a
 	// restart will reuse.
 	d := newDaemon(t, harness.Opts{})
-	// The restarted daemon appends to the SAME run log, so its boot
-	// reconciliation is read by this daemon's log assertion too: the support
-	// workspaces created above have in-flight turns and no session, and
-	// closing them at boot is a warning by design.
+	// The support workspaces created below have in-flight turns and no session,
+	// and closing them is a warning by design.
 	d.ExpectWarnings("daemon.workspace.request_command_support",
-		"daemon.health.open_fault", "daemon.health.daemon",
-		"daemon.promptqueue.restore_holds")
-	// A shim now genuinely SURVIVES this bounce: the successor probes the same
-	// kernel-lock directory its predecessor named, so the surviving shim's
-	// workspace lock reads held and the session is ADOPTED rather than
-	// respawned. A bounce that wrote no intent manifest therefore has a live
-	// session to account for, which the rollout reconciler states as a fault
-	// by design. The successor appends to the SAME run log, so this daemon's
-	// own log assertion reads the record too.
-	d.ExpectWarnings("daemon.rollout.reconcile")
+		"daemon.health.open_fault", "daemon.health.daemon")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	if err := os.RemoveAll(d.PromptsDir); err != nil {
@@ -417,6 +407,12 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
+	sentTimestamp := "2026-09-10T16:34:56.789Z"
+	instant, err := time.Parse(time.RFC3339, sentTimestamp)
+	if err != nil {
+		t.Fatalf("parse fixture timestamp: %v", err)
+	}
+	wantTimestamp := instant.In(time.Local).Format("2006-01-02T15:04:05.000000-07:00")
 	context, err := structpb.NewStruct(map[string]any{"pane": "composer"})
 	if err != nil {
 		t.Fatalf("building the log context: %v", err)
@@ -430,6 +426,8 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 			Operation: "command-dispatch.deferred",
 			Message:   "the webview deferred a command",
 			Context:   context,
+			Timestamp: sentTimestamp,
+			Verbose:   false,
 		},
 	}))
 
@@ -449,8 +447,45 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	if rec.Level != "info" {
 		t.Fatalf("the persisted record's level = %q, want %q for an info record", rec.Level, "info")
 	}
+	if rec.Timestamp != wantTimestamp {
+		t.Fatalf("the persisted record's timestamp = %q, want the client's %q", rec.Timestamp, wantTimestamp)
+	}
+	if rec.Verbosity != "normal" {
+		t.Fatalf("the persisted record's verbosity = %q, want normal", rec.Verbosity)
+	}
 	if got := rec.Context["pane"]; got != "composer" {
 		t.Fatalf("the persisted record's context.pane = %v, want %q verbatim", got, "composer")
+	}
+}
+
+func TestClientLogPersistsTheClientsVerboseClass(t *testing.T) {
+	t.Parallel()
+	// Arrange.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act.
+	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.trace",
+			Message:   "the webview traced a branch",
+			Verbose:   true,
+		},
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
+	}
+	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's verbose record", func(r harness.LogRecord) bool {
+		return r.Operation == "webapp.trace"
+	})
+	if rec.Verbosity != "verbose" {
+		t.Fatalf("the persisted record's verbosity = %q, want verbose", rec.Verbosity)
 	}
 }
 

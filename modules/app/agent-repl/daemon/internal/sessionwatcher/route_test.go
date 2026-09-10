@@ -362,6 +362,9 @@ func TestRouteMainTerminalEndsTheTurn(t *testing.T) {
 	if h.w.TurnInFlight() != nil {
 		t.Fatal("the turn is still in flight after its terminal")
 	}
+	if !h.hasRecord("info", "daemon.sessionwatcher.turn_ended") {
+		t.Fatal("the turn end has no info lifecycle record")
+	}
 }
 
 // TestTurnEndIsWithheldUntilTheMainAgentIsNamed covers the one thing the

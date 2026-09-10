@@ -3,21 +3,15 @@ package logging
 // rotate.go -- THE SIZE-CAPPED, N-GENERATION LOG FILE every long-lived Go
 // runtime in this repo appends through.
 //
-// WHY IT LIVES HERE. The daemon already answered this question for its own
-// restart-scoped run log (`daemon/internal/dlog/runlog.go`): a cap in bytes, a
-// fixed number of retained generations, and a roll that renames rather than
-// truncates so the newest evidence is never the evidence that gets thrown
-// away. The store and the sidecar are separate Go modules and could not reach
-// that code, so they appended forever -- the sidecar's launchd stderr file
-// reached 6.2 GB on the owner's machine. The answer belongs with the other
+// WHY IT LIVES HERE. Every long-lived Go runtime needs the same cap in bytes,
+// the same fixed number of retained generations, and a roll that renames
+// rather than truncates so the newest evidence is never the evidence that gets
+// thrown away. The daemon, store and sidecar are separate Go modules and
+// cannot own that answer for each other. The answer belongs with the other
 // facts every runtime must answer identically, so it is hoisted here.
 //
-// ONE DELIBERATE DIVERGENCE FROM THE DAEMON'S RUN LOG. The daemon rotates on
-// OPEN, because its run log is restart-scoped by contract: the current file
-// always describes exactly this run. A launchd service is not restart-scoped
-// -- it is bounced by every deploy and by every crash, and rotating on open
-// would let a handful of bounces evict every generation of real history. So
-// this writer APPENDS to what it finds and rolls ONLY at the cap.
+// Every consumer appends to what it finds and rolls ONLY at the cap. A deploy,
+// crash, or ordinary process restart never consumes a history generation.
 
 import (
 	"fmt"

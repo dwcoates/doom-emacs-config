@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -67,11 +68,66 @@ func newTestHooks() *testHooks {
 func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 	t.Helper()
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
 	opts := options{stateDir: root}
 	for _, a := range adjust {
 		a(&opts)
 	}
 	return run(context.Background(), opts, newTestHooks().hooks)
+}
+
+func hasRunLogLevel(t *testing.T, raw []byte, operation, level string) bool {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var record struct {
+			Level     string `json:"level"`
+			Operation string `json:"operation"`
+		}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
+		}
+		if record.Operation == operation && record.Level == level {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunRecordsProcessBringUpAtInfo pins that the process lifecycle remains
+// visible at the default production threshold.
+func TestRunRecordsProcessBringUpAtInfo(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	if !hasRunLogLevel(t, raw, "daemon.cmd.boot", dlog.LevelInfo) {
+		t.Fatalf("daemon.run.log = %q, want an INFO daemon.cmd.boot record", string(raw))
+	}
+}
+
+// TestRunRecordsProcessShutdownAtInfo pins the matching process-ending edge.
+func TestRunRecordsProcessShutdownAtInfo(t *testing.T) {
+	// Arrange.
+	root := shortRoot(t)
+
+	// Act.
+	_ = runIn(t, root)
+
+	// Assert.
+	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	if err != nil {
+		t.Fatalf("ReadFile daemon.run.log: %v", err)
+	}
+	if !hasRunLogLevel(t, raw, "daemon.cmd.exit", dlog.LevelInfo) {
+		t.Fatalf("daemon.run.log = %q, want an INFO daemon.cmd.exit record", string(raw))
+	}
 }
 
 // TestTheSecondDaemonLosesTheExclusivityClaim pins the boot-exclusivity ruling:

@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// TestRotatingFileAppendsToWhatItFinds pins the one deliberate divergence from
-// the daemon's restart-scoped run log: opening does NOT roll, so a bounced
-// launchd service keeps its history instead of evicting a generation per
-// bounce.
+// TestRotatingFileAppendsToWhatItFinds pins the shared process-restart rule:
+// opening does not roll, so a bounced service keeps its history instead of
+// evicting a generation per bounce.
 func TestRotatingFileAppendsToWhatItFinds(t *testing.T) {
 	// Arrange: a log file that already holds a prior run's record.
 	path := filepath.Join(t.TempDir(), "svc.log")

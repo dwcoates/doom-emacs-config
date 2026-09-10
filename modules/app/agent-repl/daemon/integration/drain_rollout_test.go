@@ -486,7 +486,7 @@ func TestAScheduledDrainDoesNotWaitOnADetachedSubagentThatHasSettled(t *testing.
 	awaitFooter(t, f, footer, "the agents chip counting the detached run", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetAgents().GetCount() == 1
 	})
-	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9")))
+	f.shim.PushAgentFrame("toolu-1", activityFrame("toolu-1", ftSubagentSettled("sub-unit-9", "toolu-1")))
 	awaitFooter(t, f, footer, "the agents chip retired at the run's terminal", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetLiveWork().GetAgents() == nil
 	})
@@ -930,18 +930,16 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
 	}
 	f.shim.ExpectStartTurn()
-	// THE INCUMBENT'S OWN RUN LOG. The run log is restart-scoped: the
-	// successor's boot rotates the incumbent's file into slot 1 while the
-	// incumbent goes on writing through the same descriptor, so the holdout
-	// warnings land in daemon.run.log.1 rather than the canonical path.
-	incumbentLog := d.RunLogPath() + ".1"
+	// THE INCUMBENT'S OWN RUN LOG. Successor and incumbent append to the same
+	// size-rotated file, so the predicate pins the incumbent's pid.
+	incumbentLog := d.RunLogPath()
 
 	// Act: hand over while the turn is still in flight, and never end it.
 	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
 
 	// Assert: the holdout is named in a periodic warning that repeats.
 	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.rollout.transfer" && strings.ToLower(r.Level) == "warn" &&
+		return r.PID == d.PID() && r.Operation == "daemon.rollout.transfer" && strings.ToLower(r.Level) == "warn" &&
 			r.Context["workspace"] == f.ws.GetId() && numeric(r.Context["warnings"]) >= 2
 	})
 	if got := second.Context["cadence"]; got != "25ms" {

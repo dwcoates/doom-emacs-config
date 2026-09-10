@@ -25,6 +25,7 @@ type LogRecord struct {
 	Timestamp string         `json:"timestamp"`
 	Runtime   string         `json:"runtime"`
 	Level     string         `json:"level"`
+	Verbosity string         `json:"verbosity"`
 	PID       int            `json:"pid"`
 	Operation string         `json:"operation"`
 	Message   string         `json:"message"`
@@ -48,7 +49,7 @@ type LogRecord struct {
 // TimestampPattern is the timestamp shape every record carries.
 var TimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$`)
 
-// RunLogPath is the restart-scoped run log.
+// RunLogPath is the size-rotated run log shared across process restarts.
 func (d *Daemon) RunLogPath() string {
 	return filepath.Join(d.StateDir, "logs", "daemon.run.log")
 }
@@ -59,11 +60,18 @@ func WorkspaceLogPath(workspaceDir, sink string) string {
 	return filepath.Join(workspaceDir, ".claude", "emacs", sink+".log")
 }
 
-// RunLog reads every record from the run log. A missing log reads as no
-// records, so a test can assert on an empty log without special-casing it.
+// RunLog reads every record THIS daemon process wrote to the shared run log.
+// The pid filter keeps a restarted daemon from inheriting its predecessor's
+// warnings and from satisfying an await with an older process's record.
 func (d *Daemon) RunLog() []LogRecord {
 	d.t.Helper()
-	return readLog(d.t, d.RunLogPath())
+	var out []LogRecord
+	for _, record := range readLog(d.t, d.RunLogPath()) {
+		if record.PID == d.PID() {
+			out = append(out, record)
+		}
+	}
+	return out
 }
 
 // WorkspaceLog reads a workspace's own log sink.
@@ -73,6 +81,8 @@ func (d *Daemon) WorkspaceLog(workspaceDir, sink string) []LogRecord {
 }
 
 // AwaitLogRecord waits for a record satisfying the predicate in a log file.
+// The shared run log is additionally scoped to this daemon's pid so a restart
+// cannot satisfy an await with its predecessor's record.
 func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) bool) LogRecord {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
@@ -81,6 +91,9 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 	defer ticker.Stop()
 	for {
 		for _, r := range readLog(d.t, path) {
+			if filepath.Clean(path) == filepath.Clean(d.RunLogPath()) && r.PID != d.PID() {
+				continue
+			}
 			if pred(r) {
 				return r
 			}
@@ -97,7 +110,7 @@ func (d *Daemon) AwaitLogRecord(path string, what string, pred func(LogRecord) b
 func (d *Daemon) AwaitRunLogOperation(operation string) LogRecord {
 	d.t.Helper()
 	return d.AwaitLogRecord(d.RunLogPath(), "operation "+operation, func(r LogRecord) bool {
-		return r.Operation == operation
+		return r.PID == d.PID() && r.Operation == operation
 	})
 }
 
@@ -109,11 +122,9 @@ func (d *Daemon) AwaitWorkspaceLogOperation(workspaceDir, operation string) LogR
 	})
 }
 
-// ReadLog reads every record from an arbitrary log file. It exists for the one
-// test that must read a PREVIOUS runtime's own log target: the canonical run
-// log is a symlink each runtime relinks onto its own file, so an incumbent's
-// records are reachable only through the target resolved before its successor
-// booted.
+// ReadLog reads every record from an arbitrary log file, including all process
+// generations in the shared run log when a restart-history assertion needs
+// them together.
 func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
 
 // readLog reads a log file that is being APPENDED TO WHILE IT IS READ, which is

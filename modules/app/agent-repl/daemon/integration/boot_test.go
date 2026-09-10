@@ -351,10 +351,9 @@ func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	}
 }
 
-// TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords pins the run
-// log's restart-scoped rotation (internal/dlog/runlog.go: openRunLog rotates
-// the previous run's file to daemon.run.log.1 before opening a fresh one).
-func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) {
+// TestDaemonRestartAppendsToTheRunLog pins the run log's size-scoped rotation:
+// reopening the daemon alone appends, so daemon.run.log spans process restarts.
+func TestDaemonRestartAppendsToTheRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange: first boot; capture its own records and pid before stopping it.
 	d1 := newDaemon(t, harness.Opts{})
@@ -364,7 +363,7 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 	d1.Stop()
 	// The snapshot is taken AFTER the stop: an orderly exit writes its own
 	// records, so a snapshot taken while the daemon still ran would be missing
-	// exactly the lines the rotation then preserves.
+	// exactly the lines the next boot must retain.
 	prior := harness.ReadLog(t, runLogPath)
 	if len(prior) == 0 {
 		t.Fatal("the first boot's run log holds no records, want the boot sequence recorded before restart")
@@ -374,22 +373,30 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
 	d2.AwaitRunLogOperation("daemon.pprof.disabled")
 
-	// Assert: daemon.run.log.1 holds the prior boot's records, verbatim.
-	backup := harness.ReadLog(t, runLogPath+".1")
-	if len(backup) != len(prior) {
-		t.Fatalf("daemon.run.log.1 holds %d records, want the prior boot's %d", len(backup), len(prior))
+	// Assert: the current run log retains every record from the first boot and
+	// contains records from the successor process. A restart alone creates no
+	// size-rotation generation.
+	current := harness.ReadLog(t, runLogPath)
+	if len(current) <= len(prior) {
+		t.Fatalf("daemon.run.log holds %d records after restart, want more than the prior boot's %d", len(current), len(prior))
 	}
 	for i := range prior {
-		if backup[i].Raw != prior[i].Raw {
-			t.Fatalf("daemon.run.log.1[%d] = %q, want the prior boot's record %q", i, backup[i].Raw, prior[i].Raw)
+		if current[i].Raw != prior[i].Raw {
+			t.Fatalf("daemon.run.log[%d] = %q, want the prior boot's record %q", i, current[i].Raw, prior[i].Raw)
 		}
 	}
-
-	// Assert: the new run log describes only the new boot, never the old pid.
-	for _, r := range d2.RunLog() {
-		if r.PID == firstPID {
-			t.Fatalf("daemon.run.log after restart carries a record from the prior boot's pid %d: %v", firstPID, r)
+	if _, err := os.Lstat(runLogPath + ".1"); !os.IsNotExist(err) {
+		t.Fatalf("stat daemon.run.log.1 after restart = %v, want no size-rotation generation", err)
+	}
+	foundFirstPID := false
+	for _, record := range current {
+		if record.PID == firstPID {
+			foundFirstPID = true
+			break
 		}
+	}
+	if !foundFirstPID {
+		t.Fatalf("daemon.run.log after restart has no record from the prior boot's pid %d", firstPID)
 	}
 }
 
