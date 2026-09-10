@@ -202,9 +202,14 @@ type DB interface {
 
 Invariants: one `*sql.DB` with `SetMaxOpenConns(1)`; open DSN carries
 `_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_txlock=immediate`
-(the old open path, copied); layout version table; a newer layout refuses
-to open; `OpenReadOnly` uses `mode=ro&_pragma=query_only(1)`; every load
-is all-or-nothing (a corrupt row fails the whole read).
+(the old open path, copied); layout version table; an OLDER layout is
+MIGRATED FORWARD by the ordered list in `internal/wsm/migrate.go` (the state
+is the user's data, so a schema change never throws it away), and only a
+layout this build cannot interpret refuses to open — a NEWER one, because a
+downgrade is not a migration, or one no chain of migrations reaches;
+`OpenReadOnly` uses `mode=ro&_pragma=query_only(1)` and therefore refuses an
+older layout rather than migrating it; every load is all-or-nothing (a corrupt
+row fails the whole read).
 
 ### shimclient (`internal/shimclient`)
 
