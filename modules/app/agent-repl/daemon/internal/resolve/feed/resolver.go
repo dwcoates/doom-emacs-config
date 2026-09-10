@@ -80,9 +80,6 @@ type wsState struct {
 	responses map[string]*proseState
 	// plans is the open plan episode per agent, keyed by agent id.
 	plans map[string]*planState
-	// planEpisodes counts the episodes an agent has had, so a second episode
-	// never collides with the first's FeedId.
-	planEpisodes map[string]uint64
 	// shells is the detached-shell accumulation, keyed by detached work id.
 	shells map[string]*shellState
 	// detachedUnits are the units a detachment announced BEFORE this resolver
@@ -304,7 +301,6 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		units:           map[string]*unitState{},
 		responses:       map[string]*proseState{},
 		plans:           map[string]*planState{},
-		planEpisodes:    map[string]uint64{},
 		shells:          map[string]*shellState{},
 		detachedUnits:   map[string]string{},
 		subagents:       map[string]*subagentState{},

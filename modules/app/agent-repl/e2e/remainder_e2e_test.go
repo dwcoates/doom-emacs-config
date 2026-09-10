@@ -121,6 +121,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -523,6 +524,46 @@ func TestPlanModeEnterExit(t *testing.T) {
 	}
 	if planned.GetEdit().GetPath() == "" {
 		t.Fatal("plan bubble's planned state carries no edit target, want one (PLAN_MODE names a plan file)")
+	}
+}
+
+// TestPlanModeCoalescesOntoOneBubble is the SAME turn as #85 asked the other
+// way: feed.proto's FeedPlan says the daemon keys the enter and the exit onto
+// ONE FeedId, so a plan episode is ONE row in the feed no matter how many
+// plan-mode calls it took or how many planes reported them. The playtest's
+// picture of `!plan` showed the plan card drawn TWICE -- once where the enter
+// landed and once after the turn concluded -- which is invisible to #85,
+// since a duplicate satisfies "a planned row exists" perfectly.
+//
+// The count is read AFTER driveScenarioToCompletion, which waits for the
+// sidecar's file-plane cursor to advance past this turn's transcript lines as
+// well as for the turn's own terminal row: both planes have delivered
+// everything they are going to deliver for this turn before the page is read.
+func TestPlanModeCoalescesOntoOneBubble(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	w, ws := rmNewWorkspace(t)
+
+	// Act
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "plan")
+
+	// Assert
+	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+	success := opened.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
+	}
+	var plans []string
+	for _, row := range success.GetPage().GetSuccess().GetRows() {
+		if row.GetActivity().GetPlan() != nil {
+			plans = append(plans, fmt.Sprintf("%s(%T)", row.GetId().GetValue(), row.GetActivity().GetPlan().GetState()))
+		}
+	}
+	if len(plans) != 1 {
+		t.Fatalf("the feed holds %d plan rows %v, want exactly 1: feed.proto's FeedPlan coalesces the enter and the exit onto ONE FeedId", len(plans), plans)
 	}
 }
 
