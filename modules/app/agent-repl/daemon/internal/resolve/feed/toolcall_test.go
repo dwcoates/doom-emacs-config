@@ -1091,3 +1091,116 @@ func TestATextOutputShellDrawsNoExitChipWhenNoneWasStated(t *testing.T) {
 		t.Fatalf("exit = %v, want unset for an interrupted command", exit)
 	}
 }
+
+// ---- BASH, WHOSE WORK MOVED TO THE BACKGROUND ----
+//
+// A BACKGROUNDED COMMAND DID NOT END, IT MOVED, and the card is not where it
+// finishes. The detached shell row published beneath it is the record of the
+// run and the only row that settles; the card owes the reader the fact that the
+// work left. Without the arm it kept the `running` it drew with forever, above a
+// row already reporting `exit 0` (playtest F43, 2026-09-09).
+
+// movedCard is a foreground shell whose work then left for the background.
+func movedCard(h *harness, unit string) *frontendv1.FeedSimpleToolCall {
+	h.t.Helper()
+	return h.activityRow(unit).GetActivity().GetSimpleToolCall()
+}
+
+// startForegroundBash draws the running card a detachment later moves.
+func startForegroundBash(h *harness, unit, line string) {
+	h.t.Helper()
+	h.send(activityOf(unit, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: line},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+}
+
+func TestACommandWhoseWorkMovedToTheBackgroundDrawsTheMovedArm(t *testing.T) {
+	// Arrange: a foreground shell, drawn running.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+
+	// Act: the work leaves for the background.
+	h.detachWork("unit-1", "unit-1")
+
+	// Assert.
+	if movedCard(h, "unit-1").GetMoved() == nil {
+		t.Fatalf("outcome = %T, want the moved arm", movedCard(h, "unit-1").GetOutcome())
+	}
+}
+
+func TestTheDetachedRunsOwnSettleLeavesTheMovedCardAlone(t *testing.T) {
+	// Arrange: the work moved, and the detached shell row is now where it
+	// reports.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+	h.detachWork("unit-1", "unit-1")
+
+	// Act: the run ends, on the shell's own stream.
+	h.bash("unit-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "sleep 600"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}},
+			},
+		}},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+	})
+
+	// Assert: the ending belongs to the shell row, and the card still says the
+	// work moved rather than borrowing a verdict that is not its own.
+	if movedCard(h, "unit-1").GetMoved() == nil {
+		t.Fatalf("outcome = %T, want the card still on the moved arm", movedCard(h, "unit-1").GetOutcome())
+	}
+}
+
+func TestAForegroundCommandThatEndedWhereItRanStillDrawsReturned(t *testing.T) {
+	// Arrange: an ordinary foreground shell. The silence above must not swallow
+	// the verdict every command that ACTUALLY ended still owes.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "go test ./...")
+
+	// Act
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "go test ./..."},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{},
+				Termination: &conversationv1.AgentBashTermination{
+					How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}},
+				},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+		}},
+	}))
+
+	// Assert
+	if h.card().GetReturned().GetSucceeded() == nil {
+		t.Fatalf("outcome = %T, want the returned arm's succeeded verdict", h.card().GetOutcome())
+	}
+}
+
+func TestAReplayedUnitFrameKeepsAMovedCardMoved(t *testing.T) {
+	// Arrange: the work moved. The producers go on restating this unit's own
+	// frames afterwards -- the vendor's receipt for the launch, replayed by the
+	// other plane -- and none of them says the work left.
+	h := newHarness(t)
+	startForegroundBash(h, "unit-1", "sleep 600")
+	h.detachWork("unit-1", "unit-1")
+
+	// Act
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "sleep 600"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert
+	if movedCard(h, "unit-1").GetMoved() == nil {
+		t.Fatalf("outcome = %T, want the card still on the moved arm after a replay", movedCard(h, "unit-1").GetOutcome())
+	}
+}

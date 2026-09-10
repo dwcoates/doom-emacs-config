@@ -482,10 +482,37 @@ func (r *resolver) detachForegroundShell(s *wsState, at placement, unitID, workI
 	sh.startedAtMs = u.startedAtMs
 	sh.feed = at
 	r.publishShell(s, workID, sh, nil)
+	r.moveToolCard(s, at, unitID, u)
 	r.logger(s.id).Debug("daemon.feed.detached_shell",
 		"a foreground shell became a detached shell bubble",
 		dlog.Context{"unit": unitID, "work": workID})
 	return true
+}
+
+// moveToolCard restates the card of a call whose WORK MOVED to the background,
+// on the `moved` arm.
+//
+// TWO ROWS, ONE RUN, AND ONLY ONE OF THEM SETTLES. The detached shell bubble
+// published just above is where the command reports from here on; the card
+// above it is the record that the agent made the call, and it has no ending of
+// its own to state. Left alone it kept the `running` arm it drew with and never
+// left it -- no later frame of the unit says the work moved, and the detached
+// run's terminal is addressed to the shell row -- so a backgrounded command drew
+// a card spinning forever above a row already reporting `exit 0` (playtest F43,
+// 2026-09-09).
+func (r *resolver) moveToolCard(s *wsState, at placement, unitID string, u *unitState) {
+	u.moved = true
+	if u.name == "" {
+		// NOTHING HAS DRAWN THIS UNIT'S CARD, so there is none to restate. The
+		// mark still stands, so the card draws moved the moment it does draw.
+		r.logger(s.id).Debug("daemon.feed.moved_card_undrawn",
+			"a detachment named a unit with no drawn card; the move is remembered for when it draws",
+			dlog.Context{"unit": unitID})
+		return
+	}
+	row := r.toolRow(s, at, unitID, u.name, movedOutcome())
+	r.stampTurn(s, row, nil)
+	r.upsert(s, at, row, true)
 }
 
 // applyHeldDetachment completes a detachment that was announced BEFORE the
