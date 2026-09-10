@@ -127,8 +127,73 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 		}
 	}
 
+	v.reviveRecordedConversation(ctx, log, record, created)
+
 	v.republishRegistry(ctx, log, opRegister)
 	return record, nil
+}
+
+// The session terminals registration reads. `deleted` refuses resurrection
+// outright; `hibernated` is a stand-down the daemon performed ON PURPOSE and
+// a prompt is what revives it, so neither is revived by an announcement.
+const (
+	terminalDeleted    = "deleted"
+	terminalHibernated = "hibernated"
+)
+
+// reviveRecordedConversation brings a KNOWN workspace's recorded conversation
+// back up when Emacs announces it again.
+//
+// A RELAUNCHED DAEMON MUST NEVER LOSE A CONVERSATION. Emacs re-announces every
+// workspace it holds the moment the link comes up, and after a daemon restart
+// that announcement is the ONLY edge a workspace whose panel is ALREADY
+// mounted ever gets: the mount happened against the daemon that died, so no
+// OpenWorkspace follows it, no session comes up, no watcher opens, and the
+// feed serves zero rows for a conversation the store still holds whole.
+//
+// SPAWN ON MOUNT still stands. What is revived here is not "every registered
+// workspace" but a workspace whose DURABLE RECORD NAMES A CONVERSATION: a
+// first registration (`created`), a closed workspace, and a workspace that
+// never had a vendor session mint nothing and spawn nothing. The revival runs
+// through Sessions.Start, which is the one transcript-aware classifier, so the
+// conversation RESUMES rather than starting fresh — and the resumed session's
+// opening history page is what puts the store's own rows back in the feed and
+// reconciles the footer to the terminal the last turn recorded.
+//
+// A failed revival is REPORTED, never absorbed and never fatal to the
+// announcement: the roster row is a durable fact that must land regardless,
+// and the workspace's next mount takes the bring-up again.
+func (v *verbs) reviveRecordedConversation(ctx context.Context, log dlog.Logger, record wsm.Workspace, created bool) {
+	if created || record.Closed {
+		return
+	}
+	if v.deps.Sessions.Live(record.ID) {
+		return
+	}
+	session, exists, err := v.deps.DB.Session(ctx, record.ID)
+	if err != nil {
+		log.Error(opRegister, "could not read the announced workspace's session record", dlog.Context{
+			"workspace": string(record.ID), "cause": err.Error(),
+		})
+		return
+	}
+	if !exists || session.VendorSessionID == "" {
+		return
+	}
+	if session.Terminal != nil && (session.Terminal.Kind == terminalDeleted || session.Terminal.Kind == terminalHibernated) {
+		log.Debug(opRegister, "the announced workspace's session is not revived by an announcement", dlog.Context{
+			"workspace": string(record.ID), "terminal": session.Terminal.Kind,
+		})
+		return
+	}
+	log.Info(opRegister, "the announcement revives the workspace's recorded conversation", dlog.Context{
+		"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID,
+	})
+	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+		log.Error(opRegister, "the announced workspace's recorded conversation did not come back up", dlog.Context{
+			"workspace": string(record.ID), "vendor_session_id": session.VendorSessionID, "cause": err.Error(),
+		})
+	}
 }
 
 // bindResolvers binds one workspace's directory on every resolver that needs
