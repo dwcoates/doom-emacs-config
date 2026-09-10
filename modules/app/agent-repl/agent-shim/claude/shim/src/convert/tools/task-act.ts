@@ -83,15 +83,23 @@ function statusOf(
   }
 }
 
-/** The task as this act leaves it. */
+/**
+ * The task as this act leaves it.
+ *
+ * A SUBJECT THE ACT DID NOT NAME IS LEFT UNSET, never stated as "". Both
+ * fields carry presence, so a `TaskUpdate(status)` -- which names no subject at
+ * all -- says nothing about the subject and a consumer keeps the one its
+ * checklist already holds. Stating "" here said the caller had BLANKED it, and
+ * the checklist drew every row as a bare glyph with no words beside it (G52).
+ */
 function stateOf(
   call: PendingCall,
   status: conversationv1.AgentTaskState["status"],
 ): conversationv1.AgentTaskState {
   const input = call.input;
   return create(conversationv1.AgentTaskStateSchema, {
-    subject: str(input, "subject") ?? "",
-    description: str(input, "description") ?? "",
+    subject: str(input, "subject"),
+    description: str(input, "description"),
     owner: str(input, "owner"),
     status,
     blocks: taskIds(input, "addBlocks"),
@@ -178,8 +186,9 @@ function settleCreate(
   }
   const state = create(conversationv1.AgentTaskStateSchema, {
     // The tracker's own echo wins over the input: it is what the task IS.
-    subject: str(obj(structured, "task"), "subject") ?? str(call.input, "subject") ?? "",
-    description: str(call.input, "description") ?? "",
+    // UNSET when neither named one, which is not the same as a subject of "".
+    subject: str(obj(structured, "task"), "subject") ?? str(call.input, "subject"),
+    description: str(call.input, "description"),
     owner: str(call.input, "owner"),
     // A CREATE'S STATE IS `pending` UNLESS STATED: the create tool takes no
     // status, so a new entry is recorded and not begun.
