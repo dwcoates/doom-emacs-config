@@ -36,6 +36,12 @@ type mockScenario struct {
 	// must carry an `exited` termination. A live-forever spool sets BashRun
 	// without this.
 	ExitCode bool
+	// SpilledOutput — the scenario's result declares a `persistedOutputSize`, so
+	// the settled shell's text output must state the PARTIAL extent and its
+	// omitted byte count. THE FILE PLANE OWES THIS AS MUCH AS THE STREAM PLANE
+	// DOES: both write the same unit under one upsert key, so a row here
+	// claiming `whole` erases the truncation the other plane already drew.
+	SpilledOutput bool
 	// ContextCut — the scenario cuts the conversation (a clear, a compaction),
 	// so exactly one `AgentUpdate.context_cut` page line must land.
 	ContextCut bool
@@ -124,6 +130,9 @@ func TestMockScenarios(t *testing.T) {
 			if tc.ExitCode {
 				requireExitCodeInTheTerminal(t, tc.Prompt, in)
 			}
+			if tc.SpilledOutput {
+				requireBashPartialExtent(t, tc.Prompt, entries)
+			}
 			if tc.ContextCut {
 				requireContextCutPageLine(t, tc.Prompt, entries)
 			}
@@ -163,7 +172,7 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!bash", Wait: waitTerminal},
 	{Prompt: "!bash-fail", Wait: waitTerminal},
 	{Prompt: "!bash-timeout", Wait: waitTerminal},
-	{Prompt: "!bash-spill", Wait: waitTerminal},
+	{Prompt: "!bash-spill", Wait: waitTerminal, SpilledOutput: true},
 	{Prompt: "!bash-image", Wait: waitTerminal},
 	{Prompt: "!bash-detach", Wait: waitTerminal, BashRun: true, ExitCode: true},
 	{Prompt: "!bash-detach-fail", Wait: waitTerminal, BashRun: true, ExitCode: true},
