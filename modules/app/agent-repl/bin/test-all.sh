@@ -62,6 +62,7 @@ ALL_SUITES=(
     logging-density-harness
     build-frontend-harness
     deploy-harness
+    suite-slot-harness
     readiness-harness
     doctor-harness
     precommit-harness
@@ -363,6 +364,7 @@ require_executable "$THIS_DIR/test-report-nonlisp-coverage.sh"
 require_executable "$THIS_DIR/test-report-logging-density.sh"
 require_executable "$THIS_DIR/test-build-frontend.sh"
 require_executable "$THIS_DIR/test-deploy-all.sh"
+require_executable "$THIS_DIR/test-suite-slot.sh"
 require_executable "$THIS_DIR/test-readiness-report.sh"
 require_executable "$THIS_DIR/test-e2e.sh"
 require_executable "$THIS_DIR/test-e2e-emacs.sh"
@@ -388,6 +390,7 @@ run_timed coverage-harness "$THIS_DIR/test-report-nonlisp-coverage.sh"
 run_timed logging-density-harness "$THIS_DIR/test-report-logging-density.sh"
 run_timed build-frontend-harness "$THIS_DIR/test-build-frontend.sh"
 run_timed deploy-harness "$THIS_DIR/test-deploy-all.sh"
+run_timed suite-slot-harness "$THIS_DIR/test-suite-slot.sh"
 run_timed readiness-harness "$THIS_DIR/test-readiness-report.sh"
 run_timed doctor-harness "$REPO_ROOT/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh"
 run_timed precommit-harness "$REPO_ROOT/.githooks/test-pre-commit.sh"
