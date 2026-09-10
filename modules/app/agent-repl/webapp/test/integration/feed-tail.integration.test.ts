@@ -54,6 +54,15 @@ function scriptGeometry(box: HTMLElement) {
       clientHeight -= px;
     },
     /**
+     * The rows collapsing to PX -- a compaction replacing a history with a
+     * summary, a card settling smaller. The box's position rides the clamp
+     * down with the range, which is the movement nobody made.
+     */
+    contentShrinksTo: (px: number) => {
+      scrollHeight = px;
+      scrollTop = Math.max(0, Math.min(scrollTop, scrollHeight - clientHeight));
+    },
+    /**
      * The rows growing by PX with the viewport unchanged: a bubble the wire
      * pushed unfolded finishing its own fetch and painting a page into its
      * panel, a deferred card settling, a highlighted block relaying out.
@@ -93,6 +102,9 @@ describe("the docked footer and the feed's tail", () => {
       arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" })),
     });
     const geometry = scriptGeometry(harness.shell.feedScroll);
+    // The reader's own input reaches the box before the movement it causes,
+    // which is what makes the movement theirs rather than the box's clamp.
+    harness.shell.feedScroll.dispatchEvent(new Event("wheel"));
     harness.shell.feedScroll.scrollTop = 200;
     harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
     // Act
@@ -161,6 +173,7 @@ describe("the docked footer and the feed's tail", () => {
       arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" })),
     });
     const geometry = scriptGeometry(harness.shell.feedScroll);
+    harness.shell.feedScroll.dispatchEvent(new Event("wheel"));
     harness.shell.feedScroll.scrollTop = 200;
     harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
     // Act
@@ -168,5 +181,31 @@ describe("the docked footer and the feed's tail", () => {
     fireResize(harness.shell.feed);
     // Assert — growth below the reader is not a reason to move them.
     expect(geometry.top()).toBe(200);
+  });
+
+  /**
+   * THE CLAMP, ON THE BOOTED APP. The feed shrinking under a parked box drags
+   * `scrollTop` down with it, and the drag reads exactly like a gesture upward.
+   * Measured in the hibernated tab's playbook under load: the box sat at 52 --
+   * the reachable extent one turn earlier -- while 400px of new rows arrived
+   * beneath it, because the reconcile that saw the movement arrived only after
+   * the content had regrown. No input ever reached the box, so nothing that
+   * happened there was the reader.
+   */
+  it("re-lands the tail after a shrink's clamp that no reader caused", async () => {
+    // Arrange — following the tail of a feed that then shrinks under the box.
+    harness = await startHarness({
+      arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" })),
+    });
+    const geometry = scriptGeometry(harness.shell.feedScroll);
+    harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
+    // Act — the shrink clamps the box down, the content regrows, and only then
+    // does anything reconcile.
+    geometry.contentShrinksTo(352);
+    harness.shell.feedScroll.dispatchEvent(new Event("scroll"));
+    geometry.contentGrows(747);
+    fireResize(harness.shell.feed);
+    // Assert — 1099 of content under a 300 viewport: the tail is 799.
+    expect(geometry.top()).toBe(799);
   });
 });
