@@ -401,6 +401,31 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	}
 }
 
+// TestATurnDrivenToItsTerminalOpensTheMainWatchExactlyOnce covers the count
+// itself: the main agent's book is watched by ONE standing WatchAgent for the
+// life of the session, and a turn running and ending on it is not an occasion
+// to open another.
+//
+// A SECOND TAIL ON ONE BOOK IS A STALL, not merely waste. The shim registers
+// every open WatchAgent for its teardown and concludes each one through the
+// book's head; a tail nobody drains cannot reach that head, so the shim's
+// `KillSession` spends its whole conclusion budget on it and the daemon's stop
+// waits inside that call.
+func TestATurnDrivenToItsTerminalOpensTheMainWatchExactlyOnce(t *testing.T) {
+	// Arrange: the session's one main watch, and the turn it is about to run.
+	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
+	h.w.SetMainAgent(agentID("main-1"))
+	h.quiet()
+
+	// Act: the turn's prompt, one activity, and the terminal that ends it.
+	h.route(h.main, entryPrompt("turn-1", "main-1"))
+	h.route(h.main, entryFrameAt(frameUpdate("main-1", activityUpdate(readActivity("act-1"))), "ptr-42"))
+	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
+
+	// Assert.
+	h.client.noAgentOpen(t)
+}
+
 // TestSeveredLinkReopensFromTheTrackedPointer covers the transport failure:
 // only the consumer knows a stream should still be open, so a WatchSession that
 // ends while the session lives severs the link, and the return re-opens the

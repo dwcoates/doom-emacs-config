@@ -117,6 +117,75 @@ func TestHostRequestedStopLeavesNoProcessBehind(t *testing.T) {
 	}
 }
 
+// stopAfterTurnBound is how long the host's stop may take on a session whose
+// turn RAN AND ENDED, with its watches still standing — the shape every
+// playbook finishes in.
+//
+// IT IS A FAILURE BOUND FOR ONE SPECIFIC STALL. The shim's teardown concludes
+// every open `WatchAgent` tail through its book's head and waits for the tail
+// to serve it, bounded by `WATCHER_CONCLUSION_BUDGET_MS` (1s). A tail that can
+// never reach that head — the store streams an upsert of an old row at its
+// ORIGINAL pointer, so the newest pointer a tail has served walks BACKWARD —
+// spends the whole budget, and the daemon's stop is waiting inside it. That is
+// what this measures: a stop anywhere near a second has ridden that budget.
+//
+// MEASURED across a -count=8 run against the real quartet: 7.4ms at the best,
+// 9.7ms at the worst. 250ms is ~26x that worst case and a quarter of the budget
+// a stalled tail would burn, so nothing healthy can reach it and nothing
+// stalled can hide under it.
+const stopAfterTurnBound = 250 * time.Millisecond
+
+// TestAStopAfterACompletedTurnLeavesOnTheStop pins the cost of the ordinary
+// stop against the WHOLE world: a real store, a real sidecar, a real daemon and
+// the real Node shim, with a turn driven to its terminal and every watch of the
+// session still standing.
+//
+// It is the e2e half of daemon/integration's test of the same name, which
+// measures the same stop against the fake shim. Only this one exercises the
+// real shim's teardown, which is where the tail conclusion lives.
+func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session whose turn has run and ended.
+	w, ws := pmNewPermissionWorld(t)
+	// Standing a live session down on purpose is what the whole test is
+	// about; these are that act's own trail.
+	w.ExpectWarnings(
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.shimclient.kill", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.reopen",
+		"daemon.shimclient.watch_agent", "daemon.shimclient.watch_session",
+		"daemon.workspace.kill", "daemon.workspace.bring_up",
+		"daemon.health.open_fault", "daemon.health.session",
+	)
+	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	// Act: exactly what Emacs sends, on its own bound for the reason the test
+	// above states.
+	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancelStop()
+	started := time.Now()
+	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
+				Operator: &agentreplv1.DrainReasonOperator{Note: "emacs"},
+			}},
+		}},
+	}))
+	stop := time.Since(started)
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = (%v, %v), want a success", resp, err)
+	}
+	if stop > stopAfterTurnBound {
+		t.Errorf("the stop took %v, over the %v bound — the shim's teardown rode a conclusion budget rather than ending its tails", stop, stopAfterTurnBound)
+	}
+	w.AwaitExit()
+	t.Logf("the host's stop after a completed turn took %v", stop)
+}
+
 // awaitWorldStraysGone polls until nothing but the test's own spared processes
 // names the world's state root, answering whatever is left at the bound.
 func awaitWorldStraysGone(t *testing.T, w *World, bound time.Duration) []int {
