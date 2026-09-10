@@ -201,7 +201,7 @@ export function appendCompactionLines(
   lines: { boundary: Record<string, unknown>; summary: Record<string, unknown> },
 ): void {
   appendFileSync(file, `${JSON.stringify(lines.boundary)}\n${JSON.stringify(lines.summary)}\n`, "utf8");
-  LOGGER.log(
+  LOGGER.info(
     { transcript: file, boundary_uuid: lines.boundary.uuid, summary_uuid: lines.summary.uuid },
     "appended the compact_boundary and summary records the vendor's loader splices at",
   );

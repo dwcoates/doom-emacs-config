@@ -55,14 +55,13 @@ export function backupTranscript(options: {
   try {
     mkdirSync(directory, { recursive: true });
     copyFileSync(options.transcript, target);
-    LOGGER.log(
+    LOGGER.debug(
       { transcript: options.transcript, backup: target, vendor_session_id: options.vendorSessionId },
       "backed up the vendor transcript",
     );
   } catch (err) {
-    LOGGER.log(
+    LOGGER.warn(
       {
-        level: "warn",
         transcript: options.transcript,
         backup: target,
         cause: err instanceof Error ? err.message : String(err),
@@ -86,8 +85,8 @@ export function pruneBackups(directory: string, keep: number): void {
   try {
     names = readdirSync(directory).filter((name) => name.endsWith(".jsonl"));
   } catch (err) {
-    LOGGER.log(
-      { level: "warn", directory, cause: err instanceof Error ? err.message : String(err) },
+    LOGGER.warn(
+      { directory, cause: err instanceof Error ? err.message : String(err) },
       "could not list the transcript backup directory to prune it",
     );
     return;
@@ -97,10 +96,10 @@ export function pruneBackups(directory: string, keep: number): void {
   for (const name of doomed) {
     try {
       rmSync(path.join(directory, name));
-      LOGGER.log({ directory, pruned: name, keep }, "pruned an old transcript backup");
+      LOGGER.debug({ directory, pruned: name, keep }, "pruned an old transcript backup");
     } catch (err) {
-      LOGGER.log(
-        { level: "warn", directory, pruned: name, cause: err instanceof Error ? err.message : String(err) },
+      LOGGER.warn(
+        { directory, pruned: name, cause: err instanceof Error ? err.message : String(err) },
         "could not prune a transcript backup",
       );
     }

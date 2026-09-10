@@ -118,11 +118,11 @@ export async function askPermission(
   // deny rule would, with a `system:permission_denied` and no `canUseTool`.
   // A mock that asked in every mode would make the mode unobservable.
   if (ctx.permissionMode === "bypassPermissions") {
-    ctx.log({ tool: call.name, permission_mode: ctx.permissionMode }, "fake gate BYPASSED; no ask was made");
+    ctx.log.debug({ tool: call.name, permission_mode: ctx.permissionMode }, "fake gate BYPASSED; no ask was made");
     return { behavior: "allow" };
   }
   if (ctx.permissionMode === "dontAsk") {
-    ctx.log(
+    ctx.log.debug(
       { tool: call.name, permission_mode: ctx.permissionMode },
       "fake gate REFUSED by the session's mode; no ask was made",
     );

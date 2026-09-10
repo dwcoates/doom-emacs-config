@@ -525,7 +525,7 @@ describe("shutdownSignalHandlers", () => {
     });
   });
 
-  it("logs the SIGINT refusal at ERROR, because it means something is misconfigured", () => {
+  it("logs the named SIGINT shutdown refusal at warn", () => {
     // Arrange.
     const { engine } = standDownEngine();
     const handlers = shutdownSignalHandlers({
@@ -540,7 +540,7 @@ describe("shutdownSignalHandlers", () => {
 
     // Assert.
     const written = stderr.mock.calls.map((call) => String(call[0])).join("");
-    expect(written).toContain('"level":"error"');
+    expect(written).toContain('"level":"warn"');
   });
 
   it("reports no stand-down in flight before any signal arrives", () => {
@@ -847,7 +847,7 @@ describe("main", () => {
     Object.assign(process.env, priorEnv);
   });
 
-  /** One lifecycle record, as `logMainLifecycle` was handed it. */
+  /** One lifecycle record, including the method-selected level. */
   interface Lifecycle {
     readonly fields: Record<string, unknown>;
     readonly message: string;
@@ -906,14 +906,26 @@ describe("main", () => {
     Object.assign(process.env, spawnEnv(env));
 
     vi.resetModules();
-    vi.doMock("../src/fatal.js", () => ({
-      MAIN_LIFECYCLE_OPERATION: "shim.main.lifecycle",
-      MAIN_FATAL_OPERATION: "shim.main.fatal",
-      logMainLifecycle: (fields: Record<string, unknown>, message: string): void => {
-        const record = { fields, message };
+    const recordLifecycle =
+      (level: "debug" | "info" | "warn" | "error") =>
+      (fields: Record<string, unknown>, message: string): void => {
+        const record = { fields: { level, ...fields }, message };
         lifecycle.push(record);
         const outcome = typeof fields["outcome"] === "string" ? fields["outcome"] : "";
         waiters.get(outcome)?.(record);
+      };
+    vi.doMock("../src/fatal.js", () => ({
+      MAIN_LIFECYCLE_OPERATION: "shim.main.lifecycle",
+      MAIN_FATAL_OPERATION: "shim.main.fatal",
+      MAIN_LIFECYCLE_LOGGER: {
+        debug: recordLifecycle("debug"),
+        info: recordLifecycle("info"),
+        warn: recordLifecycle("warn"),
+        error: recordLifecycle("error"),
+        logVerbose: recordLifecycle("debug"),
+        with: (): never => {
+          throw new Error("main must not rebind its lifecycle logger");
+        },
       },
       reportFatal: (err: unknown): void => {
         fatals.push(err);
@@ -1073,7 +1085,7 @@ describe("main", () => {
 
     // Assert.
     const refusal = await h.reached("refused_shutdown");
-    expect(refusal.fields).toMatchObject({ level: "error", query_preserved: true });
+    expect(refusal.fields).toMatchObject({ level: "warn", query_preserved: true });
   });
 
   it("exits immediately when a session end is requested before the listener exists", async () => {
@@ -1108,7 +1120,7 @@ describe("main", () => {
     // KillSession response itself.
     expect(h.quiet.mock.invocationCallOrder[0]).toBeLessThan(h.close.mock.invocationCallOrder[0]);
     expect(record.fields).toMatchObject({ exit_code: 0 });
-    expect(record.fields["level"]).toBeUndefined();
+    expect(record.fields["level"]).toBe("info");
     expect(h.exits).toEqual([0]);
   });
 

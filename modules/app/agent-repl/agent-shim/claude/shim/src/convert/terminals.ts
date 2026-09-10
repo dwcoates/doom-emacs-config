@@ -296,7 +296,7 @@ export function convertResult(
 
   // ---- The two success shapes -------------------------------------------
   if (reason === "completed" || (reason === undefined && raw.subtype === "success" && raw.is_error !== true)) {
-    LOGGER.log({ turn: context.turnId?.value }, "the turn completed");
+    LOGGER.info({ turn: context.turnId?.value }, "the turn completed");
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",
       value: create(conversationv1.AgentSuccessSchema, {
@@ -315,7 +315,7 @@ export function convertResult(
   }
 
   if (isUserStop(message)) {
-    LOGGER.log({ turn: context.turnId?.value, reason }, "the turn was interrupted by a user stop");
+    LOGGER.info({ turn: context.turnId?.value, reason }, "the turn was interrupted by a user stop");
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",
       value: create(conversationv1.AgentSuccessSchema, {
@@ -334,7 +334,7 @@ export function convertResult(
   }
 
   if (reason === "background_requested") {
-    LOGGER.log({ turn: context.turnId?.value }, "the turn moved to the background rather than ending");
+    LOGGER.info({ turn: context.turnId?.value }, "the turn moved to the background rather than ending");
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",
       value: create(conversationv1.AgentSuccessSchema, {
@@ -350,9 +350,8 @@ export function convertResult(
   // ---- The failure arms --------------------------------------------------
   if (reason === "api_error") {
     const status = typeof raw.api_error_status === "number" ? raw.api_error_status : undefined;
-    LOGGER.log(
+    LOGGER.warn(
       {
-        level: "warn",
         turn: context.turnId?.value,
         http_status: status,
         vendor_error: vendorApiError.errorClass,
@@ -385,8 +384,8 @@ export function convertResult(
     // unclassified execution failure, with `errors` as the account — which is
     // exactly what that arm is for — and the site is logged so the gap is
     // reported rather than guessed at.
-    LOGGER.log(
-      { level: "warn", turn: context.turnId?.value, terminal_reason: reason, subtype: raw.subtype },
+    LOGGER.warn(
+      { turn: context.turnId?.value, terminal_reason: reason, subtype: raw.subtype },
       "no failure arm spells this terminal reason; relayed as an unclassified execution failure",
     );
     const result: conversationv1.AgentFrame["result"] = {
@@ -403,8 +402,8 @@ export function convertResult(
   }
 
   const failure = arm();
-  LOGGER.log(
-    { level: "warn", turn: context.turnId?.value, terminal_reason: reason, arm: failure.case },
+  LOGGER.warn(
+    { turn: context.turnId?.value, terminal_reason: reason, arm: failure.case },
     "the turn ended on a vendor-stated failure",
   );
   const result: conversationv1.AgentFrame["result"] = {

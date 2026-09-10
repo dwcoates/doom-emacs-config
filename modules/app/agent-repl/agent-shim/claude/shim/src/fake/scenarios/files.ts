@@ -63,7 +63,7 @@ const READ_WHOLE = scenario({
   writes: "the tool_use assistant line, the tool_result user line with `toolUseResult`, the closing text line",
   arms: "AgentRead.start + AgentReadSuccess.extent=whole",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "read-whole" }, "fake read (whole file) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "read-whole" }, "fake read (whole file) turn");
     const call = ctx.toolUse("Read", { file_path: FILE });
     ctx.toolResult(
       call,
@@ -81,7 +81,7 @@ const READ_HEAD = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentRead.start + AgentReadSuccess.extent=head",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "read-head" }, "fake read (head) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "read-head" }, "fake read (head) turn");
     const call = ctx.toolUse("Read", { file_path: FILE, limit: 2 });
     const head = FILE_BODY.split("\n").slice(0, 2).join("\n");
     ctx.toolResult(call, head, readResult({ content: head, numLines: 2, startLine: 1, totalLines: 4 }));
@@ -96,7 +96,7 @@ const READ_RANGE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentRead.start + AgentReadSuccess.extent=range",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "read-range" }, "fake read (range) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "read-range" }, "fake read (range) turn");
     const call = ctx.toolUse("Read", { file_path: FILE, offset: 2, limit: 2 });
     const window = FILE_BODY.split("\n").slice(1, 3).join("\n");
     ctx.toolResult(call, window, readResult({ content: window, numLines: 2, startLine: 2, totalLines: 4 }));
@@ -111,7 +111,7 @@ const READ_TRUNCATED = scenario({
   writes: "the tool_use line, the tool_result line, a `read_truncation_notice` attachment line, the closing text line",
   arms: "AgentReadSuccess.cut=token_cap",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "read-truncated" }, "fake truncated-read turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "read-truncated" }, "fake truncated-read turn");
     const call = ctx.toolUse("Read", { file_path: FILE });
     const head = FILE_BODY.split("\n").slice(0, 2).join("\n");
     ctx.toolResult(
@@ -143,7 +143,7 @@ const READ_IMAGE = scenario({
   writes: "the tool_use line, the image tool_result line, the closing text line",
   arms: "AgentReadSuccess with an ImageBlock",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "read-image" }, "fake image-read turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "read-image" }, "fake image-read turn");
     const call = ctx.toolUse("Read", { file_path: "/w/s/shot.png" });
     const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     ctx.toolResult(
@@ -176,7 +176,7 @@ const WRITE_CREATE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentWrite.start + AgentWriteSuccess.outcome=created",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "write-create" }, "fake write (create) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "write-create" }, "fake write (create) turn");
     const call = ctx.toolUse("Write", { file_path: "/w/s/new.ts", content: "export const fresh = true;\n" });
     ctx.toolResult(call, "File created successfully.", {
       type: "create",
@@ -197,7 +197,7 @@ const WRITE_UPDATE = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentWrite.start + AgentWriteSuccess.outcome=updated",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "write-update" }, "fake write (update) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "write-update" }, "fake write (update) turn");
     const call = ctx.toolUse("Write", { file_path: FILE, content: `${FILE_BODY}\nexport const five = 5;\n` });
     ctx.toolResult(call, "File updated successfully.", {
       type: "update",
@@ -226,7 +226,7 @@ const EDIT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentEdit.start + AgentEditSuccess",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "edit" }, "fake edit turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "edit" }, "fake edit turn");
     const call = ctx.toolUse("Edit", {
       replace_all: false,
       file_path: FILE,
@@ -261,7 +261,7 @@ const IDE_DIAGNOSTICS = scenario({
   writes: "the tool_use line, the tool_result line, a `diagnostics` attachment line, the closing text line",
   arms: "AgentEdit.diagnostics (AgentDiagnosticsReport joined to the last edit by adjacency)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ide-diagnostics" }, "fake edit-then-diagnostics turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ide-diagnostics" }, "fake edit-then-diagnostics turn");
     const call = ctx.toolUse("Edit", {
       replace_all: false,
       file_path: FILE,
@@ -324,7 +324,7 @@ const IDE_DIAGNOSTICS_WRITE = scenario({
   writes: "the tool_use line, the tool_result line, a `diagnostics` attachment line, the closing text line",
   arms: "AgentWrite.diagnostics (AgentDiagnosticsReport joined to the last WRITE by adjacency)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "ide-diagnostics-write" }, "fake write-then-diagnostics turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "ide-diagnostics-write" }, "fake write-then-diagnostics turn");
     const call = ctx.toolUse("Write", { file_path: NEW_FILE, content: NEW_FILE_BODY });
     // GROUNDED IN TWO REAL ARTIFACTS, exactly as IDE_DIAGNOSTICS above is:
     // the `Write` result shape is the capture's, field for field —
@@ -376,7 +376,7 @@ const GREP_CONTENT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentGrep.start + AgentGrepSuccess.matches=content (extent=partial)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "grep-content" }, "fake grep (content) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "grep-content" }, "fake grep (content) turn");
     const call = ctx.toolUse("Grep", { pattern: "export const", path: "/w/s", output_mode: "content" });
     ctx.toolResult(call, "example.ts:1:export const one = 1;\nexample.ts:2:export const two = 2;", {
       mode: "content",
@@ -403,7 +403,7 @@ const GREP_FILES = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentGrepSuccess.matches=files (extent=all)",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "grep-files" }, "fake grep (files) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "grep-files" }, "fake grep (files) turn");
     const call = ctx.toolUse("Grep", { pattern: "export", path: "/w/s", output_mode: "files_with_matches" });
     ctx.toolResult(call, FILE, {
       mode: "files_with_matches",
@@ -422,7 +422,7 @@ const GREP_COUNT = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentGrepSuccess.matches=count",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "grep-count" }, "fake grep (count) turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "grep-count" }, "fake grep (count) turn");
     const call = ctx.toolUse("Grep", { pattern: "export", path: "/w/s", output_mode: "count" });
     ctx.toolResult(call, `${FILE}:4`, {
       mode: "count",
@@ -443,7 +443,7 @@ const GLOB = scenario({
   writes: "the tool_use line, the tool_result line, the closing text line",
   arms: "AgentGlob.start + AgentGlobSuccess.extent=partial with an omitted count",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "glob" }, "fake glob turn");
+    ctx.log.debug({ turn: ctx.turn, branch: "glob" }, "fake glob turn");
     const call = ctx.toolUse("Glob", { pattern: "**/*.ts" });
     ctx.toolResult(call, `${FILE}\n/w/s/other.ts`, {
       durationMs: 12,

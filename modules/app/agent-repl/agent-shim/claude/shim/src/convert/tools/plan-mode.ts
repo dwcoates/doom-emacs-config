@@ -38,8 +38,8 @@ const EXIT = "ExitPlanMode";
 function actNameOf(call: PendingCall): "enter" | "exit" | undefined {
   if (call.toolName === ENTER) return "enter";
   if (call.toolName === EXIT) return "exit";
-  LOGGER.log(
-    { level: "error", tool: call.toolName, tool_use_id: call.toolUseId },
+  LOGGER.warn(
+    { tool: call.toolName, tool_use_id: call.toolUseId },
     "a plan-mode unit was built from a tool name that is neither the enter nor the exit call",
   );
   return undefined;
@@ -98,16 +98,16 @@ export const planModeConverter: ToolConverter = {
     if (act === undefined) {
       // The act IS the fact this arm carries; a success with neither arm set
       // would say a plan-mode call returned without saying which one.
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a settled plan-mode call names no act; no success frame is produced",
       );
       return undefined;
     }
     const output = asRecord(outcome.structured);
     if (output === undefined) {
-      LOGGER.log(
-        { level: "warn", tool_use_id: call.toolUseId, act },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId, act },
         "a settled plan-mode call carried no typed output; the act is recorded with nothing stated about it",
       );
     }

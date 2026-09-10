@@ -194,7 +194,7 @@ export class TranscriptWriter {
   ) {
     ensureDir(path);
     this.head = lastChainedUuid(path);
-    LOGGER.log(
+    LOGGER.debug(
       { transcript_path: path, resumed_chain_head: this.head ?? "", claude_session_id: envelope.sessionId },
       this.head === null ? "opened a FRESH vendor transcript" : "REOPENED a vendor transcript and adopted its chain head",
     );
@@ -271,7 +271,7 @@ export class SubagentWriter {
   }): void {
     ensureDir(this.metaPath);
     writeFileSync(this.metaPath, `${JSON.stringify(meta, null, 2)}\n`);
-    LOGGER.log(
+    LOGGER.debug(
       { subagent_meta_path: this.metaPath, agent_id: this.agentId, agent_type: meta.agentType },
       "wrote a subagent metadata sidecar",
     );
@@ -344,7 +344,7 @@ export class SpoolWriter {
     }
     this.finished = true;
     appendFileSync(this.path, `EXIT=${exitCode}\n`);
-    LOGGER.log({ spool_path: this.path, exit_code: exitCode }, "terminated a fake task spool");
+    LOGGER.debug({ spool_path: this.path, exit_code: exitCode }, "terminated a fake task spool");
   }
 
   /** Whether the `EXIT=` terminator has been written. */
@@ -411,7 +411,7 @@ export class VendorFiles {
    * that deleted it would make that untestable.
    */
   rotate(newSessionId: string): void {
-    LOGGER.log(
+    LOGGER.debug(
       { previous_claude_session_id: this.sessionId, claude_session_id: newSessionId },
       "ROTATED the fake vendor session identity; a new transcript file begins",
     );

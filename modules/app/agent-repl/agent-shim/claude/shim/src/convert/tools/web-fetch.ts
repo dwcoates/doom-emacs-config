@@ -29,8 +29,8 @@ const LOGGER = bindLog({
 function targetOf(call: PendingCall): conversationv1.AgentWebFetchTarget {
   const url = str(call.input, "url");
   if (url === undefined) {
-    LOGGER.log(
-      { level: "error", tool_use_id: call.toolUseId },
+    LOGGER.warn(
+      { tool_use_id: call.toolUseId },
       "a web fetch call names no url; the unit's target cannot restate one",
     );
   }
@@ -85,8 +85,8 @@ export const webFetchConverter: ToolConverter = {
       // The status is a REQUIRED submessage of the success arm and only the
       // typed output states it; a message built without it would claim a code
       // the server never sent. No message, and the gap is recorded.
-      LOGGER.log(
-        { level: "error", tool_use_id: call.toolUseId },
+      LOGGER.warn(
+        { tool_use_id: call.toolUseId },
         "a settled web fetch carried no typed output; no success frame can be built without its http status",
       );
       return undefined;
