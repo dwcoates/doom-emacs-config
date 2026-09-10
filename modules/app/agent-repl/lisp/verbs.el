@@ -56,6 +56,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
+(declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
 (declare-function agent-repl--pseudo-workspace-name-p "agent-repl-core" (ws))
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl--kill-one-workspace "agent-repl-workspace" (ws &optional preserve))
@@ -548,13 +549,70 @@ PROJECT ROOT PATH.  A ref carrying no dir is REPORTED, never silently
 skipped: the decoder already refuses a success without the ref, so a
 missing dir is a contract breach and the user is owed the reason their
 new workspace did not come up."
-  (let ((dir (plist-get ref :dir)))
+  (let ((dir (plist-get ref :dir))
+        (id (plist-get ref :id)))
     (if (and dir (not (string-empty-p dir)))
         (progn
           (agent-repl--info nil "elisp.verbs.select-minted dir=%s" dir)
-          (agent-repl-switch-to-project dir))
+          (if (agent-repl--ws-by-ref-id id)
+              (agent-repl-verbs--land-on ref "already-a-tab")
+            ;; THE TAB IS NOT HERE YET.  The minted ref is the daemon's
+            ;; ANSWER, and the workspace itself reaches Emacs on the ROSTER
+            ;; stream -- `agent-repl-roster--open-tab' is the whole of its
+            ;; editor-side birth.  The answer beats that push, so landing
+            ;; here found no workspace at the directory, armed no panels
+            ;; (`agent-repl--switch-project-arm-panels' logged
+            ;; branch=not-a-workspace) and Doom's empty-project fallback put
+            ;; MAGIT STATUS in the main area instead of the new workspace's
+            ;; own panel.  Whether the push won that race decided whether a
+            ;; freshly made workspace came up on itself at all.
+            ;;
+            ;; So the landing WAITS FOR THE TAB, exactly the way
+            ;; `agent-repl--ffw-pending-fire' waits for one: the arrival of
+            ;; the tab fires it. Nothing here polls, retries or schedules --
+            ;; a tab that never arrives simply leaves the landing pending.
+            (agent-repl-verbs--pending-landing-register ref)))
       (agent-repl--error nil "elisp.verbs.select-minted-no-dir ref=%S" ref)
       (message "agent-repl: the new workspace carries no directory to switch to"))))
+
+(defvar agent-repl-verbs--pending-landing nil
+  "The `WorkspaceRef' of a minted workspace whose tab has not arrived yet.
+LATEST WINS, and there is only ever one: a landing moves the user, and
+the user stands in one place -- so a second mint supersedes a first that
+is still waiting rather than queueing behind it.  Cleared the moment it
+fires, so nothing here outlives the arrival it waits on.")
+
+(defun agent-repl-verbs--land-on (ref why)
+  "Stand on the workspace REF names, recording WHY the landing ran now."
+  (let ((dir (plist-get ref :dir)))
+    (agent-repl--info nil "elisp.verbs.land-on dir=%s why=%s" dir why)
+    (agent-repl-switch-to-project dir)))
+
+(defun agent-repl-verbs--pending-landing-register (ref)
+  "Record REF as the landing waiting for its tab to reach the roster."
+  (agent-repl--info nil "elisp.verbs.pending-landing-registered dir=%s id=%s"
+                    (plist-get ref :dir) (plist-get ref :id))
+  (setq agent-repl-verbs--pending-landing ref))
+
+(defun agent-repl-verbs--pending-landing-fire (&rest _)
+  "Land on the pending minted workspace once its tab exists.
+Installed on `agent-repl-roster-update-functions', the hook the roster
+runs after it has reconciled a push into tabs, so the ARRIVAL of the tab
+is what lands the user.  Fires exactly once: the pending ref is cleared
+before the landing runs."
+  (when-let* ((ref agent-repl-verbs--pending-landing)
+              (id (plist-get ref :id))
+              (ws (agent-repl--ws-by-ref-id id)))
+    (setq agent-repl-verbs--pending-landing nil)
+    (agent-repl--info ws "elisp.verbs.pending-landing-arrived ws=%s id=%s" ws id)
+    (agent-repl-verbs--land-on ref "tab-arrived")))
+
+;; `agent-repl-roster-update-functions' is roster.el's, and roster.el loads
+;; AFTER this file (config.el); `add-hook' binds the symbol itself, and a
+;; later `defvar' leaves an already-bound variable alone, so the
+;; registration holds either way.
+(defvar agent-repl-roster-update-functions)
+(add-hook 'agent-repl-roster-update-functions #'agent-repl-verbs--pending-landing-fire)
 
 (defun agent-repl-verbs--select-created (success)
   "Stand on the workspace CreateWorkspaceSuccess names.
