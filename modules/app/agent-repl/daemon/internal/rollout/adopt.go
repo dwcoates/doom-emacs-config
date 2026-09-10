@@ -373,7 +373,34 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	}
 	c.mu.Unlock()
 
-	err := c.adopt(ctx, ws, operation)
+	// THE ADOPTION IS THE DAEMON'S WORK, NOT THIS CALLER'S, so it runs on a
+	// context the caller cannot cancel. The rendezvous is satisfied by the
+	// line above: every expected participant has called, and the workspace is
+	// being taken over on behalf of all of them. Whether the ONE connection
+	// that happened to complete it is still listening has nothing to do with
+	// whether the takeover finishes.
+	//
+	// THE COST OF LETTING IT BE CANCELLED IS THE WHOLE ADOPTION WINDOW, and
+	// that is the defect this replaces. Emacs gives a unary rpc
+	// `agent-repl-connect-unary-timeout-seconds' (10s, `lisp/connect.el') and
+	// its adopt is an ordinary unary call; the steps below are a state-handle
+	// promotion and four writes against a SQLite handle the OUTGOING daemon is
+	// still writing, whose busy timeout alone is 5s apiece. On a loaded box the
+	// host's call can therefore expire mid-`adopt' -- and cancelling the
+	// adoption there left serving ownership unclaimed, settled the rendezvous
+	// FAILED (`e.settle'), and left nothing to try again with: Emacs does not
+	// re-adopt after a transport failure, and `retryHeadless' covers only
+	// workspaces with no participants. The incumbent then waited out its whole
+	// `DefaultAdoptionWindow' (30s) for an adoption that had all but finished,
+	// which delays `windows.Wait()', which delays its exit, which delays the
+	// primary stream close Emacs promotes the successor on
+	// (`lisp/daemon-link.el', `agent-repl-link--handle-close'). That is
+	// `TestEmacsHandoverTransfersAtFreeness' missing its 21s bound on a
+	// promotion healthy runs make in ~2s.
+	//
+	// `advertise' below already detaches for the same reason; this is the same
+	// rule one step earlier.
+	err := c.adopt(context.WithoutCancel(ctx), ws, operation)
 	c.mu.Lock()
 	e.settle(err)
 	c.mu.Unlock()
