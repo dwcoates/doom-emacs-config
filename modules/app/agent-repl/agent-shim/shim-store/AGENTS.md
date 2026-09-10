@@ -374,7 +374,19 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - `internal/logging` is the store's ONE canonical JSON logging API. Direct
   `fmt`, `log`, `slog` or ad hoc diagnostics are forbidden except the
   documented pre-logger bootstrap failure and the logger's own sink-emergency
-  path.
+  path. `logging_bypass_test.go` enforces that boundary; its only sanctioned
+  writers are `main.go:reportFatal` and
+  `internal/logging/logging.go:writeFull`.
+- `AGENT_REPL_LOG_LEVEL` is the ONE process-wide threshold:
+  `debug|info|warn|error`, default `info`. An invalid value is a bootstrap
+  failure before the log directory or file is created. Production passes the
+  parsed `agentrepl/logging.Level` to `logging.NewDurableOnlyAtLevel`; tests
+  and foreground harnesses may use `logging.NewAtLevel`.
+- The canonical store sink is
+  `$XDG_CACHE_HOME/agent-repl/log/shim-store.log` (or
+  `~/.cache/agent-repl/log/shim-store.log` when `XDG_CACHE_HOME` is unset),
+  unless `--log` overrides it. Production does not mirror ordinary records to
+  launchd stderr.
 - Every logical branch logs its selection: verbose for the ordinary path,
   `warn` for degraded-but-handled, `error` for failures. **Every error is
   logged exactly once, by its owning layer — and WHO OWNS IT DEPENDS ON WHOSE
@@ -407,6 +419,11 @@ arms are derived from, and each one is logged once with `refusal_site`.
   header when a caller sends one. `rpc` is the Connect procedure spelled
   exactly as Connect spells it, leading slash included
   (`/store.v1.ShimStore/WriteBatch`).
+- Every request about one agent/book binds `agent_id` and `book_agent_id` to
+  the request logger so every record inherits them. An aggregate WriteBatch
+  binds the singular keys when unambiguous and sorted `agent_ids` /
+  `book_agent_ids` arrays when the batch spans identities; it never chooses an
+  arbitrary identity from a mixed batch.
 - **EVERY REFUSAL RECORD CARRIES BOTH `refusal_site` AND `refusal_kind`.** The
   site is which of the store's checks said no; the kind is the wire arm the
   caller received (`invalid_request`, `stale_pointer`, `storage_failure`,
@@ -421,9 +438,11 @@ arms are derived from, and each one is logged once with `refusal_site`.
   A token is a capability.
 - `offset` is a `*int64` on purpose: zero is a meaningful file offset and must
   be reported, not omitted as unset.
-- Hot per-record and per-batch success diagnostics go through the VERBOSE
-  helper (gated by `AGENT_REPL_LOG_VERBOSE` at startup). Lifecycle, invariant
-  violations, refusals and failures are normal verbosity. Slow queries are the
+- Request boundaries, state decisions, and per-record/per-batch success
+  diagnostics go through `logging.Logger.LogVerbose`, which emits
+  `level=debug`, `verbosity=verbose`. Service lifecycle edges are `info`;
+  invariant violations and refusals are `warn`; owned failures are `error`.
+  Slow queries are the
   one deliberate exception: a statement past
   `AGENT_REPL_STORE_SLOW_QUERY_MS` (default 250ms) emits a normal-verbosity
   `warn` at `store.db.slow-query` with `statement`, `duration_ms`, `rows` and
