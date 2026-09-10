@@ -59,6 +59,14 @@
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
+(declare-function agent-repl--with-log-context "agent-repl-core"
+                  (workspace request-id function))
+(declare-function agent-repl--register-timer "agent-repl-core" (key timer))
+(declare-function agent-repl--cancel-timer-key "agent-repl-core" (key))
+(defvar agent-repl--log-context-request-id)
+(defvar agent-repl--log-context-workspace)
+(defvar agent-repl--global-log-scope)
 (declare-function agent-repl--meta-wrap "agent-repl-core" (text))
 (declare-function agent-repl--rgb-hex "agent-repl-core" (r g b))
 (declare-function agent-repl--set-buffer-background "agent-repl-core" (color))
@@ -175,6 +183,16 @@ pasteboard image; `agent-repl--send' turns each entry into one
 `ImageBlock' beside the text block and clears the list on a submission
 the daemon accepted.")
 
+(defvar-local agent-repl--input-flash-timer-key nil
+  "Unique core timer-registry key for this composer's notice dwell.")
+
+(defun agent-repl--input-cancel-flash-timer ()
+  "Cancel this composer's pending notice dwell during buffer teardown.
+This is a best-effort cleanup hook: a composer with no armed dwell has nothing
+to cancel, while core's timer boundary reports whether a keyed timer existed."
+  (when agent-repl--input-flash-timer-key
+    (agent-repl--cancel-timer-key agent-repl--input-flash-timer-key)))
+
 (defconst agent-repl--input-mode-line-spec
   '(:eval (agent-repl--input-notice-segment))
   "The composer's mode-line segment: the standing notice, or nothing.")
@@ -205,7 +223,8 @@ the daemon accepted.")
   (setq-local word-wrap t)
   ;; Intentionally unlogged: `after-change-functions' runs per keystroke, so
   ;; logging it would overwhelm the durable input/send lifecycle diagnostics.
-  (add-hook 'after-change-functions #'agent-repl--history-on-change nil t))
+  (add-hook 'after-change-functions #'agent-repl--history-on-change nil t)
+  (add-hook 'kill-buffer-hook #'agent-repl--input-cancel-flash-timer nil t))
 
 (defun agent-repl--input-buffer (ws)
   "Return WS's live input buffer, or nil."
@@ -280,8 +299,14 @@ the timer fires."
   (agent-repl--input-set-notice ws text)
   (let ((buffer (agent-repl--input-buffer ws)))
     (when buffer
-      (run-at-time agent-repl-input-flash-seconds nil
-                   #'agent-repl--input-expire-flash ws buffer text))))
+      (with-current-buffer buffer
+        (unless agent-repl--input-flash-timer-key
+          (setq agent-repl--input-flash-timer-key
+                (make-symbol (format "agent-repl-input-flash-%s" ws))))
+        (agent-repl--register-timer
+         agent-repl--input-flash-timer-key
+         (run-at-time agent-repl-input-flash-seconds nil
+                      #'agent-repl--input-expire-flash ws buffer text))))))
 
 ;;;; ---- Attachments -----------------------------------------------------
 
@@ -309,14 +334,16 @@ The file is NOT read here: an `ImageBlock' carries a REFERENCE, and the
 daemon and the shim run on this same host, so the path is the whole
 payload."
   (unless (derived-mode-p 'agent-repl-input-mode)
-    (agent-repl--fatal nil "elisp.input.attach-outside-composer buffer=%s path=%s"
+    (agent-repl--fatal agent-repl--global-log-scope
+                       "elisp.input.attach-outside-composer buffer=%s path=%s"
                        (buffer-name) path))
-  (setq agent-repl-input-attachments
-        (append agent-repl-input-attachments
-                (list (list :path path :media-type media-type))))
-  (agent-repl--info nil "elisp.input.attached path=%s media-type=%s count=%d"
-                    path media-type (length agent-repl-input-attachments))
-  agent-repl-input-attachments)
+  (let ((ws (agent-repl--buffer-owner (current-buffer))))
+    (setq agent-repl-input-attachments
+          (append agent-repl-input-attachments
+                  (list (list :path path :media-type media-type))))
+    (agent-repl--info ws "elisp.input.attached ws=%s path=%s media-type=%s count=%d"
+                      ws path media-type (length agent-repl-input-attachments))
+    agent-repl-input-attachments))
 
 (defun agent-repl-input-attachments (&optional ws)
   "Return the images attached to a composer, oldest first.
@@ -791,28 +818,40 @@ value Emacs constructs from a path."
   (let ((ref (agent-repl-host-ref ws))
         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
         (key (or key (agent-repl--uuid))))
-    (unless ref
-      (agent-repl--fatal ws "elisp.input.submit-no-ref ws=%s origin=%S" ws origin))
-    (unless conn
-      (agent-repl--warn ws "elisp.input.submit-no-conn ws=%s origin=%S" ws origin)
-      (agent-repl--input-on-failure
-       ws said origin raw (list :kind :transport :message "no daemon connection") key)
-      (cl-return-from agent-repl--input-submit key))
-    (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d"
-                      ws origin key (length (plist-get (plist-get said :content) :blocks)))
-    (agent-repl-rpc-submit-prompt
-     conn (list :said said :idempotency-key key :origin origin :workspace ref)
-     :on-response
-     (lambda (response)
-       (pcase (plist-get response :arm)
-         (:success (agent-repl--input-on-success
-                    ws raw origin (plist-get response :value) from-buffer))
-         (:error (agent-repl--input-on-error
-                  ws said origin raw (plist-get response :value) key))
-         (arm (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S" ws arm))))
-     :on-failure
-     (lambda (detail) (agent-repl--input-on-failure ws said origin raw detail key)))
-    key))
+    (agent-repl--with-log-context
+     ws key
+     (lambda ()
+       (unless ref
+         (agent-repl--fatal ws "elisp.input.submit-no-ref ws=%s origin=%S" ws origin))
+       (unless conn
+         (agent-repl--warn ws "elisp.input.submit-no-conn ws=%s origin=%S" ws origin)
+         (agent-repl--input-on-failure
+          ws said origin raw (list :kind :transport :message "no daemon connection") key)
+         (cl-return-from agent-repl--input-submit key))
+       (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d"
+                         ws origin key (length (plist-get (plist-get said :content) :blocks)))
+       (agent-repl-rpc-submit-prompt
+        conn (list :said said :idempotency-key key :origin origin :workspace ref)
+        :on-response
+        (lambda (response)
+          (agent-repl--with-log-context
+           ws key
+           (lambda ()
+             (pcase (plist-get response :arm)
+               (:success (agent-repl--input-on-success
+                          ws raw origin (plist-get response :value) from-buffer))
+               (:error (agent-repl--input-on-error
+                        ws said origin raw (plist-get response :value) key))
+               (arm
+                (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S"
+                                   ws arm))))))
+        :on-failure
+        (lambda (detail)
+          (agent-repl--with-log-context
+           ws key
+           (lambda ()
+             (agent-repl--input-on-failure ws said origin raw detail key)))))
+       key))))
 
 ;;;; ---- The send pipeline ------------------------------------------------
 

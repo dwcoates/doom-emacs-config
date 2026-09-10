@@ -35,6 +35,7 @@
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl--ws-by-ref-id "workspace")
+(declare-function agent-repl--ws-known-p "workspace" (ws))
 (declare-function agent-repl-roster-tab-order "roster")
 (declare-function agent-repl--ws-put "workspace")
 (declare-function agent-repl--ws-switch "workspace")
@@ -1287,7 +1288,9 @@ message — the fixture must set it that way."
                       "itest-badge" "itest-badge" 'ready
                       '(priority . ((label . "P1")))))))
       (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-status-tab-state "itest-badge") :ready))
+       (lambda ()
+         (and (agent-repl--ws-known-p "itest-badge")
+              (eq (agent-repl-status-tab-state "itest-badge") :ready)))
        nil "the row to resolve")
       ;; Assert.
       (should (string-prefix-p
@@ -1307,7 +1310,9 @@ SOME visual marker even though they take no lifecycle color."
                (list (agent-repl-itest-roster--row
                       "itest-glyph-inactive" "itest-glyph-inactive" 'inactive))))
       (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-status-tab-state "itest-glyph-inactive") :inactive))
+       (lambda ()
+         (and (agent-repl--ws-known-p "itest-glyph-inactive")
+              (eq (agent-repl-status-tab-state "itest-glyph-inactive") :inactive)))
        nil "the inactive state")
       ;; Assert.
       (should (equal (agent-repl-status-tab-glyph
@@ -1328,7 +1333,9 @@ rather than a lifecycle color."
                (list (agent-repl-itest-roster--row
                       "itest-glyph-conflict" "itest-glyph-conflict" 'mergeConflict))))
       (agent-repl-itest--wait-until
-       (lambda () (eq (agent-repl-status-tab-state "itest-glyph-conflict") :merge-conflict))
+       (lambda ()
+         (and (agent-repl--ws-known-p "itest-glyph-conflict")
+              (eq (agent-repl-status-tab-state "itest-glyph-conflict") :merge-conflict)))
        nil "the merge-conflict state")
       ;; Assert.
       (should (equal (agent-repl-status-tab-glyph
@@ -2093,11 +2100,13 @@ since deprioritized."
                       "itest-badge-clear" "itest-badge-clear" 'ready
                       '(priority . ((label . "P1")))))))
       (agent-repl-itest--wait-until
-       (lambda () (string-prefix-p
-                   "P1" (or (agent-repl--tab-badge-str
-                             "itest-badge-clear"
-                             (agent-repl-status-tab-state "itest-badge-clear"))
-                            "")))
+       (lambda ()
+         (and (agent-repl--ws-known-p "itest-badge-clear")
+              (string-prefix-p
+               "P1" (or (agent-repl--tab-badge-str
+                         "itest-badge-clear"
+                         (agent-repl-status-tab-state "itest-badge-clear"))
+                        ""))))
        nil "the priority badge to draw")
       ;; Act.
       (agent-repl-itest-roster--push

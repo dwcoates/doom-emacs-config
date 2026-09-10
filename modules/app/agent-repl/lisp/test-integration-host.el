@@ -2268,7 +2268,6 @@ still go through."
             (let ((body (car (agent-repl-itest--call-bodies daemon "RegisterWorkspace"))))
               (should (equal (agent-repl-itest--body-field body 'dir) (agent-repl-itest--fixture-dir "itest-host-ws")))))
         (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
-        (ignore-errors (agent-repl-host-forget ws-no-dir))
         (agent-repl-connect-close conn)))))
 
 ;; audit-3 #23
@@ -2349,6 +2348,7 @@ synthesize a call."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (let ((ws (concat agent-repl-itest-host--ws "-unregistered")))
+      (agent-repl--ws-put ws :project-dir (agent-repl-itest--fixture-dir ws))
       ;; Act.
       (agent-repl-host-select ws)
       ;; Assert: nothing was ever sent, and nothing ever will be -- there

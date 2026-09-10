@@ -361,6 +361,9 @@ work in the batch process.  Ignores every argument by design."
          (expand-file-name (format "agent-repl-test-state-%d" (emacs-pid))
                            temporary-file-directory)))
     (setenv "AGENT_REPL_STATE_DIR" test-state-dir)
+    ;; Keep debug-file assertions stable across aggregate-suite module reloads:
+    ;; `core.el' intentionally re-reads this environment variable on every load.
+    (setenv "AGENT_REPL_LOG_LEVEL" "debug")
     ;; The global Emacs sink now lives in a UID-scoped OS-temp directory rather
     ;; than the state tree.  Pre-bind its defcustom to this process's state dir
     ;; so concurrent ERT processes cannot contend for one append-file lock.
@@ -450,25 +453,29 @@ work in the batch process.  Ignores every argument by design."
 ;; Tests that specifically exercise the file-write path bind this back
 ;; locally and redirect `agent-repl-log-file-name' to a temp path.
 (when (and noninteractive (boundp 'agent-repl-log-to-file))
-  (setq agent-repl-log-to-file nil))
+  (setq agent-repl-log-to-file nil
+        agent-repl-log-file-level 'debug))
+
+;; Unit tests run without a live perspective unless a case constructs one.
+;; Mark that harness-wide scope explicitly central so incidental diagnostics
+;; from pure helpers do not masquerade as failed workspace attribution.  Tests
+;; of the resolver bind this back to nil and exercise the production invariant.
+(when (and noninteractive (boundp 'agent-repl--log-context-workspace))
+  (setq agent-repl--log-context-workspace agent-repl--global-log-scope))
 
 (defmacro agent-repl-test--with-log-sink-on (&rest body)
   "Run BODY with the durable log sink ENABLED, writing to a throwaway file.
 The `setq' immediately above turns `agent-repl-log-to-file' off for every
-noninteractive run, and `agent-repl--persist-log-record' then skips
-workspace-identity resolution ENTIRELY.  A test that leaves it off
-therefore never exercises log routing at all — which is precisely how log
-calls handing a wire CWD to `agent-repl--workspace-log-identity' shipped
-green while crashing Emacs boot and the frontend process filter.
+noninteractive run.  The harness marks incidental test logging explicitly
+central; cases exercising workspace routing bind their own scope and sink.
 
-Any test asserting that some code path does not violate the log routing
-invariant MUST wrap itself in this."
+Any test asserting durable output MUST wrap itself in this."
   (declare (indent 0))
   `(let ((sink (make-temp-file "agent-repl-test-log-sink-")))
      (unwind-protect
          (let ((agent-repl-log-to-file t)
                (agent-repl-log-file-name sink)
-               (agent-repl--log-write-counter 0))
+               (agent-repl-log-file-level 'debug))
            (cl-letf (((symbol-function 'message) #'ignore))
              ,@body))
        (when (file-exists-p sink) (delete-file sink)))))
@@ -481,6 +488,21 @@ invariant MUST wrap itself in this."
 (when (and noninteractive
            (boundp 'agent-repl--workspace-log-buffer-enabled))
   (setq agent-repl--workspace-log-buffer-enabled nil))
+
+(defun agent-repl-test--resolve-log-workspace-with-disabled-sinks
+    (original ws fmt)
+  "Skip workspace sink resolution when the batch harness disabled every sink.
+Call ORIGINAL with WS and FMT whenever either structured sink is active, so all
+dedicated persistence and routing tests exercise production unchanged."
+  (if (and noninteractive
+           (not agent-repl-log-to-file)
+           (not agent-repl--workspace-log-buffer-enabled))
+      (list :central "batch harness disabled every structured record sink")
+    (funcall original ws fmt)))
+
+(when noninteractive
+  (advice-add 'agent-repl--resolve-log-workspace :around
+              #'agent-repl-test--resolve-log-workspace-with-disabled-sinks))
 
 ;;;; ---- External-boundary guards ----
 ;;

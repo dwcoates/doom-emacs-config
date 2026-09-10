@@ -267,7 +267,7 @@ the normal reconnect path rather than a duplicate-creation hazard."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (let ((ws "itest-link-restart-ws")
-          (dir "/tmp/itest-link-restart-ws"))
+          (dir (agent-repl-itest--fixture-dir "itest-link-restart-ws")))
       (agent-repl--ws-put ws :project-dir dir)
       (agent-repl-itest-link--with-real-hooks primary
         ;; host.el's link-up hook registers and subscribes on the initial
@@ -311,7 +311,7 @@ is host.el's OWN `agent-repl-link-down-functions' hook, live via
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (let ((ws "itest-link-down-ws")
-          (dir "/tmp/itest-link-down-ws"))
+          (dir (agent-repl-itest--fixture-dir "itest-link-down-ws")))
       (agent-repl--ws-put ws :project-dir dir)
       (agent-repl-itest-link--with-real-hooks daemon
         (agent-repl-itest--wait-until
@@ -948,7 +948,7 @@ regardless of load order — a regression that let one bad consumer cancel
 the rest would leave WS unregistered and the roster unsubscribed here."
   (agent-repl-itest--with-fake-daemon daemon
     (let ((ws "itest-link-hook-up-ws")
-          (dir "/tmp/itest-link-hook-up-ws"))
+          (dir (agent-repl-itest--fixture-dir "itest-link-hook-up-ws")))
       (agent-repl--ws-put ws :project-dir dir)
       (add-hook 'agent-repl-link-up-functions
                 #'agent-repl-itest-link--boom-up-hook -100)
