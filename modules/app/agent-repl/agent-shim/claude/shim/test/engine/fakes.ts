@@ -279,6 +279,24 @@ export class RecordingPersistence implements Persistence {
       },
     });
   }
+  /**
+   * The one-shot read, at the seam the engine calls it through.
+   *
+   * The refusal-to-empty-page conversion this fake does NOT do lives in the
+   * real reader, over the store client: at this seam a refusal is a refusal,
+   * which is exactly what the engine's arm mapping is tested against.
+   */
+  readFirstPage(
+    _agent?: conversationv1.AgentId,
+    _pageSize?: number,
+    known?: () => boolean,
+  ): Promise<conversationv1.HistoryPage> {
+    this.lastKnownAgent = known;
+    if (this.openHangs) return new Promise<conversationv1.HistoryPage>(() => undefined);
+    if (this.openError !== undefined) return Promise.reject(this.openError);
+    this.closedPages++;
+    return Promise.resolve(this.page);
+  }
   readAgentPage(): Promise<conversationv1.HistoryPage> {
     if (this.readError !== undefined) return Promise.reject(this.readError);
     return Promise.resolve(this.page);
