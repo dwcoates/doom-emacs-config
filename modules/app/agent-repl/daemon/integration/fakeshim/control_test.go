@@ -25,6 +25,11 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpPushAgentFrame, Agent: "sub-1", Payload: payload},
 		},
 		{
+			name: "push_user_prompt addresses an agent",
+			line: `{"op":"push_user_prompt","agent":"sub-1","payload":"` + payload + `"}`,
+			want: Command{Op: OpPushUserPrompt, Agent: "sub-1", Payload: payload},
+		},
+		{
 			name: "push_bash addresses a detached work id",
 			line: `{"op":"push_bash","work":"w-1","payload":"` + payload + `"}`,
 			want: Command{Op: OpPushBash, Work: "w-1", Payload: payload},
@@ -93,6 +98,7 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "unknown op", line: `{"op":"teleport"}`, wantSub: "unknown control op"},
 		{name: "unknown field", line: `{"op":"hang","nonsense":1}`, wantSub: "malformed control line"},
 		{name: "push_session_update without payload", line: `{"op":"push_session_update"}`, wantSub: "payload is required"},
+		{name: "push_user_prompt without payload", line: `{"op":"push_user_prompt"}`, wantSub: "payload is required"},
 		{name: "push_bash without work", line: `{"op":"push_bash","payload":"AA=="}`, wantSub: "work is required"},
 		{name: "answer without rpc", line: `{"op":"answer","payload":"AA=="}`, wantSub: "rpc is required"},
 		{name: "answer for a stream verb", line: `{"op":"answer","rpc":"WatchSession","payload":"AA=="}`, wantSub: "takes no scripted answer"},

@@ -2272,6 +2272,45 @@ func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
 }
 
 // ==========================================================================
+// Image blocks — the daemon resolves the record's reference, end to end.
+// ==========================================================================
+
+func TestAPromptsImageIsDrawnAsAnImageRowRatherThanAnUnsupportedBlock(t *testing.T) {
+	t.Parallel()
+	// Arrange: a session watching its main agent, and a pasted image — which
+	// the shim carries on ImageBlock's url arm as a data url, the only arm any
+	// producer emits.
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	const src = "data:image/png;base64,aGk="
+
+	// Act: the delivered prompt reaches the feed on the agent watch.
+	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-image"},
+		Agent:  &conversationv1.AgentId{Value: mainAgent},
+		Origin: origin,
+		Said: &conversationv1.UserSaid{Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{{
+				Block: &conversationv1.UserContentBlock_Image{Image: &conversationv1.ImageBlock{
+					Location:  &conversationv1.ImageBlock_Url{Url: &conversationv1.ImageBlockUrl{Url: src}},
+					MediaType: "image/png",
+				}},
+			}},
+		}},
+	})
+
+	// Assert: the block reaches the row on the IMAGE arm. The whole daemon is
+	// wired here, so this is the composition root's own resolver answering.
+	row := awaitRow(t, f, feed, "the drawn prompt row carrying the image", func(r *frontendv1.FeedRow) bool {
+		return r.GetUserPrompt() != nil && r.GetTurn().GetValue() == "turn-image"
+	})
+	blocks := row.GetUserPrompt().GetSuccess().GetBody().GetBlocks()
+	if len(blocks) != 1 || blocks[0].GetImage().GetSrc() != src {
+		t.Fatalf("blocks = %v, want one image block whose src is the resolved reference %q", blocks, src)
+	}
+}
+
+// ==========================================================================
 // feed-suite-local helpers.
 // ==========================================================================
 
