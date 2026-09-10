@@ -51,6 +51,9 @@ func (l *logger) With(ctx Context) Logger {
 
 // emit renders one record and delivers it.
 func (l *logger) emit(level, operation, message string, ctx Context) {
+	if !l.s.level.enabled(level) {
+		return
+	}
 	rec := newRecord(l.s.now(), l.runtime, level, operation, message, merge(l.base, ctx), l.s.pid)
 	l.deliver(rec)
 }
@@ -62,9 +65,6 @@ func (l *logger) deliver(rec record) {
 	if err := l.dest.write(line); err != nil {
 		emergency(err, line)
 	}
-	if rec.Verbosity == VerbosityVerbose && !l.s.verbose {
-		return
-	}
 	if status := l.s.mirror.enqueue(line); !status.ok() {
 		l.reportMirror(status)
 	}
@@ -74,6 +74,9 @@ func (l *logger) deliver(rec record) {
 // mirror that just failed or dropped is the wrong place to send the news, and
 // re-mirroring it would recurse.
 func (l *logger) reportMirror(status mirrorStatus) {
+	if !l.s.level.enabled(LevelWarn) {
+		return
+	}
 	ctx := Context{"dropped_records": status.Dropped}
 	if status.Failure != nil {
 		ctx["cause"] = status.Failure.Error()

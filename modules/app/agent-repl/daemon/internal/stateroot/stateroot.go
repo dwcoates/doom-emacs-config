@@ -68,10 +68,10 @@ func (l Layout) DaemonAddr() string { return filepath.Join(l.dir, "daemon.addr")
 // in place and never opened.
 func (l Layout) DB() string { return filepath.Join(l.dir, "wsm.db") }
 
-// LogsDir holds the restart-scoped run log and its rotated backups.
+// LogsDir holds the size-rotated run log and its retained generations.
 func (l Layout) LogsDir() string { return filepath.Join(l.dir, "logs") }
 
-// RunLog is the restart-scoped daemon run log.
+// RunLog is the size-rotated daemon run log, shared across process restarts.
 func (l Layout) RunLog() string { return filepath.Join(l.LogsDir(), "daemon.run.log") }
 
 // SockDir holds the per-workspace shim unix-domain sockets.
