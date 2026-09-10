@@ -361,6 +361,102 @@ reading."
                           (string-search "elisp.roster.tab-teardown-persp-kill-failed" text))
                         logs)))))
 
+(ert-deftest agent-repl-test-roster-teardown-of-the-current-tab-lands-on-a-survivor ()
+  "A roster teardown of the workspace the user STANDS ON lands them on a
+survivor, with that workspace armed to show its panels -- through the one
+landing every teardown uses, not a second one of the roster's own.
+Without it the frame kept whatever persp-mode dropped it in and the main
+area came up on the fallback buffer."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    (setq agent-repl-test-roster--current-name "first")
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("second")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("second"))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
+    ;; Assert
+    (should (equal (car agent-repl-test-roster--switched) "second"))))
+
+(ert-deftest agent-repl-test-roster-teardown-of-the-current-tab-arms-the-survivor ()
+  "The workspace landed on is armed to SHOW ITSELF on arrival, so the
+landing has panels on it rather than the fallback buffer."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    (setq agent-repl-test-roster--current-name "first")
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("second")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("second"))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
+    ;; Assert
+    (should (agent-repl--ws-get "second" :pending-show-panels))))
+
+(ert-deftest agent-repl-test-roster-teardown-of-another-tab-does-not-move-the-user ()
+  "Tearing down a tab the user is NOT standing on leaves them where they are:
+the landing is for the workspace that vanished under them, nothing else."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "first" :ready)
+                                    (agent-repl-test-roster--row "b" "second" :ready))))))
+    (setq agent-repl-test-roster--current-name "second")
+    (setq agent-repl-test-roster--switched nil)
+    (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+              ((symbol-function 'agent-repl--ws-all-names) (lambda () '("second")))
+              ((symbol-function 'agent-repl--ws-list-names) (lambda () '("second"))))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "second" :ready)))))))
+    ;; Assert
+    (should-not agent-repl-test-roster--switched)))
+
+(ert-deftest agent-repl-test-roster-teardown-with-no-survivor-is-reported ()
+  "The last tab torn down has nowhere to land: no switch is made, and the
+frame left on the fallback buffer is REPORTED rather than silently taken
+for a landing."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((warnings nil))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "first" :ready))))))
+      (setq agent-repl-test-roster--current-name "first")
+      (setq agent-repl-test-roster--switched nil)
+      (cl-letf (((symbol-function 'agent-repl--ws-system-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--ws-all-names) (lambda () nil))
+                ((symbol-function 'agent-repl--ws-list-names) (lambda () nil))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (agent-repl-roster-apply (agent-repl-test-roster--roster :sections nil)))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "NO surviving workspace to land in" text))
+                        warnings))
+      (should-not agent-repl-test-roster--switched))))
+
 (ert-deftest agent-repl-test-roster-teardown-is-idempotent ()
   "A second push with the row already gone tears nothing down twice.
 CloseWorkspace's own success tears the tab down too, so the roster push
