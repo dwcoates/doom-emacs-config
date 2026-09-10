@@ -454,6 +454,45 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// for each drawn divider, its arm, its label, the feed row it
 				// hangs in (whose id carries the divider's key, which is the
 				// store pointer the cut arrived at) and which feed that is.
+				// THE MODEL IS ON THE GLASS, MEASURED AND NOT LOOKED AT.
+				// The reveal's line is `<session id> · <account root> ·
+				// <model>` and the panel is capped at `min(90vw, 32rem)`;
+				// drawn on one unwrapped row the model ran off the right
+				// edge, which is a defect no reviewer can catch from a
+				// picture that simply looks like a line. So the boxes are
+				// compared: a Range over the text AFTER the last separator is
+				// the model's own rectangle, and it must sit inside the
+				// panel's. A half-pixel of slack absorbs subpixel layout,
+				// nothing more.
+				box := p09ReadInPage(t, s, "the model's box against the reveal's box",
+					`(function () {
+                       var line = document.querySelector('`+p09SessionLine+`');
+                       if (!line) { return "<no session line>"; }
+                       var panel = line.closest(".topbar-reveal");
+                       if (!panel) { return "<the session line hangs in no reveal>"; }
+                       var node = line.firstChild;
+                       var text = line.textContent;
+                       var cut = text.lastIndexOf("\u00b7");
+                       if (!node || node.nodeType !== 3 || cut < 0) {
+                         return "<the session line is not one text node of separated segments: " + text + ">";
+                       }
+                       var range = document.createRange();
+                       range.setStart(node, cut + 1);
+                       range.setEnd(node, text.length);
+                       var m = range.getBoundingClientRect();
+                       var p = panel.getBoundingClientRect();
+                       var within = m.width > 0 && m.left >= p.left - 0.5 && m.right <= p.right + 0.5 &&
+                                    m.top >= p.top - 0.5 && m.bottom <= p.bottom + 0.5;
+                       return "model=[" + m.left.toFixed(1) + "," + m.top.toFixed(1) + "," +
+                              m.right.toFixed(1) + "," + m.bottom.toFixed(1) + "] panel=[" +
+                              p.left.toFixed(1) + "," + p.top.toFixed(1) + "," + p.right.toFixed(1) + "," +
+                              p.bottom.toFixed(1) + "] within=" + within;
+                     })()`)
+				t.Logf("the session reveal's model box: %s", box)
+				if !strings.Contains(box, "within=true") {
+					t.Fatalf("the session reveal drew %s, want the model's box inside the panel's visible box", box)
+				}
+
 				census := p09ReadInPage(t, s, "the census of the dividers the rotation drew",
 					`(function () {
                        var drawn = document.querySelectorAll(".separation");
@@ -500,14 +539,17 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 			asserted: "the feed drew a `separation` row whose body carries `[data-arm=\"cleared\"]`; the " +
 				"session reveal opened by clicking `[data-reveal-anchor=\"session\"]` is still open and " +
 				"its `.topbar-session-line` is non-empty and no longer the text read before the rotate; " +
+				"the bounding box of the line's LAST segment — the model — lies inside the reveal " +
+				"panel's own box, measured with a Range rather than looked at; " +
 				"and the arm settled",
 			expected: "A RED SEPARATOR RULE under the label \"context cleared\" sits between the `!rotate` " +
 				"prompt bubble and the response \"Cleared the conversation.\". The earlier warm-up " +
 				"bubbles are STILL ABOVE it — a rotation separates the conversation, it does not erase " +
 				"the feed. Hanging under the topbar is the SESSION REVEAL, a small panel opened before " +
 				"the rotate and still open, carrying one line of the form " +
-				"`<vendor session id> · <account root> · <model>`, CLIPPED at the panel's right edge so " +
-				"the model at its end is off the panel; the session id it begins with is the NEW one " +
+				"`<vendor session id> · <account root> · <model>` WHOLE — the line wraps onto a second row " +
+				"inside the panel rather than running off its right edge, so the model at its end is " +
+				"on the glass; the session id it begins with is the NEW one " +
 				"the rotation minted, not the one the panel opened with. KNOWN DEFECT, filed and not " +
 				"this section's to fix: a SECOND identical \"context cleared\" rule is drawn BELOW the " +
 				"response. One `/clear` reaches the daemon on two store entries — run 10 measured the " +
