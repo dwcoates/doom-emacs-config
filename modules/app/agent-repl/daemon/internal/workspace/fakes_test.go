@@ -64,21 +64,27 @@ type fakeDB struct {
 	registerDir string
 	createdNew  bool
 
-	putJobs      []wsm.CreationJob
-	putJobErr    error
-	putSessions  []wsm.Session
-	putTurns     []wsm.Turn
-	closedFlags  map[ids.WorkspaceID]bool
-	priorities   map[ids.WorkspaceID]*wsm.Priority
-	attention    map[ids.WorkspaceID]bool
-	currentAt    time.Time
-	forgotten    []ids.WorkspaceID
-	terminals    map[ids.WorkspaceID]wsm.SessionTerminal
-	orphanReport wsm.OrphanReport
-	createdTasks []string
-	taskChanges  map[ids.TaskID]wsm.TaskChange
-	assignments  map[ids.WorkspaceID]*ids.TaskID
-	taskErr      error
+	putJobs     []wsm.CreationJob
+	putJobErr   error
+	putSessions []wsm.Session
+	putTurns    []wsm.Turn
+	// conversations is what ConversationPrompts answers per workspace, and
+	// portedPrompts is what PutPortedPrompts recorded.
+	conversations   map[ids.WorkspaceID][]wsm.PortedPrompt
+	conversationErr error
+	portedPrompts   map[ids.WorkspaceID][]wsm.PortedPrompt
+	putPortedErr    error
+	closedFlags     map[ids.WorkspaceID]bool
+	priorities      map[ids.WorkspaceID]*wsm.Priority
+	attention       map[ids.WorkspaceID]bool
+	currentAt       time.Time
+	forgotten       []ids.WorkspaceID
+	terminals       map[ids.WorkspaceID]wsm.SessionTerminal
+	orphanReport    wsm.OrphanReport
+	createdTasks    []string
+	taskChanges     map[ids.TaskID]wsm.TaskChange
+	assignments     map[ids.WorkspaceID]*ids.TaskID
+	taskErr         error
 
 	// dbFaults is the fault table the fleet opens and closes lost-link rows
 	// in; dbClosed records the ids CloseFault was called with.
@@ -256,6 +262,31 @@ func (d *fakeDB) PutTurn(_ context.Context, t wsm.Turn) error {
 	return nil
 }
 
+// ConversationPrompts answers what a fork of this workspace inherits. The
+// fixture holds it per workspace so a fork test states the parent's
+// conversation directly rather than driving turns through the fake.
+func (d *fakeDB) ConversationPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.PortedPrompt, error) {
+	if d.conversationErr != nil {
+		return nil, d.conversationErr
+	}
+	return d.conversations[id], nil
+}
+
+func (d *fakeDB) PortedPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.PortedPrompt, error) {
+	return d.portedPrompts[id], nil
+}
+
+func (d *fakeDB) PutPortedPrompts(_ context.Context, id ids.WorkspaceID, rows []wsm.PortedPrompt) error {
+	if d.putPortedErr != nil {
+		return d.putPortedErr
+	}
+	if d.portedPrompts == nil {
+		d.portedPrompts = map[ids.WorkspaceID][]wsm.PortedPrompt{}
+	}
+	d.portedPrompts[id] = rows
+	return nil
+}
+
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
 	return d.held[id], nil
 }
@@ -359,6 +390,9 @@ type fakeAccounts struct {
 	transcriptErr error
 	ported        []portedTranscript
 	portErr       error
+	// mint is the fork mapping PortTranscript answers with; nil takes a
+	// readable default so a test that does not care still gets one mapping.
+	mint account.RemintedID
 	// email is the signed-in address Read answers with; empty is logged out.
 	email string
 	// readErr makes Read fail, which registration must surface.
@@ -387,12 +421,15 @@ func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.
 	return a.transcript, a.transcriptErr
 }
 
-func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) error {
+func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) (account.RemintedID, error) {
 	if a.portErr != nil {
-		return a.portErr
+		return nil, a.portErr
 	}
 	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
-	return nil
+	if a.mint != nil {
+		return a.mint, nil
+	}
+	return func(old string) string { return "minted-" + old }, nil
 }
 
 // MoveTranscript records the account switch's port, which is what makes a

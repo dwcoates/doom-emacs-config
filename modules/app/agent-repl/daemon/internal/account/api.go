@@ -70,6 +70,12 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("account: no transcript for vendor session %s under %v", e.VendorSessionID, e.Probed)
 }
 
+// RemintedID answers the child's identity for one of the parent's, under a
+// single fork's mapping. It is memoized by the port that produced it: the same
+// old id always answers the same new one, and an id the port never saw is
+// minted on first ask.
+type RemintedID func(old string) string
+
 // Resolver answers the account questions.
 type Resolver interface {
 	// ConfigDirFor routes a workspace directory to its config root: under
@@ -100,7 +106,13 @@ type Resolver interface {
 	// session-<id>.lock inside StartSession), so a fork of a live parent that
 	// resumed the parent's own id could never come up. The conversation's
 	// CONTENT is untouched, its original agent id included.
-	PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) error
+	//
+	// It answers THE MAPPING it re-minted under, so the caller can carry the
+	// rest of the conversation — the daemon's own prompt rows, which the
+	// vendor transcript does not hold — under the SAME ids. Two mappings for
+	// one fork would file the child's questions under identities its ported
+	// transcript never mentions.
+	PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) (RemintedID, error)
 	// MoveTranscript MOVES a transcript (and its sidecar directory) into
 	// toConfigDir's project dir for the same workspace. It is the
 	// account-switch spelling: the daemon ports the vendor transcript between

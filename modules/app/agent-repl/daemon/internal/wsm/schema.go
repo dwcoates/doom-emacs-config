@@ -9,7 +9,7 @@ package wsm
 // is materialized), so creation_jobs carries no reference to workspaces and
 // Forget deletes it explicitly. Everything else — sessions, leases, held
 // prompts, turns, idempotency claims, the merge ledger, the per-repo merge
-// queue, faults — exists only after registration and cascades with the
+// queue, faults, a fork's ported prompts — exists only after registration and cascades with the
 // workspace row.
 const schemaDDL = `
 CREATE TABLE layout (
@@ -128,6 +128,18 @@ CREATE TABLE turns (
 );
 
 CREATE INDEX turns_by_workspace ON turns(workspace_id);
+
+CREATE TABLE ported_prompts (
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  turn_id      TEXT NOT NULL,
+  ordinal      INTEGER NOT NULL,
+  text         TEXT NOT NULL,
+  origin       TEXT NOT NULL,
+  started_at   INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, turn_id)
+);
+
+CREATE INDEX ported_prompts_by_workspace ON ported_prompts(workspace_id, ordinal);
 
 CREATE TABLE idempotency_keys (
   workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

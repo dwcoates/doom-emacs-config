@@ -257,6 +257,25 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}
 		return record.Dir, nil
 	}
+	// A FORK'S PORTED CONVERSATION is the daemon's own record of the parent's
+	// questions, carried over under the child's turn ids at the fork. The feed
+	// draws it above everything the workspace has of its own, which is what
+	// makes a forked feed the parent's conversation followed by the fork's.
+	portedPrompts := func(ctx context.Context, ws ids.WorkspaceID) ([]feed.PortedPrompt, error) {
+		rows, err := p.DB.PortedPrompts(ctx, ws)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]feed.PortedPrompt, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, feed.PortedPrompt{
+				Turn:   string(row.Turn),
+				Text:   row.Text,
+				Origin: conversationv1.PromptOrigin(conversationv1.PromptOrigin_value[row.Origin]),
+			})
+		}
+		return out, nil
+	}
 	// The metaprompt sentinels are stripped from DRAWN text only; the record
 	// keeps the full text. Both the feed resolver and the queue's mirror draw
 	// prompt rows, so both take the same one implementation.
@@ -281,7 +300,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// An image reference is turned into a source on the daemon's own
 		// image origin (`path`) or answered verbatim (`url`); an unset arm
 		// is refused loudly rather than drawn as an empty src.
-		ResolveImage: resolveImage,
+		ResolveImage:  resolveImage,
+		PortedPrompts: portedPrompts,
 		// Zero leaves the resolver's own DefaultTailRetention in force; the
 		// flag and its environment knob are what make token_expired reachable.
 		TailRetention: p.Opts.feedTailRetention,

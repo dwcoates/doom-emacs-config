@@ -89,6 +89,10 @@ type harness struct {
 	// that does not name one, so two ordinary cuts in one test are two
 	// entries rather than the same entry twice.
 	cutSeq int
+	// ported is the fork's ported parent conversation the resolver reads at
+	// the opening history page; portedErr fails that read.
+	ported    []PortedPrompt
+	portedErr error
 }
 
 // newHarness builds a resolver with deterministic dependencies: a fixed clock,
@@ -108,6 +112,9 @@ func newHarness(t *testing.T) *harness {
 		Painter:      painter,
 		ResolveImage: func(block *conversationv1.ImageBlock) (string, string, error) {
 			return "https://host/img", "screenshot.png", nil
+		},
+		PortedPrompts: func(context.Context, ids.WorkspaceID) ([]PortedPrompt, error) {
+			return h.ported, h.portedErr
 		},
 		Now:      func() time.Time { return time.UnixMilli(h.nowMs) },
 		PageSize: 3,

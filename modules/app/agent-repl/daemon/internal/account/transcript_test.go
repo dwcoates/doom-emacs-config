@@ -232,7 +232,7 @@ func TestPortTranscriptCopiesAndLeavesTheSourceInPlace(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
+	_, err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
 
 	// Assert.
 	if err != nil {
@@ -253,7 +253,7 @@ func TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId(t *testing.T
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
+	_, err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
 
 	// Assert.
 	if err != nil {
@@ -274,7 +274,7 @@ func TestPortTranscriptCarriesTheSidecarDirectory(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
+	_, err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
 
 	// Assert.
 	if err != nil {
@@ -302,7 +302,7 @@ func TestPortTranscriptRemintsTheSidecarsSubagentRecordsUnderTheSameMapping(t *t
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
+	_, err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
 
 	// Assert: the locator moved with the records that name it, and the meta's
 	// toolUseId is the very id the ported transcript's spawning call now carries.
@@ -447,7 +447,7 @@ func TestPortTranscriptRefusesWhenTheSidecarDestinationExists(t *testing.T) {
 	plantSidecar(t, destExisting, "note.json", "already there")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, f.ws, "uuid-1")
+	_, err := f.r.PortTranscript(context.Background(), src, f.multi, f.ws, "uuid-1")
 
 	// Assert.
 	if err == nil {
@@ -460,7 +460,7 @@ func TestPortTranscriptRefusesAMissingSource(t *testing.T) {
 	f := newTranscriptFixture(t)
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), filepath.Join(f.def, "nope.jsonl"), f.multi, f.ws, "uuid-2")
+	_, err := f.r.PortTranscript(context.Background(), filepath.Join(f.def, "nope.jsonl"), f.multi, f.ws, "uuid-2")
 
 	// Assert.
 	if err == nil {
@@ -485,7 +485,7 @@ func TestPortTranscriptRejectsMissingInputs(t *testing.T) {
 			f := newTranscriptFixture(t)
 
 			// Act.
-			err := f.r.PortTranscript(context.Background(), tc.source, tc.destRoot, tc.destWSDir, "uuid-2")
+			_, err := f.r.PortTranscript(context.Background(), tc.source, tc.destRoot, tc.destWSDir, "uuid-2")
 
 			// Assert.
 			if err == nil {
