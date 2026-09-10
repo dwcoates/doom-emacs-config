@@ -79,14 +79,7 @@ func (s *playtestScenario) readInPage(t *testing.T, what, expression string) str
 func (s *playtestScenario) clickWithin(t *testing.T, what, elementExpr string) {
 	t.Helper()
 	s.awaitInPage(t, what+" to be there to click", elementExpr+` != null`)
-	s.E.Eval(`(setq agent-repl-playtest--js nil)`)
-	s.E.AwaitEvalFor(playtestPageBound, "the click on "+what,
-		`(agent-repl-playtest--probe `+elispString(s.Name)+` `+
-			elispString(pageYes(`(function () { var el = `+elementExpr+`;
-                                                if (!el) { return false; }
-                                                el.click();
-                                                return true; })()`))+`)`,
-		func(raw json.RawMessage) bool { return decodeString(raw) == "yes" })
+	s.clickOnce(t, what, elementExpr)
 }
 
 // ---------------------------------------------------------------------------
