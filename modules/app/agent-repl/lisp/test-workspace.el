@@ -696,8 +696,12 @@ dead shadow never counts as the owner."
 (ert-deftest agent-repl-test-ws-require-known-errors-for-unknown ()
   "--ws-require-known signals user-error when ws is not known."
   (agent-repl-test--with-clean-state
-    (should-error (agent-repl--ws-require-known "missing" "ctx")
-                  :type 'user-error)))
+    (let ((logged-workspace nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
+        (should-error (agent-repl--ws-require-known "missing" "ctx")
+                      :type 'user-error))
+      (should (eq logged-workspace agent-repl--global-log-scope)))))
 
 (ert-deftest agent-repl-test-ws-require-known-includes-context-in-message ()
   "The error message mentions the CONTEXT argument so callers identify themselves."
@@ -783,11 +787,16 @@ dead shadow never counts as the owner."
 
 (ert-deftest agent-repl-test-ws-revive-on-an-unknown-workspace-answers-nil ()
   "Reviving an unknown name creates no entry and answers nil."
-  ;; Arrange / Act.
+  ;; Arrange.
   (agent-repl-test--with-clean-state
-    (should-not (agent-repl--ws-revive "missing"))
+    (let ((logged-workspace nil))
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
+        ;; Act.
+        (should-not (agent-repl--ws-revive "missing")))
     ;; Assert.
-    (should-not (agent-repl--ws-known-p "missing"))))
+      (should-not (agent-repl--ws-known-p "missing"))
+      (should (eq logged-workspace agent-repl--global-log-scope)))))
 
 (ert-deftest agent-repl-test-ws-revive-restores-ref-id-reverse-lookup ()
   "After a revive the name answers `--ws-by-ref-id' again."
@@ -1301,12 +1310,15 @@ gated push would then drop the very repaint this exists for."
 (ert-deftest agent-repl-test-ws-rename-persp-renames-live-persp ()
   "ws-rename-persp renames the resolved persp and returns non-nil on success."
   (agent-repl-test--with-clean-state
-    (let (captured)
+    (let (captured logged-workspace)
       (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) 'a-persp))
                 ((symbol-function 'persp-rename)
-                 (lambda (new persp) (setq captured (list new persp)) t)))
+                 (lambda (new persp) (setq captured (list new persp)) t))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
         (should (agent-repl--ws-rename-persp "old" "new"))
-        (should (equal captured '("new" a-persp)))))))
+        (should (equal captured '("new" a-persp)))
+        (should (equal logged-workspace "new"))))))
 
 (ert-deftest agent-repl-test-ws-rename-persp-returns-nil-on-failure ()
   "ws-rename-persp returns nil when a live persp exists but persp-rename fails."

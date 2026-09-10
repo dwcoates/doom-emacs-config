@@ -169,13 +169,17 @@ i.e. only when the line actually reached the echo area / modeline."
     (should (string-match-p "loaded 3 of 7" (plist-get res :text)))))
 
 (ert-deftest agent-repl-config-test-boot-info/delegates-once-core-loaded ()
-  "Once core.el defines the ladder, `--boot-info' routes through it."
-  (let ((delegated nil))
+  "Once core.el defines the ladder, `--boot-info' routes centrally through it."
+  ;; Arrange.
+  (let ((delegated nil)
+        (agent-repl--global-log-scope :test-central-scope))
     (cl-letf (((symbol-function 'agent-repl--info)
                (lambda (ws fmt &rest args)
                  (setq delegated (list ws (apply #'format fmt args))))))
+      ;; Act.
       (agent-repl--boot-info "hello %s" "world")
-      (should (equal delegated '(nil "hello world"))))))
+      ;; Assert.
+      (should (equal delegated '(:test-central-scope "hello world"))))))
 
 (ert-deftest agent-repl-config-test-boot-warn/fallback-reaches-echo-area ()
   "Pre-core (ladder undefined), `--boot-warn' MUST still reach the echo area —
@@ -201,13 +205,17 @@ delegated boot-warning is recorded but must NOT reach the echo area / modeline."
     (should (string-match-p "WARNING: recoverable hiccup" (plist-get res :text)))))
 
 (ert-deftest agent-repl-config-test-boot-warn/delegates-once-core-loaded ()
-  "Once core.el defines the ladder, `--boot-warn' routes through it."
-  (let ((delegated nil))
+  "Once core.el defines the ladder, `--boot-warn' routes centrally through it."
+  ;; Arrange.
+  (let ((delegated nil)
+        (agent-repl--global-log-scope :test-central-scope))
     (cl-letf (((symbol-function 'agent-repl--warn)
                (lambda (ws fmt &rest args)
                  (setq delegated (list ws (apply #'format fmt args))))))
+      ;; Act.
       (agent-repl--boot-warn "bad %s" "thing")
-      (should (equal delegated '(nil "bad thing"))))))
+      ;; Assert.
+      (should (equal delegated '(:test-central-scope "bad thing"))))))
 
 (ert-deftest agent-repl-config-test-boundary-guards-survive-the-config-reload ()
   "This file's `config.el' load leaves the external-boundary guards armed.

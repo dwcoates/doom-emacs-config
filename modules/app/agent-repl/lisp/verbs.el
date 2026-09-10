@@ -53,7 +53,15 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--next-log-request-id "agent-repl-core" ())
+(declare-function agent-repl--with-log-context "agent-repl-core"
+                  (workspace request-id function))
+(defvar agent-repl--global-log-scope)
+(defvar agent-repl--log-context-request-id)
+(defvar agent-repl--log-context-workspace)
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
+(declare-function agent-repl--ws-current-log-name "agent-repl-workspace" ())
+(declare-function agent-repl--ws-require-known "agent-repl-workspace" (ws context))
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-by-ref-id "agent-repl-workspace" (id))
@@ -111,6 +119,7 @@
 The ref is an ECHO TOKEN obtained from RegisterWorkspace's success or from
 the roster; there is no spelling of it Emacs could construct from a path,
 so a workspace without one cannot be addressed at all."
+  (agent-repl--ws-require-known ws "verb workspace resolution")
   (or (agent-repl-host-ref ws)
       (progn
         (agent-repl--warn ws "elisp.verbs.no-ref ws=%s" ws)
@@ -254,30 +263,44 @@ receives the decoded error value and OWNS the reporting for that verb;
 without it a daemon-authored refusal is reported generically.  A transport
 failure never reaches ON-ERROR: nobody answering and the daemon refusing
 are different facts."
-  (agent-repl--info ws "elisp.verbs.send op=%s ws=%s" op ws)
-  (funcall rpc conn request
-           :on-response
-           (lambda (response)
-             (pcase (plist-get response :arm)
-               (:success
-                (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
-                (when on-success (funcall on-success (plist-get response :value))))
-               (:error
-                ;; ON-ERROR, when given, may CLAIM the arm (answering
-                ;; non-nil); anything it does not claim falls through to the
-                ;; arm-generic handling, so a verb with a special case for
-                ;; one arm still reports every other arm correctly.
-                (let ((value (plist-get response :value)))
-                  (unless (and on-error (funcall on-error value))
-                    (agent-repl-verbs--on-refusal ws op value))))
-               (arm
-                (agent-repl--error ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
-                                   op ws arm))))
-           :on-failure
-           (lambda (detail)
-             (agent-repl--error ws "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
-                                op ws detail)
-             (message "agent-repl: %s failed -- the daemon did not answer" op))))
+  (let ((request-id (or (plist-get request :idempotency-key)
+                        (agent-repl--next-log-request-id)))
+        (log-ws (or ws agent-repl--global-log-scope)))
+    (agent-repl--with-log-context
+     log-ws request-id
+     (lambda ()
+       (agent-repl--info ws "elisp.verbs.send op=%s ws=%s" op ws)
+       (funcall rpc conn request
+                :on-response
+                (lambda (response)
+                  (agent-repl--with-log-context
+                   log-ws request-id
+                   (lambda ()
+                     (pcase (plist-get response :arm)
+                       (:success
+                        (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
+                        (when on-success (funcall on-success (plist-get response :value))))
+                       (:error
+                        ;; ON-ERROR, when given, may CLAIM the arm (answering
+                        ;; non-nil); anything it does not claim falls through to the
+                        ;; arm-generic handling, so a verb with a special case for
+                        ;; one arm still reports every other arm correctly.
+                        (let ((value (plist-get response :value)))
+                          (unless (and on-error (funcall on-error value))
+                            (agent-repl-verbs--on-refusal ws op value))))
+                       (arm
+                        (agent-repl--error
+                         ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
+                         op ws arm))))))
+                :on-failure
+                (lambda (detail)
+                  (agent-repl--with-log-context
+                   log-ws request-id
+                   (lambda ()
+                     (agent-repl--error
+                      ws "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
+                      op ws detail)
+                     (message "agent-repl: %s failed -- the daemon did not answer" op)))))))))
 
 ;;;; ---- Editor-state updates ---------------------------------------------
 
@@ -918,9 +941,13 @@ Clearing is the absence of the field, which no level label can spell.")
   "Read the creation prompt, defaulting to the composer's current text.
 The composer is where the user was already writing, so its contents are
 the obvious default rather than something to retype."
-  (let* ((buffered (agent-repl--read-input-buffer (agent-repl--ws-current-name)))
+  (let* ((ws (agent-repl--ws-current-log-name))
+         (buffered (and ws (agent-repl--read-input-buffer ws)))
          (initial (and buffered (not (string-empty-p (string-trim buffered)))
                        (string-trim buffered))))
+    (unless ws
+      (agent-repl--log agent-repl--global-log-scope
+                       "elisp.verbs.read-prompt prompt=%S composer=none" prompt-text))
     (read-string prompt-text initial)))
 
 (defun agent-repl-verbs--optional-string (prompt)

@@ -31,6 +31,7 @@
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--save-buffer-if-modified "autosave" (buf &optional ws aggregate-p))
 (declare-function agent-repl-popup-open "popup" (path &optional line))
+(defvar agent-repl--global-log-scope)
 
 ;;;; ---- On-disk locations -----------------------------------------------
 
@@ -50,11 +51,12 @@ Signals when WORKSPACE is not a nonempty string: a notes file with no
 workspace to name it would collide with every other workspace's, so the
 missing name is surfaced rather than defaulted."
   (unless (and (stringp workspace) (not (string-empty-p workspace)))
-    (agent-repl--error nil "elisp.notes.file: rejected workspace=%S reason=not-a-nonempty-string"
+    (agent-repl--error agent-repl--global-log-scope
+                       "elisp.notes.file: rejected workspace=%S reason=not-a-nonempty-string"
                        workspace)
     (error "agent-repl--notes-file: workspace must be a nonempty string, got %S" workspace))
   (let ((file (expand-file-name (format "%s.org" workspace) (agent-repl--notes-dir))))
-    (agent-repl--log nil "elisp.notes.file: workspace=%s file=%s" workspace file)
+    (agent-repl--log workspace "elisp.notes.file: workspace=%s file=%s" workspace file)
     file))
 
 ;;;; ---- Seeding ---------------------------------------------------------
@@ -65,28 +67,30 @@ Returns the file path.  Idempotent: an existing file is left untouched."
   (let ((file (agent-repl--notes-file workspace))
         (created nil))
     (unless (file-exists-p file)
-      (agent-repl--log nil "elisp.notes.ensure: create workspace=%s file=%s" workspace file)
+      (agent-repl--log workspace "elisp.notes.ensure: create workspace=%s file=%s" workspace file)
       (make-directory (file-name-directory file) t)
       (with-temp-file file
         (insert (format "#+TITLE: %s\n#+CREATED: %s\n\n"
                         workspace (format-time-string "%Y-%m-%d %H:%M"))))
       (setq created t))
-    (agent-repl--log nil "elisp.notes.ensure: ready workspace=%s file=%s outcome=%s"
+    (agent-repl--log workspace "elisp.notes.ensure: ready workspace=%s file=%s outcome=%s"
                      workspace file (if created 'created 'existing))
     file))
 
 ;;;; ---- Opening ---------------------------------------------------------
 
-(defun agent-repl--notes-install-save-on-kill (buf)
-  "Install a buffer-local save-on-kill hook on BUF.
+(defun agent-repl--notes-install-save-on-kill (buf workspace)
+  "Install a buffer-local save-on-kill hook on BUF owned by WORKSPACE.
 The notes popup is dismissed far more often than it is explicitly saved,
 so the save rides the kill rather than the user's memory."
   (with-current-buffer buf
     (add-hook 'kill-buffer-hook
               (lambda ()
-                (agent-repl--save-buffer-if-modified (current-buffer)))
+                (agent-repl--save-buffer-if-modified (current-buffer) workspace))
               nil t))
-  (agent-repl--log nil "elisp.notes.save-on-kill: installed buffer=%s" (buffer-name buf))
+  (agent-repl--log workspace
+                   "elisp.notes.save-on-kill: installed workspace=%s buffer=%s"
+                   workspace (buffer-name buf))
   buf)
 
 ;;;###autoload
@@ -98,17 +102,18 @@ by workspace and there is nothing to key them by."
   (interactive)
   (let ((workspace (agent-repl--ws-current-name)))
     (unless (and (stringp workspace) (not (string-empty-p workspace)))
-      (agent-repl--error nil "elisp.notes.open: rejected reason=no-current-workspace workspace=%S"
+      (agent-repl--error agent-repl--global-log-scope
+                         "elisp.notes.open: rejected reason=no-current-workspace workspace=%S"
                          workspace)
       (user-error "agent-repl: no current workspace to open notes for"))
-    (agent-repl--log nil "elisp.notes.open: begin workspace=%s" workspace)
+    (agent-repl--log workspace "elisp.notes.open: begin workspace=%s" workspace)
     (let ((file (agent-repl--notes-ensure workspace)))
       ;; The ONE shared editor-popup subroutine (popup.el): right side, half
       ;; the frame width.  Every open-a-file affordance goes through it, and
       ;; a local `find-file' here would be the divergence that rule forbids.
       (agent-repl-popup-open file)
-      (agent-repl--notes-install-save-on-kill (get-file-buffer file))
-      (agent-repl--info nil "elisp.notes.open: opened workspace=%s file=%s" workspace file)
+      (agent-repl--notes-install-save-on-kill (get-file-buffer file) workspace)
+      (agent-repl--info workspace "elisp.notes.open: opened workspace=%s file=%s" workspace file)
       (current-buffer))))
 
 (provide 'agent-repl-notes)

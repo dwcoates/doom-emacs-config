@@ -73,7 +73,9 @@ fake would not exercise them."
          (progn
            (setq agent-repl-test-input--buffer
                  (generate-new-buffer " *agent-repl-test-composer*"))
-           (with-current-buffer agent-repl-test-input--buffer (agent-repl-input-mode))
+           (with-current-buffer agent-repl-test-input--buffer
+             (agent-repl-input-mode)
+             (setq-local agent-repl--owning-workspace "ws-one"))
            (cl-letf* (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                       ((symbol-function 'agent-repl--ws-current-log-name) (lambda () "ws-one"))
                       ((symbol-function 'agent-repl--ws-get)
@@ -82,6 +84,13 @@ fake would not exercise them."
                            (:input-buffer agent-repl-test-input--buffer)
                            (:project-dir "/tmp/agent-repl-test/ws-1")
                            (_ nil))))
+                      ((symbol-function 'agent-repl--ws-log-routable-p)
+                       (lambda (ws) (and (stringp ws)
+                                         (not (member ws '("main" "none"))))))
+                      ((symbol-function 'agent-repl--workspace-log-identity)
+                       (lambda (ws)
+                         (list :project-dir (format "/tmp/agent-repl-test/%s" ws)
+                               :workspace-id (format "id-%s" ws))))
                       ((symbol-function 'agent-repl-host-ref)
                        (lambda (_ws) agent-repl-test-input--ref))
                       ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'test-conn))
@@ -101,6 +110,8 @@ fake would not exercise them."
                          (push (list ws said origin raw key)
                                agent-repl-test-input--queued)))
                       ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+                      ((symbol-function 'agent-repl--register-timer)
+                       (lambda (_key timer) timer))
                       ((symbol-function 'message)
                        (lambda (fmt &rest args)
                          (push (if args (apply #'format fmt args) fmt)
@@ -353,6 +364,28 @@ fake would not exercise them."
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
     (should (stringp (plist-get (agent-repl-test-input--request) :idempotency-key)))))
+
+(ert-deftest agent-repl-input-submit-correlates-the-request-and-response ()
+  "SubmitPrompt logs use the wire idempotency key as their request id."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl--emit-log-record)
+                 (lambda (_ws _level _verbosity fmt _args &rest _)
+                   (push (list fmt
+                               agent-repl--log-context-workspace
+                               agent-repl--log-context-request-id)
+                         seen))))
+        ;; Act
+        (agent-repl--input-submit
+         "ws-one" (list :content (list :blocks nil))
+         :user-sent "hello" "request-1" t)
+        ;; Assert
+        (should (> (length seen) 1))
+        (should (cl-every (lambda (entry)
+                            (and (equal (nth 1 entry) "ws-one")
+                                 (equal (nth 2 entry) "request-1")))
+                          seen))))))
 
 (ert-deftest agent-repl-input-submit-carries-the-text-block ()
   "The composed text travels as one TextBlock."
@@ -949,6 +982,19 @@ input clears."
       (should (equal agent-repl-input-attachments
                      '((:path "/tmp/a.png" :media-type "image/png")))))))
 
+(ert-deftest agent-repl-input-attach-attributes-the-record-to-the-composer-owner ()
+  "Attachment diagnostics carry the composer buffer's workspace explicitly."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    (let (logged-workspace)
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (ws &rest _args) (setq logged-workspace ws))))
+        ;; Act.
+        (with-current-buffer agent-repl-test-input--buffer
+          (agent-repl-input-attach-image "/tmp/a.png" "image/png"))
+        ;; Assert.
+        (should (equal logged-workspace "ws-one"))))))
+
 (ert-deftest agent-repl-input-attach-refuses-outside-a-composer ()
   "Attaching is a composer act: there is no other buffer it could mean."
   (agent-repl-test-input--with
@@ -1102,7 +1148,8 @@ input clears."
           (with-current-buffer buffer
             (setq-local agent-repl-input-notice "refused: merge in flight"))
           ;; Act.
-          (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight")
+          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+            (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))
           ;; Assert.
           (should (null (buffer-local-value 'agent-repl-input-notice buffer))))
       (kill-buffer buffer))))
@@ -1119,7 +1166,8 @@ to the resolution agent."
           (with-current-buffer buffer
             (setq-local agent-repl-input-notice agent-repl--input-merge-parked-badge))
           ;; Act.
-          (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight")
+          (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+            (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))
           ;; Assert.
           (should (equal (buffer-local-value 'agent-repl-input-notice buffer)
                          agent-repl--input-merge-parked-badge)))
@@ -1131,7 +1179,9 @@ to the resolution agent."
   (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
     (kill-buffer buffer)
     ;; Act / Assert.
-    (should-not (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))))
+    (cl-letf (((symbol-function 'agent-repl--log) #'ignore))
+      (should-not (agent-repl--input-expire-flash
+                   "ws" buffer "refused: merge in flight")))))
 
 (ert-deftest agent-repl-input-flash-arms-the-dwell-on-the-buffer-it-wrote ()
   "The dwell is armed with the buffer and text of THIS flash.
@@ -1139,11 +1189,16 @@ Resolving the composer by NAME when the timer fires is what let one
 workspace's dwell clear another composer's badge."
   ;; Arrange.
   (agent-repl-test-input--with
-    (let ((armed nil))
+    (let ((armed nil)
+          (registered nil))
       (cl-letf (((symbol-function 'run-at-time)
                  (lambda (_secs _repeat fn &rest args)
                    (setq armed (cons fn args))
-                   nil)))
+                   'fake-timer))
+                ((symbol-function 'agent-repl--register-timer)
+                 (lambda (key timer)
+                   (setq registered (list key timer))
+                   timer)))
         ;; Act.
         (agent-repl--input-flash "ws-one" "refused: merge in flight"))
       ;; Assert.
@@ -1151,7 +1206,25 @@ workspace's dwell clear another composer's badge."
       (should (equal (cdr armed)
                      (list "ws-one"
                            agent-repl-test-input--buffer
-                           "refused: merge in flight"))))))
+                           "refused: merge in flight")))
+      (should (equal (cadr registered) 'fake-timer)))))
+
+(ert-deftest agent-repl-input-mode-cancels-its-flash-timer-on-kill ()
+  "Killing a composer prevents its delayed diagnostic from outliving the sink."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-flash-cleanup*"))
+        (cancelled nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--cancel-timer-key)
+                   (lambda (key) (setq cancelled key))))
+          (with-current-buffer buffer
+            (agent-repl-input-mode)
+            (setq-local agent-repl--input-flash-timer-key 'composer-flash))
+          ;; Act.
+          (kill-buffer buffer)
+          ;; Assert.
+          (should (eq cancelled 'composer-flash)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (provide 'test-input)
 
