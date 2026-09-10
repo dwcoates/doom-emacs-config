@@ -11,10 +11,12 @@ package integration
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -196,4 +198,74 @@ func TestNukingRemovesTheStaleWalSibling(t *testing.T) {
 			t.Errorf("the nuke left the stale sibling %q behind", sibling)
 		}
 	}
+}
+
+// bulkyForeignSchema stages a database this binary did not create AND makes it
+// big: one table of megabyte blobs, so the cost of discarding it is measurable
+// rather than notional.
+func bulkyForeignSchema(t *testing.T, path string, megabytes int) {
+	t.Helper()
+	handle, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("staging a bulky foreign database: %v", err)
+	}
+	defer handle.Close() //nolint:errcheck // test staging
+	if _, err := handle.Exec(`CREATE TABLE schema_meta (version INTEGER NOT NULL);
+	  INSERT INTO schema_meta(version) VALUES (99);
+	  CREATE TABLE ancient_messages (session_id TEXT, seq INTEGER, payload BLOB);
+	  CREATE INDEX ancient_by_session ON ancient_messages(session_id, seq);`); err != nil {
+		t.Fatalf("staging a bulky foreign schema: %v", err)
+	}
+	payload := make([]byte, 1<<20)
+	tx, err := handle.Begin()
+	if err != nil {
+		t.Fatalf("staging transaction: %v", err)
+	}
+	for i := 0; i < megabytes; i++ {
+		if _, err := tx.Exec(`INSERT INTO ancient_messages VALUES (?, ?, ?)`,
+			fmt.Sprintf("s%d", i), i, payload); err != nil {
+			t.Fatalf("staging row %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("staging commit: %v", err)
+	}
+}
+
+// TestAStoreOverABulkyForeignSchemaIsServingPromptly: what a deploy waits on is
+// the SOCKET, and a store handed a foreign database it must discard has to
+// reach that socket anyway. On 2026-09-09 it did not: the store met an 11.5 GB
+// events.db at a superseded version, spent minutes emptying it with DROP TABLE
+// with no socket listening, and the deploy gave up and left the rest of the
+// stack un-bounced.
+//
+// The bound is a small multiple of the observed healthy boot, which is about
+// twelve milliseconds over the staged file below. It is a regression fence on
+// the SERVING deadline, not the proof of the mechanism — that the file is
+// unlinked rather than emptied in place is pinned on the file's own identity in
+// internal/db. What this pins black-box is that a real store process over a
+// real foreign database on disk is answering calls in milliseconds.
+func TestAStoreOverABulkyForeignSchemaIsServingPromptly(t *testing.T) {
+	// Arrange
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	bulkyForeignSchema(t, dbPath, 64)
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("stat the staged database: %v", err)
+	}
+
+	// Act: startStore returns only once the socket accepts connections.
+	began := time.Now()
+	store := startStore(t, storeOptions{dbPath: dbPath})
+	elapsed := time.Since(began)
+
+	// Assert: it came up promptly, and it came up EMPTY.
+	const bound = 500 * time.Millisecond
+	if elapsed > bound {
+		t.Fatalf("a store over a %d MiB foreign schema took %v to serve, want under %v — a boot that scales with the discarded file is a DROP, not an unlink\nstderr:\n%s",
+			info.Size()>>20, elapsed, bound, store.stderrText())
+	}
+	ctx, cancel := callContext(t)
+	defer cancel()
+	openUnknownAgent(ctx, t, store.client(), "main")
 }

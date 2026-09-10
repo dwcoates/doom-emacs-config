@@ -23,11 +23,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
@@ -139,12 +139,21 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 
 	// THE FILE IS IN THE WAY, SO IT GOES. A --db path this binary cannot even
 	// read as a database is the SAME situation as a schema this binary did not
-	// create, and the store answers it the same way: the store holds a cache of
-	// what the vendor and the shim already know how to produce again, so a file
-	// worth nothing costs a remove to be rid of. Refusing to boot instead would
-	// wedge the service permanently on a truncated file or a half-written copy —
-	// an outage that needs a human with a shell, in exchange for preserving
-	// bytes nobody can read.
+	// create, and the store answers BOTH the same way: it REMOVES the file and
+	// its WAL siblings and creates a fresh one. The store holds a cache of what
+	// the vendor and the shim already know how to produce again, so a file worth
+	// nothing costs an unlink to be rid of. Refusing to boot instead would wedge
+	// the service permanently on a truncated file or a half-written copy — an
+	// outage that needs a human with a shell, in exchange for preserving bytes
+	// nobody can read.
+	//
+	// AN UNLINK, NEVER A DROP. Emptying a foreign schema with DROP TABLE walks
+	// every page of whatever was in it: a real deploy met an 11.5 GB events.db
+	// stamped at a superseded version, and the DROP ran for minutes with the
+	// socket absent while the deploy gave up waiting for it and left the rest of
+	// the stack un-bounced. Removing the file is O(1) however large the thing
+	// being discarded is, which is the whole point of a store that is nuked
+	// rather than migrated.
 	//
 	// ONLY ONCE, AND ONLY FOR THAT. A second failure after a clean recreate is a
 	// real problem — an unwritable directory, a full disk — and is returned.
@@ -160,11 +169,18 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 			"the database path cannot be opened and is not a regular file, so it will not be replaced: %v", err)
 		return nil, err
 	}
-	log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn", ErrorCause: err.Error()},
-		"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
+	var mismatch *schemaMismatchError
+	if errors.As(err, &mismatch) {
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
+			"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — removing the database file and its WAL siblings and recreating; the store is nuked, never migrated",
+			mismatch.version, mismatch.tables, SchemaVersion, schemaTables)
+	} else {
+		log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn", ErrorCause: err.Error()},
+			"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
+	}
 	if removeErr := removeDatabaseFiles(path); removeErr != nil {
 		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: removeErr.Error()},
-			"removing the unreadable database failed: %v", removeErr)
+			"removing the superseded database failed: %v", removeErr)
 		return nil, removeErr
 	}
 	d, err = openAt(dsn, path, log, opts, clock)
@@ -218,7 +234,7 @@ func isRegularFile(path string) bool {
 func removeDatabaseFiles(path string) error {
 	for _, name := range []string{path, path + "-wal", path + "-shm"} {
 		if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return storagef(err, "removing the unreadable database file %q", name)
+			return storagef(err, "removing the superseded database file %q", name)
 		}
 	}
 	return nil
@@ -344,14 +360,38 @@ CREATE TABLE schema_meta (version INTEGER NOT NULL);
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
 var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
 
-// ensureSchema brings the database to SchemaVersion by the only means this
-// package has: dropping everything and recreating it.
+// schemaMismatchError is an on-disk shape this binary did not create. It is
+// NOT a storage failure and nothing outside Open ever sees it: it is the signal
+// that carries what was found up to the one layer that owns the file, so that
+// layer can discard the file itself.
+//
+// IT DOES NOT WRAP ErrStorage. Nothing is wrong with the database; it is simply
+// somebody else's, and classing it as a storage fault would put a routine
+// version bump in the same bucket as a full disk.
+type schemaMismatchError struct {
+	version int
+	tables  []string
+}
+
+func (e *schemaMismatchError) Error() string {
+	return fmt.Sprintf("on-disk schema version %d tables %v was not created by this binary (want version %d tables %v)",
+		e.version, e.tables, SchemaVersion, schemaTables)
+}
+
+// ensureSchema brings the database to SchemaVersion, or reports that the file
+// underneath it has to go.
 //
 // THERE IS NO MIGRATION AND THERE IS NO BACKFILL. The store holds a cache of
 // what the vendor and the shim already know how to produce again, so a shape
-// this binary did not create is worth exactly nothing and costs a DROP to be
-// rid of. Writing an ALTER here would be the first half of a compatibility
-// surface the whole design exists to not have.
+// this binary did not create is worth exactly nothing. Writing an ALTER here
+// would be the first half of a compatibility surface the whole design exists to
+// not have.
+//
+// AND THERE IS NO DROP EITHER. This function does not empty a foreign database
+// in place: DROP TABLE walks every page of whatever it discards, which on a
+// large events.db is minutes of boot with no socket. It returns a
+// schemaMismatchError and Open unlinks the file, which costs the same whatever
+// the file weighs.
 func (d *DB) ensureSchema(ctx context.Context, path string) error {
 	current, tables, err := d.inspectSchema(ctx)
 	if err != nil {
@@ -365,25 +405,23 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 		return nil
 	}
 	// AN EMPTY FILE IS A FIRST CREATE, NOT A NUKE. Every fresh store — every
-	// launch on a new machine, every test process — arrives here with no
-	// tables at all, and warning about it would bury the one case that
-	// genuinely deserves the weight: a shape this binary did not create being
-	// DROPPED with whatever was in it.
-	if len(tables) == 0 {
-		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-			"no schema on disk; creating it at version=%d tables=%v", SchemaVersion, schemaTables)
-	} else {
-		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
-			"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — dropping and recreating; the store is nuked, never migrated",
-			current, tables, SchemaVersion, schemaTables)
+	// launch on a new machine, every test process, and every reopen after Open
+	// removed a superseded file — arrives here with no tables at all, and
+	// warning about it would bury the one case that genuinely deserves the
+	// weight: a shape this binary did not create being DISCARDED with whatever
+	// was in it. Open emits that warning, because Open is what discards it.
+	if len(tables) != 0 {
+		return &schemaMismatchError{version: current, tables: tables}
 	}
-	if err := d.nukeAndCreate(ctx, tables); err != nil {
+	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+		"no schema on disk; creating it at version=%d tables=%v", SchemaVersion, schemaTables)
+	if err := d.createSchema(ctx); err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
-			"recreating the schema failed: %v", err)
+			"creating the schema failed: %v", err)
 		return err
 	}
 	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
-		"schema recreated at version=%d", SchemaVersion)
+		"schema created at version=%d", SchemaVersion)
 	return nil
 }
 
@@ -430,21 +468,19 @@ func (d *DB) inspectSchema(ctx context.Context) (int, []string, error) {
 	}
 }
 
-// nukeAndCreate drops every user table and applies schemaDDL, stamping the
-// version in the SAME transaction so the schema and the claim about it can
-// never disagree.
-func (d *DB) nukeAndCreate(ctx context.Context, existing []string) error {
+// createSchema applies schemaDDL to an EMPTY database, stamping the version in
+// the SAME transaction so the schema and the claim about it can never disagree.
+//
+// IT NEVER DROPS ANYTHING. Its only caller has already established that there
+// are no tables — a foreign shape never reaches here, because Open removed the
+// file it was in.
+func (d *DB) createSchema(ctx context.Context) error {
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
-		return storagef(err, "begin schema recreation")
+		return storagef(err, "begin schema creation")
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
 
-	for _, table := range existing {
-		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS "`+strings.ReplaceAll(table, `"`, `""`)+`"`); err != nil {
-			return storagef(err, "dropping table %q", table)
-		}
-	}
 	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
 		return storagef(err, "creating the schema")
 	}
@@ -452,7 +488,7 @@ func (d *DB) nukeAndCreate(ctx context.Context, existing []string) error {
 		return storagef(err, "stamping schema version %d", SchemaVersion)
 	}
 	if err := tx.Commit(); err != nil {
-		return storagef(err, "committing schema recreation")
+		return storagef(err, "committing schema creation")
 	}
 	return nil
 }
