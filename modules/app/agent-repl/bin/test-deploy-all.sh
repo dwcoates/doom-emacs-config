@@ -46,8 +46,10 @@ printf '%s\n' '{"gate":{"system":"webapp","ready":true,"deployed_sha":"source-re
 EOF
     chmod +x "$mod/bin/readiness-report.sh"
     chmod +x "$mod/bin/deploy-all.sh"
+    # Exactly the control-plane files deploy-all's PRELOAD_FILES names, and no
+    # others: a stub for a module the checkout does not have is how the harness
+    # kept passing while every real deploy died loading lisp/frontend-client.el.
     printf ';; stub daemon control plane\n' > "$mod/lisp/daemon.el"
-    printf ';; stub frontend client control plane\n' > "$mod/lisp/frontend-client.el"
     printf ';; stub runtime coordinator\n' > "$mod/lisp/services.el"
 
     # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
@@ -242,6 +244,9 @@ run_deploy() {
     make_tree "$dir/tree"
     make_stubs "$dir/stubs"
     mkdir -p "$dir/h"
+    # PRE_RUN runs against the built tree, for a case whose subject is a tree
+    # that is WRONG — a control-plane file the checkout does not have.
+    if [ -n "${PRE_RUN:-}" ]; then ( cd "$dir/tree" && eval "$PRE_RUN" ); fi
     STUB_LOG="$dir/log"
     : > "$STUB_LOG"
     set +e
@@ -276,8 +281,8 @@ if [ "$RC" -eq 0 ] \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
    && log_before "load .*daemon.el" "runtime-restart" \
-   && log_before "load .*frontend-client.el" "runtime-restart" \
    && log_before "load .*services.el" "runtime-restart" \
+   && ! log_has "frontend-client.el" \
    && log_before "kickstart -k gui/.*shim-claude-sidecar" "runtime-restart" \
    && log_has "readiness-report --require-ready webapp"; then
     pass "fresh tree runs the full chain in dependency order"
@@ -795,6 +800,23 @@ if [ "$RC" -eq 1 ] \
 else
     fail "a store still working past the upper bound fails loudly and names the schema nuke" \
          "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
+fi
+
+# --- 33. a preload naming an absent file fails before anything moves -------
+# The deleted lisp/frontend-client.el stayed in the preload form, and every
+# deploy died on it in step 5 — after both services had been kickstarted.
+d="$TMP/t33"; mkdir -p "$d"
+PRE_RUN='rm -f modules/app/agent-repl/lisp/services.el' RUN_ENV="" run_deploy "$d"
+PRE_RUN=""
+if [ "$RC" -eq 3 ] \
+   && grep -q "preload names 1 file(s) this checkout does not have: lisp/services.el" "$d/stderr" \
+   && ! log_has "launchctl" \
+   && ! log_has "make -C" \
+   && ! log_has "runtime-restart"; then
+    pass "a control-plane preload naming an absent file fails before any build or kickstart"
+else
+    fail "a control-plane preload naming an absent file fails before any build or kickstart" \
+         "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 echo
