@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+
+# shellcheck disable=SC2250,SC2292,SC2312,SC2310
+# Opt-in (`-o all`) style checks, declined for the same reasons spelled out at
+# the top of build-frontend.sh.
+#
+# test-realtest.sh — hermetic tests for realtest.sh and its backup helper.
+#
+# Nothing here touches the owner's editor, the owner's state, or a real
+# deployment. realtest.sh is exercised as a COPY in a scratch directory beside
+# stub siblings — a stub readiness-report.sh, a stub suite-slot.sh, a stub
+# emacsclient — so `THIS_DIR` resolves to the scratch directory and every
+# external answer the script depends on is the test's to choose. That is the
+# only way to assert a refusal: the thing being asserted is that the script does
+# NOT run, and running it for real to find out would be the failure.
+#
+# The backup helper is tested against files in a scratch tree, because the one
+# rule it has — never overwrite an existing backup — is a rule about the
+# filesystem and a mock of the filesystem would not be testing it.
+#
+# Run with:   bash bin/test-realtest.sh
+
+set -euo pipefail
+
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_UNDER_TEST="$THIS_DIR/realtest.sh"
+LIB_UNDER_TEST="$THIS_DIR/lib-realtest-backup.sh"
+
+# shellcheck source=lib-realtest-backup.sh
+. "$LIB_UNDER_TEST"
+
+readonly EXIT_DECLINED=77
+
+PASS=0
+FAIL=0
+pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }
+fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $2"; return 0; }
+
+SCRATCH="$(mktemp -d)"
+cleanup() { rm -rf "$SCRATCH"; }
+trap cleanup EXIT
+
+# ---- the backup helper ----------------------------------------------------
+
+test_backup_copies_the_database() {
+    local name="the backup helper copies a database and prints where it went"
+    local dir="$SCRATCH/backup-plain"
+    mkdir -p "$dir"
+    printf 'workspaces' > "$dir/wsm.db"
+
+    local out
+    if ! out="$(realtest_backup_database "$dir/wsm.db" 20260910-120000 2>&1)"; then
+        fail "$name" "the helper failed: $out"
+        return
+    fi
+    if [ ! -f "$dir/wsm.db.realtest-bak-20260910-120000" ]; then
+        fail "$name" "no backup was written; the helper said: $out"
+        return
+    fi
+    if [ "$out" != "$dir/wsm.db.realtest-bak-20260910-120000" ]; then
+        fail "$name" "the helper printed $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_backup_carries_the_wal_siblings() {
+    local name="the backup helper carries the -wal and -shm siblings with the database"
+    local dir="$SCRATCH/backup-wal"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+    printf 'wal' > "$dir/wsm.db-wal"
+    printf 'shm' > "$dir/wsm.db-shm"
+
+    if ! realtest_backup_database "$dir/wsm.db" 20260910-120000 >/dev/null 2>&1; then
+        fail "$name" "the helper failed"
+        return
+    fi
+    local suffix missing=""
+    for suffix in "" "-wal" "-shm"; do
+        [ -f "$dir/wsm.db${suffix}.realtest-bak-20260910-120000" ] || missing="$missing $suffix"
+    done
+    if [ -n "$missing" ]; then
+        fail "$name" "these siblings were not backed up:$missing"
+        return
+    fi
+    pass "$name"
+}
+
+test_backup_refuses_to_overwrite() {
+    local name="the backup helper REFUSES to overwrite an existing backup"
+    local dir="$SCRATCH/backup-refuse"
+    mkdir -p "$dir"
+    printf 'the state as it was before the first run' > "$dir/wsm.db.realtest-bak-20260910-120000"
+    printf 'the state the first run left behind' > "$dir/wsm.db"
+
+    local out status=0
+    out="$(realtest_backup_database "$dir/wsm.db" 20260910-120000 2>&1)" || status=$?
+    if [ "$status" -eq 0 ]; then
+        fail "$name" "the helper succeeded; it must refuse"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'refusing to overwrite'; then
+        fail "$name" "the refusal does not say what it refused: $out"
+        return
+    fi
+    # THE POINT OF THE RULE: the earlier copy is still the earlier copy.
+    if [ "$(cat "$dir/wsm.db.realtest-bak-20260910-120000")" != "the state as it was before the first run" ]; then
+        fail "$name" "the existing backup was overwritten anyway"
+        return
+    fi
+    pass "$name"
+}
+
+test_backup_absent_file_is_not_a_failure() {
+    local name="the backup helper treats an absent -wal as fine, not as a failure"
+    local dir="$SCRATCH/backup-absent"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+
+    if ! realtest_backup_database "$dir/wsm.db" 20260910-120000 >/dev/null 2>&1; then
+        fail "$name" "a cleanly closed database with no -wal was reported as a failure"
+        return
+    fi
+    if [ -e "$dir/wsm.db-wal.realtest-bak-20260910-120000" ]; then
+        fail "$name" "a backup was invented for a file that does not exist"
+        return
+    fi
+    pass "$name"
+}
+
+test_backup_refuses_a_missing_stamp() {
+    local name="the backup helper refuses a call with no stamp"
+    local dir="$SCRATCH/backup-nostamp"
+    mkdir -p "$dir"
+    printf 'db' > "$dir/wsm.db"
+
+    local status=0
+    realtest_backup_file "$dir/wsm.db" "" >/dev/null 2>&1 || status=$?
+    if [ "$status" -eq 0 ]; then
+        fail "$name" "a stampless backup was accepted, which would collide with every other run"
+        return
+    fi
+    pass "$name"
+}
+
+# ---- the script's refusals ------------------------------------------------
+
+# scratch_bin CASE — a copy of realtest.sh beside stub siblings, so THIS_DIR
+# resolves here and every external answer is the test's.
+#
+# The stubs answer READY and NOTHING RUNNING by default; each case overwrites
+# the one it is about. suite-slot.sh records that it was reached, which is how a
+# case distinguishes "declined" from "ran and failed".
+scratch_bin() {
+    local dir="$SCRATCH/$1/bin"
+    mkdir -p "$dir"
+    cp "$SCRIPT_UNDER_TEST" "$dir/realtest.sh"
+    cp "$LIB_UNDER_TEST" "$dir/lib-realtest-backup.sh"
+
+    cat > "$dir/readiness-report.sh" <<'STUB'
+#!/usr/bin/env bash
+cat "${STUB_READINESS_JSON:?the case must state a readiness document}"
+STUB
+
+    cat > "$dir/suite-slot.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'reached\n' > "${STUB_SLOT_MARKER:?the case must state a marker path}"
+exit 0
+STUB
+
+    cat > "$dir/emacsclient" <<'STUB'
+#!/usr/bin/env bash
+# Answers only what the case says it should. With STUB_EMACS_ALIVE unset every
+# probe fails, which is how "no Emacs is running" is spelled.
+[ "${STUB_EMACS_ALIVE:-}" = "1" ] || exit 1
+for arg in "$@"; do
+    case "$arg" in
+        '(kill-emacs)') printf 'killed\n' > "${STUB_KILL_MARKER:?}"; rm -f "${STUB_ALIVE_FLAG:?}" ;;
+    esac
+done
+printf 'nil\n'
+STUB
+
+    chmod +x "$dir"/*.sh "$dir/emacsclient"
+    printf '%s' "$dir"
+}
+
+ready_json() {
+    cat <<'JSON'
+{"systems": [{"name": "daemon", "ready": true}, {"name": "shim", "ready": true}]}
+JSON
+}
+
+stale_json() {
+    cat <<'JSON'
+{"systems": [{"name": "daemon", "ready": true},
+             {"name": "shim", "ready": false,
+              "error": "the artifact is built from source revision aaa, but the checkout is at bbb"}]}
+JSON
+}
+
+# run_script DIR — run the copied script with the stub environment, capturing
+# output and status. Every path the script would otherwise reach on the real
+# machine is redirected into the scratch tree.
+run_script() {
+    local dir="$1"
+    shift
+    set +e
+    HOME="$SCRATCH/home" \
+    STUB_READINESS_JSON="$SCRATCH/readiness.json" \
+    STUB_SLOT_MARKER="$SCRATCH/slot-reached" \
+    STUB_KILL_MARKER="$SCRATCH/killed" \
+    AGENT_REPL_REALTEST_EMACSCLIENT="$dir/emacsclient" \
+    AGENT_REPL_REALTEST_OUT="$SCRATCH/out" \
+    "$@" bash "$dir/realtest.sh" 2>&1
+    local status=$?
+    set -e
+    return "$status"
+}
+
+prepare_home() {
+    rm -rf "${SCRATCH:?}/home" "${SCRATCH:?}/out" "${SCRATCH:?}/slot-reached" "${SCRATCH:?}/killed"
+    mkdir -p "$SCRATCH/home/.claude-emacs" "$SCRATCH/home/.cache/agent-repl/store"
+    printf 'workspaces' > "$SCRATCH/home/.claude-emacs/wsm.db"
+    printf 'events' > "$SCRATCH/home/.cache/agent-repl/store/events.db"
+}
+
+test_declines_when_a_system_is_not_deployed() {
+    local name="the script DECLINES when a deployed system is not at this checkout"
+    local dir out status=0
+    dir="$(scratch_bin not-deployed)"
+    prepare_home
+    stale_json > "$SCRATCH/readiness.json"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'these systems are not at this checkout'; then
+        fail "$name" "the refusal does not name the problem: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'shim'; then
+        fail "$name" "the refusal does not name the stale system: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was reached despite the refusal"
+        return
+    fi
+    pass "$name"
+}
+
+test_declines_when_emacs_is_running_without_a_takeover() {
+    local name="the script DECLINES when an Emacs is running and no takeover was authorized"
+    local dir out status=0
+    dir="$(scratch_bin no-takeover)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(STUB_EMACS_ALIVE=1 STUB_ALIVE_FLAG="$SCRATCH/alive" run_script "$dir")" || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'AGENT_REPL_REALTEST_TAKEOVER=1'; then
+        fail "$name" "the refusal does not say how to authorize the takeover: $out"
+        return
+    fi
+    if [ -f "$SCRATCH/killed" ]; then
+        fail "$name" "the owner's editor was quit without authorization"
+        return
+    fi
+    if [ -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was reached despite the refusal"
+        return
+    fi
+    pass "$name"
+}
+
+test_backs_up_before_refusing_the_takeover() {
+    local name="the script backs up the owner's state BEFORE it refuses a takeover"
+    local dir status=0
+    dir="$(scratch_bin backup-first)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    STUB_EMACS_ALIVE=1 STUB_ALIVE_FLAG="$SCRATCH/alive" run_script "$dir" >/dev/null || status=$?
+    if [ "$status" -ne "$EXIT_DECLINED" ]; then
+        fail "$name" "exit was $status, want $EXIT_DECLINED"
+        return
+    fi
+    # The copy is what makes the refusal recoverable: the operator who then sets
+    # the takeover flag is running against state that already has a copy.
+    if ! ls "$SCRATCH/home/.claude-emacs/wsm.db.realtest-bak-"* >/dev/null 2>&1; then
+        fail "$name" "no workspace-state backup was taken before the refusal"
+        return
+    fi
+    if ! ls "$SCRATCH/home/.cache/agent-repl/store/events.db.realtest-bak-"* >/dev/null 2>&1; then
+        fail "$name" "no store backup was taken before the refusal"
+        return
+    fi
+    pass "$name"
+}
+
+test_runs_when_nothing_stands_in_the_way() {
+    local name="the script runs the realtests when everything is deployed and no Emacs is up"
+    local dir out status=0
+    dir="$(scratch_bin clean)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    out="$(run_script "$dir")" || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0; output: $out"
+        return
+    fi
+    if [ ! -f "$SCRATCH/slot-reached" ]; then
+        fail "$name" "the run was never reached; output: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q 'the vendor is forbidden for this run'; then
+        fail "$name" "the run does not state that the vendor is forbidden: $out"
+        return
+    fi
+    if ! printf '%s' "$out" | grep -q "the owner's editor is left running"; then
+        fail "$name" "the run does not state that the editor is left running: $out"
+        return
+    fi
+    pass "$name"
+}
+
+test_records_the_deployed_revisions() {
+    local name="the script records the deployed revisions it measured"
+    local dir status=0
+    dir="$(scratch_bin stamps)"
+    prepare_home
+    ready_json > "$SCRATCH/readiness.json"
+
+    run_script "$dir" >/dev/null || status=$?
+    if [ "$status" -ne 0 ]; then
+        fail "$name" "exit was $status, want 0"
+        return
+    fi
+    if [ ! -f "$SCRATCH/out/readiness.json" ]; then
+        fail "$name" "the run directory holds no readiness document, so a finding cannot be tied to a build"
+        return
+    fi
+    pass "$name"
+}
+
+# ---- run ------------------------------------------------------------------
+
+test_backup_copies_the_database
+test_backup_carries_the_wal_siblings
+test_backup_refuses_to_overwrite
+test_backup_absent_file_is_not_a_failure
+test_backup_refuses_a_missing_stamp
+test_declines_when_a_system_is_not_deployed
+test_declines_when_emacs_is_running_without_a_takeover
+test_backs_up_before_refusing_the_takeover
+test_runs_when_nothing_stands_in_the_way
+test_records_the_deployed_revisions
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
