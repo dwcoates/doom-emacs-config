@@ -281,7 +281,7 @@ const BASH_DETACH_POLL = scenario({
     "pairs: two reporting RUNNING with growing output, then one reporting a terminal exit code and status. " +
     "UNGROUNDED, INVENTED: no capture ever calls `TaskOutput`, only lists it in `init.tools`",
   writes: "the tool_use/tool_result lines for the background and for each poll, and the spool terminated by `EXIT=0`",
-  arms: "AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is unregistered and folds to AgentUnmodeled",
+  arms: "AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is in `EXEMPT_TOOLS`, so each poll is dropped SILENTLY: no unit, no `AgentUnmodeled`, no unmodeled warning",
   async run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "bash-detach-poll" }, "fake explicit-poll detached-bash turn");
     const command = ctx.args === "" ? "tail -f build.log" : ctx.args;
