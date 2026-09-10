@@ -11,6 +11,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"connectrpc.com/connect"
@@ -18,31 +19,31 @@ import (
 )
 
 type clientLogServer struct {
-	response            *agentreplv1.ClientLogResponse
-	workspace           *workspacev1.WorkspaceRef
-	registrationRequest *agentreplv1.RegisterWorkspaceRequest
-	request             *agentreplv1.ClientLogRequest
+	response       *agentreplv1.ClientLogResponse
+	workspace      *workspacev1.WorkspaceRef
+	request        *agentreplv1.ClientLogRequest
+	rosterRequests int
 }
 
 func serveClientLog(t *testing.T, response *agentreplv1.ClientLogResponse) (*Client, *clientLogServer) {
 	t.Helper()
 	stateDir := t.TempDir()
+	workspaceDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("normalize fake daemon workspace: %v", err)
+	}
 	recorder := &clientLogServer{
 		response: response,
 		workspace: &workspacev1.WorkspaceRef{
-			Id: "daemon-workspace-id", Dir: "/work/repo",
+			Id: "daemon-workspace-id", Dir: workspaceDir,
 		},
 	}
 	mux := http.NewServeMux()
-	mux.Handle(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
-		connect.NewUnaryHandler(agentreplv1connect.AgentReplRegisterWorkspaceProcedure,
-			func(_ context.Context, req *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
-				recorder.registrationRequest = proto.Clone(req.Msg).(*agentreplv1.RegisterWorkspaceRequest)
-				return connect.NewResponse(&agentreplv1.RegisterWorkspaceResponse{
-					Result: &agentreplv1.RegisterWorkspaceResponse_Success{Success: &agentreplv1.RegisterWorkspaceSuccess{
-						Workspace: proto.Clone(recorder.workspace).(*workspacev1.WorkspaceRef),
-					}},
-				}), nil
+	mux.Handle(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+		connect.NewServerStreamHandler(agentreplv1connect.AgentReplWatchWorkspaceRosterProcedure,
+			func(_ context.Context, _ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
+				recorder.rosterRequests++
+				return stream.Send(rosterResponse(recorder.workspace))
 			}))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
@@ -73,7 +74,7 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 	record := logging.ForwardRecord{
 		Timestamp: "2026-09-10T12:34:56.789000-04:00", PID: 4242,
 		Level: "warn", Verbose: true, Operation: "sidecar.tail.read",
-		Message: "the transcript could not be decoded", WorkspaceDir: "/work/repo",
+		Message: "the transcript could not be decoded", WorkspaceDir: server.workspace.GetDir(),
 		WorkspaceID: "deadbeef", ClaudeSessionID: "claude-1",
 		Context: map[string]any{
 			"path": "/work/repo/session.jsonl", "pid": 4242.0,
@@ -89,10 +90,7 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 		t.Fatalf("Forward returned %v", err)
 	}
 	got := server.request
-	if server.registrationRequest.GetDir() != record.WorkspaceDir {
-		t.Fatalf("RegisterWorkspace dir = %q, want %q", server.registrationRequest.GetDir(), record.WorkspaceDir)
-	}
-	if got.GetWorkspace().GetId() != "daemon-workspace-id" || got.GetWorkspace().GetDir() != "/work/repo" {
+	if got.GetWorkspace().GetId() != "daemon-workspace-id" || got.GetWorkspace().GetDir() != record.WorkspaceDir {
 		t.Fatalf("workspace ref = %v, want the daemon-minted complete ref", got.GetWorkspace())
 	}
 	if got.GetRecord().GetSidecar() == nil || got.GetRecord().GetWarn() == nil {
@@ -107,6 +105,30 @@ func TestForwardSendsACompleteSidecarClientLogRequest(t *testing.T) {
 	writeIDs := got.GetRecord().GetContext().GetFields()["write_ids"].GetListValue().GetValues()
 	if len(writeIDs) != 2 || writeIDs[0].GetStringValue() != "write-1" || writeIDs[1].GetStringValue() != "write-2" {
 		t.Fatalf("record context.write_ids = %v, want the complete typed string list", writeIDs)
+	}
+}
+
+func TestForwardCachesTheRosterRefForTheSameDaemonAndWorkspace(t *testing.T) {
+	// Arrange.
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+	})
+	record := logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
+	}
+
+	// Act.
+	if _, err := client.Forward(record); err != nil {
+		t.Fatalf("first Forward returned %v", err)
+	}
+	if _, err := client.Forward(record); err != nil {
+		t.Fatalf("second Forward returned %v", err)
+	}
+
+	// Assert.
+	if server.rosterRequests != 1 {
+		t.Fatalf("WatchWorkspaceRoster requests = %d, want one cached lookup", server.rosterRequests)
 	}
 }
 
@@ -131,10 +153,10 @@ func TestForwardRejectsANonLoopbackDaemonAddress(t *testing.T) {
 
 func TestForwardRefusesAResponseWithNoResultArm(t *testing.T) {
 	// Arrange.
-	client, _ := serveClientLog(t, &agentreplv1.ClientLogResponse{})
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{})
 	record := logging.ForwardRecord{
 		Level: "info", Operation: "sidecar.tail.read", Message: "read",
-		WorkspaceDir: "/work/repo", WorkspaceID: "deadbeef",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
 	}
 
 	// Act.
@@ -144,4 +166,41 @@ func TestForwardRefusesAResponseWithNoResultArm(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "neither success nor error") {
 		t.Fatalf("Forward error = %v, want an unset-result refusal", err)
 	}
+}
+
+func TestForwardInvalidatesTheRosterRefAfterClientLogRefusal(t *testing.T) {
+	// Arrange.
+	client, server := serveClientLog(t, &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Error{Error: &agentreplv1.ClientLogError{}},
+	})
+	record := logging.ForwardRecord{
+		Level: "info", Operation: "sidecar.tail.read", Message: "read",
+		WorkspaceDir: server.workspace.GetDir(), WorkspaceID: "deadbeef",
+	}
+
+	// Act.
+	if _, err := client.Forward(record); err == nil {
+		t.Fatal("first Forward succeeded, want the fake daemon's refusal")
+	}
+	server.response = &agentreplv1.ClientLogResponse{
+		Result: &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}},
+	}
+	if _, err := client.Forward(record); err != nil {
+		t.Fatalf("second Forward returned %v", err)
+	}
+
+	// Assert.
+	if server.rosterRequests != 2 {
+		t.Fatalf("WatchWorkspaceRoster requests = %d, want the refused ref resolved again", server.rosterRequests)
+	}
+}
+
+func rosterResponse(ref *workspacev1.WorkspaceRef) *agentreplv1.WatchWorkspaceRosterResponse {
+	return &agentreplv1.WatchWorkspaceRosterResponse{Roster: &frontendv1.WorkspaceRoster{
+		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{
+			Rows: &frontendv1.RosterRows{Rows: []*frontendv1.RosterRow{{
+				Workspace: &frontendv1.RosterRowWorkspace{Workspace: copyWorkspaceRef(ref)},
+			}}},
+		}}},
+	}}
 }
