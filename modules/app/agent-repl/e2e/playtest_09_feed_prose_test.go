@@ -126,7 +126,10 @@ const p09TerminalRow = `[data-feed-row][data-row-kind="turnEnded"]`
 // It is scoped to the REVEAL PANEL it is drawn in rather than left bare,
 // because that is where the product puts it: the strip has no session line of
 // its own, and the panel is the only thing that ever holds one.
-const p09SessionLine = `.topbar-reveal[data-reveal="session"] .topbar-session-line`
+const p09SessionReveal = `.topbar-reveal[data-reveal="session"]`
+
+// p09SessionLine is the line itself, inside that panel.
+const p09SessionLine = p09SessionReveal + ` .topbar-session-line`
 
 // p09EofCauseWords and p09IteratorCauseWords are the sentences the webapp
 // draws under a query-death headline, copied from `QUERY_CAUSE_WORDS` in
@@ -364,7 +367,29 @@ func TestPlaytestFeedProseFamilies(t *testing.T) {
 				// from the NEW push's view (`reveals.refresh()` in
 				// topbar.ts), so leaving it open is also what proves the
 				// rotated identity reaches a reveal a reader already had up.
-				s.clickInPage(t, "the topbar's session anchor", `[data-reveal-anchor="session"]`)
+				//
+				// AND IT IS OPENED IDEMPOTENTLY rather than through
+				// `clickInPage`, because the session anchor is a TOGGLE.
+				// The page probe is asynchronous, so every helper built on it
+				// RE-ISSUES its script on each poll and answers the previous
+				// issue's value (`playtestProbeSetup`); `clickInPage` clicks
+				// again on every one of those issues, which is harmless for a
+				// button and is not for a toggle. Measured: run 4 clicked the
+				// anchor, reported the click, and left the reveal CLOSED --
+				// two issues, open then shut -- and run 5's diagnosis read
+				// `anchors=1 openReveal=<none>`.
+				//
+				// So the act is "be open", not "click": an issue that finds
+				// the panel already there answers yes and touches nothing,
+				// and one that finds it gone opens it again.
+				s.awaitInPage(t, "the topbar's session reveal to be open",
+					`(function () {
+                       if (document.querySelector('`+p09SessionReveal+`')) { return true; }
+                       var anchor = document.querySelector('[data-reveal-anchor="session"]');
+                       if (!anchor) { return false; }
+                       anchor.click();
+                       return document.querySelector('`+p09SessionReveal+`') !== null;
+                     })()`)
 				before := p09ReadInPage(t, s, "the topbar's session line before the rotate",
 					`document.querySelector('`+p09SessionLine+`') &&
                      document.querySelector('`+p09SessionLine+`').textContent.trim()`)
