@@ -3,11 +3,13 @@ package db
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -278,6 +280,23 @@ func scalar[T any](t *testing.T, d *DB, query string, args ...any) T {
 	return value
 }
 
+// fileIdentity is the inode a path names, so a test can tell a file that was
+// UNLINKED and recreated from one that was edited in place. Content and mtime
+// cannot: a recreated database and a dropped-and-recreated one look identical
+// by both.
+func fileIdentity(t *testing.T, path string) uint64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %q: %v", path, err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("stat %q carries no inode", path)
+	}
+	return uint64(stat.Ino)
+}
+
 // ---- schema ----
 
 func TestOpenCreatesTheSchemaOnAFreshDatabase(t *testing.T) {
@@ -395,7 +414,115 @@ func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
 	if got := scalar[int](t, second, `SELECT version FROM schema_meta`); got != SchemaVersion {
 		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
 	}
-	s.assertLogged(t, "warn", "dropping and recreating")
+	s.assertLogged(t, "warn", "removing the database file and its WAL siblings and recreating")
+}
+
+func TestOpenRemovesTheFileOfADatabaseStampedAtAnotherVersion(t *testing.T) {
+	// Arrange: a foreign shape is DISCARDED BY UNLINK, never emptied in place.
+	// DROP TABLE walks every page of what it discards, and on a multi-gigabyte
+	// events.db that is minutes of boot with no socket — long enough that a
+	// deploy waiting on the socket gives up and leaves the stack half-bounced.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(`UPDATE schema_meta SET version = 99`); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+	before := fileIdentity(t, path)
+
+	// Act
+	_, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert: a DIFFERENT file stands where the old one did.
+	if after := fileIdentity(t, path); after == before {
+		t.Fatalf("the superseded database file survived the nuke (identity %v unchanged), want it removed and recreated", after)
+	}
+}
+
+func TestOpenRemovesTheWalSiblingsOfADatabaseStampedAtAnotherVersion(t *testing.T) {
+	// Arrange: a -wal or -shm left beside a recreated database belongs to the
+	// file that was just discarded, and SQLite meeting it on the next open is
+	// how a "fresh" store comes up carrying fragments of the one it replaced.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if _, err := first.sql.Exec(`UPDATE schema_meta SET version = 99`); err != nil {
+		t.Fatalf("restamp: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+	for _, sibling := range []string{path + "-wal", path + "-shm"} {
+		if err := os.WriteFile(sibling, []byte("stale sibling bytes"), 0o600); err != nil {
+			t.Fatalf("staging %q: %v", sibling, err)
+		}
+	}
+
+	// Act
+	_, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert: a live store writes its own -wal, so the assertion is on the
+	// STAGED bytes rather than on the paths existing at all.
+	for _, sibling := range []string{path + "-wal", path + "-shm"} {
+		data, readErr := os.ReadFile(sibling)
+		if readErr != nil {
+			continue
+		}
+		if string(data) == "stale sibling bytes" {
+			t.Errorf("the nuke left the stale sibling %q behind", sibling)
+		}
+	}
+}
+
+func TestOpenSurfacesAFailureToRemoveTheDatabaseItMustDiscard(t *testing.T) {
+	// Arrange: a database this binary must replace, in a directory nothing may
+	// be unlinked from. A store that cannot discard the file in its way has no
+	// database at all, so the boot fails rather than continuing over it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	staged, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("staging a foreign database: %v", err)
+	}
+	if _, err := staged.Exec(`CREATE TABLE schema_meta (version INTEGER NOT NULL);
+	  INSERT INTO schema_meta(version) VALUES (99);`); err != nil {
+		t.Fatalf("staging a foreign schema: %v", err)
+	}
+	staged.Close() //nolint:errcheck // staged and done
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // the open should not have succeeded
+		t.Fatal("OpenWithOptions = nil, want the un-removable database surfaced")
+	}
+	if !errors.Is(err, ErrStorage) {
+		t.Fatalf("error = %v, want an ErrStorage", err)
+	}
+	s.assertLogged(t, "error", "removing the superseded database failed")
 }
 
 func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
@@ -427,7 +554,7 @@ func TestOpenNukesADatabaseWhoseTableSetDiffers(t *testing.T) {
 	if !slicesEqual(tables, schemaTables) {
 		t.Fatalf("tables = %v, want %v", tables, schemaTables)
 	}
-	s.assertLogged(t, "warn", "dropping and recreating")
+	s.assertLogged(t, "warn", "removing the database file and its WAL siblings and recreating")
 }
 
 func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
@@ -449,9 +576,35 @@ func TestOpenLeavesAMatchingDatabaseUntouched(t *testing.T) {
 	}
 	defer second.Close() //nolint:errcheck // test teardown
 
-	// Assert: the row survived, so nothing was dropped.
+	// Assert: the row survived, so nothing was discarded.
 	if got := scalar[int](t, second, `SELECT COUNT(*) FROM entry`); got != 1 {
 		t.Fatalf("entry rows = %d, want 1", got)
+	}
+}
+
+func TestOpenLeavesTheFileOfAMatchingDatabaseInPlace(t *testing.T) {
+	// Arrange: the nuke unlinks. A database this binary DID create must never
+	// meet it, so the file a matching reopen serves is the same file.
+	path := filepath.Join(t.TempDir(), "store.db")
+	_, log := newSink(t)
+	first, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	first.Close() //nolint:errcheck // reopened below
+	before := fileIdentity(t, path)
+
+	// Act
+	_, reopenLog := newSink(t)
+	second, err := OpenWithOptions(path, reopenLog, Options{})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	// Assert
+	if after := fileIdentity(t, path); after != before {
+		t.Fatalf("file identity = %v, want the matching database's own file %v left in place", after, before)
 	}
 }
 
