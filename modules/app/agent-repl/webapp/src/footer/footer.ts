@@ -39,6 +39,7 @@ import { requireCase, requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { drawFooterExpanded, FOOTER_PANELS, type FooterPanel } from "./expanded.js";
 import { drawFooterStrip, footerStatusActivity } from "./strip.js";
+import { createStopControls } from "./stop.js";
 
 /** Where the open panel is remembered, per workspace. */
 export function panelStorageKey(workspaceId: string): string {
@@ -70,6 +71,13 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
 
   const statusListeners = new Set<(statusCase: string) => void>();
   let selection: FooterPanel | null = readSelection(ctx);
+  // THE SECOND PIECE OF LOCAL STATE, and for the same reason as the first: it
+  // is the reader's, not the daemon's. A stop's answer -- the note, the
+  // refusal, the confirm challenge -- is drawn at the control that made the
+  // call, and this view is rebuilt on EVERY push. Building the controls here
+  // and appending the same elements each draw is what lets an answer survive
+  // the push the stop itself caused. See `StopControls`.
+  const stops = createStopControls(ctx);
   let view: FooterView | null = null;
   let statusCase: string | null = null;
   let disposed = false;
@@ -126,11 +134,12 @@ export function mountFooter(host: HTMLElement, ctx: AppContext, deps: FooterDeps
     // what keeps the two from disagreeing about a figure.
     const panel = drawFooterExpanded(expanded, selection, {
       ctx,
+      stops,
       revealRow: deps.revealRow,
       activity: footerStatusActivity(requireMessage(strip.status, `FooterStrip.status`)),
     });
     if (panel !== null) dock.appendChild(panel);
-    dock.appendChild(drawFooterStrip(strip, { ctx, selection, onSelect: select }));
+    dock.appendChild(drawFooterStrip(strip, { ctx, selection, onSelect: select, stops }));
 
     stopTicking(host);
     host.replaceChildren(dock);

@@ -12,10 +12,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { startHarness, type Harness } from "./harness";
+import { installStylesheet } from "../stylesheet.js";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
   activityRow,
+  detachedSubagentRow,
   feedId,
   feedPageError,
   feedPageSuccess,
@@ -296,6 +298,27 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     expect(harness.fake.calls("openFeed").length).toBe(opensBefore + 1);
   });
 
+  // A SUB-FEED HANGS BENEATH ITS HEAD. The bubble wears `.bubble` for the
+  // card's fill and lift, and `.bubble` is a flex ROW, so the head line and the
+  // whole sub-feed were laid out side by side -- half the bubble empty under
+  // the head and every nested row squeezed into the other half. Photographed by
+  // the G49 playbook. The cascade is installed here because a class assertion
+  // alone passed the entire time.
+  it("stacks its sub-feed under its head, under the real stylesheet", async () => {
+    // Arrange
+    harness = await openBubble();
+    const remove = installStylesheet();
+    try {
+      await harness.click('[data-feed-row="bubble"] [data-expand]');
+      const bubble = harness.row("bubble")?.querySelector(".bubble");
+      // Act / Assert
+      expect(bubble).not.toBeNull();
+      expect(window.getComputedStyle(bubble as Element).flexDirection).toBe("column");
+    } finally {
+      remove();
+    }
+  });
+
   it("hosts the sub-feed inside the bubble rather than navigating to it", async () => {
     // Arrange
     harness = await openBubble();
@@ -317,6 +340,31 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     expect(harness.row("bubble")?.textContent).toContain("inner work");
   });
 
+  // THE FOLD'S OTHER HALF. `data-expanded` says the bubble is shut; the panel's
+  // own `hidden` is what makes it LOOK shut, and the two came apart in the real
+  // webview -- the sheet's `.agent-panel { display: flex }` outranked the
+  // user-agent `[hidden]` rule, so a collapsed sub-feed stayed fully drawn
+  // under a caret that said it was closed. The sheet now carries the guard
+  // (pinned in test/feed/bubble.test.ts, and asserted against a real browser in
+  // the G49 playbook); what is asserted here is that the shell's own caret
+  // reaches the attribute that guard keys on.
+  it("hides the sub-feed panel when the caret folds it", async () => {
+    // Arrange
+    harness = await openBubble();
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+    harness.fake.pushRow(WORKSPACE_ID, "bubble", responseRow("success", "inner work", { id: feedId("inner") }));
+    await harness.settle();
+    const panel = harness.row("bubble")?.querySelector<HTMLElement>("[data-subfeed]");
+    expect(panel?.hidden).toBe(false);
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.settle();
+    // Assert
+    expect(panel?.hidden).toBe(true);
+    expect(harness.row("bubble")?.dataset.expanded).toBe("false");
+  });
+
   it("does not draw a sub-feed row on the root feed", async () => {
     // Arrange
     harness = await openBubble();
@@ -327,6 +375,64 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     await harness.settle();
     // Assert: the inner row is inside the bubble, not a sibling of it.
     expect(harness.feedContainer()?.children).not.toContain(harness.row("inner"));
+  });
+});
+
+// A BACKGROUND SPAWN CHANGES PLACEMENT UNDER ITS OWN FeedId. The daemon
+// announces it as a synchronous `subagent` unit and re-pushes the SAME row as
+// `detached_subagent` once the vendor answers `async_launched`. The bubble is
+// kept across that push so an open sub-feed survives it, which means the head
+// must be chosen from the row in hand -- it was chosen once at mount, and every
+// detached spawn was then refused as an unreadable frame and froze on the state
+// it was announced with. Caught by the G51 playbook, whose `!cancel-all`
+// launches two of them.
+describe("a spawn that moves to its detached placement", () => {
+  const startSync = async (): Promise<Harness> =>
+    startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+
+  it("reads the re-pushed row rather than refusing it", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("succeeded", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("redraws the head in its new placement", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("succeeded", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(
+      harness.row("bubble")?.querySelector(".subagent-head")?.getAttribute("data-state"),
+    ).toBe("succeeded");
+  });
+
+  it("keeps the reader's open sub-feed across the move", async () => {
+    // Arrange
+    harness = await startSync();
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("live", { id: feedId("bubble") }));
+    await harness.settle();
+    // Assert
+    expect(harness.row("bubble")?.dataset.expanded).toBe("true");
   });
 });
 
