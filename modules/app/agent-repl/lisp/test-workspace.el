@@ -1531,6 +1531,48 @@ gated push would then drop the very repaint this exists for."
         ;; Assert.
         (should-not magit-dirs)))))
 
+;;;; ---- Tests: --ws-install-persp-policy ----
+
+(ert-deftest agent-repl-test-persp-policy-never-recycles-the-workspace-being-left ()
+  "A project switch always makes its own workspace, never renaming the old one.
+
+Doom's `+workspaces-switch-to-project-h\=' recycles the workspace being
+LEFT -- `+workspace-rename\=' onto the entered project's name -- whenever
+`+workspaces-on-switch-project-behavior\=' is `non-empty\=' and
+`+workspace-buffer-list\=' is empty.  An agent-repl workspace showing its
+agent IS empty by that test, because the panel is a webview buffer and
+deliberately not a `doom-real-buffer-list\=' member, so the abandoned
+workspace's persp left `persp-names-cache\=' under its old name while the
+registry and the roster kept carrying it -- and its TAB vanished."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((+workspaces-on-switch-project-behavior 'non-empty)
+          (+workspaces-switch-project-function nil)
+          (persp-auto-resume-time nil)
+          (persp-auto-save-opt nil)
+          (persp-kill-foreign-buffer-behaviour nil)
+          (persp-set-frame-buffer-predicate nil))
+      ;; Act.
+      (agent-repl--ws-install-persp-policy)
+      ;; Assert.
+      (should (eq +workspaces-on-switch-project-behavior t)))))
+
+(ert-deftest agent-repl-test-persp-policy-lands-a-project-switch-on-the-panel ()
+  "The policy installs agent-repl's own switch-project display function."
+  (agent-repl-test--with-clean-state
+    ;; Arrange.
+    (let ((+workspaces-on-switch-project-behavior nil)
+          (+workspaces-switch-project-function nil)
+          (persp-auto-resume-time nil)
+          (persp-auto-save-opt nil)
+          (persp-kill-foreign-buffer-behaviour nil)
+          (persp-set-frame-buffer-predicate nil))
+      ;; Act.
+      (agent-repl--ws-install-persp-policy)
+      ;; Assert.
+      (should (eq +workspaces-switch-project-function
+                  #'agent-repl--ws-switch-project-display)))))
+
 ;;;; ---- Tests: --record-workspace-history ----
 
 (ert-deftest agent-repl-test-record-workspace-history-pushes-current ()
