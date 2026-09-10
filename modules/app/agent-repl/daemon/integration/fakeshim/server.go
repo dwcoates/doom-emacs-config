@@ -154,7 +154,10 @@ type server struct {
 	// sessionKilled records an accepted KillSession: the process exits once
 	// its answer has been written.
 	sessionKilled bool
-	vendorID      string
+	// resumed records that this session was started as a RESUME, which is what
+	// makes the profile's recorded conversation the opening page.
+	resumed  bool
+	vendorID string
 	// started is the SessionStarted this fake last answered. Every new session
 	// watch RE-ANNOUNCES it right after the opening diagnostics (landing 7),
 	// which is what lets an adopting daemon attach purely.
@@ -350,6 +353,13 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	vendorID := s.profile.VendorSessionID
 	if r := req.Msg.GetResume(); r != nil {
 		vendorID = r.GetVendorSessionId()
+		// A RESUMED SESSION HAS A BOOK. The real shim answers every watch off
+		// the store, so a resume's opening page is the conversation and a
+		// fresh start's is an empty floor; the fake keeps that difference so a
+		// test asserting rehydrated rows is asserting the RESUME.
+		s.mu.Lock()
+		s.resumed = true
+		s.mu.Unlock()
 	}
 	if vendorID == "" {
 		vendorID = mintID()
@@ -481,6 +491,29 @@ func (s *server) liveWork() []*conversationv1.AgentDetachedWork {
 	return out
 }
 
+// openingPage is what a WatchAgent stream opens with: the resumed
+// conversation's own book, or an empty floor when there is nothing to serve.
+func (s *server) openingPage() *conversationv1.HistoryPage {
+	s.mu.Lock()
+	resumed := s.resumed
+	s.mu.Unlock()
+	if !resumed || len(s.profile.ResumeHistory) == 0 {
+		return EmptyFloorPage()
+	}
+	page := EmptyFloorPage()
+	for i, raw := range s.profile.ResumeHistory {
+		entry := &conversationv1.HistoryEntry{}
+		if err := proto.Unmarshal(raw, entry); err != nil {
+			panic(sprintf("fakeshim: profile resume_history[%d] does not decode: %v", i, err))
+		}
+		page.Entries = append(page.Entries, &conversationv1.HistoryEntryAt{
+			At:    &conversationv1.HistoryPointer{Value: sprintf("resume-%d", i)},
+			Entry: entry,
+		})
+	}
+	return page
+}
+
 func (s *server) buildSHA() string {
 	if s.profile.BuildSHA != "" {
 		return s.profile.BuildSHA
@@ -551,7 +584,7 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 	defer s.agents.unsubscribe(id)
 
 	if err := stream.Send(&shimv1.WatchAgentResponse{
-		Frame: &shimv1.WatchAgentResponse_Page{Page: EmptyFloorPage()},
+		Frame: &shimv1.WatchAgentResponse_Page{Page: s.openingPage()},
 	}); err != nil {
 		return err
 	}
