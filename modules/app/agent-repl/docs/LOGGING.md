@@ -74,8 +74,10 @@ Store and sidecar (Go)
 - DONE: `agentrepl.v1.ClientLogRecord.runtime.sidecar` lets every file-scoped
   sidecar diagnostic retain its originating timestamp, verbosity, level,
   operation, message, context, PID, Claude session, and workspace ref while the
-  daemon persists it into workspace `sidecar.log`. Global lifecycle records
-  remain in the sidecar's own rotating sink.
+  daemon persists it into workspace `sidecar.log`. An ordered forwarding worker
+  keeps ClientLog latency and failures off the tailer's path, and shutdown
+  drains records already accepted by the logger. Global lifecycle records remain
+  in the sidecar's own rotating sink.
 - DONE: both processes honor `AGENT_REPL_LOG_LEVEL`; verbose request/state
   records are `debug`, lifecycle remains `info`, decisions/refusals are `warn`,
   and owned failures are `error`.

@@ -208,6 +208,11 @@ type Logger struct {
 	files                 map[string]Context
 	forwarder             Forwarder
 	lastForwardFailure    string
+	forwardMu             sync.Mutex
+	forwardReady          *sync.Cond
+	forwardQueue          []ForwardRecord
+	forwardClosing        bool
+	forwardDone           chan struct{}
 }
 
 // Bound is the runtime logger passed through sidecar packages.
@@ -258,15 +263,18 @@ func NewDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.
 }
 
 // NewForwardingDurableOnlyAtLevel constructs the production logger: global
-// records go to file, while file-scoped records go through forwarder to the
-// daemon-owned workspace sink. A nil forwarder is an invariant violation,
-// never permission to put a workspace record in the global sink.
+// records go to file, while file-scoped records enter an ordered forwarding
+// queue for the daemon-owned workspace sink. A nil forwarder is an invariant
+// violation, never permission to put a workspace record in the global sink.
 func NewForwardingDurableOnlyAtLevel(terminal, file io.Writer, minimumLevel sharedlogging.Level, forwarder Forwarder) *Logger {
 	if forwarder == nil {
 		panic("sidecar logging: forwarding logger requires a daemon forwarder")
 	}
 	l := NewDurableOnlyAtLevel(terminal, file, minimumLevel)
 	l.forwarder = forwarder
+	l.forwardReady = sync.NewCond(&l.forwardMu)
+	l.forwardDone = make(chan struct{})
+	go l.forwardLoop()
 	return l
 }
 
@@ -284,6 +292,31 @@ func (b *Bound) With(ctx Context) *Bound {
 		panic("sidecar logging: With called on nil Bound logger")
 	}
 	return &Bound{logger: b.logger, context: mergeContext(b.context, ctx)}
+}
+
+// Close drains the forwarding queue and stops its worker. Ordinary log calls
+// never wait for ClientLog; shutdown is the one boundary that waits so a
+// process exit cannot strand diagnostics which were already accepted.
+func (l *Logger) Close() {
+	if l == nil || l.forwarder == nil {
+		return
+	}
+	l.forwardMu.Lock()
+	if !l.forwardClosing {
+		l.forwardClosing = true
+		l.forwardReady.Broadcast()
+	}
+	done := l.forwardDone
+	l.forwardMu.Unlock()
+	<-done
+}
+
+// Close drains the root logger's forwarding queue.
+func (b *Bound) Close() {
+	if b == nil {
+		panic("sidecar logging: Close called on nil Bound logger")
+	}
+	b.logger.Close()
 }
 
 // RegisterFile binds proven workspace/session attribution to one normalized
@@ -423,19 +456,12 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 		forwardContext := cloneMap(rec.Context)
 		forwardContext["pid"] = rec.PID
 		forwardContext["claude_session_id"] = rec.ClaudeSessionID
-		address, err := l.forwarder.Forward(ForwardRecord{
+		l.enqueueForward(ForwardRecord{
 			Timestamp: rec.Timestamp, PID: rec.PID, Level: rec.Level,
 			Verbose: verbose, Operation: rec.Operation, Message: rec.Message,
 			WorkspaceDir: rec.WorkspaceDir, WorkspaceID: rec.WorkspaceID,
 			ClaudeSessionID: rec.ClaudeSessionID, Context: forwardContext,
 		})
-		if err != nil {
-			l.reportForwardFailure(now, address, rec, err)
-		} else {
-			l.mu.Lock()
-			l.lastForwardFailure = ""
-			l.mu.Unlock()
-		}
 		return
 	}
 	payload, err := json.Marshal(rec)
@@ -460,6 +486,46 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	}
 	if err := writeAll(l.stderr, line); err != nil {
 		panic(fmt.Sprintf("sidecar logging: stderr sink failed: %v", err))
+	}
+}
+
+func (l *Logger) enqueueForward(rec ForwardRecord) {
+	l.forwardMu.Lock()
+	defer l.forwardMu.Unlock()
+	if l.forwardClosing {
+		panic("sidecar logging: file-scoped record written after forwarding closed")
+	}
+	l.forwardQueue = append(l.forwardQueue, rec)
+	l.forwardReady.Signal()
+}
+
+func (l *Logger) forwardLoop() {
+	defer close(l.forwardDone)
+	for {
+		l.forwardMu.Lock()
+		for len(l.forwardQueue) == 0 && !l.forwardClosing {
+			l.forwardReady.Wait()
+		}
+		if len(l.forwardQueue) == 0 {
+			l.forwardMu.Unlock()
+			return
+		}
+		rec := l.forwardQueue[0]
+		l.forwardQueue[0] = ForwardRecord{}
+		l.forwardQueue = l.forwardQueue[1:]
+		l.forwardMu.Unlock()
+
+		address, err := l.forwarder.Forward(rec)
+		if err != nil {
+			l.reportForwardFailure(l.now().Local(), address, record{
+				Operation: rec.Operation, WorkspaceDir: rec.WorkspaceDir,
+				WorkspaceID: rec.WorkspaceID, ClaudeSessionID: rec.ClaudeSessionID,
+			}, err)
+			continue
+		}
+		l.mu.Lock()
+		l.lastForwardFailure = ""
+		l.mu.Unlock()
 	}
 }
 
