@@ -439,7 +439,10 @@ func openLogger(storeSocket, stateDir, logPath string) (*logging.Bound, func(), 
 	forwarder := daemonclient.New(stateDir)
 	logf := logging.NewForwardingDurableOnlyAtLevel(os.Stderr, file, level, forwarder).
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
-	return logf, func() { _ = file.Close() }, nil
+	return logf, func() {
+		logf.Close()
+		_ = file.Close()
+	}, nil
 }
 
 // runWithLogger owns process-level failures once canonical logging exists.
