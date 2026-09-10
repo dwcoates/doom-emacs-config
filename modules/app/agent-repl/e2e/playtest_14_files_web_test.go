@@ -110,16 +110,53 @@ func omittedText(text string) string {
 }
 
 const (
-	noOmitted       = `card.querySelector(".tool-omitted") === null`
-	hasDiffLines    = `card.querySelectorAll("[data-diff-line]").length > 0`
-	noDiagnostics   = `card.querySelector(".tool-diagnostics") === null`
-	hasDiagnostics  = `card.querySelectorAll(".tool-diagnostic").length > 0`
-	noOutputBody    = `card.querySelector("[data-output-body]") === null`
-	hasCodeSpans    = `card.querySelectorAll(".tool-read-output .hljs span").length > 0`
-	hasTextOutput   = `card.querySelector(".tool-output") !== null && card.querySelector(".tool-output").textContent.trim() !== ""`
-	hasLinkRows     = `card.querySelectorAll(".tool-link-row").length > 0`
-	hasClickableURL = `card.querySelectorAll(".tool-link-row a[data-external-link][href]").length > 0`
+	noOmitted      = `card.querySelector(".tool-omitted") === null`
+	noDiagnostics  = `card.querySelector(".tool-diagnostics") === null`
+	hasDiagnostics = `card.querySelectorAll(".tool-diagnostic").length > 0`
+	noOutputBody   = `card.querySelector("[data-output-body]") === null`
+	hasCodeSpans   = `card.querySelectorAll(".tool-read-output .hljs span").length > 0`
+	hasTextOutput  = `card.querySelector(".tool-output") !== null && card.querySelector(".tool-output").textContent.trim() !== ""`
 )
+
+// diffKinds is a predicate over `card` for the drawn diff's line kinds, in
+// order and exhaustively — `[data-diff-line]` carries the ARM's own name, so
+// this counts what the card actually painted rather than that it painted
+// something. A phantom trailing addition (a file's terminating newline drawn
+// as a further, blank added line) is a defect this shape catches and a bare
+// "has diff lines" cannot.
+func diffKinds(kinds ...string) string {
+	list := "["
+	for i, kind := range kinds {
+		if i > 0 {
+			list += ","
+		}
+		list += jsString(kind)
+	}
+	list += "]"
+	return `(function () {
+                var want = ` + list + `;
+                var got = Array.prototype.map.call(card.querySelectorAll("[data-diff-line]"),
+                  function (l) { return l.getAttribute("data-diff-line"); });
+                return got.length === want.length && got.every(function (k, i) { return k === want[i]; });
+              })()`
+}
+
+// linkRows is a predicate over `card` for the search's drawn result rows: how
+// many there are, and which of them are CLICKABLE. A row whose anchor carries
+// an empty href is counted as un-clickable here on purpose — a dead link drawn
+// as a live one is exactly the defect this row exists to photograph.
+func linkRows(total, clickable int) string {
+	return fmt.Sprintf(`(function () {
+                var rows = card.querySelectorAll(".tool-link-row");
+                if (rows.length !== %d) { return false; }
+                var live = 0;
+                for (var i = 0; i < rows.length; i++) {
+                  var a = rows[i].querySelector("a[data-external-link]");
+                  if (a && a.getAttribute("href")) { live++; }
+                }
+                return live === %d;
+              })()`, total, clickable)
+}
 
 // playtestFileRows is plan F.44: the file tools, one row per fake scenario.
 var playtestFileRows = []playtestToolRow{
@@ -144,25 +181,25 @@ var playtestFileRows = []playtestToolRow{
 		asserted: "the card draws NO output body at all: an image read carries no extent this wave, so the `none` form is the settled shape",
 		expected: "A grey `Read` card for `/w/s/shot.png` with a green ok badge and NOTHING below the head: no divider content, no image, no code. The absence is the contract (AgentReadSuccess has no image extent this wave); an image drawn here would be a defect."},
 	{scenario: "write-create", tool: "Write", form: "diff",
-		extra:    hasDiffLines + " && " + noDiagnostics,
-		asserted: "the diff output carries diff lines and no diagnostics section",
-		expected: "A grey `Write` card whose output is a DIFF in which every line is an addition (green, '+'), since a created file's patch is all additions. No diagnostics box under it."},
+		extra:    diffKinds("header", "added") + " && " + noDiagnostics,
+		asserted: "the drawn diff is EXACTLY a hunk header and ONE added line: a created one-line file is one addition, and its terminating newline is not a second, blank one",
+		expected: "A grey `Write` card whose output is a DIFF of exactly two rows: the hunk header `@@ -1,0 +1,1 @@` and one green `+export const fresh = true;`. There is NO blank green `+` row beneath it. No diagnostics under the card."},
 	{scenario: "write-update", tool: "Write", form: "diff",
-		extra:    hasDiffLines + " && " + noDiagnostics,
-		asserted: "the diff output carries diff lines and no diagnostics section",
-		expected: "A grey `Write` card whose output is a DIFF with both removed (red, '-') and added (green, '+') lines. No diagnostics box under it."},
+		extra:    diffKinds("header", "context", "added") + " && " + noDiagnostics,
+		asserted: "the drawn diff is EXACTLY a header, one context line and one added line -- the vendor's own stated patch, which appends without removing anything",
+		expected: "A grey `Write` card whose output is a DIFF of three rows: the header `@@ -4,1 +4,2 @@`, an unpainted context line `export const four = 4;`, and one green `+export const five = 5;`. NO red removal: this update only appends. No diagnostics under the card."},
 	{scenario: "edit", tool: "Edit", form: "diff",
-		extra:    hasDiffLines + " && " + noDiagnostics,
-		asserted: "the diff output carries the hunk's diff lines and no diagnostics section",
-		expected: "A grey `Edit` card whose output is a DIFF hunk with removed and added lines. No diagnostics box under it."},
+		extra:    diffKinds("header", "removed", "added") + " && " + noDiagnostics,
+		asserted: "the drawn diff is EXACTLY a header, the removed line and the added line -- a replacement of one line, with no context around it because the vendor's patch states none",
+		expected: "A grey `Edit` card whose output is a DIFF of three rows: the header, a red `-export const two = 2;` and a green `+export const two = 22;`. No diagnostics under the card."},
 	{scenario: "ide-diagnostics", tool: "Edit", form: "diff",
-		extra:    hasDiffLines + " && " + hasDiagnostics,
-		asserted: "the diff output carries diff lines AND a diagnostics section with at least one diagnostic row hangs off this Edit card",
-		expected: "A grey `Edit` card: a DIFF hunk, and UNDER it a diagnostics box listing the IDE's typescript error against the change. The diagnostics belong to THIS Edit card, not to a separate card."},
+		extra:    diffKinds("header", "context", "removed", "added", "context") + " && " + hasDiagnostics,
+		asserted: "the drawn diff is the vendor's own hunk -- header, a context line, the removal, the addition, a context line -- AND at least one diagnostic row hangs off this Edit card",
+		expected: "A grey `Edit` card: a five-row DIFF (header, context, red removal, green addition, context), and UNDER it a muted diagnostics row reading the file, line, severity and the typescript message. The diagnostics belong to THIS Edit card, not to a separate card."},
 	{scenario: "ide-diagnostics-write", tool: "Write", form: "diff",
-		extra:    hasDiffLines + " && " + hasDiagnostics,
-		asserted: "the diff output carries diff lines AND a diagnostics section with at least one diagnostic row hangs off this card NAMED Write",
-		expected: "A grey `Write` card (NOT an Edit card): an all-additions DIFF, and UNDER it a diagnostics box listing the IDE's typescript error. The diagnostics hang off the Write -- this is the arm a production defect once folded onto Edit."},
+		extra:    diffKinds("header", "added") + " && " + hasDiagnostics,
+		asserted: "the drawn diff is EXACTLY a header and ONE added line (no phantom blank addition for the terminating newline) AND at least one diagnostic row hangs off this card NAMED Write",
+		expected: "A grey `Write` card (NOT an Edit card): a DIFF of the header and one green `+export const created = missing;` with NO blank `+` row after it, and UNDER it a muted diagnostics row naming the typescript error. The diagnostics hang off the Write -- this is the arm a production defect once folded onto Edit."},
 	{scenario: "grep-content", tool: "Grep", form: "lines",
 		extra:    hasTextOutput + " && " + omittedText("3 more lines not shown"),
 		asserted: "the lines output is non-empty and the omitted line reads exactly '3 more lines not shown' -- the EXACT remainder the shim subtracted (5 total, 2 returned)",
@@ -170,7 +207,7 @@ var playtestFileRows = []playtestToolRow{
 	{scenario: "grep-files", tool: "Grep", form: "lines",
 		extra:    hasTextOutput + " && " + noOmitted,
 		asserted: "the lines output is non-empty and NO omitted floor is drawn (every matched file is present)",
-		expected: "A grey `Grep` card listing the one matched file path below the divider and NO 'showing' footer."},
+		expected: "A grey `Grep` card listing the one matched file path below the divider and NO muted footer of any kind beneath it."},
 	{scenario: "grep-count", tool: "Grep", form: "text",
 		extra:    hasTextOutput,
 		asserted: "the text output is a non-empty composed count",
@@ -196,9 +233,11 @@ var playtestWebRows = []playtestToolRow{
 		asserted: "the text opens with '302 Found', keeps the vendor's redirect instruction verbatim, and the input link names the asked-for URL (api.example.com), never the redirect destination",
 		expected: "A grey `WebFetch` card with a green ok badge (a 302 is a served answer, not a failure): the input link reads api.example.com/methods, and the output opens '302 Found' and then carries the vendor's 'REDIRECT DETECTED' text verbatim."},
 	{scenario: "web-search", tool: "WebSearch", form: "links",
-		extra:    hasLinkRows + " && " + hasClickableURL,
-		asserted: "the links output carries link rows, at least one of them a clickable hyperlink",
-		expected: "A grey `WebSearch` card whose input line is the query, and below the divider a list of result rows: two clickable titled links (reference, changelog) and one plain commentary row with no link."},
+		extra: linkRows(3, 2) +
+			` && card.querySelector(".tool-link-row a[data-external-link][href='https://docs.example.com/reference/']") !== null` +
+			` && card.querySelector(".tool-link-row a[data-external-link][href='https://docs.example.com/changelog/']") !== null`,
+		asserted: "the links output draws THREE rows, exactly TWO of them carrying a live href, and those two are the group's own pages (reference, changelog) -- a hit group is flattened into a row per page, never collapsed into one dead row",
+		expected: "A grey `WebSearch` card whose input line is the query `example api reference`, and below the divider THREE rows: two blue clickable titles ('Example API reference', 'Example changelog') and then one plain commentary line. There is no blank or invisible row among them."},
 }
 
 // TestPlaytestFileTools is plan F.44.
