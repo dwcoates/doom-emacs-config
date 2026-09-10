@@ -1728,3 +1728,100 @@ describe("a book whose id this shim minted", () => {
     expect([opens, second.page.entries.length]).toEqual([2, 1]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The one-shot read. THREE OUTCOMES, TOLD APART BY ASKING: a page, an announced
+// book with nothing in it yet, and a store that is down or failing reads. A
+// watch may serve a minted book without asking because the value of that open
+// is its tail; a read stands no tail, so an unasked store would be reported as
+// an empty history the moment the store went away.
+// ---------------------------------------------------------------------------
+describe("readFirstPage on a book whose id this shim minted", () => {
+  /** The refusal the store gives for a book it holds no row for. */
+  function noSuchBook(): storev1.OpenAgentSessionResponse {
+    return create(storev1.OpenAgentSessionResponseSchema, {
+      result: {
+        case: "failure",
+        value: create(storev1.OpenAgentSessionFailureSchema, {
+          detail: "no agent row",
+          kind: {
+            case: "unknownAgent",
+            value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+          },
+        }),
+      },
+    });
+  }
+
+  it("ASKS the store, which the watch-side open of the same book does not", async () => {
+    // Arrange.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return noSuchBook();
+      },
+    });
+    reader.noteAgentMinted("book-1");
+
+    // Act.
+    await reader.readFirstPage(BOOK, 10, () => true);
+
+    // Assert.
+    expect(opens).toBe(1);
+  });
+
+  it("serves an EMPTY page when a HEALTHY store refuses the book the producer vouches for", async () => {
+    // Arrange.
+    const reader = readerOver({ openAgentSession: async () => noSuchBook() });
+    reader.noteAgentMinted("book-1");
+
+    // Act.
+    const page = await reader.readFirstPage(BOOK, 10, () => true);
+
+    // Assert.
+    expect([page.entries.length, page.boundary.case]).toEqual([0, "floor"]);
+  });
+
+  it("refuses store_unavailable when the store CANNOT BE REACHED", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: () => {
+        throw new ConnectError("the store socket is gone", Code.Unavailable);
+      },
+    });
+    reader.noteAgentMinted("book-1");
+
+    // Act, Assert.
+    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+
+  it("refuses store_unavailable when the READ ITSELF FAILS", async () => {
+    // Arrange.
+    const reader = readerOver({
+      openAgentSession: async () =>
+        create(storev1.OpenAgentSessionResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(storev1.OpenAgentSessionFailureSchema, {
+              // The prose says the opposite of the arm on purpose: the arm is
+              // what decides, never the store's wording.
+              detail: "that pointer names no such agent",
+              kind: {
+                case: "storageFailure",
+                value: create(storev1.OpenAgentSessionStorageFailureSchema, {}),
+              },
+            }),
+          },
+        }),
+    });
+    reader.noteAgentMinted("book-1");
+
+    // Act, Assert.
+    await expect(reader.readFirstPage(BOOK, 10, () => true)).rejects.toMatchObject({
+      kind: "store_unavailable",
+    });
+  });
+});

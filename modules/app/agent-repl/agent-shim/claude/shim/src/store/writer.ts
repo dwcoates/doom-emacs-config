@@ -671,6 +671,14 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       reader.noteAgentMinted(agentValue);
     },
 
+    readFirstPage(
+      agent: conversationv1.AgentId,
+      pageSize: number,
+      known?: () => boolean,
+    ): Promise<conversationv1.HistoryPage> {
+      return reader.readFirstPage(agent, pageSize, known);
+    },
+
     readAgentPage(
       agent: conversationv1.AgentId,
       pageSize: number,
