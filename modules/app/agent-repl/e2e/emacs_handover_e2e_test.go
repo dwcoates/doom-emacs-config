@@ -550,3 +550,119 @@ func TestEmacsHandoverTransfersAtFreeness(t *testing.T) {
 		t.Fatalf("the headless workspace %q is held on %q after the handover, want the successor's %q", headless, got, successor)
 	}
 }
+
+// TestEmacsRestartKeepsTheSelectedWorkspace pins the ruling that EMACS OWNS
+// THE USER'S SELECTION ACROSS A DAEMON RESTART.
+//
+// A relaunched daemon has no memory of `current`: it stamps it on whichever
+// workspace re-registered first, and that order is Emacs's walk over its own
+// registry rather than anything the user did. Measured before the fix, with
+// a panel open on the FIRST workspace: the second workspace registered first
+// on the link-up edge, its ref was stamped `current`, the roster push
+// carrying it reached `agent-repl-roster-react-to-current` while Emacs's
+// `agent-repl-host-last-selected-id` still named the old daemon's ref — so
+// it read as a switch REQUEST and the frame ended on the other workspace's
+// magit buffer, with the recovered panel behind a perspective nobody asked
+// for.
+//
+// Both halves are asserted, because the first alone cannot tell a selection
+// that was kept from a frame that merely happened to land right: the current
+// workspace is UNCHANGED across the restart, and the panel's webview is
+// still the buffer on screen.
+//
+// THE ARRANGEMENT IS THE HALF THAT MAKES IT A TEST. The user is put on the
+// workspace that re-registers LAST, read off the link-up walk itself: a user
+// standing on the one offered first is stamped `current` by accident and
+// passes this scenario against the defect.
+func TestEmacsRestartKeepsTheSelectedWorkspace(t *testing.T) {
+	t.Parallel()
+	// Arrange: two registered workspaces, and THE USER STANDS ON THE ONE THAT
+	// RE-REGISTERS LAST. That is the whole adversarial shape of the defect:
+	// `agent-repl-host-on-link-up` walks the registry, so the workspace it
+	// offers FIRST is the one the fresh daemon stamps `current` first, and a
+	// user standing on that one would be carried past the bug by luck. The
+	// walk order is read off Emacs rather than assumed, and the arrangement
+	// fails loudly if it is not the two-workspace shape this test needs.
+	w, e := emGHIWorld(t)
+	one, oneDir := emGHIRegister(t, e, w.Emacs.box, "repo-selection-one")
+	two, twoDir := emGHIRegister(t, e, w.Emacs.box, "repo-selection-two")
+	// The walk carries every live workspace, including the ones with no
+	// project dir (`main`, `none`), which link-up skips; only the two
+	// registered here can be re-registered, so only their relative order
+	// decides who is stamped first.
+	walk := e.EvalStrings(`(agent-repl--live-ws-names)`)
+	registered := make([]string, 0, 2)
+	for _, name := range walk {
+		if name == one || name == two {
+			registered = append(registered, name)
+		}
+	}
+	if len(registered) != 2 {
+		t.Fatalf("the link-up walk %v carries %v of the registered workspaces, want both %q and %q",
+			walk, registered, one, two)
+	}
+	first := registered[len(registered)-1]
+	firstDir := oneDir
+	if first == two {
+		firstDir = twoDir
+	}
+	t.Logf("the user stands on %q, which the link-up walk %v offers LAST", first, walk)
+	emGHISelect(t, e, firstDir, first)
+	emGHIOpenPanel(t, e)
+	pid := e.EvalInt(emHODaemonPIDForm)
+	if pid <= 0 {
+		t.Fatalf("the launcher holds no live daemon process (pid %d) before the restart", pid)
+	}
+
+	// Act: the stop and the ensure as two acts, which is the shape the defect
+	// was measured in — the link goes fully down and Emacs re-registers from
+	// scratch on a daemon that has never heard of these workspaces.
+	e.Eval(`(agent-repl-frontend-daemon-stop)`)
+	e.AwaitEvalFor(daemonStopBound, "the link to go down when the daemon exits",
+		`(if (agent-repl-link-up-p) nil t)`,
+		func(raw json.RawMessage) bool { return !isJSONNull(raw) })
+	e.Eval(`(agent-repl-frontend-daemon-ensure)`)
+	emHOAwaitNewDaemon(t, e, pid)
+	emHOAwaitLinkUp(t, e, "the link to come back on the new daemon")
+	e.AwaitEval("both workspaces to be re-registered on the fresh daemon",
+		emGHIWorkspaceNamesForm,
+		func(raw json.RawMessage) bool { return len(decodeStrings(raw)) == 2 })
+
+	// Assert: the selection is the user's, still. It is read AFTER the
+	// re-registration has settled, which is the window the defect lived in.
+	e.AwaitEval("the user's selection to survive the daemon restart",
+		`(format "%s" (agent-repl--ws-current-name))`,
+		func(raw json.RawMessage) bool {
+			var got string
+			return json.Unmarshal(raw, &got) == nil && got == first
+		})
+	if got := decodeString(e.Eval(`(format "%s" (agent-repl--ws-current-name))`)); got != first {
+		t.Fatalf("the current workspace is %q after the restart, want %q kept", got, first)
+	}
+
+	// Assert: and Emacs RE-ASSERTED it, rather than the frame merely having
+	// landed right. The stamp the fresh daemon makes on its own is whichever
+	// workspace re-registered first, so "the selection is still the user's"
+	// is only a guarantee when Emacs said so again: the re-assertion is read
+	// off Emacs's own log line, and the suppression it holds the frame with
+	// is released again afterwards.
+	e.AwaitTrue("Emacs to re-assert the user's selection on the fresh daemon",
+		`(with-current-buffer "*Messages*"
+                   (and (string-match-p "elisp.host.link-up-reselect ws=" (buffer-string)) t))`)
+	e.AwaitTrue("the frame suppression to be released once the re-select is acknowledged",
+		`(if agent-repl-host-reselect-pending nil t)`)
+
+	// Assert: and the panel is still the buffer on screen, which is what the
+	// user actually loses when the selection moves — the frame ended on the
+	// other workspace's magit buffer.
+	e.AwaitEval("the panel's webview to still be the buffer on screen",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			for _, name := range decodeStrings(raw) {
+				if name == "*agent-frontend-"+first+"*" {
+					return true
+				}
+			}
+			return false
+		})
+}
