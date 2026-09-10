@@ -371,7 +371,7 @@ func TestDiagnosticsAmendTheSettledCardTheyFollow(t *testing.T) {
 	}
 }
 
-func TestDiagnosticsBeforeATerminalAreRefusedLoudly(t *testing.T) {
+func TestDiagnosticsBeforeItsCardAreRecordedAtDebug(t *testing.T) {
 	// Arrange: no card has settled.
 	h := newHarness(t)
 
@@ -384,8 +384,11 @@ func TestDiagnosticsBeforeATerminalAreRefusedLoudly(t *testing.T) {
 	if rows := h.rows(rootFeed()); len(rows) != 0 {
 		t.Fatalf("rows = %d, want none", len(rows))
 	}
-	if !h.hasRecord("warn", "daemon.feed.diagnostics_without_card") {
-		t.Fatalf("records = %+v, want a WARN daemon.feed.diagnostics_without_card", h.records())
+	if !h.hasRecord("debug", "daemon.feed.diagnostics_without_card") {
+		t.Fatalf("records = %+v, want a DEBUG daemon.feed.diagnostics_without_card", h.records())
+	}
+	if h.hasRecord("warn", "daemon.feed.diagnostics_without_card") {
+		t.Fatalf("records = %+v, want no WARN daemon.feed.diagnostics_without_card", h.records())
 	}
 }
 

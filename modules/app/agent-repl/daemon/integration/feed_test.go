@@ -700,6 +700,54 @@ func TestWriteToolCardDrawsDiffLines(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsBeforeTheirWriteCardProduceNoWarning(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-diagnostics-before-write", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the transcript-plane diagnostics arrive before the stream-plane card.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("write-diagnostics-first"),
+		Item: &conversationv1.AgentActivity_Write{Write: &conversationv1.AgentWrite{Result: &conversationv1.AgentWrite_Diagnostics{
+			Diagnostics: &conversationv1.AgentDiagnosticsReport{Files: []*conversationv1.AgentDiagnosticsFile{{
+				Path: "new.go",
+				Diagnostics: []*conversationv1.AgentDiagnostic{{
+					Severity:  conversationv1.AgentDiagnosticSeverity_AGENT_DIAGNOSTIC_SEVERITY_WARNING,
+					Message:   "unused result",
+					StartLine: 6,
+				}},
+			}}},
+		}}},
+	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("write-diagnostics-first"),
+		Item: &conversationv1.AgentActivity_Write{Write: &conversationv1.AgentWrite{Result: &conversationv1.AgentWrite_Success{
+			Success: &conversationv1.AgentWriteSuccess{
+				Path:      &conversationv1.ReadPath{Path: "new.go"},
+				Outcome:   &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}},
+				Patch:     []*conversationv1.FilePatchHunk{{Lines: []string{"package main"}}},
+				SettledAt: settledAt(2),
+			},
+		}}},
+	}))
+
+	// Assert: the retained attachment lands on the card without a WARN record.
+	row := awaitRow(t, f, tail, "the write card carrying its early diagnostics", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetReturned().GetDiagnostics() != nil
+	})
+	lines := row.GetActivity().GetSimpleToolCall().GetReturned().GetDiagnostics().GetLines()
+	if len(lines) != 1 || lines[0] != "new.go:7 · warning · unused result" {
+		t.Fatalf("the write card's diagnostics = %v, want the retained transcript attachment", lines)
+	}
+	for _, record := range f.d.WorkspaceLog(f.ws.GetDir(), "daemon") {
+		if strings.EqualFold(record.Level, "warn") && record.Operation == "daemon.feed.diagnostics_without_card" {
+			t.Fatalf("out-of-order diagnostics record = %+v, want no WARN", record)
+		}
+	}
+}
+
 func TestEditToolCardDrawsDiffLines(t *testing.T) {
 	t.Parallel()
 	// Arrange
