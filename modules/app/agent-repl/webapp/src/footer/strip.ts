@@ -90,7 +90,7 @@ import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict
 import { protoArmName } from "../vocab.js";
 import type { FooterPanel } from "./expanded.js";
 import { activityDatumClass, allowanceStatusClass, statusArmClass } from "./tones.js";
-import { drawTurnStopControl } from "./stop.js";
+import type { StopControls } from "./stop.js";
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
 export const IDLE_CLOCK_LABEL = "--";
@@ -102,6 +102,15 @@ export interface StripDeps {
   selection: FooterPanel | null;
   /** Open a panel, or close the open one. The footer owns the state. */
   onSelect(panel: FooterPanel): void;
+  /**
+   * The footer's stop controls, built once per mount.
+   *
+   * HANDED IN RATHER THAN BUILT HERE, because a stop's own answer is drawn at
+   * the control and the footer redraws whole on every push -- see
+   * `StopControls`. A control rebuilt per draw loses the answer it was just
+   * given.
+   */
+  readonly stops: StopControls;
 }
 
 /**
@@ -845,7 +854,7 @@ export function drawFooterClock(u: FooterClock, deps: StripDeps): HTMLElement {
   tick(label, deps.ctx.ticker, (nowMs) => {
     label.textContent = formatTickedElapsed(nowMs - startedAtMs);
   });
-  cell.appendChild(drawTurnStopControl(deps.ctx));
+  cell.appendChild(deps.stops.turn);
   return cell;
 }
 
