@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"image/color"
 	"testing"
 )
 
@@ -102,10 +103,92 @@ func TestPlaytestPageStreamsAndFeedTail(t *testing.T) {
 		"a feed container other than the root holds rows, so the bubble's OWN tail is served alongside "+
 			"the root's",
 		"The feed carries a SUBAGENT BUBBLE whose head names the commission, beneath the `!subagent` "+
-			"prompt bubble, and the two bubbles from the previous step are still above it. "+
-			"WHAT THIS PICTURE DOES NOT SETTLE: whether the caret visibly OPENS the bubble. The "+
-			"assertion above proves a non-root feed container is carrying rows — the second tail is "+
-			"served, which is this playbook's whole claim — but the bubble has been observed still "+
-			"drawn collapsed at this point, and `data-expanded` never became true. That is the "+
-			"webapp's own bubble toggle and is recorded as an open question, not asserted here.")
+			"prompt bubble, and the two bubbles from the previous step are still above it. The bubble is "+
+			"drawn OPEN, with its own nested rows beneath the head. "+
+			"WHAT THIS PICTURE DOES NOT SETTLE: whether `data-expanded` is how the bubble spells that. "+
+			"The assertion above proves a non-root feed container is carrying rows — the second tail is "+
+			"served, which is this playbook's whole claim — and the bubble was previously reported here "+
+			"as still drawn COLLAPSED, which the capture's paint gate has since shown to have been a "+
+			"stale picture rather than the product. Which attribute carries the open state is the "+
+			"webapp's own business and is not asserted here.")
+
+	// ---------------------------------------------------------------------
+	// AND THE CAPTURE MECHANISM'S OWN PRECONDITION: A PICTURE IS OF THE
+	// CURRENT DOM.
+	// ---------------------------------------------------------------------
+	//
+	// Every playbook above and every owner's below rests on this and none of
+	// them can see it: an assertion reads the DOM, and the picture beside it
+	// is of the GLASS. Those came apart -- see playtestPaintFrames -- and the
+	// failure is invisible from inside a playbook, because the stale screen
+	// is perfectly still and the capture reports it settled.
+	//
+	// So this proves it MECHANICALLY, on the one thing about a picture that
+	// can be asserted rather than reviewed. The page paints a solid region no
+	// part of the product ever draws, the DOM says so, a capture is taken
+	// IMMEDIATELY, and the decoded pixels are counted. Without the paint
+	// gate this capture photographs the feed as it was a moment earlier and
+	// the count is zero.
+	s.awaitInPage(t, "the page to paint a solid proof region over its whole viewport",
+		`(function () {
+                   var el = document.createElement("div");
+                   el.id = `+jsString(paintProofID)+`;
+                   el.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:" + `+
+			jsString(paintProofCSS)+`;
+                   document.body.appendChild(el);
+                   return document.getElementById(`+jsString(paintProofID)+`) !== null;
+                 })()`)
+	img := p.capture("dom-reaches-the-glass",
+		"the page appended a full-viewport `"+paintProofCSS+"` region and the DOM carries it",
+		"the decoded capture carries that color in quantity, so the picture is of the DOM this step "+
+			"just made and not of the page state before it",
+		"THE WEBVIEW IS ONE SOLID MAGENTA RECTANGLE, edge to edge, with the Emacs chrome around it -- "+
+			"the tab bar, the mode lines and the composer window -- all still drawn. This is the capture "+
+			"mechanism photographing itself: the magenta was put into the document a moment before the "+
+			"picture was taken, so a picture WITHOUT it is a picture of a stale page, and a picture with "+
+			"it but with no Emacs chrome is the double-buffer parity artifact.")
+	exact := countColorWithin(img, paintProofColor, 0)
+	near := countColorWithin(img, paintProofColor, paintProofTolerance)
+	t.Logf("playtest phase paint-proof exact=%d within%d=%d pixels of %v",
+		exact, paintProofTolerance, near, paintProofColor)
+	if near < paintProofFloor {
+		t.Errorf("the capture carries %d pixels within %d of %v, want at least %d: "+
+			"the picture is not of the DOM the step before it asserted",
+			near, paintProofTolerance, paintProofColor, paintProofFloor)
+	}
 }
+
+// The paint proof's own region, and why each number is the one it is.
+const (
+	// paintProofID is the element the page appends. It is named so the
+	// assertion can read it back rather than trusting the append.
+	paintProofID = "agent-repl-playtest-paint-proof"
+
+	// paintProofCSS is a color NO part of the product draws, so a pixel
+	// carrying it can only have come from this step. The webapp's own
+	// palette is greys, blues and the status hues; magenta is in none of
+	// them.
+	paintProofCSS = "rgb(255, 0, 255)"
+
+	// paintProofTolerance allows for the region's own antialiased edges and
+	// for WebKit's color handling of a CSS color on its way to the
+	// framebuffer. MEASURED: 957,676 pixels decode EXACTLY magenta and
+	// 957,702 decode within 8 of it, so the tolerance is worth 26 pixels of
+	// edge and the two counts are logged side by side -- a run where they
+	// diverge says so rather than hiding behind the wider one.
+	paintProofTolerance = 8
+
+	// paintProofFloor is how many such pixels a capture must carry.
+	//
+	// MEASURED: the panel's webview at this 1280x1024 geometry decodes
+	// 957,676 magenta pixels when the region is on the glass, and the defect
+	// this proves against puts ZERO of them there -- the picture is of the
+	// page as it was before the region existed. The floor is 100,000, a tenth
+	// of the measured region, so a narrower panel, a scrollbar over part of
+	// it or a differently laid-out frame cannot make it fail, while the
+	// distance to the failure it catches is the whole count.
+	paintProofFloor = 100_000
+)
+
+// paintProofColor is paintProofCSS as pixels.
+var paintProofColor = color.RGBA{R: 0xff, G: 0x00, B: 0xff, A: 0xff}
