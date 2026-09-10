@@ -358,9 +358,9 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 }
 
 // A STATUS-ONLY UPDATE MUST NOT BLANK THE CHECKLIST. `TaskUpdate` carries no
-// subject when it names only a status, so the act's state states an empty one
-// -- and applying that over the create's own subject drew every checklist row
-// as a bare glyph with no words beside it, which is what the G52 playbook
+// subject when it names only a status, so the act's state leaves the field
+// UNSET -- and applying that over the create's own subject drew every checklist
+// row as a bare glyph with no words beside it, which is what the G52 playbook
 // photographed. The same act states no STATUS either when the tracker has not
 // answered it, and reading that as `pending` knocked a running task back to
 // unstarted.
@@ -415,6 +415,30 @@ func TestFooterChecklistGainsNoRowForATaskNobodyNamed(t *testing.T) {
 		}
 		return rows[0].GetSubject().GetText() == "Land the converter" &&
 			rows[1].GetSubject().GetText() == "Land the store writer"
+	})
+}
+
+// A SUBJECT STATED EMPTY IS STILL A SUBJECT, and presence is the whole reason
+// the daemon can tell it from one an act never named. The producers state it
+// this way end to end, so the wire's own distinction is asserted here rather
+// than only in the resolver's unit tests.
+func TestFooterChecklistTakesASubjectAnActStatesEmpty(t *testing.T) {
+	t.Parallel()
+	// Arrange: a created task with a subject.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
+	awaitFooter(t, f, footer, "the checklist with its one named task", func(v *frontendv1.FooterView) bool {
+		return len(v.GetExpanded().GetTasks().GetRows()) == 1
+	})
+
+	// Act: an act that STATES an empty subject.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-2", "t-1", "", false)))
+
+	// Assert
+	awaitFooter(t, f, footer, "the checklist row taking the stated empty subject", func(v *frontendv1.FooterView) bool {
+		rows := v.GetExpanded().GetTasks().GetRows()
+		return len(rows) == 1 && rows[0].GetSubject().GetText() == ""
 	})
 }
 
@@ -1210,7 +1234,7 @@ func ftUsageActivity(id string, usage *conversationv1.TokenUsage) *conversationv
 
 // ftTaskActivity builds a task-tracker act creating one task at a status.
 func ftTaskActivity(activityIDValue, taskID, subject string, completed bool) *conversationv1.AgentActivity {
-	state := &conversationv1.AgentTaskState{Subject: subject}
+	state := &conversationv1.AgentTaskState{Subject: &subject}
 	if completed {
 		state.Status = &conversationv1.AgentTaskState_Completed{Completed: &conversationv1.AgentTaskCompleted{}}
 	} else {
@@ -1227,7 +1251,8 @@ func ftTaskActivity(activityIDValue, taskID, subject string, completed bool) *co
 }
 
 // ftTaskRunning moves a task to running, naming NO subject -- which is what a
-// `TaskUpdate(status)` carries, the tracker echoing no subject of its own.
+// `TaskUpdate(status)` carries, the tracker echoing no subject of its own. The
+// field is UNSET rather than empty, which is what presence is for.
 func ftTaskRunning(activityIDValue, taskID string) *conversationv1.AgentActivity {
 	return &conversationv1.AgentActivity{
 		ActivityId: activityID(activityIDValue),

@@ -184,17 +184,16 @@ func (r *resolver) applyBash(s *wsState, unit string, bash *conversationv1.Agent
 //     state -- so every subject-only or blocked-by-only update knocked a
 //     running task back to unstarted. A row that never existed before still
 //     starts pending, because "recorded and not begun" IS what a new entry is.
-//   - AN EMPTY SUBJECT IS NOT A SUBJECT. A `TaskUpdate` that names only a
+//   - AN UNSTATED SUBJECT IS NOT A SUBJECT. A `TaskUpdate` that names only a
 //     status carries no subject at all, and this overwrote the one the create
 //     established -- so the whole checklist drew as blank lines beside its
 //     glyphs, observed in the G52 playbook.
 //
-// THE SECOND GUARD IS A SENTINEL AND SHOULD NOT HAVE TO BE. `AgentTaskState`
-// gives `owner` presence and `subject`/`description` none, so an act that
-// names no subject is indistinguishable on the wire from one that names an
-// empty one. Filed as a proto need by owner 16; until it lands, the empty
-// string is read as "not stated", which is the only reading that does not
-// erase a subject the tracker still holds.
+// PRESENCE IS WHAT SETTLES THE SECOND ONE, and it is now on the wire:
+// `AgentTaskState.subject` is `optional`, so an act that names no subject is
+// UNSET and an act that names an empty one is SET to "". The two are read
+// apart here rather than guessed at -- absent leaves the checklist's own
+// subject standing, present installs what the act states, whatever it states.
 func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversationv1.AgentTaskAct) {
 	id := act.GetTask().GetValue()
 	state := act.GetState()
@@ -202,7 +201,7 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 		delete(s.tasks, id)
 		return
 	}
-	subject := state.GetSubject()
+	subject := state.Subject
 	row, ok := s.tasks[id]
 	if !ok {
 		// A CHECKLIST ENTRY IS A SUBJECT, so an act that names none cannot
@@ -218,7 +217,7 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 		// It is stated rather than dropped quietly, because the other way to
 		// reach here is a footer that missed the create's own frame, and that
 		// is worth seeing in the log.
-		if subject == "" {
+		if subject == nil {
 			r.logOf(ws, s).Debug("daemon.footer.task_act_unheld",
 				"a task act names no subject and no entry is held for it; the checklist is unchanged",
 				dlog.Context{"task": id})
@@ -227,8 +226,8 @@ func (r *resolver) applyTaskAct(ws ids.WorkspaceID, s *wsState, act *conversatio
 		row = &taskRow{id: id, order: s.nextOrder(), status: taskPending}
 		s.tasks[id] = row
 	}
-	if subject != "" {
-		row.subject = subject
+	if subject != nil {
+		row.subject = *subject
 	}
 	switch status := state.GetStatus().(type) {
 	case *conversationv1.AgentTaskState_Running:
