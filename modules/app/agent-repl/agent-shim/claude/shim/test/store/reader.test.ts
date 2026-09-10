@@ -1040,6 +1040,36 @@ describe("the deferred book, against a hand-built store", () => {
     ]).toEqual(["unit-a", "unit-b"]);
   });
 
+  it("ends the tail on a conclusion through a pointer it served out of the opening page", async () => {
+    // Arrange: a book deferred until a write lands, whose rows then arrive in
+    // the real session's OPENING PAGE rather than down its tail. That page is
+    // served by the deferred wrapper, so the inner session never sees those
+    // pointers go out — and a teardown concluding through the book's head used
+    // to leave this tail standing for a row that had already been handed over.
+    let opens = 0;
+    const reader = readerOver({
+      openAgentSession: async () => {
+        opens += 1;
+        return opens <= 2 ? refusingOpen() : opened(floorPage([storedLine("1", "unit-a")]), WATCH);
+      },
+      watchAgentSession: () => standingWatch([]),
+    });
+    const session = await reader.openAgentPage(BOOK, 10, undefined, () => true);
+    const iterator = session.tail[Symbol.asyncIterator]();
+    const first = iterator.next();
+    reader.noteAgentRows(["book-1"]);
+    const served = await first;
+    expect(unitOf(served.value as conversationv1.HistoryEntryAt)).toEqual("unit-a");
+
+    // Act: the teardown concludes through the head of the book, which is the
+    // pointer just served.
+    session.concludeThrough(create(conversationv1.HistoryPointerSchema, { value: "1" }));
+
+    // Assert: the tail ENDS, rather than standing out the conclusion budget
+    // the shim's KillSession bounds it with.
+    expect((await iterator.next()).done).toBe(true);
+  });
+
   it("ends the tail, serving nothing, when the session is closed while the book is being opened", async () => {
     // Arrange.
     let opens = 0;
