@@ -633,7 +633,7 @@ func (r *resolver) drawDetachedShell(s *wsState, work *conversationv1.DetachedWo
 	r.publishShell(s, workID, sh, settled)
 	log.Debug("daemon.feed.detached_shell_row",
 		"a detached shell's bubble was upserted",
-		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": settled != nil})
+		dlog.Context{"work": workID, "spool_bytes": len(sh.spool), "settled": sh.settled != nil})
 }
 
 // spoolCap is how much of a spool's tail the daemon carries. The body is a
@@ -655,8 +655,15 @@ func (r *resolver) publishShell(s *wsState, workID string, sh *shellState, settl
 		}
 		shell.Spool = spool
 	}
+	// A SETTLED RUN STAYS SETTLED. The ending is remembered on the run rather
+	// than read off the frame in hand, because every push after the terminal —
+	// a replayed announcement, the other plane's spool replay, a beat — carries
+	// no ending at all and would otherwise draw the finished run live again.
 	if settled != nil {
-		shell.State = &frontendv1.FeedShell_Settled{Settled: settled}
+		sh.settled = settled
+	}
+	if sh.settled != nil {
+		shell.State = &frontendv1.FeedShell_Settled{Settled: sh.settled}
 	} else {
 		live := &frontendv1.FeedShellLive{}
 		if sh.lastProgressMs > 0 {

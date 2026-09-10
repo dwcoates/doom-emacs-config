@@ -132,6 +132,23 @@ export interface ToolConverter {
   /** The unit's `progress` arm, for the kinds that declare one. */
   progress?(beat: conversationv1.AgentToolCallProgress): conversationv1.AgentActivity["item"];
   /**
+   * The unit's terminal arm for a call THE TURN'S STOP CUT SHORT, or `undefined`
+   * when this kind can state no such ending.
+   *
+   * A stopped turn returns no `tool_result` for the call it landed inside — the
+   * vendor's own record of it is the bare `[Request interrupted by user]` line
+   * — so nothing else will ever settle the unit, and a card left on its running
+   * arm goes on telling the reader that work is in flight inside a turn that
+   * ended. This is the producer's side of that: the shim is the one thing that
+   * knows both that the turn was stopped and which calls were open when it was.
+   *
+   * NOTHING IS INVENTED HERE. The cut states only what happened — the user
+   * stopped it — never an exit status, an output or a duration the call never
+   * reported. A kind whose proto has no vocabulary for being cut short omits
+   * this, and its unit stays open exactly as it did before.
+   */
+  cut?(call: PendingCall, atMs: number): conversationv1.AgentActivity["item"] | undefined;
+  /**
    * What to keep remembered when {@link settle} DECLINED to conclude the unit.
    *
    * The declining result is the last time its own fields are seen, so a kind
@@ -220,6 +237,14 @@ export interface CallRegistry {
   take(toolUseId: string): PendingCall | undefined;
   /** Look at a call without settling it (a progress beat). */
   peek(toolUseId: string): PendingCall | undefined;
+  /**
+   * Every call still in flight, oldest first, without settling any of them.
+   *
+   * The turn's END is the one moment the SET matters rather than one call: a
+   * stop cuts whatever was open, and nothing else can ask which calls those
+   * were. Answers a snapshot, so a caller may settle what it iterates.
+   */
+  open(): readonly PendingCall[];
 }
 
 export function createCallRegistry(): CallRegistry {
@@ -244,6 +269,7 @@ export function createCallRegistry(): CallRegistry {
       return call;
     },
     peek: (toolUseId) => calls.get(toolUseId),
+    open: () => [...calls.values()],
   };
 }
 
@@ -487,4 +513,55 @@ export function convertProgressBeat(
       toolActivity(call, converter.progress(toolProgress(atMs))),
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// The stop
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal frames for every call the turn's STOP left open.
+ *
+ * Each cut call is TAKEN out of the registry, so a late result cannot settle a
+ * unit twice, and each entry is written under its OWN block ordinal: the
+ * deterministic write id is minted from the source coordinates, so several
+ * frames derived from one vendor record must differ somewhere or the store
+ * absorbs all but the first as duplicates of it.
+ *
+ * A kind that states no {@link ToolConverter.cut} is LEFT ALONE and left
+ * remembered: its unit stays open, which is the shape it had before, rather
+ * than being retired into silence where nothing could ever settle it.
+ */
+export function cutOpenCalls(
+  converters: ReadonlyMap<string, ToolConverter>,
+  context: FoldContext,
+  registry: CallRegistry,
+  origin: Omit<FrameOrigin, "discriminator" | "agentId" | "blockIndex">,
+): readonly PersistEntry[] {
+  const entries: PersistEntry[] = [];
+  for (const call of registry.open()) {
+    const disposition = dispositionOf(converters, call.toolName);
+    if (disposition.case !== "modelled" || disposition.converter.cut === undefined) continue;
+    const converter = disposition.converter;
+    const item = converter.cut?.(call, context.nowMs());
+    if (item === undefined) continue;
+    registry.take(call.toolUseId);
+    LOGGER.log(
+      { tool: call.toolName, kind: converter.kind, tool_use_id: call.toolUseId },
+      "the turn was stopped with this call still open; its unit is settled as cut short",
+    );
+    entries.push(
+      activityEntry(
+        context,
+        {
+          ...origin,
+          agentId: call.agentId,
+          blockIndex: entries.length,
+          discriminator: `activity.${converter.kind}.interrupted`,
+        },
+        toolActivity(call, item),
+      ),
+    );
+  }
+  return entries;
 }

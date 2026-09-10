@@ -257,18 +257,27 @@ func TestGoldenRealTranscriptProducesOnlyServableAndDeclaredResidue(t *testing.T
 	}
 }
 
+// The captured session's two Bash calls, and they are NOT alike: the first was
+// LAUNCHED INTO THE BACKGROUND (its receipt carries `backgroundTaskId`
+// "bbkqcvn8k" and an empty stdout) and the second ran to completion. Named here
+// because the difference is the point of the test below.
+const (
+	capturedMovedBashCall     = "toolu_01HhE2ReMxc7nhxD3LsRs53L"
+	capturedCompletedBashCall = "toolu_01BkZUVG3kLG2cH5A2zWBzSx"
+)
+
 func TestGoldenRealTranscriptJoinsBothBashResultsToTheirCalls(t *testing.T) {
-	// Arrange. The captured session makes two Bash calls and both return in the
-	// same file, so both must settle as their OWN units rather than degrading to
-	// orphan residue.
+	// Arrange. Both results return in the same file, so both must be JOINED to
+	// their calls rather than degrading to orphan residue — and the join is what
+	// this is about, not the arm each one reaches.
 	entries := driveRealTranscript(t)
 
 	// Act.
-	settled := 0
+	settled := map[string]bool{}
 	orphans := 0
 	for _, e := range entries {
-		if activityOf(e).GetBash().GetSuccess() != nil {
-			settled++
+		if a := activityOf(e); a.GetBash().GetSuccess() != nil {
+			settled[a.GetActivityId().GetValue()] = true
 		}
 		if v := e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific(); v != nil && v.GetKind() == "orphan_tool_result" {
 			orphans++
@@ -276,8 +285,16 @@ func TestGoldenRealTranscriptJoinsBothBashResultsToTheirCalls(t *testing.T) {
 	}
 
 	// Assert.
-	if settled != 2 {
-		t.Fatalf("settled bash units = %d, want 2 (the join from result to call regressed)", settled)
+	if !settled[capturedCompletedBashCall] {
+		t.Fatalf("the completed command %q settled no unit (the join from result to call regressed)", capturedCompletedBashCall)
+	}
+	// A BACKGROUNDED COMMAND DID NOT END, IT MOVED. Its receipt is the same
+	// shape a finished command's is — empty output plus a task id — so settling
+	// on it drew a command that ran and printed nothing, over the top of the
+	// live card the stream plane had already published for the same unit. The
+	// detached-work frames naming this unit are what settle it.
+	if settled[capturedMovedBashCall] {
+		t.Fatalf("the backgrounded command %q settled a unit whose work had only MOVED", capturedMovedBashCall)
 	}
 	if orphans != 0 {
 		t.Fatalf("orphan tool results = %d, want 0 in a file carrying both calls and both results", orphans)

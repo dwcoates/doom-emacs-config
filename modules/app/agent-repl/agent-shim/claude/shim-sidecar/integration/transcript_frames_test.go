@@ -211,6 +211,11 @@ func TestCapturedTranscriptCarriesUsageOnOneUnitPerApiResponse(t *testing.T) {
 // TestToolResultUpsertsItsCallRatherThanAddingARow asserts a tool RETURN
 // re-emits its unit's settled state under the SAME upsert_key, so the book
 // holds one line for the call and the write stream holds two entries for it.
+//
+// THE SUBJECT IS THE SECOND BASH CALL, and deliberately: the first one was
+// LAUNCHED INTO THE BACKGROUND, and a command that moved rather than ended
+// produces no terminal on this plane at all (convert/exempt.go settlesLater),
+// so it can prove nothing about upserting.
 func TestToolResultUpsertsItsCallRatherThanAddingARow(t *testing.T) {
 	t.Parallel()
 	// Arrange.
@@ -223,8 +228,8 @@ func TestToolResultUpsertsItsCallRatherThanAddingARow(t *testing.T) {
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	writeCapturedTranscript(t, tree, captured)
-	wantKey := "activity:" + capturedBashCall1
-	fake.awaitEntry(ctx, t, "the settled state of "+capturedBashCall1, func(e *storev1.StoreEntry) bool {
+	wantKey := "activity:" + capturedBashCall2
+	fake.awaitEntry(ctx, t, "the settled state of "+capturedBashCall2, func(e *storev1.StoreEntry) bool {
 		return e.GetUpsertKey() == wantKey && countUpsertKey(fake.Entries(), wantKey) >= 2
 	})
 
