@@ -364,7 +364,7 @@ describe("fast mode", () => {
 });
 
 describe("account usage", () => {
-  function accountUsage(observedAtMs: bigint, utilization: number): conversationv1.SessionUpdate {
+  function accountUsage(observedAtMs: bigint, utilizationPercent: number): conversationv1.SessionUpdate {
     return create(conversationv1.SessionUpdateSchema, {
       update: {
         case: "accountUsage",
@@ -375,7 +375,7 @@ describe("account usage", () => {
             case: "available",
             value: create(conversationv1.SessionAccountUsageAvailableSchema, {
               fiveHour: create(conversationv1.SessionUsageWindowSchema, {
-                utilization,
+                utilizationPercent,
                 resetsAtMs: 1_700_000_000_000n,
               }),
             }),
@@ -392,7 +392,7 @@ describe("account usage", () => {
   // closed and reprobed — the whole of a fresh session's usage line, missing.
   it("is replayed to a consumer that joins after the session probed it", async () => {
     const pushes = new SessionPushes(() => 1);
-    pushes.push(accountUsage(1n, 0.41));
+    pushes.push(accountUsage(1n, 41));
 
     const opening = await take(pushes.subscribe(), 2);
 
@@ -401,9 +401,9 @@ describe("account usage", () => {
 
   it("goes out again for a later sample, which never repeats an instant", () => {
     const pushes = new SessionPushes(() => 1);
-    pushes.push(accountUsage(1n, 0.41));
+    pushes.push(accountUsage(1n, 41));
 
-    expect(pushes.push(accountUsage(2n, 0.41))).toBe(true);
+    expect(pushes.push(accountUsage(2n, 41))).toBe(true);
   });
 });
 

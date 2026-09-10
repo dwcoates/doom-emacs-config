@@ -1361,7 +1361,7 @@ export function createFakeQuery(
         ? fakeContextUsage(model, 30_000 + turn * 20_000, turn)
         : fakeContextUsage(model, 30_000 + turn * 1_000),
     usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (): Promise<AccountUsageLike> =>
-      fakeAccountUsage(accountUsageArm),
+      fakeAccountUsage(accountUsageArm, nowMs()),
     accountInfo: async (): Promise<AccountInfoLike> => FAKE_ACCOUNT_INFO,
     initializationResult: async (): Promise<InitializationResultLike> => FAKE_INITIALIZATION_RESULT,
 

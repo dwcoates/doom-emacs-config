@@ -24,7 +24,11 @@ import {
   TURN_GATE_TEXT_ENV,
 } from "../../src/fake/index.js";
 import type { CanUseToolLike, SdkUserMessage } from "../../src/sdk/types.js";
-import { driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
+import {
+  FAKE_SESSION_WINDOW_RESETS_IN_MS,
+  FAKE_WEEKLY_WINDOW_RESETS_IN_MS,
+} from "../../src/fake/catalogs.js";
+import { HARNESS_NOW_MS, driveScenario, ofType, recordsOfType, theResult } from "./harness.js";
 
 const ALLOW: CanUseToolLike = async (_n, input) =>
   ({ behavior: "allow", updatedInput: input });
@@ -522,9 +526,10 @@ describe("getContextUsage", () => {
 });
 
 describe("the account-usage probe", () => {
-  const usage = async (prompts: string[]) => {
+  const usage = async (prompts: string[], nowMs?: () => number) => {
     let answer: unknown;
     await driveScenario(prompts, {
+      ...(nowMs === undefined ? {} : { opts: { nowMs } }),
       during: async (query) => {
         await new Promise((r) => setImmediate(r));
         await new Promise((r) => setImmediate(r));
@@ -538,6 +543,40 @@ describe("the account-usage probe", () => {
       subscription_type?: string;
     };
   };
+
+  it("resets the SESSION window a fixed offset after the fake's own now", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-available"]);
+
+    // Assert. The instant is stated as an offset from the injected clock, so a
+    // sampled countdown is always in the future rather than reading `0m`.
+    expect(answer.rate_limits?.five_hour).toMatchObject({
+      resets_at: new Date(HARNESS_NOW_MS + FAKE_SESSION_WINDOW_RESETS_IN_MS).toISOString(),
+    });
+  });
+
+  it("resets the WEEKLY window a fixed offset after the fake's own now", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-available"]);
+
+    // Assert
+    expect(answer.rate_limits?.seven_day).toMatchObject({
+      resets_at: new Date(HARNESS_NOW_MS + FAKE_WEEKLY_WINDOW_RESETS_IN_MS).toISOString(),
+    });
+  });
+
+  it("still resets AFTER now for a sample observed at a later clock", async () => {
+    // Arrange. A clock a full year past the harness's own: an absolute fixture
+    // would have gone stale here, an offset one cannot.
+    const later = HARNESS_NOW_MS + 365 * 24 * 60 * 60 * 1_000;
+
+    // Act
+    const answer = await usage(["!usage-available"], () => later);
+
+    // Assert
+    const window = answer.rate_limits?.five_hour as { resets_at: string };
+    expect(Date.parse(window.resets_at) - later).toBe(FAKE_SESSION_WINDOW_RESETS_IN_MS);
+  });
 
   it("answers every window when the service is available", async () => {
     // Arrange + Act
@@ -626,7 +665,16 @@ describe("the account-usage probe", () => {
     expect({
       opus: answer.rate_limits?.seven_day_opus,
       fiveHour: answer.rate_limits?.five_hour,
-    }).toEqual({ opus: null, fiveHour: { utilization: 41, resets_at: "2026-08-29T20:00:00.000Z" } });
+    }).toEqual({
+      opus: null,
+      fiveHour: {
+        utilization: 41,
+        // PINNED AS AN OFFSET, not as a literal instant: the fixture's reset is
+        // stated relative to the fake's own clock so a sampled window always
+        // resets in the FUTURE. The clock is injected, so this is still exact.
+        resets_at: new Date(HARNESS_NOW_MS + FAKE_SESSION_WINDOW_RESETS_IN_MS).toISOString(),
+      },
+    });
   });
 
   it("answers a null UTILIZATION when the figure is unavailable", async () => {
