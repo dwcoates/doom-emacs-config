@@ -363,6 +363,50 @@ describe("fast mode", () => {
   });
 });
 
+describe("account usage", () => {
+  function accountUsage(observedAtMs: bigint, utilization: number): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "accountUsage",
+        value: create(conversationv1.SessionAccountUsageSchema, {
+          observedAtMs,
+          subscriptionType: "max",
+          outcome: {
+            case: "available",
+            value: create(conversationv1.SessionAccountUsageAvailableSchema, {
+              fiveHour: create(conversationv1.SessionUsageWindowSchema, {
+                utilization,
+                resetsAtMs: 1_700_000_000_000n,
+              }),
+            }),
+          },
+        }),
+      },
+    });
+  }
+
+  // THE DEFECT THIS PINS: the session probes the account's usage ONCE at
+  // StartSession, and the daemon opens its standing WatchSession only after
+  // StartSession has answered. With this arm unreplayed that first sample
+  // reached nobody, so the footer drew no allowance figure until a turn
+  // closed and reprobed — the whole of a fresh session's usage line, missing.
+  it("is replayed to a consumer that joins after the session probed it", async () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(accountUsage(1n, 0.41));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]?.update.case).toBe("accountUsage");
+  });
+
+  it("goes out again for a later sample, which never repeats an instant", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(accountUsage(1n, 0.41));
+
+    expect(pushes.push(accountUsage(2n, 0.41))).toBe(true);
+  });
+});
+
 describe("a consumer that goes away", () => {
   it("ends the stream when the iterator's own return() is called directly", async () => {
     const pushes = new SessionPushes(() => 1);
