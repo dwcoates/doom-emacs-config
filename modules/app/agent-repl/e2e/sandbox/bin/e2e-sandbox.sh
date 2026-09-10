@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build and run the agent-repl cross-system e2e sandbox.
 #
-#   e2e-sandbox.sh build [--allow-unpinned] [--no-cache]
+#   e2e-sandbox.sh build [--allow-unpinned] [--no-cache] [--force]
 #   e2e-sandbox.sh run   [--] [--dir <module-relative-path>] <command> [args...]
 #   e2e-sandbox.sh shell
 #   e2e-sandbox.sh preflight
@@ -159,12 +159,156 @@ load_pins() {
   log "pins: arch=$arch from $pins"
 }
 
+# --- the source stamp and the build lock ----------------------------------
+#
+# WHY. Five `build` runs at once thrashed one buildkit cache, and a build from
+# a STALE checkout re-tagged the shared `:latest` over a good image, so a suite
+# then ran against sandbox sources nobody was looking at. Two structural
+# fixes, and neither is advisory:
+#
+#   * BUILD IS EXCLUSIVE, host-wide. The lock is a directory claimed with
+#     `mkdir` -- the one filesystem operation that is atomic and fails if the
+#     name exists -- with the holder's pid recorded inside, exactly the
+#     technique bin/suite-slot.sh and the run gate above use. A second build
+#     WAITS out loud; a lock whose holder is gone is taken over.
+#
+#   * THE IMAGE CARRIES ITS SOURCE. The git tree hash of e2e/sandbox is
+#     written onto the image as an OCI label, so the image can always say
+#     which sandbox sources produced it. A build whose stamp already matches
+#     the tagged image does nothing at all, and `run` REFUSES an image whose
+#     stamp is not this checkout's rather than silently using it.
+
+SANDBOX_STAMP_LABEL=org.agent-repl.sandbox-tree
+
+# sandbox_stamp prints the identity of THIS checkout's e2e/sandbox sources.
+#
+# The git tree hash is the honest answer when the sandbox directory is clean:
+# it is exactly "these bytes, in this shape". When it is dirty, or there is no
+# git at all, the tree hash would name sources that are NOT what would be
+# built, so a content digest of the directory is computed instead and marked
+# `dirty-`; two dirty checkouts with identical sandbox bytes still agree, and
+# a dirty one never claims to be the committed tree.
+sandbox_stamp() {
+  local rel=$MODULE_REL/e2e/sandbox tree dirty
+
+  if git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+    dirty=$(git -C "$repo_root" status --porcelain -- "$rel" 2>/dev/null || echo dirty)
+    if [[ -z $dirty ]]; then
+      tree=$(git -C "$repo_root" rev-parse "HEAD:$rel" 2>/dev/null || true)
+      if [[ -n $tree ]]; then
+        printf '%s\n' "$tree"
+        return 0
+      fi
+    fi
+  fi
+
+  # Content digest fallback: every file under the sandbox dir, by path and by
+  # bytes, in a stable order.
+  local digest
+  digest=$( { cd -- "$sandbox_dir" && find . -type f -not -name '.*' -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 shasum -a 256 2>/dev/null; } | shasum -a 256 | awk '{print $1}')
+  printf 'dirty-%s\n' "$digest"
+}
+
+# image_stamp RUNTIME — the stamp recorded on the tagged image, empty when the
+# image does not exist or carries no stamp (an image built before this label
+# existed, which is precisely the stale image this gate is here to catch).
+image_stamp() {
+  local rt=$1 out
+  out=$("$rt" image inspect --format "{{ index .Config.Labels \"$SANDBOX_STAMP_LABEL\" }}" "$IMAGE" 2>/dev/null || true)
+  out=${out//<no value>/}
+  printf '%s\n' "${out//$'\n'/}"
+}
+
+# BUILD_LOCK_DIR is a fixed host path, NOT under $TMPDIR: on macOS $TMPDIR is
+# per-process, which would hand every caller a private lock and therefore no
+# exclusion at all. Builds from DIFFERENT worktrees of this repo share one
+# buildkit cache and one `:latest` tag, so they must share one lock.
+BUILD_LOCK_DIR=${AGENT_REPL_SANDBOX_BUILD_LOCK_DIR:-/tmp/agent-repl-sandbox-build.lock}
+
+# BUILD_LOCK_HELD is the lock this process holds, released by the EXIT trap.
+# Not `local`: the trap runs after the acquiring function's frame is gone.
+BUILD_LOCK_HELD=""
+
+release_build_lock() {
+  [[ -n ${BUILD_LOCK_HELD:-} ]] || return 0
+  rm -rf "$BUILD_LOCK_HELD"
+  BUILD_LOCK_HELD=""
+}
+
+# acquire_build_lock — block until this host's sandbox build lock is ours.
+#
+# The order is what makes the takeover safe: the pid is read from a lock that
+# EXISTS, so nobody can be claiming it at that moment (a claim is `mkdir`,
+# which fails on an existing name); only then is the directory moved aside. A
+# lock therefore becomes claimable only by ceasing to exist, never by being
+# emptied under a live holder.
+acquire_build_lock() {
+  local waited=0 announced=0 pid
+  mkdir -p "$(dirname "$BUILD_LOCK_DIR")"
+  while true; do
+    if mkdir "$BUILD_LOCK_DIR" 2>/dev/null; then
+      BUILD_LOCK_HELD=$BUILD_LOCK_DIR
+      printf '%s\n' "$$" > "$BUILD_LOCK_DIR/pid"
+      trap release_build_lock EXIT INT TERM
+      (( waited > 0 )) && log "build lock acquired after ${waited}s"
+      return 0
+    fi
+    pid=$(cat "$BUILD_LOCK_DIR/pid" 2>/dev/null || echo "")
+    if [[ -n $pid ]] && ! kill -0 "$pid" 2>/dev/null; then
+      log "reclaiming the build lock from dead pid $pid"
+      mv "$BUILD_LOCK_DIR" "$BUILD_LOCK_DIR.dead.$$" 2>/dev/null && rm -rf "$BUILD_LOCK_DIR.dead.$$"
+      continue
+    fi
+    if (( announced == 0 )); then
+      log "WAITING: another sandbox build holds the host build lock${pid:+ (pid $pid)}."
+      log "  This is the build gate, not a hang: $BUILD_LOCK_DIR is the lock."
+      log "  Concurrent builds thrash one buildkit cache and race the '$IMAGE' tag."
+      announced=1
+    elif (( waited % 30 == 0 )); then
+      log "still waiting for the sandbox build lock (${waited}s)"
+    fi
+    sleep 2
+    waited=$(( waited + 2 ))
+  done
+}
+
+# require_fresh_image RUNTIME — refuse to RUN an image that is not this
+# checkout's sandbox.
+#
+# A silently-used stale image is the failure this whole section exists to end:
+# it produces test results about sources nobody is looking at, and it looks
+# exactly like a real run while doing it. So the refusal is loud, it names
+# both stamps, and it says what to do.
+require_fresh_image() {
+  local rt=$1 want have
+  want=$(sandbox_stamp)
+  have=$(image_stamp "$rt")
+  [[ $have == "$want" ]] && return 0
+
+  if [[ ${AGENT_REPL_SANDBOX_ALLOW_STALE:-0} == 1 ]]; then
+    log "AGENT_REPL_SANDBOX_ALLOW_STALE=1: running a sandbox image whose sources are NOT this checkout's"
+    log "  image sandbox stamp: ${have:-<none>}"
+    log "  checkout sandbox stamp: $want"
+    return 0
+  fi
+
+  log "REFUSING TO RUN: '$IMAGE' was not built from this checkout's e2e/sandbox."
+  log "  image sandbox stamp: ${have:-<none: built before the stamp existed, or no such image>}"
+  log "  checkout sandbox stamp: $want"
+  log "  Rebuild it:  e2e/sandbox/bin/e2e-sandbox.sh build"
+  log "  Or set AGENT_REPL_SANDBOX_ALLOW_STALE=1 to use it anyway, deliberately."
+  exit 3
+}
+
 do_build() {
-  local allow_unpinned=0 extra=()
+  local allow_unpinned=0 force=0 extra=()
   while (( $# )); do
     case $1 in
       --allow-unpinned) allow_unpinned=1 ;;
-      --no-cache) extra+=(--no-cache) ;;
+      --no-cache) extra+=(--no-cache); force=1 ;;
+      --force) force=1 ;;
       *) die "build: unknown flag $1" ;;
     esac
     shift
@@ -173,6 +317,21 @@ do_build() {
   local rt
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
   "$rt" info >/dev/null 2>&1 || die "'$rt' is not usable; run 'e2e-sandbox.sh preflight' for details"
+
+  # EXCLUSIVE, HOST-WIDE, AND BEFORE ANYTHING IS STAGED. Everything below this
+  # line writes the shared buildkit cache or the shared '$IMAGE' tag.
+  acquire_build_lock
+
+  # The wait above is usually a wait for the very image this run wanted. Once
+  # it is ours, ask what is on the tag: if it already carries this checkout's
+  # sandbox stamp, there is nothing to build and saying so is the whole job.
+  local stamp
+  stamp=$(sandbox_stamp)
+  if (( force == 0 )) && [[ $(image_stamp "$rt") == "$stamp" ]]; then
+    log "'$IMAGE' already carries this checkout's sandbox stamp ($stamp); nothing to build"
+    log "  pass --force (or --no-cache) to rebuild it anyway."
+    return 0
+  fi
 
   load_pins "$rt"
 
@@ -198,11 +357,17 @@ do_build() {
   # replacing the real failure with a shell error. A file-scope name plus a
   # `:-` guard in the trap makes the cleanup correct on every path.
   CTX=$(mktemp -d)
-  trap 'rm -rf "${CTX:-}"' EXIT
+  # BOTH cleanups in one trap: `trap ... EXIT` REPLACES the handler, so a bare
+  # context-cleanup trap here would silently discard the build lock's
+  # release_build_lock trap and leak the lock to every later build on this host.
+  trap 'rm -rf "${CTX:-}"; release_build_lock' EXIT INT TERM
   local ctx=$CTX
   stage_context "$ctx"
 
   local args=(build -t "$IMAGE" -f "$ctx/Dockerfile")
+  # The image's own account of which sandbox sources made it. `run` reads this
+  # back, so an image can never be stale without saying so.
+  args+=(--label "$SANDBOX_STAMP_LABEL=$stamp")
   [[ -n ${SANDBOX_BASE_IMAGE:-} ]] && args+=(--build-arg "BASE_IMAGE=$SANDBOX_BASE_IMAGE")
   [[ -n ${SANDBOX_SNAPSHOT_STAMP:-} ]] && args+=(--build-arg "SNAPSHOT_STAMP=$SANDBOX_SNAPSHOT_STAMP")
   [[ -n ${SANDBOX_NODE_VERSION:-} ]] && args+=(--build-arg "NODE_VERSION=$SANDBOX_NODE_VERSION")
@@ -225,7 +390,7 @@ do_build() {
     die "$rt build FAILED (exit $rc); no image was produced"
   fi
   verify_image "$rt"
-  log "built $IMAGE"
+  log "built $IMAGE (sandbox stamp $stamp)"
 }
 
 # --- post-build verification ----------------------------------------------
@@ -505,6 +670,11 @@ do_run() {
   (( $# )) || die "run: no command given"
   local rt
   rt=$(runtime) || die "no container runtime on PATH; run 'e2e-sandbox.sh preflight' for details"
+
+  # BEFORE the preflight, the gate and the webapp build: an image that is not
+  # this checkout's sandbox is refused loudly, never silently used.
+  require_fresh_image "$rt"
+
   preflight >&2 || die "preflight failed; see the message above"
 
   # BEFORE anything is built or started. The gate is what keeps two runs from
