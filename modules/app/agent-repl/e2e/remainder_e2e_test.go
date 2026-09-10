@@ -121,6 +121,7 @@ package e2e
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1029,8 +1030,29 @@ func TestWebSearch(t *testing.T) {
 	// Assert
 	row := rmAwaitFeedRow(t, w, ws, "the WebSearch settled tool card", rmToolCallSettled(turn, "WebSearch"))
 	returned := rmRequireSucceeded(t, row, "WebSearch")
-	if links := returned.GetLinks(); links == nil || len(links.GetLinks()) == 0 {
+	links := returned.GetLinks()
+	if links == nil || len(links.GetLinks()) == 0 {
 		t.Fatalf("WebSearch tool call returned = %v, want a non-empty links output form", returned)
+	}
+	// THE GROUP'S PAGES, EACH ITS OWN ROW. web.ts's fixture answers one hit
+	// group of two pages plus one bare narration string, so the drawn answer
+	// is THREE rows in the engine's order. Asserting only "non-empty" passed
+	// while the transcript plane read `title`/`url` off the GROUP rather than
+	// its `content` array: it minted one row with an empty title and an empty
+	// href and lost both pages, and the card drew an invisible dead row where
+	// two clickable results belonged.
+	type linkRow struct{ text, url string }
+	var got []linkRow
+	for _, link := range links.GetLinks() {
+		got = append(got, linkRow{text: link.GetText(), url: link.GetUrl().GetUrl()})
+	}
+	want := []linkRow{
+		{text: "Example API reference", url: "https://docs.example.com/reference/"},
+		{text: "Example changelog", url: "https://docs.example.com/changelog/"},
+		{text: "The reference page covers every method; the changelog lists recent additions.", url: ""},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("WebSearch drawn link rows = %+v, want %+v", got, want)
 	}
 }
 
