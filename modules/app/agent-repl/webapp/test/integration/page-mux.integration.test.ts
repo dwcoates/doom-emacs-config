@@ -264,14 +264,17 @@ describe("the workspace moving away", () => {
     await harness.settle();
   };
 
+  // The server-side close acknowledgement crosses the real Unix socket.
   it("lets go of the page's one stream", async () => {
     // Arrange / Act.
     await moveAway();
+    const [page] = harness.fake.attachedPages();
+    if (page !== undefined) await harness.fake.awaitPageDetached(page);
 
     // Assert: the connection is released rather than left reopening on backoff
     // for a workspace this page can never get back.
     expect(harness.fake.attachedPages()).toEqual([]);
-  });
+  }, 1_500);
 
   it("draws nothing the old workspace pushes afterwards", async () => {
     // Arrange.

@@ -49,7 +49,7 @@ export const DELIVERY_WORDS = {
  * draws its author.
  */
 export function drawFeedAgentPrompt(msg: FeedAgentPrompt): HTMLElement {
-  log("debug", "drawing an agent prompt row", {
+  log.debug("drawing an agent prompt row", {
     operation: "feed.draw-agent-prompt",
     context: {},
   });
@@ -126,7 +126,7 @@ export function drawFeedAgentPromptDelivery(
         armName(delivery as unknown as { case: string }),
       );
   }
-  log("debug", `the agent prompt was delivered: ${delivery.case}`, {
+  log.debug(`the agent prompt was delivered: ${delivery.case}`, {
     operation: "feed.agent-prompt-delivery",
     context: { delivery: delivery.case },
   });

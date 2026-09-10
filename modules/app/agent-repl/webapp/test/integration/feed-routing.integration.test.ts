@@ -304,6 +304,8 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
   // the head and every nested row squeezed into the other half. Photographed by
   // the G49 playbook. The cascade is installed here because a class assertion
   // alone passed the entire time.
+  // Real stylesheet installation plus a socket-backed expansion is the bound;
+  // it reached 1635ms under concurrent integration load.
   it("stacks its sub-feed under its head, under the real stylesheet", async () => {
     // Arrange
     harness = await openBubble();
@@ -317,7 +319,7 @@ describe.each(BUBBLE_CASES)("$name", ({ unit }) => {
     } finally {
       remove();
     }
-  });
+  }, 2_500);
 
   it("hosts the sub-feed inside the bubble rather than navigating to it", async () => {
     // Arrange

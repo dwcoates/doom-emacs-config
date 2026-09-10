@@ -51,7 +51,7 @@ const GENERIC_GLYPH = "⇄";
 export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
   const result = requireCase(msg.result, `${PATH}.result`);
   const head = requireMessage(msg.head, `${PATH}.head`);
-  log("debug", `drawing a merge head as ${result.case}`, {
+  log.debug(`drawing a merge head as ${result.case}`, {
     operation: "merge.draw-head",
     context: { arm: result.case },
   });
@@ -114,7 +114,7 @@ export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
   el.setAttribute("data-glyph", glyph.icon);
   const known = GLYPHS[glyph.icon];
   if (known === undefined) {
-    log("warn", `merge glyph '${glyph.icon}' is not one this build draws; using the generic one`, {
+    log.warn(`merge glyph '${glyph.icon}' is not one this build draws; using the generic one`, {
       operation: "merge.unknown-glyph",
       context: { icon: glyph.icon, known: FEED_MERGE_HEAD_GLYPH },
       dedupKey: `merge.glyph:${glyph.icon}`,

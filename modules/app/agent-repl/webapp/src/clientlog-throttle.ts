@@ -13,24 +13,26 @@
  * the burst in the first place, which is what keeps the daemon's queue, its
  * ack bookkeeping and the on-disk log proportional to what actually happened.
  *
- * WHY THROTTLING RATHER THAN BATCHING: `ClientLogRecord` carries ONE level, ONE
- * message and ONE context Struct. A batch would need a repeated field, and the
- * per-record context — which is where the whole structured record lives — has
- * nowhere to go in a newline-joined message. Changing the wire contract to save
- * frames is a worse trade than sending the same frames at a bounded rate, so
- * records are buffered and released at a cap instead.
+ * WHY THROTTLING RATHER THAN BATCHING: `ClientLogRecord` carries ONE record. A
+ * batch would need a repeated field. Changing the wire contract to save frames
+ * is a worse trade than sending the same frames at a bounded rate, so complete
+ * records are buffered and released at a cap instead. Keeping the generated
+ * record whole also preserves the client's timestamp and verbosity across the
+ * throttle window.
  *
  * NOTHING IS SILENTLY LOST. A record is dropped only when the buffer's hard
  * bound is already full, and every drop is counted and reported to the daemon
  * as its own record at the next flush.
  */
-import type { ClientLogContext, ClientLogLevel } from "./log.js";
+import type { ClientLogRecord } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 
 /** Pushes one record toward the daemon; false means the socket refused it. */
-export type ClientLogSend = (level: ClientLogLevel, message: string, context?: ClientLogContext) => boolean;
+export type ClientLogSend = (record: ClientLogRecord) => boolean;
 
 export interface ClientLogThrottleOptions {
   send: ClientLogSend;
+  /** Build the canonical warning that accounts for records the buffer lost. */
+  droppedRecord: (dropped: number, bufferBound: number) => ClientLogRecord;
   /** Longest a buffered record waits before its flush. */
   intervalMs?: number;
   /** Records released per flush, and the count that triggers an early one. */
@@ -42,19 +44,13 @@ export interface ClientLogThrottleOptions {
   clearTimer?: (handle: unknown) => void;
 }
 
-interface BufferedRecord {
-  level: ClientLogLevel;
-  message: string;
-  context?: ClientLogContext;
-}
-
 /** At most 50 records every 2s, which is 25/s of steady-state ceiling. */
 const DEFAULT_INTERVAL_MS = 2000;
 const DEFAULT_MAX_BATCH = 50;
 const DEFAULT_MAX_BUFFER = 500;
 
 export class ClientLogThrottle {
-  private readonly buffer: BufferedRecord[] = [];
+  private readonly buffer: ClientLogRecord[] = [];
   private readonly intervalMs: number;
   private readonly maxBatch: number;
   private readonly maxBuffer: number;
@@ -80,13 +76,13 @@ export class ClientLogThrottle {
    * someone is going to go looking for, and it must not sit behind a two second
    * window that a crashing page may never reach the end of.
    */
-  write(level: ClientLogLevel, message: string, context?: ClientLogContext): boolean {
+  write(record: ClientLogRecord): boolean {
     if (this.buffer.length >= this.maxBuffer) {
       this.dropped += 1;
       return false;
     }
-    this.buffer.push({ level, message, context });
-    if (level === "error" || this.buffer.length >= this.maxBatch) {
+    this.buffer.push(record);
+    if (record.level.case === "error" || this.buffer.length >= this.maxBatch) {
       this.flush();
       return true;
     }
@@ -105,11 +101,7 @@ export class ClientLogThrottle {
     if (this.dropped > 0) {
       const dropped = this.dropped;
       this.dropped = 0;
-      const reported = this.options.send(
-        "warn",
-        `client log forwarding dropped ${dropped} record(s) over its ${this.maxBuffer}-record buffer bound`,
-        { operation: "webapp.client-log-throttle-dropped", dropped, buffer_bound: this.maxBuffer },
-      );
+      const reported = this.options.send(this.options.droppedRecord(dropped, this.maxBuffer));
       // A refused summary is a transport failure, not permission to forget how
       // much was lost: the count goes back and is reported by a later flush.
       if (!reported) this.dropped += dropped;
@@ -117,7 +109,7 @@ export class ClientLogThrottle {
     let released = 0;
     while (this.buffer.length > 0 && released < this.maxBatch) {
       const record = this.buffer[0];
-      if (!this.options.send(record.level, record.message, record.context)) break;
+      if (!this.options.send(record)) break;
       this.buffer.shift();
       released += 1;
     }

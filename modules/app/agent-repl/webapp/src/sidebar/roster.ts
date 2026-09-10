@@ -70,7 +70,7 @@ export function drawWorkspaceRoster(u: WorkspaceRoster, sc: SidebarContext): HTM
     u.current === undefined
       ? null
       : drawRosterCurrentWorkspace(u.current, `${path}.current`);
-  log("debug", "drawing the workspace roster", {
+  log.debug("drawing the workspace roster", {
     operation: "sidebar.roster",
     context: {
       repo_sections: repository.sections.length,
@@ -294,7 +294,7 @@ export function drawRosterTaskSectionHeader(
 ): HTMLElement {
   const done = drawRosterTaskDone(requireMessage(u.done, `${path}.done`), `${path}.done`);
   const title = drawRosterLabel(requireMessage(u.label, `${path}.label`), `${path}.label`);
-  log("debug", "drawing a task section header", {
+  log.debug("drawing a task section header", {
     operation: "sidebar.roster.task-header",
     context: { path, task: taskId, done },
   });

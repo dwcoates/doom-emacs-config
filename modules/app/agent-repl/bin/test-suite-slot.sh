@@ -26,6 +26,12 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/suite-slot.sh"
 
+# The unified suite is itself expected to hold the host slot. Its exported
+# re-entrancy marker is not fixture state: each case below constructs its own
+# process tree and private slot directory, including the nested case that
+# proves the marker is exported by the script under test.
+unset AGENT_REPL_SUITE_SLOT_HELD
+
 PASS=0
 FAIL=0
 pass() { PASS=$((PASS + 1)); echo "ok   - $1"; }

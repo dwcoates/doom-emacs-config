@@ -180,7 +180,7 @@ async function issue(
   confirmed: boolean,
 ): Promise<void> {
   clearAnswer(wrapper);
-  log("info", `interrupting: ${spec.target}`, {
+  log.info(`interrupting: ${spec.target}`, {
     operation: spec.operation,
     context: { target: spec.target, confirm_agents: confirmed },
   });
@@ -202,7 +202,7 @@ async function issue(
     // owns the daemon_unreachable window. BOTH draw at the control, because a
     // stop that silently did nothing is the one reading this must never leave.
     if (isMalformedView(err)) {
-      log("error", `the Interrupt answer could not be read: ${err.detail}`, {
+      log.error(`the Interrupt answer could not be read: ${err.detail}`, {
         operation: `${spec.operation}-undecodable`,
         context: { target: spec.target, path: err.path, cause: err.detail },
       });
@@ -211,7 +211,7 @@ async function issue(
       return;
     }
     drawRefusal(wrapper, "transport", "the daemon could not be reached");
-    log("error", `Interrupt failed at the transport: ${String(err)}`, {
+    log.error(`Interrupt failed at the transport: ${String(err)}`, {
       operation: `${spec.operation}-failed`,
       context: { target: spec.target, cause: err },
     });
@@ -287,7 +287,7 @@ function drawOutcome(
   spec: ControlSpec,
 ): void {
   const note = drawInterruptSuccess(success, "InterruptSuccess");
-  log("info", `the stop answered ${note.getAttribute("data-stop-outcome") ?? ""}`, {
+  log.info(`the stop answered ${note.getAttribute("data-stop-outcome") ?? ""}`, {
     operation: `${spec.operation}-answered`,
     context: { target: spec.target, outcome: note.getAttribute("data-stop-outcome") },
   });
@@ -322,7 +322,7 @@ function drawConfirm(
   wrapper: HTMLElement,
   liveAgentCount: bigint,
 ): void {
-  log("warn", "the stop needs confirmation: live agents would also end", {
+  log.warn("the stop needs confirmation: live agents would also end", {
     operation: `${spec.operation}-confirm-required`,
     context: { target: spec.target, live_agent_count: String(liveAgentCount) },
   });

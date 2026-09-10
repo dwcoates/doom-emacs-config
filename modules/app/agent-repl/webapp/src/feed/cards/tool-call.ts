@@ -92,7 +92,7 @@ export interface OutcomeParts {
 export function drawFeedSimpleToolCall(u: FeedSimpleToolCall, rc: RowContext): HTMLElement {
   const path = "FeedSimpleToolCall";
   const outcome = requireCase(u.outcome, `${path}.outcome`);
-  log("debug", "drawing a tool call card", {
+  log.debug("drawing a tool call card", {
     operation: "feed.cards.tool-call",
     context: { outcome: outcome.case },
   });
@@ -142,7 +142,7 @@ function drawOutcome(
 
 /** ① The head's name, verbatim. */
 export function drawFeedToolCallName(u: FeedToolCallName, path: string): HTMLElement {
-  log("debug", "drawing a tool call name", {
+  log.debug("drawing a tool call name", {
     operation: "feed.cards.tool-call.name",
     context: { path },
   });
@@ -191,7 +191,7 @@ export function drawFeedToolCallInput(
     form.element.setAttribute("data-input-form", u.form.case);
     form.element.classList.add(`tool-input-${u.form.case}`);
   }
-  log("debug", "drawing a tool call input line", {
+  log.debug("drawing a tool call input line", {
     operation: "feed.cards.tool-call.input",
     context: {
       path,
@@ -240,7 +240,7 @@ function drawInputForm(form: FeedToolCallInput["form"], path: string): InputForm
  * asserting a shape nobody stated.
  */
 function drawPlainInput(path: string): InputForm {
-  log("debug", "drawing an unformed tool call input line as plain text", {
+  log.debug("drawing an unformed tool call input line as plain text", {
     operation: "feed.cards.tool-call.input-plain",
     context: { path },
   });
@@ -254,7 +254,7 @@ export function drawFeedToolCallInputCommand(
   _u: FeedToolCallInputCommand,
   path: string,
 ): InputForm {
-  log("debug", "drawing a tool call input line as a shell command", {
+  log.debug("drawing a tool call input line as a shell command", {
     operation: "feed.cards.tool-call.input-command",
     context: { path },
   });
@@ -265,7 +265,7 @@ export function drawFeedToolCallInputCommand(
 
 /** The path form: the existing muted file-path line. */
 export function drawFeedToolCallInputPath(_u: FeedToolCallInputPath, path: string): InputForm {
-  log("debug", "drawing a tool call input line as a file path", {
+  log.debug("drawing a tool call input line as a file path", {
     operation: "feed.cards.tool-call.input-path",
     context: { path },
   });
@@ -281,7 +281,7 @@ export function drawFeedToolCallInputPath(_u: FeedToolCallInputPath, path: strin
  * grep line has always had, and no "$".
  */
 export function drawFeedToolCallInputQuery(_u: FeedToolCallInputQuery, path: string): InputForm {
-  log("debug", "drawing a tool call input line as a query", {
+  log.debug("drawing a tool call input line as a query", {
     operation: "feed.cards.tool-call.input-query",
     context: { path },
   });
@@ -297,7 +297,7 @@ export function drawFeedToolCallInputLink(
   text: string,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a tool call input link", {
+  log.debug("drawing a tool call input link", {
     operation: "feed.cards.tool-call.input-link",
     context: { path },
   });
@@ -327,13 +327,13 @@ export function drawFeedToolCallRunning(
   badge.appendChild(document.createTextNode("running…"));
 
   if (u.lastProgress === undefined) {
-    log("debug", "drawing a running tool call with no observed beat", {
+    log.debug("drawing a running tool call with no observed beat", {
       operation: "feed.cards.tool-call.running",
       context: { path, beat: false },
     });
     return { badge, body: [] };
   }
-  log("debug", "drawing a running tool call with a quiet-for clock", {
+  log.debug("drawing a running tool call with a quiet-for clock", {
     operation: "feed.cards.tool-call.running",
     context: { path, beat: true },
   });
@@ -372,7 +372,7 @@ export function drawFeedToolCallLastProgress(
     }
     paint(nowMs);
   });
-  log("debug", "drawing a tool call quiet-for clock", {
+  log.debug("drawing a tool call quiet-for clock", {
     operation: "feed.cards.tool-call.last-progress",
     context: { path, since_ms: since },
   });
@@ -386,7 +386,7 @@ export function drawFeedToolCallLastProgress(
  * the permission card's, so there is nothing else to draw here.
  */
 export function drawFeedToolCallDenied(_u: FeedToolCallDenied, path: string): OutcomeParts {
-  log("debug", "drawing a denied tool call", {
+  log.debug("drawing a denied tool call", {
     operation: "feed.cards.tool-call.denied",
     context: { path },
   });
@@ -407,7 +407,7 @@ export function drawFeedToolCallDenied(_u: FeedToolCallDenied, path: string): Ou
  * an empty output section says the call printed nothing.
  */
 export function drawFeedToolCallMoved(_u: FeedToolCallMoved, path: string): OutcomeParts {
-  log("debug", "drawing a tool call whose work moved to the background", {
+  log.debug("drawing a tool call whose work moved to the background", {
     operation: "feed.cards.tool-call.moved",
     context: { path },
   });
@@ -437,7 +437,7 @@ export function drawFeedToolCallReturned(
   // it could not draw.
   const verdictArm: string = verdict.case;
   const form = requireCase(u.form, `${path}.form`);
-  log("debug", "drawing a returned tool call", {
+  log.debug("drawing a returned tool call", {
     operation: "feed.cards.tool-call.returned",
     context: { verdict: verdict.case, form: form.case },
   });
@@ -516,7 +516,7 @@ function drawForm(
  * in the card where every other output form sits.
  */
 export function drawFeedToolCallImage(u: FeedImageBlock, path: string): HTMLElement {
-  log("debug", "drawing an image output", {
+  log.debug("drawing an image output", {
     operation: "feed.cards.tool-call.image-output",
     context: { path, has_alt: u.alt !== "" },
   });
@@ -548,7 +548,7 @@ export function drawFeedToolCallNoOutput(
   _u: FeedToolCallNoOutput,
   path: string,
 ): readonly HTMLElement[] {
-  log("debug", "the returned call has no output to draw", {
+  log.debug("the returned call has no output to draw", {
     operation: "feed.cards.tool-call.no-output",
     context: { path },
   });
@@ -557,7 +557,7 @@ export function drawFeedToolCallNoOutput(
 
 /** The ok badge. */
 export function drawFeedToolCallSucceeded(path: string): HTMLElement {
-  log("debug", "drawing a succeeded verdict", {
+  log.debug("drawing a succeeded verdict", {
     operation: "feed.cards.tool-call.succeeded",
     context: { path },
   });
@@ -569,7 +569,7 @@ export function drawFeedToolCallSucceeded(path: string): HTMLElement {
 
 /** The err badge. The error TEXT is the output section's, in its own form. */
 export function drawFeedToolCallFailed(path: string): HTMLElement {
-  log("debug", "drawing a failed verdict", {
+  log.debug("drawing a failed verdict", {
     operation: "feed.cards.tool-call.failed",
     context: { path },
   });
@@ -581,7 +581,7 @@ export function drawFeedToolCallFailed(path: string): HTMLElement {
 
 /** The settled clock's composed sentence ("ran 4.2 s"), verbatim. */
 export function drawFeedToolCallRuntime(u: FeedToolCallRuntime, path: string): HTMLElement {
-  log("debug", "drawing a tool call runtime", {
+  log.debug("drawing a tool call runtime", {
     operation: "feed.cards.tool-call.runtime",
     context: { path },
   });
@@ -597,7 +597,7 @@ export function drawFeedToolCallTextOutput(
   failed: boolean,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a text output", {
+  log.debug("drawing a text output", {
     operation: "feed.cards.tool-call.text-output",
     context: { path, failed },
   });
@@ -618,7 +618,7 @@ export function drawFeedToolCallCodeOutput(
   u: FeedToolCallCodeOutput,
   path: string,
 ): readonly HTMLElement[] {
-  log("debug", "drawing a code output", {
+  log.debug("drawing a code output", {
     operation: "feed.cards.tool-call.code-output",
     context: { path, spans: u.spans.length, omitted: u.omitted !== undefined },
   });
@@ -645,7 +645,7 @@ export function drawFeedCodeSpan(u: FeedCodeSpan, path: string): HTMLElement {
   const painted = paintSpanClass(u.paintClass);
   if (painted !== "") span.className = painted;
   span.textContent = u.text;
-  log("debug", "drawing a code span", {
+  log.debug("drawing a code span", {
     operation: "feed.cards.tool-call.code-span",
     context: { path, paint_class: u.paintClass, painted },
   });
@@ -657,7 +657,7 @@ export function drawFeedToolCallDiffOutput(
   u: FeedToolCallDiffOutput,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a diff output", {
+  log.debug("drawing a diff output", {
     operation: "feed.cards.tool-call.diff-output",
     context: { path, lines: u.lines.length },
   });
@@ -697,7 +697,7 @@ export function drawFeedDiffLine(u: FeedDiffLine, path: string): HTMLElement {
         : kind.case === "header"
           ? "hunk"
           : "ctx";
-  log("debug", "drawing a diff line", {
+  log.debug("drawing a diff line", {
     operation: "feed.cards.tool-call.diff-line",
     context: { path, kind: kind.case },
   });
@@ -713,7 +713,7 @@ export function drawFeedToolCallLinesOutput(
   u: FeedToolCallLinesOutput,
   path: string,
 ): readonly HTMLElement[] {
-  log("debug", "drawing a lines output", {
+  log.debug("drawing a lines output", {
     operation: "feed.cards.tool-call.lines-output",
     context: { path, lines: u.lines.length, omitted: u.omitted !== undefined },
   });
@@ -730,7 +730,7 @@ export function drawFeedToolCallLinksOutput(
   rc: RowContext,
   path: string,
 ): readonly HTMLElement[] {
-  log("debug", "drawing a links output", {
+  log.debug("drawing a links output", {
     operation: "feed.cards.tool-call.links-output",
     context: { path, links: u.links.length, omitted: u.omitted !== undefined },
   });
@@ -757,14 +757,14 @@ export function drawFeedToolCallLink(
   const row = document.createElement("div");
   row.className = "tool-link-row";
   if (u.url === undefined) {
-    log("debug", "drawing a narration link row", {
+    log.debug("drawing a narration link row", {
       operation: "feed.cards.tool-call.link",
       context: { path, clickable: false },
     });
     row.textContent = u.text;
     return row;
   }
-  log("debug", "drawing a clickable link row", {
+  log.debug("drawing a clickable link row", {
     operation: "feed.cards.tool-call.link",
     context: { path, clickable: true },
   });
@@ -779,7 +779,7 @@ export function drawFeedToolCallLinkUrl(
   text: string,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a link row's target", {
+  log.debug("drawing a link row's target", {
     operation: "feed.cards.tool-call.link-url",
     context: { path },
   });
@@ -788,7 +788,7 @@ export function drawFeedToolCallLinkUrl(
 
 /** The composed truncation line, verbatim. */
 export function drawFeedToolCallOmitted(u: FeedToolCallOmitted, path: string): HTMLElement {
-  log("debug", "drawing an omitted line", {
+  log.debug("drawing an omitted line", {
     operation: "feed.cards.tool-call.omitted",
     context: { path },
   });
@@ -810,7 +810,7 @@ export function drawFeedToolCallDiagnostics(
   path: string,
 ): HTMLElement {
   const hidden = Math.max(0, u.lines.length - DIAGNOSTICS_VISIBLE);
-  log("debug", "drawing tool call diagnostics", {
+  log.debug("drawing tool call diagnostics", {
     operation: "feed.cards.tool-call.diagnostics",
     context: { path, lines: u.lines.length, hidden },
   });
@@ -846,7 +846,7 @@ export function drawFeedToolCallDiagnostics(
       row.hidden = !open && index >= DIAGNOSTICS_VISIBLE;
     });
     label();
-    log("debug", "toggling the diagnostics overflow", {
+    log.debug("toggling the diagnostics overflow", {
       operation: "feed.cards.tool-call.diagnostics-toggle",
       context: { path, open },
     });

@@ -136,7 +136,7 @@ export function drawTypedRefusal(
   const said = refusalOf(cause, own, path);
   clearRefusals(host);
   host.append(refusal(said.arm, said.text));
-  log("debug", `a ${rpcName} click was refused: ${said.arm}`, {
+  log.debug(`a ${rpcName} click was refused: ${said.arm}`, {
     operation: "rpc.refused",
     context: { rpc: rpcName, arm: said.arm },
   });
@@ -176,7 +176,7 @@ export function drawMalformedRefusal(
   err: unknown,
 ): boolean {
   if (!isMalformedView(err)) return false;
-  log("error", `a refusal could not be read: ${err.message}`, {
+  log.error(`a refusal could not be read: ${err.message}`, {
     operation,
     context: { path: err.path, detail: err.detail },
   });
@@ -209,7 +209,7 @@ function rpcNameOf(path: string): string {
 function raiseMoved(path: string, value: unknown): void {
   const address = (value as { address?: unknown } | undefined)?.address;
   if (typeof address !== "string") return;
-  log("info", `a refusal says this workspace moved to ${address}`, {
+  log.info(`a refusal says this workspace moved to ${address}`, {
     operation: "rpc.refusal-transferring-away",
     context: { path, address },
   });

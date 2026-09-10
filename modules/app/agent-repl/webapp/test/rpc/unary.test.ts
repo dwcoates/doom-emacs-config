@@ -46,7 +46,14 @@ const call = (ctx: UnaryContext): Promise<OpenExternalResponse> =>
 /** Capture the records the canonical logger emits during ACT. */
 function captureLog(): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
-  setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+  setLogger(
+    new ForwardingLogger(
+      async () => {},
+      (level, line) => lines.push([level, line]),
+      {},
+      "debug",
+    ),
+  );
   return lines;
 }
 

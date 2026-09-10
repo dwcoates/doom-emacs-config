@@ -66,7 +66,7 @@ component_spec() {
         webapp)
             COMPONENT_DIR="$ROOT/webapp/src"
             COMPONENT_LANGUAGE=typescript
-            LOG_PATTERN='(^|[^.[:alnum:]_])(log|logVerbose)\('
+            LOG_PATTERN='(^|[^.[:alnum:]_])log\.(debug|info|warn|error)\('
             ;;
     esac
 }

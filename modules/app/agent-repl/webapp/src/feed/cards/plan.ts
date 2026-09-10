@@ -55,7 +55,7 @@ export const PLAN_STATE_ARMS: readonly string[] = Object.keys(STATE_BADGES);
 /** The plan bubble. */
 export function drawFeedPlan(u: FeedPlan, rc: RowContext): HTMLElement {
   const state = requireCase(u.state, `${PATH}.state`);
-  log("debug", "drawing a plan bubble", {
+  log.debug("drawing a plan bubble", {
     operation: "feed.cards.plan",
     context: { state: state.case },
   });
@@ -91,7 +91,7 @@ export function drawFeedPlanPlanned(
   ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a presented plan", {
+  log.debug("drawing a presented plan", {
     operation: "feed.cards.plan.planned",
     context: { path, edit: u.edit !== undefined },
   });
@@ -111,7 +111,7 @@ export function drawFeedPlanPlanned(
  * — and the same cap, which the bubble's own body class states.
  */
 export function drawFeedPlanProse(u: FeedPlanProse, path: string): HTMLElement {
-  log("debug", "drawing a plan's prose", {
+  log.debug("drawing a plan's prose", {
     operation: "feed.cards.plan.prose",
     context: { path, length: u.markdown.length },
   });
@@ -133,7 +133,7 @@ export function drawFeedPlanEditTarget(
   ctx: AppContext,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a plan's edit affordance", {
+  log.debug("drawing a plan's edit affordance", {
     operation: "feed.cards.plan.edit",
     context: { path },
   });
@@ -145,7 +145,7 @@ export function drawFeedPlanEditTarget(
 
 /** The failed state's composed reason, drawn verbatim. */
 export function drawFeedPlanFailed(u: FeedPlanFailed, path: string): HTMLElement {
-  log("debug", "drawing a failed plan episode", {
+  log.debug("drawing a failed plan episode", {
     operation: "feed.cards.plan.failed",
     context: { path },
   });

@@ -59,7 +59,7 @@ export const REVEALED_ATTRIBUTE = "data-revealed";
 export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const path = "FeedResponse";
   const result = requireCase(u.result, `${path}.result`);
-  log("debug", "drawing a response bubble", {
+  log.debug("drawing a response bubble", {
     operation: "feed.cards.response",
     context: {
       state: result.case,
@@ -137,7 +137,7 @@ export function drawFeedResponseUpdate(
 ): void {
   const markdown = drawFeedResponseProse(requireMessage(u.prose, `${path}.prose`), `${path}.prose`);
   const resumed = revealedSoFar(rc.previous, markdown.length);
-  log("debug", "drawing an arriving response", {
+  log.debug("drawing an arriving response", {
     operation: "feed.cards.response.update",
     context: { path, length: markdown.length, resumed },
   });
@@ -147,7 +147,7 @@ export function drawFeedResponseUpdate(
 
 /** The settled state: the whole markdown. */
 export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): string {
-  log("debug", "drawing a settled response", {
+  log.debug("drawing a settled response", {
     operation: "feed.cards.response.success",
     context: { path },
   });
@@ -156,7 +156,7 @@ export function drawFeedResponseSuccess(u: FeedResponseSuccess, path: string): s
 
 /** The broken state: the partial markdown, kept on screen. */
 export function drawFeedResponseError(u: FeedResponseError, path: string): string {
-  log("debug", "drawing a response cut short", {
+  log.debug("drawing a response cut short", {
     operation: "feed.cards.response.error",
     context: { path },
   });
@@ -165,7 +165,7 @@ export function drawFeedResponseError(u: FeedResponseError, path: string): strin
 
 /** The bubble's markdown element: the source, for the prose renderer. */
 export function drawFeedResponseProse(u: FeedResponseProse, path: string): string {
-  log("debug", "reading a response's prose", {
+  log.debug("reading a response's prose", {
     operation: "feed.cards.response.prose",
     context: { path, length: u.markdown.length },
   });
@@ -180,7 +180,7 @@ export function drawFeedResponseProse(u: FeedResponseProse, path: string): strin
  * no re-wording, no per-notice branch.
  */
 export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTMLElement {
-  log("debug", "drawing a response notice heading", {
+  log.debug("drawing a response notice heading", {
     operation: "feed.cards.response.notice",
     context: { path },
   });
@@ -195,7 +195,7 @@ export function drawFeedResponseUsageStamp(
   u: FeedResponseUsageStamp,
   path: string,
 ): HTMLElement {
-  log("debug", "drawing a response usage stamp", {
+  log.debug("drawing a response usage stamp", {
     operation: "feed.cards.response.usage-stamp",
     context: { path },
   });
@@ -292,7 +292,7 @@ function animate(
 
   const frame = globalThis.requestAnimationFrame?.bind(globalThis);
   if (frame === undefined) {
-    log("debug", "no animation frame host; drawing the arriving prose whole", {
+    log.debug("no animation frame host; drawing the arriving prose whole", {
       operation: "feed.cards.response.no-frames",
       context: { length: markdown.length },
     });

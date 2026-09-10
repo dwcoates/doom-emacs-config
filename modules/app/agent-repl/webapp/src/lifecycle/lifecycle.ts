@@ -126,7 +126,7 @@ export function bindSessionIdentity(identity: WebWorkspaceSessionIdentity): void
     agent_repl_session_id: identity.agentReplSessionId,
     claude_session_id: identity.claudeSessionId,
   });
-  log("debug", "bound the page's session identity", {
+  log.info("bound the page's session identity", {
     operation: "lifecycle.session_identity",
     context: { has_session: identity.agentReplSessionId !== "" },
   });
@@ -136,7 +136,7 @@ export function bindSessionIdentity(identity: WebWorkspaceSessionIdentity): void
  * Start the page's lifecycle. Returns the handle that stops both streams.
  */
 export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
-  log("debug", "starting the page lifecycle", { operation: "lifecycle.start" });
+  log.debug("starting the page lifecycle", { operation: "lifecycle.start" });
 
   const banner = mountBanner(deps.drainBannerHost, ctx);
 
@@ -144,7 +144,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
     // THE TERMINAL STATE. The notice goes up first, so the reader has the
     // successor's address in front of them before every stream on the page
     // stops; quiescing after it means nothing can redraw over it.
-    log("info", `the workspace moved to ${address}; going quiet`, {
+    log.info(`the workspace moved to ${address}; going quiet`, {
       operation: "lifecycle.transferred",
       context: { address },
     });
@@ -209,7 +209,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
 
   return {
     dispose(): void {
-      log("debug", "disposing the page lifecycle", { operation: "lifecycle.dispose" });
+      log.debug("disposing the page lifecycle", { operation: "lifecycle.dispose" });
       unregisterMoved();
       unsubscribeFromPushes();
       webLink.cancel();
@@ -235,7 +235,7 @@ export function announceShutdown(
 ): void {
   const nowMs = ctx.ticker.now();
   const quietMs = quietWindowMs(announced, nowMs);
-  log("info", "the daemon announced a shutdown", {
+  log.info("the daemon announced a shutdown", {
     operation: "lifecycle.shutdown-announced",
     context: {
       handover: announced.address !== undefined,
@@ -248,7 +248,7 @@ export function announceShutdown(
   if (ctx.failures.suppress !== undefined) {
     ctx.failures.suppress("daemonUnreachable", nowMs + quietMs);
   } else {
-    log("warn", "this page's failure sink cannot suppress; the outage will draw a card", {
+    log.warn("this page's failure sink cannot suppress; the outage will draw a card", {
       operation: "lifecycle.suppress-unavailable",
     });
   }
@@ -338,7 +338,7 @@ export function mountBanner(host: HTMLElement, ctx: AppContext): BannerHandle {
     },
     clearRestarting(): void {
       if (restarting === null) return;
-      log("info", "the daemon is answering again; taking the restart notice down", {
+      log.info("the daemon is answering again; taking the restart notice down", {
         operation: "lifecycle.restart-over",
       });
       restarting = null;
@@ -350,7 +350,7 @@ export function mountBanner(host: HTMLElement, ctx: AppContext): BannerHandle {
     },
     clearDrain(): void {
       if (drain === null) return;
-      log("info", "the drain schedule was cancelled; taking the banner down", {
+      log.info("the drain schedule was cancelled; taking the banner down", {
         operation: "lifecycle.drain-cancelled",
       });
       drain = null;
@@ -544,7 +544,7 @@ export async function adoptAtBoot(
   const startedAt = ctx.ticker.now();
   let waitMs = initialMs;
 
-  log("debug", "adopting this workspace on the daemon this page booted against", {
+  log.debug("adopting this workspace on the daemon this page booted against", {
     operation: "lifecycle.adopt-at-boot",
   });
 
@@ -569,7 +569,7 @@ export async function adoptAtBoot(
     }
     const result = requireCase(response.result, "AdoptWebWorkspaceResponse.result");
     if (result.case === "success") {
-      log("info", "this workspace was adopted", { operation: "lifecycle.adopted" });
+      log.info("this workspace was adopted", { operation: "lifecycle.adopted" });
       return "adopted";
     }
     if (result.case !== "error") {
@@ -578,13 +578,13 @@ export async function adoptAtBoot(
     }
     const outcome = classifyAdoptionRefusal(result.value);
     if (outcome.kind === "no-transfer") {
-      log("debug", "no transfer was announced for this workspace; a plain boot", {
+      log.debug("no transfer was announced for this workspace; a plain boot", {
         operation: "lifecycle.adopt-no-transfer",
       });
       return "no-transfer";
     }
     if (outcome.kind === "terminal") {
-      log("error", `this page cannot be adopted: ${outcome.detail}`, {
+      log.error(`this page cannot be adopted: ${outcome.detail}`, {
         operation: "lifecycle.adopt-refused",
         context: { arm: outcome.arm },
       });
@@ -594,11 +594,11 @@ export async function adoptAtBoot(
     // RETRY: the successor is still finishing its rendezvous.
     if (ctx.ticker.now() - startedAt >= budgetMs) {
       const detail = `the daemon was still adopting after ${formatElapsed(budgetMs)}`;
-      log("error", detail, { operation: "lifecycle.adopt-gave-up", context: { arm: outcome.arm } });
+      log.error(detail, { operation: "lifecycle.adopt-gave-up", context: { arm: outcome.arm } });
       ctx.failures.report(controlPlaneFailed("adopt web workspace", detail));
       throw new AdoptionFailed(outcome.arm, detail);
     }
-    log("info", `the daemon is still adopting this workspace; retrying in ${waitMs} ms`, {
+    log.info(`the daemon is still adopting this workspace; retrying in ${waitMs} ms`, {
       operation: "lifecycle.adopt-retry",
       context: { arm: outcome.arm, backoff_ms: waitMs },
     });

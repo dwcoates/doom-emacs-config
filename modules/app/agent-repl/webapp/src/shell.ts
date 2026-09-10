@@ -65,7 +65,7 @@ const SHELL_IDS: ReadonlyArray<readonly [keyof ShellElements, string]> = [
  * missing.
  */
 export function shellElements(doc: Document): ShellElements {
-  log("debug", "resolving the page shell", {
+  log.debug("resolving the page shell", {
     operation: "shell.resolve",
     context: { mount_points: SHELL_IDS.length },
   });
@@ -76,7 +76,7 @@ export function shellElements(doc: Document): ShellElements {
       // The one branch that selects a materially different outcome, and the
       // boot's first possible failure: logged where the fault is, by name,
       // before the throw carries it up to the pre-overlay emergency path.
-      log("error", `the page shell is missing #${id}`, {
+      log.error(`the page shell is missing #${id}`, {
         operation: "shell.missing-mount-point",
         context: { id, key },
       });

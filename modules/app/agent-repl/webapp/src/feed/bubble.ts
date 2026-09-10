@@ -223,7 +223,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   }
 
   async function open(): Promise<boolean> {
-    log("info", "expanding a bubble", {
+    log.info("expanding a bubble", {
       operation: "feed.bubble-expand",
       context: { row: id.value, kind: row.row.case ?? "unset" },
     });
@@ -254,7 +254,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
       case "error":
         // The refusal is this click's own answer, so it marks the control that
         // made the call rather than appearing as pushed state anywhere else.
-        log("warn", "the daemon refused to open a sub-feed", {
+        log.warn("the daemon refused to open a sub-feed", {
           operation: "feed.bubble-open-refused",
           context: { row: id.value },
         });
@@ -357,7 +357,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
         return requireMessage(result.value.watch, "OpenFeedSuccess.watch");
       }
       case "error":
-        log("error", "the daemon refused to re-open a sub-feed after its tail died", {
+        log.error("the daemon refused to re-open a sub-feed after its tail died", {
           operation: "feed.bubble-reopen-refused",
           context: { row: id.value },
         });
@@ -369,7 +369,7 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
 
   /** Collapse: abandon the token, keep the DOM. */
   function collapse(): void {
-    log("info", "collapsing a bubble", {
+    log.info("collapsing a bubble", {
       operation: "feed.bubble-collapse",
       context: { row: id.value },
     });

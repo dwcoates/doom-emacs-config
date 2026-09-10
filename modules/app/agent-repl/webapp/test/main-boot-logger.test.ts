@@ -7,7 +7,7 @@
  * for what it asserts, and it is exactly why it cannot see the defect this
  * file exists for.
  *
- * THE DEFECT. `log()` REFUSES to emit without an installed sink -- `emit`
+ * THE DEFECT. The canonical `log` methods refuse to emit without an installed sink -- `emit`
  * throws "the webapp logger is not installed" rather than discarding the
  * record -- and two of the boot's own steps log as their first statement:
  * `shellElements` announces the shell it is resolving, and
@@ -49,13 +49,16 @@ import { shellHTML } from "./shell-html.js";
  * module graph on that import. Measured over three runs: the first test 661,
  * 678 and 692ms; the second and third 68-87ms each, doing identical work. So
  * the cost is the first import, not the boot, and it lands on whichever test
- * the runner happens to order first — which the shuffled run reorders.
+ * the runner happens to order first — which the shuffled run reorders. The
+ * coverage-instrumented full graph reached 2170ms in the unified gate and
+ * exhausted a three-second bound under later host contention.
  *
- * 3x the 692ms healthy maximum. This is a per-site bound, deliberately not a
- * raised global: nothing else in the unit suite imports its subject at run
- * time, and the global stays sized for what it covers.
+ * Six seconds also leaves the inner two-second failure-card deadline enough
+ * room to print its own diagnostic first. This is a per-site bound,
+ * deliberately not a raised global: nothing else in the unit suite imports
+ * its subject at run time, and the global stays sized for what it covers.
  */
-const BOOT_IMPORT_TIMEOUT_MS = 2100;
+const BOOT_IMPORT_TIMEOUT_MS = 6000;
 
 /** The page address a workspace-addressed page is loaded with. */
 const PAGE_ADDRESS = "/?workspace=w-boot-logger&dir=/tmp/w-boot-logger";

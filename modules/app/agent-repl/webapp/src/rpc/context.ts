@@ -133,7 +133,7 @@ export function createAppContext(init: AppContextInit): AppContext {
       // No workspace fields on the record: `bindLogContext` already carries
       // this page's workspace on every line, and restating half of that pair
       // is what the logger's own field validation refuses.
-      log("info", "the page is going quiet; nothing more will be sent on this client", {
+      log.info("the page is going quiet; nothing more will be sent on this client", {
         operation: "rpc.context-quiesce",
       });
       // A copy: a listener cancelling its stream unsubscribes itself here.

@@ -33,7 +33,12 @@ import { createAgentReplClient } from "../../src/rpc/client";
 import { createAppContext, type AppContext } from "../../src/rpc/context";
 import { workspaceRef } from "../../src/rpc/workspace-ref";
 import { createTicker } from "../../src/clock";
-import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log";
+import {
+  ForwardingLogger,
+  bindLogContext,
+  setLogger,
+  type ClientLogLevel,
+} from "../../src/log";
 import { mountFailureOverlay } from "../../src/failure/overlay";
 import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
@@ -190,12 +195,8 @@ export interface MountedApp {
    * The wiring is main.ts's own, identical to what `clientLog: true` installs;
    * only the moment differs. A case that asserts about a record IT emits wants
    * production's sink but not the boot's own diagnostics, each of which is its
-   * own unary round trip to the fake. The boot emits ~56, so it crosses the
-   * throttle's 50-record `maxBatch` and fires fifty real socket trips before
-   * the test body even starts — ~180ms of that body's 900ms budget, measured,
-   * spent on records it does not assert about, which under full parallel load
-   * it did not always finish draining. Booting quiet and installing after
-   * moves that cost out of the assertion entirely.
+   * own unary round trip to the fake. Booting quiet and installing after keeps
+   * unrelated diagnostic traffic out of the assertion entirely.
    *
    * `clientLog: true` still exists for the cases that ARE about the boot's own
    * diagnostics: those need the sink standing before the first mount draws.
@@ -315,6 +316,8 @@ export interface HarnessOptions {
   /** The workspace the page is addressed to. */
   workspaceId?: string;
   workspaceDir?: string;
+  /** The page-delivered `AGENT_REPL_LOG_LEVEL`. */
+  logLevel?: ClientLogLevel;
   /** Script the daemon before anything mounts (the cold-open case). */
   arrange?(fake: FakeDaemon): void;
   /**
@@ -327,8 +330,7 @@ export interface HarnessOptions {
    * log. The console function is a no-op so the suite's output stays clean;
    * the forwarding half is the app's own.
    *
-   * Reach for this ONLY when the case is about the boot's own diagnostics: the
-   * boot emits fifty-odd records and each is its own unary round trip, so a
+   * Reach for this ONLY when the case is about the boot's own diagnostics. A
    * case that only wants the sink for a record IT emits should boot quiet and
    * call `installClientLogSink()` instead.
    */
@@ -421,6 +423,7 @@ async function mountApp(
   const dispatcher = socketPath === undefined ? undefined : new Agent({ connect: { socketPath } });
   // `stop()` is idempotent (a test may stop explicitly and the afterEach stops
   // again), and undici throws on a second close, so the close is claimed once.
+  let stopped = false;
   let dispatcherClosed = false;
   const closeDispatcher = async (): Promise<void> => {
     if (dispatcher === undefined || dispatcherClosed) return;
@@ -460,17 +463,22 @@ async function mountApp(
   // MAIN.TS'S OWN SINK, in main.ts's own order: the identity is bound and the
   // forwarding logger installed BEFORE the first component draws, so a record
   // emitted during boot travels the same path a record emitted later does.
+  let clientLogger: ForwardingLogger | undefined;
   const installClientLogSink = (): void => {
     bindLogContext({
       connection_id: "harness-connection",
       workspace_id: ctx.workspace.id,
       workspace_dir: ctx.workspace.dir,
     });
-    setLogger(
-      new ForwardingLogger(async (record) => {
+    clientLogger = new ForwardingLogger(
+      async (record) => {
         await client.clientLog({ workspace: ctx.workspace, record });
-      }, () => {}),
+      },
+      () => {},
+      {},
+      options.logLevel ?? "info",
     );
+    setLogger(clientLogger);
   };
   if (options.clientLog === true) installClientLogSink();
 
@@ -681,7 +689,21 @@ async function mountApp(
       await settle();
     },
     async stop() {
+      if (stopped) return;
+      stopped = true;
       for (const handle of [...handles].reverse()) handle.dispose();
+      // Draining clears the logger's timer and settle holds the socket open
+      // until every resulting ClientLog response head lands. Without both,
+      // a later test's clock can flush this page's records after its fake
+      // daemon has already stopped.
+      if (clientLogger !== undefined) {
+        clientLogger.flush();
+        await settle();
+        // Stream cancellation below can itself log. Detach production's sink
+        // only after it is drained so teardown diagnostics cannot address a
+        // fake daemon that teardown has already stopped.
+        setLogger(new ForwardingLogger(async () => {}, () => {}));
+      }
       // A daemon this mount did not start is the caller's to stop; the fake
       // one it did start is stopped here.
       await fake?.stop();

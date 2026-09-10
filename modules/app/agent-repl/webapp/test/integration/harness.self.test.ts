@@ -77,7 +77,7 @@ describe("settle with a request outstanding", () => {
     harness = await startHarness();
     harness.installClientLogSink();
     harness.fake.clearCalls();
-    log("warn", "the view arrived thin", { operation: "harness.self.slow-answer" });
+    log.warn("the view arrived thin", { operation: "harness.self.slow-answer" });
     // Act: the throttle releases the record on its two second window, and the
     // settle that follows finds the request in flight.
     await harness.tick(2_000);

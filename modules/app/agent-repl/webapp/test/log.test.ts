@@ -6,12 +6,12 @@ import {
   buildClientLogRecord,
   clearLogDedup,
   log,
-  logVerbose,
+  parseClientLogLevel,
   resetLoggingForTests,
   restampRecordIdentity,
   setLogger,
-  setVerboseConsole,
   type ClientLogLevel,
+  type WebappLogRecord,
 } from "../src/log.js";
 
 const LEVELS: readonly ClientLogLevel[] = ["debug", "info", "warn", "error"];
@@ -23,7 +23,10 @@ interface Harness {
 }
 
 /** A logger whose sink resolves and whose console is captured. */
-function install(sink?: (record: ClientLogRecord) => Promise<void>): Harness {
+function install(
+  sink?: (record: ClientLogRecord) => Promise<void>,
+  minimumLevel: ClientLogLevel = "debug",
+): Harness {
   const sent: ClientLogRecord[] = [];
   const consoleLines: Array<[ClientLogLevel, string]> = [];
   const logger = new ForwardingLogger(
@@ -32,10 +35,29 @@ function install(sink?: (record: ClientLogRecord) => Promise<void>): Harness {
         sent.push(record);
       }),
     (level, line) => consoleLines.push([level, line]),
+    {},
+    minimumLevel,
   );
   setLogger(logger);
   bindLogContext({ connection_id: "test-connection" });
   return { logger, sent, console: consoleLines };
+}
+
+function webappRecord(
+  level: ClientLogLevel,
+  overrides: Partial<WebappLogRecord> = {},
+): WebappLogRecord {
+  return {
+    timestamp: "2026-09-10T12:34:56.789000-04:00",
+    runtime: "webapp",
+    level,
+    verbosity: "normal",
+    operation: "test.op",
+    message: "m",
+    context: {},
+    connection_id: "connection-1",
+    ...overrides,
+  };
 }
 
 /**
@@ -56,43 +78,65 @@ beforeEach(() => {
 });
 
 describe("buildClientLogRecord: the level oneof", () => {
+  it("the canonical logger exposes exactly one method per level", () => {
+    expect(Object.keys(log).sort()).toEqual(["debug", "error", "info", "warn"]);
+  });
+
   for (const level of LEVELS) {
     it(`maps ${level} onto its own arm`, () => {
       // ARRANGE / ACT
-      const record = buildClientLogRecord(level, "m", { operation: "op" });
+      const record = buildClientLogRecord(webappRecord(level));
       // ASSERT
       expect(record.level.case).toBe(level);
     });
   }
 
   it("sets exactly one arm, never two", () => {
-    const record = buildClientLogRecord("warn", "m", { operation: "op" });
+    const record = buildClientLogRecord(webappRecord("warn"));
     expect(record.level.case).toBe("warn");
   });
 });
 
 describe("buildClientLogRecord: the record's fields", () => {
   it("carries the human sentence", () => {
-    expect(buildClientLogRecord("info", "the webapp booted", { operation: "op" }).message).toBe(
-      "the webapp booted",
-    );
+    const record = buildClientLogRecord(webappRecord("info", { message: "the webapp booted" }));
+    expect(record.message).toBe("the webapp booted");
   });
 
   it("lifts the operation onto its own field, for a machine to route on", () => {
-    expect(buildClientLogRecord("info", "m", { operation: "main.boot" }).operation).toBe("main.boot");
+    const record = buildClientLogRecord(webappRecord("info", { operation: "main.boot" }));
+    expect(record.operation).toBe("main.boot");
   });
 
-  it("sends an empty operation rather than a wrong one when none was given", () => {
-    expect(buildClientLogRecord("info", "m", {}).operation).toBe("");
+  it("carries the client's own timestamp", () => {
+    const record = buildClientLogRecord(webappRecord("info"));
+    expect(record.timestamp).toBe("2026-09-10T12:34:56.789000-04:00");
   });
 
-  it("carries the context as the record's Struct", () => {
-    const record = buildClientLogRecord("info", "m", { operation: "op", rpc: "WatchFooter" });
+  it("the live timestamp uses six fractional digits and an explicit offset", async () => {
+    const h = install();
+    log.info("m", { operation: "test.timestamp-shape" });
+    await flushAndSettle(h);
+    expect(h.sent[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$/);
+  });
+
+  it("carries the client's own verbosity class", () => {
+    const record = buildClientLogRecord(webappRecord("info", { verbosity: "verbose" }));
+    expect(record.verbose).toBe(true);
+  });
+
+  it("keeps the call site's fields directly in the context Struct", () => {
+    const record = buildClientLogRecord(webappRecord("info", { context: { rpc: "WatchFooter" } }));
     expect(record.context).toMatchObject({ rpc: "WatchFooter" });
   });
 
+  it("does not nest the complete built record inside context", () => {
+    const record = buildClientLogRecord(webappRecord("info", { context: { rows: 3 } }));
+    expect(record.context).not.toHaveProperty("context");
+  });
+
   it("builds a real generated message", () => {
-    expect(buildClientLogRecord("info", "m", { operation: "op" }).$typeName).toBe(
+    expect(buildClientLogRecord(webappRecord("info")).$typeName).toBe(
       "agentrepl.v1.ClientLogRecord",
     );
   });
@@ -101,64 +145,64 @@ describe("buildClientLogRecord: the record's fields", () => {
 describe("log: forwarding", () => {
   it("hands one record to the sink", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(1);
   });
 
   it("forwards the level the call site chose", async () => {
     const h = install();
-    log("error", "boom", { operation: "test.op" });
+    log.error("boom", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.sent[0].level.case).toBe("error");
   });
 
   it("forwards the operation", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.sent[0].operation).toBe("test.op");
   });
 
   it("forwards the call site's structured evidence", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op", context: { rows: 3 } });
+    log.info("hello", { operation: "test.op", context: { rows: 3 } });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ context: { rows: 3 } });
+    expect(h.sent[0].context).toMatchObject({ rows: 3 });
   });
 
   it("stamps the bound connection id on every record", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.sent[0].context).toMatchObject({ connection_id: "test-connection" });
   });
 
-  it("stamps the bound workspace identity", async () => {
+  it("keeps workspace routing out of context because the request carries it", async () => {
     const h = install();
     bindLogContext({ workspace_id: "ws-1", workspace_dir: "/w" });
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ workspace_id: "ws-1", workspace_dir: "/w" });
+    expect(h.sent[0].context).not.toHaveProperty("workspace_id");
   });
 
   it("marks a normal record's verbosity", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ verbosity: "normal" });
+    expect(h.sent[0].verbose).toBe(false);
   });
 
   it("does not forward a localOnly record, the emergency console path", async () => {
     const h = install();
-    log("error", "hello", { operation: "test.op", localOnly: true });
+    log.error("hello", { operation: "test.op", localOnly: true });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(0);
   });
 
   it("still consoles a localOnly record", () => {
     const h = install();
-    log("error", "hello", { operation: "test.op", localOnly: true });
+    log.error("hello", { operation: "test.op", localOnly: true });
     expect(h.console).toHaveLength(1);
   });
 });
@@ -166,61 +210,77 @@ describe("log: forwarding", () => {
 describe("log: the console", () => {
   it("emits a normal record", () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     expect(h.console).toHaveLength(1);
   });
 
   it("emits it at the record's own level", () => {
     const h = install();
-    log("warn", "hello", { operation: "test.op" });
+    log.warn("hello", { operation: "test.op" });
     expect(h.console[0][0]).toBe("warn");
   });
 
   it("emits the record as JSON, so a human can read the evidence", () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     expect(JSON.parse(h.console[0][1])).toMatchObject({ operation: "test.op", message: "hello" });
   });
 });
 
-describe("logVerbose", () => {
-  it("PERSISTS regardless of the console gate", async () => {
-    // ARRANGE: the gate is console noise only, never evidence.
+describe("the verbosity class", () => {
+  it("forwards a verbose record", async () => {
     const h = install();
-    // ACT
-    logVerbose("info", "hot path", { operation: "test.op" });
+    log.info("hot path", { operation: "test.op", verbosity: "verbose" });
     await flushAndSettle(h);
-    // ASSERT
     expect(h.sent).toHaveLength(1);
   });
 
-  it("stays OFF the console by default", () => {
+  it("keeps a verbose record on the console when its level is enabled", () => {
     const h = install();
-    logVerbose("info", "hot path", { operation: "test.op" });
-    expect(h.console).toHaveLength(0);
-  });
-
-  it("reaches the console once the flag is on", () => {
-    const h = install();
-    setVerboseConsole(true);
-    logVerbose("info", "hot path", { operation: "test.op" });
+    log.info("hot path", { operation: "test.op", verbosity: "verbose" });
     expect(h.console).toHaveLength(1);
   });
 
   it("marks the record's verbosity", async () => {
     const h = install();
-    logVerbose("info", "hot path", { operation: "test.op" });
+    log.info("hot path", { operation: "test.op", verbosity: "verbose" });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ verbosity: "verbose" });
+    expect(h.sent[0].verbose).toBe(true);
+  });
+});
+
+describe("AGENT_REPL_LOG_LEVEL", () => {
+  const cases: ReadonlyArray<{
+    name: string;
+    minimum: ClientLogLevel;
+    emitted: ClientLogLevel;
+    want: number;
+  }> = [
+    { name: "debug admits debug", minimum: "debug", emitted: "debug", want: 1 },
+    { name: "info rejects debug", minimum: "info", emitted: "debug", want: 0 },
+    { name: "warn rejects info", minimum: "warn", emitted: "info", want: 0 },
+    { name: "error admits error", minimum: "error", emitted: "error", want: 1 },
+  ];
+
+  for (const tc of cases) {
+    it(tc.name, async () => {
+      const h = install(undefined, tc.minimum);
+      log[tc.emitted]("threshold case", { operation: "test.level" });
+      await flushAndSettle(h);
+      expect(h.sent).toHaveLength(tc.want);
+    });
+  }
+
+  it("uses info only when the delivered value is absent", () => {
+    expect(parseClientLogLevel(null)).toBe("info");
   });
 
-  it("is reset to off by the test hook, so a flag cannot leak between tests", () => {
-    install();
-    setVerboseConsole(true);
-    resetLoggingForTests();
-    const h = install();
-    logVerbose("info", "hot path", { operation: "test.op" });
-    expect(h.console).toHaveLength(0);
+  it("refuses an empty delivered value", () => {
+    expect(() => parseClientLogLevel("")).toThrow(/invalid log_level/);
+  });
+
+  it("refuses an unknown delivered value", () => {
+    expect(() => parseClientLogLevel("trace")).toThrow(/invalid log_level/);
   });
 });
 
@@ -232,7 +292,7 @@ describe("a sink failure never recurses", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     // ACT
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     // ASSERT
     expect(h.logger.sinkFailureCount()).toBe(1);
@@ -243,9 +303,9 @@ describe("a sink failure never recurses", () => {
       throw new Error("unavailable");
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
-    log("info", "a", { operation: "test.op" });
-    log("info", "b", { operation: "test.op" });
-    log("info", "c", { operation: "test.op" });
+    log.info("a", { operation: "test.op" });
+    log.info("b", { operation: "test.op" });
+    log.info("c", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.logger.sinkFailureCount()).toBe(3);
   });
@@ -255,8 +315,8 @@ describe("a sink failure never recurses", () => {
       throw new Error("unavailable");
     });
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    log("info", "a", { operation: "test.op" });
-    log("info", "b", { operation: "test.op" });
+    log.info("a", { operation: "test.op" });
+    log.info("b", { operation: "test.op" });
     await flushAndSettle(h);
     expect(spy).toHaveBeenCalledOnce();
   });
@@ -268,7 +328,7 @@ describe("a sink failure never recurses", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     // ACT
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     // ASSERT: one attempt, not a cascade.
     expect(h.logger.sinkFailureCount()).toBe(1);
@@ -279,15 +339,15 @@ describe("a sink failure never recurses", () => {
       throw new Error("unavailable");
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
-    log("info", "a", { operation: "test.op" });
+    log.info("a", { operation: "test.op" });
     await flushAndSettle(h);
-    log("info", "b", { operation: "test.op" });
+    log.info("b", { operation: "test.op" });
     expect(h.console).toHaveLength(2);
   });
 
   it("reports no failures on a healthy sink", async () => {
     const h = install();
-    log("info", "hello", { operation: "test.op" });
+    log.info("hello", { operation: "test.op" });
     await flushAndSettle(h);
     expect(h.logger.sinkFailureCount()).toBe(0);
   });
@@ -296,13 +356,13 @@ describe("a sink failure never recurses", () => {
 describe("the installation invariant", () => {
   it("refuses to log before a logger is installed", () => {
     resetLoggingForTests();
-    expect(() => log("info", "hello", { operation: "test.op" })).toThrow(/not installed/);
+    expect(() => log.info("hello", { operation: "test.op" })).toThrow(/not installed/);
   });
 
   it("refuses a context that overrides the operation", () => {
     install();
     expect(() =>
-      log("info", "hello", { operation: "a", context: { operation: "b" } }),
+      log.info("hello", { operation: "a", context: { operation: "b" } }),
     ).toThrow(/operation/);
   });
 
@@ -310,56 +370,56 @@ describe("the installation invariant", () => {
     install();
     bindLogContext({ workspace_id: "ws-1" });
     expect(() =>
-      log("info", "hello", { operation: "a", context: { workspace_id: "ws-2" } }),
+      log.info("hello", { operation: "a", context: { workspace_id: "ws-2" } }),
     ).toThrow(/conflicts/);
   });
 
   it("refuses a record with no connection id", () => {
-    setLogger(new ForwardingLogger(async () => {}, () => {}));
+    setLogger(new ForwardingLogger(async () => {}, () => {}, {}, "debug"));
     // A reset clears the bound context to the harness default; unbind it.
     bindLogContext({ connection_id: "" });
-    expect(() => log("info", "hello", { operation: "a" })).toThrow(/connection_id/);
+    expect(() => log.info("hello", { operation: "a" })).toThrow(/connection_id/);
   });
 });
 
 describe("dedup", () => {
   it("suppresses a repeat of the same message under a key", async () => {
     const h = install();
-    log("warn", "same", { operation: "op", dedupKey: "k" });
-    log("warn", "same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(1);
   });
 
   it("lets a DIFFERENT message through, because the condition changed", async () => {
     const h = install();
-    log("warn", "first", { operation: "op", dedupKey: "k" });
-    log("warn", "second", { operation: "op", dedupKey: "k" });
+    log.warn("first", { operation: "op", dedupKey: "k" });
+    log.warn("second", { operation: "op", dedupKey: "k" });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(2);
   });
 
   it("re-arms the key when the caller observed recovery", async () => {
     const h = install();
-    log("warn", "same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
     clearLogDedup("k");
-    log("warn", "same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(2);
   });
 
   it("keeps keys independent", async () => {
     const h = install();
-    log("warn", "same", { operation: "op", dedupKey: "a" });
-    log("warn", "same", { operation: "op", dedupKey: "b" });
+    log.warn("same", { operation: "op", dedupKey: "a" });
+    log.warn("same", { operation: "op", dedupKey: "b" });
     await flushAndSettle(h);
     expect(h.sent).toHaveLength(2);
   });
 
   it("suppresses the console too, since the first line carried the evidence", () => {
     const h = install();
-    log("warn", "same", { operation: "op", dedupKey: "k" });
-    log("warn", "same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
+    log.warn("same", { operation: "op", dedupKey: "k" });
     expect(h.console).toHaveLength(1);
   });
 });
@@ -400,70 +460,71 @@ describe("restampRecordIdentity", () => {
     const h = install();
     bindLogContext({ agent_repl_session_id: "s-1" });
     // ACT
-    log("info", "hello", { operation: "op" });
+    log.info("hello", { operation: "op" });
+    bindLogContext({ agent_repl_session_id: "s-2" });
     await flushAndSettle(h);
     // ASSERT
-    expect(h.sent[0].context).toMatchObject({ agent_repl_session_id: "s-1" });
+    expect(h.sent[0].context).toMatchObject({ agent_repl_session_id: "s-2" });
   });
 });
 
 describe("jsonSafe conversion", () => {
   it("renders an Error as its name and message, not as an empty object", async () => {
     const h = install();
-    log("error", "boom", { operation: "op", context: { cause: new TypeError("nope") } });
+    log.error("boom", { operation: "op", context: { cause: new TypeError("nope") } });
     await flushAndSettle(h);
     expect(h.sent[0].context).toMatchObject({
-      context: { cause: { name: "TypeError", message: "nope" } },
+      cause: { name: "TypeError", message: "nope" },
     });
   });
 
   it("renders a bigint as a string, which a Struct can carry", async () => {
     const h = install();
-    log("info", "m", { operation: "op", context: { at_ms: 1_700_000_000_000n } });
+    log.info("m", { operation: "op", context: { at_ms: 1_700_000_000_000n } });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ context: { at_ms: "1700000000000" } });
+    expect(h.sent[0].context).toMatchObject({ at_ms: "1700000000000" });
   });
 
   it("marks a circular reference rather than throwing on it", async () => {
     const h = install();
     const cycle: Record<string, unknown> = {};
     cycle.self = cycle;
-    log("info", "m", { operation: "op", context: { cycle } });
+    log.info("m", { operation: "op", context: { cycle } });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ context: { cycle: { self: "[Circular]" } } });
+    expect(h.sent[0].context).toMatchObject({ cycle: { self: "[Circular]" } });
   });
 
   it("renders a non-finite number as a string, which JSON cannot carry", async () => {
     const h = install();
-    log("info", "m", { operation: "op", context: { ratio: Number.POSITIVE_INFINITY } });
+    log.info("m", { operation: "op", context: { ratio: Number.POSITIVE_INFINITY } });
     await flushAndSettle(h);
-    expect(h.sent[0].context).toMatchObject({ context: { ratio: "Infinity" } });
+    expect(h.sent[0].context).toMatchObject({ ratio: "Infinity" });
   });
 });
 
 describe("pendingCount", () => {
   it("is zero once a record has been released", async () => {
     const h = install();
-    log("info", "hello", { operation: "op" });
+    log.info("hello", { operation: "op" });
     await flushAndSettle(h);
     expect(h.logger.pendingCount()).toBe(0);
   });
 
   it("buffers a non-error record behind the throttle's window", () => {
     const h = install();
-    log("info", "hello", { operation: "op" });
+    log.info("hello", { operation: "op" });
     expect(h.logger.pendingCount()).toBe(1);
   });
 
   it("flushes an ERROR immediately, since it is the record someone looks for", () => {
     const h = install();
-    log("error", "boom", { operation: "op" });
+    log.error("boom", { operation: "op" });
     expect(h.logger.pendingCount()).toBe(0);
   });
 
   it("releases the buffer on an explicit flush", () => {
     const h = install();
-    log("info", "hello", { operation: "op" });
+    log.info("hello", { operation: "op" });
     h.logger.flush();
     expect(h.logger.pendingCount()).toBe(0);
   });
@@ -475,7 +536,7 @@ describe("the default console, when no console function is injected", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     const logger = new ForwardingLogger(async () => {});
     // ACT
-    logger.write("error", "m", { operation: "op" });
+    logger.write(buildClientLogRecord(webappRecord("error")), '{"operation":"op"}');
     // ASSERT
     expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
     spy.mockRestore();
@@ -484,7 +545,7 @@ describe("the default console, when no console function is injected", () => {
   it("routes a warn record to console.warn", () => {
     const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logger = new ForwardingLogger(async () => {});
-    logger.write("warn", "m", { operation: "op" });
+    logger.write(buildClientLogRecord(webappRecord("warn")), '{"operation":"op"}');
     expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
     spy.mockRestore();
   });
@@ -492,7 +553,7 @@ describe("the default console, when no console function is injected", () => {
   it("routes an info record to console.log, the level having no console of its own", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const logger = new ForwardingLogger(async () => {});
-    logger.write("info", "m", { operation: "op" });
+    logger.write(buildClientLogRecord(webappRecord("info")), '{"operation":"op"}');
     expect(spy).toHaveBeenCalledWith('{"operation":"op"}');
     spy.mockRestore();
   });
@@ -501,10 +562,11 @@ describe("the default console, when no console function is injected", () => {
 describe("the level a record must carry", () => {
   it("refuses a level outside the four, rather than forwarding it", () => {
     // ARRANGE
-    install();
+    const h = install();
     // ACT / ASSERT
-    expect(() => log("trace" as ClientLogLevel, "m", { operation: "op" })).toThrow(
-      "webapp log record has invalid level trace",
-    );
+    expect(
+      () => new ForwardingLogger(async () => {}, () => {}, {}, "trace" as ClientLogLevel),
+    ).toThrow("webapp log record has invalid level trace");
+    expect(h.sent).toHaveLength(0);
   });
 });
