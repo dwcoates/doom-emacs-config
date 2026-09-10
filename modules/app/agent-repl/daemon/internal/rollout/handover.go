@@ -127,8 +127,8 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 		c.log.Debug(opTransfer, "the workspace has no live shim to detach from", fields)
 	}
 
-	if err := c.deps.DB.ReleaseServing(ctx, ws.ID, c.deps.Instance); err != nil {
-		c.log.Warn(opTransfer, "could not release serving ownership", withCause(fields, err))
+	if err := c.releaseServing(ctx, ws.ID, fields); err != nil {
+		return fmt.Errorf("rollout: transfer %q: release serving: %w", ws.ID, err)
 	}
 
 	c.recordTransfer(ws.ID, successor)
@@ -141,6 +141,35 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 		defer windows.Done()
 		c.timeAdoption(ctx, ws.ID, fields)
 	}()
+	return nil
+}
+
+// releaseServing clears this daemon's serving claim unless the successor has
+// already claimed it. Headless workspaces can be adopted as soon as the intent
+// manifest lands, before the outgoing transfer goroutine reaches this step;
+// another owner is therefore the same completed-adoption fact timeAdoption
+// observes, never a release this daemon should attempt on a bystander's claim.
+func (c *controller) releaseServing(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	owner, err := c.deps.DB.Serving(ctx, ws)
+	if err != nil {
+		c.log.Error(opTransfer, "could not read serving ownership before releasing it", withCause(fields, err))
+		return err
+	}
+	if owner == nil {
+		c.log.Debug(opTransfer, "serving ownership was already released", fields)
+		return nil
+	}
+	if *owner != c.deps.Instance {
+		c.log.Info(opTransfer, "the successor already owns the workspace", merge(fields, dlog.Context{
+			"owner": string(*owner),
+		}))
+		return nil
+	}
+	if err := c.deps.DB.ReleaseServing(ctx, ws, c.deps.Instance); err != nil {
+		c.log.Error(opTransfer, "could not release serving ownership", withCause(fields, err))
+		return err
+	}
+	c.log.Debug(opTransfer, "released serving ownership", fields)
 	return nil
 }
 

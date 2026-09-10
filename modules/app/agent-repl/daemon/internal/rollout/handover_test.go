@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -351,6 +352,40 @@ func TestAnAdoptionThatLandedRecordsNoFault(t *testing.T) {
 	}
 	if len(faults) != 0 {
 		t.Fatalf("adoption-expiry faults = %d, want none once the successor claimed the workspace", len(faults))
+	}
+}
+
+func TestTransferAcceptsServingOwnershipThatAlreadyMoved(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	record, err := h.db.Workspace(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	successor := ids.InstanceID("daemon-successor")
+	if err := h.db.ClaimServing(context.Background(), ws, successor); err != nil {
+		t.Fatalf("ClaimServing(successor): %v", err)
+	}
+	var windows sync.WaitGroup
+
+	// Act.
+	err = h.c.transfer(context.Background(), record, "127.0.0.1:7788", Participants{}, &windows)
+	windows.Wait()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("transfer after the successor claimed serving = %v, want success", err)
+	}
+	infos := levelRecords(records(h.log, opTransfer), "info")
+	found := false
+	for _, record := range infos {
+		if record.Message == "the successor already owns the workspace" && record.Context["owner"] == string(successor) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("INFO records = %+v, want the already-owned transition", infos)
 	}
 }
 
