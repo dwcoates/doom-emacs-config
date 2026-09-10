@@ -511,20 +511,31 @@ func TestPlaytest16TasksAndMessages(t *testing.T) {
 
 	s.submit(t, "!task-reject")
 	s.awaitArm(t, s.Name, "the rejected turn to settle", emGHISettledArms...)
-	s.awaitInPageFor(t, playtestAskBound, "the refused update to leave its task WHERE IT STANDS",
-		`document.querySelectorAll('`+pt16TaskRows+`').length === 3 &&
-                 document.querySelectorAll('`+pt16TaskRows+`')[2].getAttribute("data-task-status") !== "completed"`)
+	// A REJECTION ADDS NOTHING AND CHANGES NOTHING, which is `AgentTaskRejected`'s
+	// own sentence. The refused act names task 9, which the tracker does not
+	// hold and nobody has ever named, so the checklist must be exactly what it
+	// was -- neither a ticked row for the status the act asked for, nor a
+	// phantom row with no words in it.
+	s.awaitInPageFor(t, playtestAskBound, "the turn's own prose to say the board refused",
+		`document.body.innerText.indexOf("The board rejected the update.") >= 0`)
+	s.awaitInPage(t, "the checklist to be exactly the two tasks the board actually holds",
+		`document.querySelectorAll('`+pt16TaskRows+`').length === 2 &&
+                 document.querySelectorAll('[data-panel="tasks"] [data-task-status="completed"]').length === 0`)
+	s.awaitInPage(t, "the tasks chip's denominator to count only those two",
+		`document.querySelector('.footer-chip[data-chip="tasks"]').textContent.indexOf("0/2") >= 0`)
 	statuses := s.readInPage(t, "the checklist's arms",
 		`Array.prototype.map.call(document.querySelectorAll('`+pt16TaskRows+`'), function (r) {
                    return r.getAttribute("data-task-status"); }).join(",")`)
 	p.capture("tasks-rejected",
 		"`!task-reject` submitted with composer RET -- an update the board refuses",
-		fmt.Sprintf("the checklist's arms read [%s]: the refused update did NOT mark its task completed, "+
-			"which is the contract's own rule that a rejection describes the task as it STILL STANDS "+
-			"rather than as the refused act asked for", statuses),
-		"A THIRD checklist row is present and it is NOT ticked. The refused update asked for "+
-			"\"completed\" and the board said no, so the row must not be drawn as done -- a ticked third "+
-			"row here would be the page believing a refusal.")
+		fmt.Sprintf("the turn's prose says the board refused, the checklist's arms are still [%s] with "+
+			"NOTHING ticked, and the ☑ chip still reads `0/2` -- a rejection adds nothing and changes "+
+			"nothing, which is `AgentTaskRejected`'s own sentence", statuses),
+		"The feed carries the `!task-reject` prompt and the answer \"The board rejected the update.\", "+
+			"and the checklist below is UNCHANGED: the same two rows, the first running and the second "+
+			"empty-boxed, and the ☑ chip still reading 0/2. NEITHER a ticked row (the page believing a "+
+			"refusal) NOR a third row with no words beside its glyph (a phantom entry for a task the "+
+			"tracker says it does not have) may appear.")
 
 	// -----------------------------------------------------------------------
 	// The three deliveries. Two landings and a refusal, and the plan's own
