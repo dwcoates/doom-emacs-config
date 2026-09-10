@@ -115,9 +115,20 @@ change into DDL.
 ### The store is NUKED, never migrated
 
 `db.Open` checks `schema_meta.version`; any mismatch, or any pre-existing table
-set that differs, DROPS every table and recreates. There is no `ALTER`, ever,
-and no migration code. Writing migration code, or preserving a stored shape on
-durable-compatibility grounds, is forbidden.
+set that differs, REMOVES THE DATABASE FILE and creates a fresh one. There is no
+`ALTER`, ever, and no migration code. Writing migration code, or preserving a
+stored shape on durable-compatibility grounds, is forbidden.
+
+**THE NUKE IS AN UNLINK, NEVER A `DROP TABLE`.** Emptying a foreign schema in
+place walks every page of what it discards: on 2026-09-09 the store met an
+11.5 GB `events.db` at a superseded version, ran the DROP for minutes with no
+socket listening, and `deploy-all.sh` gave up waiting for `store.sock` and left
+the sidecar and the runtime un-bounced. Unlinking costs the same whatever the
+file weighs, so `ensureSchema` never drops: it returns a `schemaMismatchError`
+naming what it found, and `Open` — the layer that owns the file — closes the
+handle, removes the file with its siblings, and reopens onto an empty one. The
+mismatch is recorded ONCE, as a warn from `Open`, naming the found version and
+table set and saying the file was removed.
 
 **A `--db` FILE THAT IS NOT A DATABASE IS IN THE WAY, SO IT GOES** — the same
 answer, because the store holds a cache of what the vendor and the shim already
