@@ -1,0 +1,40 @@
+/**
+ * THE REAL STYLESHEET, INSTALLED INTO A TEST'S DOCUMENT.
+ *
+ * WHY A TEST WOULD WANT IT. Almost every drawing test here asserts CLASSES,
+ * which is the right unit: the class is what the drawing code decides. But a
+ * class only means something if the stylesheet lets it win, and the cascade is
+ * decided by the WHOLE file rather than by the rule an author was looking at.
+ * A playtest capture of the topbar caught exactly that gap — the context figure
+ * carried `.tone-yellow` and was painted grey, because a later single-class
+ * rule set `color` on the same element and the earlier tone rule lost. The
+ * class assertion passed the whole time.
+ *
+ * WHAT IT CAN AND CANNOT SAY. jsdom resolves the cascade — selector matching,
+ * specificity and source order — so "which declaration wins" is answerable
+ * here. It does NOT resolve custom properties, so the winning value comes back
+ * as the literal `var(--async)` rather than a color. That is enough, and it is
+ * also the honest assertion: the token is the vocabulary the app is written in,
+ * and pinning the resolved hex would pin the theme instead of the register.
+ */
+import stylesheet from "../src/styles.css?raw";
+
+/**
+ * Install `src/styles.css` into the current document, and answer a teardown
+ * that removes it. Call it inside the test that needs it, never globally: a
+ * suite that does not ask about paint should not pay to parse the file.
+ */
+export function installStylesheet(): () => void {
+  const style = document.createElement("style");
+  style.textContent = stylesheet;
+  document.head.append(style);
+  return () => style.remove();
+}
+
+/**
+ * The declaration the cascade actually hands `property` on `el`, with the real
+ * stylesheet installed. Custom properties are returned unresolved, by design.
+ */
+export function cascadedValue(el: Element, property: string): string {
+  return window.getComputedStyle(el).getPropertyValue(property).trim();
+}
