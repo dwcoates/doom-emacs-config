@@ -167,7 +167,10 @@ end-of-string; the longest matching name wins. Anything else is plain prose,
 EXCEPT a prompt containing the literal `e2e-fail-this-turn`, which fails the
 turn (the daemon's merge-pipeline gate spells it identically). Env:
 `AGENT_REPL_FAKE_TURN_GATE` + `_TEXT` park a matching turn until the named path
-appears; `AGENT_REPL_FAKE_SPOOL_ROOT` roots the spool tree.
+appears; `AGENT_REPL_FAKE_DETACH_GATE` parks `!bash-detach`'s detached work,
+after its first spool line, until the named path appears — no `_TEXT`
+companion, since the gate applies to that one scenario rather than to a
+matched prompt; `AGENT_REPL_FAKE_SPOOL_ROOT` roots the spool tree.
 
 ### Which rows are capture-grounded, and which are only declared
 
@@ -230,7 +233,7 @@ is still a contract — but nothing has confirmed the vendor spells them this wa
 | `!bash-timeout` | a foreground `Bash` that hits its timeout: `task_started`, then a result carrying `timedOutAfterMs` and `backgroundTaskId` — the vendor auto-backgrounds rather than killing | the tool_use line, the tool_result line, an incremental spool with NO `EXIT=` line, the closing text line | AgentBashInterrupted.cause=timed_out; the run stays live as detached work |
 | `!bash-spill` | a foreground `Bash` whose output was too large for the message and spilled to a file on disk | the tool_use line, the tool_result line carrying `persistedOutputPath`/`persistedOutputSize`, the closing text line | AgentBashOutputPartial — the partial extent with the omitted byte count |
 | `!bash-image` | a foreground `Bash` whose stdout IS image data (`isImage: true`), answered with an image content block | the tool_use line, the image tool_result line, the closing text line | AgentBashOutput.form=image |
-| `!bash-detach` | a `Bash` with `run_in_background`, `task_started`, `background_tasks_changed`, a result carrying only `backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification` | the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written INCREMENTALLY and terminated by `EXIT=0` | AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool |
+| `!bash-detach` | a `Bash` with `run_in_background`, `task_started`, `background_tasks_changed`, a result carrying only `backgroundTaskId`, then — after the turn — `task_updated` and a completed `task_notification`. When `AGENT_REPL_FAKE_DETACH_GATE` names a path, the run PARKS after its first spool line until that path exists, so a test can observe the turn concluded and the detached work still going | the tool_use and tool_result lines, and `<spool-root>/<slug>/<session>/tasks/b<hex>.output` written INCREMENTALLY (the first line before any detach gate, the rest after it) and terminated by `EXIT=0` | AgentBash detached_work + AgentBashUpdate deltas fed by the sidecar tailing the spool |
 | `!bash-detach-poll [command]` | a `Bash` with `run_in_background`, then — in the SAME turn — explicit `TaskOutput` poll tool_use/tool_result pairs: two reporting RUNNING with growing output, then one reporting a terminal exit code and status. UNGROUNDED, INVENTED: no capture ever calls `TaskOutput`, only lists it in `init.tools` | the tool_use/tool_result lines for the background and for each poll, and the spool terminated by `EXIT=0` | AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is unregistered and folds to AgentUnmodeled |
 | `!bash-detach-fail` | a detached `Bash` that ends non-zero: `task_updated{status:"failed"}` and a failed `task_notification` | the tool_use and tool_result lines, and a spool terminated by `EXIT=3` | AgentBash detached_work terminating in a non-zero exit |
 | `!bash-detach-live` | a detached `Bash` that NEVER finishes: no terminal notification, and the task stays in the live set | an unterminated spool with no `EXIT=` line — the corpus's `bash-midoutput.output` shape | AgentBash detached_work still live; what a fan-wide cancel and a StopBash act on |

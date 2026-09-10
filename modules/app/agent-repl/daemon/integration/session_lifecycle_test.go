@@ -2363,3 +2363,70 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 		return v.GetConnectivity().GetTitle() == "connected to the session"
 	})
 }
+
+// TestAPromptRevivesAWorkspaceWhoseShimWasKilled is the playtest defect end to
+// end. A workspace ran a turn to done, its shim was SIGKILLed out from under
+// the daemon, and the roster settled on `dead` — and the NEXT prompt was
+// delivered to the dead client rather than reviving the session: StartTurn
+// dialed a socket nothing was listening on, SubmitPrompt answered
+// `unavailable`, and the workspace stayed dead forever with the prompt held as
+// an outage. A dead shim is not a live client, so the submission takes the
+// same revival path a hibernated workspace takes.
+func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the shim death this test drives, the link it severs, and the bring-up the revival runs.
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.workspace.bring_up")
+	f.shim.ExpectStartSession()
+	roster := f.d.WatchRoster()
+	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
+		return func(r *frontendv1.WorkspaceRoster) bool {
+			row := rosterRow(r, f.ws.GetId())
+			return row != nil && pred(row)
+		}
+	}
+
+	// Arrange: one turn runs to done, so the session has a conversation to
+	// resume — the very state the playtest was in when the shim died.
+	f.submit("do the thing", "k-dead-revive-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	awaitRoster(t, f.d, roster, "done after the first turn", statusIs(func(row *frontendv1.RosterRow) bool {
+		return row.GetDone() != nil
+	}))
+
+	// Arrange: the shim is killed out from under the daemon.
+	pid := f.shim.Info().PID
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the fake shim process %d: %v", pid, err)
+	}
+	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+	awaitRoster(t, f.d, roster, "the roster row dead after the shim was killed", statusIs(func(row *frontendv1.RosterRow) bool {
+		return row.GetDead() != nil
+	}))
+
+	// Act
+	f.submit("wake up", "k-dead-revive-2", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	revived := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+
+	// Assert: a NEW shim is brought up on the recorded conversation.
+	req := revived.ExpectStartSession()
+	if req.GetResume() == nil {
+		t.Fatalf("StartSession on the revival = %v, want a resume source (the session took a turn)", req)
+	}
+	if revivedPID := revived.Info().PID; revivedPID == pid {
+		t.Fatalf("the revival's shim pid = %d, want a process other than the killed %d", revivedPID, pid)
+	}
+
+	// Assert: the held prompt is delivered once the revived session is ready.
+	revived.ExpectStartTurn()
+
+	// Assert: the roster row LEAVES dead and settles on the revived turn.
+	revived.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	awaitRoster(t, f.d, roster, "the revived roster row settling out of dead", statusIs(func(row *frontendv1.RosterRow) bool {
+		return row.GetDone() != nil
+	}))
+}

@@ -62,9 +62,17 @@ export interface DriveOptions {
    *
    * `messages` is the same array the drive is filling, so a test that needs an
    * id the scenario minted (a task id, a tool_use id) can read it out mid-flight
-   * instead of guessing it.
+   * instead of guessing it. `roots` is the same {@link Driven.spool}-shaped
+   * root information the finished drive reports, handed over early so a test
+   * can read a spool's PARTIAL content while the drive is still parked on
+   * something, rather than only after it settles.
    */
-  readonly during?: (query: QueryLike, prompts: PromptFeeder, messages: Line[]) => Promise<void> | void;
+  readonly during?: (
+    query: QueryLike,
+    prompts: PromptFeeder,
+    messages: Line[],
+    roots: { readonly cwd: string; readonly configDir: string; readonly spoolRoot: string; readonly sessionId: string },
+  ) => Promise<void> | void;
   /** Extra `createFakeQuery` options. */
   readonly opts?: Partial<FakeQueryOpts>;
   /** Resume this vendor session instead of starting fresh. */
@@ -171,7 +179,9 @@ export async function driveScenario(
     }
   })();
 
-  if (options.during !== undefined) await options.during(query, feeder, messages);
+  if (options.during !== undefined) {
+    await options.during(query, feeder, messages, { cwd, configDir, spoolRoot, sessionId });
+  }
   feeder.close();
   await collect;
 
@@ -196,15 +206,28 @@ export async function driveScenario(
       linesOf(join(projectDir, id, "subagents", `agent-${agentId}.jsonl`)),
     subagentMeta: (agentId, id = sessionId) =>
       JSON.parse(readFileSync(join(projectDir, id, "subagents", `agent-${agentId}.meta.json`), "utf8")) as Line,
-    spool: (taskId, id = sessionId) => {
-      const path = join(spoolRoot, cwdSlug(cwd), id, "tasks", `${taskId}.output`);
-      return existsSync(path) ? readFileSync(path, "utf8") : null;
-    },
+    spool: (taskId, id = sessionId) => readSpool({ cwd, spoolRoot }, id, taskId),
     spoolIds: (id = sessionId) => {
       const dir = join(spoolRoot, cwdSlug(cwd), id, "tasks");
       return existsSync(dir) ? readdirSync(dir).map((f) => f.replace(/\.output$/, "")).sort() : [];
     },
   };
+}
+
+/**
+ * Read one task spool's current body, or null when it was never opened.
+ *
+ * Shared by {@link Driven.spool} and by a `during` callback that needs to read
+ * a spool's PARTIAL content mid-drive, off the `roots` `driveScenario` hands
+ * `during` early (before the finished {@link Driven} exists to ask instead).
+ */
+export function readSpool(
+  roots: { readonly cwd: string; readonly spoolRoot: string },
+  sessionId: string,
+  taskId: string,
+): string | null {
+  const path = join(roots.spoolRoot, cwdSlug(roots.cwd), sessionId, "tasks", `${taskId}.output`);
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
 /**

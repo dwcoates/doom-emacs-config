@@ -314,3 +314,44 @@ func TestKillSessionTellsTheWatcherBeforeItEndsTheSession(t *testing.T) {
 		t.Fatalf("stand-down order = %v, want %v", got, want)
 	}
 }
+
+// TestClientAnswersALiveShimOnlyWhileItsProcessLives is the playtest defect at
+// its lowest seam: a shim SIGKILLed out from under the daemon leaves its row in
+// the fleet, and answering that row as a live client sends a submitted prompt
+// down the delivery path — StartTurn onto a socket nothing is listening on —
+// instead of the revival path a workspace with no client takes.
+func TestClientAnswersALiveShimOnlyWhileItsProcessLives(t *testing.T) {
+	tests := []struct {
+		name     string
+		reaped   bool
+		wantLive bool
+	}{
+		{name: "the shim is running", reaped: false, wantLive: true},
+		{name: "the shim process is gone", reaped: true, wantLive: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			f.client.reaped = tt.reaped
+
+			// Act.
+			client, live := f.fleet.Client(ws.ID)
+
+			// Assert.
+			if live != tt.wantLive {
+				t.Fatalf("Client() live = %v, want %v", live, tt.wantLive)
+			}
+			if live && client == nil {
+				t.Fatal("Client() answered live with no client")
+			}
+			if !live && client != nil {
+				t.Fatalf("Client() answered not live with client %v", client)
+			}
+		})
+	}
+}
