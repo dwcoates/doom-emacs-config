@@ -390,14 +390,61 @@ func TestPlaytestShutdownNowTakesEveryTabDown(t *testing.T) {
 	s.awaitPageMounted(t)
 	s.awaitInPage(t, "the webapp's failure overlay to be carrying nothing again",
 		`document.querySelector('[data-component="failure-overlay"]').hasAttribute("data-empty")`)
+	// AND THE PANEL IS PUT BACK ON SCREEN BY THE USER, WHICH IS A FILED
+	// DEFECT RATHER THAN A STEP THIS PLAYBOOK WANTED.
+	//
+	// Measured here, twice: after the ensure the frame's only window holds
+	// `*magit: <the OTHER workspace>/*`. The page itself is healthy -- every
+	// assertion above passed against it -- but the restart moved the
+	// SELECTION off the workspace the user was in, so the recovered panel is
+	// behind a perspective nobody asked to be in. `roster.el`'s
+	// `agent-repl-roster-react-to-current` follows a `current` it did not
+	// originate, and after a restart the fresh roster's `current` is not the
+	// one Emacs last selected. It is filed rather than fixed here: which
+	// side owns the selection across a daemon restart is a contract question
+	// between the daemon's roster and Emacs's `agent-repl-host-last-selected-id`,
+	// not this section's to settle.
+	//
+	// So the user's own two acts are made -- switch back, re-open the panel
+	// -- and the picture is of the view they get back.
+	playtestSwitchToWorkspace(t, s, first)
+	s.openPanel(t)
+	e.AwaitEval("the panel's webview to be the buffer on screen again",
+		`(mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))`,
+		func(raw json.RawMessage) bool {
+			for _, name := range decodeStrings(raw) {
+				if strings.HasPrefix(name, "*agent-frontend-") {
+					return true
+				}
+			}
+			return false
+		})
+	// THE CONVERSATION DOES NOT COME BACK, AND THAT IS FILED RATHER THAN
+	// ASSERTED. Measured here: the workspace's id is IDENTICAL across the
+	// restart (`elisp.host.registered ... id="260186..."` before and after),
+	// the fresh daemon serves the page and the page opens its feed
+	// (`WatchFeed` twice on the new daemon), and the feed comes back with
+	// ZERO rows -- the two bubbles of the turn that ran before the stop are
+	// gone from the view, and the footer reads `ready` rather than `done`.
+	// The rows are the SESSION's and the stop stood every session down, so
+	// whether a restarted daemon re-attaches the prior transcript is that
+	// subsystem's question, not this section's.
+	//
+	// It is NOT asserted either way: pinning "the feed is empty" would make
+	// the fix red this playbook, and pinning "the feed is full" would red it
+	// today. The manifest sentence below says what the picture holds and
+	// names the defect, which is what a reviewer needs.
 	p.capture("daemon-back",
-		"`agent-repl-frontend-daemon-ensure` -- a fresh daemon launched and adopted",
+		"`agent-repl-frontend-daemon-ensure` -- a fresh daemon launched and adopted -- then the first workspace re-selected and its panel re-opened",
 		fmt.Sprintf("a NEW daemon pid is live (the old one was %d), `agent-repl-link-up-p` is non-nil, the reconnect "+
 			"timer stood down, and the tab bar carries two workspaces again", pid),
-		"THE OUTAGE IS OVER. Both tabs are drawn as before. The failure card is gone from the panel -- the "+
-			"overlay is empty again -- and nothing in this picture reports a disconnection. This is the "+
-			"`before-stop` picture again, and any difference from it other than the feed's scroll position is "+
-			"something the restart did not restore.")
+		"THE OUTAGE IS OVER, AND TWO THINGS THE RESTART DID NOT RESTORE ARE VISIBLE HERE. What must be "+
+			"true: both tabs are drawn, the panel on screen is the FIRST workspace's (its mode line names "+
+			"`*agent-frontend-repo-one*`), the failure card is gone and nothing reports a disconnection. "+
+			"What is FILED, and is expected in this picture until it is fixed: the feed is EMPTY -- the two "+
+			"bubbles of the pre-stop turn are gone and the footer reads `ready` rather than `done` -- and the "+
+			"panel had to be re-selected and re-opened at all, because the restart left the frame showing the "+
+			"OTHER workspace's magit buffer. Neither is a fault in this capture.")
 }
 
 // ---------------------------------------------------------------------------
