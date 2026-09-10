@@ -1194,30 +1194,50 @@ pre {
      and never widens the bubble, while a bubble too small to hold the stamp
      (a bare `hello`) grows only just enough to contain the stamp. */
   display: grid;
-  /* A working prompt bubble carries a THINKING WAVE: a soft shadow band that
-     crosses its own background from left to right, over and over. The bubble
-     and its text hold ONE STATIC SIZE while it runs — nothing here scales,
-     translates, or reflows — so the motion reads as progress travelling
-     through the turn rather than as the box itself inflating and deflating,
-     which is the conventional way a surface says "still working".
+}
+/* THE THINKING WAVE, AND ONLY WHILE THE TURN IS IN FLIGHT.
 
-     The band is a two-viewport-wide gradient panned across a one-viewport
-     window (`background-size: 200%`, `background-repeat: no-repeat`), so the
-     only animated property is `background-position-x`: no layout, no
-     geometry, and the `--bubble-shadow` depth and the state border stay
-     exactly where they were laid out. The gradient is declared AFTER the
-     `background` shorthand above, which would otherwise reset it.
+   A WORKING prompt bubble carries a soft shadow band that crosses its own
+   background from left to right, over and over. The bubble and its text hold
+   ONE STATIC SIZE while it runs — nothing here scales, translates, or reflows
+   — so the motion reads as progress travelling through the turn rather than as
+   the box itself inflating and deflating, which is the conventional way a
+   surface says "still working".
 
-     The 3.2s period is duplicated in `BUBBLE_WAVE_PERIOD_MS` (breathing.ts),
-     which every render uses to emit a negative `animation-delay` inline: a
-     rebuilt bubble node would otherwise restart this animation at 0% and jump
-     the band visibly back to the left edge mid-pass. The two MUST stay equal.
+   THE SELECTOR IS THE WHOLE POINT OF THIS RULE BEING SEPARATE. On `.bubble.user`
+   outright, every prompt in the scrollback waved forever: a settled
+   conversation painted one band per prompt, saying that every turn it ever ran
+   is still running, and leaving the page with no resting state at all — a
+   screenshot of it can never be still, and a reader has no way to tell the
+   live turn from the thirty dead ones above it. `data-wave="working"` is set
+   by the feed on the prompt whose turn has no `turn_ended` row yet and cleared
+   the moment one arrives (`markWorkingPrompts` in feed-view.ts,
+   `PROMPT_WAVE_ATTRIBUTE` in breathing.ts).
 
-     NOTHING INSIDE THE BUBBLE CARRIES ITS OWN COPY OF THIS ANIMATION. The
-     wave is painted on this element's own fill, and the body is drawn over
-     that fill; a second `bubble-wave` on `.bubble-body` would pan a second
-     band across the text's own box at its own phase. One animated element
-     means there is nothing for a second phase to drift against. */
+   THE GRADIENT LIVES HERE WITH THE ANIMATION, not on the base rule, for the
+   same reason the reduced-motion block below drops both together: a gradient
+   with no animation over it parks a static shadow band across the fill, which
+   is a permanent smudge rather than a resting bubble. A resting prompt is its
+   plain `--user` fill and nothing else.
+
+   The band is a two-viewport-wide gradient panned across a one-viewport window
+   (`background-size: 200%`, `background-repeat: no-repeat`), so the only
+   animated property is `background-position-x`: no layout, no geometry, and
+   the `--bubble-shadow` depth and the state border stay exactly where they
+   were laid out. The gradient is declared AFTER the `background` shorthand
+   above, which would otherwise reset it.
+
+   The 3.2s period is duplicated in `BUBBLE_WAVE_PERIOD_MS` (breathing.ts),
+   which every render uses to emit a negative `animation-delay` inline: a
+   rebuilt bubble node would otherwise restart this animation at 0% and jump
+   the band visibly back to the left edge mid-pass. The two MUST stay equal.
+
+   NOTHING INSIDE THE BUBBLE CARRIES ITS OWN COPY OF THIS ANIMATION. The wave
+   is painted on this element's own fill, and the body is drawn over that fill;
+   a second `bubble-wave` on `.bubble-body` would pan a second band across the
+   text's own box at its own phase. One animated element means there is nothing
+   for a second phase to drift against. */
+.bubble.user[data-wave="working"] {
   background-image: linear-gradient(90deg, transparent 0%, var(--bubble-wave) 50%, transparent 100%);
   background-size: 200% 100%;
   background-repeat: no-repeat;
@@ -2597,7 +2617,7 @@ pre {
      delay seeking to the wrong phase here. The gradient goes with it: a
      stopped wave would otherwise park a static shadow band across the fill.
      The body needs no entry — it never had an animation of its own. */
-  .bubble.user {
+  .bubble.user[data-wave="working"] {
     animation: none;
     background-image: none;
   }
