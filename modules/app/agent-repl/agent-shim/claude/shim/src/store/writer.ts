@@ -645,6 +645,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       return reader.openAgentPage(agent, pageSize, knownThrough, known);
     },
 
+    noteAgentMinted(agentValue: string): void {
+      reader.noteAgentMinted(agentValue);
+    },
+
     readAgentPage(
       agent: conversationv1.AgentId,
       pageSize: number,
