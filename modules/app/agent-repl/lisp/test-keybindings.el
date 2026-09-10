@@ -81,6 +81,7 @@
                  agent-repl-open-most-recent-workspace
                  agent-repl-switch-left
                  agent-repl-switch-right
+                 agent-repl-switch-to-workspace
                  agent-repl-copy-reference
                  agent-repl-copy-workspace-name
                  agent-repl-revert-and-eval-buffer
@@ -115,7 +116,11 @@ so the absence is asserted rather than assumed."
                  agent-repl-create-worktree-workspace
                  agent-repl-workspace-merge-current-into-source
                  agent-repl-output-next-prompt
-                 agent-repl-sidebar-nav-next))
+                 agent-repl-sidebar-nav-next
+                 ;; The jump-chord INSTALLER died with client-authored
+                 ;; ordering and stays dead: the numerals are a keymap of
+                 ;; data now, not a function that rewrites Doom's bindings.
+                 agent-repl--install-workspace-jump-overrides))
     (should-not (fboundp cmd))))
 
 (ert-deftest agent-repl-test-keybindings-priority-helpers-are-gone ()
@@ -135,10 +140,36 @@ persp-kill would be Emacs inventing a lifecycle decision the contract
 gives it no say in."
   (should-not (fboundp 'agent-repl--kill-before-workspace-delete)))
 
-(ert-deftest agent-repl-test-keybindings-defines-no-jump-chord-tower ()
-  "The workspace-jump chord tower died with client-authored ordering."
-  (should-not (boundp 'agent-repl--workspace-jump-chords))
-  (should-not (fboundp 'agent-repl--install-workspace-jump-overrides)))
+(ert-deftest agent-repl-test-keybindings-numerals-name-the-drawn-tab-commands ()
+  "Every numeral chord resolves to the command for its OWN tab slot.
+Unlike the rest of this file the numerals are plain keymap data rather
+than a `map!' form, so the binding itself is observable here -- which is
+half of why they live on a keymap of the module's own."
+  (dotimes (i agent-repl-switch-numeral-count)
+    (let ((n (1+ i)))
+      (should (eq (lookup-key agent-repl-workspace-numerals-mode-map
+                              (kbd (format "M-%d" n)))
+                  (intern (format "agent-repl-switch-to-workspace-%d" n))))
+      (should (commandp (intern (format "agent-repl-switch-to-workspace-%d" n)))))))
+
+(ert-deftest agent-repl-test-keybindings-numerals-shadow-dooms-own ()
+  "A numeral reaches OUR command even with Doom's binding in `global-map'.
+Doom binds `M-1' .. `M-0' to `+workspace/switch-to-N', which indexes
+persp-mode's perspective list rather than the drawn tab bar. The
+shadowing has to be structural: the mode's keymap is consulted before
+`global-map' whatever order the two were installed in."
+  (let ((saved (current-global-map)))
+    (unwind-protect
+        (progn
+          (use-global-map (copy-keymap saved))
+          (define-key (current-global-map) (kbd "M-2") '+workspace/switch-to-1)
+          (agent-repl-workspace-numerals-mode 1)
+          (should (eq (key-binding (kbd "M-2")) 'agent-repl-switch-to-workspace-2)))
+      (use-global-map saved))))
+
+(ert-deftest agent-repl-test-keybindings-leaves-m-0-to-doom ()
+  "`M-0' is the one numeral the module does not claim."
+  (should-not (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))))
 
 ;;;; ---- The helpers a binding needs ----
 
