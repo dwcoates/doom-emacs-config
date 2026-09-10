@@ -46,6 +46,12 @@
 (declare-function agent-repl--info "core" (ws format-string &rest args))
 (declare-function agent-repl--warn "core" (ws format-string &rest args))
 (declare-function agent-repl--error "core" (ws format-string &rest args))
+(declare-function agent-repl--next-log-request-id "core" ())
+(declare-function agent-repl--with-log-context "core"
+                  (workspace request-id function))
+(defvar agent-repl--global-log-scope)
+(defvar agent-repl--log-context-request-id)
+(defvar agent-repl--log-context-workspace)
 (declare-function agent-repl--current-ws-p "core" (ws))
 (declare-function agent-repl-connect-connection-address "connect" (conn))
 (declare-function agent-repl-rpc-watch-workspace-roster "rpc"
@@ -639,7 +645,10 @@ dropped."
 
 (defun agent-repl-roster-on-push (push)
   "Handle one decoded WatchWorkspaceRoster PUSH."
-  (agent-repl-roster-apply (plist-get push :roster)))
+  (let ((request-id (agent-repl--next-log-request-id)))
+    (agent-repl--with-log-context
+     agent-repl--global-log-scope request-id
+     (lambda () (agent-repl-roster-apply (plist-get push :roster))))))
 
 (defun agent-repl-roster-on-close (reason)
   "Handle the roster stream closing for REASON.

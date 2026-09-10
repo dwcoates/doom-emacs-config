@@ -103,9 +103,25 @@ The directory is removed afterwards, so no test observes another's files."
       (cl-letf (((symbol-function 'agent-repl--save-buffer-if-modified)
                  (lambda (buf &rest _) (setq saved (buffer-name buf)) t)))
         (let ((buf (generate-new-buffer "notes-under-test")))
-          (agent-repl--notes-install-save-on-kill buf)
+          (agent-repl--notes-install-save-on-kill buf "alpha")
           (kill-buffer buf))
         (should (equal saved "notes-under-test"))))))
+
+(ert-deftest agent-repl-test-notes-save-on-kill-carries-workspace-to-autosave ()
+  "The installed hook preserves its workspace attribution until buffer death."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (let ((saved-workspace nil))
+      (cl-letf (((symbol-function 'agent-repl--save-buffer-if-modified)
+                 (lambda (_buf &optional ws _aggregate-p)
+                   (setq saved-workspace ws)
+                   t)))
+        (let ((buf (generate-new-buffer "notes-workspace-under-test")))
+          (agent-repl--notes-install-save-on-kill buf "alpha")
+          ;; Act.
+          (kill-buffer buf))
+        ;; Assert.
+        (should (equal saved-workspace "alpha"))))))
 
 ;;;; ---- Tests: agent-repl-notes-open ------------------------------------
 

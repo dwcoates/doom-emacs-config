@@ -100,9 +100,9 @@ the wait before this scenario's own push has actually been delivered."
          (agent-repl-send-posthooks nil))
      (unwind-protect
          (let ((,ref nil))
-           (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
            (agent-repl--ws-put agent-repl-itest-composer--ws
                                :project-dir agent-repl-itest-composer--dir)
+           (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
            (agent-repl-host-register
             conn agent-repl-itest-composer--dir
             (lambda (minted) (setq ,ref minted)))
@@ -146,6 +146,7 @@ Registers it as WS's `:input-buffer' and returns it; the caller kills it
 and clears the registration on the way out."
   (let ((buf (generate-new-buffer (format " *agent-repl-itest-composer-%s*" ws))))
     (with-current-buffer buf
+      (setq-local agent-repl--owning-workspace ws)
       (agent-repl-input-mode)
       (insert text))
     (agent-repl--ws-put ws :input-buffer buf)
@@ -1004,13 +1005,13 @@ daemon is the authority and answers with its own refusal arms\"."
   (agent-repl-itest--with-fake-daemon daemon
     ;; A clean slate: no push in THIS test must mean :unknown, regardless of
     ;; what an earlier test in this process left in the shared host table.
-    (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
     (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon)))
           (ref nil))
       (unwind-protect
           (progn
             (agent-repl--ws-put agent-repl-itest-composer--ws
                                 :project-dir agent-repl-itest-composer--dir)
+            (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
             (agent-repl-host-register conn agent-repl-itest-composer--dir
                                       (lambda (minted) (setq ref minted)))
             (agent-repl-itest--wait-until (lambda () ref) nil
@@ -1740,6 +1741,7 @@ rather than being silently dropped."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (let ((ws "itest-composer-no-conn-ws"))
+      (agent-repl--ws-put ws :project-dir (agent-repl-itest--fixture-dir ws))
       (agent-repl--prompt-queue-enqueue
        ws :outage (agent-repl--input-said "run the tests" nil)
        :user-sent "run the tests" "held-key-no-conn")

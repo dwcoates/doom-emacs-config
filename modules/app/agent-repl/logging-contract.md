@@ -54,8 +54,10 @@ Every global durable sink follows the same 64 MiB, five-generation retention
 rule. Long-lived services append on open and rotate only at the byte cap, so a
 bounce loop cannot evict history merely by restarting. The daemon run log may
 start a fresh current generation at a run boundary and also rotates on size.
-The Emacs sink rotates by the same generation rule; no runtime truncates and
-loses the only copy of earlier records.
+The Emacs sink rotates by the same generation rule (`.1` newest, `.5` oldest,
+rotation before the append that would cross the cap, a record larger than the
+cap kept whole in the active generation); no runtime truncates and loses the
+only copy of earlier records.
 
 Global service records use the runtime's canonical global log only when the
 record genuinely has no conceptual workspace or agent association. Failure to

@@ -23,6 +23,13 @@
 
 set -euo pipefail
 
+# This harness models independent callers in private slot directories.  When
+# the harness itself is correctly run through the host gate, its inherited
+# marker describes that OUTER suite, not any subject invocation below.  Clear
+# it once here; the nesting cases create and inherit their own marker through
+# the script under test.
+unset AGENT_REPL_SUITE_SLOT_HELD
+
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/suite-slot.sh"
 

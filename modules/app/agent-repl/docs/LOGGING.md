@@ -82,18 +82,29 @@ Store and sidecar (Go)
 - DONE: one AST-backed bypass lint per Go process names the sanctioned
   bootstrap and canonical-sink writers.
 
-Emacs (lisp)
-- 332 of ~1,027 sites pass a nil workspace; resolve the workspace from the
-  buffer or explicit scope, and stop degrading an unroutable record to the
-  global sink (the contract forbids it; today it only warns once).
-- records carry no `agent_repl_session_id`/`request_id`; add them where the
-  edge has them.
-- the file truncates its oldest 80% at the cap; rotate with generations.
-- `--log-verbose` records are dropped from the durable sink; persist them
-  like every other runtime (the level switch governs).
-- 138 `(message …)` sites: a lint that separates a user-facing echo (kept)
-  from a diagnostic that must be a record.
-- the six rungs stay as thin wrappers, but one function builds every record.
+Emacs (lisp) — closed
+- `agent-repl--emit-log-record` is the sole record builder and writer caller;
+  every logging rung is a thin wrapper, and `test-core.el` scans production
+  sources for bypasses.
+- nil-workspace calls resolve through the request edge, buffer owner, or
+  current workspace. Genuinely process-wide format prefixes carry an explicit
+  reason in `agent-repl--central-log-format-prefixes`, which the source audit
+  enforces. An unroutable workspace writes a correlated central error, warns
+  visibly, and aborts without writing the original record globally.
+- workspace records read `agent_repl_session_id` from `host.el`; verb and
+  SubmitPrompt boundaries propagate request identity through their callbacks,
+  and each inbound roster push receives one correlation id.
+- Emacs targets rotate before crossing 64 MiB, retaining five completed
+  generations (`.1` newest through `.5` oldest) while the canonical
+  `<workspace>/.claude/emacs/emacs.log` symlink continues to name the active
+  target path. Oversized single records remain whole.
+- `agent-repl--log-verbose` emits `level=debug`, `verbosity=verbose` and is
+  durably governed by `AGENT_REPL_LOG_LEVEL` like every other Emacs record.
+  The load-time default is `info`; `agent-repl-log-file-level` remains the
+  live Elisp knob and is reset from the environment on module reload.
+- `test-core.el` parses every hand-written production `lisp/*.el` form. Each
+  direct `message` call is named in a file/function/template allowlist with a
+  user-facing reason; an unlisted diagnostic echo fails the suite.
 
 Webapp (closed 2026-09-10)
 - forwarded records carry the client's RFC 3339 instant and verbosity class;

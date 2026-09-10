@@ -114,6 +114,8 @@ answers a bare success, which is what almost every verb's success is."
          (agent-repl-test-verbs--answers ,answers))
      (cl-letf* (((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
+                ((symbol-function 'agent-repl--ws-require-known)
+                 (lambda (_ws _context) nil))
                 ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'test-conn))
                 ((symbol-function 'agent-repl-host-faults) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl-host-handle-refusal)
@@ -133,6 +135,13 @@ answers a bare success, which is what almost every verb's success is."
                 ((symbol-function 'agent-repl--ws-get)
                  (lambda (ws key)
                    (and (eq key :project-dir) (equal ws "ws-one") "/tmp/agent-repl-test/ws-1")))
+                ((symbol-function 'agent-repl--ws-log-routable-p)
+                 (lambda (ws)
+                   (and (stringp ws) (not (member ws '("main" "none"))))))
+                ((symbol-function 'agent-repl--workspace-log-identity)
+                 (lambda (ws)
+                   (list :project-dir (format "/tmp/agent-repl-test/%s" ws)
+                         :workspace-id (format "id-%s" ws))))
                 ((symbol-function 'agent-repl--pseudo-workspace-name-p)
                  (lambda (ws) (member ws '("main" "none"))))
                 ((symbol-function 'agent-repl--kill-one-workspace)
@@ -178,6 +187,23 @@ answers a bare success, which is what almost every verb's success is."
 (defvar agent-repl-test-verbs--answers nil
   "The scripted answers for the rpc stubs, bound by the `--with' macro.")
 
+(ert-deftest agent-repl-test-verbs-read-prompt-without-a-workspace-uses-no-composer ()
+  "A creation prompt outside agent-repl does not read an unroutable composer."
+  ;; Arrange.
+  (let (read-workspace logged-workspace)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-log-name) (lambda () nil))
+              ((symbol-function 'agent-repl--read-input-buffer)
+               (lambda (ws) (setq read-workspace ws)))
+              ((symbol-function 'agent-repl--log)
+               (lambda (ws &rest _args) (setq logged-workspace ws)))
+              ((symbol-function 'read-string)
+               (lambda (_prompt initial &rest _) initial)))
+      ;; Act.
+      (agent-repl-verbs--read-prompt "Commission: "))
+    ;; Assert.
+    (should-not read-workspace)
+    (should (eq logged-workspace agent-repl--global-log-scope))))
+
 (defun agent-repl-test-verbs--stub (op)
   "Return an rpc stub for OP that records its request and answers it."
   (lambda (_conn request &rest keys)
@@ -198,6 +224,30 @@ answers a bare success, which is what almost every verb's success is."
   "Return non-nil when any recorded `message' contained NEEDLE."
   (cl-find-if (lambda (m) (string-match-p (regexp-quote needle) m))
               agent-repl-test-verbs--messages))
+
+(ert-deftest agent-repl-test-verbs-send-correlates-the-request-and-response ()
+  "A verb's outbound boundary and synchronous answer share one request id."
+  ;; Arrange
+  (let (seen)
+    (cl-letf (((symbol-function 'agent-repl--next-log-request-id)
+               (lambda () "request-1"))
+              ((symbol-function 'agent-repl--emit-log-record)
+               (lambda (_ws _level _verbosity fmt _args &rest _)
+                 (push (list fmt
+                             agent-repl--log-context-workspace
+                             agent-repl--log-context-request-id)
+                       seen))))
+      ;; Act
+      (agent-repl-verbs--send
+       (lambda (_conn _request &rest keys)
+         (funcall (plist-get keys :on-response)
+                  (list :arm :success :value nil)))
+       'test-conn nil :ws "ws-one" :op "close")
+      ;; Assert
+      (should (equal (nreverse seen)
+                     '(("elisp.verbs.send op=%s ws=%s" "ws-one" "request-1")
+                       ("elisp.verbs.ack op=%s ws=%s outcome=success"
+                        "ws-one" "request-1")))))))
 
 ;;;; ---- Request shapes: one test per verb ----
 

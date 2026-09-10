@@ -410,35 +410,46 @@ kill-switch at runtime."
   :type 'boolean
   :group 'agent-repl)
 
-(defcustom agent-repl-log-file-level 'debug
+(defun agent-repl--log-level-from-environment ()
+  "Return the durable log level selected by `AGENT_REPL_LOG_LEVEL'.
+An unset variable selects `info'.  Any set value outside the shared
+`debug|info|warn|error' vocabulary aborts the module load."
+  (let ((value (getenv "AGENT_REPL_LOG_LEVEL")))
+    (cond
+     ((null value) 'info)
+     ((member value '("debug" "info" "warn" "error")) (intern value))
+     (t
+      (error "agent-repl: AGENT_REPL_LOG_LEVEL must be debug, info, warn, or error; got %S"
+             value)))))
+
+(defcustom agent-repl-log-file-level (agent-repl--log-level-from-environment)
   "Least severe rung the LOG FILE records.  See the ladder in core.el.
 
 This is the knob `agent-repl-debug' is repeatedly mistaken for.  That one
 governs *Messages* visibility ONLY and has never had any effect on what
 reaches disk.
 
-Ordered least to most severe: `verbose', `debug', `info', `warn',
-`error'.  A record is written when its own rung is at or above this one.
+Ordered least to most severe: `debug', `info', `warn', `error'.  A record is
+written when its level is at or above this one.  Verbose records carry level
+`debug' and persist whenever debug records do; verbosity controls presentation,
+not durability.
 
-THE DEFAULT IS `debug': every ordinary log line is recorded and only the
-`agent-repl--log-verbose' chatter is dropped.  That rung is not cheap — a
-working day of it runs to ~350k records and well over a hundred megabytes
-— so it is opt-IN, turned on for the stretch of an investigation that
-needs it and turned back off after.
-
-Use \\[agent-repl-toggle-verbose-to-disk] for the common
-verbose-on/verbose-off flip, or \\[agent-repl-set-log-file-level] to name
-any rung.  Both take effect on the very next record, with no restart and
-no reload.
+The initial value comes from `AGENT_REPL_LOG_LEVEL' at module load and is
+`info' when that variable is absent.  The Elisp variable remains the runtime
+knob: \\[agent-repl-set-log-file-level] changes subsequent records immediately.
 
 This does NOT control the per-workspace log BUFFERS; see
 `agent-repl-log-buffer-level'."
-  :type '(choice (const :tag "Verbose (everything)" verbose)
-                 (const :tag "Debug (default; drops hot-path chatter)" debug)
+  :type '(choice (const :tag "Debug" debug)
                  (const :tag "Info" info)
                  (const :tag "Warnings" warn)
                  (const :tag "Errors only" error))
   :group 'agent-repl)
+
+;; `defcustom' preserves an already-bound value across a Doom reload.  The
+;; process environment is the shared startup switch, so every module load
+;; re-reads it and resets the Elisp knob to the process-level selection.
+(setq agent-repl-log-file-level (agent-repl--log-level-from-environment))
 
 (defcustom agent-repl-log-buffer-level 'warn
   "Least severe rung the per-workspace log BUFFERS display.
@@ -463,20 +474,16 @@ the chatter itself is the object of study."
                  (const :tag "Errors only" error))
   :group 'agent-repl)
 
-(defcustom agent-repl-log-size-cap-bytes (* 1024 1024 1024)
-  "Hard cap on the log file size in bytes.  Default 1 GiB.
-Checked every `agent-repl-log-size-check-interval' writes (not on every
-write — `file-attributes' on a multi-GB file is cheap but not free).
-When the cap is exceeded, the first 80% of the file is dropped
-(line-aligned) and a WARNING line is appended noting the truncation."
+(defcustom agent-repl-log-size-cap-bytes (* 64 1024 1024)
+  "Maximum bytes in one active Emacs log generation.  Default 64 MiB.
+The write that would cross the cap first moves the active file to `.1', shifts
+older generations, and writes the complete new record to a fresh file."
   :type 'integer
   :group 'agent-repl)
 
-(defcustom agent-repl-log-size-check-interval 1000
-  "Number of file-writes between size-cap checks.
-Lower values catch overruns sooner but pay more `file-attributes' calls;
-the default of 1000 keeps the check effectively free for typical usage
-(one stat per ~1000 log lines)."
+(defcustom agent-repl-log-generation-count 5
+  "Number of completed Emacs log generations retained beside the active file.
+`.1' is the newest completed generation and `.N' is the oldest."
   :type 'integer
   :group 'agent-repl)
 
@@ -793,8 +800,6 @@ itself is untouched at the one call site that must honour it,
 (defconst agent-repl--emacs-log-target-prefix "agent-repl-emacs-"
   "Filename prefix that identifies an Emacs-owned external log target.")
 
-(define-error 'agent-repl-log-truncate-failure "agent-repl log truncation failure")
-
 (defun agent-repl--json-object (&rest pairs)
   "Return PAIRS as a JSON object with string keys.
 Each member of PAIRS is a cons whose car is the field name and whose cdr is
@@ -860,8 +865,8 @@ pseudo, and neither workspace had ever produced a record of its own.
 Deciding the name CLASS first makes that unrepresentable: a built-in
 perspective cannot own a sink no matter what got registered under its name,
 so it can never shadow the workspace whose directory it borrowed.  The
-record is not lost — `agent-repl--persist-log-record' routes it globally and
-stamps `pseudo_workspace' with the name."
+record is classified as central and stamped with `pseudo_workspace', so it
+cannot be confused with a workspace-owned record."
   (and ws
        (not (agent-repl--pseudo-workspace-name-p ws))
        (fboundp 'agent-repl--ws-get)
@@ -956,23 +961,150 @@ must keep shouting."
 (defvar agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)
   "Workspace names already reported as unable to own a durable log sink.")
 
+(defconst agent-repl--global-log-scope :agent-repl-global-log-scope
+  "Explicit workspace argument for a record that is genuinely central.")
+
+(defvar agent-repl--log-context-workspace nil
+  "Dynamically bound workspace for records emitted below an asynchronous edge.")
+
+(defvar agent-repl--log-context-request-id nil
+  "Dynamically bound request identifier for records below a request edge.")
+
+(defvar agent-repl--log-request-sequence 0
+  "Process-local sequence used to mint Emacs request correlation ids.")
+
+(defun agent-repl--next-log-request-id ()
+  "Return a fresh process-local request correlation id."
+  (format "emacs-%d-%d-%d"
+          (emacs-pid)
+          (truncate (* 1000000 (float-time)))
+          (cl-incf agent-repl--log-request-sequence)))
+
+(defconst agent-repl--central-log-format-prefixes
+  '(("Loading Agent-Repl" . "module bootstrap precedes every workspace")
+    ("%s.el loaded" . "module loading is process-wide")
+    ("FAILED to load" . "module loading is process-wide")
+    ("early-git-string:" . "module version discovery is process-wide")
+    ("version command:" . "the loaded module version is process-wide")
+    ("version:" . "the loaded module version is process-wide")
+    ("workspace-notes popup rule" . "module UI registration is process-wide")
+    ("prevent-select: installed" . "module UI registration is process-wide")
+    ("Loaded with" . "module loading is process-wide")
+    ("Loaded Agent-Repl" . "module loading is process-wide")
+    ("  " . "indented module-load diagnostics are process-wide")
+    ("cold-start:" . "module startup policy is process-wide")
+    ("register-timer:" . "the timer registry is process-wide")
+    ("cancel-all-timers:" . "module reload clears the process-wide timer registry")
+    ("assert-heartbeat-armed:" . "the process-wide heartbeat owns all workspaces")
+    ("cancel-timer-key:" . "the timer registry is process-wide")
+    ("data-dir:" . "the process data directory is shared")
+    ("workspace-prefix:" . "workspace naming policy is process-wide")
+    ("async-gh:" . "the generic GitHub subprocess boundary has no workspace")
+    ("capture-process-output:" . "the generic subprocess boundary has no workspace")
+    ("kill-process-safely:" . "generic process cleanup has no workspace")
+    ("deferred-quit:" . "generic control-flow diagnostics have no workspace")
+    ("assert-main-thread:" . "generic thread guards have no workspace")
+    ("print-git-branch:" . "branch display can run outside a workspace")
+    ("restore-focus:" . "focus restoration spans perspectives")
+    ("tabline-advice:" . "tab rendering spans every workspace")
+    ("migrate-legacy-state:" . "state migration is process-wide")
+    ("elisp.daemon." . "the resident daemon lifecycle spans workspaces")
+    ("elisp.link." . "the primary daemon link spans workspaces")
+    ("elisp.connect." . "an unscoped transport exchange is process-wide")
+    ("elisp.commands.change-spec" . "macro expansion has no runtime workspace")
+    ("elisp.commands.add-project" . "project registration precedes workspace creation")
+    ("elisp.host." . "host registration and selection span workspace lifecycles")
+    ("elisp.input.no-workspace" . "the record reports that no workspace exists")
+    ("elisp.input.attach-outside-composer" . "the record reports a non-workspace buffer")
+    ("elisp.notes.dir:" . "the notes directory is shared storage")
+    ("elisp.notes.file: rejected" . "the record reports that no valid workspace was supplied")
+    ("elisp.notes.open: rejected" . "the record reports that no current workspace exists")
+    ("elisp.notes.popup-predicate" . "popup classification is process-wide")
+    ("elisp.popup." . "the generic popup utility is path-scoped")
+    ("elisp.prompt-queue.link-up" . "link recovery scans every workspace")
+    ("elisp.status.tab-color: unknown" . "the shared status palette is not workspace-specific")
+    ("elisp.verbs." . "workspace-management verbs can precede workspace creation")
+    ("elisp.worktree." . "generic worktree utilities are path-scoped")
+    ("elisp.rpc." . "an unscoped RPC exchange is process-wide")
+    ("elisp.wire." . "an unscoped codec operation has no workspace")
+    ("elisp.roster." . "the roster stream is a whole-process view")
+    ("frontend-register:" . "frontend registration is process-wide")
+    ("find-file-workspace:" . "file routing precedes workspace selection")
+    ("interaction-record:" . "interaction capture spans workspaces")
+    ("interaction-replay:" . "interaction replay spans workspaces")
+    ("elisp.core." . "logging controls and routing are process-wide")
+    ("read-sexp-file:" . "shared state-file IO has no workspace")
+    ("read-sexp-file-if-exists:" . "shared state-file IO has no workspace")
+    ("write-sexp-file:" . "shared state-file IO has no workspace")
+    ("migrate-saved-state:" . "saved-state migration spans workspaces")
+    ("history-load:" . "history loading precedes workspace restoration")
+    ("history-file" . "history storage is process-wide")
+    ("autosave:" . "the autosave scheduler spans every workspace")
+    ("autosave-workspace-buffers:" . "the autosave sweep spans every workspace")
+    ("WARN: autosave" . "the autosave sweep spans every workspace")
+    ("state-load:" . "state loading precedes workspace restoration")
+    ("state-save:" . "the saved workspace registry is process-wide")
+    ("state-file" . "workspace registry storage is process-wide")
+    ("after-persp-activated:" . "foreign perspective activation has no agent workspace")
+    ("before-persp-deactivate:" . "perspective deactivation can precede workspace selection")
+    ("persp-frame-save-state failed" . "perspective teardown can run without an agent workspace")
+    ("on-window-change" . "frame-wide window reconciliation can run without an agent workspace")
+    ("sync-panels" . "frame-wide orphan-panel reconciliation spans workspaces")
+    ("frontend webview adopt-hook failed" . "the frontend hook resolves no safe workspace")
+    ("instantiation-to-plist:" . "pure instantiation conversion has no workspace")
+    ("elisp.services." . "service discovery and launch are process-wide")
+    ("services-" . "service discovery and launch are process-wide")
+    ("invalid launchctl verb " . "service control is process-wide")
+    ("launchd service " . "service control is process-wide")
+    ("shim service build completed " . "service build validation is process-wide")
+    ("select-notification-backend:" . "notification backend selection is process-wide")
+    ("select-notification-backend " . "notification backend selection is process-wide")
+    ("prompt-summary: attach-all" . "the attach-all command spans workspaces")
+    ("prompt-summary: kickoff skipped reason=no-workspace"
+     . "the record reports that no workspace was supplied")
+    ("elisp.webview-recovery." . "webview recovery spans workspaces")
+    ("load-priority-images:" . "shared image loading is process-wide")
+    ("ws-rewrite-source-back-refs:" . "source-reference migration spans workspaces")
+    ("ws-put:" . "workspace registry validation can precede sink ownership")
+    ("ws-by-ref-id:" . "reverse workspace lookup can return no workspace")
+    ("ws-persp-identity:" . "the record reports a non-workspace perspective")
+    ("ws-registered-names:" . "workspace registry enumeration spans workspaces")
+    ("ws-switch-project-display:" . "project display can precede activation")
+    ("ws-tabline-names:" . "tab rendering spans every workspace")
+    ("window--ensure-layout:" . "the record reports that no workspace exists")
+    ("%s error:" . "module loader error reporting is process-wide"))
+  "Reasoned allowlist of format prefixes that may use the central log sink.
+Explicit or dynamically bound workspace scope always wins.  A nil-workspace
+site not covered here must resolve through its buffer or current workspace;
+otherwise the record is a routing invariant violation.")
+
+(defun agent-repl--central-log-reason (fmt)
+  "Return the reason FMT is genuinely central, or nil when it is workspace-owned."
+  (when (stringp fmt)
+    (cl-loop for (prefix . reason) in agent-repl--central-log-format-prefixes
+             when (string-prefix-p prefix fmt)
+             return reason)))
+
+(defun agent-repl--with-log-context (workspace request-id function)
+  "Call FUNCTION with WORKSPACE and REQUEST-ID available to nested log calls."
+  (let ((agent-repl--log-context-workspace workspace)
+        (agent-repl--log-context-request-id request-id))
+    (funcall function)))
+
 (defun agent-repl--note-unroutable-log-workspace (ws)
-  "Warn once that WS cannot own a durable log sink, naming why.
-The name is marked BEFORE the warning is emitted, because the warning
-itself re-enters the logging ladder; that mark is what stops the re-entry
-from recurring.  The warning carries nil as its own workspace, so it takes
-the global-sink path and cannot re-enter this branch."
+  "Display a user-visible warning that WS cannot own a durable log sink."
   (unless (gethash ws agent-repl--unroutable-log-workspaces)
     (puthash ws t agent-repl--unroutable-log-workspaces)
     (let ((dir (and (fboundp 'agent-repl--ws-get)
                     (agent-repl--ws-get ws :project-dir))))
-      (agent-repl--warn
-       nil
-       "unroutable log workspace %S (registered-dir=%s) — its records go to the global sink"
-       ws
-       (cond ((not (stringp dir)) "unregistered")
-             ((file-directory-p dir) dir)
-             (t (format "%s [MISSING]" dir)))))))
+      (display-warning
+       'agent-repl
+       (format "log routing failed for workspace %S (registered-dir=%s); the original record was not written"
+               ws
+               (cond ((not (stringp dir)) "unregistered")
+                     ((file-directory-p dir) dir)
+                     (t (format "%s [MISSING]" dir))))
+       :error))))
 
 (defvar agent-repl--log-preregistration-workspace nil
   "Name of the workspace currently inside its own registration window.
@@ -992,13 +1124,11 @@ and now registers first, the creation path's `puthash' IS the commit
 point, and moving it ahead of the conflict checks would publish a
 half-materialized workspace to every observer.
 
-So the window is DECLARED instead, by the one function that knows it is
-open, and only for the one name it is opening.  Anything else — a
-different workspace, a record after the window closes, a workspace whose
-registration is genuinely missing — is untouched and still warns.")
-
-(defvar agent-repl--preregistration-log-workspaces (make-hash-table :test #'equal)
-  "Workspace names already noted as logging inside their registration window.")
+So the window is DECLARED instead, by the one function that knows it is open,
+and only for the one name it is opening.  Panel ownership uses this marker to
+distinguish a workspace being created from a foreign perspective.  Logging is
+deliberately stricter: a record emitted before registration has no durable
+workspace sink and aborts rather than being rerouted.")
 
 (defun agent-repl--preregistration-log-workspace-p (ws)
   "Return non-nil when WS is the workspace whose registration window is open."
@@ -1006,58 +1136,13 @@ registration is genuinely missing — is untouched and still warns.")
        (stringp agent-repl--log-preregistration-workspace)
        (equal ws agent-repl--log-preregistration-workspace)))
 
-(defun agent-repl--note-preregistration-log-workspace (ws)
-  "Note once that WS's records precede its registration.
-
-INFO, not WARNING: the global sink is where these records belong — the
-workspace's own sink does not exist yet — so this is a classification,
-not a degradation.  It is still recorded rather than silent, because
-\"where did the first records of this workspace go\" is a real question
-and this line is its answer.
-
-Marked BEFORE the record is emitted, for the same reason the unroutable
-warning is: the record re-enters the logging ladder, and the mark is what
-stops the re-entry from recurring."
-  (unless (gethash ws agent-repl--preregistration-log-workspaces)
-    (puthash ws t agent-repl--preregistration-log-workspaces)
-    (agent-repl--info
-     nil
-     "pre-registration log workspace %S — its records precede its registration and go to the global sink"
-     ws)))
-
 (defun agent-repl--log-sink-workspace (ws)
-  "Return the workspace WS's records may be routed to, or nil for global.
-A log line must never be able to abort its caller.  Logging is a diagnostic
-channel, and two conditions put a WS beyond routing that no call site can
-prevent:
-
-- A workspace legitimately registered in the hash whose worktree was deleted
-  while Emacs was running.  The caller is correct to log about it; the
-  directory is simply gone.
-- A name that reached the ladder through a local bound from ambient state,
-  where provenance is dynamic rather than statically enumerable.
-
-Both degrade to the global sink here rather than signalling, and neither
-loses the record: `agent-repl--note-unroutable-log-workspace' warns once per
-distinct name, so the condition stays loud and greppable without turning a
-debug line into a fatal error.  The structural checks that guard a HOSTILE
-workspace path — symlinked directory components, a non-directory component,
-a canonical log path that is a directory — remain fatal in
-`agent-repl--ensure-real-log-directory' and
-`agent-repl--workspace-emacs-log-target', because those describe an attack,
-not an absence.
-
-A THIRD condition is not a degradation at all: WS may name one of persp-mode's
-own perspectives (`agent-repl--pseudo-workspace-name-p').  Those own no sink
-because they are not workspaces, so routing such a record globally is the
-correct classification rather than a fallback, and it does not warn.  Screening
-that case HERE — at the one point where attribution becomes a sink — is what
-keeps it from being every producer's job to know which names persp-mode
-invented; call sites that screen themselves through `agent-repl--ws-log-name'
-stay correct and simply never reach this branch.  The name is not lost: the
-ladder puts it on the record as `pseudo_workspace'."
+  "Return the registered sink workspace for explicit WS.
+Nil and `agent-repl--global-log-scope' name the central sink.  A pseudo
+perspective is central by definition.  Every other unroutable non-nil value is
+an invariant violation and signals; it is never rewritten to the central sink."
   (cond
-   ((null ws) nil)
+   ((or (null ws) (eq ws agent-repl--global-log-scope)) nil)
    ((agent-repl--ws-log-routable-p ws) ws)
    ;; WS may be the registry's other spelling of a live workspace — its
    ;; worktree path rather than its name.  Reduce both spellings to the
@@ -1068,17 +1153,39 @@ ladder puts it on the record as `pseudo_workspace'."
            (agent-repl--ws-log-routable-p canonical)
            canonical)))
    ((agent-repl--pseudo-workspace-name-p ws) nil)
-   ;; A FOURTH condition that is a classification rather than a degradation:
-   ;; WS is being created RIGHT NOW and its registration has not committed
-   ;; yet (`agent-repl--log-preregistration-workspace').  Its records
-   ;; correctly belong to the global sink because its own sink does not exist
-   ;; yet, and a normal creation must not warn about its own normal prologue.
-   ;; The window is narrow and explicitly declared: it covers one name, only
-   ;; while its creator holds the binding, so a workspace whose registration
-   ;; is genuinely missing still falls through to the warning below.
-   ((agent-repl--preregistration-log-workspace-p ws)
-    (agent-repl--note-preregistration-log-workspace ws) nil)
-   (t (agent-repl--note-unroutable-log-workspace ws) nil)))
+   (t
+    (error "agent-repl log routing invariant violated: workspace %S has no durable sink" ws))))
+
+(defun agent-repl--resolve-log-workspace (ws fmt)
+  "Resolve WS for FMT to a sink workspace, central nil, or a routing error.
+The return value is `(:workspace NAME)', `(:central REASON)', or a plist with
+`:routing-error', `:offender', and `:reason'.  Explicit scope wins, followed by
+the dynamically bound request edge, the current buffer's owner, the current
+workspace, and finally the reasoned central registry."
+  (let ((candidate
+         (cond
+          ((eq ws agent-repl--global-log-scope) agent-repl--global-log-scope)
+          (ws ws)
+          (agent-repl--log-context-workspace agent-repl--log-context-workspace)
+          ((agent-repl--buffer-owner (current-buffer)))
+          ((and (fboundp 'agent-repl--ws-current-log-name)
+                (agent-repl--ws-current-log-name)))
+          ((agent-repl--central-log-reason fmt) agent-repl--global-log-scope)
+          (t nil))))
+    (cond
+     ((eq candidate agent-repl--global-log-scope)
+      (list :central (or (agent-repl--central-log-reason fmt)
+                         "explicit central request context")))
+     ((null candidate)
+      (list :routing-error t :offender nil
+            :reason "no explicit, request, buffer, or current-workspace scope"))
+     ((agent-repl--pseudo-workspace-name-p candidate)
+      (list :central "perspective is not an agent-repl workspace" :pseudo candidate))
+     (t
+      (condition-case err
+          (list :workspace (agent-repl--log-sink-workspace candidate))
+        (error (list :routing-error t :offender candidate
+                     :reason (error-message-string err))))))))
 
 (defun agent-repl--workspace-log-identity (ws)
   "Return WS's registered canonical directory and stable workspace identity.
@@ -1096,17 +1203,17 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
                             (error "agent-repl log routing invariant violated: workspace %S has no workspace ID" ws)))))
 
 (defun agent-repl--log-add-workspace-identity (record ws)
-  "Add WS identity and its durable conversation id to JSON RECORD.
+  "Add WS identity and its known session identifiers to JSON RECORD.
 A nil WS adds nothing.
-`claude_session_id' is the CLI transcript uuid: it survives the daemon,
-names the conversation on disk, and is the resume target, so it is the
-one conversation identifier worth correlating a log line by."
+`agent_repl_session_id' is the daemon session echo token and
+`claude_session_id' is the vendor conversation uuid."
   (when ws
     (let ((identity (agent-repl--workspace-log-identity ws)))
       (puthash "workspace_dir" (plist-get identity :project-dir) record)
       (puthash "workspace_id" (plist-get identity :workspace-id) record)
       (dolist (field-value
-               `(("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
+               `(("agent_repl_session_id" . ,(agent-repl--ws-observed-agent-repl-session-id ws))
+                 ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
         (let ((field (car field-value))
               (value (cdr field-value)))
           (cond
@@ -1153,6 +1260,12 @@ to be stable, so the BARE format string travels here separately."
                   (cons "message" message)
                   (cons "context" context))))
     (agent-repl--log-add-workspace-identity record ws)
+    (when agent-repl--log-context-request-id
+      (unless (and (stringp agent-repl--log-context-request-id)
+                   (not (string-empty-p agent-repl--log-context-request-id)))
+        (error "agent-repl log identity invariant violated: invalid request_id=%S"
+               agent-repl--log-context-request-id))
+      (puthash "request_id" agent-repl--log-context-request-id record))
     (when pseudo-ws
       (puthash "pseudo_workspace" pseudo-ws record))
     (json-serialize record)))
@@ -1275,10 +1388,6 @@ the day of invisible records that keying by name cost."
               (when (file-exists-p target)
                 (delete-file target)))))))))
 
-(defvar agent-repl--log-write-counter 0
-  "Monotonic counter of successful log-file writes.
-Used by `agent-repl--do-log-to-file' to decide when to size-check.")
-
 (defun agent-repl--secure-log-file-mode (path)
   "Require PATH to be a regular file and force its permissions to 0600.
 This helper intentionally does not log: it runs inside the logfile sink, so
@@ -1288,86 +1397,58 @@ using the logging ladder here would recurse."
   (unless (= (logand (file-modes path) #o777) #o600)
     (set-file-modes path #o600)))
 
-(defun agent-repl--log-truncate (path size &optional ws)
-  "Drop the first 80% of PATH (SIZE bytes) and append a WARNING line.
-Reads the last 20% of the file as raw bytes, aligns to the next
-newline (so we don't keep a partial first line), then overwrites PATH in
-place so readers holding the target open retain its inode.
+(defun agent-repl--log-generation-path (path generation)
+  "Return PATH's positive integer GENERATION filename."
+  (unless (and (integerp generation) (> generation 0))
+    (error "agent-repl: log generation must be a positive integer, got %S" generation))
+  (format "%s.%d" path generation))
 
-Pure side-effect — no logging facilities are called here so we cannot
-re-enter `agent-repl--do-log-to-file' and recurse."
-  (let* ((keep-bytes (max 1 (- size (floor (* 0.8 size)))))
-         (start (- size keep-bytes))
-         (warning nil)
-         (needs-newline nil))
-    (with-temp-buffer
-      (set-buffer-multibyte nil)
-      (let ((coding-system-for-read 'no-conversion)
-            (coding-system-for-write 'no-conversion))
-        (insert-file-contents-literally path nil start size)
-        ;; Drop the partial first line (everything up to and including the
-        ;; first newline) so the resulting file starts on a clean line.
-        (goto-char (point-min))
-        (when (search-forward "\n" nil t)
-          (delete-region (point-min) (point)))
-        (setq needs-newline
-              (and (> (point-max) (point-min))
-                   (not (eq (char-before (point-max)) ?\n))))
-        (write-region (point-min) (point-max) path nil 'silent)))
-    (setq warning
-          (agent-repl--json-object
-            (cons "timestamp" (agent-repl--log-rfc3339-timestamp))
-            (cons "runtime" "emacs") (cons "pid" (emacs-pid))
-            (cons "level" "warn") (cons "verbosity" "normal")
-            (cons "operation" "agent-repl.log.truncate")
-            (cons "message" "log truncated after size cap exceeded")
-            (cons "context" (agent-repl--json-object
-                              (cons "cap_bytes" agent-repl-log-size-cap-bytes)
-                              (cons "size_bytes" size)
-                              (cons "kept_bytes" keep-bytes)))))
-    (agent-repl--log-add-workspace-identity warning ws)
-    (setq warning (json-serialize warning))
-    (write-region (concat (if needs-newline "\n" "") warning "\n") nil path t 'silent)
-    (agent-repl--secure-log-file-mode path)))
+(defun agent-repl--log-rotate-generations (path)
+  "Move PATH to `.1' and retain exactly `agent-repl-log-generation-count'."
+  (when (< agent-repl-log-generation-count 1)
+    (error "agent-repl: log generation count must be positive, got %S"
+           agent-repl-log-generation-count))
+  (let ((oldest (agent-repl--log-generation-path
+                 path agent-repl-log-generation-count)))
+    (when (file-exists-p oldest)
+      (delete-file oldest)))
+  (cl-loop for generation downfrom (1- agent-repl-log-generation-count) to 1
+           for from = (agent-repl--log-generation-path path generation)
+           for to = (agent-repl--log-generation-path path (1+ generation))
+           when (file-exists-p from)
+           do (rename-file from to))
+  (when (file-exists-p path)
+    (rename-file path (agent-repl--log-generation-path path 1))))
 
-(defun agent-repl--log-maybe-truncate (path &optional ws)
-  "Truncate PATH when it exceeds `agent-repl-log-size-cap-bytes'.
-Called periodically from `agent-repl--do-log-to-file'."
-  (let ((attrs (file-attributes path)))
-    (when attrs
-      (let ((size (file-attribute-size attrs)))
-        (when (and size (> size agent-repl-log-size-cap-bytes))
-          (condition-case err
-              (agent-repl--log-truncate path size ws)
-            (error
-             (message "[agent-repl] LOG SINK FAILURE operation=truncate path=%s workspace=%S error=%S"
-                      path ws err)
-             (signal 'agent-repl-log-truncate-failure (list path ws err)))))))))
+(defun agent-repl--log-rotate-before-write (path bytes)
+  "Rotate PATH when appending BYTES would cross the configured size cap."
+  (unless (> agent-repl-log-size-cap-bytes 0)
+    (error "agent-repl: log size cap must be positive, got %S"
+           agent-repl-log-size-cap-bytes))
+  (let* ((attrs (file-attributes path))
+         (size (if attrs (file-attribute-size attrs) 0)))
+    (when (and (> size 0)
+               (> (+ size bytes) agent-repl-log-size-cap-bytes))
+      (agent-repl--log-rotate-generations path))))
 
 (defun agent-repl--do-log-to-file (text &optional ws)
   "Append TEXT as a line to the logfile when `agent-repl-log-to-file' is non-nil.
-Sink failures, including truncation failures, emit the emergency diagnostic and
+Sink failures, including rotation failures, emit the emergency diagnostic and
 signal an error; persistence must never silently degrade.
-
-Increments `agent-repl--log-write-counter' on every successful write
-and runs `agent-repl--log-maybe-truncate' once every
-`agent-repl-log-size-check-interval' writes."
+The size check runs before every append so a record is never split across
+generations."
   (when agent-repl-log-to-file
     (let ((path (if ws
                     (agent-repl--workspace-emacs-log-target ws)
                   (agent-repl--logfile-path))))
       (condition-case err
-          (let ((new-file (not (file-exists-p path))))
-            (write-region (concat text "\n") nil path t 'silent)
-            (when new-file
-              (agent-repl--secure-log-file-mode path))
-            (cl-incf agent-repl--log-write-counter)
-            (when (and (> agent-repl-log-size-check-interval 0)
-                       (zerop (mod agent-repl--log-write-counter
-                                   agent-repl-log-size-check-interval)))
-              (agent-repl--log-maybe-truncate path ws)))
-        (agent-repl-log-truncate-failure
-         (signal (car err) (cdr err)))
+          (let* ((line (concat text "\n"))
+                 (bytes (string-bytes (encode-coding-string line 'utf-8 t))))
+            (agent-repl--log-rotate-before-write path bytes)
+            (let ((new-file (not (file-exists-p path))))
+              (write-region line nil path t 'silent)
+              (when new-file
+                (agent-repl--secure-log-file-mode path))))
         (error
          ;; Sink failure cannot enter its own failed sink.  This emergency
          ;; message is therefore the sole permitted alternate output channel.
@@ -1399,14 +1480,6 @@ Production leaves this enabled.  The pure-Elisp batch harness binds it nil so
 unrelated tests that assert exact buffer or perspective effects do not acquire
 a logging side effect; the dedicated workspace-log tests bind it back to t.")
 
-(defun agent-repl--workspace-log-buffer (ws)
-  "Return WS's workspace-owned live agent-repl log buffer.
-The buffer is created through `agent-repl--create-buffer', which sets its
-permanent-local owner and attaches it through workspace.el's perspective
-boundary.  Its contents are an in-memory view only; the durable logfile
-remains the authoritative persisted record."
-  (agent-repl--create-buffer ws agent-repl--workspace-log-buffer-suffix))
-
 (defvar agent-repl--log-sink-reentrant nil
   "Non-nil while the logging ladder is resolving its own sink.
 Helpers the sink itself calls consult this to stay silent.  Without it the
@@ -1417,6 +1490,17 @@ the name of the buffer it was about to be appended to.  That doubling is
 what made `buffer-name: suffix=-log' the third-largest operation in the log
 at 71,425 records, and it scales with ALL workspace-scoped logging, not with
 any one noisy caller.")
+
+(defun agent-repl--workspace-log-buffer (ws)
+  "Return WS's workspace-owned live agent-repl log buffer.
+The buffer is created through `agent-repl--create-buffer', which sets its
+permanent-local owner and attaches it through workspace.el's perspective
+boundary.  Its contents are an in-memory view only; the durable logfile
+remains the authoritative persisted record.  Buffer resolution is itself part
+of the sink, so it suppresses the buffer-name diagnostic that would recurse
+or require routing before this in-memory sink exists."
+  (let ((agent-repl--log-sink-reentrant t))
+    (agent-repl--create-buffer ws agent-repl--workspace-log-buffer-suffix)))
 
 (defun agent-repl--append-workspace-log (ws text)
   "Append the exact formatted log TEXT to WS's live log buffer.
@@ -1443,16 +1527,12 @@ a level: on the durable sink the two axes collapse into one ordering, and
 a threshold is only useful if every record can be placed on it.")
 
 (defun agent-repl--log-record-rank (level verbosity)
-  "Rank the record described by LEVEL and VERBOSITY on the ladder.
-A verbose record ranks below every ordinary level regardless of the LEVEL
-it carries, because `agent-repl--log-verbose' stamps its records `debug'
-and the verbosity is the only thing distinguishing hot-path chatter from
-the debug lines a reader actually wants."
+  "Rank LEVEL and VERBOSITY on the workspace-buffer display ladder.
+The durable sink deliberately ranks only by LEVEL; see
+`agent-repl--log-record-persists-p'."
   (or (cdr (assoc (if (equal verbosity "verbose") "verbose" level)
                   agent-repl--log-level-rank))
-      ;; An unknown level is not a reason to silently drop a record: rank it
-      ;; at the top so a threshold can never be what loses it.
-      (cdr (assoc "error" agent-repl--log-level-rank))))
+      (error "agent-repl: unknown log level=%S verbosity=%S" level verbosity)))
 
 (defun agent-repl--log-record-clears-p (level verbosity threshold)
   "Whether a LEVEL / VERBOSITY record ranks at or above THRESHOLD."
@@ -1461,44 +1541,59 @@ the debug lines a reader actually wants."
 
 (defun agent-repl--log-record-persists-p (level verbosity)
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-file-level'."
-  (agent-repl--log-record-clears-p level verbosity agent-repl-log-file-level))
+  (ignore verbosity)
+  (>= (agent-repl--log-record-rank level "normal")
+      (agent-repl--log-record-rank (symbol-name agent-repl-log-file-level)
+                                   "normal")))
 
 (defun agent-repl--log-record-displays-p (level verbosity)
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-buffer-level'."
   (agent-repl--log-record-clears-p level verbosity agent-repl-log-buffer-level))
 
-(defun agent-repl--persist-log-record (ws level verbosity fmt args &optional operation-fmt)
-  "Persist one JSONL record for WS without changing caller-facing signatures.
-OPERATION-FMT, when non-nil, is the untagged format string the record's
-stable `operation' name is derived from; see `agent-repl--log-record'."
-  ;; Record construction resolves the durable sink identity for WS.  Skip that
-  ;; work when both persistence sinks are disabled, as in the generic batch
-  ;; harness.  Echo-area formatting and emission remain the caller's concern.
-  ;; THE TWO SINKS ARE GATED SEPARATELY.  The file is a forensic record and
-  ;; keeps the verbose rung by default; the workspace buffers are read live by
-  ;; a human and drop it.  Deciding both from one threshold would force the
-  ;; reader to choose between a quiet buffer and a complete file.
-  (let ((to-file (and agent-repl-log-to-file
-                      (agent-repl--log-record-persists-p level verbosity)))
-        (to-buffer (and agent-repl--workspace-log-buffer-enabled ws
-                        (agent-repl--log-record-displays-p level verbosity))))
-    (when (or to-file to-buffer)
-      ;; Resolve the routing decision ONCE, before anything consumes WS.  The
-      ;; record's identity fields and the sink path must agree about which
-      ;; workspace owns this line, and both derive from this single answer.
-      (let* ((sink-ws (agent-repl--log-sink-workspace ws))
-             ;; A pseudo-perspective loses its attribution to the global sink
-             ;; above; carry the name onto the record so the demotion does not
-             ;; also erase which perspective the line was about.
-             (pseudo-ws (and (null sink-ws)
-                             (agent-repl--pseudo-workspace-name-p ws)
-                             ws))
-             (record (agent-repl--log-record sink-ws level verbosity fmt args
-                                             pseudo-ws operation-fmt)))
+(cl-defun agent-repl--emit-log-record
+    (ws level verbosity fmt args &key operation-fmt message-mode fatal)
+  "Build, route, persist, and present one log record.
+Every logging rung calls this function directly.  MESSAGE-MODE is nil,
+`quiet', or `echo'.  FATAL signals after persistence.  OPERATION-FMT preserves
+the untagged operation template used by warning and error wrappers."
+  (let* ((routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
+         (routing-error (plist-get routing :routing-error))
+         (sink-ws (plist-get routing :workspace))
+         (pseudo-ws (plist-get routing :pseudo)))
+    (if routing-error
+        (let* ((offender (plist-get routing :offender))
+               (reason (plist-get routing :reason))
+               (route-fmt "elisp.core.log-routing-error workspace=%S reason=%s original-operation=%s")
+               (route-args (list offender reason
+                                 (agent-repl--log-operation (or operation-fmt fmt))))
+              (record (agent-repl--log-record nil "error" "normal"
+                                               route-fmt route-args)))
+          (when agent-repl-log-to-file
+            (agent-repl--do-log-to-file record nil))
+          (agent-repl--note-unroutable-log-workspace offender)
+          (error "agent-repl log routing invariant violated: workspace=%S reason=%s"
+                 offender reason))
+      (let* ((record (agent-repl--log-record sink-ws level verbosity fmt args
+                                             pseudo-ws operation-fmt))
+             (text (agent-repl--build-log-text sink-ws fmt args))
+             (to-file (and agent-repl-log-to-file
+                           (agent-repl--log-record-persists-p level verbosity)))
+             (to-buffer (and agent-repl--workspace-log-buffer-enabled sink-ws
+                             (agent-repl--log-record-displays-p level verbosity))))
         (when to-file
           (agent-repl--do-log-to-file record sink-ws))
         (when to-buffer
-          (agent-repl--append-workspace-log sink-ws record))))))
+          (agent-repl--append-workspace-log sink-ws record))
+        (unless fatal
+          (pcase message-mode
+            ('quiet (agent-repl--emit-message text nil))
+            ('echo (agent-repl--emit-message text t))
+            ('backend
+             (agent-repl--emit-message
+              (concat "agent-repl: " (apply #'format fmt args)) t))))
+        (when fatal
+          (error "%s" text))
+        record))))
 
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
@@ -1528,8 +1623,8 @@ stable `operation' name is derived from; see `agent-repl--log-record'."
 ;;
 ;; Pick a level, do not reach for `message' directly:
 ;;
-;;   `agent-repl--log-verbose'  hot-path chatter   file always, terminal verbose
-;;   `agent-repl--log'          debug chatter      file always, quiet
+;;   `agent-repl--log-verbose'  hot-path chatter   file at debug, terminal verbose
+;;   `agent-repl--log'          debug chatter      file at debug, quiet
 ;;   `agent-repl--info'         background notice  file + *Messages*, quiet
 ;;   `agent-repl--warn'         recorded warning   file + *Messages*, quiet
 ;;   `agent-repl--error'        recorded error     file + *Messages*, quiet
@@ -1557,11 +1652,10 @@ OPERATION-FMT, when non-nil, is the untagged format string the persisted
 record's stable `operation' name is derived from, while FMT — which may
 carry a severity display tag — still supplies the recorded and displayed
 message."
-  (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--persist-log-record ws level "normal" fmt args operation-fmt)
-    (if error-p
-        (error "%s" text)
-      (agent-repl--emit-message text nil))))
+  (agent-repl--emit-log-record ws level "normal" fmt args
+                               :operation-fmt operation-fmt
+                               :message-mode 'quiet
+                               :fatal error-p))
 
 (defun agent-repl--do-log (ws fmt args &optional error-p)
   "Unconditional log entry: ALWAYS write to file AND emit to message/error.
@@ -1582,7 +1676,9 @@ This is the entry point for log calls that MUST be captured regardless
 of `agent-repl-debug'.  Debug-gated callers (`agent-repl--log',
 `agent-repl--log-verbose') use the file-write path directly and emit
 quietly; `agent-repl--info' is the equivalent ungated quiet-notice level."
-  (agent-repl--do-log-level ws fmt args (if error-p "error" "info") error-p))
+  (agent-repl--emit-log-record ws (if error-p "error" "info") "normal" fmt args
+                               :message-mode 'quiet
+                               :fatal error-p))
 
 (defun agent-repl--log (ws fmt &rest args)
   "Log a timestamped message for WS, always to file, conditionally to *Messages*.
@@ -1592,22 +1688,17 @@ fires when `agent-repl-debug' is non-nil, and even then it is emitted
 quietly (into *Messages* only, never the echo area), so turning debug
 logging on never turns the modeline into a firehose.
 FMT and ARGS use the same format conventions as `message'."
-  (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--persist-log-record ws "debug" "normal" fmt args)
-    (when agent-repl-debug
-      (agent-repl--emit-message text nil))))
+  (agent-repl--emit-log-record ws "debug" "normal" fmt args
+                               :message-mode (and agent-repl-debug 'quiet)))
 
 (defun agent-repl--log-verbose (ws fmt &rest args)
   "Persist a high-frequency message and show it only in verbose mode.
 `agent-repl-debug' affects terminal and *Messages* visibility only.  The
-JSONL record reaches the durable sink when it clears
-`agent-repl-log-file-level', which by default it does NOT: this rung is
-the hot-path chatter, and keeping it out of the file is the whole reason
-that threshold exists."
-  (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--persist-log-record ws "debug" "verbose" fmt args)
-    (when (eq agent-repl-debug 'verbose)
-      (agent-repl--emit-message text nil))))
+JSONL record carries level `debug' and persists whenever the durable level
+switch admits debug records."
+  (agent-repl--emit-log-record ws "debug" "verbose" fmt args
+                               :message-mode (and (eq agent-repl-debug 'verbose)
+                                                  'quiet)))
 
 (defun agent-repl--info (ws fmt &rest args)
   "Log an informational line for WS to the QUIET sink, ungated by debug.
@@ -1621,9 +1712,7 @@ Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
 severity (still quiet), or `agent-repl--error' for the `error' rung — a
 contract breach or a failed operation, recorded at the level the logging
 contract reserves for them.  `agent-repl--fatal' is the abort."
-  (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--persist-log-record ws "info" "normal" fmt args)
-    (agent-repl--emit-message text nil)))
+  (agent-repl--emit-log-record ws "info" "normal" fmt args :message-mode 'quiet))
 
 (defun agent-repl--warn (ws fmt &rest args)
   "Log a WARNING for WS to the QUIET sink: the log file and *Messages'.
@@ -1641,13 +1730,14 @@ the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
 use it for failed writes, dropped state, broken invariants, and degraded
 functionality that are worth flagging in the log but are not fatal."
   (if (stringp fmt)
-      (agent-repl--do-log-level ws (concat "WARNING: " fmt) args "warn" nil fmt)
+      (agent-repl--emit-log-record ws "warn" "normal" (concat "WARNING: " fmt) args
+                                   :operation-fmt fmt :message-mode 'quiet)
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
     ;; than `concat'-ing it (which would raise a wrong-type-argument here and
     ;; bury the real culprit): `agent-repl--build-log-text' already captures a
     ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
     ;; preserved so nothing about the offending call is lost.
-    (agent-repl--do-log-level ws fmt args "warn")))
+    (agent-repl--emit-log-record ws "warn" "normal" fmt args :message-mode 'quiet)))
 
 (defconst agent-repl--warn-once-capacity 4096
   "Maximum process-local warning fingerprints retained by `agent-repl--warn-once'.")
@@ -1677,7 +1767,12 @@ to emit again rather than allowing unbounded diagnostic state."
     (puthash fingerprint t agent-repl--warn-once-fingerprints)
     (setq agent-repl--warn-once-order
           (append agent-repl--warn-once-order (list fingerprint)))
-    (apply #'agent-repl--warn ws fmt args)
+    (if (stringp fmt)
+        (agent-repl--emit-log-record ws "warn" "normal"
+                                     (concat "WARNING: " fmt) args
+                                     :operation-fmt fmt :message-mode 'quiet)
+      (agent-repl--emit-log-record ws "warn" "normal" fmt args
+                                   :message-mode 'quiet))
     t))
 
 (defvar agent-repl--log-transition-states (make-hash-table :test 'equal)
@@ -1732,12 +1827,12 @@ and back up before a reproduction is captured."
    (list (intern
           (completing-read
            (format "Durable log level (currently %s): " agent-repl-log-file-level)
-           '("verbose" "debug" "info" "warn" "error")
+           '("debug" "info" "warn" "error")
            nil t nil nil (symbol-name agent-repl-log-file-level)))))
-  (unless (assoc (symbol-name level) agent-repl--log-level-rank)
+  (unless (memq level '(debug info warn error))
     (agent-repl--error
      nil "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
-    (error "agent-repl: %S is not a log level; expected one of verbose debug info warn error"
+    (error "agent-repl: %S is not a log level; expected one of debug info warn error"
            level))
   (setq agent-repl-log-file-level level)
   ;; Announced through the durable sink as well as the echo area: the record
@@ -1749,17 +1844,15 @@ and back up before a reproduction is captured."
 
 (defun agent-repl-toggle-verbose-to-disk ()
   "Toggle whether the verbose rung is written to the LOG FILE.
-Flips `agent-repl-log-file-level' between `verbose' (write the hot-path
-chatter) and `debug' (write everything else).  This is the knob for a log
-growing faster than it is worth: turn it off, and turn it back on before
-provoking the reproduction it is needed for.
+Verbose records carry debug level, so this flips `agent-repl-log-file-level'
+between `debug' and `info'.
 
 Affects the FILE only.  The per-workspace log buffers follow
 `agent-repl-log-buffer-level' and *Messages* follows `agent-repl-debug'."
   (interactive)
   (setq agent-repl-log-file-level
-        (if (eq agent-repl-log-file-level 'verbose) 'debug 'verbose))
-  (let ((on (eq agent-repl-log-file-level 'verbose)))
+        (if (eq agent-repl-log-file-level 'debug) 'info 'debug))
+  (let ((on (eq agent-repl-log-file-level 'debug)))
     (agent-repl--info nil "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
                       (if on "ON" "OFF"))
     (message "[agent-repl] verbose logging to disk: %s%s"
@@ -2014,8 +2107,7 @@ a pointer at the log file.
 FMT and ARGS keep the ladder's format-string signature, so the persisted
 `operation' name stays derived from the template and never from a runtime
 value."
-  (agent-repl--persist-log-record ws "info" "normal" fmt args)
-  (agent-repl--emit-message (concat "agent-repl: " (apply #'format fmt args)) t))
+  (agent-repl--emit-log-record ws "info" "normal" fmt args :message-mode 'backend))
 
 (defun agent-repl--fatal (ws fmt &rest args)
   "Record a fatal condition for WS and then SIGNAL it.
@@ -2031,7 +2123,8 @@ the severity-gate commentary above).  Reach for it where the caller must
 not continue — a refusal, a broken precondition, an unusable input.  When
 the branch only needs to RECORD that something failed and carry on, that
 is `agent-repl--error' one line below."
-  (agent-repl--do-log ws fmt args t))
+  (agent-repl--emit-log-record ws "error" "normal" fmt args
+                               :message-mode 'quiet :fatal t))
 
 (defun agent-repl--error (ws fmt &rest args)
   "Log an ERROR for WS to the QUIET sink: the log file and *Messages*.
@@ -2056,13 +2149,14 @@ records at this same level and then signals; a refusal that already has
 its own `error' / `user-error' keeps it and calls this to put the reason
 on the record first."
   (if (stringp fmt)
-      (agent-repl--do-log-level ws (concat "ERROR: " fmt) args "error" nil fmt)
+      (agent-repl--emit-log-record ws "error" "normal" (concat "ERROR: " fmt) args
+                                   :operation-fmt fmt :message-mode 'quiet)
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
     ;; than `concat'-ing it (which would raise a wrong-type-argument here and
     ;; bury the real culprit): `agent-repl--build-log-text' already captures a
     ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
     ;; preserved so nothing about the offending call is lost.
-    (agent-repl--do-log-level ws fmt args "error")))
+    (agent-repl--emit-log-record ws "error" "normal" fmt args :message-mode 'quiet)))
 
 (defun agent-repl--assert-main-thread (what)
   "Signal an error when called off the main thread; no-op (nil) on main.
@@ -2084,28 +2178,6 @@ failure handling surfaces."
      "assert-main-thread: REFUSING %s off the main thread (thread=%s) — ns_select_1 worker-thread trap, see AGENTS.md"
      (list what (thread-name (current-thread)))
      t)))
-
-(defun agent-repl--rotate-log-on-startup ()
-  "Rename an existing log file to `<path>.prev', preserving one prior session.
-Idempotent: clobbers any existing `.prev'.  No-op when the current log
-file does not exist or `agent-repl-log-to-file' is nil.  Errors are
-caught and surfaced as a message — the rollover must not block startup."
-  (when agent-repl-log-to-file
-    (condition-case err
-        (let* ((path (agent-repl--logfile-path))
-               (prev (concat path ".prev")))
-          (when (file-exists-p path)
-            (when (file-exists-p prev) (delete-file prev))
-            (rename-file path prev)
-            ;; Reset the write counter — size accounting is per-file.
-            (setq agent-repl--log-write-counter 0)))
-      (error (message "[agent-repl] WARNING: log rotate failed: %S" err)))))
-
-;; Run inline at load so each Emacs session begins with a fresh log file.
-;; Guarded against `noninteractive' so ERT batch runs don't trash the user's
-;; real log on every test invocation.
-(unless noninteractive
-  (agent-repl--rotate-log-on-startup))
 
 ;;; Git and workspace identity
 
@@ -2609,10 +2681,11 @@ one; see that variable for the scope a memo is valid in."
 Uses an MD5 hash of the canonical project root path from the workspace hashmap.
 Returns nil when no workspace has a registered `:project-dir' — callers are
 expected to only invoke this from contexts where a workspace is active."
-  (let* ((root (ignore-errors (agent-repl--ws-dir (agent-repl--ws-current-name))))
+  (let* ((ws (agent-repl--ws-current-name))
+         (root (ignore-errors (agent-repl--ws-dir ws)))
          (id (when root
                (substring (md5 (agent-repl--path-canonical root)) 0 agent-repl-workspace-id-length))))
-    (agent-repl--log-verbose nil "workspace-id: root=%s id=%s" root id)
+    (agent-repl--log-verbose ws "workspace-id: ws=%s root=%s id=%s" ws root id)
     id))
 
 ;;; Workspace state management
@@ -2634,6 +2707,14 @@ expected to only invoke this from contexts where a workspace is active."
 ;; immediately upstream of the wrapper API rather than downstream).
 
 (declare-function agent-repl-host--live "host" (ws))
+(declare-function agent-repl-host-session-id "host" (ws))
+
+(defun agent-repl--ws-observed-agent-repl-session-id (ws)
+  "Return the daemon session id in WS's latest host push, or nil.
+The id is read at record construction time and never persisted as Emacs state.
+Nil is valid before a host push and for a workspace with no session."
+  (when (fboundp 'agent-repl-host-session-id)
+    (agent-repl-host-session-id ws)))
 
 (defun agent-repl--ws-observed-claude-session-id (ws)
   "Return the vendor conversation uuid WS's session is CURRENTLY on, or nil.
@@ -2756,7 +2837,7 @@ to delete the input panel as orphaned."
       ;; Silent when the log sink is resolving its own buffer: instrumenting
       ;; that path makes every workspace-scoped record emit a second record.
       (unless agent-repl--log-sink-reentrant
-        (agent-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name))
+        (agent-repl--log-verbose ws-name "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name))
       name)))
 
 (defun agent-repl--input-buffer-name (ws title)
