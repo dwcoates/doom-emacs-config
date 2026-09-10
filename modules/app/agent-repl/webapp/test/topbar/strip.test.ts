@@ -16,6 +16,7 @@ import {
   drawTopbarSessionLine,
   drawTopbarTitle,
 } from "../../src/topbar/strip.js";
+import { cascadedValue, installStylesheet } from "../stylesheet.js";
 import { openPanel, topbarContext } from "./fixtures.js";
 
 const loggedIn = (email: string) =>
@@ -167,6 +168,29 @@ describe("drawTopbarSessionLine", () => {
     expect(drawTopbarSessionLine(create(TopbarSessionLineSchema, { text: "x" })).textContent).toBe(
       "x",
     );
+  });
+
+  // THE LINE IS LONGER THAN THE PANEL AND THE PANEL IS CAPPED. `.topbar-reveal`
+  // is `max-width: min(90vw, 32rem)`, so a line drawn `nowrap` runs past the
+  // cap and the last segment -- the MODEL -- is cut off the right edge. The
+  // reveal has a second axis to spend, so the line must be allowed to take a
+  // second row rather than a hidden one.
+  it("lets the line take a second row rather than run past the panel's capped width", () => {
+    // Arrange
+    const teardown = installStylesheet();
+    try {
+      const line = drawTopbarSessionLine(
+        create(TopbarSessionLineSchema, {
+          text: "vend-1 · ~/workspace/very/deep/checkout/root · fake-opus-4-8",
+        }),
+      );
+      document.body.append(line);
+
+      // Act / Assert
+      expect(cascadedValue(line, "white-space")).not.toBe("nowrap");
+    } finally {
+      teardown();
+    }
   });
 });
 
