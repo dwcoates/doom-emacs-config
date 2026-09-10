@@ -20,39 +20,54 @@ import (
 // with two identities and offers no pairing key; the daemon coalesces them by
 // the EPISODE INVARIANT — an agent has at most one open plan episode at a time
 // — so entering draws the planning state and the exit fills the same bubble.
+//
+// THE BUBBLE'S IDENTITY IS THE OPENING CALL'S ACTIVITY ID, exactly as every
+// other unit here keys on `act.GetActivityId()`. That is what makes the two
+// planes — the shim's stream and the sidecar's file tail, which convert the
+// SAME vendor record — collapse onto one row instead of drawing it twice.
 func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, plan *conversationv1.AgentPlanMode) (*frontendv1.FeedRow, error) {
 	agentID := agent.GetValue()
-	episode := s.plans[agentID]
+	unitID := act.GetActivityId().GetValue()
+
+	// WHICH EPISODE THIS CALL BELONGS TO, and it is answered from the call's
+	// own identity first. A call already attributed to an episode is attributed
+	// to the SAME one however often it arrives; otherwise it joins the agent's
+	// open episode, and opens one keyed on itself when there is none.
+	episode := s.planUnits[unitID]
+	if episode == nil {
+		episode = s.plans[agentID]
+		if episode == nil || episode.closed {
+			episode = &planState{opener: unitID, feed: at}
+			s.plans[agentID] = episode
+		}
+		s.planUnits[unitID] = episode
+	}
+	if episode.closed {
+		// A SETTLED EPISODE IS INERT. Its bubble already carries its final
+		// state, and the only frames that can still arrive for it are the
+		// other plane's copies of the calls it was drawn from — a `start` among
+		// them, which redrawn would put a finished plan back into its planning
+		// treatment. Nothing is lost by declining: the row stands as drawn.
+		r.logger(s.id).Debug("daemon.feed.plan_redelivered",
+			"a plan-mode call arrived again for an episode already settled; the bubble stands as drawn",
+			dlog.Context{"agent": agentID, "episode": episode.opener, "unit": unitID})
+		return nil, errNotARow
+	}
 
 	bubble := &frontendv1.FeedPlan{}
 	switch frame := plan.GetState().(type) {
 	case *conversationv1.AgentPlanMode_Start:
 		switch frame.Start.GetAct().(type) {
 		case *conversationv1.AgentPlanModeStart_Enter:
-			if episode == nil {
-				s.planEpisodes[agentID]++
-				episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-				s.plans[agentID] = episode
-			}
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		case *conversationv1.AgentPlanModeStart_Exit:
 			// AN EXIT WITH NO ENTER IS LEGAL: a session started in the plan
 			// permission mode never calls EnterPlanMode at all.
-			if episode == nil {
-				s.planEpisodes[agentID]++
-				episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-				s.plans[agentID] = episode
-			}
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
 		default:
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Success:
-		if episode == nil {
-			s.planEpisodes[agentID]++
-			episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-			s.plans[agentID] = episode
-		}
 		switch outcome := frame.Success.GetAct().(type) {
 		case *conversationv1.AgentPlanModeSuccess_Entered:
 			bubble.State = &frontendv1.FeedPlan_Planning{Planning: &frontendv1.FeedPlanPlanning{}}
@@ -65,32 +80,30 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 				planned.Edit = &frontendv1.FeedPlanEditTarget{Path: outcome.Exited.GetFilePath()}
 			}
 			bubble.State = &frontendv1.FeedPlan_Planned{Planned: planned}
-			// The episode is over; the next enter opens a new one.
-			delete(s.plans, agentID)
+			// The episode is over; the next enter opens a new one. It is KEPT
+			// rather than deleted so a re-delivery of either of its calls is
+			// recognized as one instead of opening a second episode.
+			episode.closed = true
 		default:
 			return nil, errNotARow
 		}
 	case *conversationv1.AgentPlanMode_Failure:
-		if episode == nil {
-			s.planEpisodes[agentID]++
-			episode = &planState{episode: s.planEpisodes[agentID], feed: at}
-		}
 		bubble.State = &frontendv1.FeedPlan_Failed{Failed: &frontendv1.FeedPlanFailed{
 			Text: planFailureText(frame.Failure.GetError()),
 		}}
-		delete(s.plans, agentID)
+		episode.closed = true
 	default:
 		return nil, errNotARow
 	}
 
 	id := r.rowID(s.id, episode.feed.feed, feedid.RowKey{
 		Kind: feedid.KindActivity,
-		ID:   fmt.Sprintf("plan:%s:%d", agentID, episode.episode),
+		ID:   "plan:" + episode.opener,
 	})
 	episode.row = id
 	r.logger(s.id).Debug("daemon.feed.plan",
 		"a plan-mode call was coalesced onto its episode's bubble",
-		dlog.Context{"agent": agentID, "episode": episode.episode, "row": id.GetValue()})
+		dlog.Context{"agent": agentID, "episode": episode.opener, "row": id.GetValue()})
 	return &frontendv1.FeedRow{
 		Id: id,
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
@@ -104,10 +117,17 @@ func (r *resolver) drawPlan(s *wsState, at placement, agent *conversationv1.Agen
 // planning state forever.
 func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 	for agentID, episode := range s.plans {
+		if episode.closed {
+			// An episode that already reached its final state is not open, and
+			// breaking it would put "the turn ended while plan mode was still
+			// open" over a plan the agent DID present. It is only still in this
+			// map so a re-delivery of its calls is recognized as one.
+			continue
+		}
 		row := &frontendv1.FeedRow{
 			Id: r.rowID(s.id, episode.feed.feed, feedid.RowKey{
 				Kind: feedid.KindActivity,
-				ID:   fmt.Sprintf("plan:%s:%d", agentID, episode.episode),
+				ID:   "plan:" + episode.opener,
 			}),
 			Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 				Unit: &frontendv1.FeedTurnActivity_Plan{Plan: &frontendv1.FeedPlan{
@@ -117,10 +137,10 @@ func (r *resolver) breakPlanEpisodes(s *wsState, reason string) {
 		}
 		r.logger(s.id).Debug("daemon.feed.plan_episode_broken",
 			"a plan episode broke and its bubble was failed",
-			dlog.Context{"agent": agentID, "episode": episode.episode, "reason": reason})
+			dlog.Context{"agent": agentID, "episode": episode.opener, "reason": reason})
 		r.stampTurn(s, row, nil)
 		r.upsert(s, episode.feed, row, true)
-		delete(s.plans, agentID)
+		episode.closed = true
 	}
 }
 
@@ -247,7 +267,8 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 			return nil, errNotARow
 		}
 		u.startedAtMs = frame.Start.GetStartedAtMs()
-		u.input = artifactHeading(publish.Publish.GetFavicon(), publish.Publish.GetTitle(), publish.Publish.GetFilePath())
+		u.artifactFavicon = publish.Publish.GetFavicon()
+		u.input = artifactHeading(u.artifactFavicon, publish.Publish.GetTitle(), publish.Publish.GetFilePath())
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: u.input}
 		bubble.State = &frontendv1.FeedArtifact_Publishing{Publishing: &frontendv1.FeedArtifactPublishing{}}
 	case *conversationv1.AgentArtifact_Success:
@@ -257,7 +278,11 @@ func (r *resolver) drawArtifact(s *wsState, at placement, act *conversationv1.Ag
 		}
 		heading := u.input
 		if title := published.Published.GetTitle(); title != "" {
-			heading = artifactHeading("", title, "")
+			// The outcome's title WINS over the one the call announced, and the
+			// favicon still comes from the call: the publish is the only frame
+			// that carries one, so recomposing from the outcome alone dropped
+			// the glyph off the finished card (photographed by the playtest).
+			heading = artifactHeading(u.artifactFavicon, title, "")
 		}
 		bubble.Heading = &frontendv1.FeedArtifactHeading{Text: heading}
 		bubble.State = &frontendv1.FeedArtifact_Published{Published: &frontendv1.FeedArtifactPublished{
