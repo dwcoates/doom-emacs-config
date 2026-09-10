@@ -102,12 +102,10 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame, at 
 				dlog.Context{"agent": agent.GetValue()})
 		case *conversationv1.AgentUpdate_ApiError:
 			// Mid-turn evidence, replayed as evidence: it was never a terminal
-			// and replaying it as one would invent a turn ending.
-			line := "a vendor request failed mid-turn and the turn went on"
-			if message := update.ApiError.GetMessage(); message != "" {
-				line = line + ": " + message
-			}
-			r.addEvidence(s, line)
+			// and replaying it as one would invent a turn ending. The wording
+			// is the live sink's own, so a replayed turn reads exactly as the
+			// watched one did.
+			r.addEvidence(s, apiErrorEvidence(update.ApiError.GetMessage()))
 		default:
 			r.logger(s.id).Warn("daemon.feed.history_update_unset",
 				"a replayed update carried no arm",

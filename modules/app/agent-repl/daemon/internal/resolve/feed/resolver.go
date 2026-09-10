@@ -109,7 +109,7 @@ type wsState struct {
 	questionAsks map[string]*questionState
 	// turnEvidence collects per-turn evidence lines — a mid-turn api error, a
 	// compaction that failed — that the turn's terminal row surfaces.
-	turnEvidence map[string][]string
+	turnEvidence map[string][]turnEvidenceLine
 	// turnRefusals records that a response in this turn ended on the vendor's
 	// REFUSAL. conversation.v1's AgentModelError is an empty message, so the
 	// terminal alone cannot say whether the model errored or refused; the
@@ -312,7 +312,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		permissionRows:  map[string]*permissionState{},
 		questionAsks:    map[string]*questionState{},
 		gatedCalls:      map[string]string{},
-		turnEvidence:    map[string][]string{},
+		turnEvidence:    map[string][]turnEvidenceLine{},
 		turnRefusals:    map[string]bool{},
 		turnQueryDeaths: map[string]*conversationv1.SessionQueryDied{},
 		answerRows:      map[string]*frontendv1.FeedId{},
