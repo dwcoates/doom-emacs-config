@@ -2043,21 +2043,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     const agentId = requireIdentity().agentId;
 
     // THE RECORD IS THE ONLY PLACE the work's own start survives a bounce, so
-    // the book is read ONCE and every description below comes out of it. The
-    // page session's tail is closed at once: this is a read, not a follow.
+    // the book is read ONCE and every description below comes out of it. This
+    // is a read and not a follow, so it goes through the ONE-SHOT verb: the
+    // store mints no watch token for a tail that is never stood.
     let book: readonly conversationv1.HistoryEntryAt[] = [];
     if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
-      let page;
       try {
-        page = await deps.persistence.openAgentPage(agentId, RECONCILE_PAGE_SIZE);
-        book = page.page.entries;
+        book = (await deps.persistence.readFirstPage(agentId, RECONCILE_PAGE_SIZE)).entries;
       } catch (err) {
         LOGGER.log(
           { level: "warn", cause: err instanceof Error ? err.message : String(err) },
           "the book could not be read for reconciliation; live work cannot be described",
         );
-      } finally {
-        page?.close();
       }
     }
 
@@ -2438,12 +2435,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * would tell an adopting daemon that a running shell does not exist.
    */
   async function announceLiveWorkNow(): Promise<conversationv1.AgentDetachedWork[]> {
-    let page: AgentPageSession | undefined;
     try {
       const handles = (await deps.persistence.liveWork()).liveDetached;
       if (handles.length === 0) return [];
-      page = await deps.persistence.openAgentPage(requireIdentity().agentId, RECONCILE_PAGE_SIZE);
-      return announceLiveWork(page.page.entries, handles);
+      // READ, NOT WATCH: the one-shot verb, so no watch token is minted for a
+      // tail this description never stands.
+      const page = await deps.persistence.readFirstPage(
+        requireIdentity().agentId,
+        RECONCILE_PAGE_SIZE,
+      );
+      return announceLiveWork(page.entries, handles);
     } catch (err) {
       // LOUD, NEVER SILENT: the watch still opens — a consumer told nothing at
       // all is worse off than one told the opening with an empty membership —
@@ -2462,8 +2463,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         ),
       );
       return [];
-    } finally {
-      page?.close();
     }
   }
 
@@ -2770,17 +2769,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // never answers would leave KillSession hanging with the tail unconcluded.
     // Rejecting hands the caller's own catch the honest outcome -- the head
     // could not be read -- instead of stalling the stand-down.
-    const opened = await deadline(
+    const page = await deadline(
+      // A ONE-SHOT READ, AND IT SAYS SO. The head is a page and nothing more:
+      // `readFirstPage` opens page-only, so the store mints no watch token for
+      // a tail this teardown will never stand.
+      //
       // THE PRODUCER VOUCHES HERE TOO. A session killed before its first turn
       // has an agent with no book, and asking the store for one earned an
       // `unknown_agent` refusal on every such teardown. The head of a book that
       // does not exist is absence, which is exactly what an empty page answers.
-      deps.persistence.openAgentPage(agent, 1, undefined, () => knowsAgent(agent)),
+      deps.persistence.readFirstPage(agent, 1, undefined, () => knowsAgent(agent)),
       watcherConclusionBudgetMs,
       `the store did not answer for ${agent.value}'s book within ${watcherConclusionBudgetMs}ms`,
     );
-    opened.close();
-    return opened.page.entries[0]?.at;
+    return page.entries[0]?.at;
   }
 
   /**

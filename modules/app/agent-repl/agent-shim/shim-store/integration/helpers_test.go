@@ -1436,6 +1436,50 @@ func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 	return success
 }
 
+// openPageOnly is the one-shot read: the caller states at the open that no
+// watch follows, so the store mints nothing and the success carries no token.
+func openPageOnly(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, agent string, pageSize uint32) *storev1.OpenAgentSessionSuccess {
+	t.Helper()
+	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent:    agentID(agent),
+		PageSize: pageSize,
+		PageOnly: true,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession(%q, page_only) transport error: %v", agent, err)
+	}
+	if failure := resp.Msg.GetFailure(); failure != nil {
+		t.Fatalf("OpenAgentSession(%q, page_only) refused: %s", agent, failure.GetDetail())
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession(%q, page_only) answered neither arm: %v", agent, resp.Msg)
+	}
+	if success.GetWatch() != nil {
+		t.Fatalf("OpenAgentSession(%q, page_only) answered a watch token %v; a page-only open mints none", agent, success.GetWatch())
+	}
+	return success
+}
+
+// assertOutstandingTokensAtShutdown stops the store and reads the outstanding
+// token count off its shutdown record — the only place the registry's size is
+// stated, and the reason the count is stated there at all.
+func assertOutstandingTokensAtShutdown(t *testing.T, store *storeProcess, want int) {
+	t.Helper()
+	store.stop()
+	marker := fmt.Sprintf("outstanding_tokens=%d", want)
+	for _, rec := range store.logRecords() {
+		if rec.Operation != "store.shutdown" || !strings.Contains(rec.Message, "ending standing watches") {
+			continue
+		}
+		if !strings.Contains(rec.Message, marker) {
+			t.Fatalf("the shutdown record says %q, want it to carry %q", rec.Message, marker)
+		}
+		return
+	}
+	t.Fatalf("the store wrote no store.shutdown record stating its outstanding tokens")
+}
+
 func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest, requestID ...string) *storev1.OpenAgentSessionFailure {
 	t.Helper()
 	call := connect.NewRequest(req)

@@ -454,6 +454,110 @@ func TestOpenAgentSessionAnswersAPageAndAToken(t *testing.T) {
 	}
 }
 
+// openPageOnly runs the one-shot open a caller uses when no watch will follow,
+// and asserts the answer carries no token.
+func openPageOnly(t *testing.T, h *harness, agent string) {
+	t.Helper()
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID(agent), PageSize: 10, PageOnly: true,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession: %v", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession = %v, want the success arm", res.Msg.GetResult())
+	}
+	if success.GetWatch() != nil {
+		t.Fatalf("watch = %v, want UNSET for a page-only open", success.GetWatch())
+	}
+}
+
+// TestOpenAgentSessionMintsNoTokenForAPageOnlyRead: the caller said no watch
+// follows, so there is nothing to mint and nothing to answer with.
+func TestOpenAgentSessionMintsNoTokenForAPageOnlyRead(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.opened = OpenedPage{Page: &storev1.AgentSessionPage{
+		Lines:    []*storev1.StoreLineAt{line("a1", "p1", 7).Line},
+		Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}},
+	}, PinSeq: 7}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("a1"), PageSize: 10, PageOnly: true,
+	}))
+
+	// Assert. The page is served in full; only the token is withheld.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	success := res.Msg.GetSuccess()
+	if success == nil || len(success.GetPage().GetLines()) != 1 {
+		t.Fatalf("result = %v, want one page line", res.Msg.GetResult())
+	}
+	if success.GetWatch() != nil {
+		t.Fatalf("watch = %v, want UNSET for a page-only open", success.GetWatch())
+	}
+}
+
+// TestOpenAgentSessionRetainsTheTokenAnOrdinaryOpenMinted: the ordinary open is
+// untouched — a watch is coming, so the registry holds the token for it.
+func TestOpenAgentSessionRetainsTheTokenAnOrdinaryOpenMinted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	token := openSession(t, h, "a1")
+
+	// Assert.
+	if token == "" {
+		t.Fatalf("watch token = %q, want a minted token", token)
+	}
+	if got := h.server.tokens.outstanding(); got != 1 {
+		t.Fatalf("outstanding = %d, want 1", got)
+	}
+}
+
+// TestWatchRefusesTheBookOfAPageOnlyOpen: a page-only open leaves the caller
+// with no token, so the watch it cannot address meets the ordinary refusal
+// rather than any arm of its own.
+func TestWatchRefusesTheBookOfAPageOnlyOpen(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+	openPageOnly(t, h, "a1")
+
+	// Act.
+	err := startWatch(h, context.Background(), "").refusal(t)
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("code = %v (err %v), want %v", connect.CodeOf(err), err, connect.CodeNotFound)
+	}
+	rec, ok := findRecord(t, h.logs, "store.rpc.watch-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteTokenEmpty {
+		t.Fatalf("records = %+v, want a warn record at site %q", records(t, h.logs), SiteTokenEmpty)
+	}
+}
+
+// TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens: the two
+// one-shot reads a single turn performs — the opening page and the teardown's
+// book head — leave the registry exactly as they found it.
+func TestOutstandingTokensIsZeroAfterAOneTurnSessionsPageOnlyOpens(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, newFakeStore(), 0)
+
+	// Act.
+	openPageOnly(t, h, "a1")
+	openPageOnly(t, h, "a1")
+
+	// Assert.
+	if got := h.server.tokens.outstanding(); got != 0 {
+		t.Fatalf("outstanding = %d, want 0", got)
+	}
+}
+
 func TestOpenAgentSessionRefusesAnAgentIdWithNoValue(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, newFakeStore(), 0)

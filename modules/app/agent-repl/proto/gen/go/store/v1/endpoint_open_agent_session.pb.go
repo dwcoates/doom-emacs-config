@@ -37,7 +37,17 @@ type OpenAgentSessionRequest struct {
 	// page. SET = catch-up: the page carries only items NEWER than this, never
 	// it or anything older. The store tracks nothing about what it previously
 	// served — the caller states its own high-water mark.
-	KnownThrough  *StoreItemPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
+	KnownThrough *StoreItemPointer `protobuf:"bytes,3,opt,name=known_through,json=knownThrough,proto3,oneof" json:"known_through,omitempty"`
+	// Whether the caller will FOLLOW this open with a watch. UNSET/false = a
+	// watch is coming: the store mints a token and pins the tail (the ordinary
+	// open). SET = a one-shot read: the caller wants the page and nothing more,
+	// no token is minted, `watch` in the success is UNSET, and a watch cannot
+	// be opened from this page. Stated by the caller because the store has no
+	// other way to learn a page was abandoned — OpenAgentSession is unary and
+	// there is no close — and every unclaimed token minted for a read that
+	// never watched lived for the store's whole process lifetime (measured:
+	// two per turn, 2026-09-10).
+	PageOnly      bool `protobuf:"varint,4,opt,name=page_only,json=pageOnly,proto3" json:"page_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -91,6 +101,13 @@ func (x *OpenAgentSessionRequest) GetKnownThrough() *StoreItemPointer {
 		return x.KnownThrough
 	}
 	return nil
+}
+
+func (x *OpenAgentSessionRequest) GetPageOnly() bool {
+	if x != nil {
+		return x.PageOnly
+	}
+	return false
 }
 
 // The page, or why it could not be served.
@@ -187,7 +204,7 @@ type OpenAgentSessionSuccess struct {
 	// The watch address: opaque, store-minted at THIS open, pinning the tail to
 	// begin exactly after this page's newest item — nothing is missed or
 	// doubled between page and stream. A caller cannot watch an agent it did
-	// not open.
+	// not open. UNSET when the request said `page_only`: no token was minted.
 	Watch         *AgentSessionToken `protobuf:"bytes,2,opt,name=watch,proto3" json:"watch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -529,11 +546,12 @@ var File_store_v1_endpoint_open_agent_session_proto protoreflect.FileDescriptor
 
 const file_store_v1_endpoint_open_agent_session_proto_rawDesc = "" +
 	"\n" +
-	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\xbe\x01\n" +
+	"*store/v1/endpoint_open_agent_session.proto\x12\bstore.v1\x1a$conversation/v1/agent_activity.proto\x1a\x14store/v1/store.proto\"\xdb\x01\n" +
 	"\x17OpenAgentSessionRequest\x12.\n" +
 	"\x05agent\x18\x01 \x01(\v2\x18.conversation.v1.AgentIdR\x05agent\x12\x1b\n" +
 	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x12D\n" +
-	"\rknown_through\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\fknownThrough\x88\x01\x01B\x10\n" +
+	"\rknown_through\x18\x03 \x01(\v2\x1a.store.v1.StoreItemPointerH\x00R\fknownThrough\x88\x01\x01\x12\x1b\n" +
+	"\tpage_only\x18\x04 \x01(\bR\bpageOnlyB\x10\n" +
 	"\x0e_known_through\"\xa2\x01\n" +
 	"\x18OpenAgentSessionResponse\x12=\n" +
 	"\asuccess\x18\x01 \x01(\v2!.store.v1.OpenAgentSessionSuccessH\x00R\asuccess\x12=\n" +

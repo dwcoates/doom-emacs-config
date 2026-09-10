@@ -23,11 +23,14 @@ package e2e
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/integration/harness"
 
 	"connectrpc.com/connect"
 )
@@ -186,7 +189,80 @@ func TestAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 	t.Logf("the host's stop after a completed turn took %v", stop)
 }
 
-// awaitWorldStraysGone polls until nothing but the test's own spared processes
+// TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding is the store-side
+// half of the same stop: the shim's reads must leave the store holding nothing.
+//
+// THE DEFECT, MEASURED. OpenAgentSession is unary and the store's service has
+// no close, so a watch token minted for a page the caller then abandons can
+// never be reclaimed — it lives for the store's whole process lifetime. The
+// shim performs exactly two such reads per turn (the turn's opening page and
+// the teardown's book head), and the singleton store's registry grew by two
+// per turn for as long as the daemon ran. Both now open `page_only`, so the
+// store mints nothing for them.
+//
+// The registry's size is stated in ONE place — the store's own shutdown
+// record — so the assertion stops the store and reads it there, the same way
+// the cold-bring-up tests read the store's refusals out of its real log.
+func TestACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
+	t.Parallel()
+	// Arrange: a live session whose turn has run and ended.
+	w, ws := pmNewPermissionWorld(t)
+	// Standing a live session down on purpose is what produces the teardown
+	// this test is about; these are that act's own trail.
+	w.ExpectWarnings(
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.shimclient.kill", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.reopen",
+		"daemon.shimclient.watch_agent", "daemon.shimclient.watch_session",
+		"daemon.workspace.kill", "daemon.workspace.bring_up",
+		"daemon.health.open_fault", "daemon.health.session",
+	)
+	turn := SubmitPrompt(t, w, ws, "!prose-streamed")
+	AwaitTurnEnded(t, w, ws, turn)
+
+	// The host's stop is what runs the teardown, and the teardown's book-head
+	// read is the second of the two one-shot reads.
+	stopCtx, cancelStop := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancelStop()
+	resp, err := w.Client().UpdateShutdownSchedule(stopCtx, connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{
+			Reason: &agentreplv1.DrainReason{Kind: &agentreplv1.DrainReason_Operator{
+				Operator: &agentreplv1.DrainReasonOperator{Note: "emacs"},
+			}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateShutdownSchedule{now} = (%v, %v), want a success", resp, err)
+	}
+	w.AwaitExit()
+
+	// Act: the store counts its registry as it stands down.
+	w.Store.Stop()
+
+	// Assert.
+	assertStoreHeldNoOutstandingTokens(t, w)
+}
+
+// assertStoreHeldNoOutstandingTokens reads the store's shutdown record — the
+// one record that states the token registry's size — and requires it to be
+// empty. The record's own vocabulary is what it matches on (the operation plus
+// the `outstanding_tokens=` field), never the surrounding prose.
+func assertStoreHeldNoOutstandingTokens(t *testing.T, w *World) {
+	t.Helper()
+	for _, rec := range harness.ReadLog(t, w.Store.LogPath) {
+		if rec.Operation != "store.shutdown" || !strings.Contains(rec.Message, "outstanding_tokens=") {
+			continue
+		}
+		if !strings.Contains(rec.Message, "outstanding_tokens=0") {
+			t.Fatalf("the store stood down holding watch tokens nothing will ever spend: %s", rec.Message)
+		}
+		return
+	}
+	t.Fatalf("the store wrote no shutdown record stating its outstanding tokens; its log holds %d records", len(harness.ReadLog(t, w.Store.LogPath)))
+}
+
+// awaitWorldStraysGone polls until nothing but the test's own spared processes// awaitWorldStraysGone polls until nothing but the test's own spared processes
 // names the world's state root, answering whatever is left at the bound.
 func awaitWorldStraysGone(t *testing.T, w *World, bound time.Duration) []int {
 	t.Helper()
