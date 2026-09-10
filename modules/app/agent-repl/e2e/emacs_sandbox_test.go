@@ -88,6 +88,11 @@ type sandboxProc interface {
 
 	// Output returns whatever the pty has produced so far, for artifacts.
 	Output() string
+
+	// Pid is the process id, so a caller can declare the process its OWN
+	// through harness.SpareFromStrayReaping. Zero once the process has been
+	// reaped, which is never a pid anything may be declared under.
+	Pid() int
 }
 
 // sandboxScriptRel is the sandbox entry point, relative to the repo root.
@@ -462,6 +467,13 @@ func (p *localProc) Exited() bool {
 }
 
 func (p *localProc) Output() string { return p.out.String() }
+
+func (p *localProc) Pid() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
 
 // syncBuffer is an io.Writer safe for the pty reader goroutine to write while
 // a test reads it for failure artifacts.
