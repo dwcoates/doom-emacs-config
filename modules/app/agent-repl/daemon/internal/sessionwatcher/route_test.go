@@ -574,9 +574,11 @@ func TestRouteDetachedSubagentFrame(t *testing.T) {
 		})},
 	}))
 
-	// Assert.
+	// Assert: the frame is this run's TERMINAL, so the live set loses it in the
+	// same breath the chip retires.
 	assertNames(t, got, []string{
 		"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity", "footer.OnSubagent",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 }
 
@@ -985,5 +987,56 @@ func TestRepeatedAnnouncementReopensARefusedShellWatch(t *testing.T) {
 	}
 	if live := h.w.LiveWork(); len(live.Shells) != 1 {
 		t.Fatalf("live work = %v, want the re-opened shell", live.Shells)
+	}
+}
+
+// TestDetachedSubagentSettlesOutOfTheLiveSet covers the settle a detached run
+// actually gets: its own stream carries no agent terminal, so the SPAWN UNIT's
+// success arm — addressed by the work handle — is what drops it from the live
+// set.
+func TestDetachedSubagentSettlesOutOfTheLiveSet(t *testing.T) {
+	// Arrange.
+	h := detachedSubagentHarness(t)
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", false)))))
+
+	// Assert.
+	if live := h.w.LiveWork(); len(live.Agents) != 0 {
+		t.Fatalf("live work = %v, want no agents once the detached run settled", live.Agents)
+	}
+}
+
+// TestFailedDetachedSubagentSettlesOutOfTheLiveSet covers the other terminal
+// arm: a run that ended without reporting is just as settled as one that
+// reported, and holding it live would keep the workspace unfree over work that
+// is over.
+func TestFailedDetachedSubagentSettlesOutOfTheLiveSet(t *testing.T) {
+	// Arrange.
+	h := detachedSubagentHarness(t)
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("spawn-1", true)))))
+
+	// Assert.
+	if live := h.w.LiveWork(); len(live.Agents) != 0 {
+		t.Fatalf("live work = %v, want no agents once the detached run failed", live.Agents)
+	}
+}
+
+// TestRunningDetachedSubagentStaysLive covers the half that is NOT a settle: an
+// update arm is progress, and reaping on it would drop a run that is still
+// going.
+func TestRunningDetachedSubagentStaysLive(t *testing.T) {
+	// Arrange.
+	h := detachedSubagentHarness(t)
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(runningSubagentActivity("spawn-1")))))
+
+	// Assert.
+	live := h.w.LiveWork()
+	if len(live.Agents) != 1 || live.Agents[0].GetValue() != "sub-1" {
+		t.Fatalf("live work = %v, want the still-running detached subagent", live.Agents)
 	}
 }

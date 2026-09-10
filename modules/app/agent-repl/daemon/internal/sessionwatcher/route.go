@@ -376,6 +376,52 @@ func (w *watcher) routeDetachedSubagentLocked(agent *conversationv1.AgentId, act
 		"activity_id": act.GetActivityId().GetValue(),
 	})
 	w.sinks.Footer.OnSubagent(w.ws, work, sub)
+	w.reapSettledDetachedSubagentLocked(work, sub)
+}
+
+// reapSettledDetachedSubagentLocked drops a detached subagent from the LIVE-WORK
+// SET at its own terminal arm.
+//
+// THE UNIT'S TERMINAL IS THE ONLY SETTLE THE CONTRACT PROMISES. A detached run's
+// own stream carries its response frames and no agent terminal: the producer
+// settles the run as the SUBAGENT UNIT's terminal arm ("exactly one terminal
+// arm ... on whichever stream is carrying the unit"), and the minting rule makes
+// that frame retire the handle by equality — "a subagent's end retires the
+// handle ... without any join table". So the live set, exactly like the footer's
+// chip, retires the run HERE rather than waiting for a stream terminal that is
+// never owed. Waiting for one left every settled detached subagent live for the
+// rest of the session, which is what AwaitFree, turn liveness and the shutdown
+// drain all read.
+func (w *watcher) reapSettledDetachedSubagentLocked(work *conversationv1.DetachedWorkId, sub *conversationv1.AgentSubagent) {
+	if sub.GetSuccess() == nil && sub.GetFailure() == nil {
+		return
+	}
+	key, ok := w.detachedAgentKeyLocked(work)
+	if !ok {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.detached_subagent_settled", "a detached subagent settled at its own terminal", dlog.Context{
+		"work_id": work.GetValue(), "agent_id": key, "failed": sub.GetFailure() != nil,
+	})
+	if w.reapAgentLocked(key) {
+		w.publishLiveWorkLocked()
+	}
+}
+
+// detachedAgentKeyLocked answers which watched agent reports this handle, by
+// EQUALITY on the handle and nothing else — the live set is keyed by agent id
+// while detached work is addressed by its handle, and the watch's own `work` is
+// the one place the two are already tied together.
+func (w *watcher) detachedAgentKeyLocked(work *conversationv1.DetachedWorkId) (string, bool) {
+	if work.GetValue() == "" {
+		return "", false
+	}
+	for key, entry := range w.agents {
+		if entry.work.GetValue() == work.GetValue() {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // detachedHandleForLocked answers the handle a subagent frame belongs to, or
